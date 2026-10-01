@@ -582,6 +582,34 @@ selection, declaration conditions, calls, richer types, ownership, managed
 cleanup and new policy or metadata contracts are outside this projection.
 Q37 decisions are unchanged.
 
+Provisional projection v56 admits one `void` function with a braced body,
+including an empty body or implicit completion. Return-type code zero is
+reserved for these headers; v56 is not a scalar-return projection.
+Statement kind 22 represents `return;` or a balanced parenthesized unit-literal
+return such as `return ();` or `return ((()));`: `slot` is zero, `root` is
+`-1`, and the span covers the exact keyword through semicolon. Unit returns
+allocate no expression node. Their parentheses retain the existing
+16-level expression-recursion bound. Versions 1–55 reject void headers and
+kind 22.
+
+Lowering uses the existing `BoundReturn(null, sourceSpan)` for each explicit
+return and mirrors hosted binding's appended implicit null return at the
+source closing-brace end, including after an explicit return. This completion
+adds no projection statement record, scalar result, hidden local or source
+scope. Supported scalar statements preserve their effects, laziness and
+checked failures under both policies. Parameterless `void Main()` exits zero;
+public void exports use normalized names and the existing zero-through-three
+primitive-parameter ABI. Invalid source still preserves prior PE contents.
+
+The independent reader audits the void keyword, header, null-return root,
+spans, grouping, complete source coverage and existing scalar roots and local
+visibility. Scalar-valued returns and void parameters or locals reject; the
+six-primitive expression/local/parameter domains and all resource limits
+remain unchanged. Expression-bodied void functions, general calls and void
+call-return expressions, a general unit-expression domain, vacant storage,
+ownership and managed cleanup remain outside this projection. No grammar,
+scanner, semantic/ISA/Contract/TRRM/native format or ABI contract changes.
+
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed
 lexical `BoundBlock` and shared verified path. Names use ordinal normalized
@@ -595,8 +623,9 @@ validation publishes no partial projection.
 Standalone blocks use kind 14 beginning in v52; non-void scalar discard uses
 kind 15 beginning in v53; named-loop kinds begin in v54; require uses kind 21
 in v55. Versions 1–51 retain their block restrictions, versions 1–52 their
-discard restrictions, versions 1–53 their named-transfer restrictions, and
-versions 1–54 their require restrictions and prior source audits. The
+discard restrictions, versions 1–53 their named-transfer restrictions,
+versions 1–54 their require restrictions, and versions 1–55 their void-function
+restrictions and prior source audits. The
 392-`int32` buffer and all record widths remain fixed:
 16,384 UTF-16 source units, 64 tokens, eight total named/hidden local
 identities, 12 statement records, 32 expression nodes, three parameters,

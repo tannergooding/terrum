@@ -24,7 +24,8 @@ its reader is unchanged. The native scalar frontend is separate: projection
 v52 adds standalone blocks, v53 adds bounded non-void scalar discards, and v54
 adds labeled loops with named transfers to nearest or outer loops under both
 runtime policies. Projection v55 adds standalone `require condition;` under
-both policies.
+both policies. Projection v56 adds existing braced void functions with
+empty/implicit completion and bare or grouped unit-literal returns.
 Initialized six-primitive locals in lexical blocks, branches and loops preserve
 scope visibility, outer mutations and per-iteration initialization through
 existing indexed values, without adding executable lexical regions or places.
@@ -52,7 +53,7 @@ resource bounds or ABI.
 The native scalar frontend remains a bounded projection, not a standalone
 compiler: it shares the hosted verifier/emitter and is limited to 16K source
 units, 64 tokens, 8 total named/hidden local identities, 12 statement records,
-32 expression nodes and 3 parameters. Projection versions 1–55 remain readable
+32 expression nodes and 3 parameters. Projection versions 1–56 remain readable
 within their declared shapes. The bounded generic, ownership, initialization
 and constant-evaluation contracts are detailed in the
 [implementation reference](../docs/implementation.md);
@@ -185,8 +186,8 @@ native emitter or compiler self-build.
 | [TokenIntegerSnapshot](TokenIntegerSnapshot.terrum) | Separately owned scanner-6 numeric-token indices and raw unsigned magnitude words, published with tokens and trivia by `TryScanCompilerInput` | AOT/JIT full-`uint64`, radix and overflow fixtures, indexed token lookup, invalid index/status/tag/owner rejection and atomic failure; shape checks do not prove a producer's arithmetic, and general binding remains hosted |
 | [TokenDiagnosticSnapshot](TokenDiagnosticSnapshot.terrum) | Independently owned lexical diagnostic codes and source ranges, available after a scan with errors even when token snapshots cannot publish | AOT/JIT host diagnostic parity under both policies, invalid buffer rejection, stable reads after host mutation and no success-shaped empty token stream on lexical failure |
 | [ScalarParserTypes](ScalarParserTypes.terrum) | Shared scalar type recognition, token-name equality, scalar comparison and scanner-integer decoding for separately compiled bounded parser probes | Scanner-owned source ranges, UTF-16 spelling and integer records, with no independent syntax or semantic ABI |
-| [ScalarFrontend](ScalarFrontend.terrum) | Bounded frontend over a successful scanner snapshot: one scalar function with up to three named parameters; supported scalar expressions, literals, grouping, conditionals, returns, and explicit `public`/`internal` visibility. Projection 48 adds structured returns, 49 adds shifts/compounds/local updates, 50 adds scoped local declarations, 51 adds `do`/`for`, 52 adds standalone lexical blocks, 53 adds non-void scalar discards, 54 adds labeled loops and named transfers, and 55 adds standalone requirements. | Produces a source-bound scalar projection for the shared host verifier/emitter; scanner integer records and destination bounds supply constants without rescanning digits. Uses `Host.Source` and managed tokens; the persisted primitives DLL and `build-component` do not consume its typed result. |
-| [ScalarFrontendProjection](ScalarFrontendProjection.terrum) | Provisional 392-word host-owned buffer with completion status written last. Versions 21–47 add initialized locals, conversions, conditional trees, nested loops/branches and transfers; 48 adds structured returns, 49 shifts and local mutations, 50 scoped declarations, 51 `do`/`for`, 52 standalone lexical blocks, 53 non-void scalar discards, 54 labeled loops and named transfers, and 55 standalone requirements. Older payloads retain their feature restrictions; unused extensions are zero. | `ScalarFrontendHost` independently checks source anchors, types, literals, node order, precedence, roots, local binding, control-flow extents, transfers, returns, mutability and conversions before lowering to verified `BoundProgram`. Reachable non-void fallthrough rejects. The buffer bounds input to 64 tokens, 8 total named/hidden local identities, 12 statements, 32 nodes, 16 expression-recursion levels and 6 source structural levels; this is not a standalone compiler or machine-code encoder. |
+| [ScalarFrontend](ScalarFrontend.terrum) | Bounded frontend over a successful scanner snapshot: one function with a scalar or void result and up to three named scalar parameters; supported scalar expressions, literals, grouping, conditionals, returns, and explicit `public`/`internal` visibility. Projection 48 adds structured returns, 49 adds shifts/compounds/local updates, 50 adds scoped local declarations, 51 adds `do`/`for`, 52 adds standalone lexical blocks, 53 adds non-void scalar discards, 54 adds labeled loops and named transfers, 55 adds standalone requirements, and 56 adds braced void functions. | Produces a source-bound scalar projection for the shared host verifier/emitter; scanner integer records and destination bounds supply constants without rescanning digits. Uses `Host.Source` and managed tokens; the persisted primitives DLL and `build-component` do not consume its typed result. |
+| [ScalarFrontendProjection](ScalarFrontendProjection.terrum) | Provisional 392-word host-owned buffer with completion status written last. Versions 21–47 add initialized locals, conversions, conditional trees, nested loops/branches and transfers; 48 adds structured returns, 49 shifts and local mutations, 50 scoped declarations, 51 `do`/`for`, 52 standalone lexical blocks, 53 non-void scalar discards, 54 labeled loops and named transfers, 55 standalone requirements, and 56 braced void functions and null returns. Older payloads retain their feature restrictions; unused extensions are zero. | `ScalarFrontendHost` independently checks source anchors, types, literals, node order, precedence, roots, local binding, control-flow extents, transfers, returns, mutability and conversions before lowering to verified `BoundProgram`. Reachable non-void fallthrough rejects. The buffer bounds input to 64 tokens, 8 total named/hidden local identities, 12 statements, 32 nodes, 16 expression-recursion levels and 6 source structural levels; this is not a standalone compiler or machine-code encoder. |
 | [ScalarFunctionParser](ScalarFunctionParser.terrum) | Provisional scalar function probe: grouped/unary literals, two-literal checked arithmetic and bitwise operations, typed integer/`char16` comparisons, and one named scalar parameter in comparisons or integer checked addition | Hosted-span and executed-value parity with AOT/JIT at decimal/based boundaries across all four integer widths and `char16` comparisons; names bind to declarations, invalid magnitudes and checked addition overflow reject; requires `ScalarParserTypes`; other declarations still require the host parser |
 | [ScalarParameterPairParser](ScalarParameterPairParser.terrum) | Separate bounded probe of two named scalar parameters returned through checked integer addition/subtraction, `x + y + literal` with both checked steps, or a Boolean comparison (including `char16`) | AOT/JIT under both policies across signed/unsigned 32-/64-bit extrema, code-unit comparisons and decimal/based literal boundaries; both identifiers bind to distinct declarations, either overflow or unsigned subtraction underflow rejects; requires `ScalarParserTypes`, not a bootstrap compiler |
 | [ScalarConditionalParser](ScalarConditionalParser.terrum) | Separately compiled probe of a `bool` parameter selecting between two named, same-typed scalar parameters with explicit `if`/`else` returns | AOT/JIT under both policies check both reachable arms across six scalar types and reject swapped/unbound names and missing branches; uses scanner-owned tokens and `ScalarParserTypes`, not the general hosted parser or a bootstrap compiler |
@@ -366,6 +367,14 @@ the source-free indexed-TRRM protocol.
 Provisional projection v55 adds standalone `require condition;` using the
 existing Boolean frontend and checked-failure behavior under both policies. It
 adds no hidden local, source scope, grammar or metadata.
+
+Projection v56 adds braced void functions with empty/implicit completion and
+bare or grouped unit-literal returns. Source returns lower to null returns;
+hosted implicit completion adds no projection record. Parameterless void
+`Main` exits zero, and normalized public void exports keep the existing
+zero-through-three scalar-parameter ABI under both policies. Unit expression
+nodes/storage, void expression bodies and general calls remain excluded;
+source/resource limits and historical projection restrictions are unchanged.
 
 The host's syntax-29 post-tested loops and named enclosing-loop transfers
 also execute through existing checked lowering; semantic v39 is selected

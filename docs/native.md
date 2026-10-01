@@ -253,6 +253,16 @@ kind 21 with earlier feature kinds. It does not extend the source-free
 indexed-TRRM contract; see the [implementation reference](implementation.md)
 for the bounded audit and flow rules.
 
+Projection v56 adopts existing braced `void` function contracts in the bounded
+native frontend: empty bodies, implicit completion, and bare or grouped
+unit-literal returns. It reuses null-return lowering under both policies;
+parameterless `void Main()` exits zero, and public void exports retain the
+existing primitive-parameter ABI. The six-primitive expression, local and
+parameter domains are unchanged. Versions 1–55 retain their void restrictions.
+Void expression bodies and general calls remain excluded; the
+[implementation reference](implementation.md) specifies exact source auditing
+and completion behavior. This does not widen source-free indexed TRRM.
+
 The native scalar frontend's provisional projection v48 represents scalar
 returns as structured body statements: kind 8, slot 0, a typed result root and
 the keyword-through-semicolon span. Header words 38–40 are `-1`; the source

@@ -8,13 +8,13 @@ Approval, implementation, and pre-v1 stability are separate.
 
 ## Active work (priority order)
 
-1. Extend the bounded native frontend to existing `void` function contracts:
-   empty bodies, implicit completion, bare returns and unit-literal returns.
-   Reuse hosted entry-point, export and checked-failure behavior under both
-   runtime policies. Preserve the six-primitive expression, local and parameter
-   domains, source/resource limits and historical projection servicing.
-   General calls, unit-valued call expressions, ownership, new grammar and new
-   ABI or metadata contracts remain outside this unit.
+1. Extend native void functions to existing expression-bodied requirement
+   and non-void scalar discard statements. Reuse hosted statement binding,
+   implicit null completion and checked-failure behavior under both policies.
+   Preserve the six-primitive domains, source/resource limits, historical
+   projection servicing and existing ABI. A void arrow body is a statement,
+   not an implicit unit-valued return; general calls, unit expressions,
+   ownership, new grammar and new metadata contracts remain outside this unit.
 2. Review source-contract decisions from the [grammar](grammar-spec.md) and
    [decision queue](proposals/grammar-open-questions.md). Preserve accepted
    decisions; recommendations remain proposals until approved.
@@ -102,6 +102,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `6952d2d` | Native braced void functions and null returns, projection 56 |
 | `e1fe270` | Native scalar standalone runtime requirements, projection 55 |
 | `3b10d51` | Native scalar labeled loops and named transfers, projection 54 |
 | `cee8c31` | Native scalar non-void discard statements, projection 53 |
