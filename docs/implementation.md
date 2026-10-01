@@ -198,8 +198,8 @@ edges. Required constant evaluation uses the same target/iteration order.
 The implemented subset rejects duplicate simultaneously enclosing labels
 and permits disjoint reuse, matching the approved separate label namespace.
 The [source attachment rule](grammar-spec.md#33-statements-and-local-declarations)
-now also requires one label on the loop introducer's source line; adoption of
-that additional parser/source-audit restriction remains implementation work.
+requires one label on the loop introducer's source line; syntax-44 now enforces
+that additional restriction in parsing and native source audits.
 Semantic v39 is selected only for retained post-tested loops or non-nearest
 transfers; older headers reject those nodes. Ordinary pre-tested loops and
 nearest transfers retain their earlier feature-selected formats. No native

@@ -95,7 +95,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
-| This revision | Single same-line loop-label attachment, syntax-44 |
+| `e40d0b4` | Single same-line loop-label attachment, syntax-44 |
 | `586aa4b` | Native parameterless NoThrow/DoesNotReturn function contracts, projection 59 |
 | `27aaf17` | Native braced scalar/void `else if` chains, projection 58 |
 | `e43ea1c` | Native void arrow requirements and scalar discards, projection 57 |
