@@ -69,7 +69,18 @@ source/record audits reject contradictory or unrepresentable dot shapes.
 Scanner-7/schema-7, projections 1–51 and all resource bounds are unchanged.
 Qualified attributes, optional member access and other spacing remain outside
 this adoption.
-The host parser's current language version is syntax-40. Syntax-18's qualified
+The host parser's current language version is syntax-41. Supported symbolic
+expression binary/binding/assignment operators and expression-body arrows
+require trivia on both sides; symbolic prefixes and postfix updates attach
+to the immediate operand token boundary. Native scalar frontend shape
+selection and maintained probes validate raw snapshot ranges before fallback,
+and successful projection reconstruction independently audits current syntax.
+Legacy projection publication shares monotone operation-threshold checks to
+retain the whole-program verification budget. Scanner-7/schema-7, projections
+1–51 and the 16K-source/64-token/8-local/12-statement/32-node/3-parameter
+limits remain unchanged. This adds no general calls/member access or new
+constructs, `?:`/colon/optional-suffix spacing, or operator-run scanning.
+Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile

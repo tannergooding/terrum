@@ -15,7 +15,7 @@ public sealed partial class CliTests
 {
     [Theory]
     [InlineData("public int32 Value(int32 x, int32 y) { return x + y + x; }")]
-    [InlineData("public int32 Value(int32 x) => + + + + + + + + + + + + + + x + x + x + x + x + x + x;")]
+    [InlineData("public int32 Value(int32 x) => +(+(+(+(+(+(+(+x))))))) + x + x + x + x + x + x;")]
     [InlineData("public int32 Value(int32 x, int32 y) => x + (y * 3) - (x / 2);")]
     [InlineData("public int64 Value(int64 x) => -(x + (10 * (x - 3)));")]
     [InlineData("public uint32 Value(uint32 x) => (x & 7) | ((x ^ 3) + 1);")]

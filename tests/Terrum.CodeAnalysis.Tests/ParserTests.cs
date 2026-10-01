@@ -18,7 +18,7 @@ public sealed class ParserTests
         const string Source = "int32 Main() { _ /* destination */ = int32(42); return 42; }";
         var tree = SyntaxTree.Parse(Source);
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal("syntax-40", SyntaxTree.LanguageVersion);
+        Assert.Equal("syntax-41", SyntaxTree.LanguageVersion);
         var discard = Assert.Single(tree.Root.DescendantNodes(), static node => node.Kind == SyntaxKind.DiscardStatement);
         Assert.Equal(TokenKind.Underscore, Assert.IsType<SyntaxTokenElement>(discard.Children[0]).Token.Kind);
         Assert.Equal(TokenKind.Equals, Assert.IsType<SyntaxTokenElement>(discard.Children[1]).Token.Kind);
@@ -302,7 +302,7 @@ public sealed class ParserTests
         Assert.Contains(tree.Diagnostics, diagnostic => diagnostic.Code == "TRM1004");
         AssertLossless(tree);
 
-        var flat = "void F() { return " + string.Join("+", Enumerable.Repeat("1", 5000)) + "; }";
+        var flat = "void F() { return " + string.Join(" + ", Enumerable.Repeat("1", 5000)) + "; }";
         var flatTree = SyntaxTree.Parse(flat);
         Assert.False(flatTree.HasErrors);
         AssertLossless(flatTree);

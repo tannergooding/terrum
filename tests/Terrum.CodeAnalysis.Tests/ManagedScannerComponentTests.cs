@@ -2041,7 +2041,7 @@ public sealed class ManagedScannerComponentTests
     [InlineData("int32 Main() { return ~0; }", true, -1)]
     [InlineData("int32 Main() { return ~(0x8000_0000); }", true, int.MaxValue)]
     [InlineData("int32 Main() { return -2147483648; }", true, int.MinValue)]
-    [InlineData("int32 Main() { return - 2_147_483_648; }", true, int.MinValue)]
+    [InlineData("int32 Main() { return -2_147_483_648; }", true, int.MinValue)]
     [InlineData("int32 Main() { return 2147483648; }", false, 0)]
     [InlineData("int32 Main() { return +2147483648; }", false, 0)]
     [InlineData("int32 Main() { return -2147483649; }", false, 0)]
@@ -2203,7 +2203,7 @@ public sealed class ManagedScannerComponentTests
     [InlineData("int64 Value() { return ~0; }", true, -1L)]
     [InlineData("int64 Value() { return (~0x8000_0000_0000_0000); }", true, long.MaxValue)]
     [InlineData("int64 Value() { return -9223372036854775808; }", true, long.MinValue)]
-    [InlineData("int64 Value() { return - 9_223_372_036_854_775_808; }", true, long.MinValue)]
+    [InlineData("int64 Value() { return -9_223_372_036_854_775_808; }", true, long.MinValue)]
     [InlineData("int64 Value() { return 9223372036854775808; }", false, 0L)]
     [InlineData("int64 Value() { return +9223372036854775808; }", false, 0L)]
     [InlineData("int64 Value() { return -9223372036854775809; }", false, 0L)]
@@ -2588,6 +2588,41 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32 Value() { return -#42; }", true, "ScalarFunctionParser",
+        "TryParseScalarReturnFunctionTyped(move tokens, out var scalarType, out var name, out var expression)")]
+    [InlineData("int32 Value(int32 x, int32 y) { return x#+#y; }", false, "ScalarParameterPairParser",
+        "TryEvaluateInt32TwoParameterAddReturn(move tokens, 20, 22, out var name, out var value)")]
+    [InlineData("int32 Value(bool c, int32 x, int32 y) { if (c) { return x#+#y; } else { return x; } }",
+        false, "ScalarConditionalAddParser",
+        "TryEvaluateInt32ScalarConditionalAddReturn(move tokens, true, 20, 22, out var name, out var value)")]
+    [InlineData("int32 Value(int32 x, int32 y) { if (x#<#y) { return x; } else { return y; } }",
+        false, "ScalarComparisonConditionalParser",
+        "TryEvaluateInt32ComparisonConditionalReturn(move tokens, 20, 22, out var name, out var value)")]
+    public async Task MaintainedScalarProbesRejectOperatorSpacingBeforeLegacyFallbackAsync(
+        string form, bool prefix, string module, string invocation)
+    {
+        foreach (var gap in new[] { "", " ", "\r\n", "/* gap */", "//** gap **//", "/// gap\n" })
+        {
+            var text = form.Replace("#", gap, StringComparison.Ordinal);
+            var entry = $$"""
+                using Terrum.CodeAnalysis;
+                int32 Main() {
+                    require TokenSnapshot.TryScan(init var tokens);
+                    bool valid = {{invocation}};
+                    if (valid != {{(prefix == (gap.Length == 0) ? "true" : "false")}}) { return 1; }
+                    return 42;
+                }
+                """;
+            foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+            {
+                var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy, module).ConfigureAwait(true);
+                Assert.Equal(42, NativeJit.Execute(program, policy));
+                await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+            }
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Value#(bool c, int32 x, int32 y) { if (c) { return x; } else { return y; } }",
         "ScalarConditionalParser", "TryEvaluateInt32ScalarConditionalReturn(move tokens, true, 20, 22, out var name, out var value)")]
     [InlineData("int32 Value#(bool c, int32 x, int32 y) { if (c) { return x + y; } else { return x; } }",
@@ -2618,6 +2653,22 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32 Value(int32 x, int32 y) { return x+y; }", 1, "+")]
+    [InlineData("int32 Value(int32 x, int32 y) { return x+ y; }", 1, "+")]
+    [InlineData("int32 Value(int32 x, int32 y) { return x +y; }", 1, "+")]
+    [InlineData("int32 Value(int32 x) { return - x; }", 1, "-")]
+    [InlineData("int32 Value(int32 x) { return ~/* gap */x; }", 1, "~")]
+    [InlineData("bool Value(bool x) { return !/// gap\nx; }", 1, "!")]
+    [InlineData("int32 Value(int32 x) { return +\r\n(x); }", 1, "+")]
+    [InlineData("int32 Value() { mut int32 x= 4; return x; }", 1, "=")]
+    [InlineData("int32 Value() { mut int32 x =4; return x; }", 1, "=")]
+    [InlineData("int32 Value() { mut int32 x = 4; x+= 2; return x; }", 1, "+=")]
+    [InlineData("int32 Value() { mut int32 x = 4; x +=2; return x; }", 1, "+=")]
+    [InlineData("int32 Value() { mut int32 x = 4; return x /* gap */++; }", 1, "++")]
+    [InlineData("int32 Value() { mut int32 x = 4; return ++\nx; }", 1, "++")]
+    [InlineData("int32 Value()=> 42;", 1, "=>")]
+    [InlineData("int32 Value() =>42;", 1, "=>")]
+    [InlineData("int32 Value() { return - 2147483648; }", 1, "-")]
     [InlineData("int32 Value () { return 42; }", 1, "()")]
     [InlineData("int32 Value\n() { return 42; }", 1, "()")]
     [InlineData("int32 Value/* boundary */() { return 42; }", 1, "()")]
@@ -3057,7 +3108,7 @@ public sealed class ManagedScannerComponentTests
         NativeRuntimePolicy policy, int first, int second, bool comments)
     {
         var text = comments
-            ? "int32 Value(int32 x, int32 y) { if ((x)/* test */<(y)) { return (x)/* test */+((y)); } else { return x-y; } }"
+            ? "int32 Value(int32 x, int32 y) { if ((x)/* test */< (y)) { return (x)/* test */+ ((y)); } else { return x - y; } }"
             : "int32 Value(int32 x, int32 y) { if (x < y) { return x + y; } else { return x - y; } }";
         var source = SourceText.From(text);
         var stage = await CompileAsync(text,

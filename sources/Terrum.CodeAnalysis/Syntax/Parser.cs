@@ -425,7 +425,7 @@ internal sealed class Parser
                     {
                         if (Current.Kind == TokenKind.Equals)
                         {
-                            children.Add(Take());
+                            children.Add(TakeSeparated());
                             children.Add(ParseExpression());
                         }
                         children.Add(Expect(TokenKind.Semicolon));
@@ -625,7 +625,7 @@ internal sealed class Parser
             return ParseBlock();
         }
 
-        var children = new List<SyntaxElement> { Take() };
+        var children = new List<SyntaxElement> { TakeSeparated() };
         if (Current.Kind is TokenKind.RequireKeyword or TokenKind.Underscore)
         {
             children.Add(ParseStatement());
@@ -778,7 +778,7 @@ internal sealed class Parser
             case TokenKind.Underscore:
             {
                 node = Node(SyntaxKind.DiscardStatement,
-                    [Take(), Expect(TokenKind.Equals), ParseExpression(), Expect(TokenKind.Semicolon)]);
+                    [Take(), ExpectSeparated(TokenKind.Equals), ParseExpression(), Expect(TokenKind.Semicolon)]);
                 break;
             }
             default:
@@ -828,7 +828,7 @@ internal sealed class Parser
 
         if (assignment)
         {
-            children.Add(Take());
+            children.Add(TakeSeparated());
             children.Add(ParseExpression());
         }
 
@@ -852,7 +852,7 @@ internal sealed class Parser
 
         children.Add(Current.Kind == TokenKind.VarKeyword ? Take() : ParseType());
         children.Add(Expect(TokenKind.Identifier));
-        children.Add(Expect(TokenKind.Equals));
+        children.Add(ExpectSeparated(TokenKind.Equals));
         if (Current.Kind == TokenKind.Semicolon)
         {
             Report("TRM1001", "An ordinary local requires an initializer.", Current.Span);
@@ -960,7 +960,7 @@ internal sealed class Parser
         }
         else if (unaryPrecedence != 0 && unaryPrecedence >= parentPrecedence)
         {
-            var op = Take();
+            var op = Current.Kind == TokenKind.MoveKeyword ? Take() : TakePrefix();
             if (op.Token.Kind is TokenKind.PlusPlus or TokenKind.MinusMinus
                 && ((Current.Kind is TokenKind.Plus or TokenKind.Minus or TokenKind.PlusPlus or TokenKind.MinusMinus
                         && Current.Span.Start == op.Span.End)
@@ -1006,7 +1006,7 @@ internal sealed class Parser
                 break;
             }
 
-            left = Node(SyntaxKind.BinaryExpression, [left, Take(), ParseExpression(precedence)]);
+            left = Node(SyntaxKind.BinaryExpression, [left, TakeSeparated(), ParseExpression(precedence)]);
         }
 
         if (parentPrecedence == 0 && Current.Kind == TokenKind.Question)
@@ -1078,6 +1078,10 @@ internal sealed class Parser
             }
             else if (Current.Kind is TokenKind.PlusPlus or TokenKind.MinusMinus)
             {
+                if (!IsAttachedToPrevious())
+                {
+                    Report("TRM1009", "A symbolic postfix operator must attach to the preceding operand token.", Current.Span);
+                }
                 var op = Take();
                 if (Current.Kind is TokenKind.Plus or TokenKind.Minus or TokenKind.PlusPlus or TokenKind.MinusMinus
                     && Current.Span.Start == op.Span.End)
@@ -1175,6 +1179,29 @@ internal sealed class Parser
 
     private bool IsAttachedToPrevious() =>
         _position > 0 && _tokens[_position - 1].Span.End == Current.Span.Start;
+
+    private SyntaxTokenElement TakeSeparated()
+    {
+        if (IsAttachedToPrevious() || Current.Span.End == Peek(1).Span.Start)
+        {
+            Report("TRM1008", "The operator must be separated from both neighboring tokens by trivia.", Current.Span);
+        }
+
+        return Take();
+    }
+
+    private SyntaxTokenElement ExpectSeparated(TokenKind kind) =>
+        Current.Kind == kind ? TakeSeparated() : Expect(kind);
+
+    private SyntaxTokenElement TakePrefix()
+    {
+        if (Current.Span.End != Peek(1).Span.Start)
+        {
+            Report("TRM1009", "A symbolic prefix operator must attach to the following operand token.", Current.Span);
+        }
+
+        return Take();
+    }
 
     private SyntaxTokenElement TakeDot(bool qualified)
     {

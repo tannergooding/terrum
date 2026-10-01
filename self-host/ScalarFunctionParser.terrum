@@ -5,6 +5,11 @@ namespace Terrum.CodeAnalysis;
 bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     out int32 scalarType, out SourceRange name, out SourceRange expression)
 {
+    var spacing = tokens.GetScalarOperatorSpacingError();
+    if (spacing.Length != 0)
+    {
+        return false;
+    }
     int32 count = tokens.GetCount();
     if (count != 10 && count != 11 && count != 12 && count != 13)
     {
@@ -474,6 +479,11 @@ bool TryParseScalarBinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
     out int32 firstLow, out int32 firstHigh, out bool firstBased,
     out int32 secondLow, out int32 secondHigh, out bool secondBased)
 {
+    var spacing = tokens.GetScalarOperatorSpacingError();
+    if (spacing.Length != 0)
+    {
+        return false;
+    }
     if (tokens.GetCount() != 12)
     {
         return false;
@@ -529,6 +539,11 @@ bool TryParseScalarBinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
 bool TryEvaluateTypedScalarComparisonReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out SourceRange name, out bool result)
 {
+    var spacing = tokens.GetScalarOperatorSpacingError();
+    if (spacing.Length != 0)
+    {
+        return false;
+    }
     if (tokens.GetCount() != 18)
     {
         return false;
@@ -626,6 +641,11 @@ bool TryParseParameterComparisonReturn(TokenSnapshot tokens, TokenIntegerSnapsho
     out int32 scalarType, out int32 operation, out SourceRange name,
     out uint64 magnitude, out bool based)
 {
+    var spacing = tokens.GetScalarOperatorSpacingError();
+    if (spacing.Length != 0)
+    {
+        return false;
+    }
     if (tokens.GetCount() != 14)
     {
         return false;
@@ -763,6 +783,11 @@ bool TryEvaluateChar16ParameterComparisonReturn(TokenSnapshot tokens,
 bool TryParseParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out int32 scalarType, out SourceRange name, out uint64 magnitude, out bool based)
 {
+    var spacing = tokens.GetScalarOperatorSpacingError();
+    if (spacing.Length != 0)
+    {
+        return false;
+    }
     if (tokens.GetCount() != 14)
     {
         return false;

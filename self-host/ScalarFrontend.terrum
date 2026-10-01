@@ -2864,6 +2864,13 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
         return ScalarFrontendResult.TryCreate(false, false, 1, excess.Range, 0, 0, 0, 0, 0,
             empty, empty, empty, empty, false, false, absent, absent, absent, out result);
     }
+    var spacing = tokens.GetScalarOperatorSpacingError();
+    if (spacing.Length != 0)
+    {
+        require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
+        return ScalarFrontendResult.TryCreate(false, false, 1, spacing, 0, 0, 0, 0, 0,
+            empty, empty, empty, empty, false, false, absent, absent, absent, out result);
+    }
     if (count < 1 || !ManagedTokenChain.TryCreate(out var chain))
     {
         return false;

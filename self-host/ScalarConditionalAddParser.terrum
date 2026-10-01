@@ -3,6 +3,11 @@ namespace Terrum.CodeAnalysis;
 bool TryParseScalarConditionalAddReturn(TokenSnapshot tokens,
     out int32 scalarType, out SourceRange name)
 {
+    var spacing = tokens.GetScalarOperatorSpacingError();
+    if (spacing.Length != 0)
+    {
+        return false;
+    }
     if (tokens.GetCount() != 32)
     {
         return false;

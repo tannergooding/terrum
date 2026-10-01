@@ -40,6 +40,62 @@ public unique struct TokenSnapshot
         return true;
     }
 
+    // Scalar input has no generic lists or operator declarations. Its operand-ending
+    // token kinds determine unary versus binary/update roles without name lookup.
+    public SourceRange GetScalarOperatorSpacingError()
+    {
+        require TryGet(0, out var first);
+        mut Token previous = first;
+        for (mut int32 index = 1; index < _count - 1; index = index + 1)
+        {
+            require TryGet(index, out var op);
+            require TryGet(index + 1, out var next);
+            int32 kind = op.Kind;
+            bool operandEnd = IsScalarOperandEnd(previous.Kind);
+            mut bool prefix = kind == 62 || kind == 63;
+            mut bool postfix = false;
+            mut bool separated = false;
+            if (kind == 57 || kind == 58)
+            {
+                if (operandEnd) { separated = true; }
+                else { prefix = true; }
+            }
+            if (kind == 86 || kind == 87)
+            {
+                if (operandEnd) { postfix = true; }
+                else { prefix = true; }
+            }
+            if (kind >= 59 && kind <= 61) { separated = true; }
+            if (kind >= 64 && kind <= 75) { separated = true; }
+            if (kind == 82 || kind == 84 || kind == 85) { separated = true; }
+            if (kind >= 88 && kind <= 101) { separated = true; }
+            if (prefix && op.Range.End != next.Range.Start)
+            {
+                return op.Range;
+            }
+            if (postfix && previous.Range.End != op.Range.Start)
+            {
+                return op.Range;
+            }
+            if (separated && (previous.Range.End == op.Range.Start
+                || op.Range.End == next.Range.Start))
+            {
+                return op.Range;
+            }
+            previous = op;
+        }
+        require SourceRange.TryCreate(0, 0, out var empty);
+        return empty;
+    }
+
+    private static bool IsScalarOperandEnd(int32 kind)
+    {
+        if (kind == 2 || kind == 3) { return true; }
+        if (kind == 20 || kind == 21) { return true; }
+        if (kind == 47) { return true; }
+        return kind == 86 || kind == 87;
+    }
+
     public static bool TryBuild(int32 count, init ref<TokenSnapshot> result)
     {
         if (Host.Diagnostics[0] != 0 || count < 1

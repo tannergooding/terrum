@@ -1,6 +1,29 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-40, semantic v43–v45 updates, native-10 through native-20
+## Current boundary: syntax-41, semantic v43–v45 updates, native-10 through native-20
+
+Syntax-41 adopts symbolic expression operator, binding and expression-body
+arrow spacing in supported forms. Binary arithmetic, shifts, comparisons,
+bitwise/Boolean/coalescing operators, declaration/assignment `=` and supported
+compounds, and `=>` require trivia on both sides (`TRM1008`). Symbolic
+`+`, `-`, `!`, `~`, `++`, `--` prefixes attach to the immediate following
+operand token; postfix updates attach to the preceding final token
+(`TRM1009`). Raw spans distinguish all whitespace/newline/comment trivia;
+grouping interiors remain permissive. Syntactic role and precedence are
+unchanged: declaration operators, keyword operators, `const(expression)`
+versus `const (expression)`, optional types and conditional `?:` retain
+their existing classification. Invalid spacing never selects another role.
+
+Hosted/prelexed/component parsing shares these checks. The native scalar
+frontend validates supported operator boundaries before modern/legacy shape
+selection; maintained probes use the same snapshot check. Host successful
+projection audits independently require current syntax, including compatible
+historical projection shapes. Legacy publication reuses monotone operation
+threshold classification to retain the existing whole-program verification
+work bound. Scanner-7/schema-7, projections 1–51, token identities, all source/
+token/local/statement/node/parameter bounds, semantic/native formats and ABI
+are unchanged. This introduces no new constructs, conditional/colon or
+optional-suffix spacing, or operator-run lexical validation.
 
 Syntax-40 adopts role-specific dot attachment. Supported qualified type names,
 namespace declarations and imports require both raw token boundaries attached.

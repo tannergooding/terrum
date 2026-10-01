@@ -42,7 +42,7 @@ public sealed class NativeTests
     [InlineData("int32 Main() { return Factorial(6); } int32 Factorial(int32 n) { if (n <= 1) { return 1; } return n * Factorial(n - 1); }", 720)]
     [InlineData("int32 Main() { return Fib(10); } int32 Fib(int32 n) { if (n < 2) { return n; } return Fib(n - 1) + Fib(n - 2); }", 55)]
     [InlineData("int32 Main() { return Mix(1, 2, 3, 4, 5, 6); } int32 Mix(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return a + b * 2 + c * 3 + d * 4 + e * 5 + f * 6; }", 91)]
-    [InlineData("int32 Main() { return Mix(Id(1), Id(2), Id(3), Id(4), Id(5), Mix(1,2,3,4,5,6)); } int32 Id(int32 x) { return x; } int32 Mix(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return a+b+c+d+e+f; }", 36)]
+    [InlineData("int32 Main() { return Mix(Id(1), Id(2), Id(3), Id(4), Id(5), Mix(1,2,3,4,5,6)); } int32 Id(int32 x) { return x; } int32 Mix(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return a + b + c + d + e + f; }", 36)]
     [InlineData("int32 Main() { if (false && Fail()) { return 1; } if (true || Fail()) { return 8; } return 2; } bool Fail() { int32 value = 1 / 0; return value == 0; }", 8)]
     [InlineData("int32 Main() { bool a = true; bool b = false; if ((a & !b) ^ b) { return 11; } return 2; }", 11)]
     [InlineData("int32 Main() { if (int32(-2147483648) < 2147483647 && int32(2147483647) >= -2147483648) { return 9; } return 2; }", 9)]

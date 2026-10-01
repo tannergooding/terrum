@@ -273,6 +273,17 @@ added. Native scalar input has no supported dot-bearing forms, and its
 existing successful-projection current-syntax audit follows this profile.
 Scanner-7/schema-7, record widths, catalogs and frontend bounds are unchanged.
 
+Syntax-41 uses the same raw extents for symbolic expression operators:
+binary/binding/assignment operators and expression-body arrows require
+trivia on both sides (`TRM1008`); symbolic prefixes and postfix updates attach
+to their immediate operand boundary (`TRM1009`). Tokenization does not change.
+The current prelexed/component parser applies the hosted syntactic role,
+while native scalar parsing and maintained probes check their supported
+roles directly before fallback. Compatible historical raw records remain
+readable; successful frontend projections must satisfy current source syntax.
+Operator-run scanning, `?:`/colon spacing and optional-type attachment remain
+separate work. Scanner/schema, token IDs/widths, projections and bounds stay fixed.
+
 Keyword records are generated from the host `TokenKind` catalog's `*Keyword`
 members. Operator records use their lexical spellings, with fixture comparisons
 covering the entire punctuation/operator catalog. Packed lexeme records contain

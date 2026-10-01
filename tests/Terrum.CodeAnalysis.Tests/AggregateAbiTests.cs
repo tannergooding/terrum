@@ -99,7 +99,7 @@ public sealed class AggregateAbiTests
         _ = source.Append("public Bytes() {");
         for (var index = 0; index < size; index++)
         {
-            _ = source.Append('F').Append(index).Append(index == size - 1 ? "=true;" : "=false;");
+            _ = source.Append('F').Append(index).Append(index == size - 1 ? " = true;" : " = false;");
         }
         _ = source.Append("} } Bytes Produce() { return new Bytes(); }")
             .Append("Bytes Echo(Bytes value) { return value; }")

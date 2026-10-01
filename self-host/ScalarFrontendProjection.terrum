@@ -241,15 +241,12 @@ bool TryPublishScalarFrontend()
         WriteScalarFrontendExpression(28, result.WhenFalse);
     }
     WriteScalarFrontendExpression(22, result.WhenTrue);
-    if (result.WhenTrue.Operation >= 1200
-        || (result.HasCondition && (result.Condition.Operation >= 1200
-            || result.WhenFalse.Operation >= 1200)))
+    int32 maximum = GetScalarFrontendMaximumOperation(result);
+    if (maximum >= 1200)
     {
         Host.Frontend[0] = 5;
     }
-    if (result.WhenTrue.Operation >= 1600
-        || (result.HasCondition && (result.Condition.Operation >= 1600
-            || result.WhenFalse.Operation >= 1600)))
+    if (maximum >= 1600)
     {
         Host.Frontend[0] = 6;
     }
@@ -259,15 +256,11 @@ bool TryPublishScalarFrontend()
     {
         Host.Frontend[0] = 7;
     }
-    if (result.WhenTrue.Operation >= 2000
-        || (result.HasCondition && (result.Condition.Operation >= 2000
-            || result.WhenFalse.Operation >= 2000)))
+    if (maximum >= 2000)
     {
         Host.Frontend[0] = 8;
     }
-    if (result.WhenTrue.Operation >= 2700
-        || (result.HasCondition && (result.Condition.Operation >= 2700
-            || result.WhenFalse.Operation >= 2700)))
+    if (maximum >= 2700)
     {
         Host.Frontend[0] = 9;
     }
@@ -283,51 +276,35 @@ bool TryPublishScalarFrontend()
     {
         Host.Frontend[0] = 10;
     }
-    if (result.WhenTrue.Operation >= 4000
-        || (result.HasCondition && (result.Condition.Operation >= 4000
-            || result.WhenFalse.Operation >= 4000)))
+    if (maximum >= 4000)
     {
         Host.Frontend[0] = 11;
     }
-    if (result.WhenTrue.Operation >= 6000
-        || (result.HasCondition && (result.Condition.Operation >= 6000
-            || result.WhenFalse.Operation >= 6000)))
+    if (maximum >= 6000)
     {
         Host.Frontend[0] = 12;
     }
-    if (result.WhenTrue.Operation >= 10000
-        || (result.HasCondition && (result.Condition.Operation >= 10000
-            || result.WhenFalse.Operation >= 10000)))
+    if (maximum >= 10000)
     {
         Host.Frontend[0] = 13;
     }
-    if (result.WhenTrue.Operation >= 12000
-        || (result.HasCondition && (result.Condition.Operation >= 12000
-            || result.WhenFalse.Operation >= 12000)))
+    if (maximum >= 12000)
     {
         Host.Frontend[0] = 14;
     }
-    if (result.WhenTrue.Operation >= 16000
-        || (result.HasCondition && (result.Condition.Operation >= 16000
-            || result.WhenFalse.Operation >= 16000)))
+    if (maximum >= 16000)
     {
         Host.Frontend[0] = 15;
     }
-    if (result.WhenTrue.Operation >= 22000
-        || (result.HasCondition && (result.Condition.Operation >= 22000
-            || result.WhenFalse.Operation >= 22000)))
+    if (maximum >= 22000)
     {
         Host.Frontend[0] = 16;
     }
-    if (result.WhenTrue.Operation >= 30000
-        || (result.HasCondition && (result.Condition.Operation >= 30000
-            || result.WhenFalse.Operation >= 30000)))
+    if (maximum >= 30000)
     {
         Host.Frontend[0] = 17;
     }
-    if (result.WhenTrue.Operation >= 38000
-        || (result.HasCondition && (result.Condition.Operation >= 38000
-            || result.WhenFalse.Operation >= 38000)))
+    if (maximum >= 38000)
     {
         Host.Frontend[0] = 18;
     }
@@ -337,4 +314,17 @@ bool TryPublishScalarFrontend()
     }
     Host.Frontend[1] = 1;
     return true;
+}
+
+// Reuse the monotone threshold classification rather than repeat its branch
+// analysis twelve times within the whole-program verification work bound.
+int32 GetScalarFrontendMaximumOperation(ScalarFrontendResult result)
+{
+    mut int32 maximum = result.WhenTrue.Operation;
+    if (result.HasCondition)
+    {
+        if (result.Condition.Operation > maximum) { maximum = result.Condition.Operation; }
+        if (result.WhenFalse.Operation > maximum) { maximum = result.WhenFalse.Operation; }
+    }
+    return maximum;
 }

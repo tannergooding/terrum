@@ -718,7 +718,7 @@ public sealed partial class CliTests
     [Fact]
     public async Task FlatTreeProtocolPreservesReferencesAndDeepTreesAsync()
     {
-        var source = "void F() { return " + string.Join("+", Enumerable.Repeat("1", 500)) + "; }";
+        var source = "void F() { return " + string.Join(" + ", Enumerable.Repeat("1", 500)) + "; }";
         (var exit, var output, _) = await RunAsync(Encoding.UTF8.GetBytes(source), "tree", "-", "--json");
         Assert.Equal(0, exit);
         using var document = JsonDocument.Parse(output);

@@ -4,6 +4,11 @@ bool TryParseTwoParameterBinaryPrefix(TokenSnapshot tokens, int32 operatorKind,
     bool comparison,
     out int32 scalarType, out SourceRange name)
 {
+    var spacing = tokens.GetScalarOperatorSpacingError();
+    if (spacing.Length != 0)
+    {
+        return false;
+    }
     if (tokens.GetCount() != 17 && tokens.GetCount() != 19)
     {
         return false;

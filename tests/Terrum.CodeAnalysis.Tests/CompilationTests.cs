@@ -105,7 +105,7 @@ public sealed class CompilationTests
     [Fact]
     public void LongExpressionChainsDiagnoseRatherThanOverflowTheHostStack()
     {
-        var tree = SyntaxTree.Parse("int32 Main() { return " + string.Join("+", Enumerable.Repeat("1", 5000)) + "; }");
+        var tree = SyntaxTree.Parse("int32 Main() { return " + string.Join(" + ", Enumerable.Repeat("1", 5000)) + "; }");
         Assert.False(tree.HasErrors);
         var compilation = Compilation.Create(tree);
         Assert.True(compilation.HasErrors);

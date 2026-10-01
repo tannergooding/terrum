@@ -347,7 +347,7 @@ public sealed partial class CliTests
         var nineLocals = eightLocals.Replace("} while (false);",
             "bool x8 = true; } while (false);", StringComparison.Ordinal);
         var thirtyThreeNodes = "int32 Main() { do { return "
-            + "+" + string.Join("+", Enumerable.Repeat("1", 16)) + "; } while (false); }";
+            + "+" + string.Join(" + ", Enumerable.Repeat("1", 16)) + "; } while (false); }";
         var thirtyTwoNodes = thirtyThreeNodes.Replace("return +", "return ", StringComparison.Ordinal);
         var fifteenGroups = "int32 Main() { do { return "
             + new string('(', 15) + "42" + new string(')', 15)

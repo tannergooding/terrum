@@ -251,7 +251,7 @@ public sealed partial class CliTests
     [InlineData("public char16 Value() { return 0xFFFF; }")]
     [InlineData("public int32 Value() { if (true) { return 0b101010; } else { return 0; } }")]
     [InlineData("public int32 Value() { return -42; }")]
-    [InlineData("public int32 Value() { return - /* whitespace */ 42; }")]
+    [InlineData("public int32 Value() { return /* whitespace */ -42; }")]
     [InlineData("public int32 Value() { return -2147483648; }")]
     [InlineData("public int32 Value() { return -0x80000000; }")]
     [InlineData("public int32 Value() { return -(42); }")]
