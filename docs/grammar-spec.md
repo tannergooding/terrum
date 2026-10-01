@@ -456,14 +456,14 @@ permit it in an arbitrary context.
 | Receiver and self binder | `this` | Refer to the member receiver and mark an interface's implementing-type formal as `<this T>`. |
 | Generic constraints | `where` | State formal parameter constraints. |
 | Compile-time values | `const` | Require static evaluation or declare a compile-time value formal. |
-| Type forms | `void`, `var` | Name a zero-data result or infer a local type. |
+| Type forms | `void`, `var` | Name a zero-data result or infer a non-null local/binding type; `var?` permits a normalized nullable type. |
 | Ownership | `unique`, `own`, `move` | Express ownership and explicit transfer. |
 | Reference access | `mut`, `ref`, `write`, `pin` | Qualify places, loans and references; pin qualifies `ref<T>` only. |
 | Parameter and argument modes | `init`, `implicit`, `params` | Express vacant initialization, implicit loans or collection arguments; not every combination is legal. |
 | Branching | `if`, `else`, `switch` | Choose conditional paths or pattern arms. |
 | Default selection | `default` | Select a declared generic default or an interface default body. |
 | Witness selection | contextual `via` | Explicitly select an existing interface witness after `.`. |
-| Patterns | `when`, `is`, `some`, `and`, `or`, `not` | Match values and guard arms; full pattern grammar remains open. |
+| Patterns | `when`, `is`, `and`, `or`, `not` | Match values and guard arms; inferred bindings use `var`/`var?`, independently of `is init`. |
 | Loops and iteration | `while`, `do`, `for`, `in`, `break`, `continue` | Iterate, including `await for`, and transfer to the nearest loop. |
 | Results | `return` | Complete a call. |
 | Producers | `yield` | Emit an element from a producer; ordinary `return;` finishes it. |
@@ -488,8 +488,7 @@ that recognition even in its designated position.
 | `const` | Compile-time value declaration or generic value formal introducer; required-constant expression prefix. |
 | `policy` | Policy-selection scope after its optional `require` marker. |
 | `via` | Witness selection after `.` with its interface argument list. |
-| `some` | Optional-presence pattern introducer. |
-| `when` | Pattern-arm guard introducer. |
+| `when` | Pattern-arm guard or catch-filter introducer. |
 | `and`, `or`, `not` | Pattern combinators, not ordinary Boolean expression operators. |
 
 Attribute-target spellings such as `module`, `assembly`, `property`,
@@ -1084,14 +1083,14 @@ ForInit         = LocalBinding | StepExpression ;
 ForStep         = StepExpression ;
 StepExpression  = Expression | Assignment ;
 ForEachStatement = "for", "(", [ "mut" | "ref" | "mut", "ref" ],
-                   ( "var" | Type ), Identifier,
+                   ( InferredType | Type ), Identifier,
                    "in", Expression, ")", Block ;
 AsyncForEachStatement = "await", ForEachStatement ;
 RequireStatement = "require", Expression, ";" ;
 TryStatement    = "try", Block, ( "finally", Block
                   | CatchClause, { CatchClause }, [ "finally", Block ] ) ;
 CatchClause     = "catch", [ "(", Type, ( Identifier | "_" ), ")",
-                            [ "when", "(", Expression, ")" ] ], Block ;
+                            [ "when", Expression ] ], Block ;
 UnsafeStatement = "unsafe", Block ;
 DeferStatement  = "defer", ( ExpressionStatement | Block ) ;
 PolicyStatement = [ "require" ], "policy", PolicyCases, Block ;
@@ -1103,8 +1102,9 @@ SwitchTransfer  = "continue",
                   ( CaseLiteral | "_" | "(", ConstantExpression, ")" ), ";" ;
 CaseLiteral     = [ "+" | "-" ], ( DecimalDigits | HexInteger | BinaryInteger ) ;
 LocalDecl       = LocalBinding, ";" | VacantLocal ;
-LocalBinding    = [ "mut" ], ( "var" | Type ), Identifier, "=", Expression ;
-VacantLocal     = "init", ( "var" | Type ), Identifier, ";" ;
+InferredType    = "var", [ "?" ] ;
+LocalBinding    = [ "mut" ], ( InferredType | Type ), Identifier, "=", Expression ;
+VacantLocal     = "init", ( InferredType | Type ), Identifier, ";" ;
 DiscardStatement = "_", "=", Expression, ";" ;
 LifetimeEndStatement = Identifier, "=", "_", ";" ;
 AssignmentStatement = Assignment, ";" ;
@@ -1131,12 +1131,14 @@ StatementArm    = ArmHeader, "=>", Block ;
 SwitchExpression = "switch", "(", Expression, ")",
                    "{", [ ValueArm, { ",", ValueArm }, [ "," ] ], "}" ;
 ValueArm        = ArmHeader, "=>", Expression ;
-ArmHeader       = { Attribute }, Pattern, [ "when", "(", Expression, ")" ] ;
+ArmHeader       = { Attribute }, Pattern, [ "when", Expression ] ;
 Pattern         = PatternOperand, { PatternOperator, PatternOperand } ;
 PatternOperand  = { "not" }, PatternAtom ;
 PatternOperator = "and" | "or" ;
-PatternAtom     = "_" | "null" | "some", ( Identifier | "_" )
+PatternAtom     = "_" | "null" | InferredBindingPattern | TuplePattern
                 | ConstantExpression | "(", Pattern, ")" ;
+InferredBindingPattern = InferredType, ( Identifier | "_" ) ;
+TuplePattern    = "(", Pattern, ",", Pattern, { ",", Pattern }, ")" ;
 ```
 
 `for` initializers and iterators omit their internal semicolon; an iterator
@@ -1145,6 +1147,18 @@ initializer. `init var name;` instead declares vacant storage whose type is
 established by a checked initialization; `init T name;` makes its
 type explicit. Neither form is a default value, and neither permits reads
 before complete publication. Bare `T name;` is not a declaration here.
+Inferred local and iteration bindings use `var` for a non-null type or `var?`
+for its normalized nullable form where the type/profile permits that form.
+This grants no new representation or invalid-bit-pattern assumption.
+`var name = nullableExpression;` requires
+established non-nullness; otherwise use `var?`, without an implicit unwrap,
+throw or default. Nullable inference retains the existing substitution
+normalization: an already-optional inferred type does not gain another layer.
+Vacant `init var`/`init var?` bindings infer from a checked initialization and
+retain that complete type for later lifetimes. Nullability does not initialize
+storage or grant mutation authority. General inferred generic-argument
+positions and their inference rules remain specification work.
+
 `name = _;` explicitly ends a named local's current value lifetime and performs
 that value's scope-exit obligations at the statement, leaving the binding
 vacant. It is not an assignment of a discard value, a default/null value,
@@ -1248,6 +1262,40 @@ matches. Guards are ordinary checked Boolean code with preserved effects
 and failures, not purity/NoThrow-only expressions. Both switch forms require
 coverage or an unguarded wildcard fallback. Normal completion of an arm exits
 the switch, with no implicit fallthrough or switch-specific `break`.
+Guards and catch filters consistently use `when expression`; parentheses are
+ordinary optional expression grouping, not mandatory filter punctuation.
+As with declaration contract clauses, an unparenthesized top-level `=>`
+delimits the arm rather than forming a guard lambda. A lambda within the
+predicate must be grouped or nested in another expression delimiter.
+This spelling does not select catch-filter/unwind timing.
+
+For eligible nullable forms, inferred binding patterns distinguish
+initialization from nullability:
+
+| Scrutinee/output state | `is init` | `var item` | `var? item` |
+|---|---|---|---|
+| Vacant | False | No match | No match |
+| Initialized, null | True | No match | Matches |
+| Initialized, non-null | True | Matches | Matches |
+
+`var item` binds the canonical non-null payload snapshot; `var? item` permits
+null and binds the normalized nullable form. Tests establish initialization
+before any value access; vacancy is never read to discover a nonmatch.
+Access, backing and copy/borrow/move obligations remain checked. Matching
+does not upgrade authority, implicitly copy a unique value or narrow an
+aliased source place. `_` does not read or bind an ignored output, but does
+not cancel cleanup obligations for a live ignored value.
+
+Tuple patterns are structural. Multiple-output calls may supply a contextual
+matching projection of one evaluated call, preserving per-output
+initialization, nullability, ownership and the declared status correlations.
+This is not an ordinary tuple constructed by reading potentially vacant
+outputs, a mandatory library `Option`/`Result`, or a general implicit
+conversion. A success-output projection tests declared success; initialized
+failure outputs remain distinguishable through a status-aware projection.
+Exact call-site activation, output selection and projection metadata remain
+specification work, not permission to omit arbitrary required arguments.
+These are accepted target directions, not current compiler support.
 `continue N;` enters an existing unguarded constant arm in the same statement
 switch directly without rematching; the target must have no pattern bindings.
 Named or compound constant targets use `continue (N);`, while
@@ -1309,7 +1357,7 @@ operator level. Ordinary binary operators at the same level associate left;
 operators nest right; postfix calls, member access and indexing bind more
 tightly than prefix operators. Parentheses group a full `Expression` and
 override the table, so they are not a binary precedence level. `is null`
-and `is some name` have equality precedence. The table is highest first:
+and inferred `is var name` / `is var? name` tests have equality precedence. The table is highest first:
 
 | Level | Syntax | Associativity |
 |---:|---|---|
@@ -1319,7 +1367,7 @@ and `is some name` have equality precedence. The table is highest first:
 | 11 | `+ -` | left |
 | 10 | `<< >> >>>` | left |
 | 9 | `< <= > >=` | left |
-| 8 | `== !=`, `is null`, `is some name`, `is init` | left |
+| 8 | `== !=`, `is null`, `is var name`, `is var? name`, `is init` | left |
 | 7 | `&` | left |
 | 6 | `^` | left |
 | 5 | `|` | left |
@@ -1334,9 +1382,12 @@ operand width as required by the language arithmetic contract. Built-in
 operator availability is distinct from whether a nominal type may declare an
 overload or a generic protocol may require it. Comparisons may chain
 syntactically (`a < b < c`) and require semantic checking; the grammar does
-not imply chained-comparison meaning. In
-`is some`, `some` is contextual and is followed by an identifier naming the
-bound value, e.g. `maybe is some value`.
+not imply chained-comparison meaning. `is var name` tests initialized
+non-null presence and binds its payload snapshot; `is var? name` permits
+initialized null. `is init` tests initialization independently of presence.
+The former `some` introducer is no longer part of the target pattern grammar;
+the current compiler's legacy support is documented in
+[implementation](implementation.md).
 
 ```ebnf
 Expression      = LambdaExpression | ThrowExpression | ConditionalExpression ;
@@ -1350,7 +1401,7 @@ BinaryOperator  = "*" | "/" | "%" | "+" | "-"
                 | "<<" | ">>" | ">>>"
                 | "<" | "<=" | ">" | ">=" | "==" | "!="
                 | "&" | "^" | "|" | "&&" | "||" | "??" ;
-IsTest          = "is", ( "null" | "some", Identifier | "init" ) ;
+IsTest          = "is", ( "null" | InferredBindingPattern | "init" ) ;
 Postfix         = Primary, { PostfixPart } ;
 PostfixPart     = ".", Identifier, [ TypeArguments ]
                 | ".", "via", "<", Type, ">"
@@ -1398,7 +1449,7 @@ CollectionElement = Expression | "..", Expression ;
 ```
 
 `IsTest` is a postfix-like binary test at equality precedence: it consumes
-the preceding expression as its left operand and its `null` or `some name`
+the preceding expression as its left operand and its `null`, inferred binding or `init`
 tail as the right form. Unlike an ordinary binary operator, it may bind
 `name` for the appropriate checked scope. The table, not the flat
 `BinaryOperator` alternatives, resolves any mixed expression. `HexFloat`
@@ -2185,7 +2236,7 @@ lambda parameter names are separate nonbinding contexts; they do not consume
 the matched value or alter argument evaluation/parameter mode. A possible
 generic type hole is another distinct nonbinding grammar role defined in §3.2,
 not a named identifier or a consequence of the discard rule. In a match over `T?`,
-`some` covers the present case and `_` can cover the remaining absent case
+`var item` covers the initialized non-null case and `_` can cover the remaining absent case
 when those are the only possibilities. The wildcard still means "any
 remaining value", not `none`: it also matches other unhandled cases if the
 matched type has them. `null` remains the optional absence value. The

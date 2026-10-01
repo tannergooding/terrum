@@ -304,8 +304,12 @@ publishes the fully initialized value only on the declared success, and on
 false cleans partial state before raising the selected requirement failure.
 It never reads a vacant destination or synthesizes `default(T)`. This uses the
 same output metadata as an explicit branch, not a method-name convention;
-multiple outputs and declaration-driven status/presence matching remain
-explicit. A selected exception applies to the false condition only and does
+multiple outputs are not inferred by this `require` form. Contextual
+multiple-output matching is a separate accepted direction, preserving
+per-output initialization/presence and status correlations rather than
+constructing a tuple from vacant storage. `_` does not read an ignored
+output or erase its live cleanup obligations. Exact projection activation
+and extraction contracts remain specification work. A selected exception applies to the false condition only and does
 not catch an exception raised while evaluating the call. The syntax is target
 direction; current compiler support is documented in
 [implementation](implementation.md).

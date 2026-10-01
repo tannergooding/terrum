@@ -1157,6 +1157,11 @@ An initialized absent value is not an uninitialized
 variable or an output from a failed call. Constructors must explicitly initialize
 optional fields, and direct optional dereference is rejected. Optional scalar
 types and generic normalization remain unsupported.
+The accepted target `is var item` / `is var? item` patterns, non-null `var`
+versus nullable `var?` declaration inference, and contextual multiple-output
+matching are not implemented. Current source still uses `is some item`, and
+ordinary `var` infers the complete initializer type, including optional
+handles. Source approval does not change that support or existing artifacts.
 Version 18 semantic modules separately admit private `ManagedNode` code in a
 leaf producer whose exported declarations are scalar and by-value only.
 Version 19 extends that private-leaf contract to source classes and their

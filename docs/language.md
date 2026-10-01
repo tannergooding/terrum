@@ -185,7 +185,20 @@ aliasing cannot be silently inherited by inline storage. Scoped loans,
 arbitrary cleanup obligations and raw pointers cannot be boxed to escape
 restrictions. `val<T>` has no implicit writable-default interpretation.
 
-There is no universal `default(T)`: live fields and active union payloads must be initialized. Explicitly repeated optional modifiers (`int32??`, `T??`, including intervening trivia) are syntax errors. Optional construction remains semantically idempotent: substituting `T = int32?` into `T?` yields `int32?`, not a second presence layer. `Option<T>` likewise normalizes an optional payload rather than adding a presence layer. Modifiers on distinct nested types, such as `List<int32?>?`, are valid. `is some` yields the canonical payload, and `is null` tests absence. Nominal unions preserve distinct cases such as `Missing` versus `Found(null)`; `with` updates need separate `Unchanged`/`Set(null)` states. `T?` and `box<T>` are non-injective projections, so inverse generic inference cannot guess a unique original type. Normalization precedes signature identity/overload checks, without flattening nominal wrappers. Niche encodings must be declared validity/ABI contracts (e.g. reserved `-1` for nonnegative `int32`, zero for nonzero `int32`, null for a non-null reference); invalid encodings and padding are not free option states. Imports and mutations preserve validity.
+There is no universal `default(T)`: live fields and active union payloads must be initialized. Explicitly repeated optional modifiers (`int32??`, `T??`, including intervening trivia) are syntax errors. Optional construction remains semantically idempotent: substituting `T = int32?` into `T?` yields `int32?`, not a second presence layer. `Option<T>` likewise normalizes an optional payload rather than adding a presence layer. Modifiers on distinct nested types, such as `List<int32?>?`, are valid. Target `is var item` yields the initialized non-null payload, `is var? item` permits initialized null, `is null` tests absence in a live optional, and `is init` tests initialization independently. Nominal unions preserve distinct cases such as `Missing` versus `Found(null)`; `with` updates need separate `Unchanged`/`Set(null)` states. `T?` and `box<T>` are non-injective projections, so inverse generic inference cannot guess a unique original type. Normalization precedes signature identity/overload checks, without flattening nominal wrappers. Niche encodings must be declared validity/ABI contracts (e.g. reserved `-1` for nonnegative `int32`, zero for nonzero `int32`, null for a non-null reference); invalid encodings and padding are not free option states. Imports and mutations preserve validity.
+
+The accepted inference direction uses `var` for a non-null binding and `var?`
+for a normalized nullable binding. An ordinary declaration from a possibly
+null expression requires `var?` or established non-nullness; there is no
+implicit unwrap, throw or fabricated default. Pattern binding first establishes
+initialization, then the requested presence contract, preserving access and
+ownership. Structural output patterns such as `(var x, _)` can consume a
+contextual multi-output matching view of one call; the view retains status
+correlations and never reads vacant outputs to construct an ordinary tuple.
+Ignored live owners still require cleanup. General projection activation,
+generic inference positions and copy/borrow/move extraction remain to specify.
+This replaces target `some` pattern spelling, not the compiler's current
+`is some` support or its existing whole-type `var` inference.
 
 Integer-backed `enum` values include unnamed underlying values; `[Flags]`
 defines named bit-set operations without closing the set. Nominal unions are

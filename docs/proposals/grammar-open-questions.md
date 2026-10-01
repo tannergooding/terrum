@@ -124,8 +124,29 @@ of C# keywords and multiword terms.
 **Question:** Complete relational, nominal-case, type-test and destructuring
 patterns, including binding ownership and access. Existing guards,
 `and`/`or`/`not`, compatible `or` bindings and fallback behavior remain fixed.
-**Example:** `switch (value) { some item => Use(item), _ => 0 }`
-already exposes an optional payload without defining arbitrary destructuring.
+**Accepted direction:** Replace the target `some` introducer with inferred
+`var`/`var?` bindings. `var item` requires initialization and non-nullness;
+`var? item` requires initialization but permits null. `is init` tests
+initialization independently. Vacancy is not null and must not be read to
+discover a nonmatch. Ordinary declaration inference follows the same
+non-null/nullable distinction, without implicit unwraps or throws; generic
+substitution keeps normalized optional semantics, not nested `T??` spelling.
+See the [source contracts](../grammar-spec.md#33-statements-and-local-declarations).
+
+Contextual multi-output matching views evaluate one call and support structural
+output patterns such as `(var x, _)`, `(_, var? y)` and `(var x, var y)`.
+They retain declared status/output correlations; output availability is not
+call success, and ignored live owners still require cleanup. Exact call-site
+activation, output selection and metadata remain specification work. See
+[output matching](../language-contracts.md#23-checking-and-consuming-the-contract).
+No mandatory library `Option`/`Result` or general implicit tuple conversion
+is introduced.
+
+Guards and catch filters use consistent `when expression`, with parentheses
+as ordinary grouping. This does not change their checked effects/failures,
+select catch-filter/unwind timing or replace function `require`/`ensure`.
+Pattern `where` qualification and a two-stage `where`/`when` composition
+remain unselected proposals.
 
 **C# model:** Pattern families are C#-inspired; Terrum does not inherit
 property-getter duplication, implicit numeric conversion, or ownership-neutral
@@ -138,20 +159,23 @@ does not settle member/extractor observation, refinement invalidation or
 copy/borrow/move bindings. Tuple structure remains distinct from
 name-discovered `Deconstruct`.
 
-**Terrum counterpart (existing optional pattern only):**
+**Terrum counterpart (accepted target direction, not current compiler support):**
 
 ```terrum
 switch (Next())
 {
-    some item when Guard(item) => Use(item),
+    var item when Guard(item) => Use(item),
+    null => Missing(),
     _ => Other(),
 }
 ```
 
-This uses the approved optional payload form: call `Next()` once, evaluate
+This uses the inferred non-null binding direction: call `Next()` once, evaluate
 the guard only after matching, then select the corresponding body. It does
 not introduce property, relational or general type patterns. Failures are not
 nonmatches and cannot be silently retried.
+The compiler still uses `is some item`; neither this switch form nor `var?`
+inference/output matching is implemented.
 
 The additional choice is whether reads of `Value` are reused. Recommend
 one read per member path within an attempted arm, feeding its relational

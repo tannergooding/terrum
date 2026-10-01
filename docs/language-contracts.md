@@ -174,6 +174,13 @@ cannot discover whether storage is initialized, because evaluating that test
 already requires a readable value. GC-safe private zeroing is not
 source-visible initialization.
 
+The accepted inferred-binding direction makes that separation explicit:
+`value is init` tests initialization, `value is var item` binds only an
+initialized non-null payload, and `value is var? item` also permits an
+initialized null. Neither inferred pattern matches vacant storage. These
+checks use declared initialization facts before value access; they do not
+turn vacancy into null or test bytes whose value is uninitialized.
+
 For `bool TryGet(..., init ref<Customer?> value)`, true can publish either null
 or a non-null customer; false may leave it uninitialized. An initialized null,
 an initialized non-null value, and an uninitialized destination are distinct
@@ -265,8 +272,21 @@ condition, not whether some output happened to be initialized. On true it
 extracts the designated output with its full optional/ownership type. True-null
 remains a legitimate optional value if the API permits it. On false, even an
 API that provides an initialized failure output still fails the requirement;
-the temporary's cleanup remains due. Multiple outputs and failure payloads
-remain explicit initially. No vacant read or manufactured default is needed.
+the temporary's cleanup remains due. This `require` lifting contract still
+designates one output; it does not infer multiple outputs or a failure mapping.
+No vacant read or manufactured default is needed.
+
+Separately, the accepted matching direction permits contextual multiple-output
+views with structural patterns such as `(var x, _)`, `(_, var? y)` and
+`(var x, var y)`. The call evaluates once; requested bindings establish their
+own initialization/presence facts, while `_` does not read or bind an ignored
+output. Live ignored owners remain subject to cleanup. A success-output view
+tests the declared success condition even when failure publishes a live value;
+a status-aware view preserves declared failure outputs instead of collapsing
+availability into success. This is not ordinary tuple construction from
+possibly vacant storage, a library-wide `Option`/`Result`, or a general implicit
+conversion. Exact view activation, output selection and metadata remain
+specification work; current call/output support is unchanged.
 
 Changing a declared output-initialization relation can change caller
 obligations and compatibility. Compare the published conditional facts and
