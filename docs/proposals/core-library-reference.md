@@ -2341,9 +2341,39 @@ remain **OPEN**; neither a `Try` name nor an exact widened product grants a
 NoThrow declaration.
 
 **OPEN next to floating math candidates:**
-Float `Min`/`Max`/`Clamp` need NaN propagation and signed-zero tie rules,
-while `Sqrt`/`Pow`/`Exp`/`Log`/`Sin`/`Cos`/`RoundToIntegral` need special-value,
-domain, precision and rounding-mode contracts. Strict target-format
+The following gives a concrete **PROPOSED candidate for review**, not an
+accepted policy, for the existing `Float32Math` selection members. It
+separates numeric selection from total key ordering and makes validation
+order observable:
+
+| Member | Proposed candidate special-value contract |
+|---|---|
+| `Abs` | Return the exact nonnegative magnitude of a finite value; either zero becomes positive zero and either infinity becomes positive infinity. NaN produces NaN; payload, signaling behavior and status flags remain OPEN. |
+| `Min` | Propagate NaN if either operand is NaN; otherwise select the numerically lesser value. If the inputs are both zeros, return negative zero when either is negative zero. |
+| `Max` | Propagate NaN if either operand is NaN; otherwise select the numerically greater value. If the inputs are both zeros, return positive zero when either is positive zero. |
+| `Clamp` | First reject a NaN bound or numerically reversed bounds as a checked argument failure. After valid bounds, NaN input produces NaN; otherwise return the lower bound only for a strictly smaller input, the upper bound only for a strictly greater input, and the original input when inside the interval. Infinite bounds are permitted. |
+
+Under this candidate, `Min(+0.0, -0.0)` selects `-0.0`, and
+`Max(-0.0, +0.0)` selects `+0.0`; these examples use the `float32` parameter
+context, not a default literal type. `Clamp(-0.0, +0.0, 1.0)` preserves the
+input's negative zero because the two zero signs are numerically equal.
+`Clamp` is consequently not specified by composing these `Min`/`Max`
+operations: that composition could change an in-range zero's sign.
+Valid numerically equal bounds accept an equal input unchanged, including
+its zero sign; a nonzero out-of-range input selects the corresponding bound.
+
+Bounds validation precedes input-NaN handling, so a NaN input does not conceal
+an invalid bound pair. No bound swapping, NaN-to-zero conversion, numeric-key
+ordering or hardware-instruction-specific NaN selection is implied.
+NaN propagation specifies the NaN result class only; which operand's
+payload/sign is retained, signaling-NaN quieting and floating status effects
+remain **OPEN**. These proposed library policies neither change ordinary
+IEEE comparisons nor approve a floating total-order witness, primitive
+intrinsic or NoThrow declaration.
+
+The candidate selection policies remain **OPEN pending review**;
+`Sqrt`/`Pow`/`Exp`/`Log`/`Sin`/`Cos`/`RoundToIntegral` separately need
+special-value, domain, precision and rounding-mode contracts. Strict target-format
 `float32` arithmetic neither reassociates nor contracts implicitly.
 Native/approximate variants and reproducible reductions need separate names
 and contracts. Decimal transcendental availability, cohorts and rounding
