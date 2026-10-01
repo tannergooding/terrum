@@ -41,6 +41,11 @@ Indexed `do` loops enter at the body before testing. Scoped `for` initializers
 run once, and normal completion or nearest `continue` reaches the iterator
 before the next condition; break/return bypass it. Existing direct branches
 and staged edge copies preserve local/call snapshots through these targets.
+Non-nearest named `break`/`continue` in the source-free scalar path route
+through designated single-exit indexed regions, carrying target-visible values
+and preserving continuation order. Direct edges that bypass a designated exit
+remain unsupported; nearest transfers keep their existing representation.
+This adds no labels, opcodes, region kinds, widths, versions or ABI.
 Emission still requires a reachable loop backedge; always-transferring bodies
 reject rather than acquiring synthetic edges or unaudited inactive blocks.
 It supports fail-fast only; the approved Body subset does not
@@ -218,7 +223,8 @@ failed validation publishes no partial projection. Versions 1–51 retain their
 feature restrictions. The 392-word shape, record widths, existing bounds,
 scanner IDs and semantic/native ABI remain unchanged. See the
 [implementation reference](implementation.md) for name resolution and scope
-rules.
+rules. Native scalar frontend transfers remain nearest-only; non-nearest named
+transfers described there apply to the source-free indexed TRRM path.
 
 The native scalar frontend's provisional projection v48 represents scalar
 returns as structured body statements: kind 8, slot 0, a typed result root and

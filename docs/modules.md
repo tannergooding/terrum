@@ -30,9 +30,13 @@ existing indexed values and target-visible edge arguments. Scope retirement
 does not discard outer writes or recycle identities; loop initializers execute
 per iteration. This adds neither executable lexical regions nor a wire revision.
 Indexed `do` and scoped `for` loops retain body/condition/iterator ordering,
-nearest transfers and header-local scope through the existing region contract.
-They use the same source-free loading and native consumers; emission rejects
-acyclic loop shapes without a reachable backedge rather than inventing one.
+transfers and header-local scope through the existing region contract.
+Non-nearest named `break`/`continue` route through designated single exits,
+carrying target-visible values and preserving iterator/condition order; edges
+that bypass a designated exit remain unsupported. This adds no wire encoding
+or reader change. They use the same source-free loading and native consumers;
+emission rejects acyclic loop shapes without a reachable backedge rather than
+inventing one.
 It does not replace the `.trm`
 producer/consumer commands or add TRRM import linking. This page describes
 the existing development semantic/native module paths.

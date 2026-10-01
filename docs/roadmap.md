@@ -8,11 +8,12 @@ Approval, implementation, and pre-v1 stability are separate.
 
 ## Active work (priority order)
 
-1. Lower non-nearest named loop transfers through existing single-exit
-   indexed TRRM graph regions, preserving target-loop values and continuation
-   order within existing bounds. Edges that bypass a designated region exit
-   and arbitrary graphs remain unsupported; this adds no metadata labels or
-   reader changes.
+1. Add bounded native-scalar support for non-void explicit discard,
+   `_ = expression;`, over the existing six primitive scalar types. Preserve
+   existing expression typing without a discard target type, single evaluation,
+   checked failures and lazy effects; any hidden local counts toward the
+   eight-identity bound. Keep general calls,
+   void, owning, managed and nominal expressions out of scope.
 2. Review source-contract decisions from the [grammar](grammar-spec.md) and
    [decision queue](proposals/grammar-open-questions.md). Preserve accepted
    decisions; recommendations remain proposals until approved.
@@ -100,6 +101,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `9e20137` | Non-nearest named loop transfers through indexed region exits |
 | `1fc9e7e` | Native scalar standalone lexical blocks, projection 52 |
 | `e06aee6` | Syntax 43: maximal ASCII punctuation runs and expected-linear indexed diagnostic audits |
 | `d6e65d3` | Syntax 42: contextual punctuation boundaries |

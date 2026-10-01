@@ -1779,10 +1779,21 @@ continuation carries target-visible snapshots from every incoming body edge.
 For forms already lowered with an appended iterator remain supported.
 These are ordinary indexed loop regions: no new region kind, instruction,
 flag or wire version distinguishes the source loop syntax.
-Transfers still consume the binder's existing one-based target depth, not
-label identities. A named source target already resolved to depth one is
-indistinguishable from a bare nearest transfer at this boundary; deeper
-targets remain unsupported. No named-transfer protocol is introduced.
+The binder resolves the existing one-based target depth at compile time; no
+label identity or runtime target-depth field is serialized. Non-nearest named
+`break` and `continue` lower to scalar routing codes and equality branches
+threaded through existing block parameters and designated single-exit loop
+regions. Arguments carry values captured at the transfer, not loop-entry
+snapshots; each exited scope progressively retires its local identities.
+Intervening statements and exited loop iterators or `do` conditions are
+skipped. The selected `continue` reaches its target header, iterator or
+post-test condition exactly once; selected `break` bypasses it. Nearest
+transfers retain their existing graph representation and add no routing state,
+parameters, operations or blocks. Routing values, comparisons and parameters
+consume the existing 256-value and 100,000-visit analysis budgets. Edges that
+bypass a designated region exit remain unsupported; no new wire
+representation, labels, opcodes, region kinds, widths, versions or ABI are
+added.
 
 Initialized locals of all six scalar types are supported in lexical blocks,
 branch arms and loop bodies. Monotonic source variable identities remain
@@ -1862,8 +1873,7 @@ Calls to imported or packed cross-module targets, nominal/instance and
 generic/witness calls, and non-value/owning parameters remain unsupported.
 A `NoThrow` caller requires a declared and audited `NoThrow` callee; the
 runtime policy does not manufacture that guarantee.
-Vacant locals, transfers
-beyond the nearest loop, field/nominal mutations,
+Vacant locals, direct edges that bypass designated exits, field/nominal mutations,
 places, roots, ownership, cleanup, exceptional transfer and imported
 declarations are not implemented here. Indexed loop emission requires a
 reachable backedge and a designated exit; it does not synthesize a backedge

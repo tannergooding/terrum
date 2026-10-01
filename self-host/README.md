@@ -17,7 +17,10 @@ The hosted [TRRM scalar pipeline](../docs/implementation.md#executable-trrm-scal
 now emits approved metadata and compact-linear/indexed Bodies and loads them for
 shared native execution without producer source, including bounded branches,
 loops, integer shifts, initialized writable-local compounds/updates and
-module-local scalar calls with the existing direct-call ABI.
+module-local scalar calls with the existing direct-call ABI. It also lowers
+non-nearest named loop transfers through scalar routing codes and designated
+single-exit indexed regions. This source-free TRRM support does not extend the
+native scalar frontend: projection v52 retains nearest-only transfers.
 Initialized six-primitive locals in lexical blocks, branches and loops preserve
 scope visibility, outer mutations and per-iteration initialization through
 existing indexed values, without adding executable lexical regions or places.
