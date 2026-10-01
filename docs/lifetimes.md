@@ -25,6 +25,31 @@ representation forms are `ref<T>`, `ptr<T>`, `box<T>`, `val<T>` and `own<T>`.
 reference or view contract applies to the complete qualified form, including
 access, backing, roots, ownership and region dependencies.
 
+### Passing and storage access
+
+| Form | Access and expansion |
+|---|---|
+| `T` by value | Preserve the complete value's authority/dependencies; copy only when eligible, otherwise transfer through the declared ownership contract |
+| `ref T` parameter / `ref<T>` | Readonly alias to a `T` place, not a snapshot or exclusive loan |
+| `mut ref T` parameter / `write ref<T>` | Writable alias to a `T` place; permits slot updates, not arbitrary writes through values stored in that slot |
+| `implicit ref<T>` parameter | The same readonly reference contract, borrowing an eligible place or materializing the expression once in its ordinary enclosing scope |
+| `init ref<T>` parameter | Vacant destination initialized according to the published normal-outcome contract, not an arbitrary writable alias |
+| `pin ref<T>` | Explicitly acquired backing/root stability for its pin dependency; ordinary reference qualification does not acquire it |
+| Class handle `C` / `write C` | Readonly / writable object access without borrowing the variable's handle slot |
+| `ref<C>` / `write ref<C>` | Readonly / writable handle-slot access, independently of object authority |
+| `ref<write C>` / `write ref<write C>` | Preserve object-write authority with readonly / writable handle-slot access |
+
+Reference-object `C` carries rooting and lifetime dependencies but is not an
+interior pointer into the variable containing its handle. Applicable access,
+capture and lifetime principles are shared with references; their storage
+indirections are not interchangeable. `mut C` permits rebinding a local handle,
+not writing the object; `write C` permits eligible object writes, not rebinding
+that local. Neither readonly access nor a writable alias automatically implies
+exclusivity, deep immutability or stable reads.
+Reject an inapplicable qualifier combination rather than inventing a copy,
+pin, initialization route or stronger authority. `implicit` remains parameter-
+only; writable and initialization loans do not acquire implicit materialization.
+
 Current executable ownership, view and managed-root boundaries are documented
 in [implementation](implementation.md) and [native](native.md); staged work
 is tracked in [roadmap](roadmap.md). A slice does not thereby become the
@@ -270,8 +295,12 @@ The accepted parameter-directed result annotation is
 over literal parameter names. All possible declared input dependencies remain
 obligations at the caller, without extending their permitted lifetimes.
 See the [source contract](grammar-spec.md#result-dependency-declarations).
-Unannotated-result defaults and receiver/capture/suspension selector forms
-remain [separate decisions](proposals/grammar-open-questions.md#q201-remaining-result-capture-and-backing-contracts).
+Receiver-storage, forwarded-backing, stored-capture and suspension contracts
+are separate targeted relationships. The result annotation alone does not
+declare all of them. Unannotated defaults follow the language-versioned and
+inherited/registered declaration rules above, not a dependency-bearing example
+or today's implementation. Exact selector schemas and metadata encodings
+remain specification work.
 
 Working annotations `[ViewOf(From = nameof(source))]`,
 `[ViewOf(Access.Write)]` and `[Captures(nameof(value))]` express **exceptions

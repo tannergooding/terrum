@@ -338,9 +338,11 @@ not blanket generic-container reinterpretation or writable covariance: each
 projection must preserve validity, representation, access, ownership, lifetime
 and container representation. A narrowing invariant such as
 `NeverNegativeInt32` is not a total adapter merely because its payload bits
-match. Exact adapter syntax, forwarding, conflicts, dispatch metadata and
-projection eligibility remain specification work; `Blittable` is a separate
-fixed-representation promise.
+match. Forwarding is explicit checked membership, authored or opt-in generated,
+not a live wildcard; trivial forwards should avoid duplicated metadata while
+preserving identity and contracts. Concrete adapter/projection schemas,
+conflicts and dispatch encoding remain specification work; `Blittable` is a
+separate fixed-representation promise.
 
 Applicable members outrank ordinary extension members; conflicting member
 extensions may be explicitly qualified. Ordinary extension-member lookup does

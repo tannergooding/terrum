@@ -124,10 +124,26 @@ the mutation, the call is invalid in both spellings. The compiler must not
 silently substitute a copy, delay the reference, or invent a special two-phase
 loan to make the implicit spelling succeed.
 
-Whether ordinary references eventually need reservation/activation remains
-an [open grammar and loan question](grammar-spec.md#55-accepted-temporary-scope-for-implicit-reft).
-Implicit convenience syntax cannot silently change the ordinary loan
-contract.
+Ordinary writable access is not an exclusive-loan declaration. For
+`target.Update(target.Read())`, where `Read` returns an independent scalar,
+the inner read completes before the outer update begins. Deriving readonly
+access from an existing writable reference does not itself conflict: both
+paths can alias the same storage. No general reservation/activation protocol
+is required merely to allow this call. Exclusive owner/guard contracts may
+independently prohibit invalidation or overlapping access; they do not redefine
+ordinary `ref<T>` or `write ref<T>`.
+
+The outer receiver is still evaluated once before its arguments. Preserve
+place-formation checks at their source evaluation point and invocation-only
+checks, including a receiver null check when applicable, at invocation after
+arguments. Do not expand a complex receiver into repeated evaluation or
+reevaluate a captured class handle after an argument rebinds its source slot.
+For an unchanged local struct receiver, the nested call has the effects of
+reading its scalar result and then updating that same place.
+The ABI may share an identical byref for the two calls when doing so preserves
+evaluation, checks, access attenuation, lifetimes and dependencies. This
+permits address commoning, not treating `Read` as pure or memoizing its result.
+Implicit convenience syntax uses this same ordinary call/loan contract.
 
 Completed owning value arguments are staged in evaluation order. If a later
 argument fails before invocation, the caller cleans the staged owners on

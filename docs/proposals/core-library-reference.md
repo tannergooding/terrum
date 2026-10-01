@@ -1638,8 +1638,9 @@ declaration form, but its binding and selection contract is not adopted here.
 Parameter-directed result dependencies are
 [accepted](../grammar-spec.md#result-dependency-declarations), with `nameof`
 preferred for named parameters. The receiver selector
-`[return: DependsOn("this")]` remains a candidate under
-[Q20.1](grammar-open-questions.md#q201-remaining-result-capture-and-backing-contracts);
+`[return: DependsOn("this")]` remains a candidate spelling; the
+[accepted relationship contract](../grammar-spec.md#result-dependency-declarations)
+requires receiver-storage and forwarded-backing selectors to remain distinct;
 it is **UNAPPROVED** and does not itself specify which advancement invalidates
 the borrow. The accepted direction separates creation/completion obligations
 from advance/item obligations and requires declared suspension dependencies.

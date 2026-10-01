@@ -82,6 +82,14 @@ an explicitly declared conversion operator or witness, not arbitrary
 castability. Type-call binding preserves existing source-function/local
 shadowing and call precedence. `new T(arguments)` is distinct nominal
 construction; there is no primitive `new int32(value)` form.
+For nominal nonliteral type-call conversions, applicability searches the
+destination-owned set first and the source-owned set only when none apply at
+the destination. Ambiguity or failure in the selected destination set does
+not fall back. Explicit `Target.via<Owner>(value)` limits selection to the
+eligible source/destination owner, still requiring one unique applicable
+conversion; it supplies no extension receiver. Contextual primitive literals
+are not retroactively routed through arbitrary nominal conversions.
+See the [source contract](grammar-spec.md#513-operators-assignments-and-expression-gaps).
 
 Resolve known parameter/operand/target types before unresolved literals when
 that yields a unique answer. For `F<T>(T left, T right)`, `F(knownInt32, 1)` can

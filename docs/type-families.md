@@ -79,9 +79,11 @@ automatic covariance or a general container reinterpretation rule. A checked
 projection must preserve validity, representation, access, ownership, lifetime
 and container representation; writable storage remains invariant. A narrowing
 invariant is not a total projection just because its payload bits match.
-Exact adapter/projection syntax, forwarding, conflicts, dispatch metadata and
-eligibility remain specification work. `Blittable` is a separate
-fixed-representation promise. Applicable members outrank ordinary extension
+Forwarding uses explicit checked members or opt-in generated declarations,
+not a live wildcard. Compact metadata may share target/signature/contract
+information without erasing nominal identities. Concrete adapter/projection
+schemas, conflicts and dispatch encoding remain specification work.
+`Blittable` is a separate fixed-representation promise. Applicable members outrank ordinary extension
 members; the accepted
 [explicit provider selector](grammar-spec.md#extension-provider-selection)
 uses `value.via<Provider>.Member()` for an eligible nominal non-interface

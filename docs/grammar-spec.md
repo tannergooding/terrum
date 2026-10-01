@@ -778,8 +778,9 @@ explicit adapter or wrapper witness, not a global extension operator. A
 conversion declaration `operator T(U source)` is a separate nominal member
 form with result `T` and one by-value `U` input, invoked explicitly as
 `T(source)`. It requires `static` and has no separate return-type prefix or
-conversion keyword. Constructor-versus-conversion ranking and duplicate source-/target-owned
-conversion eligibility remain open; declaration order cannot break ties.
+conversion keyword. `new T(...)` selects construction separately from
+conversion type-calls. Destination-first conversion eligibility and explicit
+owner selection are specified in §5.13; declaration order cannot break ties.
 A bodyless static interface operator is a required compile-time witness; a
 bodyful one supplies a default. Static operator witness selection needs no
 runtime vtable. The generic type parameters and conformance lists
@@ -1213,7 +1214,7 @@ and `is some name` have equality precedence. The table is highest first:
 | Level | Syntax | Associativity |
 |---:|---|---|
 | 14 | postfix call, member access, index, `?.`, `?[]`, `++`, `--` | left |
-| 13 | prefix `+ - ! ~ move ++ -- await`; contextual index-bound `^` | prefix/right-nesting |
+| 13 | prefix `+ - ! ~ * & move ++ -- await`; contextual index-bound `^` | prefix/right-nesting |
 | 12 | `* / %` | left |
 | 11 | `+ -` | left |
 | 10 | `<< >> >>>` | left |
@@ -1243,7 +1244,8 @@ ConditionalExpression = OperatorExpression,
                         [ "?", Expression, ":", Expression ] ;
 OperatorExpression = Operand, { ( BinaryOperator, Operand | IsTest ) } ;
 Operand         = { PrefixOperator }, ( Postfix | ThrowExpression ) ;
-PrefixOperator  = "+" | "-" | "!" | "~" | "move" | "++" | "--" | "await" ;
+PrefixOperator  = "+" | "-" | "!" | "~" | "*" | "&"
+                | "move" | "++" | "--" | "await" ;
 BinaryOperator  = "*" | "/" | "%" | "+" | "-"
                 | "<<" | ">>" | ">>>"
                 | "<" | "<=" | ">" | ">=" | "==" | "!="
@@ -1783,9 +1785,11 @@ typed value arguments contribute types, expected-result context fills
 unresolved positions, and declared defaults fill omitted unresolved positions
 before contextual literals/lambdas are checked. Do not infer generic arguments
 from field capture, private constructor implementation or arbitrary witness
-search. Constructor-versus-conversion selection is a separate open question.
-Complete applicability details, exact diagnostics, extension declaration/import
-eligibility and serialized binding metadata remain specification work.
+search. Construction remains separate from the conversion type-call under
+§5.13.
+Complete applicability details, exact diagnostics, concrete extension
+declaration/import schemas and serialized binding metadata remain specification
+work.
 
 #### Extension-provider selection
 
@@ -1795,8 +1799,11 @@ non-interface container, distinct from the interface selector in
 `value.via<I>.Member(arguments)`. The latter still selects an actual declared
 witness; neither form creates conformance, bypasses access or loan checks, or
 makes every static/private member of a named container eligible as an extension.
-Extension eligibility is lexical and explicit; its declaration/import syntax
-remains open.
+Extension eligibility is lexical and explicit. A provider declaration and
+lexical import must grant eligibility; naming an arbitrary public static
+container does not. Ordinary access, loan checks and member-over-extension
+ranking remain intact. Concrete declaration/import schemas remain specification
+work, not implicit provider discovery.
 
 For eligible providers with these ordinary static helpers:
 
@@ -1978,6 +1985,33 @@ is `()` of type `void`; `void` in an encoding-erased family argument is not a
 default encoding or a new primitive named `unit`. Exact family opt-in,
 conditional-member/conformance and projection declaration syntax remain open.
 
+Family membership remains separate from extension lookup. Conditional members
+publish their eligibility and full contract for definition-site generic
+checking; a favorable later instantiation cannot supply a missing guarantee.
+An ordinary `Box<T>` gains neither conditional conformance nor `Box<void>`
+erasure by name/arity matching. Projection must be declared and checked.
+
+**Nominal adapters and forwarding:** begin with explicitly declared nominal
+wrappers and checked forwarding members; no wrapped type gains a conformance
+or exposes members automatically. Aliases and eligible extensions serve
+non-nominal source reuse, not implicit nominal relationships.
+Opt-in generators may select only named members or all eligible members except
+an explicit exclusion set, producing inspectable ordinary declarations in
+compatible partial parts. An unchanged compiled adapter does not acquire new
+members when a wrapped dependency gains them. Forward nothing by default.
+Resolve complete overload/accessor signatures and check access, effects,
+ownership, validity and backing dependencies; no name-only guessing or raw
+representation equivalence. Operators, conversions, whole-interface
+conformance and one-way container projections require their own explicit
+contracts rather than blanket forwarding.
+Trivial forwarding should not duplicate bodies, signatures or contract data
+needlessly in metadata. Compact checked target references and shared contract
+information may represent it while preserving each declared member's identity,
+mapping and replacement guarantees; exact encoding remains metadata work.
+This efficiency requirement does not introduce a live wildcard or implicit
+conformance. Concrete adapter/forwarding attribute schemas remain specification
+work.
+
 Interface constructors are deferred: a future requirement
 needs a checked construction and initialization-completion contract. Fixed
 `const T Name = value;` interface constants are owned by the interface
@@ -1992,11 +2026,18 @@ is made here; generic defaults and collection spreads are not type packs.
 
 For `Foo(5).Bar(); Baz();`, materialization is shorthand for initializing an ordinary hidden local at the argument's original evaluation point in the current enclosing lexical scope, then passing its readonly reference. The local is not hoisted to scope entry and does not create a shorter lifetime-only scope. If conditional or short-circuit control flow skips the argument, no local is initialized and there is no owner to clean up. Scope exit follows ordinary initialized/moved-state cleanup. A valid returned reference may be used by later statements in that scope, subject to ordinary declared dependencies; existing place/backing lifetimes are not widened and capture/suspension/escape permissions do not change. See the canonical [reference contract](language-contracts.md#1-one-call-and-reference-model) and [implicit-loan lifetime rules](lifetimes.md#parameter-only-implicit-readonly-loans). General source/loan metadata remain open.
 
-Ordinary reference/receiver reservation timing remains unspecified; see
-[Q21](proposals/grammar-open-questions.md#q21-reservation-versus-immediate-reference-formation)
-for alternatives and a recommendation. Implicit borrowing must use the
-same mechanism as its explicit expansion, not select a distinct mechanism
-merely because it is convenience syntax.
+Ordinary writable reference access is aliasable, not an exclusive loan.
+`target.Update(target.Read())` with an independent scalar result from `Read`
+does not conflict merely because both calls address the same storage.
+Evaluate the outer receiver once, evaluate arguments in source order, then
+invoke the outer call, preserving formation and invocation checks at their
+respective phases. Readonly attenuation and address commoning do not invent a
+different lifetime or purity guarantee.
+Exclusive owner/guard loans retain their separately declared exclusion and
+invalidation rules. Implicit borrowing follows the same explicit expansion;
+see [ordinary call timing](language-contracts.md#13-evaluation-and-loan-timing).
+The [passing/storage matrix](lifetimes.md#passing-and-storage-access)
+distinguishes place authority, object authority, initialization and pinning.
 
 <a id="result-dependency-declarations"></a>
 **Accepted result dependency declaration:** a borrowed result can publish
@@ -2023,10 +2064,12 @@ that published relationship, not today's branch implementation.
 
 This result annotation does not authorize capturing an input into receiver
 storage, erase a lease/root obligation, or identify a receiver's own storage
-with the backing forwarded through its descriptor. Receiver selectors,
-capture/storage contracts, suspension dependencies and the default treatment
-of unannotated results remain separate source decisions in
-[Q20.1](proposals/grammar-open-questions.md#q201-remaining-result-capture-and-backing-contracts).
+with the backing forwarded through its descriptor. Receiver-storage,
+forwarded-backing, capture/storage and suspension relationships use separate
+targeted contracts. Unannotated results follow the
+[language-versioned declaration defaults](lifetimes.md#declaration-defaults-exceptions-and-published-compatibility),
+not a dependency-bearing example or private body inference. Concrete selector
+schemas remain specification work.
 Concrete attribute registration and metadata encoding are implementation work;
 this approval does not claim current compiler support or settle the full
 general compile-time-query catalog.
@@ -2336,9 +2379,17 @@ checked failure leaves no published live object and retains ordinary
 partial-state cleanup. It is not inferred from a method name or a
 constructor's current body, and an ordinary live-value wither cannot enter
 this construction phase.
-The exact hook declaration/registration spelling and invocation identity
-remain in
-[Q22.2](proposals/grammar-open-questions.md#q222-completion-hook-declaration-and-registration).
+The hook has an explicit registered operation identity and checked published
+contract, not name-discovered `Validate` behavior. Concrete attribute/schema
+encoding remains specification work.
+Full validation and a declared changed-state validation contract may coexist.
+For an update from already validated state, the latter may reuse unchanged
+facts only when its checked dependencies still hold, and must revalidate every
+invariant affected by changed values, including cross-field relationships.
+Mutable aliases, changed backing, versioned invariants or unknown dependencies
+cannot inherit a stale validation fact. Copying a value alone is not proof.
+The completion gate must establish the same published guarantees before the
+updated value is exposed; no generated wither silently skips validation.
 A normal `.with(...)` on an already live value instead produces
 a separately validated updated value; it cannot mutate its source through
 `init`. No `required` modifier is needed solely to express constructor
@@ -2621,13 +2672,22 @@ cleanup or class declarations.
 
 ### 5.13 Operators, assignments and expression gaps
 
-**Accepted semantics; declaration contract still to complete:** user `operator +=` is a separate declared contract from
-`operator +`, using a `write ref<T>` destination; it cannot be desugared to
-read/copy/write or inferred from addition. The same distinct-contract rule
+**Accepted compound-operation contract:** user `operator +=` is separate from
+`operator +`; it cannot be desugared to read/copy/write or inferred from
+addition. A static, void-returning declaration uses `write ref<S>` to update
+struct storage, or `write C` to mutate reference-object contents:
+
+```terrum
+public static void operator +=(write ref<S> destination, int32 increment) { ... }
+public static void operator +=(write C destination, int32 increment) { ... }
+```
+
+These are declaration-shape sketches with omitted bodies, not new body syntax.
+The same distinct-contract rule
 applies to nominal `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=` and
-`>>>=`. Their statement spellings are in §3.3; explicit nominal declaration
-shape and metadata still need completion. A destination must satisfy the
-ordinary writable-place checks, not merely parse as an expression. Built-in
+`>>>=`. Their statement spellings are in §3.3; nominal declaration metadata
+still needs completion. A struct destination must satisfy ordinary
+writable-place checks, not merely parse as an expression. Built-in
 integer shift assignments evaluate the place once and check shift counts.
 `??=` is the built-in initialized-optional operation described in §3.4,
 not a grant of arbitrary nominal overloading.
@@ -2635,15 +2695,54 @@ For class-like values, writable handle-slot access and writable referent
 authority remain independent. `write ref<C>` permits replacing a stored
 readonly `C` handle, not mutating that object's contents; `ref<write C>`
 permits access through a writable handle without granting slot replacement.
-Whether content-only compound operations should also accept that latter
-destination instead of requiring a writable slot is an unresolved eligibility
-decision in
-[Q23](proposals/grammar-open-questions.md#q23-nominal-compound-operator-declaration-shape),
-not settled by choosing static versus instance declaration syntax.
+Content-only class operations take an eligible `write C` receiver value,
+without requiring a replaceable handle slot. A fixed binding, value-returning
+accessor or temporary can supply that value when its declared write authority
+and lifetime permit the call; readonly object access cannot.
+Handle replacement instead requires explicit writable-slot access.
+If content-only and slot-updating candidates are both applicable, lookup must
+select one under the ordinary checked ranking rules or diagnose ambiguity,
+not invent a winner from static/instance spelling. Destination and operand
+evaluation remain once-only and source ordered, with declared effects and no
+implicit rollback or owning transfer. Static operand-shaped `++`/`--` remain
+distinct; no C# instance-operator machinery is inferred.
 Do not split compound operator spellings into an ordinary binary operator
-followed by `=`. Pointer dereference/address formation needs its own access
-and evaluation-order contract; it is not an ordinary overload merely because
-it uses operator punctuation.
+followed by `=`.
+
+**Conversion eligibility:** `new T(...)` selects construction.
+For a nonliteral `T(value)` conversion, first resolve applicable destination-
+owned declarations; consider source-owned conversions only when the
+destination has none applicable. Each selected set must have one unique best
+candidate under ordinary ranking. Destination ambiguity diagnoses, and a
+selected conversion's failure propagates; neither triggers fallback to the
+source. Source binding records one declaration, not runtime trial calls.
+Contextual literal construction retains its own checked target-domain rules.
+Explicit `Target.via<Source>(value)` or `Target.via<Target>(value)` restricts
+conversion lookup to the selected eligible owner without supplying a receiver
+argument. The owner must be the source or destination type, not an arbitrary
+factory provider. Normal applicability/ranking still applies; a literal needs
+one unambiguous selected input context. This is distinct from extension
+`value.via<Provider>.Member(...)`, whose receiver is an argument. Ordinary
+named factories remain available, but no `Source.Target` method is synthesized.
+
+**Pointer formation and dereference:** `&place` forms an address only with
+checked initialized storage, access, lifetime and stable/rooted backing.
+GC storage requires a statically known covering pin; `unsafe` is not a
+substitute for rooting or pinning. Safe pin-derived pointer conversion retains
+the necessary access, pin and backing dependencies; implicit/explicit
+conversion and release spelling remain in
+[Q26.1](proposals/grammar-open-questions.md#q261-pointer-formation-and-dereferencemember-boundaries).
+Dereference uses ordinary attached prefix `*` and requires unsafe access;
+it does not create a new `(* ... )` fence. `*p`, `*(p + offset)`,
+`*GetPointer()` and `*pointers[index]` retain ordinary prefix/postfix precedence.
+When the unparenthesized operand's postfix receiver chain contains member
+selection, grouping must identify the pointer expression or pointee boundary:
+`(*p).M` and `*(p.M)` are distinct, while `*p.M` and `*GetPointer().M` reject.
+Members within call arguments or index expressions are not that receiver
+chain. `*p + offset` adds to the dereferenced value; it is not address
+arithmetic. `*(*p)` dereferences twice; `**p`, `* *p` and `* p` reject under
+the existing operator-run and attachment rules. Grouping supplies neither
+validity, bounds, pinning nor write authority.
 
 **Explicitly deferred:** nominal `&&`/`||` short-circuiting remains unavailable
 until a concrete need motivates a complete protocol for truth testing,
@@ -2737,8 +2836,8 @@ appears in §2.
 | Fields | §3.1 sketches instance fields. | Applicable attribute contracts and layout restrictions. |
 | Constructors | §§3.1 and 5.10 give `ensure P is init` minimum guarantees and repeatable unpublished init-property writes. | Completion validation hooks, value/effect compatibility and metadata encoding. |
 | Properties | §§3.1, 5.10 and 5.12 give mixed backing, receiver modes, expression bodies and authored indexers. | Implicit storage initialization, ref-result contracts and metadata. |
-| Operators | §§3.1, 5.7 and 5.13 describe nominal unary/binary operators and distinct compound-operation contracts. | Compound-operator declarations, tokenization, places and evaluation order. |
-| Conversions | §§3.1 and 5.12 sketch `operator T(U source)` and explicit `T(value)`. | Conversion eligibility and constructor/conversion ranking. |
+| Operators | §§3.1, 5.7 and 5.13 describe nominal unary/binary operators and static void compound operations over struct slots or writable object contents. | Complete applicability, checked witness/metadata encoding and tooling adoption. |
+| Conversions | §§3.1 and 5.13 give `operator T(U source)`, destination-first `T(value)` and explicit `.via<Owner>` selection, distinct from `new T(...)`. | Complete eligible conversion catalogs and binding/metadata diagnostics. |
 | Interface members | §§3.1, 5.4 and 5.12 give explicit qualified implementations, shared implicit implementations and restricted current-receiver default-body bypass. | Complete inherited-default resolution and representation; constructors remain deferred. |
 | Types | §3.2 gives recursive types, tuple types and normalized optionals. | General ownership/reference-result forms and public tuple ABI. |
 | Ownership | §§3.2 and 5.12 sketch owner forms and explicit transfer. | Complete ownership-form grammar. |
