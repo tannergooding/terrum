@@ -309,7 +309,7 @@ internal static partial class Program
                         }
                         if (frontend.ReturnType == 0)
                         {
-                            projectionVersion = 56;
+                            projectionVersion = frontend.IsExpressionBody ? 57 : 56;
                         }
                         writer.WriteNumber("projectionVersion", projectionVersion);
                         writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);

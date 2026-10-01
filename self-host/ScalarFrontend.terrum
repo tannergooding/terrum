@@ -2057,15 +2057,12 @@ mut class ScalarFrontendState
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
         mut SourceRange name = empty;
         mut int32 returnType = 0;
-        if (ParseHeader(out var selected, out var foundName)
-            && Take(48, out var openBody))
+        if (ParseHeader(out var selected, out var foundName))
         {
             returnType = selected;
             name = foundName;
             _structuredReturnType = returnType;
-            if (!ParseTreeStructuredBody(0, -1)
-                || !Take(49, out var closeBody)
-                || !Take(0, out var eof) || _at != _tokens.GetCount())
+            if (!ParseTreeStructuredCallableBody())
             {
                 if (_error == 0) { Fail(1); }
             }
@@ -2097,6 +2094,38 @@ mut class ScalarFrontendState
             returnType, _parameterCount, _firstType, _secondType, _thirdType,
             name, _first.Range, _second.Range, _third.Range,
             false, false, absent, absent, absent, out result);
+    }
+
+    private mut bool ParseTreeStructuredCallableBody()
+    {
+        require _tokens.TryGet(_at, out var body);
+        if (body.Kind == 82)
+        {
+            _hasStructuredStatement = true;
+            if (_structuredReturnType != 0) { FailAt(1, body.Range); return false; }
+            _at = _at + 1;
+            require _tokens.TryGet(_at, out var statement);
+            if (statement.Kind == 41)
+            {
+                if (!ParseTreeTerminatedStatement(statement)) { return false; }
+            }
+            else if (statement.Kind == 81)
+            {
+                if (!ParseTreeDiscard(statement)) { return false; }
+            }
+            else
+            {
+                FailAt(1, statement.Range);
+                return false;
+            }
+            Host.Frontend[41] = 1;
+        }
+        else if (!Take(48, out var openBody) || !ParseTreeStructuredBody(0, -1)
+            || !Take(49, out var closeBody))
+        {
+            return false;
+        }
+        return Take(0, out var eof) && _at == _tokens.GetCount();
     }
 
     private mut bool ParseTreeBlock(int32 depth, int32 nearestLoop)

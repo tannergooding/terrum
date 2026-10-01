@@ -56,6 +56,8 @@ namespace Terrum.CodeAnalysis;
 // and an exact keyword-through-semicolon span, without a local or source scope.
 // Version 56 admits void headers (return type zero) and kind-22 null returns.
 // Bare and parenthesized unit-literal returns have root -1 and no expression node.
+// Version 57 admits a void arrow body: flag 41 is one, envelope roots are -1,
+// and exactly one existing kind-15 discard or kind-21 requirement record owns it.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -127,7 +129,8 @@ bool TryPublishScalarFrontend()
     Host.Frontend[5] = result.ReturnType;
     if (result.ReturnType == 0 || Host.Frontend[37] != 0 || Host.Frontend[298] != 0)
     {
-        Host.Frontend[0] = result.ReturnType == 0 ? 56 : GetScalarFrontendTreeVersion();
+        Host.Frontend[0] = result.ReturnType == 0
+            ? (Host.Frontend[41] == 1 ? 57 : 56) : GetScalarFrontendTreeVersion();
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {
