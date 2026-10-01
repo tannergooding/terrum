@@ -467,12 +467,46 @@ vacant/richer locals, source grammar decision or persisted-format revision.
 Provisional projection v52 adds nested empty or nonempty standalone lexical
 blocks using existing brace syntax; it adds no grammar spelling.
 Older projection layouts cannot identify or authorize a source-bound
-standalone-block scope, so only v52 selects the new record.
+standalone-block scope. Kind 14 is admitted beginning in v52: a recognized
+block selects at least v52, while a v53 projection may contain it alongside
+kind 15. Versions 1–51 retain their standalone-block restrictions.
 Statement kind 14 stores the exclusive body-end statement index in `slot`,
 uses root `-1`, spans the opening through closing brace, and precedes its child
 records in preorder. Only a recognized standalone block selects kind 14 and
 its structured failure path. Raw-token resemblance cannot select it, and
 there is no successful hosted-parse fallback.
+
+Provisional projection v53 appends statement kind 15 for non-void standalone
+`_ = expression;` over the existing six primitive scalar types. Its existing
+five-word statement stores the one-based parameter/local identity in `slot`,
+the intrinsically typed expression root in `root`, and the exact
+underscore-through-semicolon span. The matching four-word local record stores
+the scalar type, readonly bit zero, and the exact underscore source start and
+length. The source-bound reader consumes the exact underscore, equals sign,
+root and semicolon, and checks complete postorder-node/source coverage.
+Duplicate slots, anchors or roots, wrong type/span/version, invisible
+identities and discards in a `for` header reject. Only an actual kind-15 record
+selects v53.
+
+There is no contextual discard target type: `_ = 1;` rejects while
+`_ = int32(1);` is well typed. Existing conversion, read, update, Boolean,
+lazy, conditional and supported primitive-operator typing remains in force.
+Lowering captures evaluation once in a readonly hidden `<discard>` local
+inside a managed lexical `BoundBlock`; the hidden identity is never visible by
+name. It counts toward the limit of eight total named and hidden identities.
+The compiler-generated block consumes no source structural depth. The
+392-word buffer, 16K UTF-16 source, 64-token, 12-record, 32-node,
+three-parameter, 16-level expression and six-level source-structure bounds,
+and shared 100,000-visit/resource gates are unchanged.
+
+The independent audit also bounds parser recursion, not just postorder tree
+height. The publisher shares local/parameter checks and header/version writing
+to preserve the existing semantic work limit. Invalid input clears provisional
+projection data and does not publish completion; failed CLI builds retain
+existing PE bytes. There is no hosted parse fallback or raw-record
+reinterpretation. Syntax-43, scanner-8/schema-8, diagnostic and token
+inventories, semantic/ISA/Contract/TRRM formats, native formats and ABI are
+unchanged. Only the provisional frontend feature version is appended.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed
@@ -484,13 +518,16 @@ authority through the existing cleanup path without undoing outer mutations;
 returns and nearest loop transfers retain their existing targets. Failed
 validation publishes no partial projection.
 
-Only projection v52 admits standalone blocks. Versions 1–51 retain their
-exact feature restrictions and source audits. The 392-`int32` buffer and all
-record widths remain fixed: 16,384 UTF-16 source units, 64 tokens, eight total
-local declarations, 12 statement records, 32 expression nodes, three
-parameters, 16 expression-recursion levels, six structural levels and the
-shared 100,000-visit limit. Scanner-8/schema-8, diagnostic kinds 1–12, token
-IDs, semantic/ISA/Contract/TRRM formats and native ABI remain unchanged.
+Standalone blocks use kind 14 beginning in v52; non-void scalar discard uses
+kind 15 in v53. Versions 1–51 retain their block restrictions, and versions
+1–52 retain their discard restrictions and prior source audits. The
+392-`int32` buffer and all record widths remain fixed:
+16,384 UTF-16 source units, 64 tokens, eight total named/hidden local
+identities, 12 statement records, 32 expression nodes, three parameters,
+16 expression-recursion levels, six source structural levels and the shared
+100,000-visit limit. Compiler-generated discard blocks do not consume source
+depth. Scanner-8/schema-8, diagnostic kinds 1–12, token IDs,
+semantic/ISA/Contract/TRRM formats and native ABI remain unchanged.
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain

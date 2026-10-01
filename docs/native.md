@@ -226,6 +226,18 @@ scanner IDs and semantic/native ABI remain unchanged. See the
 rules. Native scalar frontend transfers remain nearest-only; non-nearest named
 transfers described there apply to the source-free indexed TRRM path.
 
+Provisional projection v53 appends non-void standalone `_ = expression;`
+statements for the existing six primitive scalar types. Discard has no
+contextual target type, so `_ = 1;` rejects while `_ = int32(1);` is valid.
+The independently audited hidden readonly local preserves the expression's
+existing single-evaluation, checked-failure and lazy-effect behavior and
+counts toward the existing eight-identity limit. Versions 1–52 retain their
+prior shapes and do not admit discard records. This appends only a provisional
+frontend feature version: source grammar, syntax-43, scanner-8/schema-8,
+diagnostic/token inventories, semantic/ISA/Contract/TRRM formats, native
+formats and ABI do not change. The exact record and publication contract is
+in the [implementation reference](implementation.md).
+
 The native scalar frontend's provisional projection v48 represents scalar
 returns as structured body statements: kind 8, slot 0, a typed result root and
 the keyword-through-semicolon span. Header words 38–40 are `-1`; the source

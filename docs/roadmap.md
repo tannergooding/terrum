@@ -8,12 +8,12 @@ Approval, implementation, and pre-v1 stability are separate.
 
 ## Active work (priority order)
 
-1. Add bounded native-scalar support for non-void explicit discard,
-   `_ = expression;`, over the existing six primitive scalar types. Preserve
-   existing expression typing without a discard target type, single evaluation,
-   checked failures and lazy effects; any hidden local counts toward the
-   eight-identity bound. Keep general calls,
-   void, owning, managed and nominal expressions out of scope.
+1. Add native-scalar support for approved non-nearest named `break` and
+   `continue`, using the hosted one-based target-depth contract and existing
+   shared verified lowering. Preserve Q37 duplicate-active-label rejection and
+   disjoint-scope reuse, current loop and standalone-block boundaries, source
+   limits, failure behavior, ABI and historical projection servicing. Add no
+   grammar or label-scope changes and no indexed-TRRM protocol.
 2. Review source-contract decisions from the [grammar](grammar-spec.md) and
    [decision queue](proposals/grammar-open-questions.md). Preserve accepted
    decisions; recommendations remain proposals until approved.
@@ -101,6 +101,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `cee8c31` | Native scalar non-void discard statements, projection 53 |
 | `9e20137` | Non-nearest named loop transfers through indexed region exits |
 | `1fc9e7e` | Native scalar standalone lexical blocks, projection 52 |
 | `e06aee6` | Syntax 43: maximal ASCII punctuation runs and expected-linear indexed diagnostic audits |
