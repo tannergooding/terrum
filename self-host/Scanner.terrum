@@ -349,6 +349,49 @@ int32 OperatorMatch(int32 start)
     return best;
 }
 
+bool IsPunctuationGlyph(int32 unit)
+{
+    if (unit < 33 || unit > 63)
+    {
+        return unit == 94 || unit == 124 || unit == 126;
+    }
+    // Bits relative to ASCII '!' encode !%&*+-./:<=>?; the guard bounds the shift.
+    return ((0x7A007631 >> (unit - 33)) & 1) != 0;
+}
+
+bool TryReadPunctuationRun(int32 start, out int32 end, out bool typeBoundary)
+{
+    mut int32 at = start;
+    mut bool deferred = true;
+    while (at < Host.Source.Length && IsPunctuationGlyph(PeekUnit(at)))
+    {
+        int32 unit = PeekUnit(at);
+        if (unit == 47 && (PeekUnit(at + 1) == 47 || PeekUnit(at + 1) == 42))
+        {
+            break;
+        }
+        if (unit != 62 && unit != 63)
+        {
+            deferred = false;
+        }
+        at = at + 1;
+    }
+    end = at;
+    typeBoundary = deferred;
+    return at != start;
+}
+
+bool IsUnsupportedPunctuationRun(int32 start, int32 length)
+{
+    if (length == 2)
+    {
+        return (PeekUnit(start) == 46 || PeekUnit(start) == 63)
+            && PeekUnit(start + 1) == 46;
+    }
+    return length == 3 && PeekUnit(start) == 46
+        && PeekUnit(start + 1) == 46 && PeekUnit(start + 2) == 94;
+}
+
 int32 ReadNumericTag(int32 at)
 {
     int32 first = PeekUnit(at);
@@ -820,6 +863,7 @@ int32 Scan()
     Host.IntegerValues[0] = 0;
     mut int32 position = 0;
     mut int32 count = 0;
+    mut int32 deferredEnd = 0;
     while (position < Host.Source.Length)
     {
         position = SkipTrivia(position, count);
@@ -876,7 +920,33 @@ int32 Scan()
             else
             {
                 int32 matched = OperatorMatch(start);
-                if (matched != -1)
+                if (start >= deferredEnd && IsPunctuationGlyph(scalar))
+                {
+                    require TryReadPunctuationRun(start, out var end, out var typeBoundary);
+                    int32 length = end - start;
+                    if (matched != -1 && matched % 8 == length)
+                    {
+                        kind = matched / 8;
+                        position = end;
+                    }
+                    else if (typeBoundary)
+                    {
+                        deferredEnd = end;
+                        kind = matched / 8;
+                        position = start + matched % 8;
+                    }
+                    else
+                    {
+                        mut int32 diagnostic = 11;
+                        if (IsUnsupportedPunctuationRun(start, length))
+                        {
+                            diagnostic = 12;
+                        }
+                        Report(diagnostic, start, length);
+                        position = end;
+                    }
+                }
+                else if (matched != -1)
                 {
                     kind = matched / 8;
                     position = start + matched % 8;

@@ -18,40 +18,12 @@ public static class ScannerHost
     public const int MaximumSourceLength = 16_384;
 
     /// <summary>The version of the lossless scanner and integer-decoder interchange.</summary>
-    public const int SchemaVersion = 7;
+    public const int SchemaVersion = 8;
 
     /// <summary>The component identity for the lossless scanner and integer-decoder protocol.</summary>
-    public const string ComponentName = "scanner-7";
+    public const string ComponentName = "scanner-8";
 
     // Lexemes are packed as (kind, UTF-16 length, code units...) and terminated by kind -1.
-    private static readonly (TokenKind Kind, string Text)[] s_operatorSpellings =
-    [
-        (TokenKind.OpenParen, "("), (TokenKind.CloseParen, ")"),
-        (TokenKind.OpenBrace, "{"), (TokenKind.CloseBrace, "}"),
-        (TokenKind.OpenBracket, "["), (TokenKind.CloseBracket, "]"),
-        (TokenKind.Semicolon, ";"), (TokenKind.Comma, ","), (TokenKind.Dot, "."),
-        (TokenKind.Colon, ":"), (TokenKind.Question, "?"),
-        (TokenKind.QuestionQuestion, "??"), (TokenKind.QuestionQuestionEquals, "??="),
-        (TokenKind.Plus, "+"), (TokenKind.PlusPlus, "++"),
-        (TokenKind.Minus, "-"), (TokenKind.MinusMinus, "--"), (TokenKind.Star, "*"), (TokenKind.Slash, "/"),
-        (TokenKind.Percent, "%"), (TokenKind.Bang, "!"), (TokenKind.Tilde, "~"),
-        (TokenKind.Equals, "="), (TokenKind.EqualsEquals, "=="),
-        (TokenKind.Arrow, "=>"),
-        (TokenKind.BangEquals, "!="), (TokenKind.Less, "<"),
-        (TokenKind.LessEquals, "<="), (TokenKind.Greater, ">"),
-        (TokenKind.GreaterEquals, ">="), (TokenKind.Ampersand, "&"),
-        (TokenKind.AmpersandAmpersand, "&&"), (TokenKind.Pipe, "|"),
-        (TokenKind.PipePipe, "||"), (TokenKind.Caret, "^"),
-        (TokenKind.ShiftLeft, "<<"), (TokenKind.ShiftRight, ">>"),
-        (TokenKind.ShiftRightUnsigned, ">>>"),
-        (TokenKind.PlusEquals, "+="), (TokenKind.MinusEquals, "-="),
-        (TokenKind.StarEquals, "*="), (TokenKind.SlashEquals, "/="),
-        (TokenKind.PercentEquals, "%="), (TokenKind.AmpersandEquals, "&="),
-        (TokenKind.PipeEquals, "|="), (TokenKind.CaretEquals, "^="),
-        (TokenKind.ShiftLeftEquals, "<<="), (TokenKind.ShiftRightEquals, ">>="),
-        (TokenKind.ShiftRightUnsignedEquals, ">>>="),
-    ];
-
     private static readonly ImmutableArray<int> s_keywords = CreateKeywords();
     private static readonly ImmutableArray<int> s_escapeKeywords = CreateEscapeKeywords();
     private static readonly ImmutableArray<int> s_operators = CreateOperators();
@@ -103,7 +75,7 @@ public static class ScannerHost
     private static ImmutableArray<int> CreateOperators()
     {
         var words = ImmutableArray.CreateBuilder<int>();
-        foreach (var (kind, text) in s_operatorSpellings)
+        foreach (var (kind, text) in PunctuationRun.Spellings)
         {
             AddLexeme(words, kind, text);
         }
@@ -499,7 +471,7 @@ public static class ScannerHost
             var code = BinaryPrimitives.ReadInt32LittleEndian(record);
             var start = BinaryPrimitives.ReadInt32LittleEndian(record[4..]);
             var length = BinaryPrimitives.ReadInt32LittleEndian(record[8..]);
-            if (code is < 1 or > 10 || start < 0 || start > source.Length
+            if (code is < 1 or > 12 || start < 0 || start > source.Length
                 || length <= 0 || length > source.Length - start)
             {
                 throw new ArgumentException("Invalid scanner diagnostic record.", nameof(bytes));
@@ -511,7 +483,7 @@ public static class ScannerHost
         return diagnostics.MoveToImmutable();
     }
 
-    /// <summary>Adapts a completed native scan into parser input, checking current trivia rules without re-lexing tokens.</summary>
+    /// <summary>Adapts a completed native scan into parser input, auditing current trivia and token framing without replacing supplied classifications.</summary>
     /// <param name="source">The exact source snapshot used by the scanner.</param>
     /// <param name="count">The scanner's token count, including EOF.</param>
     /// <param name="tokenBytes">The copied token buffer.</param>
@@ -560,6 +532,8 @@ public static class ScannerHost
                 "TRM0008" => "Binary prefix requires an ASCII binary digit.",
                 "TRM0009" => "Digit separators must appear between digits.",
                 "TRM0010" => "Block comment closing fence has too many stars.",
+                PunctuationRun.InvalidCode => PunctuationRun.InvalidMessage,
+                PunctuationRun.UnsupportedCode => PunctuationRun.UnsupportedMessage,
                 _ => throw new ArgumentException("Unknown scanner diagnostic.", nameof(diagnosticBytes)),
             };
             diagnostics.Add(new Diagnostic(diagnostic.Code, DiagnosticSeverity.Error, message, diagnostic.Span));
@@ -567,7 +541,77 @@ public static class ScannerHost
         var result = new LexResult(source, tokens.MoveToImmutable(), diagnostics.MoveToImmutable());
         ValidateTriviaProfile(result, cancellationToken);
         ValidateEscapeProfile(result);
+        ValidatePunctuationProfile(result, cancellationToken);
         return result;
+    }
+
+    private static void ValidatePunctuationProfile(LexResult result, CancellationToken cancellationToken)
+    {
+        for (var index = 0; index < result.Tokens.Length - 1; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var token = result.Tokens[index];
+            var start = token.Span.Start;
+            if (!PunctuationRun.IsGlyph(result.Source[start]))
+            {
+                // Audit framing, not ordinary caller-owned keyword/name classification.
+                // A fabricated long literal/name must not hide later punctuation.
+                if (Lexer.TokenEnd(result.Source, start, cancellationToken) != token.Span.End
+                    || (token.Kind == TokenKind.StringLiteral) != (result.Source[start] == '"'))
+                {
+                    throw new ArgumentException("Scanner records contradict source token framing.", nameof(result));
+                }
+                continue;
+            }
+            var end = PunctuationRun.End(result.Source.Text, start, cancellationToken);
+            var kind = PunctuationRun.Classify(result.Source.Text.AsSpan(start, end - start), out var expected);
+            if (kind == PunctuationRunKind.TypeBoundary)
+            {
+                var at = start;
+                do
+                {
+                    token = result.Tokens[index];
+                    expected = PunctuationRun.TypeBoundaryToken(result.Source.Text.AsSpan(at, end - at), out var width);
+                    if (token.Span.Start != at || token.Span.End > end
+                        || token.Span.Length != width || expected != token.Kind)
+                    {
+                        throw new ArgumentException("Scanner records contradict deferred type punctuation.", nameof(result));
+                    }
+                    at = token.Span.End;
+                    if (at < end)
+                    {
+                        index++;
+                    }
+                }
+                while (at < end && index < result.Tokens.Length - 1);
+                if (at != end)
+                {
+                    throw new ArgumentException("Incomplete scanner punctuation run.", nameof(result));
+                }
+                continue;
+            }
+            if (token.Span.End != end || token.Kind != expected)
+            {
+                throw new ArgumentException("Scanner records split or hide a punctuation run.", nameof(result));
+            }
+            if (kind is PunctuationRunKind.Invalid or PunctuationRunKind.Unsupported)
+            {
+                var code = kind == PunctuationRunKind.Unsupported ? PunctuationRun.UnsupportedCode : PunctuationRun.InvalidCode;
+                var found = false;
+                foreach (var diagnostic in result.Diagnostics)
+                {
+                    if (diagnostic.Code == code && diagnostic.Span == token.Span)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                {
+                    throw new ArgumentException("Scanner records omit a punctuation diagnostic.", nameof(result));
+                }
+            }
+        }
     }
 
     private static void ValidateEscapeProfile(LexResult result)

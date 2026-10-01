@@ -8,11 +8,13 @@ Approval, implementation, and pre-v1 stability are separate.
 
 ## Active work (priority order)
 
-1. Adopt the approved maximal ASCII operator runs `!%&*+-./:<=>?^|~` across
-   supported hosted, native, scanner and projection paths. This work is still
-   in progress. It targets syntax-43 and may append a scanner diagnostic and
-   profile identity for invalid runs; that profile change is allowed. Preserve
-   existing record widths, token IDs, resource budgets and semantic/native ABI.
+1. Maximal ASCII operator runs `!%&*+-./:<=>?^|~` are adopted in syntax-43
+   across supported hosted, native, scanner and projection paths. Scanner-8
+   appends invalid/unsupported-run diagnostics without changing layouts,
+   token IDs, projection versions or resource bounds. Actual hosted type
+   boundaries are certified before binding; native scalar forms have no
+   type exemptions. Range/slice/optional access and unrelated syntax remain
+   unsupported.
 2. Review source-contract decisions from the [grammar](grammar-spec.md) and
    [decision queue](proposals/grammar-open-questions.md). Preserve accepted
    decisions; recommendations remain proposals until approved.

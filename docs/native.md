@@ -110,7 +110,7 @@ ABI changes; imported functions cannot satisfy required constant calls.
 Syntax-26 adds scalar `const expression` requirements in nested executable
 expressions, with the same limits and deferred constant substitution; no new
 native or semantic wire representation is emitted. The current parser version
-is syntax-42. Supported symbolic expression binary/binding/assignment
+is syntax-43. Supported symbolic expression binary/binding/assignment
 operators and expression-body arrows require trivia on both sides; symbolic
 prefixes/postfix updates attach to their immediate operand token boundary.
 The scalar frontend and maintained probes check raw ranges before legacy or
@@ -122,8 +122,14 @@ Conditional `?`/`:` also require both-sided trivia, directly validated by the
 native snapshot before fallback. Hosted relationship colons, name-prefix
 colons and optional-type suffixes follow their current supported grammar roles;
 no native labels, named arguments, optional types or attribute targets are
-added. String/format interiors remain unchanged and operator-run lexing is not
-adopted. Generalized comment fences and closed-catalog `@keyword` names
+added. String/format interiors remain unchanged. The compiled scanner rejects
+unlisted maximal ASCII punctuation runs with whole-span diagnostic 11 and
+defined-but-unsupported spellings with diagnostic 12 (scanner/schema 8).
+The scalar snapshot gate linearly validates contiguous punctuation records
+before spacing/fallback, with no generic/type exemptions. Successful current
+and historical projections independently audit syntax-43. Layouts, IDs,
+projection versions and all work/resource bounds remain unchanged.
+Generalized comment fences and closed-catalog `@keyword` names
 execute in the compiled scanner and native frontend input path, preserving
 raw source ranges and underlying name identity without changing native
 profiles, persisted symbol identities or ABI.

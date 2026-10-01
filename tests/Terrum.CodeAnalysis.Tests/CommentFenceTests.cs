@@ -25,7 +25,7 @@ public sealed class CommentFenceTests
     [InlineData("// text", TriviaKind.SingleLineComment, "")]
     [InlineData("/* **/ */", TriviaKind.MultiLineComment, "TRM0010")]
     [InlineData("//** ***// **//", TriviaKind.DocumentationBlockComment, "TRM0010")]
-    [InlineData("/** /**/ **/", TriviaKind.MultiLineComment, "")]
+    [InlineData("/** /**/ **/", TriviaKind.MultiLineComment, "TRM0011")]
     [InlineData("/* \"*/", TriviaKind.MultiLineComment, "")]
     public void CommentFencesPreserveLosslessTriviaAndDiagnostics(string text, TriviaKind kind, string error)
     {

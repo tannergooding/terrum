@@ -24,6 +24,7 @@ public sealed class Lexer
     private readonly CancellationToken _cancellationToken;
     private readonly ImmutableArray<Diagnostic>.Builder _diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
     private int _position;
+    private int _deferredRunEnd;
 
     private Lexer(SourceText source, CancellationToken cancellationToken)
     {
@@ -64,6 +65,13 @@ public sealed class Lexer
         Lexer lexer = new(source, cancellationToken) { _position = position };
         var trivia = lexer.ReadTrivia();
         return (trivia, lexer._diagnostics.ToImmutable(), lexer._position);
+    }
+
+    internal static int TokenEnd(SourceText source, int position, CancellationToken cancellationToken)
+    {
+        Lexer lexer = new(source, cancellationToken) { _position = position };
+        _ = lexer.ReadToken();
+        return lexer._position;
     }
 
     private bool AtEnd => _position == _source.Length;
@@ -250,6 +258,33 @@ public sealed class Lexer
             return ReadString();
         }
 
+        if (_position >= _deferredRunEnd && PunctuationRun.IsGlyph(Current))
+        {
+            var end = PunctuationRun.End(_source.Text, start, _cancellationToken);
+            var runKind = PunctuationRun.Classify(_source.Text.AsSpan(start, end - start), out var tokenKind);
+            if (runKind == PunctuationRunKind.Implemented)
+            {
+                _position = end;
+                return tokenKind;
+            }
+            if (runKind != PunctuationRunKind.TypeBoundary)
+            {
+                _position = end;
+                Report(runKind == PunctuationRunKind.Unsupported ? PunctuationRun.UnsupportedCode : PunctuationRun.InvalidCode,
+                    runKind == PunctuationRunKind.Unsupported ? PunctuationRun.UnsupportedMessage : PunctuationRun.InvalidMessage,
+                    start, end - start);
+                return TokenKind.Bad;
+            }
+            _deferredRunEnd = end;
+        }
+
+        if (_position < _deferredRunEnd)
+        {
+            var kind = PunctuationRun.TypeBoundaryToken(_source.Text.AsSpan(start, _deferredRunEnd - start), out width);
+            _position += width;
+            return kind;
+        }
+
         _position++;
         switch (_source[start])
         {
@@ -269,83 +304,6 @@ public sealed class Lexer
                 return TokenKind.Semicolon;
             case ',':
                 return TokenKind.Comma;
-            case '.':
-                return TokenKind.Dot;
-            case ':':
-                return TokenKind.Colon;
-            case '?':
-                if (!AtEnd && Current == '?')
-                {
-                    _position++;
-                    return Compound('=', TokenKind.QuestionQuestionEquals, TokenKind.QuestionQuestion);
-                }
-                return TokenKind.Question;
-            case '+':
-                if (!AtEnd && Current == '+')
-                {
-                    _position++;
-                    return TokenKind.PlusPlus;
-                }
-                return Compound('=', TokenKind.PlusEquals, TokenKind.Plus);
-            case '-':
-                if (!AtEnd && Current == '-')
-                {
-                    _position++;
-                    return TokenKind.MinusMinus;
-                }
-                return Compound('=', TokenKind.MinusEquals, TokenKind.Minus);
-            case '*':
-                return Compound('=', TokenKind.StarEquals, TokenKind.Star);
-            case '/':
-                return Compound('=', TokenKind.SlashEquals, TokenKind.Slash);
-            case '%':
-                return Compound('=', TokenKind.PercentEquals, TokenKind.Percent);
-            case '~':
-                return TokenKind.Tilde;
-            case '^':
-                return Compound('=', TokenKind.CaretEquals, TokenKind.Caret);
-            case '!':
-                return Compound('=', TokenKind.BangEquals, TokenKind.Bang);
-            case '=':
-                if (!AtEnd && Current == '>')
-                {
-                    _position++;
-                    return TokenKind.Arrow;
-                }
-                return Compound('=', TokenKind.EqualsEquals, TokenKind.Equals);
-            case '<':
-                if (!AtEnd && Current == '<')
-                {
-                    _position++;
-                    return Compound('=', TokenKind.ShiftLeftEquals, TokenKind.ShiftLeft);
-                }
-                return Compound('=', TokenKind.LessEquals, TokenKind.Less);
-            case '>':
-                if (!AtEnd && Current == '>')
-                {
-                    _position++;
-                    if (!AtEnd && Current == '>')
-                    {
-                        _position++;
-                        return Compound('=', TokenKind.ShiftRightUnsignedEquals, TokenKind.ShiftRightUnsigned);
-                    }
-                    return Compound('=', TokenKind.ShiftRightEquals, TokenKind.ShiftRight);
-                }
-                return Compound('=', TokenKind.GreaterEquals, TokenKind.Greater);
-            case '&':
-                if (!AtEnd && Current == '&')
-                {
-                    _position++;
-                    return TokenKind.AmpersandAmpersand;
-                }
-                return Compound('=', TokenKind.AmpersandEquals, TokenKind.Ampersand);
-            case '|':
-                if (!AtEnd && Current == '|')
-                {
-                    _position++;
-                    return TokenKind.PipePipe;
-                }
-                return Compound('=', TokenKind.PipeEquals, TokenKind.Pipe);
             default:
                 if (char.IsHighSurrogate(_source[start]) && !AtEnd && char.IsLowSurrogate(Current))
                 {
@@ -356,17 +314,6 @@ public sealed class Lexer
                     : "Unrecognized character.", start, _position - start);
                 return TokenKind.Bad;
         }
-    }
-
-    private TokenKind Compound(char second, TokenKind compound, TokenKind single)
-    {
-        if (!AtEnd && Current == second)
-        {
-            _position++;
-            return compound;
-        }
-
-        return single;
     }
 
     private TokenKind ReadNumber()

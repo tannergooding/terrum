@@ -15,20 +15,25 @@ internal sealed class Parser
 {
     private const int MaximumDepth = 128;
     private readonly ImmutableArray<SyntaxToken> _tokens;
+    private readonly SourceText _source;
+    private readonly HashSet<TextSpan> _typePunctuation = [];
     private readonly CancellationToken _cancellationToken;
     private readonly List<Diagnostic> _diagnostics = [];
     private int _position;
     private int _depth;
     private int _pendingGreater;
+    private int _missingTokens;
 
-    internal Parser(ImmutableArray<SyntaxToken> tokens, CancellationToken cancellationToken)
+    internal Parser(SourceText source, ImmutableArray<SyntaxToken> tokens, CancellationToken cancellationToken)
     {
+        _source = source;
         _tokens = tokens;
         _cancellationToken = cancellationToken;
     }
 
     private SyntaxNode ParseTypeParameters(bool interfaceParameters = false)
     {
+        var missing = _missingTokens;
         var children = new List<SyntaxElement> { ExpectAttached(TokenKind.Less) };
         if (interfaceParameters && Current.Kind == TokenKind.Identifier && Current.Text == "this")
         {
@@ -44,7 +49,7 @@ internal sealed class Parser
             }
             children.Add(Expect(TokenKind.Identifier));
         }
-        children.Add(Expect(TokenKind.Greater));
+        children.Add(ExpectTypeCloser(missing));
         return Node(SyntaxKind.TypeParameterList, children);
     }
 
@@ -188,13 +193,14 @@ internal sealed class Parser
 
     private SyntaxNode ParseTypeArguments()
     {
+        var missing = _missingTokens;
         var children = new List<SyntaxElement> { ExpectAttached(TokenKind.Less), ParseType() };
         while (Current.Kind == TokenKind.Comma)
         {
             children.Add(Take());
             children.Add(ParseType());
         }
-        children.Add(Expect(TokenKind.Greater));
+        children.Add(ExpectTypeCloser(missing));
         return Node(SyntaxKind.TypeParameterList, children);
     }
 
@@ -255,6 +261,7 @@ internal sealed class Parser
             children.Add(new SyntaxTokenElement(_tokens[^1]));
         }
 
+        ValidateDeferredPunctuation();
         return Node(SyntaxKind.CompilationUnit, children);
     }
 
@@ -492,6 +499,7 @@ internal sealed class Parser
     private SyntaxNode ParseType()
     {
         Enter();
+        var missing = _missingTokens;
         var children = new List<SyntaxElement>();
         if (Current.Kind == TokenKind.WriteKeyword)
         {
@@ -516,7 +524,7 @@ internal sealed class Parser
                 children.Add(ParseType());
             }
 
-            children.Add(Expect(TokenKind.Greater));
+            children.Add(ExpectTypeCloser(missing));
         }
 
         if (Current.Kind is TokenKind.Question or TokenKind.QuestionQuestion)
@@ -529,6 +537,10 @@ internal sealed class Parser
                     Report("TRM1011", "An optional type modifier must attach to the type's final token.", Current.Span);
                 }
                 var modifier = Take();
+                if (missing == _missingTokens)
+                {
+                    _typePunctuation.Add(modifier.Span);
+                }
                 children.Add(modifier);
                 for (var index = hasModifier ? 0 : 1; index < modifier.Token.Text.Length; index++)
                 {
@@ -555,11 +567,12 @@ internal sealed class Parser
             if (Current.Kind == TokenKind.Identifier && Current.Text == "init"
                 && Peek(1).Kind == TokenKind.RefKeyword)
             {
+                var missing = _missingTokens;
                 parameter.Add(Take());
                 parameter.Add(Take());
                 parameter.Add(ExpectAttached(TokenKind.Less));
                 parameter.Add(ParseType());
-                parameter.Add(Expect(TokenKind.Greater));
+                parameter.Add(ExpectTypeCloser(missing));
             }
             else
             {
@@ -1259,7 +1272,76 @@ internal sealed class Parser
         return Missing(kind);
     }
 
-    private SyntaxTokenElement Missing(TokenKind kind) => new(SyntaxToken.Missing(kind, Current.Span.Start));
+    private SyntaxTokenElement ExpectTypeCloser(int missingBefore)
+    {
+        var closer = Expect(TokenKind.Greater);
+        if (!closer.Token.IsMissing && missingBefore == _missingTokens)
+        {
+            _typePunctuation.Add(closer.Span);
+        }
+        return closer;
+    }
+
+    private void ValidateDeferredPunctuation()
+    {
+        for (var index = 0; index < _tokens.Length - 1; index++)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (!IsTypePunctuation(_tokens[index]))
+            {
+                continue;
+            }
+            var first = index;
+            var start = _tokens[index].Span.Start;
+            var end = _tokens[index].Span.End;
+            while (index + 1 < _tokens.Length - 1 && _tokens[index + 1].Span.Start == end
+                && IsTypePunctuation(_tokens[index + 1]))
+            {
+                end = _tokens[++index].Span.End;
+            }
+            if (PunctuationRun.Classify(_source.Text.AsSpan(start, end - start), out _) != PunctuationRunKind.TypeBoundary)
+            {
+                continue;
+            }
+            var consumed = true;
+            for (var item = first; item <= index && consumed; item++)
+            {
+                var token = _tokens[item];
+                if (_typePunctuation.Contains(token.Span))
+                {
+                    continue;
+                }
+                // The CST consumes a compound closer one actual '>' at a time.
+                foreach (var unit in token.Text)
+                {
+                    if (unit != '>')
+                    {
+                        consumed = false;
+                        break;
+                    }
+                }
+                for (var at = token.Span.Start; at < token.Span.End && consumed; at++)
+                {
+                    consumed = _typePunctuation.Contains(new TextSpan(at, 1));
+                }
+            }
+            if (!consumed)
+            {
+                Report(PunctuationRun.InvalidCode, PunctuationRun.InvalidMessage, new TextSpan(start, end - start));
+            }
+        }
+
+        static bool IsTypePunctuation(SyntaxToken token) =>
+            token.Kind is TokenKind.Greater or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned
+                or TokenKind.Question or TokenKind.QuestionQuestion
+            && token.Text.AsSpan().IndexOfAnyExcept('>', '?') < 0;
+    }
+
+    private SyntaxTokenElement Missing(TokenKind kind)
+    {
+        _missingTokens++;
+        return new SyntaxTokenElement(SyntaxToken.Missing(kind, Current.Span.Start));
+    }
 
     private SyntaxTokenElement Take()
     {

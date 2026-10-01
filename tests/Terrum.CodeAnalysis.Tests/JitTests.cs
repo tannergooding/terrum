@@ -359,8 +359,8 @@ public sealed partial class JitTests
         Assert.Equal(0, exit);
         Assert.Equal("", error);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(7, document.RootElement.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("scanner-7", document.RootElement.GetProperty("component").GetString());
+        Assert.Equal(8, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("scanner-8", document.RootElement.GetProperty("component").GetString());
         Assert.True(document.RootElement.GetProperty("success").GetBoolean());
         Assert.Equal(0, document.RootElement.GetProperty("diagnostics").GetArrayLength());
         var tokens = document.RootElement.GetProperty("tokens");
@@ -393,7 +393,7 @@ public sealed partial class JitTests
         Assert.Equal(expected.Diagnostics.IsEmpty ? 0 : 1, exit);
         Assert.Empty(error);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(7, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(8, document.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal(expected.Diagnostics.IsEmpty, document.RootElement.GetProperty("success").GetBoolean());
         var diagnostics = document.RootElement.GetProperty("diagnostics");
         Assert.Equal(expected.Diagnostics.Length, diagnostics.GetArrayLength());

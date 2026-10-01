@@ -73,6 +73,20 @@ public sealed class PrelexedSyntaxTests
             SyntaxTree.Parse(lexResult with { Tokens = lexResult.Tokens.SetItem(index, forged) }));
     }
 
+    [Fact]
+    public void TrustedCallerClassificationIsNotHostileCompletedScannerInterchange()
+    {
+        const string text = "int32 !!() { return 1; }";
+        var lexed = Lexer.Lex(SourceText.From(text));
+        var token = Assert.Single(lexed.Tokens, item => item.Kind == TokenKind.Bad);
+        var forged = ForgeToken(TokenKind.Identifier, token.Text, token.Span, token.LeadingTrivia);
+        var tree = SyntaxTree.Parse(lexed with {
+            Tokens = lexed.Tokens.SetItem(lexed.Tokens.IndexOf(token), forged), Diagnostics = [],
+        });
+        Assert.Empty(tree.Diagnostics);
+        Assert.Equal(text, tree.Root.ToFullString());
+    }
+
     [Theory]
     [InlineData("null-source")]
     [InlineData("default-tokens")]

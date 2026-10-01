@@ -131,6 +131,9 @@ public sealed class ManagedScannerComponentTests
     [InlineData("\uD800")]
     [InlineData("\"unterminated\n\"\\q\"")]
     [InlineData("/* **/ */")]
+    [InlineData("!!")]
+    [InlineData("..^")]
+    [InlineData("\U00010400 +++")]
     public async Task OwnedDiagnosticsRemainAvailableOnLexicalFailureAsync(string text)
     {
         var expected = Lexer.Lex(SourceText.From(text)).Diagnostics;
@@ -168,7 +171,7 @@ public sealed class ManagedScannerComponentTests
     [InlineData(0, -1)]
     [InlineData(0, int.MaxValue)]
     [InlineData(1, 0)]
-    [InlineData(1, 11)]
+    [InlineData(1, 13)]
     [InlineData(2, -1)]
     [InlineData(2, 2)]
     [InlineData(3, -1)]
@@ -2649,6 +2652,55 @@ public sealed class ManagedScannerComponentTests
                 Assert.Equal(42, NativeJit.Execute(program, policy));
                 await ExecuteAotAsync(program, policy).ConfigureAwait(true);
             }
+        }
+    }
+
+    [Theory]
+    [InlineData("!!", TokenKind.Bang, TokenKind.Bang)]
+    [InlineData("+++", TokenKind.PlusPlus, TokenKind.Plus)]
+    [InlineData(">?>", TokenKind.Greater, TokenKind.Question, TokenKind.Greater)]
+    [InlineData(">>>>", TokenKind.ShiftRightUnsigned, TokenKind.Greater)]
+    [InlineData("!!", TokenKind.Identifier)]
+    [InlineData("==", TokenKind.Equals, TokenKind.Equals)]
+    public async Task NativeScalarRunGateRejectsIndependentHistoricAndForgedRecordsAsync(
+        string text, params TokenKind[] kinds)
+    {
+        var entry = new StringBuilder("""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                Host.Diagnostics[0] = 0;
+            """);
+        var start = 0;
+        for (var index = 0; index < kinds.Length; index++)
+        {
+            var width = kinds[index] switch {
+                TokenKind.Identifier => text.Length,
+                TokenKind.PlusPlus => 2,
+                TokenKind.ShiftRightUnsigned => 3,
+                _ => 1,
+            };
+            entry.Append(CultureInfo.InvariantCulture,
+                $"Host.Tokens[{index * 3}] = {(int)kinds[index]};"
+                + $" Host.Tokens[{index * 3 + 1}] = {start};"
+                + $" Host.Tokens[{index * 3 + 2}] = {width};");
+            start += width;
+        }
+        Assert.Equal(text.Length, start);
+        entry.Append(
+            $"Host.Tokens[{kinds.Length * 3}] = 0;"
+            + $" Host.Tokens[{kinds.Length * 3 + 1}] = {text.Length};"
+            + $" Host.Tokens[{kinds.Length * 3 + 2}] = 0;"
+            + $" require TokenSnapshot.TryBuild({kinds.Length + 1}, init var tokens);"
+            + " var error = tokens.GetScalarOperatorSpacingError();"
+            + $" if (error.Start != 0 || error.Length != {text.Length}) {{ return 1; }}"
+            + " require TryParseScalarFrontend(move tokens, out var result);"
+            + $" if (result.IsValid || result.ErrorSpan.Start != 0 || result.ErrorSpan.Length != {text.Length}) {{ return 2; }}"
+            + " return 42; }");
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry.ToString(), (BoundRuntimePolicy)policy, "ScalarFrontend");
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy);
         }
     }
 

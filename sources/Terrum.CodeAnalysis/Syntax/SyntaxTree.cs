@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Syntax;
 public sealed class SyntaxTree
 {
     /// <summary>Identifies the syntax contract used by this parser.</summary>
-    public const string LanguageVersion = "syntax-42";
+    public const string LanguageVersion = "syntax-43";
 
     private readonly Dictionary<SyntaxToken, ScannerIntegerValue>? _decodedIntegers;
 
@@ -142,7 +142,7 @@ public sealed class SyntaxTree
     private static SyntaxTree ParseCore(LexResult lexResult, CancellationToken cancellationToken,
         ImmutableArray<ScannerIntegerValue> integerValues = default)
     {
-        var parser = new Parser(lexResult.Tokens, cancellationToken);
+        var parser = new Parser(lexResult.Source, lexResult.Tokens, cancellationToken);
         var root = parser.ParseCompilationUnit();
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         diagnostics.AddRange(lexResult.Diagnostics);

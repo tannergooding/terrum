@@ -45,6 +45,11 @@ public unique struct TokenSnapshot
     // Its '?' and ':' only connect conditional expressions, not types or names.
     public SourceRange GetScalarOperatorSpacingError()
     {
+        var run = GetScalarPunctuationRunError();
+        if (run.Length != 0)
+        {
+            return run;
+        }
         require TryGet(0, out var first);
         mut Token previous = first;
         for (mut int32 index = 1; index < _count - 1; index = index + 1)
@@ -85,6 +90,45 @@ public unique struct TokenSnapshot
                 return op.Range;
             }
             previous = op;
+        }
+        require SourceRange.TryCreate(0, 0, out var empty);
+        return empty;
+    }
+
+    private SourceRange GetScalarPunctuationRunError()
+    {
+        mut int32 index = 0;
+        while (index < _count - 1)
+        {
+            require TryGet(index, out var first);
+            if (!IsPunctuationGlyph(PeekUnit(first.Range.Start)))
+            {
+                index = index + 1;
+                continue;
+            }
+            int32 start = first.Range.Start;
+            mut int32 end = first.Range.End;
+            mut int32 records = 1;
+            index = index + 1;
+            while (index < _count - 1)
+            {
+                require TryGet(index, out var next);
+                if (next.Range.Start != end
+                    || !IsPunctuationGlyph(PeekUnit(next.Range.Start)))
+                {
+                    break;
+                }
+                end = next.Range.End;
+                records = records + 1;
+                index = index + 1;
+            }
+            int32 matched = OperatorMatch(start);
+            if (records != 1 || matched == -1 || matched % 8 != end - start
+                || matched / 8 != first.Kind)
+            {
+                require SourceRange.TryCreate(start, end - start, out var error);
+                return error;
+            }
         }
         require SourceRange.TryCreate(0, 0, out var empty);
         return empty;

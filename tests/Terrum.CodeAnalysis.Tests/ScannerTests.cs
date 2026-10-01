@@ -316,7 +316,7 @@ public sealed class ScannerTests
     [Theory]
     [InlineData(2, 1, 0, 1)]
     [InlineData(1, 0, 0, 1)]
-    [InlineData(1, 11, 0, 1)]
+    [InlineData(1, 13, 0, 1)]
     [InlineData(1, 1, -1, 1)]
     [InlineData(1, 1, 0, 0)]
     [InlineData(1, 1, 0, 2)]

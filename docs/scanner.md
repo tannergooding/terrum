@@ -90,7 +90,7 @@ Both are execution-worker commands: compiled scanner code runs inside that CLI
 process. Supervising clients must launch a bounded subprocess and treat abnormal
 termination as a runtime failure. Ordinary `build` still uses the host lexer.
 When `scan-component`
-scanning completes, JSON uses `schemaVersion: 7`, `component: "scanner-7"`,
+scanning completes, JSON uses `schemaVersion: 8`, `component: "scanner-8"`,
 `coordinateSystem: "utf-16"`, the pinned `unicodeVersion`, `sourceLength`,
 `success`, and arrays of `tokens`, `integerValues`, and `diagnostics`. Each token has an exact
 lexical `kind`, `start`, `length` and its ordered `leadingTrivia` array.
@@ -104,7 +104,7 @@ return `success: false` and exit code 1 but still publish the full token stream
 and diagnostics on stdout. Without `--json`, token rows go to stdout and
 diagnostic code/spans go to stderr. Input, compilation, or invalid-result
 failures retain the standard schema-1 error response rather than producing a
-scanner-7 token response.
+scanner-8 token response.
 
 `build-component` instead adapts the native records to `LexResult`, pairs the
 validated integer values with that same source and token stream, feeds them
@@ -193,8 +193,13 @@ records, including EOF. Words beyond that count are not token records.
 numeric value, UTF-16 start, UTF-16 length, and zero-based owning token index.
 Leading trivia remains attached to EOF when there is no following token.
 `Host.Diagnostics[0]` contains
-the diagnostic count; subsequent triples are numeric code (1–10 maps to
-`TRM0001`–`TRM0010`), UTF-16 start and UTF-16 length, in reporting order.
+the diagnostic count; subsequent triples are numeric code (1–12 maps to
+`TRM0001`–`TRM0012`), UTF-16 start and UTF-16 length, in reporting order.
+Scanner-8/schema-8 appends 11 for an invalid maximal punctuation run and 12
+for a defined but unsupported spelling; previous diagnostic meanings and
+record widths remain unchanged. Raw compatible historical records remain
+readable, but completed current-profile adapters reject split-run and
+name/literal framing contradictions without replacing supplied records.
 Overlong suffixed fences report their whole run plus the required suffix;
 recovery keeps them in the comment until a valid closer or EOF. EOF without
 a valid closer also reports `TRM0003`, retaining all source text.
@@ -287,8 +292,15 @@ attach to the preceding name with optional trivia afterward; optional-type
 `?` attaches to the final type token. Native scalar `?`/`:` are exclusively
 conditional connectors and the shared snapshot check rejects bad boundaries
 directly before fallback. No additional colon/type roles are introduced.
-Operator-run scanning remains separate work. Scanner/schema, token IDs/widths,
-projections and bounds stay fixed.
+Syntax-43 independently classifies maximal ASCII punctuation runs in the
+compiled scanner. Unlisted runs are one Bad token with whole-run `TRM0011`;
+unsupported `..`, `..^` and `?.` are one Bad token with `TRM0012`. Only
+deferred `>`/`?` type-boundary candidates retain existing splitting, pending
+actual hosted-parser consumption. Native scalar snapshots have no such type
+exemption and check whole contiguous runs before spacing/fallback. Missing
+tokens never certify a boundary; repeated optional marking retains `TRM1005`.
+Scanner/schema advance to 8 only for the appended diagnostic catalog.
+Token IDs/widths, projections, bounds and semantic/native ABI remain fixed.
 
 Keyword records are generated from the host `TokenKind` catalog's `*Keyword`
 members. Operator records use their lexical spellings, with fixture comparisons
@@ -296,6 +308,12 @@ covering the entire punctuation/operator catalog. Packed lexeme records contain
 `(kind, UTF-16 length, code units...)` and end with kind `-1`; native code
 compares source code units against these readonly records and selects the
 longest matching operator. The host never chooses a token from the source.
+The scanner first measures the maximal glyph run, stopping at comments,
+and accepts a catalog match only when it covers the entire run. Deferred
+type candidates cache the run end rather than rescanning every suffix.
+The shared managed classifier also audits completed records. See
+[implementation status](implementation.md) for parser certification and
+current unsupported spelling recovery.
 Output capacities are bounded by `sourceLength + 1` tokens, at most
 `sourceLength` trivia, integer-value, and diagnostic records; the
 native scanner requires capacity before publishing each record.

@@ -19,7 +19,7 @@ public sealed partial class CliTests
     [InlineData("//* **// *//", new[] { "TRM0010" }, new[] { 4 }, new[] { 4 })]
     [InlineData("//* **/ *//", new string[] { }, new int[] { }, new int[] { })]
     [InlineData("/*** **/ x ***/", new string[] { }, new int[] { }, new int[] { })]
-    [InlineData("/** /**/ **/", new string[] { }, new int[] { }, new int[] { })]
+    [InlineData("/** /**/ **/", new[] { "TRM0011" }, new[] { 9 }, new[] { 3 })]
     [InlineData("//** /* \" \r\n **//", new string[] { }, new int[] { }, new int[] { })]
     public async Task CompiledFenceAuditHasExactDiagnosticsUnderBothPoliciesAsync(
         string source, string[] codes, int[] starts, int[] lengths)

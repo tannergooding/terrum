@@ -82,9 +82,11 @@ public sealed class GeneralizedCommentAuditTests
     {
         const string Source = "/** /**/ **/";
         var result = Lexer.Lex(SourceText.From(Source));
-        Assert.Empty(result.Diagnostics);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("TRM0011", diagnostic.Code);
+        Assert.Equal(new TextSpan(9, 3), diagnostic.Span);
         Assert.Equal(new TextSpan(0, 8), result.Tokens[0].LeadingTrivia[0].Span);
-        Assert.Equal([TokenKind.Star, TokenKind.Star, TokenKind.Slash, TokenKind.EndOfFile],
+        Assert.Equal([TokenKind.Bad, TokenKind.EndOfFile],
             result.Tokens.Select(token => token.Kind));
         Assert.Equal(Source, Reconstruct(result));
         Assert.Equal(Source, SyntaxTree.Parse(Source).Root.ToFullString());

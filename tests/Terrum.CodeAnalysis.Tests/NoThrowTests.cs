@@ -212,7 +212,7 @@ public sealed class NoThrowTests
     [Theory]
     [InlineData("!false", true)]
     [InlineData("!true", false)]
-    [InlineData("!!true", true)]
+    [InlineData("!(!true)", true)]
     [InlineData("true && true", true)]
     [InlineData("true && false", false)]
     [InlineData("false && true", false)]

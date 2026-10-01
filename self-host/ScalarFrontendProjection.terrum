@@ -78,18 +78,12 @@ bool TryPublishScalarFrontend()
     {
         Host.Frontend[0] = 20;
         if (Host.Frontend[298] != 0) { Host.Frontend[0] = 21; }
-        for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
+        bool conversion = HasScalarFrontendOperation(83);
+        bool conditional = HasScalarFrontendOperation(84);
+        if (conversion)
         {
-            if (Host.Frontend[42 + node * 8] == 83)
-            {
-                if (Host.Frontend[298] == 0) { Host.Frontend[0] = 22; }
-                else { Host.Frontend[0] = 23; }
-            }
-        }
-        mut bool conditional = false;
-        for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
-        {
-            if (Host.Frontend[42 + node * 8] == 84) { conditional = true; }
+            if (Host.Frontend[298] == 0) { Host.Frontend[0] = 22; }
+            else { Host.Frontend[0] = 23; }
         }
         if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 4; }
         mut bool hasWhile = false;
@@ -100,11 +94,6 @@ bool TryPublishScalarFrontend()
         if (hasWhile)
         {
             Host.Frontend[0] = 28;
-            mut bool conversion = false;
-            for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
-            {
-                if (Host.Frontend[42 + node * 8] == 83) { conversion = true; }
-            }
             if (conversion) { Host.Frontend[0] = Host.Frontend[0] + 1; }
             if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 2; }
         }
@@ -117,14 +106,7 @@ bool TryPublishScalarFrontend()
         {
             Host.Frontend[0] = 32;
             if (hasWhile) { Host.Frontend[0] = 36; }
-            for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
-            {
-                if (Host.Frontend[42 + node * 8] == 83)
-                {
-                    Host.Frontend[0] = Host.Frontend[0] + 1;
-                    break;
-                }
-            }
+            if (conversion) { Host.Frontend[0] = Host.Frontend[0] + 1; }
             if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 2; }
         }
         mut bool hasTransfer = false;
@@ -137,14 +119,7 @@ bool TryPublishScalarFrontend()
         {
             Host.Frontend[0] = 40;
             if (hasBranch) { Host.Frontend[0] = 44; }
-            for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
-            {
-                if (Host.Frontend[42 + node * 8] == 83)
-                {
-                    Host.Frontend[0] = Host.Frontend[0] + 1;
-                    break;
-                }
-            }
+            if (conversion) { Host.Frontend[0] = Host.Frontend[0] + 1; }
             if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 2; }
         }
         for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -264,15 +239,10 @@ bool TryPublishScalarFrontend()
     {
         Host.Frontend[0] = 9;
     }
-    if ((result.WhenTrue.Operation >= 2100 && result.WhenTrue.Operation < 2700)
-        || result.WhenTrue.Operation >= 3200
+    if (IsScalarFrontendNumericUnary(result.WhenTrue.Operation)
         || (result.HasCondition
-            && ((result.Condition.Operation >= 2100
-                    && result.Condition.Operation < 2700)
-                || result.Condition.Operation >= 3200
-                || (result.WhenFalse.Operation >= 2100
-                    && result.WhenFalse.Operation < 2700)
-                || result.WhenFalse.Operation >= 3200)))
+            && (IsScalarFrontendNumericUnary(result.Condition.Operation)
+                || IsScalarFrontendNumericUnary(result.WhenFalse.Operation))))
     {
         Host.Frontend[0] = 10;
     }
@@ -327,4 +297,21 @@ int32 GetScalarFrontendMaximumOperation(ScalarFrontendResult result)
         if (result.WhenFalse.Operation > maximum) { maximum = result.WhenFalse.Operation; }
     }
     return maximum;
+}
+
+bool IsScalarFrontendNumericUnary(int32 operation)
+{
+    return (operation >= 2100 && operation < 2700) || operation >= 3200;
+}
+
+bool HasScalarFrontendOperation(int32 operation)
+{
+    for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
+    {
+        if (Host.Frontend[42 + node * 8] == operation)
+        {
+            return true;
+        }
+    }
+    return false;
 }

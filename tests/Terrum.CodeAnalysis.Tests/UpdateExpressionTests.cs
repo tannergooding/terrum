@@ -35,7 +35,7 @@ public sealed class UpdateExpressionTests
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
         Assert.Equal(4, tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.UpdateExpression));
         Assert.Contains(SyntaxTree.Parse("int32 Main() { mut int32 value = 1; value+++value; return 0; }").Diagnostics,
-            diagnostic => diagnostic.Code == "TRM1001");
+            diagnostic => diagnostic.Code == "TRM0011");
     }
 
     [Theory]
