@@ -134,6 +134,7 @@ table. The proposed `Option<T>` alias is separately described in
 | Signature group | Concrete types/protocols | Reference |
 |---|---|---|
 | Equality, keying, parse and format | `IEqualityComparer`, `IKeyComparer`, `IParsable`, `IFormattable` | [Witnesses](#2-explicit-equality-keying-and-formatting-witnesses) |
+| Explicit primitive comparison | `Int32KeyComparer`, `Float32IeeeEqualityComparer`, `Float32NumericKeyComparer` | [Primitive comparers](#proposed-explicit-primitive-comparers) |
 | Views and immutable text | `Span`, `IContiguousSequence`, `TextSpan`, `rune`, `Text` | [Text and views](#3-text-encoding-and-writers) |
 | Text output | `ITextWriter`, `SpanTextWriter` | [Writer signatures](#3-text-encoding-and-writers) |
 | Text construction and search | `TextBuilder`, `TextSearch` | [Construction/search](#proposed-text-construction-search-and-incremental-transcoding) |
@@ -254,6 +255,56 @@ public interface IFormattable
 `IEqualityComparer<T>` and `IKeyComparer<T>` appear in the algorithm inventory. Equality is not automatically key equality, identity, or bitwise identity. IEEE floating `==` leaves NaN unequal and signed zeros equal; proposed numeric-key semantics equate all NaNs and both zero signs and hash consistently. Decimal key hashes also normalize numerically equal cohorts. A bitwise comparer is a different policy. Formatting is explicit and typed; it does not force intermediate text allocation or imply a debug/display string API.
 
 `int32.GetHashCode()` is a concrete primitive member, not evidence of universal root inheritance and not itself a contradiction. The actual open choice is whether it promises the same numeric-key contract/name as the float/decimal `KeyEquals`/`GetKeyHashCode` pair or is a separate utility; either way, generic map-key use still needs a compatible explicit equality/hash witness.
+
+### Proposed explicit primitive comparers
+
+These concrete candidates in `Terrum.Collections.Algorithms` make the
+selected equality/key policy usable without a default comparer, universal
+root method or automatically inferred primitive conformance. The integer
+candidate also supplies the separately declared ordering witness from §5.
+
+```terrum
+public struct Int32KeyComparer : IKeyComparer<int32>, IOrderComparer<int32>
+{
+    public Int32KeyComparer();
+    public bool Equals(ref<int32> left, ref<int32> right);
+    public uint64 GetHashCode(ref<int32> value);
+    public int32 Compare(ref<int32> left, ref<int32> right);
+}
+public struct Float32IeeeEqualityComparer : IEqualityComparer<float32>
+{
+    public Float32IeeeEqualityComparer();
+    public bool Equals(ref<float32> left, ref<float32> right);
+}
+public struct Float32NumericKeyComparer : IKeyComparer<float32>
+{
+    public Float32NumericKeyComparer();
+    public bool Equals(ref<float32> left, ref<float32> right);
+    public uint64 GetHashCode(ref<float32> value);
+}
+```
+
+All three are **PROPOSED**, stateless explicit values. Integer equality and
+order use numeric value; `Compare` returns negative/zero/positive without
+overflowing subtraction. Hashing must accept every `int32`, including
+negative values and signed minimum, without a checked numeric conversion
+to `uint64` that rejects those values. It is not a conversion operation.
+
+The IEEE equality candidate follows scalar `==`: either NaN operand makes
+the comparison false, while the two zero signs compare equal. It deliberately
+does not claim `IKeyComparer<float32>` or an ordering witness. The numeric-key
+candidate instead treats all NaNs as one key and both zero signs as one key,
+with other values equal by numeric value. Those equivalent keys must hash
+identically regardless of NaN payload/sign or zero sign. Choosing this
+candidate for a dictionary does not change source floating operators or the
+separately chosen comparer of a span algorithm.
+
+The hash algorithm, collision-quality requirements and stability across
+library/profile versions remain **OPEN**; no persistent wire identifier or
+cryptographic property follows from `GetHashCode`. A bitwise float comparer,
+floating total order, other widths and decimal cohort policies require their
+own explicit candidates, not a fallback selected by these names. No hidden
+process salt, ambient culture, allocation or NoThrow promise is introduced.
 
 ## 3. Text, encoding and writers
 
@@ -1335,7 +1386,8 @@ an operation says otherwise.
 | `ISequence<T, TCursor>` | `GetEnumerator() -> TCursor`; cursor is an explicit type argument | Proposed value/copy protocol below; no universal element-copy guarantee |
 | `ICursor<T>` | `MoveNext() -> bool`; `Current -> T` where `T:[Copy]`; candidate `Close()` | The concrete copied-value path does not define lending or consuming iteration |
 | `IAsyncSequence<T, TCursor>` / `IAsyncCursor<T>` | `GetAsyncEnumeratorAsync() -> Task<TCursor>`; `MoveNextAsync() -> Task<bool>`; `Current -> T` where `T:[Copy]`; candidate `CloseAsync() -> Task<void>` | Each task has a completion owner; borrowed variants remain blocked below |
-| `SpanAlgorithms` search / `OrderedSpanAlgorithms` predicates | `Contains`, `TryIndexOf`, `TryLastIndexOf`, `TryFind`, `All`; `CountWhere`, `Any` | Explicit equality witness or predicate; no unknown-index sentinel |
+| `SpanAlgorithms` search and predicates | `Contains`, `TryIndexOf`, `TryLastIndexOf`, `TryFind`, `TryFindLast`, `TryFindIndex`, `TryFindLastIndex`, `All`, `CountWhere`, `Any` | Explicit equality witness or predicate; directional visits and vacant no-match outputs, no unknown-index sentinel |
+| `SpanAlgorithms` sequence comparison | `SequenceEqual`, `StartsWith`, `EndsWith` | Explicit element-equality witness; readonly overlap allowed, no identical-backing shortcut that skips effects or NaN comparisons |
 | `SpanAlgorithms` transform | `Select`, `Where`, `Zip`, `ForEach`, `Fill`, `Reverse`, `CopyTo`, `MoveWithin` | Mutable callbacks take `write ref<TCallback>`; destination/overlap contracts differ by operation |
 | `OrderedSpanAlgorithms` aggregate | `Fold<T,TState,TFolder>`; prospective `Sum<T>`, `Min/Max<T,TOrder>` | Initial accumulator/witness explicit; empty min/max return presence, not fabricated `T` |
 | `OrderedSpanAlgorithms` order | `Sort<T,TOrder>(write Span<T>,ref<TOrder>)`, `TryBinarySearch<T,TOrder>(Span<T>,ref<T>,ref<TOrder>,init ref<nuint>)` | Ordering witness must define total key policy; sort comparator failures can leave permutation partial |
