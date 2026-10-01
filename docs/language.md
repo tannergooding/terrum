@@ -914,7 +914,11 @@ and [native](native.md).
 ### Documentation comments
 
 Declaration-attached `///` before attributes/modifiers and `//* ... *//`
-comments use GFM-compatible prose. Leading prose before the first recognized
+comments use GFM-compatible prose. They attach to the following declaration,
+including its attribute prefix, only without an intervening blank source
+line; an empty line inside the comment's prose is different from a detached
+source line. Partial/generated parts do not inherit attachment across files.
+Leading prose before the first recognized
 metadata heading is the implicit summary, with optional `# summary`.
 Documentation adds one slash to the ordinary line/block comment marker.
 Recognize documentation-block openers before ordinary `//` line comments.
@@ -930,14 +934,19 @@ structured sections; lower-level headings remain prose. Blank lines remain
 within the current section, including the implicit summary; each structured
 section continues to the next recognized metadata heading. Recognize headings
 from parsed Markdown after removing comment decoration and common indentation,
-never from raw-line prefixes inside code, quotes or lists.
+never from raw-line prefixes inside code, quotes or lists. The finite heading
+vocabulary is case-sensitive; unknown metadata-looking headings diagnose.
 
 Declaration-scoped `@value`, `@T` and `@Type.Member` mentions resolve to
 checked references, not inside code, URLs or email addresses; `\@` escapes a
 literal at-sign. Ordinary inline and reference-style Markdown links retain
 their navigation meaning, not implicit symbol-reference meaning; explicit
 `xref:` links address qualified/custom references. Backticks denote code
-rather than implicit links. Explicit XML `<see cref="..."/>` and
+rather than implicit links. Complex references reuse source name/type syntax
+where unambiguous and require an explicit signature to select an overload.
+Inherited documentation explicitly selects a resolved member; name matching
+does not select an interface member, alias or forwarder.
+Explicit XML `<see cref="..."/>` and
 `<paramref name="..."/>` remain available as structured references, with
 ordinary XML attribute escaping such as `&lt;` and `&gt;` for generic
 arguments.
@@ -950,8 +959,9 @@ contract or caller obligations. Inherited prose cannot strengthen an
 implementation's checked guarantees. Extraction is deterministic and does not
 execute examples, fetch remote content or expose private declarations just to
 resolve a link; a separately configured documentation build may opt into
-example checks. Exact tokenization and escaping, unknown-heading behavior,
-attachment and inheritance details, member identities, schema, diagnostics
+example checks. Exact tokenization and escaping, metadata-looking heading
+classification, partial-document merge precedence, member identities, schema,
+diagnostics
 and packaging remain specification work in the
 [source grammar](grammar-spec.md#514-documentation-comment-grammar-and-tooling).
 

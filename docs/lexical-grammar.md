@@ -179,6 +179,13 @@ attribute name. `operator +(T x)` uses declaration punctuation, not a
 binary-expression operator's spacing. Qualified-name dots in types,
 namespaces, imports and attribute names attach on both sides; expression
 member access keeps its either-side rule regardless of the receiver's type.
+Loop-label colons attach to the label name, with the loop introducer on the
+same physical source line. A loop has only one label: `retry: while (...)`
+is valid; a line break after `retry:` and `a: b: while (...)` reject.
+This is distinct from ordinary post-colon trivia in named arguments,
+tuple names and attribute targets. Label namespace and collision rules
+are in the [statement grammar](grammar-spec.md#33-statements-and-local-declarations).
+
 Structural control-flow parentheses and external block braces retain
 flexible outer trivia. The canonical formatter emits one space at these
 boundaries on a single line: `if (...) { ... }`, `else { ... }` and

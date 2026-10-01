@@ -183,8 +183,10 @@ checks its condition; a `for` continue executes the selected loop's iterator.
 Definite assignment includes the first post-tested iteration and all transfer
 edges. Required constant evaluation uses the same target/iteration order.
 The implemented subset rejects duplicate simultaneously enclosing labels
-but permits disjoint reuse; the general source collision policy remains
-[a question](proposals/grammar-open-questions.md#q37-loop-label-scope-and-shadowing).
+and permits disjoint reuse, matching the approved separate label namespace.
+The [source attachment rule](grammar-spec.md#33-statements-and-local-declarations)
+now also requires one label on the loop introducer's source line; adoption of
+that additional parser/source-audit restriction remains implementation work.
 Semantic v39 is selected only for retained post-tested loops or non-nearest
 transfers; older headers reject those nodes. Ordinary pre-tested loops and
 nearest transfers retain their earlier feature-selected formats. No native
@@ -527,8 +529,9 @@ identity. The source-bound reader independently verifies active loop ancestry
 and ordinal normalized names; forward, inactive, sibling, non-loop,
 wrong-kind/depth/span/root/version targets reject. Blocks and branch
 labels are not transfer targets. Duplicate active normalized loop labels
-reject and disjoint scopes may reuse a label under this bounded projection;
-this does not adopt a broader grammar or label-shadowing policy. The binder
+reject and disjoint scopes may reuse a label, matching the approved collision
+contract. Same-line label attachment remains separate implementation work.
+The binder
 derives the existing one-based `TargetDepth` from audited enclosing loops and
 uses the existing `BoundBreak`/`BoundContinue` lowering. Selected `continue`
 reaches the target `while` header, `for` iterator or `do` condition exactly
@@ -580,7 +583,7 @@ grammar, scanner, semantic/ISA/Contract/TRRM/native formats and ABI.
 `static require`/`static ensure`, output-expression forms, custom failure
 selection, declaration conditions, calls, richer types, ownership, managed
 cleanup and new policy or metadata contracts are outside this projection.
-Q37 decisions are unchanged.
+This projection does not add label-attachment enforcement.
 
 Provisional projection v56 admits one `void` function with a braced body,
 including an empty body or implicit completion. Return-type code zero is
@@ -661,8 +664,8 @@ non-void fallthrough verification remain unchanged. Each nested `else if`
 consumes a real conditional structural level and marker record; there is no
 unbounded chain shortcut or extra source scope. All resource caps, widths,
 grammar, scanner, semantic/ISA/Contract/TRRM/native formats and ABI remain.
-General calls, richer types, ownership/cleanup and new Q37 label-shadowing
-decisions remain excluded.
+General calls, richer types and ownership/cleanup remain excluded; this
+projection does not add the newly approved same-line label enforcement.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

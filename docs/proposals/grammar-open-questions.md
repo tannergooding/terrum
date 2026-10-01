@@ -8,7 +8,7 @@
 > to choose new semantics on the user's behalf.
 
 This is a decision inventory, not a compiler backlog. Stable question numbers
-are retained; gaps in the pending queue are intentional. Twenty-one parent IDs
+are retained; gaps in the pending queue are intentional. Thirty-three parent IDs
 have only [canonical link redirects](#resolved-question-link-redirects) at
 the end of this document, so old review links remain usable without mixing
 their rules into the questions below.
@@ -25,7 +25,7 @@ C# comparisons are illustrative fragments, with ordinary namespace imports
 omitted. Placeholder APIs/types are identified where relevant; these are not
 claims that the snippets were compiled or that Terrum adopts their contracts.
 
-There are **27 pending numbered groups**. Q03 and all seven punctuation
+There are **14 pending numbered groups**. Q03 and all seven punctuation
 subquestions have canonical redirects, not pending votes. Partially resolved
 groups ask only about their remaining choice; settled context is linked or
 labeled, not another vote.
@@ -35,8 +35,7 @@ labeled, not another vote.
 | Declaration applicability and modifier order | Q06 |
 | Extension eligibility, adapter and family declaration forms | Q16.1, Q17-Q18 |
 | References, initialization and operators | Q19, Q20.1, Q21, Q22.2, Q23-Q24, Q26.1 |
-| Other source forms and contracts | Q27-Q30, Q31.1, Q32.1, Q33-Q37, Q40-Q42 |
-| Documentation | Q38-Q39 |
+| Other source forms and contracts | Q27-Q28, Q32.1 |
 
 ## Lexical and declaration choices
 
@@ -919,37 +918,30 @@ For ordinary C# pointer precedence, `(*p).M` selects the pointee member and
 
 ### Q27. Nominal sums and closed-case declarations
 
-**Question:** Choose declaration/source construction forms for tagged cases
-and the explicit closed-case contract. Optional flattening and unknown-case
-safety are already settled.
+**Remaining question:** Choose declaration and construction spellings for
+explicit nominal tagged cases. Do not introduce `case`: switch arms already
+omit it, and unions should not add a one-off keyword.
+**Settled context:** Explicit closedness, exhaustive closed dispatch and
+unknown evolvable payload safety are in the
+[official grammar](../grammar-spec.md#4-accepted-language-direction).
+Optional flattening remains separate.
 **Example:** `enum LookupStatus : int32 { Missing, Found }` with a separate
 `init ref<T?>` output illustrates why `Found(null)` differs from `Missing`.
 
 **C# model:** Not a C# enum, inheritance hierarchy or `Nullable<T>` wrapper;
 none supplies Terrum's owning tagged-payload contract automatically.
 
-**Recommendation:** Use explicit nominal cases and explicit closedness,
-keeping evolvable cases separate from closed exhaustive dispatch. Require
-rooting/cleanup of unknown payloads before allowing compatible extension.
-
-**Terrum counterpart (candidate declaration/case syntax):**
+**Semantic example, not declaration syntax:**
 
 ```terrum
-[Closed]
-public union Lookup<T>
-{
-    case Missing;
-    case Found(T value);
-}
-
 Lookup<int32?> missing = Lookup<int32?>.Missing;
 Lookup<int32?> presentNull = Lookup<int32?>.Found(null);
 Lookup<int32?> presentValue = Lookup<int32?>.Found(7);
 ```
 
-`union`, `[Closed]`, the case declarations and case construction above are
-**unapproved candidate spellings**, not a new parser feature. They show the
-proposed single nominal result: the first value has no payload; the other
+The case construction above remains **illustrative, unselected spelling**,
+not a new parser feature. It shows one nominal result: the first value has
+no payload; the other
 two have a live `int32?` payload, absent or containing `7` respectively.
 Candidate arms `Lookup<int32?>.Missing => ...` and
 `Lookup<int32?>.Found(value) => ...` expose only that case's payload.
@@ -998,27 +990,26 @@ already exposes an optional payload without defining arbitrary destructuring.
 property-getter duplication, implicit numeric conversion, or ownership-neutral
 payload extraction merely from similar spelling.
 
-**Recommendation:** Separate the already settled once-only scrutinee from
-new member/extractor evaluation rules. Specify binding modes and refinement
-invalidation before extending patterns. Keep tuple structure separate from
-name-discovered `Deconstruct` methods.
+**Design constraint:** Composition must be clear and consistent with Terrum's
+existing types, places, access and ownership. Do not adopt C#'s `x is { }`
+or `{ X: > 10 }` composition by familiarity. Once-only scrutinee evaluation
+does not settle member/extractor observation, refinement invalidation or
+copy/borrow/move bindings. Tuple structure remains distinct from
+name-discovered `Deconstruct`.
 
-**Terrum counterpart (candidate property/type/relational patterns):**
+**Terrum counterpart (existing optional pattern only):**
 
 ```terrum
 switch (Next())
 {
-    Sample { Value: > 10 } when Guard() => Large(),
-    Sample { Value: > 0 } => Positive(),
+    some item when Guard(item) => Use(item),
     _ => Other(),
 }
 ```
 
-Those new pattern spellings are **unapproved**. Their candidate evaluation
-contract is concrete: call `Next()` once; attempt the first arm's type test
-then member read; call `Guard()` only if its pattern matches; call `Large()`
-only if the guard succeeds. Otherwise attempt the next arm, then its body
-only on success. `Other()` runs only on fallback. Failures are not
+This uses the approved optional payload form: call `Next()` once, evaluate
+the guard only after matching, then select the corresponding body. It does
+not introduce property, relational or general type patterns. Failures are not
 nonmatches and cannot be silently retried.
 
 The additional choice is whether reads of `Value` are reused. Recommend
@@ -1057,178 +1048,11 @@ once, read `Value` for the first attempt, run the guard if eligible, then
 read `Value` again before a later attempt. The point is which calls/reads
 are authorized, not just which new pattern tokens are accepted.
 
-### Q29. First-class index/range values
-
-**Question:** Are `^offset` and `start..end` permitted as first-class values
-outside indexing, and which declared contracts accept them?
-**Example:** `items[start.. ^1]` is already an approved contextual slice.
-
-**C# model:** C# uses `System.Index`/`System.Range`; Terrum has not adopted
-universal types or their runtime representations.
-
-**Recommendation:** Keep the contextual forms initially and require an
-explicit registered type/contract before allowing standalone values. This
-preserves checked domains and backing without inventing an allocating range.
-
-Yes: design/register first-class value contracts before admitting their
-standalone syntax; until then keep contextual slicing. That does not require
-allocating types or a universal `Index`/`Range`.
-
-**Terrum counterpart:**
-
-```terrum
-Slice<int32> middle = items[1.. ^1];
-```
-
-Here `items` has an eligible borrowed-slice contract; the established form
-uses that context's bound domains/backing. Candidate `Index last = ^1;`
-and `Range middle = 1..last;` would instead require registered standalone
-value contracts and a consuming slice contract. Those library names and
-forms are **not selected**; neither first-class values nor allocation
-elision are prerequisites for the contextual form above.
-
-**C# comparison:**
-
-```csharp
-int[] items = [1, 2, 3, 4];
-Index last = ^1;
-Range middle = 1..last;
-Span<int> slice = items.AsSpan()[middle];
-```
-
-C# supports these standalone values through .NET's `System.Index` and
-`System.Range`; the language integrates their construction and use.
-The span slice borrows array storage, while applying a range directly to
-an array creates an array copy. Terrum must choose registered first-class
-contracts without assuming either representation or silently materializing
-its contextual borrowed slice.
-
-### Q30. Nested collection-fragment construction
-
-**Question:** How are nested fragments contextually typed, and is construction
-without an intermediate collection part of the registered contract?
-**Example:** `List<int32> values = [1, ..(include ? [2] : [])];`
-
-**C# model:** Target-directed collection expressions and spreads are
-C#-inspired. Terrum retains explicit move/refusal/abandonment contracts and
-must preserve its capture/drain ordering.
-
-**Recommendation:** Require explicit fragment support from the target
-registration. Do not promise allocation elision by syntax alone or turn
-observable builder effects into an optimization detail.
-
-**Terrum counterpart (the unresolved nesting is explicit):**
-
-```terrum
-List<int32> values = [1, ..(include ? [2, 3] : [])];
-```
-
-`List` is an illustrative registered target. If `include` is known true,
-flattening to `[1, 2, 3]` is valid **only when the selected contract permits
-equivalent direct-fragment construction** or an optimization proves the
-intermediate behavior unobservable. Allocation by itself need not be a
-required observable event. Identity/escape, allocation-refusal or failure,
-allocator hooks, cleanup and builder effects can nevertheless make a
-particular intermediate construction observable.
-
-A declared builder may drain captured elements through `Add`, a fragment
-through `AddRange`, or a direct fragment operation. These are illustrative
-operation names, not name-discovered registrations. First capture the
-selected element/sequence expressions in the accepted eager order; then
-drain according to the checked builder contract. Do not turn
-`Next(1), Next(2), Next(3)` into interleaved `Add(Next(...))` calls when that
-moves observable writes ahead of later captures. Nor can an optimizer
-substitute `AddRange` for `Add` merely because the final elements agree if
-their published effects/failures differ.
-
-The pending decision is the **source typing and guaranteed fragment
-protocol**, not whether a compiler may perform ordinary sound optimization.
-
-**C# comparison:**
-
-```csharp
-int[] suffix = include ? [2, 3] : [];
-List<int> values = [1, ..suffix];
-```
-
-C# 12 collection expressions are target-typed; here a conditional fragment
-has an array context before being spread into a list. This does not promise
-Terrum's nested fragment can construct directly in its registered destination,
-nor define its move/refusal, ownership or observable builder-effect contract.
-An implementation optimization is not a source guarantee of those behaviors.
-
-### Q31.1. Producer protocol identities and phase selectors
-
-**Question:** Which declared clauses apply at producer creation, advance,
-yield and completion, and how are element/capture loans published?
-**Example:** `[Iterator] Sequence<int32> Values() { yield 1; return; }`
-already starts lazily; adding an `ensure` must not silently mean per-yield.
-
-**C# model:** Iterators are C#-inspired, with approved differences:
-resolved `[Iterator]`, `yield expression;`, ordinary `return;`, and explicit
-checked close/loan obligations. C# does not supply Terrum's clause phases.
-
-**Accepted direction:** Keep ordinary creation and completion contracts distinct
-from advance/item contracts, selected by a declared producer protocol.
-Do not infer lifetime extension or per-yield checks from the body.
-
-**Remaining question:** Choose the producer protocol operation identities and
-phase selectors that publish those separate obligations. The direction is
-approved, not a particular clause annotation.
-
-**Terrum counterpart (ordinary wrapper plus accepted iterator forms):**
-
-```terrum
-Sequence<int32> Values(int32 count)
-{
-    require count >= 0;
-    return Produce(count);
-}
-
-[Iterator]
-Sequence<int32> Produce(int32 count)
-{
-    for (int32 i = 0; i < count; i++)
-    {
-        yield i;
-    }
-    return;
-}
-```
-
-`Sequence` represents an eligible declared producer contract.
-The ordinary wrapper checks at invocation; constructing `Produce` does
-not execute its loop. Advancement executes until yield/completion/failure.
-Per-item guarantees belong to the selected advance/item protocol;
-successful final-completion guarantees are not per-yield assertions, and
-early close follows its cleanup contract rather than pretending iteration
-finished normally. A yielded loan cannot outlive its published backing;
-the next advance/close must respect outstanding item-loan restrictions.
-
-**C# comparison:**
-
-```csharp
-static IEnumerable<int> Values(int count)
-{
-    if (count < 0) { throw new ArgumentOutOfRangeException(nameof(count)); }
-    yield return count;
-}
-IEnumerable<int> sequence = Values(-1);
-using IEnumerator<int> cursor = sequence.GetEnumerator();
-cursor.MoveNext();
-```
-
-The C# iterator body, including this validation, starts at advancement,
-not the call creating `sequence`; argument evaluation still occurs at the
-call. Terrum's creation, per-advance, suspension and completion clauses need
-declared phases. C# deferred execution alone does not specify the ownership
-and loans retained across those phases or Terrum's checked close obligation.
-
 ### Q32.1. Catchability registration and filter phase
 
-**Question:** Which failure types may be caught, how does typed matching select
-a handler, and at what checked phase are filters evaluated? Transport bytes
-and exception object ABI are separate.
+**Question:** At what phase relative to unwinding are checked filters evaluated?
+Catchable-contract registration and source-order matching are settled directions;
+transport bytes and exception object ABI are separate.
 **Example:** `try { Work(); } catch (Failure error) when (CanHandle(error)) { Recover(error); }`
 uses the approved typed/filter form within required unsafe recovery scope.
 
@@ -1236,13 +1060,16 @@ uses the approved typed/filter form within required unsafe recovery scope.
 hierarchy. A settled deviation is that a throwing filter does not silently
 become false; it follows ordinary failure/chaining rules.
 
-**Accepted direction:** Match declared catchable contracts in source order and
-make filter-phase access explicit. Never require speculative reads of
-unwound frames or silently erase a filter failure.
+**Settled direction:** The
+[official catch contract](../grammar-spec.md#33-statements-and-local-declarations) uses registered
+catchable contracts, source-order selection and checked filter-phase access.
+It forbids speculative reads of invalid unwound frames and silently erased
+filter failures.
 
-**Remaining question:** Choose the catchability registration/type domain and
-exact filter/unwind phase. Agreeing with the direction does not select the
-C# `System.Exception` hierarchy or all its timing rules.
+**Remaining question:** Select the exact filter/unwind phase. No particular
+phase was recommended or approved; approval of registered catchability does
+not choose C# pre-unwind timing. Concrete registration/type catalogs remain
+library/metadata work, not an implicit `System.Exception` hierarchy.
 
 **Terrum counterpart (failure APIs illustrative):**
 
@@ -1285,391 +1112,6 @@ filter is treated as false while selection continues for the original
 exception. Terrum's ordinary checked filter-failure/chaining rule is
 deliberately different. The remaining catchable-value/type pattern must
 not implicitly import C#'s `System.Exception` hierarchy.
-
-### Q33. Policy variant declarations and compile-time queries
-
-**Question:** Choose how a variant identifies its base declaration and policy
-tuple, and whether a source policy query tests an active request or a selected
-call. Exact-tuple lexical preference and strict `require policy` are settled.
-**Example:** `policy<Arithmetic.Wrap> { Use(value); }`
-
-**C# model:** Not C# `checked`/`unchecked`. Terrum selects a declared variant
-of an already resolved base; the request is not ambient behavior inherited
-by callees.
-
-**Revised recommendation:** Use the callable's own declared identity and full
-signature to identify its base, with a semantic attribute supplying only the
-policy tuple. Do not repeat a hand-authored signature string.
-For example, the following is **candidate syntax**, with `PolicyVariant`
-an unapproved attribute identity:
-
-```terrum
-int32 Add(int32 left, int32 right)
-{
-    return left + right;
-}
-
-[PolicyVariant(Arithmetic.Wrap)]
-int32 Add(int32 left, int32 right)
-{
-    return WrappingMath.Add(left, right);
-}
-```
-
-`WrappingMath.Add` is an illustrative API with an explicit wrapping
-contract; the attribute does not make ordinary `+` inside the variant wrap.
-If multiple policy dimensions are declared, the attribute supplies their
-exact enum tuple, for example
-`[PolicyVariant(Arithmetic.Wrap, Precision.Fast)]`; these names do not
-establish a new domain.
-Match scope/name, generic formals and full parameter identity to one base,
-then verify the complete result/access/effect/lifetime contract and
-policy-domain tuple. An attributed declaration is a variant, not an ordinary
-duplicate overload; multiple bases or duplicate tuples reject.
-No matching by parameter names, abbreviated signature strings or source
-order. This proposes a declaration contract, not an adopted attribute or wire
-identity.
-Do not allow import-attached variants. Omit a general policy query until its
-subject is explicit; an active preference is not proof of selected behavior.
-
-**C# comparison:**
-
-```csharp
-int result;
-checked
-{
-    result = left + right;
-}
-```
-
-C# selects checked arithmetic in that lexical context, including eligible
-checked user-defined operators; it does not change arithmetic inside an
-ordinary separately declared callee. This is not Terrum's exact policy-tuple
-variant of an already selected base declaration or strict `require policy`
-selection. C# has no direct equivalent of that complete variant contract.
-
-### Q34. General constants and type/layout queries
-
-**Question:** Complete eligible declaration contexts/value domains for
-constants and the source identity of type/layout/reflection queries.
-Required constant evaluation and static body proofs already have distinct
-roles; their portable rule floor is separate proposal work.
-**Example:** `const int32 count = 4;` inside a body is established; using a
-computed value in `[Layout(...)]` must obey a defined compile-time contract.
-
-**C# model:** Partly C#-inspired syntax, but Terrum permits required checked
-evaluation rather than C#'s restricted constant-expression model. It does not
-inherit CLR reflection objects or universal `default(T)`.
-
-**Recommendation:** Define compiler-known query identities and bounded
-constant domains, not magic arbitrary library names. Keep compile-time-only
-formation distinct from optional runtime folding.
-
-**Terrum counterpart (query names are candidates):**
-
-```terrum
-const int32 count = 4;
-const nuint headerBytes = SizeOf<Header>();
-const nuint headerAlignment = AlignOf<Header>();
-```
-
-The first statement is established. `SizeOf`/`AlignOf` illustrate
-**unapproved registered query identities** supplied by the language profile,
-not arbitrary functions the compiler recognizes by their names.
-For a `Header` with a published eligible layout, they would provide
-target-layout facts: a cross-compiler queries its selected target ABI, not
-the machine running the evaluator. The contract must say whether size is
-the inline value/handle size, object storage size or another measure.
-Do not let a incidental private layout become a portable constant promise;
-frozen/published layout and an eligible complete type are prerequisites
-for a query that promises that layout.
-
-Three decisions remain distinct: which declaration/attribute/generic
-contexts require constants; which values belong to an eligible published
-constant domain; and which registered queries expose what facts.
-Existing integer/Boolean/nominal-enum generic domains and guaranteed
-primitive-wrapper contracts do not thereby admit arbitrary constructed
-objects or CLR `Type` instances.
-
-A required `const`/attribute/generic argument must evaluate successfully
-under its checked constant rules or diagnose; it cannot silently execute
-at runtime. An ordinary runtime expression may be folded only when behavior
-is preserved. Query-specific registration must state whether runtime use
-is available; there is no universal reflection object or general runtime
-opt-out merely because the proposed query uses function-call notation.
-
-**C# comparison:**
-
-```csharp
-static void Queries<T>()
-{
-    const int Count = 4;
-    const int IntBytes = sizeof(int);
-    Type runtimeType = typeof(T);
-}
-```
-
-C# constant expressions admit the primitive `sizeof(int)` here, whereas
-`typeof(T)` produces a .NET `Type` value, not a `const`. Terrum's checked
-constant evaluator, published wrapper domains and compiler-known query
-registration remain distinct from arbitrary reflection/library calls.
-The approved parameter `nameof` use in result annotations does not settle
-this full query catalog.
-
-### Q35. External declarations and convention annotations
-
-**Question:** Complete `extern` declaration forms, import identity, calling
-convention annotation placement and caller-unsafe obligations.
-**Example:** `unsafe int32 ReadDevice(uint64 address) { unsafe { return 0; } }`
-illustrates the existing obligation boundary before replacing the body with
-an external definition.
-
-**C# model:** C# external declarations and function-pointer convention
-attributes offer comparison, not adoption of P/Invoke, marshalling or CLR
-managed conventions.
-
-**Recommendation:** Make external identity/convention explicit and retain
-the complete Terrum callable contract. Do not let an ABI annotation suppress
-exception containment, rooting or loan obligations.
-
-**C# comparison:**
-
-```csharp
-[DllImport("native", CallingConvention = CallingConvention.Cdecl)]
-internal static extern int ReadDevice();
-```
-
-C# combines an external declaration with .NET interop metadata; this
-calling-convention name belongs to the interop API. The example does not
-define Terrum's ABI, effects, unsafe caller obligation, exception containment
-or root/loan contract. A familiar attribute name is not a portable contract.
-
-### Q36. Whether to provide GC finalizers
-
-**Question:** Is a separate GC-finalization feature needed at all? There is no
-`~Type()` production. Deterministic owner cleanup is already a different
-mechanism.
-**Example:** `[Cleanup] void Release() { }` on an eligible owner does not
-register a GC finalizer.
-
-**C# model:** Not implicit adoption of C# finalizers or their resurrection and
-runtime-thread behavior.
-
-**Recommendation:** Keep finalizers absent unless a concrete API need survives
-explicit ownership/supervision alternatives. If added, review resurrection,
-affinity, failure and resource guarantees together, not as syntax sugar.
-
-**C# lifecycle sketch:** `ReleaseOnce` below stands for an idempotent,
-thread-safe resource release, not a standard API or a complete implementation.
-
-```csharp
-sealed class Handle : IDisposable
-{
-    public void Dispose() { ReleaseOnce(); GC.SuppressFinalize(this); }
-    ~Handle() { ReleaseOnce(); }
-}
-```
-
-C# finalization is GC-driven, not scope cleanup at a chosen time; explicit
-`Dispose` is a separate path. Production .NET native-resource wrappers
-normally use `SafeHandle` rather than infer safety from this sketch.
-Terrum's deterministic owner cleanup does not imply finalizer syntax,
-resurrection support or a policy for failure on a finalizer thread.
-
-### Q37. Loop-label scope and shadowing
-
-**Question:** Specify whether nested enclosing loops may reuse a label and
-whether labels share a declaration space with values. Named loop targets are
-approved; the source contract does not yet spell out collision rules.
-**Example:** `outer: while (ready) { inner: do { break outer; } while (again); }`
-has unambiguous distinct labels.
-
-**C# model:** Not C# `goto` labels: C# `break` and `continue` are unlabeled.
-Terrum labels name enclosing loops only and cannot escape cleanup actions.
-
-**Recommendation:** Reject duplicate simultaneously enclosing loop labels
-initially, in a separate label namespace. Reusing labels in disjoint scopes
-is harmless; silently retargeting a transfer through nested shadowing is not.
-
-**C# comparison:**
-
-```csharp
-retry:
-while (ready)
-{
-    if (tryAgain) { goto retry; }
-    break;
-}
-```
-
-C# labels target `goto`; `break` and `continue` cannot name them and instead
-target their nearest eligible enclosing construct. Terrum's labels name
-enclosing loops for structured transfers. C# label-scope rules therefore
-do not choose Terrum's duplicate/shadowing rules or turn its loop labels
-into arbitrary jump destinations.
-
-## Documentation source choices
-
-### Q38. Documentation attachment and structured headings
-
-**Question:** Complete attachment across blank lines, attributes, partial and
-generated parts, plus unknown-heading and heading-case behavior. GFM prose,
-implicit summary, top-level metadata headings and separate XML output are
-already approved.
-**Example:** `/// # param value` followed by a documented declaration must
-attach to that declaration, not to an intervening attribute's implementation.
-
-**C# model:** Declaration attachment is C#-inspired; the GFM heading model is
-not C# XML documentation syntax.
-
-**Recommendation:** Parse Markdown first, recognize a finite case-sensitive
-heading vocabulary only at top level, and diagnose unknown metadata-looking
-headings without interpreting code/list/quote contents as directives.
-
-**C# comparison:**
-
-```csharp
-/// <summary>Describes the widget.</summary>
-[Obsolete]
-public class Widget { }
-```
-
-C# XML documentation precedes the declaration, including its attribute
-sections; the attribute does not sever attachment. Terrum's GFM documentation
-model is already approved, but its remaining exact attachment, structured
-heading validation and merge rules cannot be inferred from the XML tags.
-
-### Q39. Complex documentation references and inheritance
-
-**Question:** Select overload/generic member reference spelling, escaping,
-custom-label collisions, and explicit inherited-document selection.
-**Example:** `/// See @Type.Member and [details](README.md).` distinguishes
-symbol references from ordinary navigation.
-
-**C# model:** C# `cref` overload identity is useful prior art; Terrum also has
-declaration-scoped mentions and explicit `xref:` navigation. Backticks remain
-code, not inferred references.
-
-**Recommendation:** Reuse source name/type syntax where unambiguous and require
-an explicit signature when overload selection is needed. Make inheritance
-selection explicit; never copy a stronger contract from prose.
-
-**C# documentation-tooling comparison:**
-
-```csharp
-/// <see cref="Widget.Open(int)"/>
-/// <inheritdoc cref="BaseWidget.Open(int)"/>
-void Use() { }
-```
-
-Assume those referenced members exist. C# `cref` binds symbol/overload
-references; `inheritdoc` is supported by documentation tooling, not a
-language rule inheriting behavioral contracts. Terrum must specify complex
-mentions/`xref:` resolution and inherited-document selection independently,
-especially when several interface/default members are eligible.
-
-## Additional ownership and representation source choices
-
-### Q40. Wither updates on unique owners
-
-**Question:** Define receiver consumption, field replacement, failure and
-cleanup for wither-style updates on unique/owning values. Ordinary functional
-update does not reopen construction-only `init`.
-**Example:** `var replacement = current.with(Name: name);` needs an ownership
-contract if `current` contains a uniquely owned resource.
-
-**C# model:** C# record `with` is only comparative prior art. Terrum's
-`.with(...)` direction is not a C# shallow copy or synthesized record clone;
-non-`Copy` ownership cannot be duplicated.
-
-**Recommendation:** Require an explicit consuming or borrowing update contract
-for owners and define the old/new cleanup state on failure. Do not synthesize
-a copy-based wither for every nominal type.
-
-**C# comparison, not an ownership-preserving equivalent:**
-
-```csharp
-record Owner(string Name, List<string> Items);
-Owner first = new Owner("A", items);
-Owner second = first with { Name = "B" };
-```
-
-With an existing list `items`, these records share `Items`; ordinary C#
-record `with` does not deep-clone it or enforce unique-resource transfer.
-Terrum cannot duplicate an affine field by copying the surrounding value.
-Its consuming/borrowing update, source vacancy, and failure-cleanup choices
-must be specified rather than borrowed from record cloning.
-
-### Q41. Iteration element-binding modes
-
-**Question:** Complete value, borrowed and consuming bindings in ordinary and
-asynchronous iteration, including advance invalidation. Loop expansion and
-checked close are already selected.
-**Example:** `for (var item in items) { Use(item); }` needs a binding contract
-when an element is non-`Copy` or backed by an advancing cursor.
-
-**C# model:** C# `foreach`/`ref foreach` supplies useful comparison, not
-Terrum's spelling or ownership rule. Terrum also checks capture, suspension
-and asynchronous close.
-
-**Recommendation:** Derive the element's access from the declared iteration
-protocol and require explicit consumption or writable borrowing when needed.
-Never promote an iteration-local view to an independently owning value.
-
-**C# comparison:**
-
-```csharp
-Span<int> values = [1, 2];
-foreach (ref int item in values)
-{
-    item++;
-}
-```
-
-The span enumerator's `Current` returns a reference, permitting C# `ref`
-iteration; `ref readonly` instead exposes readonly element access.
-Ordinary `foreach` copies the current value. None of these selects
-Terrum's protocol-derived borrow/consume mode or permits a loan to survive
-conflicting cursor advancement, capture or suspension.
-
-### Q42. Layout-control argument spelling
-
-**Question:** Choose the attribute argument names/forms for member packing
-and aggregate over-alignment, including their combined use. Accepted
-`Auto`, `Sequential`, `Union`, `Transparent` and `Blittable` semantics must
-not be altered by this syntax choice.
-**Example:** `[Layout(LayoutKind.Sequential)] struct Pair { int32 First; int32 Second; }`
-establishes field order, but does not select packing or over-alignment.
-
-**C# model:** C#/.NET layout attributes are comparative prior art; the
-`StructLayoutAttribute.Pack` field limits member/derived type alignment.
-The candidate below instead uses positional constant arguments and adds a
-separate aggregate-alignment control. Terrum's aggregate over-alignment and
-explicitly checked `Blittable` boundary do not follow from CLR packing or
-sequential layout.
-
-**Recommendation:** Use candidate positional arguments in the order
-kind, member-packing limit, aggregate alignment:
-`[Layout(LayoutKind.Sequential, 1, 16)]` would request one-byte member packing
-and 16-byte aggregate alignment. This fits the existing constant-argument
-production without presuming a decision on named attribute arguments. The
-argument contract is unapproved; it must preserve the selected packing,
-over-alignment, tail-padding and array-stride semantics. Neither extra argument
-freezes layout or grants `Blittable`. Reject unsupported target combinations,
-including custom controls on `Transparent`, and retain separate published-
-layout eligibility. Target limits and wire encoding remain ABI work.
-
-**C#/.NET comparison:**
-
-```csharp
-[StructLayout(LayoutKind.Sequential, Pack = 1)]
-struct Pair { public int First; public int Second; }
-```
-
-`Pack` limits member packing alignment through a named .NET attribute
-property; it does not request aggregate over-alignment. The example neither
-chooses Terrum's positional packing/alignment arguments nor establishes its
-published layout, `Blittable`, padding-validity or compatibility guarantees.
 
 ## Boundaries that are not unanswered source decisions
 
@@ -1820,21 +1262,107 @@ see [pin/reference contracts](../grammar-spec.md#32-types-parameters-and-argumen
 Pointer conversion, warning/release policy and dereference/member choices
 remain in [Q26.1](#q261-pointer-formation-and-dereferencemember-boundaries).
 
+### Q29. First-class index/range values
+
+Resolved; standalone forms require a registered value and consuming contract,
+not universal `Index`/`Range` types or allocation.
+See [contextual bounds](../grammar-spec.md#34-expressions-and-precedence).
+
+### Q30. Nested collection-fragment construction
+
+Resolved; target registration supplies fragment typing and any direct-
+construction guarantee. Optimizations preserve memory observations, capture/
+drain order, builder effects and failure/cleanup contracts.
+See [collection construction](../grammar-spec.md#34-expressions-and-precedence).
+
 ### Q31. Producer contract phases and suspension loans
 
 Creation/completion versus advance/item obligations and declared suspension
 dependencies are approved directions; see
 [producer contracts](../grammar-spec.md#512-modifiers-cleanup-and-finalization).
-Exact protocol/phase identities remain in
-[Q31.1](#q311-producer-protocol-identities-and-phase-selectors).
+Concrete protocol catalogs and phase encodings remain library/metadata work.
+
+#### Q31.1. Producer protocol identities and phase selectors
+
+Resolved registration direction; creation, advance/item, final completion
+and early-close obligations stay distinct under the declared protocol.
+See [producer contracts](../grammar-spec.md#512-modifiers-cleanup-and-finalization).
 
 ### Q32. Catch eligibility and failure matching
 
 Declared catchable contracts match in source order with checked filter-phase
 access and normal filter-failure propagation; see
 [catch contracts](../grammar-spec.md#33-statements-and-local-declarations).
-Exact catchability registration and unwind timing remain in
+Only exact filter/unwind timing remains in
 [Q32.1](#q321-catchability-registration-and-filter-phase).
+
+### Q33. Policy variant declarations and compile-time queries
+
+Resolved; callable identity/full signature selects the base and a registered
+semantic attribute supplies the exact tuple. General policy queries are
+deferred until their subject is explicit.
+See [policy selection](../grammar-spec.md#512-modifiers-cleanup-and-finalization).
+
+### Q34. General constants and type/layout queries
+
+Resolved domain/query direction; registered queries and required constants
+need checked encodable guarantees. Unfrozen private layout cannot become an
+independently persistent constant promise.
+See [constant and query contracts](../grammar-spec.md#512-modifiers-cleanup-and-finalization).
+
+### Q35. External declarations and convention annotations
+
+Resolved contract direction; explicit import identity/convention preserves
+the complete callable, safety, failure, rooting and loan contract.
+Concrete registrations/productions remain specification work.
+See [external declarations](../grammar-spec.md#512-modifiers-cleanup-and-finalization).
+
+### Q36. Whether to provide GC finalizers
+
+Resolved; finalizers remain absent without a concrete need and a separate
+lifecycle/affinity/resurrection/failure/resource-safety design.
+See [finalization boundary](../grammar-spec.md#512-modifiers-cleanup-and-finalization).
+
+### Q37. Loop-label scope and shadowing
+
+Resolved; labels have a separate namespace, reject active duplicates and
+permit disjoint reuse. One label attaches to a loop on the same source line;
+no stacked labels or arbitrary jump destinations.
+See [loop statements](../grammar-spec.md#33-statements-and-local-declarations).
+
+### Q38. Documentation attachment and structured headings
+
+Resolved; documentation attaches through the declaration's attribute prefix
+without blank source lines. Parsed top-level metadata headings use a finite,
+case-sensitive vocabulary.
+See [documentation grammar](../grammar-spec.md#514-documentation-comment-grammar-and-tooling).
+
+### Q39. Complex documentation references and inheritance
+
+Resolved; source name/type syntax and explicit overload signatures select
+references, and inherited documentation explicitly selects a member.
+See [documentation references](../grammar-spec.md#514-documentation-comment-grammar-and-tooling).
+
+### Q40. Wither updates on unique owners
+
+Resolved; explicit consuming/borrowing contracts preserve old/new ownership
+and failure cleanup. No automatic copy-based record/wither synthesis;
+author-selected generators can supply checked operations.
+See [nominal contracts](../grammar-spec.md#4-accepted-language-direction).
+
+### Q41. Iteration element-binding modes
+
+Resolved contract direction; element access comes from the declared protocol,
+with explicit consumption/writable borrowing and checked advance/suspension
+dependencies. Exact protocol catalogs remain library work.
+See [iteration](../grammar-spec.md#33-statements-and-local-declarations).
+
+### Q42. Layout-control argument spelling
+
+Resolved schema direction; the library attribute defines arguments under a
+compiler-recognized, shape-checked semantic metadata mapping. No universal
+positional overload is selected.
+See [attribute contracts](../grammar-spec.md#31-source-file-structure-and-declarations).
 
 ## Official comparison sources
 

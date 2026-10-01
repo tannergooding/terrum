@@ -15,10 +15,15 @@ Approval, implementation, and pre-v1 stability are separate.
    forms without widening calls, general attributes or pending semantics;
    retain source/resource limits, historical projection restrictions and
    existing metadata/ABI contracts.
-2. Review source-contract decisions from the [grammar](grammar-spec.md) and
+2. Adopt the approved [loop-label attachment](grammar-spec.md#33-statements-and-local-declarations)
+   restriction across hosted parsing and native source audits: one label on
+   the loop introducer's source line, no stacked labels. Preserve the existing
+   separate namespace, active-duplicate rejection, disjoint reuse and transfer
+   semantics; approval is not an implementation claim.
+3. Review source-contract decisions from the [grammar](grammar-spec.md) and
    [decision queue](proposals/grammar-open-questions.md). Preserve accepted
    decisions; recommendations remain proposals until approved.
-3. Refine concrete library proposals. Candidate signatures and contracts do
+4. Refine concrete library proposals. Candidate signatures and contracts do
    not imply parser, compiler, runtime or library support.
 
 The source-free TRRM scalar path remains fail-fast; checked-exception Bodies

@@ -162,8 +162,12 @@ Both a power-of-two member-packing limit and a separate power-of-two
 aggregate-alignment control are accepted; they may be combined, though most
 declarations need only one. Packing caps member alignment and the derived
 natural aggregate alignment; aggregate alignment may over-align the result,
-with tail padding preserving aggregate alignment and array stride. Exact source
-argument spelling and target limits remain specification work. For a struct
+with tail padding preserving aggregate alignment and array stride. The resolved
+library attribute schema defines argument names, types and defaults; its
+compiler-recognized registration must match the semantic metadata shape.
+No special layout argument grammar or universal positional overload is
+selected. Concrete schemas, target limits and encoding remain specification
+work. For a struct
 with `int8` followed by `int32`, assuming the profile naturally aligns `int32`
 to four bytes:
 
