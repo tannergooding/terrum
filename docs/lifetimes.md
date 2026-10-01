@@ -50,6 +50,14 @@ Reject an inapplicable qualifier combination rather than inventing a copy,
 pin, initialization route or stronger authority. `implicit` remains parameter-
 only; writable and initialization loans do not acquire implicit materialization.
 
+The selected implicit `pin ref<T>` to matching `ptr<T>` conversion is a
+separate, narrowly defined built-in edge. It preserves access and all referent,
+pin and backing dependencies, acquires no pin and does not transfer the pin's
+ownership. A derived pointer cannot outlive its supporting pin or manufacture
+write authority. Overload binding recognizes only this direct projection;
+identity matches rank ahead of it, with no search for intermediate conversions.
+This is a target contract, not current executable reference/pointer support.
+
 Current executable ownership, view and managed-root boundaries are documented
 in [implementation](implementation.md) and [native](native.md); staged work
 is tracked in [roadmap](roadmap.md). A slice does not thereby become the
@@ -333,6 +341,52 @@ An interface witness must satisfy the interface's published requirements.
 Store both the **broad interface contract** and the **resolved published implementation/member refinement**, including conditional relationships, source selectors, capture destinations, root/disposal requirements, rule versions and ABI layouts. Source compilation checks a member's claimed refinement against its authored body. An independently compiled generic caller sees the broad interface contract; only an explicit checked conditional contract can expose a type/witness refinement when its condition is proven. Ordinary binary consumers rely on published dependency metadata rather than re-proving dependency bodies, while still checking references, contract compatibility and caller use. Devirtualization, specialization and implementation pinning cannot change source validity or substitute body inference for a published relationship. Tightening an interface from permission to borrow receiver storage to a no-borrow requirement rejects existing implementations that published that permission, even if today's bodies do not use it. Broadening a published scoped implementation to permit receiver-storage borrowing invalidates existing callers that relied on its no-borrow guarantee; it requires a breaking revision or explicit checked adapter. Dynamic binding and AOT/JIT replacement checks must reject added capture, weakened access, changed view source, new cleanup obligation or invalid refinement, not merely compare CLR-signature shapes. Compatible changes may be replaced contract-bound; stronger implementation-only facts are not implicitly upgraded in consumer metadata. ABI layout and roll-forward need explicit version-aware validation.
 
 ## Ownership transfer and cleanup
+
+### Explicit local lifetime end
+
+`name = _;` ends the current value's lifetime in a named local at that point,
+as if its value reached the end of an enclosing block. It does not end the
+block or unrelated values, and the local's declaration remains in lexical
+scope. The binding becomes vacant rather than containing null or `default(T)`.
+Redeclaring the same name in that scope still rejects.
+
+The operation performs precisely the current value's scope-exit obligations:
+a unique owner is cleaned up; a borrowed value releases its loan and entailed
+dependencies without destroying the referent; a scope-cleanup guard performs
+its registered cleanup, such as unlocking. Under an ARC profile it releases
+this value's retain, possibly freeing the object if it was the last retain.
+An ordinary tracing-GC handle retires this local's root, not the shared object,
+and does not force collection. No operation is invented for a value whose
+scope exit requires none. These examples describe the owning profile's
+contracts, not current compiler support for arbitrary guards, ARC or pins.
+
+The value must be definitely live. Outstanding loans, derived pointers,
+captures or other dependencies can prevent its early end, including releasing
+a supporting pin or owner. Ending a local reference ends that local loan; it
+does not write through the reference or end caller-owned storage. The selected
+form does not authorize fields, properties, indexers or parameter aliases.
+It cannot bypass access, affinity or suspension obligations.
+
+Cleanup uses the same ordering, effects and checked failure rules as ordinary
+scope exit. Retirement is exact once: subsequent scope exit or unwind must not
+repeat completed obligations for the ended value. No rollback or independent
+failure-suppression rule is introduced.
+
+Ending the value grants no new write authority. An ordinary immutable `var`
+cannot be assigned again. An `init var` or `init T` local can be initialized
+again when vacant, by checked assignment or eligible initialization completion,
+without changing its established type; it cannot replace a live value merely
+because it supports initialization. Mutable bindings retain their existing
+write/initialization permissions. A new initialization starts a new value
+lifetime with its own cleanup obligations, not a revival of the old value.
+Reads, borrows and another lifetime-end operation require definite liveness
+along every incoming control-flow path.
+
+See the [statement grammar](grammar-spec.md#33-statements-and-local-declarations).
+This is accepted target direction; current vacant locals support checked
+initialization calls, not this early-end/assignment-reinitialization contract.
+
+### Existing owner transfer and cleanup contracts
 
 A unique named owner has one live-or-vacant state along every control-flow
 path. By-value parameters transfer from an explicit named move or fresh

@@ -193,6 +193,13 @@ evolvable by default; an explicitly closed case-set promise makes adding a case
 a breaking change, ordinarily rejected before consumers bind to it. Union
 representations still require a valid active payload;
 an overlapping native layout does **not** establish a safe tagged union.
+Cases declare `Missing;` or `Found(T value);` and construct through qualified
+`.Missing` or `.Found(value)` forms. The parameterless checked `[ClosedCases]`
+attribute selects the case-set promise, not fixed layout or record synthesis.
+Payload parameter names do not generate public getters or other members;
+pattern extraction remains separate. See the accepted
+[declaration grammar](grammar-spec.md#31-source-file-structure-and-declarations);
+current union implementation and exact metadata encoding remain absent.
 The layout-kind spellings below are illustrative, not compiler syntax. `Auto`
 is the default: fields are private and external access uses properties or
 methods; it grants no `Blittable`, packing or aggregate-alignment commitment.
@@ -416,7 +423,11 @@ conversions; permitted access/qualification weakening can affect match
 quality (for example, `write Span<T>` to a readonly `Span<T>` parameter), but
 does not infer a new or reversed family projection. Binding first determines
 applicability, then compares each argument's match quality independently:
-identity is better than permitted access/qualification weakening. One
+identity is better than permitted access/qualification weakening.
+One explicit additional built-in edge is `pin ref<T>` to matching `ptr<T>`:
+it retains access and lifetime/pin/backing dependencies, and an identity match
+ranks ahead of it. This does not enable conversion-operator lookup, conversion
+chains, implicit numeric conversion or inferred future exceptions. One
 candidate is better only when it is no worse for every argument and better
 for at least one; crossed better/worse arguments are ambiguous rather than
 combined into a score. Declared specificity resolves otherwise tied
@@ -481,6 +492,15 @@ and omitted lambda parameter names are separate nonbinding contexts; they do
 not drop the matched/argument value or alter parameter mode. Separately
 specified type holes are not identifiers and are not covered by this discard
 rule. Their bounded source forms are defined in the [source grammar](grammar-spec.md).
+`name = _;` separately ends a named local's current value lifetime, performing
+its scope-exit obligations and leaving it vacant. It neither removes the
+declaration nor grants write authority: same-scope redeclaration remains invalid,
+an ordinary immutable `var` cannot be assigned again, and an `init var` local
+can be initialized again when vacant without changing its established type.
+Ending a borrow releases that loan, not its referent; retiring a GC handle
+does not destroy a shared object. Dependent loans/pointers constrain early end.
+See [lifetime ending](lifetimes.md#explicit-local-lifetime-end). This accepted
+target form and assignment initialization of vacant locals are not implemented.
 Wildcard patterns, lambda placeholders and generic type holes are
 separate features; see the [implementation boundary](implementation.md).
 
@@ -501,7 +521,8 @@ coverage merely by naming a case, and
 the initial form is a final unguarded wildcard. Missing-case warnings can be
 elevated; ordinary `_` suppresses them. For integer enums, diagnostics concern
 declared names while a fallback still accepts unnamed underlying values.
-Complete nominal/destructuring pattern grammar and the closed-case marker remain open. Unknown payloads
+Complete nominal/destructuring pattern grammar and closed-case metadata
+encoding remain open; the declaration marker is `[ClosedCases]`. Unknown payloads
 must be safely rooted,
 forwarded and disposed or the representation is rejected.
 
@@ -1108,7 +1129,7 @@ planned. Current support for numeric conversions and initialization loans is
 documented in [implementation](implementation.md).
 Complete generic constraint,
 associated-equality and extension-disambiguation syntax,
-closed-case markers/full pattern grammar and compatibility-forwarder attributes/source
+closed-case metadata/full pattern grammar and compatibility-forwarder attributes/source
 visibility remain open. So do transparent-wrapper eligibility/ABI profiles,
 conditional copy capabilities, first-class
 stored-loan ABI, erased-interface dispatch ABI, span-anchor layout/calling

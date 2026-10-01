@@ -213,6 +213,10 @@ initialization. Existing definite-assignment, owner cleanup and managed-root
 rules apply. Semantic v40 is selected only when a retained body contains such
 a declaration; older feature-selected modules and the native ABI are unchanged.
 The bounded constant evaluator does not support vacant declarations.
+The accepted target `name = _;` lifetime-end statement and `=` initialization
+or reinitialization of vacant `init` locals are not implemented. Current
+vacant-local publication still requires the supported checked `init` call;
+source approval does not change its executable boundary.
 
 Syntax-31 adds right-associative `condition ? whenTrue : whenFalse` expressions
 below binary-operator precedence. The Boolean condition runs once; only its

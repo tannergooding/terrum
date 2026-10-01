@@ -8,7 +8,7 @@
 > to choose new semantics on the user's behalf.
 
 This is a decision inventory, not a compiler backlog. Stable question numbers
-are retained; gaps in the pending queue are intentional. Thirty-nine parent IDs
+are retained; gaps in the pending queue are intentional. Forty parent IDs
 have only [canonical link redirects](#resolved-question-link-redirects) at
 the end of this document, so old review links remain usable without mixing
 their rules into the questions below.
@@ -25,7 +25,7 @@ C# comparisons are illustrative fragments, with ordinary namespace imports
 omitted. Placeholder APIs/types are identified where relevant; these are not
 claims that the snippets were compiled or that Terrum adopts their contracts.
 
-There are **5 pending numbered groups**. Q03 and all seven punctuation
+There are **4 pending numbered groups**. Q03 and all seven punctuation
 subquestions have canonical redirects, not pending votes. Partially resolved
 groups ask only about their remaining choice; settled context is linked or
 labeled, not another vote.
@@ -33,8 +33,8 @@ labeled, not another vote.
 | Pending area | Stable IDs |
 |---|---|
 | Declaration applicability and modifier order | Q06 |
-| Pointer conversion, release and address diagnostics | Q26.1 |
-| Other source forms and contracts | Q27-Q28, Q32.1 |
+| Pin reacquisition/rebinding and address diagnostics | Q26.1 |
+| Other source forms and contracts | Q28, Q32.1 |
 
 ## Lexical and declaration choices
 
@@ -122,26 +122,33 @@ of C# keywords and multiword terms.
 
 ### Q26.1. Pointer formation and dereference/member boundaries
 
-**Remaining question:** Choose implicit versus explicit pin-to-pointer
-conversion, release/rebind spelling and diagnostics for invalid lifetime or
-pin use. Only these three choices need acceptance:
+**Accepted context:** The narrow implicit `pin ref<T>` to matching `ptr<T>`
+conversion preserves complete referent type, access and lifetime/pin/backing
+dependencies. Identity ranks ahead of this direct projection under existing
+per-argument overload rules; it enables neither conversion chains nor general
+implicit conversion operators. See the
+[conversion contract](../grammar-spec.md#513-operators-assignments-and-expression-gaps).
+
+`name = _;` ends a local's current value lifetime, performing its scope-exit
+obligations and leaving the binding vacant. The declaration remains in scope,
+so this does not permit same-scope redeclaration. It grants no mutation
+authority: ordinary immutable `var` cannot be assigned again; `init var` can
+be initialized again when vacant without changing its established type.
+Ending a borrow releases it, not its referent; a GC handle retires this root,
+not the shared object. Outstanding dependencies prohibit premature owner or
+pin release. See [local lifetime ending](../lifetimes.md#explicit-local-lifetime-end).
+These are accepted target contracts, not current implementation.
+
+**Remaining question:** Specify pin reacquisition/rebinding and diagnostics
+for invalid lifetime or pin use. Early lifetime ending itself is settled.
 
 | Choice | What remains undecided |
 |---|---|
-| Conversion | Implicit `ptr<int32> p = pinned;` versus an explicit conversion such as `ptr<int32>(pinned)`. These are candidate spellings, not new productions. |
-| Release/rebind | Whether assignment of `nullref` and explicit ref reassignment perform release/rebind, or a dedicated operation is required. The exact writable-binding syntax must also fit Q06; this does not make the approved local implicitly mutable. |
+| Reacquisition/rebinding | Exact eligible binding syntax and pin-acquisition failure/publication ordering when initializing vacant storage or replacing a live pin. This must fit Q06 and existing initialization/mutation authority; ending a value does not make an immutable binding writable. |
 | Diagnostics | Whether proven lifetime escapes and missing required pins are errors or warnings. Pointer creation is not itself unsafe; the recommendation below does not warn on valid formation. |
 
 **Recommendations for review, not approval:**
 
-- Permit implicit pin-to-pointer conversion when it preserves referent access,
-  lifetime and pin/backing dependencies. A type change alone need not require
-  an explicit cast. This does not promise identical machine representation or
-  permit an ordinary relocatable reference to manufacture a stable pointer.
-- Use `nullref` for clearing an eligible writable reference binding and
-  explicit ref reassignment for rebinding. Clearing means no usable referent;
-  it does not construct a default `T`. The existing dependency checks prohibit
-  releasing a pin still needed by derived pointers or loans.
 - Do not warn merely because a valid pointer is formed. Diagnose proven
   lifetime escapes and missing required pins; recommend errors for these
   checked-contract violations rather than allowing them with warnings.
@@ -153,11 +160,10 @@ A conceptual identity operation receives `implicit ref<T> x` and returns a
 `ref<T>` with a declared dependency on that input. That does not acquire a
 pin. Replacing existing `ref x` source syntax needs separate explicit approval
 and is not a prerequisite for the conversion decision.
-Likewise, `ref null`/`ref(null)` could mean borrowing a null-valued place or
-temporary rather than having no referent; `ref()` would need an explicit
-empty-reference contract. `_` already denotes discarding and should not
-silently gain a pin-release meaning. None of these alternatives has been
-adopted.
+No empty-reference value or `nullref` keyword is selected by local lifetime
+ending. `ref null`/`ref(null)` could mean borrowing a null-valued place or
+temporary rather than having no referent; `ref()` would need a separately
+approved empty-reference contract.
 
 Pin acquisition/dependency safety and ordinary prefix dereference with
 explicit member grouping are already in the
@@ -197,11 +203,11 @@ Here `storage` denotes eligible initialized storage. The initializer is
 an explicit checked acquisition operation, not a qualifier-only cast.
 The binding keeps its backing pinned for the promised local lifetime
 or an explicit release/rebind. An address/conversion expression must designate
-the pinned `int32` backing, not the storage of the reference descriptor;
-whether the pin-to-pointer conversion is implicit or explicit remains open.
+the pinned `int32` backing, not the storage of the reference descriptor.
 The local acquisition is approved target grammar, **not current compiler
-support**. Implicit/explicit conversion and release spelling remain pending;
-a potential `Pin.TryAcquire` API is not required in place of this local form.
+support**. Implicit pointer conversion and `pinned = _;` early lifetime ending
+are approved; reacquisition/rebinding details and diagnostic severity remain pending.
+A potential `Pin.TryAcquire` API is not required in place of this local form.
 
 Clearing/rebinding the local cannot release its pin while a derived address,
 copy, capture or loan still depends on it. For example, deriving `p`,
@@ -236,80 +242,6 @@ selected by that approval. Those alternatives are not additional pending
 votes or implicit safe conversion paths.
 
 </details>
-
-### Q27. Nominal sums and closed-case declarations
-
-**Proposal for acceptance:** Use `union` with semicolon-terminated named
-cases, parameter-list payload declarations, qualified construction and a
-checked attribute for the closed-case-set promise. All spellings in this
-section are **proposed, not adopted or implemented**.
-
-```terrum
-[ClosedCases]
-union Lookup<T> where T : [Copy]
-{
-    Missing;
-    Found(T value);
-}
-
-Lookup<int32?> missing = Lookup<int32?>.Missing;
-Lookup<int32?> presentNull = Lookup<int32?>.Found(null);
-Lookup<int32?> presentValue = Lookup<int32?>.Found(7);
-```
-
-The three concrete choices are:
-
-| Choice | Recommendation | Alternative and tradeoff |
-|---|---|---|
-| Case declarations | `Missing;` and `Found(T value);`, with ordinary type-first named parameters for multiple payloads | `Missing, Found(T value)` is enum-like, but commas would serve both the case list and payload lists. Semicolons keep each declaration's boundary explicit. |
-| Construction | `.Missing` for a no-payload case, `.Found(value)` for a payload case | `.Missing()` makes every case a call, but loses the visual distinction between a named no-payload value and supplying payload arguments. The proposed `.Missing` is construction syntax, not a promise of constant eligibility or a cached singleton. |
-| Closedness | Proposed parameterless `[ClosedCases]` on the union declaration; omission keeps the existing evolvable default | A `closed union` modifier is possible, but adds a keyword/order rule for a scoped compatibility promise. An attribute fits the existing checked semantic-contract mechanism without equating closed cases with frozen layout or API. |
-
-`ClosedCases` is a candidate attribute name, not a newly accepted Core API.
-Its eventual library definition and compiler-recognized metadata mapping must
-identify the union's case-set promise; ordinary attribute spelling alone
-cannot establish it. Exact attribute schema/encoding is separate from choosing
-this source form.
-
-The proposed case list has unique names, not overloaded cases. A payload list
-must be nonempty: use `Missing;`, not `Missing();`, for a no-payload declaration.
-Payload construction uses ordinary target-checked argument evaluation; its
-parameter names do not implicitly declare public fields, getters, equality,
-formatting, deconstruction or withers. These are the minimum named case
-construction operations, not record synthesis. Generic constraints and
-`unique union` retain their separate existing contracts.
-
-**Not part of this vote:** Pattern/destructuring spelling and copy/borrow/move
-extraction belong to Q28; declaration modifier ordering belongs to Q06.
-Accepting this example does not approve `Found(value)` as a pattern, a tag
-numbering/layout convention, native exports, constant eligibility or public
-payload accessors.
-
-The already accepted semantics are linked in the
-[official grammar](../grammar-spec.md#4-accepted-language-direction);
-they are not another acceptance request. In the example, `Found(null)` remains
-distinct from `Missing`, and removing `[ClosedCases]` changes the compatibility
-contract rather than the case-declaration syntax.
-
-**Rough C# comparison:** The declaration resembles named variants in a record
-hierarchy, and construction resembles selecting `Missing` versus
-`new Found(value)`:
-
-```csharp
-abstract record Lookup<T>;
-sealed record Missing<T> : Lookup<T>;
-sealed record Found<T>(T Value) : Lookup<T>;
-
-// Inside a method:
-Lookup<int?> missing = new Missing<int?>();
-Lookup<int?> presentNull = new Found<int?>(null);
-Lookup<int?> presentValue = new Found<int?>(7);
-```
-
-These C# records synthesize members and use managed inheritance; neither is
-part of the Terrum proposal. The hierarchy also does not establish Terrum
-closedness or affine payload cleanup. This is a conceptual comparison, not a
-recommendation to lower unions into records or ordinary subclasses.
 
 ### Q28. Complete pattern and type-test forms
 
@@ -652,8 +584,20 @@ short-circuit ordering.
 
 The initialized `pin ref<T> name = ref place;` acquisition is approved;
 see [pin/reference contracts](../grammar-spec.md#32-types-parameters-and-arguments).
-Only implicit/explicit conversion and warning/release choices
+Implicit conversion and named-local `name = _;` early lifetime ending are
+approved. Only reacquisition/rebinding and diagnostic choices
 remain in [Q26.1](#q261-pointer-formation-and-dereferencemember-boundaries).
+
+### Q27. Nominal sums and closed-case declarations
+
+Resolved; semicolon-terminated named cases, type-first payload parameters,
+qualified `.Missing`/`.Found(value)` construction and the checked parameterless
+`[ClosedCases]` marker are approved target forms. No `case` keyword or record
+synthesis is introduced. See
+[union declarations](../grammar-spec.md#31-source-file-structure-and-declarations).
+Exact metadata/representation and library attribute definition remain work;
+pattern/extraction forms remain in [Q28](#q28-complete-pattern-and-type-test-forms).
+Approval does not claim compiler support or adopt the concrete Core sum types.
 
 ### Q29. First-class index/range values
 

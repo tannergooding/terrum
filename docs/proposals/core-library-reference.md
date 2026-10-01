@@ -179,14 +179,14 @@ table. The proposed `Option<T>` alias is separately described in
 
 The accepted semantic direction normalizes optional `T?` substitutions: `T?` with already-optional `T` remains one optional layer. `Option<T>` is a proposed transparent alias for that same normalized presence type, not a nominal `Some(T)` wrapper; alias scope and syntax are approved, while this concrete library export remains open. `Option<void>` still represents absent versus present `()`.
 
-A distinct nominal union can preserve distinctions that optional normalization cannot, including missing versus present-null by making its payload itself optional. These are illustrative type shapes, not approved declaration grammar:
+A distinct nominal union can preserve distinctions that optional normalization cannot, including missing versus present-null by making its payload itself optional. Named semicolon-terminated cases and qualified construction are now [approved target declaration forms](../grammar-spec.md#31-source-file-structure-and-declarations), not current compiler support. These concrete Core type shapes remain proposals:
 
 ```terrum
 // Approved alias declaration form; this particular exported alias is PROPOSED.
 public alias Option<T> = T?;
 ```
 
-| Proposed nominal sum | Cases (not source union syntax) | Distinction |
+| Proposed nominal sum | Case inventory | Distinction |
 |---|---|---|
 | `Lookup<T>` | `Missing`; `Found(T? value)` | Missing versus a present optional payload, including null |
 

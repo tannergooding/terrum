@@ -91,6 +91,16 @@ conversion; it supplies no extension receiver. Contextual primitive literals
 are not retroactively routed through arbitrary nominal conversions.
 See the [source contract](grammar-spec.md#513-operators-assignments-and-expression-gaps).
 
+The selected `pin ref<T>` to matching `ptr<T>` implicit conversion is a
+narrow built-in exception, not an implicit numeric or nominal conversion
+framework. The complete referent type, access and lifetime/pin/backing
+dependencies are preserved; it acquires no pin and promises no backend-wide
+representation identity. Applicability recognizes this direct edge without
+conversion-operator lookup, intermediate types or transitive chains.
+Identity is better under existing per-argument ranking; the edge does not
+resolve otherwise ambiguous overloads. Other exceptions require separate
+explicit contracts.
+
 Resolve known parameter/operand/target types before unresolved literals when
 that yields a unique answer. For `F<T>(T left, T right)`, `F(knownInt32, 1)` can
 infer `T = int32`; unconstrained `F(1, 2)` cannot guess it. Competing viable

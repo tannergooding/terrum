@@ -444,7 +444,7 @@ permit it in an arbitrary context.
 | File imports | `using` | Bring names into scope. |
 | Namespace | `namespace` | Declare a file-scoped namespace or namespace blocks, without mixing them in a file. |
 | Visibility | `public`, `internal`, `private` | Restrict declaration access. |
-| Nominal declarations | `struct`, `class`, `interface`, `enum`, `union` | Name types; union declaration syntax remains open. |
+| Nominal declarations | `struct`, `class`, `interface`, `enum`, `union` | Name types; unions declare explicit named cases with optional payload parameters. |
 | Type aliases | `alias` | Name a namespace-level transparent type synonym with declaration visibility. |
 | Associated types | `type` | Declare an interface requirement or bind it in a conformance. |
 | Declaration composition | `partial` | Merge parts of one identity. |
@@ -535,7 +535,7 @@ NamespaceBody   = { UsingDirective }, { TopDeclaration | NamespaceDecl } ;
 DottedIdentifier = Identifier, { ".", Identifier } ;
 
 TopDeclaration = TopPrefix, ( StructDecl | ClassDecl | InterfaceDecl
-                              | EnumDecl | FunctionDefinition )
+                              | EnumDecl | UnionDecl | FunctionDefinition )
                | AliasPrefix, AliasDecl ;
 MemberDeclaration = MemberPrefix,
                     ( ConstructorDecl | FunctionDefinition | OperatorDefinition
@@ -578,6 +578,11 @@ InterfaceDecl   = "interface", Identifier, [ InterfaceTypeParameters ],
 EnumDecl        = "enum", Identifier, ":", IntegralType,
                   "{", [ EnumMember, { ",", EnumMember }, [ "," ] ], "}" ;
 EnumMember      = Identifier, [ "=", ConstantExpression ] ;
+UnionDecl       = "union", Identifier, [ TypeParameterList ],
+                  { ConstraintClause }, "{", { UnionCaseDecl }, "}" ;
+UnionCaseDecl   = Identifier,
+                  ( ";" | "(", UnionPayload, { ",", UnionPayload }, ")", ";" ) ;
+UnionPayload    = Type, Identifier ;
 AliasDecl       = "alias", Identifier, [ TypeParameterList ], "=", Type, ";" ;
 AssociatedTypeRequirement = "type", Identifier, [ "=", Type ], ";" ;
 AssociatedTypeBinding = "type", MemberName, "=", Type, ";" ;
@@ -795,6 +800,41 @@ overflows that type rejects; deliberate duplicate-valued names are permitted.
 do not forbid unnamed underlying values. String/type-valued cases are not an
 alternative enum base selected by this rule. Exact eligible integer catalogs
 and flags annotation schemas must be declared by the selected profile.
+
+Nominal union cases use semicolon-terminated declarations: `Missing;` has no
+payload, while `Found(T value);` declares named type-first payload parameters.
+Case names are unique, not overloadable; a payload parameter list is nonempty.
+Qualified construction uses `Lookup<T>.Missing` or `Lookup<T>.Found(value)`,
+with ordinary target-checked argument evaluation. The no-payload form is a
+case construction expression, not a promise of constant eligibility or a
+cached singleton. Payload names do not implicitly declare public fields,
+getters, equality, formatting, deconstruction or withers. These intrinsic
+named case constructors are not general record synthesis.
+
+`[ClosedCases]` is the parameterless compiler-recognized semantic attribute
+for an explicit closed case-set promise on a union declaration. Omission
+retains the evolvable default. Recognition uses the registered library
+attribute identity and checked schema, not arbitrary same-named attributes;
+the exact library definition and metadata encoding remain specification work.
+Closed cases do not freeze representation, layout or the rest of the API.
+Generic constraints and `unique union` preserve their separate contracts.
+No `case` keyword is introduced. Pattern/extraction forms remain in §4 and
+Q28; this declaration does not select tag numbers, native exports or a public
+payload accessor surface.
+
+```terrum
+[ClosedCases]
+union Lookup<T> where T : [Copy]
+{
+    Missing;
+    Found(T value);
+}
+
+Lookup<int32?> missing = Lookup<int32?>.Missing;
+Lookup<int32?> found = Lookup<int32?>.Found(null);
+```
+
+These are accepted target source forms, not current compiler support.
 `AliasDecl`
 names the target type without defining a new nominal identity or adding
 conformance; generic aliases substitute their type formals into the target.
@@ -983,8 +1023,9 @@ ordinary backing/root lifetime dependency. A raw `ptr<T>` is a
 non-relocatable address and does not root or pin GC storage; forming one into
 GC storage requires a live pin with enforced provenance/lifetime or
 independently stable storage.
-Concrete release/null-reference spelling, safe pointer conversion and
-dereference/member syntax remain in
+The narrow implicit pin-to-pointer conversion and prefix dereference are
+specified in §5.13. A named local's current value can end through `name = _;`
+under §3.3; pin reacquisition/rebinding and address diagnostics remain in
 [Q26.1](proposals/grammar-open-questions.md#q261-pointer-formation-and-dereferencemember-boundaries).
 Pinning a slot containing a class handle does not also pin the separately
 allocated object reached through that handle. `mut` qualifies
@@ -1003,7 +1044,7 @@ Statement       = Block | IfStatement | LoopStatement | SwitchStatement
                 | DeferStatement | PolicyStatement
                 | ReturnStatement | YieldStatement | ThrowStatement | LoopTransfer
                 | SwitchTransfer | LocalDecl | DeconstructionDecl
-                | DiscardStatement | AssignmentStatement
+                | DiscardStatement | LifetimeEndStatement | AssignmentStatement
                 | ExpressionStatement | ";" ;
 IfStatement     = "if", "(", Expression, ")", Block,
                   [ "else", ( Block | IfStatement ) ] ;
@@ -1040,6 +1081,7 @@ LocalDecl       = LocalBinding, ";" | VacantLocal ;
 LocalBinding    = [ "mut" ], ( "var" | Type ), Identifier, "=", Expression ;
 VacantLocal     = "init", ( "var" | Type ), Identifier, ";" ;
 DiscardStatement = "_", "=", Expression, ";" ;
+LifetimeEndStatement = Identifier, "=", "_", ";" ;
 AssignmentStatement = Assignment, ";" ;
 Assignment      = Expression, AssignmentOperator, Expression
                 | DeconstructionPlaces, "=", Expression ;
@@ -1078,6 +1120,38 @@ initializer. `init var name;` instead declares vacant storage whose type is
 established by a checked initialization; `init T name;` makes its
 type explicit. Neither form is a default value, and neither permits reads
 before complete publication. Bare `T name;` is not a declaration here.
+`name = _;` explicitly ends a named local's current value lifetime and performs
+that value's scope-exit obligations at the statement, leaving the binding
+vacant. It is not an assignment of a discard value, a default/null value,
+or a write through a borrowed referent. It does not end other locals or the
+lexical declaration: redeclaring the same name in that scope still rejects.
+The value must be definitely live, and outstanding dependent loans/pointers
+must permit its lifetime to end. Later scope exit cannot clean that value
+again; reads of the vacant binding reject.
+
+Ending a lifetime does not grant mutation or initialization authority.
+An ordinary immutable `var` cannot be assigned again. `init var` or `init T`
+can be initialized when vacant, including by a checked `=` initialization;
+once established, the binding's type does not change on reinitialization.
+An eligible mutable binding follows its existing write/initialization rules.
+This form targets a named local, not a field, property, indexer or parameter
+alias to caller storage. Ending a local loan releases the loan, not its
+referent. Value-specific cleanup, root retirement and dependency rules are
+specified in [lifetimes](lifetimes.md#explicit-local-lifetime-end).
+These are accepted target contracts, not current compiler support.
+
+```terrum
+var x = int32(1);
+x = _;
+// x = 2;     // Invalid: x is not mutable or an initialization binding.
+// var x = 2; // Invalid: the declaration remains in scope.
+
+init var y;
+y = int32(1);
+y = _;
+y = 2;
+```
+
 By-value iteration is the default. `ref` iteration borrows an element place
 read-only and `mut ref` requires a writable element loan from the iterator;
 neither silently copies a value or upgrades a readonly source. The declared
@@ -1129,9 +1203,10 @@ Blocks are required after `if`, `while`, `do`, `for`, `try`, `catch`,
 `finally`, and `unsafe`; a single unbraced statement is not part of this
 grammar. Assignment is a
 statement-level form, not a general right-associative expression; its left
-expression must pass a writable-place check, which this syntactic
+expression must pass the applicable write or vacant-initialization check, which this syntactic
 approximation does not define. `DiscardStatement` is only the standalone
-discard form: `_` here is not an identifier or a pattern wildcard. In a
+discard form; `LifetimeEndStatement` separately ends a local value. In neither
+form is `_` an identifier, a value expression or a pattern wildcard. In a
 pattern it is a separate nonbinding wildcard; it is not an absence literal.
 Recovery forms are not alternate accepted syntax.
 
@@ -1611,12 +1686,13 @@ claim an implementation or settle the explicitly open boundaries.
   interfaces and generic properties](language.md#interfaces-access-and-generic-properties).
   An intended reserved word does not establish a declaration or statement
   production; the bounded async, matching and failure forms above do not
-  settle union declaration syntax. Nominal tagged sums declare explicit cases
+  implement the union forms specified in §3.1. Nominal tagged sums declare explicit cases
   and an explicit closedness contract; closed case sets support exhaustive
   dispatch, while evolvable sums require an unknown-case path preserving opaque
   payload validity, roots and cleanup. A live optional payload such as
-  `Found(null)` is distinct from a no-payload `Missing`. Declaration and
-  construction spelling remain open; no `case` keyword is introduced.
+  `Found(null)` is distinct from a no-payload `Missing`. Cases use semicolon
+  declarations and qualified construction, with `[ClosedCases]` for explicit
+  closedness; no `case` keyword is introduced.
   New pattern syntax must compose clearly with Terrum's existing types,
   access, places and ownership rather than importing C# property-pattern
   punctuation. Per-arm member observation/reuse and extractor binding remain
@@ -2101,6 +2177,9 @@ Discard expressions are evaluated once. Any owner/result cleanup follows the
 ordinary expression and statement cleanup rules; this does not force
 collection. Further statement-context details are grammar/specification work,
 not permission to alter the accepted nonbinding semantics.
+The inverse-looking `name = _;` is the distinct local lifetime-end statement
+in §3.3. It runs the current value's scope-exit obligations without removing
+the name's lexical declaration; `_` does not become an assignable value.
 
 ### 5.7 Unary operator contract direction (accepted; protocol mapping remains open)
 
@@ -2728,9 +2807,20 @@ named factories remain available, but no `Source.Target` method is synthesized.
 **Pointer formation and dereference:** `&place` forms an address only with
 checked initialized storage, access, lifetime and stable/rooted backing.
 GC storage requires a statically known covering pin; `unsafe` is not a
-substitute for rooting or pinning. Safe pin-derived pointer conversion retains
-the necessary access, pin and backing dependencies; implicit/explicit
-conversion and release spelling remain in
+substitute for rooting or pinning. `pin ref<T>` has an implicit conversion to
+the matching `ptr<T>` form, preserving referent access, lifetime, pin and
+backing dependencies. This is one explicitly defined built-in conversion
+edge, not general user-defined implicit conversion support. It acquires no
+pin, grants no stronger access and does not promise identical representation
+on every backend. The complete referent type remains the same.
+Overload applicability recognizes this direct edge without searching
+operators, intermediate types or conversion chains. An identity match is
+better than this permitted projection under existing per-argument ranking.
+Existing specificity rules apply to ties; unresolved ties or crossed
+candidates remain ambiguous. Future exceptions
+require separately selected rules, not extrapolation from this one.
+Named-local early lifetime ending uses `name = _;` under §3.3 and retains all
+pin dependency checks. Pin reacquisition/rebinding and diagnostic policy remain in
 [Q26.1](proposals/grammar-open-questions.md#q261-pointer-formation-and-dereferencemember-boundaries).
 Dereference uses ordinary attached prefix `*` and requires unsafe access;
 it does not create a new `(* ... )` fence. `*p`, `*(p + offset)`,
@@ -2751,8 +2841,9 @@ The paired `true`/`false` declarations do not adopt C#'s derivation through
 `&`/`|`, nor can an ordinary binary witness license eager evaluation of both
 operands. Built-in Boolean short-circuit ordering is unchanged.
 
-Still **OPEN** for a full source grammar: nominal safe union cases and complete
-patterns, full associated-identity checking and family/adapter declarations,
+Still **OPEN** for a full source grammar: complete nominal/destructuring
+patterns and union representation/metadata contracts, full associated-identity
+checking and family/adapter declarations,
 conditional/default conformance and text-target fragment contracts,
 general `const` declarations/expressions,
 general ownership/reference results, complete constructor applicability, async completion
