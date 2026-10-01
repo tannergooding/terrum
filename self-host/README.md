@@ -69,7 +69,7 @@ source/record audits reject contradictory or unrepresentable dot shapes.
 Scanner-7/schema-7, projections 1–51 and all resource bounds are unchanged.
 Qualified attributes, optional member access and other spacing remain outside
 this adoption.
-The host parser's current language version is syntax-41. Supported symbolic
+The host parser's current language version is syntax-42. Supported symbolic
 expression binary/binding/assignment operators and expression-body arrows
 require trivia on both sides; symbolic prefixes and postfix updates attach
 to the immediate operand token boundary. Native scalar frontend shape
@@ -79,7 +79,18 @@ Legacy projection publication shares monotone operation-threshold checks to
 retain the whole-program verification budget. Scanner-7/schema-7, projections
 1–51 and the 16K-source/64-token/8-local/12-statement/32-node/3-parameter
 limits remain unchanged. This adds no general calls/member access or new
-constructs, `?:`/colon/optional-suffix spacing, or operator-run scanning.
+constructs or operator-run scanning.
+Syntax-42 also requires both-sided trivia for conditional `?`/`:` in native
+scalar input, directly checked before modern/legacy selection by the shared
+snapshot check. Hosted struct-conformance/generic-constraint colons require
+both-sided trivia; loop-label/named-argument colons attach to the name with
+optional trivia afterward, and optional-type `?` attaches to the final type
+token. These hosted roles do not introduce native labels, named arguments or
+optional types. Hosted named arguments retain syntax-only support and their
+existing binding rejection. Interface-base/enum-underlying lists, tuple names and attribute
+targets remain unsupported. Historical/current projection audits enforce
+current syntax; string/format interiors, scanner/projection identities, all
+budgets and native formats remain unchanged.
 Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected

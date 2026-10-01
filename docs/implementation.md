@@ -1,6 +1,29 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-41, semantic v43–v45 updates, native-10 through native-20
+## Current boundary: syntax-42, semantic v43–v45 updates, native-10 through native-20
+
+Syntax-42 adopts the remaining currently supported contextual punctuation
+boundaries. Conditional `?`/`:` and struct-conformance/generic-constraint
+relationship colons require raw separating trivia on both sides (`TRM1008`).
+Loop-label and named-argument colons attach to the preceding name (`TRM1010`);
+trivia afterward is optional, so `name:value` remains valid. Optional-type
+`?` attaches to the type's final token (`TRM1011`), including split generic
+closers; repeated modifiers retain their precise `TRM1005` rejection even
+with intervening trivia. Selection is syntactic before lookup, with no
+spacing-driven fallback, and recovery/CST retain every source unit.
+
+Hosted, prelexed and compiled-scanner input share these checks. The native
+scalar frontend's `?`/`:` are conditional connectors only; its shared raw
+snapshot check rejects invalid boundaries before modern/legacy selection
+and maintained probes. Independent historical/current successful-projection
+audits enforce current source syntax. Interface-base and enum-underlying
+lists, tuple names and attribute targets have no current parser surface;
+native labels/named arguments/optional types are not introduced. Named arguments
+retain their parsed role but still reject in binding with `TRM3011`; this
+spacing adoption adds no named-call semantics. String and
+format interiors are not reclassified. Scanner-7/schema-7, projections 1–51,
+all resource/work bounds, semantic/ISA/Contract/native formats, evaluation
+and ABI remain unchanged. Operator-run lexical validation remains separate.
 
 Syntax-41 adopts symbolic expression operator, binding and expression-body
 arrow spacing in supported forms. Binary arithmetic, shifts, comparisons,

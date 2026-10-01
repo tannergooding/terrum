@@ -281,8 +281,14 @@ The current prelexed/component parser applies the hosted syntactic role,
 while native scalar parsing and maintained probes check their supported
 roles directly before fallback. Compatible historical raw records remain
 readable; successful frontend projections must satisfy current source syntax.
-Operator-run scanning, `?:`/colon spacing and optional-type attachment remain
-separate work. Scanner/schema, token IDs/widths, projections and bounds stay fixed.
+Syntax-42 applies both-sided raw trivia to conditional `?`/`:` and current
+struct-conformance/generic-constraint colons. Loop-label/named-argument colons
+attach to the preceding name with optional trivia afterward; optional-type
+`?` attaches to the final type token. Native scalar `?`/`:` are exclusively
+conditional connectors and the shared snapshot check rejects bad boundaries
+directly before fallback. No additional colon/type roles are introduced.
+Operator-run scanning remains separate work. Scanner/schema, token IDs/widths,
+projections and bounds stay fixed.
 
 Keyword records are generated from the host `TokenKind` catalog's `*Keyword`
 members. Operator records use their lexical spellings, with fixture comparisons

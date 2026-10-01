@@ -130,7 +130,7 @@ public sealed class OperatorSpacingTests
     [InlineData("int32 Main() { return const (value + other); }")]
     [InlineData("int32 Main() { return const(value); }")]
     [InlineData("int32 Main() { return move /* word */ value; }")]
-    [InlineData("int32 Main() { return flag?left:right; }")]
+    [InlineData("int32 Main() { return flag ? left : right; }")]
     [InlineData("Node? F(Node? value) { return value; }")]
     [InlineData("int32 Main() { return F<Box<Box<int32>>>() >> 1; }")]
     [InlineData("struct Box { public static Box operator +(Box a, Box b) { return a; } }")]

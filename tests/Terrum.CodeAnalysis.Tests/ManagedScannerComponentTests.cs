@@ -2653,6 +2653,42 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("b ? 1 : 2", "")]
+    [InlineData("b/* left */?/// right\n1//** left **//:\r\n2", "")]
+    [InlineData("b? 1 : 2", "?")]
+    [InlineData("b ?1 : 2", "?")]
+    [InlineData("b ? 1: 2", ":")]
+    [InlineData("b ? 1 :2", ":")]
+    [InlineData("b?1:2", "?")]
+    public async Task NativeSnapshotAndFrontendRejectConditionalSpacingWithoutHostParseAuditAsync(
+        string expression, string offending)
+    {
+        var text = "int32 Value(bool b) { return " + expression + "; }";
+        var expectedStart = offending.Length == 0 ? 0 : text.IndexOf(offending, StringComparison.Ordinal);
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                var spacing = tokens.GetScalarOperatorSpacingError();
+                if (spacing.Start != {{expectedStart}}) { return 1; }
+                if (spacing.Length != {{offending.Length}}) { return 2; }
+                require TryParseScalarFrontend(move tokens, out var result);
+                if (result.IsValid != {{(offending.Length == 0 ? "true" : "false")}}) { return 3; }
+                if (result.ErrorSpan.Start != {{expectedStart}}) { return 4; }
+                if (result.ErrorSpan.Length != {{offending.Length}}) { return 5; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
+                "ScalarFrontend").ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Value(int32 x, int32 y) { return x+y; }", 1, "+")]
     [InlineData("int32 Value(int32 x, int32 y) { return x+ y; }", 1, "+")]
     [InlineData("int32 Value(int32 x, int32 y) { return x +y; }", 1, "+")]

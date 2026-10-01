@@ -81,7 +81,7 @@ public sealed class InitReferenceTests
         var fill = Assert.Single(program.Functions, function => function.Name == "Fill");
         Assert.True(fill.Variables[1].IsOut);
         Assert.True(fill.Variables[1].IsInit);
-        Assert.Equal("syntax-41", SyntaxTree.LanguageVersion);
+        Assert.Equal("syntax-42", SyntaxTree.LanguageVersion);
     }
 
     [Theory]

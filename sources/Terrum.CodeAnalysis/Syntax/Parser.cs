@@ -50,7 +50,7 @@ internal sealed class Parser
 
     private SyntaxNode ParseConformances()
     {
-        var children = new List<SyntaxElement> { Take(), ParseType() };
+        var children = new List<SyntaxElement> { TakeSeparated(), ParseType() };
         while (Current.Kind == TokenKind.Comma)
         {
             children.Add(Take());
@@ -62,7 +62,7 @@ internal sealed class Parser
     private SyntaxNode ParseConstraint()
     {
         var children = new List<SyntaxElement> {
-            Take(), Expect(TokenKind.Identifier), Expect(TokenKind.Colon),
+            Take(), Expect(TokenKind.Identifier), ExpectSeparated(TokenKind.Colon),
         };
         while (true)
         {
@@ -524,6 +524,10 @@ internal sealed class Parser
             var hasModifier = false;
             while (Current.Kind is TokenKind.Question or TokenKind.QuestionQuestion)
             {
+                if (!hasModifier && !IsAttachedToPrevious())
+                {
+                    Report("TRM1011", "An optional type modifier must attach to the type's final token.", Current.Span);
+                }
                 var modifier = Take();
                 children.Add(modifier);
                 for (var index = hasModifier ? 0 : 1; index < modifier.Token.Text.Length; index++)
@@ -786,7 +790,7 @@ internal sealed class Parser
                 if (Current.Kind == TokenKind.Identifier && Peek(1).Kind == TokenKind.Colon
                     && Peek(2).Kind is TokenKind.WhileKeyword or TokenKind.ForKeyword or TokenKind.DoKeyword)
                 {
-                    node = Node(SyntaxKind.LabeledLoopStatement, [Take(), Take(), ParseStatement()]);
+                    node = Node(SyntaxKind.LabeledLoopStatement, [Take(), TakeNameColon(), ParseStatement()]);
                 }
                 else if (Current.Kind == TokenKind.Identifier && Current.Text == "const"
                     && LooksLikeLocal(1))
@@ -1011,9 +1015,9 @@ internal sealed class Parser
 
         if (parentPrecedence == 0 && Current.Kind == TokenKind.Question)
         {
-            var question = Take();
+            var question = TakeSeparated();
             var whenTrue = ParseExpression();
-            var colon = Expect(TokenKind.Colon);
+            var colon = ExpectSeparated(TokenKind.Colon);
             var whenFalse = ParseExpression();
             left = Node(SyntaxKind.ConditionalExpression, [left, question, whenTrue, colon, whenFalse]);
         }
@@ -1111,7 +1115,7 @@ internal sealed class Parser
             if (Current.Kind == TokenKind.Identifier && Peek(1).Kind == TokenKind.Colon)
             {
                 argument.Add(Take());
-                argument.Add(Take());
+                argument.Add(TakeNameColon());
             }
 
             var isOut = Current.Kind == TokenKind.OutKeyword
@@ -1192,6 +1196,16 @@ internal sealed class Parser
 
     private SyntaxTokenElement ExpectSeparated(TokenKind kind) =>
         Current.Kind == kind ? TakeSeparated() : Expect(kind);
+
+    private SyntaxTokenElement TakeNameColon()
+    {
+        if (!IsAttachedToPrevious())
+        {
+            Report("TRM1010", "A name-prefix colon must attach to the preceding name.", Current.Span);
+        }
+
+        return Take();
+    }
 
     private SyntaxTokenElement TakePrefix()
     {

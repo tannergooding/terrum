@@ -42,6 +42,7 @@ public unique struct TokenSnapshot
 
     // Scalar input has no generic lists or operator declarations. Its operand-ending
     // token kinds determine unary versus binary/update roles without name lookup.
+    // Its '?' and ':' only connect conditional expressions, not types or names.
     public SourceRange GetScalarOperatorSpacingError()
     {
         require TryGet(0, out var first);
@@ -66,6 +67,7 @@ public unique struct TokenSnapshot
                 else { prefix = true; }
             }
             if (kind >= 59 && kind <= 61) { separated = true; }
+            if (kind == 55 || kind == 56) { separated = true; }
             if (kind >= 64 && kind <= 75) { separated = true; }
             if (kind == 82 || kind == 84 || kind == 85) { separated = true; }
             if (kind >= 88 && kind <= 101) { separated = true; }
