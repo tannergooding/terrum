@@ -50,6 +50,8 @@ namespace Terrum.CodeAnalysis;
 // root is -1, and the span covers both braces. Each header counts as one record.
 // Version 53 adds kind-15 non-void scalar discards. Slot identifies a readonly
 // hidden local anchored to '_'; root is self-typed and span ends at the semicolon.
+// Version 54 adds labeled while/do/for headers (16/17/18), whose spans include
+// the label, and named break/continue (19/20), whose slots select enclosing headers.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -78,8 +80,9 @@ int32 GetScalarFrontendStatementVersion()
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
     {
         int32 kind = Host.Frontend[332 + statement * 5];
-        if (kind == 15) { return 53; }
-        if (kind == 14) { version = 52; }
+        if (kind >= 16) { return 54; }
+        if (kind == 15) { version = 53; }
+        if (kind == 14 && version < 52) { version = 52; }
         if ((kind == 11 || kind == 12) && version < 51) { version = 51; }
         if (kind == 8 && version < 48) { version = 48; }
         if (kind != 1 || version >= 50) { continue; }
@@ -118,40 +121,7 @@ bool TryPublishScalarFrontend()
     Host.Frontend[5] = result.ReturnType;
     if (Host.Frontend[37] != 0 || Host.Frontend[298] != 0)
     {
-        Host.Frontend[0] = 20;
-        if (Host.Frontend[298] != 0) { Host.Frontend[0] = 21; }
-        bool conversion = HasScalarFrontendOperation(83);
-        bool conditional = HasScalarFrontendOperation(84);
-        if (conversion)
-        {
-            if (Host.Frontend[298] == 0) { Host.Frontend[0] = 22; }
-            else { Host.Frontend[0] = 23; }
-        }
-        if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 4; }
-        bool hasWhile = HasScalarFrontendStatement(3);
-        bool hasBranch = HasScalarFrontendStatement(4);
-        bool hasTransfer = HasScalarFrontendStatement(6) || HasScalarFrontendStatement(7);
-        if (hasWhile || hasBranch || hasTransfer)
-        {
-            Host.Frontend[0] = GetScalarFrontendControlVersion(hasWhile, hasBranch, hasTransfer);
-            if (conversion) { Host.Frontend[0] = Host.Frontend[0] + 1; }
-            if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 2; }
-        }
-        for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
-        {
-            int32 operation = Host.Frontend[42 + node * 8];
-            if (operation == 86 || operation == 87
-                || operation >= 88 && operation <= 101)
-            {
-                Host.Frontend[0] = 49;
-                break;
-            }
-        }
-        int32 statementVersion = GetScalarFrontendStatementVersion();
-        if (statementVersion > Host.Frontend[0])
-        {
-            Host.Frontend[0] = statementVersion;
-        }
+        Host.Frontend[0] = GetScalarFrontendTreeVersion();
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {
@@ -179,6 +149,35 @@ bool TryPublishScalarFrontend()
     Host.Frontend[0] = GetScalarFrontendLegacyVersion(result);
     Host.Frontend[1] = 1;
     return true;
+}
+
+int32 GetScalarFrontendTreeVersion()
+{
+    mut int32 version = Host.Frontend[298] == 0 ? 20 : 21;
+    bool conversion = HasScalarFrontendOperation(83);
+    bool conditional = HasScalarFrontendOperation(84);
+    if (conversion) { version = version + 2; }
+    if (conditional) { version = version + 4; }
+    bool hasWhile = HasScalarFrontendStatement(3);
+    bool hasBranch = HasScalarFrontendStatement(4);
+    bool hasTransfer = HasScalarFrontendStatement(6) || HasScalarFrontendStatement(7);
+    if (hasWhile || hasBranch || hasTransfer)
+    {
+        version = GetScalarFrontendControlVersion(hasWhile, hasBranch, hasTransfer);
+        if (conversion) { version = version + 1; }
+        if (conditional) { version = version + 2; }
+    }
+    for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
+    {
+        int32 operation = Host.Frontend[42 + node * 8];
+        if (operation >= 86 && operation <= 101)
+        {
+            version = 49;
+            break;
+        }
+    }
+    int32 statementVersion = GetScalarFrontendStatementVersion();
+    return statementVersion > version ? statementVersion : version;
 }
 
 int32 GetScalarFrontendLegacyVersion(ScalarFrontendResult result)
@@ -250,7 +249,9 @@ int32 GetScalarFrontendMaximumOperation(ScalarFrontendResult result)
 
 bool IsScalarFrontendNumericUnary(int32 operation)
 {
-    return (operation >= 2100 && operation < 2700) || operation >= 3200;
+    if (operation >= 3200) { return true; }
+    if (operation < 2100) { return false; }
+    return operation < 2700;
 }
 
 bool HasScalarFrontendOperation(int32 operation)

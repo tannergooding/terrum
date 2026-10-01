@@ -42,7 +42,7 @@ public unique struct TokenSnapshot
 
     // Scalar input has no generic lists or operator declarations. Its operand-ending
     // token kinds determine unary versus binary/update roles without name lookup.
-    // Its '?' and ':' only connect conditional expressions, not types or names.
+    // A colon attached to an identifier before a loop keyword introduces its label.
     public SourceRange GetScalarOperatorSpacingError()
     {
         var run = GetScalarPunctuationRunError();
@@ -76,6 +76,14 @@ public unique struct TokenSnapshot
             if (kind >= 64 && kind <= 75) { separated = true; }
             if (kind == 82 || kind == 84 || kind == 85) { separated = true; }
             if (kind >= 88 && kind <= 101) { separated = true; }
+            if (kind == 55 && (next.Kind == 18 || next.Kind == 83 || next.Kind == 31))
+            {
+                if (previous.Kind != 2 || previous.Range.End != op.Range.Start)
+                {
+                    return op.Range;
+                }
+                separated = false;
+            }
             if (prefix && op.Range.End != next.Range.Start)
             {
                 return op.Range;
