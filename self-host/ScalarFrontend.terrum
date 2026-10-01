@@ -123,7 +123,7 @@ mut class ScalarFrontendState
     private mut int32 _statementCount;
     private mut int32 _structuredReturnType;
     private mut int32 _structuredReturnCount;
-    private mut bool _hasStandaloneBlock;
+    private mut bool _hasStructuredStatement;
 
     public ScalarFrontendState(ManagedTokenChain tokens, SourceRange empty)
     {
@@ -145,12 +145,12 @@ mut class ScalarFrontendState
         _statementCount = 0;
         _structuredReturnType = 0;
         _structuredReturnCount = 0;
-        _hasStandaloneBlock = false;
+        _hasStructuredStatement = false;
     }
 
-    public bool HasStandaloneBlocks()
+    public bool HasStructuredStatements()
     {
-        return _hasStandaloneBlock;
+        return _hasStructuredStatement;
     }
 
     private mut void FailAt(int32 code, SourceRange span)
@@ -1516,9 +1516,25 @@ mut class ScalarFrontendState
         return last.Range.End;
     }
 
+    private mut bool ParseTreeDiscard(Token first)
+    {
+        _hasStructuredStatement = true;
+        _at = _at + 1;
+        return ParseTreeLocalInitializer(first, first, 0, false, true);
+    }
+
     private mut bool ParseTreeClauseStatement(bool semicolon)
     {
         require _tokens.TryGet(_at, out var first);
+        if (first.Kind == 81)
+        {
+            if (!semicolon)
+            {
+                FailAt(1, first.Range);
+                return false;
+            }
+            return ParseTreeDiscard(first);
+        }
         if (first.Kind == 2
             && _tokens.TryGet(_at + 1, out var equals)
             && (equals.Kind == 64 || equals.Kind >= 91 && equals.Kind <= 101))
@@ -1603,6 +1619,11 @@ mut class ScalarFrontendState
             return AddTreeStatement(10, 0, update, first.Range.Start, TreeStatementEnd());
         }
 
+        return ParseTreeDeclaration(first, semicolon);
+    }
+
+    private mut bool ParseTreeDeclaration(Token first, bool semicolon)
+    {
         mut bool mutable = false;
         if (first.Kind == 13)
         {
@@ -1633,9 +1654,7 @@ mut class ScalarFrontendState
         {
             return false;
         }
-        if (_parameterCount > 0 && SameTokenSpelling(_first, name)
-            || _parameterCount > 1 && SameTokenSpelling(_second, name)
-            || _parameterCount > 2 && SameTokenSpelling(_third, name))
+        if (IsParameterName(name))
         {
             FailAt(4, name.Range);
             return false;
@@ -1653,17 +1672,30 @@ mut class ScalarFrontendState
                 return false;
             }
         }
+        return ParseTreeLocalInitializer(first, name, type, mutable, semicolon);
+    }
+
+    private bool IsParameterName(Token name)
+    {
+        return _parameterCount > 0 && SameTokenSpelling(_first, name)
+            || _parameterCount > 1 && SameTokenSpelling(_second, name)
+            || _parameterCount > 2 && SameTokenSpelling(_third, name);
+    }
+
+    private mut bool ParseTreeLocalInitializer(Token first, Token name, int32 expected,
+        bool mutable, bool semicolon)
+    {
         if (_localCount >= 8)
         {
             FailAt(1, name.Range);
             return false;
         }
         if (!Take(64, out var assignment)
-            || !ParseTreeExpression(type, 1, 0, out var initializer))
+            || !ParseTreeExpression(expected, 1, 0, out var initializer))
         {
             return false;
         }
-        if (type == 0) { type = TreeWord(initializer, 1); }
+        int32 type = expected == 0 ? TreeWord(initializer, 1) : expected;
         if (type == 0)
         {
             return FailTreeType(initializer);
@@ -1680,14 +1712,17 @@ mut class ScalarFrontendState
         Host.Frontend[offset + 2] = name.Range.Start;
         Host.Frontend[offset + 3] = name.Range.Length;
         _localCount = index + 1;
-        mut int32 bit = 1;
-        for (mut int32 local = 0; local < index; local = local + 1)
-        {
-            bit = bit * 2;
-        }
-        _activeLocals = _activeLocals | bit;
         Host.Frontend[299] = _localCount;
-        return AddTreeStatement(1, _parameterCount + index + 1, initializer,
+        if (first.Kind != 81)
+        {
+            mut int32 bit = 1;
+            for (mut int32 local = 0; local < index; local = local + 1)
+            {
+                bit = bit * 2;
+            }
+            _activeLocals = _activeLocals | bit;
+        }
+        return AddTreeStatement(first.Kind == 81 ? 15 : 1, _parameterCount + index + 1, initializer,
             first.Range.Start, TreeStatementEnd());
     }
 
@@ -1760,7 +1795,7 @@ mut class ScalarFrontendState
                 }
                 _structuredReturnCount = _structuredReturnCount + 1;
             }
-            else if (next.Kind == 12 || next.Kind == 13
+            else if (next.Kind == 81 || next.Kind == 12 || next.Kind == 13
                 || next.Kind == 2 && _tokens.TryGet(_at + 1, out var following)
                     && following.Kind == 2)
             {
@@ -1996,7 +2031,7 @@ mut class ScalarFrontendState
 
     private mut bool ParseTreeBlock(int32 depth, int32 nearestLoop)
     {
-        _hasStandaloneBlock = true;
+        _hasStructuredStatement = true;
         if (depth >= 6 || _statementCount >= 12)
         {
             Fail(1);
@@ -2327,10 +2362,7 @@ mut class ScalarFrontendState
                 FailAt(1, token.Range);
                 return false;
             }
-            if (SameTokenSpelling(_function, token)
-                || (_parameterCount > 0 && SameTokenSpelling(_first, token))
-                || (_parameterCount > 1 && SameTokenSpelling(_second, token))
-                || (_parameterCount > 2 && SameTokenSpelling(_third, token)))
+            if (SameTokenSpelling(_function, token) || IsParameterName(token))
             {
                 FailAt(1, token.Range);
                 return false;
@@ -2972,7 +3004,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
             result = completed;
             return true;
         }
-        if (structured.HasStandaloneBlocks())
+        if (structured.HasStructuredStatements())
         {
             result = completed;
             return true;
