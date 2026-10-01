@@ -667,6 +667,40 @@ grammar, scanner, semantic/ISA/Contract/TRRM/native formats and ABI remain.
 General calls, richer types and ownership/cleanup remain excluded; this
 projection does not add the newly approved same-line label enforcement.
 
+Provisional projection v59 adopts the existing distinct parameterless
+`[NoThrow]` and `[DoesNotReturn]` contracts on top-level functions. Header word
+2 uses bit 0 for public visibility, bit 1 for NoThrow and bit 2 for
+DoesNotReturn; v59 requires an actual effect bit. Attributes precede visibility
+and use exact raw spellings, in either order. Unknown, duplicate, escaped,
+case-folded or argument-bearing attributes reject. Attribute tokens count
+against the existing 64-token limit. Versions 1–58 retain their masks and
+source/body restrictions.
+
+Effect selection takes precedence over v56–58. Annotated braced scalar/void
+bodies use structured statement records with no terminal envelope roots.
+Scalar arrows retain the typed expression envelope; void arrows retain
+exactly one requirement or non-void discard record. The independent reader
+checks the entire source, effect flags, body shape, node ownership and spans,
+including unsupported unreachable or following source. Lowering preserves
+hosted lexical scopes, full function/body spans and arrow-return spans.
+DoesNotReturn is void-only and suppresses implicit null completion; ordinary
+void completion remains at the source body's end without a projection record.
+
+`Binder.FoldScalarConstant` and `SemanticVerifier.VerifyLibrary` remain the
+shared authorities for scalar folding, NoThrow proof and normal-completion
+checking under both runtime policies. Reachable normal returns or fallthrough
+reject for DoesNotReturn. Readonly or inactive expressions do not gain purity
+or weaker effect checking, and NoThrow does not imply termination. Lazy
+evaluation, checked operand-before-require failure order and the existing
+zero-through-three primitive-parameter entry/export ABI remain unchanged.
+Nonterminating fixtures are compiled and audited, not executed.
+
+All projection widths and source/token/local/record/node/depth limits remain,
+including the shared 100,000-visit verification budget. General attributes,
+calls, richer types and ownership/cleanup remain excluded. This adds no
+grammar, scanner, semantic/ISA/Contract/TRRM/native format or ABI contract;
+same-line loop-label enforcement remains a separate adoption.
+
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed
 lexical `BoundBlock` and shared verified path. Names use ordinal normalized

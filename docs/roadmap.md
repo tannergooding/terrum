@@ -8,22 +8,15 @@ Approval, implementation, and pre-v1 stability are separate.
 
 ## Active work (priority order)
 
-1. Adopt the existing parameterless `[NoThrow]` and `[DoesNotReturn]` function
-   contracts in the bounded native frontend. Preserve hosted effect checking,
-   void-only nonreturning declarations and implicit-completion rules through
-   shared verification under both policies. Cover current scalar/void body
-   forms without widening calls, general attributes or pending semantics;
-   retain source/resource limits, historical projection restrictions and
-   existing metadata/ABI contracts.
-2. Adopt the approved [loop-label attachment](grammar-spec.md#33-statements-and-local-declarations)
+1. Adopt the approved [loop-label attachment](grammar-spec.md#33-statements-and-local-declarations)
    restriction across hosted parsing and native source audits: one label on
    the loop introducer's source line, no stacked labels. Preserve the existing
    separate namespace, active-duplicate rejection, disjoint reuse and transfer
    semantics; approval is not an implementation claim.
-3. Review source-contract decisions from the [grammar](grammar-spec.md) and
+2. Review source-contract decisions from the [grammar](grammar-spec.md) and
    [decision queue](proposals/grammar-open-questions.md). Preserve accepted
    decisions; recommendations remain proposals until approved.
-4. Refine concrete library proposals. Candidate signatures and contracts do
+3. Refine concrete library proposals. Candidate signatures and contracts do
    not imply parser, compiler, runtime or library support.
 
 The source-free TRRM scalar path remains fail-fast; checked-exception Bodies
@@ -107,6 +100,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `586aa4b` | Native parameterless NoThrow/DoesNotReturn function contracts, projection 59 |
 | `27aaf17` | Native braced scalar/void `else if` chains, projection 58 |
 | `e43ea1c` | Native void arrow requirements and scalar discards, projection 57 |
 | `6952d2d` | Native braced void functions and null returns, projection 56 |

@@ -283,6 +283,17 @@ record and expression limits still apply to each nested conditional. Versions
 source coverage and feature precedence. Source-free indexed TRRM and the
 native ABI are unchanged.
 
+Projection v59 adds exact parameterless `[NoThrow]` and `[DoesNotReturn]`
+declaration contracts over the current top-level scalar/void braced and arrow
+forms. Existing shared folding and effect verification remain authoritative
+under both policies; DoesNotReturn requires void and removes implicit normal
+completion. Source audits preserve raw spelling, distinct flags, all source
+coverage, hosted spans/scopes and conservative failure proofs. Normalized
+exports retain the existing primitive-parameter ABI. Versions 1–58 keep their
+restrictions, all resource limits remain, and general attributes/calls are not
+added. The [implementation reference](implementation.md) specifies header
+bits and body shapes; source-free indexed TRRM is unchanged.
+
 The native scalar frontend's provisional projection v48 represents scalar
 returns as structured body statements: kind 8, slot 0, a typed result root and
 the keyword-through-semicolon span. Header words 38–40 are `-1`; the source
