@@ -63,13 +63,17 @@ read-only imports do not promise immutable foreign storage. Field safety
 applies to all direct accesses. Properties have synchronous accessor-local
 safety and inherited-or-narrowed visibility. Partial property/indexer primaries
 own their accessor contracts without allocating backing storage. Static named
-properties are permitted, but indexers remain instance-only. These are not
-additional votes or implementation claims.
+properties are permitted, but indexers remain instance-only.
+Operators/conversions use ordinary visibility and explicit static operands,
+with optional caller-`unsafe` and `partial`, not receiver `mut` or `async`.
+Operator operands and conversion inputs may use `implicit ref<T>` under the
+existing borrow and ranking rules. Associated type/constant declarations and
+bindings use attributes/visibility only; an enclosing partial declaration can
+contribute a complete binding. These are not additional votes or implementation
+claims.
 
 **Remaining questions:**
 
-- Complete operator/conversion and associated-binding modifier applicability. The
-  fixed prefix order is not permission to apply every slot to each kind.
 - Decide whether a file-limited access domain is needed and, if so, its exact
   eligible declarations. Candidate `file internal struct Helper { }` is not
   an adopted combination or a new friend-module boundary.
@@ -78,10 +82,11 @@ additional votes or implementation claims.
   a C# type initializer. Concrete external-data schemas and target mappings
   remain specification work.
 
-Extern property/accessor forms are deferred until a concrete interop need
+Extern property/accessor and operator/conversion forms are deferred until a
+concrete interop need
 and complete design; Objective-C or another interop model is not imported by
 analogy. This is not an additional pending vote or permission to bind an
-accessor externally.
+member externally.
 
 **C# model:** C#'s preferred callable modifier order is familiar, but Terrum
 requires ordering and primary visibility, keeps compound type forms together,

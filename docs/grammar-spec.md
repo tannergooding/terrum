@@ -536,15 +536,14 @@ MemberDeclaration = ConstructorPrefix, ConstructorDecl
                   | FieldPrefix, FieldDecl
                   | PropertyPrefix, PropertyDefinition
                   | IndexerPrefix, IndexerDefinition
-                  | MemberPrefix,
-                    ( FunctionDefinition | OperatorDefinition
-                    | ConversionDefinition
-                    | AssociatedTypeBinding
-                    | AssociatedConstantBinding ) ;
-InterfaceMemberDeclaration = InterfaceMemberPrefix,
-                             ( InterfaceFunction | InterfaceOperator
-                             | AssociatedTypeRequirement
-                             | InterfaceConstant )
+                  | CallablePrefix, FunctionDefinition
+                  | OperatorPrefix, ( OperatorDefinition | ConversionDefinition )
+                  | AssociatedPrefix, ( AssociatedTypeBinding
+                                      | AssociatedConstantBinding ) ;
+InterfaceMemberDeclaration = CallablePrefix, InterfaceFunction
+                           | OperatorPrefix, InterfaceOperator
+                           | AssociatedPrefix, ( AssociatedTypeRequirement
+                                               | InterfaceConstant )
                            | PropertyPrefix, InterfaceProperty
                            | IndexerPrefix, InterfaceIndexer ;
 TypePrefix      = { Attribute }, [ VisibilityModifier ], [ "partial" ] ;
@@ -558,8 +557,9 @@ FieldPrefix     = { Attribute }, VisibilityModifier, [ "static" ],
 PropertyPrefix  = { Attribute }, [ VisibilityModifier ], [ "static" ],
                   [ "partial" ] ;
 IndexerPrefix   = { Attribute }, [ VisibilityModifier ], [ "partial" ] ;
-MemberPrefix    = CallablePrefix ;
-InterfaceMemberPrefix = CallablePrefix ;
+OperatorPrefix  = { Attribute }, [ VisibilityModifier ], [ "static" ],
+                  [ "unsafe" ], [ "partial" ] ;
+AssociatedPrefix = { Attribute }, VisibilityModifier ;
 AliasPrefix     = { Attribute }, NamespaceVisibilityModifier ;
 Attribute       = "[", [ AttributeTarget, ":" ], AttributeName,
                   [ AttributeArguments ], "]" ;
@@ -618,9 +618,11 @@ FunctionDefinition = Type, MemberName, [ TypeParameterList ], ParameterList,
                      ( CallableBody | ";" ) ;
 InterfaceFunction = FunctionDefinition ;
 OperatorDefinition = Type, "operator", OperatorSymbol, ParameterList,
-                     ContractClauses, CallableBody ;
-ConversionDefinition = "operator", Type, "(", Type, Identifier, ")",
-                       ContractClauses, CallableBody ;
+                     ContractClauses, ( CallableBody | ";" ) ;
+ConversionDefinition = "operator", Type, "(", ConversionInput, ")",
+                       ContractClauses, ( CallableBody | ";" ) ;
+ConversionInput = { Attribute }, ( Type, Identifier
+                | "implicit", "ref", "<", Type, ">", Identifier ) ;
 InterfaceOperator = Type, "operator", OperatorSymbol, ParameterList,
                     ContractClauses, ( ";" | CallableBody ) ;
 CallableBody    = Block | ExpressionBody ;
@@ -667,7 +669,9 @@ AssociatedProjection = ( "void" | DottedIdentifier ), [ TypeArguments ],
 OperatorSymbol  = "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"
                 | "<<" | ">>" | ">>>"
                 | "==" | "!=" | "<" | "<=" | ">" | ">=" | "!" | "~"
-                | "++" | "--" | "true" | "false" ;
+                | "++" | "--" | "true" | "false"
+                | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^="
+                | "<<=" | ">>=" | ">>>=" ;
 ```
 
 The source file permits one file-scoped namespace or namespace blocks, without
@@ -689,7 +693,7 @@ declaring the same namespace does not extend either access domain, and
 linking or unsafe authorization does not grant friend-module access.
 File-limited visibility is not a selected source form.
 
-Optional visibility in type, callable, constructor, property and indexer
+Optional visibility in type, callable, constructor, property, indexer and operator
 declaration prefixes exists only for secondary partial declarations, not a
 default access level. A declaration
 without visibility must identify a secondary part with `partial`; otherwise
@@ -773,6 +777,13 @@ not include fields or constructors. An interface
 constant with an initializer is fixed by its declaration; one without an
 initializer requires an implementer-supplied `const` binding of that selected
 member identity. An unrelated same-named constant does not satisfy it.
+Associated type/constant declarations and bindings have only attributes and
+visibility before `type` or `const`. They reject `static`, `mut`, `extern`,
+`unsafe`, `async` and member-level `partial`: these are type/compile-time-value
+identities, not storage slots or callables. A partial enclosing type/interface
+may contribute a complete associated declaration or binding. Existing
+effective-access and conformance rules still apply; this prefix does not
+permit a private interface requirement.
 Ordered prefix slots still require context-specific validation.
 Repeated visibility and conflicting effects reject. Callable
 contract clauses follow the parameter list and any generic constraints;
@@ -893,14 +904,46 @@ Operators belong to the declaring nominal type or an interface contract,
 **not** a global declaration. Retroactive behavior for another type needs an
 explicit adapter or wrapper witness, not a global extension operator. A
 conversion declaration `operator T(U source)` is a separate nominal member
-form with result `T` and one by-value `U` input, invoked explicitly as
+form with result `T` and one `U` input, either by value or borrowed as
+`implicit ref<U>`, invoked explicitly as
 `T(source)`. It requires `static` and has no separate return-type prefix or
 conversion keyword. `new T(...)` selects construction separately from
 conversion type-calls. Destination-first conversion eligibility and explicit
 owner selection are specified in §5.13; declaration order cannot break ties.
-A bodyless static interface operator is a required compile-time witness; a
-bodyful one supplies a default. Static operator witness selection needs no
-runtime vtable. The generic type parameters and conformance lists
+All user-defined operators and conversions require explicit `static` on
+their primary; there is no implicit instance receiver or receiver `mut`
+modifier. Mutation authority comes from the explicit operand access contract.
+Their prefixes order attributes, ordinary `public`/`internal`/`private`
+visibility, `static`, optional caller-`unsafe`, then optional `partial`.
+Lookup considers accessible operations under the ordinary access rules.
+An unsafe operation requires an explicit unsafe context at its use site,
+including operator syntax and `T(value)`; its body is not implicitly unsafe.
+Private interface operators are complete helpers, not witness requirements.
+
+Operator operands may use `implicit ref<T>` under the existing borrowed-slot,
+qualification, lifetime and overload rules. Operator operand-shape constraints
+apply to the logical operand type `T`, not a fabricated unrelated reference
+operand. A conversion likewise accepts by-value `U` or `implicit ref<U>` as
+the same logical source type, retaining ordinary by-value-versus-implicit-
+reference ranking. Borrowing does not copy the payload or select a size-based
+ABI adaptation, grant stronger access, erase dependencies or permit implicit
+user-defined conversion chains.
+
+Operators/conversions are synchronous and reject `async`; syntax never
+introduces an implicit await. An ordinary awaitable result is permitted only
+where the operation's existing result-shape contract accepts that type.
+Extern operator/conversion binding has no source form without a separate
+concrete interop design; authored implementations may call permitted extern
+named methods.
+A partial primary owns operand/result types, passing/access modes, safety
+and conditions. Exactly one matching implementation supplies its body without
+changing the contract. A bodyless concrete operator/conversion is legal only
+as that partial primary; the secondary omits visibility, `static` and safety
+modifiers and uses the primary's resolved contract.
+A bodyless nonpartial public/internal static interface operator is a required
+compile-time witness; a bodyful one supplies a default. Static operator
+witness selection needs no runtime vtable. The generic type parameters and
+conformance lists
 apply to structs **and** classes; interface base lists express interface
 composition, not implementation of an interface by itself.
 The integral enum base and constant-valued members preserve unnamed
@@ -3082,8 +3125,10 @@ variant's declared contract.
 Type-call conversions use `T(expression)`. The user
 conversion declaration `operator T(U source)` fixes its destination type
 at declaration; it does not grant raw reinterpretation or implicit
-conversion. Conversion ownership, ambiguity, effects and safety constraints
-remain open. `operator` already has a token; `cast` and `explicit` need not
+conversion. Conversion input modes and caller-safety follow §3.1; lookup
+and ambiguity follow §5.13. Complete ownership/effect compatibility and
+metadata remain open. `operator` already has a token; `cast` and `explicit`
+need not
 be reserved solely to declare or invoke a checked conversion.
 `in` marks the iteration form; `and`, `or` and `not` combine
 patterns, distinct from Boolean `&&`, `||` and `!`. Full pattern syntax remains
@@ -3161,7 +3206,9 @@ followed by `=`.
 For a nonliteral `T(value)` conversion, first resolve applicable destination-
 owned declarations; consider source-owned conversions only when the
 destination has none applicable. Each selected set must have one unique best
-candidate under ordinary ranking. Destination ambiguity diagnoses, and a
+accessible candidate under ordinary ranking, including the established
+by-value-versus-implicit-reference rules for the logical source type.
+Destination ambiguity diagnoses, and a
 selected conversion's failure propagates; neither triggers fallback to the
 source. Source binding records one declaration, not runtime trial calls.
 Contextual literal construction retains its own checked target-domain rules.
@@ -3290,7 +3337,7 @@ appears in §2.
 | Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw framing/headers, deterministic interpolation, identifier/quoted/expression formats and runtime alignment. | Complete floating token recovery, character diagnostics, raw/interpolation recovery and registered text/whole-output normalization APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or nested block namespaces without mixing, with lexically scoped imports before declarations. | Other namespace forms, if any. |
-| Visibility and declaration prefixes | §3.1 requires explicit primary visibility, fixed role-specific ordering and a sole partial contract author. Secondary attributes obey schema placement; internal interface requirements preserve module-only implementation authority, while private members are complete helpers. Constructor, field and property/indexer prefixes, narrowing accessor visibility and per-accessor safety are specified. | File-limited visibility, operator/conversion and associated-binding modifier applicability. |
+| Visibility and declaration prefixes | §3.1 requires explicit primary visibility, fixed role-specific ordering and a sole partial contract author. Secondary attributes obey schema placement; internal interface requirements preserve module-only implementation authority, while private members are complete helpers. Constructor, field, property/indexer, operator/conversion and associated prefixes are specified. | File-limited visibility and explicit static initialization/lifetime contracts. |
 | Nominal types | §3.1 gives ordered class/struct kind forms, static-class containers, interfaces, integral-base enums and explicit struct/class unions with qualified cases and independent closedness. Enum constants have checked successor overflow and deliberate aliases. | Nested declarations, selected integer catalogs, flags schemas and contextual attributes. |
 | Generic declarations | §§3.1–3.2 give bounded constant domains, checked opt-in primitive-wrapper constants, earlier-only defaults, `_` inference and explicit `default` selection. | Wrapper capability spelling/value encoding and complete inference contracts. |
 | Aliases | §§3.1 and 5.4 give finite qualified expansion, cycle rejection, namespace-level aliases and transparent public export. | Metadata encoding. |
@@ -3300,8 +3347,8 @@ appears in §2.
 | Fields | §3.1 gives fixed/mutable storage, qualified referent access, caller-unsafe direct access and static foreign-data bindings without Terrum initializers. | Ordinary static initialization/lifetime, concrete external-data schemas/target mappings and applicable layout/attribute contracts. |
 | Constructors | §§3.1 and 5.10 give `ensure P is init` minimum guarantees and repeatable unpublished init-property writes. | Completion validation hooks, value/effect compatibility and metadata encoding. |
 | Properties | §§3.1, 5.10 and 5.12 give instance/static named properties, instance-only indexers, synchronous accessor-local receiver/safety/access contracts and sole-primary partial implementation without primary backing storage. | Implicit storage initialization, static init-accessor applicability, ref-result contracts and metadata; external accessor binding needs a separate interop design. |
-| Operators | §§3.1, 5.7 and 5.13 describe nominal unary/binary operators and static void compound operations over struct slots or writable object contents. | Complete applicability and checked witness/metadata encoding. |
-| Conversions | §§3.1 and 5.13 give `operator T(U source)`, destination-first `T(value)` and explicit `.via<Owner>` selection, distinct from `new T(...)`. | Complete eligible conversion catalogs and binding/metadata diagnostics. |
+| Operators | §§3.1, 5.7 and 5.13 give static explicit operands, eligible implicit-reference inputs, ordinary visibility, synchronous caller-safety, partial primary ownership and distinct void compound operations. | Complete applicability and witness/metadata encoding; external binding needs a separate interop design. |
+| Conversions | §§3.1 and 5.13 give static by-value/implicit-reference logical inputs, synchronous caller-safety, partial primary ownership, destination-first `T(value)` and `.via<Owner>` selection, distinct from `new T(...)`. | Complete eligible conversion catalogs and binding/metadata diagnostics; external binding needs a separate interop design. |
 | Interface members | §§3.1, 5.4 and 5.12 give explicit qualified implementations, shared implicit implementations and restricted current-receiver default-body bypass. | Complete inherited-default resolution and representation; constructors have no production here. |
 | Types | §3.2 gives recursive types, tuple types and normalized optionals. | General ownership/reference-result forms and public tuple ABI. |
 | Ownership | §§3.2 and 5.12 sketch owner forms and explicit transfer. | Complete ownership-form grammar. |

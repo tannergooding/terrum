@@ -12,7 +12,10 @@ authority; private members are complete helpers. Constructors have their own
 synchronous initialization prefix and partial completion contracts. These
 source contracts also distinguish field storage/referent authority and
 caller-unsafe access, with synchronous accessor-local visibility/safety and
-sole-primary property/indexer implementation. These are not new compiler
+sole-primary property/indexer implementation. Static operator/conversion
+prefixes additionally specify caller-safety, partial ownership and eligible
+implicit-reference inputs; associated bindings use attributes/visibility only.
+These are not new compiler
 support: syntax-44 does not enforce the new prefix/partial rules or
 implement unions, static containers, caller-unsafe/async declarations or
 foreign external binding. Existing compiler declaration defaults and
