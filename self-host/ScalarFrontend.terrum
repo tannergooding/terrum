@@ -1731,16 +1731,9 @@ mut class ScalarFrontendState
                 }
                 if (!ParseTreeTransfer(next, nearestLoop)) { return false; }
             }
-            else if (next.Kind == 19 && _structuredReturnType != 0)
+            else if (next.Kind == 41 || next.Kind == 19 && _structuredReturnType != 0)
             {
-                int32 start = next.Range.Start;
-                if (!ParseTreeReturn(_structuredReturnType, out var root)
-                    || !AddTreeStatement(8, 0, root, start,
-                        TreeReturnEnd()))
-                {
-                    return false;
-                }
-                _structuredReturnCount = _structuredReturnCount + 1;
+                if (!ParseTreeTerminatedStatement(next)) { return false; }
             }
             else if (next.Kind == 81 || next.Kind == 12 || next.Kind == 13
                 || next.Kind == 2 && _tokens.TryGet(_at + 1, out var following)
@@ -1763,6 +1756,25 @@ mut class ScalarFrontendState
             }
             require _tokens.TryGet(_at, out next);
         }
+        return true;
+    }
+
+    private mut bool ParseTreeTerminatedStatement(Token keyword)
+    {
+        mut int32 kind = 8;
+        mut int32 type = _structuredReturnType;
+        if (keyword.Kind == 41)
+        {
+            kind = 21;
+            type = 5;
+            _hasStructuredStatement = true;
+        }
+        if (!ParseTreeTerminatedExpression(keyword.Kind, type, out var root)
+            || !AddTreeStatement(kind, 0, root, keyword.Range.Start, TreeReturnEnd()))
+        {
+            return false;
+        }
+        if (kind == 8) { _structuredReturnCount = _structuredReturnCount + 1; }
         return true;
     }
 
@@ -1854,6 +1866,7 @@ mut class ScalarFrontendState
             int32 header = cursor;
             int32 kind = TreeStatementKind(cursor);
             mut bool returns = kind == 8 || kind == 6 || kind == 7;
+            if (kind == 21) { returns = TreeLiteralBoolean(TreeStatementWord(cursor, 2)) == 0; }
             if (kind == 14)
             {
                 int32 blockEnd = TreeStatementWord(cursor, 1);
@@ -2027,13 +2040,13 @@ mut class ScalarFrontendState
             {
                 if (_error == 0) { Fail(1); }
             }
-            mut bool hasDoFor = false;
+            mut bool hasTerminatingStatement = false;
             for (mut int32 index = 0; index < _statementCount; index = index + 1)
             {
                 int32 kind = TreeStatementKind(index);
-                if (kind == 11 || kind == 12) { hasDoFor = true; }
+                if (kind == 11 || kind == 12 || kind == 21) { hasTerminatingStatement = true; }
             }
-            if (_error == 0 && (_structuredReturnCount == 0 && !hasDoFor
+            if (_error == 0 && (_structuredReturnCount == 0 && !hasTerminatingStatement
                 || !TreeBodyReturns(0, _statementCount)))
             {
                 Fail(1);
@@ -2711,19 +2724,17 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private mut bool ParseTreeReturn(int32 type, out int32 root)
+    private mut bool ParseTreeTerminatedExpression(int32 kind, int32 type, out int32 root)
     {
-        if (!Take(19, out var keyword)
+        if (!Take(kind, out var keyword)
             || !ParseTreeExpression(type, 1, 0, out var expression))
         {
             return false;
         }
         if (!ResolveTreeLiteral(expression, type, false))
         {
-            require SourceRange.TryCreate(TreeWord(expression, 2),
-                TreeWord(expression, 3), out var span);
-            FailAt(2, span);
-            return false;
+            root = -1;
+            return FailTreeType(expression);
         }
         if (!Take(52, out var semicolon))
         {
@@ -2818,7 +2829,7 @@ mut class ScalarFrontendState
                     }
                     if (_error == 0 && Take(47, out var closeCondition)
                         && Take(48, out var openTrue)
-                        && ParseTreeReturn(returnType, out var first)
+                        && ParseTreeTerminatedExpression(19, returnType, out var first)
                         && Take(49, out var closeTrue))
                     {
                         whenTrue = first;
@@ -2827,20 +2838,20 @@ mut class ScalarFrontendState
                         {
                             _at = _at + 1;
                             if (Take(48, out var openFalse)
-                                && ParseTreeReturn(returnType, out var second)
+                                && ParseTreeTerminatedExpression(19, returnType, out var second)
                                 && Take(49, out var closeFalse))
                             {
                                 whenFalse = second;
                             }
                         }
-                        else if (ParseTreeReturn(returnType, out var trailing))
+                        else if (ParseTreeTerminatedExpression(19, returnType, out var trailing))
                         {
                             whenFalse = trailing;
                             hasFallthrough = true;
                         }
                     }
                 }
-                else if (_error == 0 && ParseTreeReturn(returnType, out var found))
+                else if (_error == 0 && ParseTreeTerminatedExpression(19, returnType, out var found))
                 {
                     whenTrue = found;
                 }
@@ -3049,9 +3060,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     for (mut int32 index = 0; index < count; index = index + 1)
     {
         require chain.TryGet(index, out var token);
-        if (token.Kind == 82 || token.Kind == 12 || token.Kind == 13
-            || token.Kind == 18 || token.Kind == 16
-            || token.Kind == 64 || token.Kind == 56
+        if (IsScalarFrontendTreeMarker(token.Kind)
             || (token.Kind == 2 && chain.TryGet(index + 1, out var opener)
                 && opener.Kind == 46 && TryGetScalarType(token, out var conversionType)))
         {
@@ -3061,6 +3070,17 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     }
     result = legacy;
     return true;
+}
+
+bool IsScalarFrontendTreeMarker(int32 kind)
+{
+    if (kind == 82) { return true; }
+    if (kind == 12) { return true; }
+    if (kind == 13) { return true; }
+    if (kind == 18) { return true; }
+    if (kind == 16) { return true; }
+    if (kind == 64) { return true; }
+    return kind == 56;
 }
 
 bool TryScanScalarFrontend(out ScalarFrontendResult result)

@@ -52,6 +52,8 @@ namespace Terrum.CodeAnalysis;
 // hidden local anchored to '_'; root is self-typed and span ends at the semicolon.
 // Version 54 adds labeled while/do/for headers (16/17/18), whose spans include
 // the label, and named break/continue (19/20), whose slots select enclosing headers.
+// Version 55 adds kind-21 standalone requirements: slot zero, Boolean root,
+// and an exact keyword-through-semicolon span, without a local or source scope.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -77,13 +79,11 @@ void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expres
 int32 GetScalarFrontendStatementVersion()
 {
     mut int32 version = 0;
+    mut int32 maximumKind = 0;
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
     {
         int32 kind = Host.Frontend[332 + statement * 5];
-        if (kind >= 16) { return 54; }
-        if (kind == 15) { version = 53; }
-        if (kind == 14 && version < 52) { version = 52; }
-        if ((kind == 11 || kind == 12) && version < 51) { version = 51; }
+        if (kind > maximumKind) { maximumKind = kind; }
         if (kind == 8 && version < 48) { version = 48; }
         if (kind != 1 || version >= 50) { continue; }
         for (mut int32 header = 0; header < statement; header = header + 1)
@@ -97,6 +97,10 @@ int32 GetScalarFrontendStatementVersion()
             }
         }
     }
+    if (maximumKind == 21) { return 55; }
+    if (maximumKind >= 16) { return 54; }
+    if (maximumKind >= 14) { return maximumKind + 38; }
+    if (maximumKind >= 11) { return 51; }
     return version;
 }
 
@@ -185,17 +189,29 @@ int32 GetScalarFrontendLegacyVersion(ScalarFrontendResult result)
     if (result.ParameterCount == 3) { return 19; }
     int32 maximum = GetScalarFrontendMaximumOperation(result);
     if (maximum >= 4000) { return GetScalarFrontendExtendedVersion(maximum); }
-    if (IsScalarFrontendNumericUnary(result.WhenTrue.Operation)
-        || result.HasCondition && (IsScalarFrontendNumericUnary(result.Condition.Operation)
-            || IsScalarFrontendNumericUnary(result.WhenFalse.Operation))) { return 10; }
+    if (HasScalarFrontendNumericUnary(result)) { return 10; }
     if (maximum >= 2700) { return 9; }
     if (maximum >= 2000) { return 8; }
-    if (result.WhenTrue.Operation == 658
-        || result.HasCondition && (result.Condition.Operation == 658
-            || result.WhenFalse.Operation == 658)) { return 7; }
+    if (HasScalarFrontendLegacyOperation(result, 658)) { return 7; }
     if (maximum >= 1600) { return 6; }
     if (maximum >= 1200) { return 5; }
     return result.HasCondition && result.HasFallthrough ? 4 : 3;
+}
+
+bool HasScalarFrontendNumericUnary(ScalarFrontendResult result)
+{
+    if (IsScalarFrontendNumericUnary(result.WhenTrue.Operation)) { return true; }
+    if (!result.HasCondition) { return false; }
+    if (IsScalarFrontendNumericUnary(result.Condition.Operation)) { return true; }
+    return IsScalarFrontendNumericUnary(result.WhenFalse.Operation);
+}
+
+bool HasScalarFrontendLegacyOperation(ScalarFrontendResult result, int32 operation)
+{
+    if (result.WhenTrue.Operation == operation) { return true; }
+    if (!result.HasCondition) { return false; }
+    if (result.Condition.Operation == operation) { return true; }
+    return result.WhenFalse.Operation == operation;
 }
 
 void WriteScalarFrontendHeader(ScalarFrontendResult result)
