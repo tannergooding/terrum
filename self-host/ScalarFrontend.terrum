@@ -1401,6 +1401,11 @@ mut class ScalarFrontendState
         {
             return false;
         }
+        if (!TokensAttach(function, openParameters))
+        {
+            FailAt(1, openParameters.Range);
+            return false;
+        }
         require _tokens.TryGet(_at, out var next);
         if (next.Kind != 47)
         {
@@ -2259,6 +2264,11 @@ mut class ScalarFrontendState
             && _tokens.TryGet(_at + 1, out var opening)
             && opening.Kind == 46)
         {
+            if (!TokensAttach(token, opening))
+            {
+                FailAt(1, opening.Range);
+                return false;
+            }
             if (!TryGetScalarType(token, out var target)
                 || target == 5)
             {
@@ -2926,7 +2936,9 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
         require chain.TryGet(index, out var token);
         if (token.Kind == 82 || token.Kind == 12 || token.Kind == 13
             || token.Kind == 18 || token.Kind == 16
-            || token.Kind == 64 || token.Kind == 56)
+            || token.Kind == 64 || token.Kind == 56
+            || (token.Kind == 2 && chain.TryGet(index + 1, out var opener)
+                && opener.Kind == 46 && TryGetScalarType(token, out var conversionType)))
         {
             result = modern;
             return true;

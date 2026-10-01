@@ -21,6 +21,10 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     require tokens.TryGet(3, out var closeParameters);
     require tokens.TryGet(4, out var openBody);
     require tokens.TryGet(5, out var returnKeyword);
+    if (!TokensAttach(function, openParameters))
+    {
+        return false;
+    }
     if (function.Kind != 2 || openParameters.Kind != 46 || closeParameters.Kind != 47
         || openBody.Kind != 48 || returnKeyword.Kind != 19)
     {
@@ -490,6 +494,10 @@ bool TryParseScalarBinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
     require tokens.TryGet(9, out var semicolon);
     require tokens.TryGet(10, out var closeBody);
     require tokens.TryGet(11, out var eof);
+    if (!TokensAttach(function, openParameters))
+    {
+        return false;
+    }
     if (function.Kind != 2 || openParameters.Kind != 46 || closeParameters.Kind != 47
         || openBody.Kind != 48 || returnKeyword.Kind != 19
         || left.Kind != 3 || ((binary.Kind < 57 || binary.Kind > 61)
@@ -543,6 +551,11 @@ bool TryEvaluateTypedScalarComparisonReturn(TokenSnapshot tokens, TokenIntegerSn
     require tokens.TryGet(15, out var semicolon);
     require tokens.TryGet(16, out var closeBody);
     require tokens.TryGet(17, out var eof);
+    if (!TokensAttach(function, openParameters)
+        || !TokensAttach(leftType, leftOpen) || !TokensAttach(rightType, rightOpen))
+    {
+        return false;
+    }
     if (!TryGetScalarType(returnType, out var selectedReturn) || selectedReturn != 5
         || !TryGetScalarType(leftType, out var selected)
         || !TryGetScalarType(rightType, out var matching) || selected != matching
@@ -631,6 +644,10 @@ bool TryParseParameterComparisonReturn(TokenSnapshot tokens, TokenIntegerSnapsho
     require tokens.TryGet(11, out var semicolon);
     require tokens.TryGet(12, out var closeBody);
     require tokens.TryGet(13, out var eof);
+    if (!TokensAttach(function, openParameters))
+    {
+        return false;
+    }
     if (!TryGetScalarType(returnType, out var selectedReturn) || selectedReturn != 5
         || !TryGetScalarType(parameterType, out var selected) || selected == 5
         || function.Kind != 2 || openParameters.Kind != 46 || parameter.Kind != 2
@@ -764,6 +781,10 @@ bool TryParseParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
     require tokens.TryGet(11, out var semicolon);
     require tokens.TryGet(12, out var closeBody);
     require tokens.TryGet(13, out var eof);
+    if (!TokensAttach(function, openParameters))
+    {
+        return false;
+    }
     if (!TryGetScalarType(returnType, out var selected)
         || !TryGetScalarType(parameterType, out var matching) || selected != matching
         || selected == 5 || selected == 6 || function.Kind != 2

@@ -51,7 +51,15 @@ The read-only catalog appends host grant 9, moving the frontend output grant
 to index 10; the earlier nine scanner grants retain their indices.
 This is source-profile adoption, not future construct support, a self-hosting
 claim or a semantic/native/Contract format revision.
-The host parser's current language version is syntax-38. Syntax-18's qualified
+Syntax-39 requires receiver/name-attached opening delimiters in supported
+hosted forms. Scalar frontend headers and scalar type calls, and the maintained
+scalar parser/evaluator probes, use raw `Token.Range` ends/starts for the same
+boundary. Ordinary, line and documentation comments all break attachment;
+interior trivia and structural grouping remain legal. The host independently
+audits current syntax before reconstructing successful projections, including
+historical projection shapes. This does not add native general calls, indexing
+or generics, or change scanner-7/schema-7, projections 1–51 or any bounds.
+The host parser's current language version is syntax-39. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile

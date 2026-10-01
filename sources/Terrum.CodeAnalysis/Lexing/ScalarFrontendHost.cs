@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Collections.Immutable;
 using System.Linq;
 using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Lexing;
@@ -60,6 +61,10 @@ public static class ScalarFrontendHost
         }
 
         var name = Span(9);
+        if (SyntaxTree.Parse(source).HasErrors)
+        {
+            throw InvalidResult();
+        }
         var firstName = Span(11);
         var secondName = Span(13);
         var thirdName = Span(35);

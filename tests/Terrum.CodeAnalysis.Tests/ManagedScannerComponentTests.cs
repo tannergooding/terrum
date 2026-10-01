@@ -653,6 +653,10 @@ public sealed class ManagedScannerComponentTests
     [InlineData("uint64 Answer() { return +(42); }", 4)]
     [InlineData("uint64 Answer() { return (~42); }", 4)]
     [InlineData("float32 Answer() { return 42; }", 0)]
+    [InlineData("int32 Answer () { return 42; }", 0)]
+    [InlineData("int32 Answer\n() { return 42; }", 0)]
+    [InlineData("int32 Answer/* boundary */() { return 42; }", 0)]
+    [InlineData("int32 Answer/// boundary\n() { return 42; }", 0)]
     public async Task TypedScalarParserMatchesHostedDeclarationSpansAsync(string text, int type)
     {
         var hosted = SyntaxTree.Parse(text);
@@ -760,6 +764,10 @@ public sealed class ManagedScannerComponentTests
     [InlineData("char16(1) < uint32(2)", false, false)]
     [InlineData("int32(1) < int64(2)", false, false)]
     [InlineData("int32(1) + int32(2)", false, false)]
+    [InlineData("int32 (1) == int32(1)", false, false)]
+    [InlineData("int32(1) == int32\n(1)", false, false)]
+    [InlineData("int32/* boundary */(1) == int32(1)", false, false)]
+    [InlineData("int32(1) == int32/// boundary\n(1)", false, false)]
     public async Task BoundedNativeTypedScalarComparisonUsesOwnedRecordsAsync(
         string expression, bool evaluable, bool expected)
     {
@@ -953,6 +961,10 @@ public sealed class ManagedScannerComponentTests
     [InlineData("int32 Value(int32 x, uint32 y) { return x + y; }")]
     [InlineData("int32 Value(int32 x int32 y) { return x + y; }")]
     [InlineData("char16 Value(char16 x, char16 y) { return x + y; }")]
+    [InlineData("int32 Value (int32 x, int32 y) { return x + y; }")]
+    [InlineData("int32 Value\n(int32 x, int32 y) { return x + y; }")]
+    [InlineData("int32 Value/* boundary */(int32 x, int32 y) { return x + y; }")]
+    [InlineData("int32 Value/// boundary\n(int32 x, int32 y) { return x + y; }")]
     public async Task BoundedNativeTwoParameterAdditionRejectsInvalidDeclarationsAsync(string text)
     {
         const string Entry = """
@@ -2576,6 +2588,45 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32 Value#(bool c, int32 x, int32 y) { if (c) { return x; } else { return y; } }",
+        "ScalarConditionalParser", "TryEvaluateInt32ScalarConditionalReturn(move tokens, true, 20, 22, out var name, out var value)")]
+    [InlineData("int32 Value#(bool c, int32 x, int32 y) { if (c) { return x + y; } else { return x; } }",
+        "ScalarConditionalAddParser", "TryEvaluateInt32ScalarConditionalAddReturn(move tokens, true, 20, 22, out var name, out var value)")]
+    [InlineData("int32 Value#(int32 x, int32 y) { if (x < y) { return x; } else { return y; } }",
+        "ScalarComparisonConditionalParser", "TryEvaluateInt32ComparisonConditionalReturn(move tokens, 20, 22, out var name, out var value)")]
+    public async Task MaintainedScalarProbesEnforceAttachedHeadersAsync(string form, string module, string invocation)
+    {
+        foreach (var gap in new[] { "", " ", "\n", "/* boundary */", "/// boundary\n" })
+        {
+            var text = form.Replace("#", gap, StringComparison.Ordinal);
+            var entry = $$"""
+                using Terrum.CodeAnalysis;
+                int32 Main() {
+                    require TokenSnapshot.TryScan(init var tokens);
+                    bool valid = {{invocation}};
+                    if (valid != {{(gap.Length == 0 ? "true" : "false")}}) { return 1; }
+                    return 42;
+                }
+                """;
+            foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+            {
+                var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy, module).ConfigureAwait(true);
+                Assert.Equal(42, NativeJit.Execute(program, policy));
+                await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 Value () { return 42; }", 1, "()")]
+    [InlineData("int32 Value\n() { return 42; }", 1, "()")]
+    [InlineData("int32 Value/* boundary */() { return 42; }", 1, "()")]
+    [InlineData("int32 Value/// boundary\n() { return 42; }", 1, "()")]
+    [InlineData("int32 @await /* boundary */() { return 42; }", 1, "()")]
+    [InlineData("int32 Value() { return int32 (42); }", 1, "(42)")]
+    [InlineData("int32 Value() { return int32\n(42); }", 1, "(42)")]
+    [InlineData("int32 Value() { return int32/* boundary */(42); }", 1, "(42)")]
+    [InlineData("int32 Value() { return int32/// boundary\n(42); }", 1, "(42)")]
     [InlineData("int32 Value(int32 x, int32 x) { return x; }", 4, "x)")]
     [InlineData("int32 Value(int32 x) { return y; }", 3, "y;")]
     [InlineData("int32 Value(uint32 x) { return x; }", 2, "x;")]

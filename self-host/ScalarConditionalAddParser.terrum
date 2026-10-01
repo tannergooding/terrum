@@ -48,6 +48,10 @@ bool TryParseScalarConditionalAddReturn(TokenSnapshot tokens,
     {
         return false;
     }
+    if (!TokensAttach(function, openParameters))
+    {
+        return false;
+    }
     if (function.Kind != 2 || openParameters.Kind != 46
         || firstComma.Kind != 53 || secondComma.Kind != 53
         || closeParameters.Kind != 47 || openBody.Kind != 48

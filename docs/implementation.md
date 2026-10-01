@@ -1,6 +1,25 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-38, semantic v43–v45 updates, native-10 through native-20
+## Current boundary: syntax-39, semantic v43–v45 updates, native-10 through native-20
+
+Syntax-39 adopts receiver/name-attached opening delimiters across supported
+calls, indexing, generic applications and type arguments, generic declaration
+parameters, callable/constructor/operator parameters and attribute arguments.
+The preceding raw token must end exactly where the opener starts; whitespace,
+line breaks and comments break that boundary, including after escaped names
+and compound receivers. Interior trivia, ordinary grouping, structural
+keyword parentheses and external braces retain their existing rules.
+Generic-call classification remains syntactic: an otherwise selected generic
+application reports `TRM1006` for detached delimiters rather than being
+reinterpreted as a relational expression. Lossless recovery retains all text.
+The native scalar frontend and maintained scalar probes enforce function
+header and supported scalar type-call attachment. Host projection audits
+also require current source syntax, including for compatible historical
+projection shapes; hostile records cannot authorize detached constructs.
+This adds no native general calls, indexing or generics, indexer declarations
+or broader attribute syntax. Scanner-7/schema-7, projections 1–51, resource
+limits, semantic formats, persisted names and native ABI remain unchanged.
+Other spacing rules and broader grammar adoption remain separate work.
 
 Syntax-38/scanner-7 adopts the approved contiguous `@keyword` identifiers.
 The closed ordinal escape catalog is exactly the vocabulary and contextual

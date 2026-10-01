@@ -37,6 +37,10 @@ bool TryParseScalarConditionalReturn(TokenSnapshot tokens,
     require tokens.TryGet(27, out var closeFalse);
     require tokens.TryGet(28, out var closeBody);
     require tokens.TryGet(29, out var eof);
+    if (!TokensAttach(function, openParameters))
+    {
+        return false;
+    }
     if (!TryGetScalarType(returnType, out var selected)
         || !TryGetScalarType(conditionType, out var condition) || condition != 5
         || !TryGetScalarType(firstType, out var matchingFirst)

@@ -1,5 +1,10 @@
 namespace Terrum.CodeAnalysis;
 
+bool TokensAttach(Token receiver, Token opener)
+{
+    return receiver.Range.End == opener.Range.Start;
+}
+
 // Scalar type codes: 1=int32, 2=uint32, 3=int64, 4=uint64, 5=bool, 6=char16.
 bool TryGetScalarType(Token type, out int32 scalarType)
 {

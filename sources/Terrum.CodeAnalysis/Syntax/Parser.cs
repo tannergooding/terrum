@@ -29,7 +29,7 @@ internal sealed class Parser
 
     private SyntaxNode ParseTypeParameters(bool interfaceParameters = false)
     {
-        var children = new List<SyntaxElement> { Expect(TokenKind.Less) };
+        var children = new List<SyntaxElement> { ExpectAttached(TokenKind.Less) };
         if (interfaceParameters && Current.Kind == TokenKind.Identifier && Current.Text == "this")
         {
             children.Add(Take());
@@ -188,7 +188,7 @@ internal sealed class Parser
 
     private SyntaxNode ParseTypeArguments()
     {
-        var children = new List<SyntaxElement> { Take(), ParseType() };
+        var children = new List<SyntaxElement> { ExpectAttached(TokenKind.Less), ParseType() };
         while (Current.Kind == TokenKind.Comma)
         {
             children.Add(Take());
@@ -283,7 +283,7 @@ internal sealed class Parser
             var attribute = new List<SyntaxElement> { Take(), Expect(TokenKind.Identifier) };
             if (Current.Kind == TokenKind.OpenParen)
             {
-                attribute.Add(Take());
+                attribute.Add(ExpectAttached(TokenKind.OpenParen));
                 attribute.Add(Expect(TokenKind.Identifier));
                 attribute.Add(Expect(TokenKind.CloseParen));
             }
@@ -507,7 +507,7 @@ internal sealed class Parser
 
         if (Current.Kind == TokenKind.Less)
         {
-            children.Add(Take());
+            children.Add(ExpectAttached(TokenKind.Less));
             children.Add(ParseType());
 
             while (Current.Kind == TokenKind.Comma)
@@ -542,7 +542,7 @@ internal sealed class Parser
 
     private SyntaxNode ParseParameters()
     {
-        var children = new List<SyntaxElement> { Expect(TokenKind.OpenParen) };
+        var children = new List<SyntaxElement> { ExpectAttached(TokenKind.OpenParen) };
 
         while (Current.Kind is not (TokenKind.CloseParen or TokenKind.OpenBrace or TokenKind.EndOfFile))
         {
@@ -553,7 +553,7 @@ internal sealed class Parser
             {
                 parameter.Add(Take());
                 parameter.Add(Take());
-                parameter.Add(Expect(TokenKind.Less));
+                parameter.Add(ExpectAttached(TokenKind.Less));
                 parameter.Add(ParseType());
                 parameter.Add(Expect(TokenKind.Greater));
             }
@@ -1074,7 +1074,7 @@ internal sealed class Parser
             }
             else if (Current.Kind == TokenKind.OpenBracket)
             {
-                expression = Node(SyntaxKind.IndexExpression, [expression, Take(), ParseExpression(), Expect(TokenKind.CloseBracket)]);
+                expression = Node(SyntaxKind.IndexExpression, [expression, ExpectAttached(TokenKind.OpenBracket), ParseExpression(), Expect(TokenKind.CloseBracket)]);
             }
             else if (Current.Kind is TokenKind.PlusPlus or TokenKind.MinusMinus)
             {
@@ -1097,7 +1097,7 @@ internal sealed class Parser
 
     private SyntaxNode ParseArguments()
     {
-        var children = new List<SyntaxElement> { Expect(TokenKind.OpenParen) };
+        var children = new List<SyntaxElement> { ExpectAttached(TokenKind.OpenParen) };
 
         while (Current.Kind is not (TokenKind.CloseParen or TokenKind.Semicolon or TokenKind.CloseBrace or TokenKind.EndOfFile))
         {
@@ -1171,6 +1171,17 @@ internal sealed class Parser
             Report("TRM1002", "Unexpected token.", Current.Span);
             children.Add(Node(SyntaxKind.SkippedSyntax, [Take()]));
         }
+    }
+
+    private SyntaxTokenElement ExpectAttached(TokenKind kind)
+    {
+        if (Current.Kind == kind && _position > 0
+            && _tokens[_position - 1].Span.End != Current.Span.Start)
+        {
+            Report("TRM1006", "The opening delimiter must attach to the preceding name or receiver.", Current.Span);
+        }
+
+        return Expect(kind);
     }
 
     private SyntaxTokenElement Expect(TokenKind kind)

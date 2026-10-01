@@ -249,9 +249,18 @@ classification and numeric decoding remain native results. Historical
 scanner-5 records keep their numeric identities and raw readers, and historical
 compiled scanners still execute. Compatible outputs can feed the current
 adapter, but old fixed-fence or documentation classifications that disagree
-with syntax-38 reject as `TRM5001` in CLI adaptation rather than being relabeled.
+with the current syntax profile reject as `TRM5001` in CLI adaptation rather than being relabeled.
 A malformed token remains a `Bad`, `NumericLiteral`, or `StringLiteral` token
 with its raw source span; diagnostics do not replace source characters.
+
+Syntax-39 uses these unchanged raw token extents to require receiver/name
+attachment for supported opening delimiters. Scanner-7/schema-7 still
+tokenizes detached forms normally; hosted parsing (including current
+prelexed/component input) reports `TRM1006`. Native scalar parsing rejects
+detached function headers and supported scalar type calls, and the host
+audits current syntax before accepting successful frontend projections.
+Compatible historical token records remain readable; no scanner record,
+catalog, buffer or projection revision is needed for this syntax migration.
 
 Keyword records are generated from the host `TokenKind` catalog's `*Keyword`
 members. Operator records use their lexical spellings, with fixture comparisons

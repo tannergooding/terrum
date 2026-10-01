@@ -22,6 +22,10 @@ bool TryParseTwoParameterBinaryPrefix(TokenSnapshot tokens, int32 operatorKind,
     require tokens.TryGet(11, out var firstUse);
     require tokens.TryGet(12, out var binary);
     require tokens.TryGet(13, out var secondUse);
+    if (!TokensAttach(function, openParameters))
+    {
+        return false;
+    }
     if (!TryGetScalarType(returnType, out var resultType)
         || !TryGetScalarType(firstType, out var matchingFirst)
         || !TryGetScalarType(secondType, out var matchingSecond)
