@@ -5,6 +5,10 @@ The project is a bounded checked native compiler, not the whole language.
 contracts; the [implementation reference](implementation.md) records current
 support; [proposals](proposals/README.md) collect unapproved choices.
 Approval, implementation, and pre-v1 stability are separate.
+Keep the grammar normative: source productions, semantic constraints and
+explicit scope boundaries, not approval history or implementation snapshots.
+Record support and migration details in the implementation reference; use
+this roadmap for adoption sequencing and remaining work.
 
 ## Active work (priority order)
 
