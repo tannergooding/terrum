@@ -729,6 +729,7 @@ public mut unique struct Buffer<T>
     public nuint Count { get; }
     public static Buffer<T> Adopt(nuint capacity, AllocationLease storage);
     public mut void Initialize(nuint index, T value);
+    public mut bool TryTakeLast(init ref<T> value);
     public Span<T> AsSpan();
     [ViewOf(Access.Write)] public mut write Span<T> GetWriteAccess();
     public mut void Clear();
@@ -747,6 +748,7 @@ public mut unique struct Vector<T>
     public mut void Insert(nuint index, T value);
     public mut bool TryInsert(nuint index, T value);
     public mut void RemoveAt(nuint index);
+    public mut bool TryTakeLast(init ref<T> value);
     public mut void Reserve(nuint capacity);
     public mut bool TryReserve(nuint capacity);
     public Span<T> AsSpan();
@@ -781,6 +783,31 @@ span. Exact disposed-state diagnostics, release-failure reporting and
 implicit no-throw cleanup metadata remain open; the `Dispose` name alone
 supplies none of them. A vector retains its explicitly supplied allocator
 dependency for future growth rather than consulting an ambient provider.
+
+`Buffer.TryTakeLast` and `Vector.TryTakeLast` are **PROPOSED** initialized-tail
+extraction members. They transfer the last initialized element into a vacant
+output rather than copy an element and then destroy its original. The buffer
+form therefore does not add a `[Copy]` requirement; the vector retains its
+existing `[Sized], [Copy]` profile for its other operations.
+
+An empty live owner returns false, leaves the output vacant and preserves
+contents, count and capacity. True publishes the complete moved value,
+decrements `Count` by one and retires the former final slot as vacant storage.
+Earlier elements keep their order, and the allocation and capacity remain
+owned by the buffer/vector. The moved value's cleanup/release responsibility
+passes to the caller; extraction must not run its cleanup in the source or
+later destroy the vacant slot during `Clear` or `Dispose`. No `default(T)`,
+copy of an affine owner or readable stale tail is manufactured.
+
+The output must satisfy ordinary vacant-destination, move, capture/rooting
+and lifetime checks. Dependencies carried by `T` are retained by the moved
+result; extraction neither extends a borrowed lifetime nor rebases an
+interior reference. Conflicting backing loans must have ended before
+structural mutation, including when no allocation or relocation occurs.
+Disposed access, loan conflicts and other checked failures are not empty
+results. Conditional publication, transferred cleanup/root responsibility
+and source/output dependency metadata remain **OPEN**; the member spelling
+alone supplies no executable move or NoThrow guarantee.
 
 The vector's indexed access, insertion/removal and allocation-refusal
 overloads are **PROPOSED** additions for its existing `[Sized], [Copy]`
@@ -1104,8 +1131,8 @@ need collector roots/barriers independently of memory order.
 |---|---|---|
 | `AllocationLease` / `Terrum.Collections` | `ByteLength`, `Alignment`, `Dispose()`; optional checked `SliceBytes(offset, length) -> Span<uint8>` | Owns one allocation/release, not a provider; slicing retains lease |
 | `AllocatorContext` / `Terrum.Collections` | `Allocate(bytes, alignment) -> AllocationLease`, `Dispose()`; `TryAllocate(..., init ref<AllocationLease>) -> bool` | Provider must outlive outstanding allocations or explicitly transfer release capability |
-| `Buffer<T>` / `Terrum.Collections` | `Capacity`, `Count`, `Adopt`, `Initialize`, `AsSpan`, `GetWriteAccess`, `Clear`, `Dispose` | Initialized prefix versus vacant capacity; unique owner and trace/barrier policy |
-| `Vector<T>` / `Terrum.Collections` | `Create`, `Count`, `Capacity`, copied index/`TryGet`, `Add`/`TryAdd`, `Insert`/`TryInsert`, `RemoveAt`, `Reserve`/`TryReserve`, span access, `Clear`, `Dispose` | Initialized prefix and explicit allocator; allocation refusal preserves prior state; conflicting views prevent structural mutation |
+| `Buffer<T>` / `Terrum.Collections` | `Capacity`, `Count`, `Adopt`, `Initialize`, moving `TryTakeLast`, `AsSpan`, `GetWriteAccess`, `Clear`, `Dispose` | Initialized prefix versus vacant capacity; unique owner and trace/barrier policy; extraction transfers cleanup responsibility without requiring Copy |
+| `Vector<T>` / `Terrum.Collections` | `Create`, `Count`, `Capacity`, copied index/`TryGet`, `Add`/`TryAdd`, `Insert`/`TryInsert`, `RemoveAt`, moving `TryTakeLast`, `Reserve`/`TryReserve`, span access, `Clear`, `Dispose` | Initialized prefix and explicit allocator; allocation refusal preserves prior state; conflicting views prevent structural mutation |
 | `Deque<T>` / `Terrum.Collections` | Explicit-provider `Create`, count/capacity/index/peek, front/back push/pop, reservation, readonly segment pair and exclusive writable guard, `Clear`, `Dispose` | Logical front-to-back initialized sequence; disjoint two-span coverage and retained backing; no fabricated contiguous span |
 | `ByteArena` / `Terrum.Collections` | Borrowed-backing constructor, `Capacity`, `Used`, `Allocate`, `TryAllocate`, `Reset`, `Dispose` | Fixed initialized byte backing; disjoint-slice, alignment and reset/disposal loan checks; owned/growable arena remains OPEN |
 | `MemoryPool<T>`, `MemoryOwner<T>` / `Terrum.Collections` | Explicit-provider `Create`, `Rent`/`TryRent`; rental `Capacity`, `Count`, `Initialize`, span access, `Clear`, `Dispose` | Unique rental/return responsibility; initialized prefix versus pooled capacity; pool disposal requires all rentals returned |
