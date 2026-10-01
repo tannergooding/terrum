@@ -1847,8 +1847,13 @@ For floats NaN is unordered and `==` leaves NaN unequal.
 `IIntegerRelations` is an optional relation proposal; the `uint32` witness
 below shows approved `type Name = Type;` bindings. The maximum width need not have
 a `Wider` or this witness at all. Relations confer no conversion and do
-not infer `T` backward from `T.Wider`; associated equality, inherited
-witnesses and metadata remain **OPEN** in [type families](../type-families.md#nominal-witnesses-and-associated-relationships).
+not infer `T` backward from `T.Wider`. The approved
+[associated-identity clause](../grammar-spec.md#54-aliases-and-associated-types-candidate-declarations-open-binding)
+uses `where T.via<ISource>.Item is U` after ordinary inference and witness
+selection; it compares complete resolved type identity, including access and
+ownership qualification. These particular integer relationships, complete
+checking diagnostics and metadata remain **OPEN**; see
+[type families](../type-families.md#nominal-witnesses-and-associated-relationships).
 
 ### Existing sampled declarations
 
@@ -1964,7 +1969,7 @@ public struct decimal32 : IParsable<decimal32>, IFormattable, IScalarIeee754<dec
 }
 ```
 
-`IScalarNumber` and `IScalarIeee754` are optional composites; universal number protocol is not required. `TOther`/`TResult` may differ from `TSelf`. Vector arithmetic is not scalar classification. Named integer associated types such as `Wider`/`Signed`/`Unsigned` resolve through the selected interface witness, with no reverse inference from a projection. Associated declarations and explicit `.via<I>` witness selection have approved forms; associated-equality constraints and these particular numeric/conversion witness relationships remain open.
+`IScalarNumber` and `IScalarIeee754` are optional composites; universal number protocol is not required. `TOther`/`TResult` may differ from `TSelf`. Vector arithmetic is not scalar classification. Named integer associated types such as `Wider`/`Signed`/`Unsigned` resolve through the selected interface witness, with no reverse inference from a projection. Associated declarations, explicit `.via<I>` witness selection and associated-identity constraints have approved forms; these particular numeric/conversion witness relationships and their complete checking/metadata remain open.
 
 `int32.TryAdd/Subtract/Multiply` are checked expected failures; false publishes no output. `int32.FromBits` and `float32.ToBits` reinterpret bits, not numerically convert. Integer arithmetic is checked by default. Bare numeric literals have no default width; target context selects their type. The canonical [conversion policy](../conversions.md#conversion-policies) is: checked integer conversion preserves or throws, unchecked integer conversion wraps to destination-width bits, and saturation is explicit; floating-to-floating conversion follows IEEE-754 without language failure; float-to-int truncates toward zero, then checked conversion throws on out-of-range results or NaN, while unchecked or explicitly saturating conversion clamps out-of-range results and converts NaN to zero, never modulo-narrowing. Floating APIs are target-specific; exact source/destination witness lookup and user-defined declarations remain open.
 
@@ -2359,8 +2364,11 @@ neither half alone preserves every source lane.
 The two reduction names are only a place to review distinct
 strict/relaxed policies. Their exact policy definitions and lane order are
 **OPEN**; floating-point reduction, reassociation and contraction must not be
-silently selected. See [associated equality, Q14](grammar-open-questions.md#q14-associated-equality-constraints)
-before proposing a generic associated-type spelling.
+silently selected. The approved
+[associated-identity clause](../grammar-spec.md#54-aliases-and-associated-types-candidate-declarations-open-binding)
+can check a separately declared and selected result relationship; it does not
+define this vector family's relationship, infer a witness or approve a generic
+conversion signature.
 
 | Explicit member substitution inventory | Registration status |
 |---|---|
