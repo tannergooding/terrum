@@ -137,7 +137,7 @@ table. The proposed `Option<T>` alias is separately described in
 | Views and immutable text | `Span`, `IContiguousSequence`, `TextSpan`, `rune`, `Text` | [Text and views](#3-text-encoding-and-writers) |
 | Text output | `ITextWriter`, `SpanTextWriter` | [Writer signatures](#3-text-encoding-and-writers) |
 | Text construction and search | `TextBuilder`, `TextSearch` | [Construction/search](#proposed-text-construction-search-and-incremental-transcoding) |
-| Incremental text conversion | `MalformedTextPolicy`, `TextConversionStatus`, `TextConversionProgress`, `ITextDecoder`, `ITextEncoder`, `Utf8Decoder`, `Utf8Encoder` | [Transcoding](#proposed-text-construction-search-and-incremental-transcoding) |
+| Incremental text conversion | `MalformedTextPolicy`, `TextConversionStatus`, `TextConversionProgress`, `ITextDecoder`, `ITextEncoder`, `Utf8Decoder`, `Utf8Encoder`, `Utf16Decoder`, `Utf16Encoder` | [Transcoding](#proposed-text-construction-search-and-incremental-transcoding) |
 | Inline storage | `InlineArray` | [Inline storage](#general-span-and-inline-storage) |
 | Allocation and native owners | `AllocationLease`, `AllocatorContext`, `Buffer`, `Vector` | [Native storage](#explicit-native-storage-representative-foundation-inventory) |
 | Native double-ended storage | `Deque`, `DequeSegments`, `DequeWriteAccess` | [Deque signatures](#proposed-owned-double-ended-storage) |
@@ -471,6 +471,22 @@ public mut unique struct Utf8Encoder : ITextEncoder<char8>
     public mut TextConversionProgress Finish(write Span<char8> destination);
     public mut void Reset();
 }
+public mut unique struct Utf16Decoder : ITextDecoder<char16>
+{
+    public Utf16Decoder(MalformedTextPolicy policy);
+    public mut TextConversionProgress Convert(Span<char16> source,
+        write Span<rune> destination);
+    public mut TextConversionProgress Finish(write Span<rune> destination);
+    public mut void Reset();
+}
+public mut unique struct Utf16Encoder : ITextEncoder<char16>
+{
+    public Utf16Encoder();
+    public mut TextConversionProgress Convert(Span<rune> source,
+        write Span<char16> destination);
+    public mut TextConversionProgress Finish(write Span<char16> destination);
+    public mut void Reset();
+}
 ```
 
 The builder copies or transcodes each fragment into its chosen code-unit
@@ -500,6 +516,34 @@ All destination slots are valid initialized values before the call; `write`
 permits replacement, not construction of arbitrary uninitialized `T`.
 An encoder consumes validated `rune` scalars, so it needs no malformed-input
 policy; `InvalidData` applies to decoding malformed code units.
+
+The UTF-16 services are **PROPOSED** counterparts using the same progress
+protocol, not byte-stream codecs or new primitive validity rules. Decoder
+input counts are `char16` code units and output counts are complete `rune`
+scalars. A high surrogate at a fragment boundary may become consumed,
+codec-owned pending state; the next fragment can complete its pair. A lone
+low surrogate or an unmatched high surrogate follows the selected malformed
+policy. `Finish` distinguishes a pending high surrogate from a successfully
+finished input; an empty `Convert` call cannot silently discard it.
+
+The encoder writes one code unit for a BMP scalar or a complete two-unit
+surrogate pair for a supplementary scalar. With insufficient destination
+space it does not consume that scalar or publish half a pair. For example,
+a one-element output span cannot accept a supplementary scalar even when it
+is otherwise empty. This preserves retry from the reported unconsumed
+suffix, rather than requiring callers to reconstruct a partially emitted
+scalar. Stateful decoding of a raw source-unit span does not certify it as a
+valid immutable `TextSpan`; conversion and text-view validation have distinct
+publication contracts.
+
+These codecs operate on declared code units, without selecting a byte order,
+stripping a byte-order mark or negotiating an encoding from content. U+FEFF
+is ordinary scalar data in this proposed profile. Explicit byte framing,
+replacement-subsequence granularity and post-`Finish` reuse rules remain
+**OPEN**; they cannot be inferred from the names or an empty input. `Reset`
+provides the explicit pending-state reset already shared by the UTF-8
+services. Neither profile implies allocation, normalization or replacement
+of malformed source text inside the compiler's lossless lexer.
 
 The proposed TRRM String row has a 4-byte encoding-flags/unit-count header,
 explicit code-unit terminator and padded, 4-byte-aligned data. It is not a
