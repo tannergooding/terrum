@@ -618,8 +618,8 @@ exactly one existing kind-21 requirement or kind-15 discard record. Requirements
 have no local; discards have exactly one readonly hidden identity after the
 parameters. The Boolean-target condition and self-determined scalar discard
 rules are unchanged, including rejection of `_ = 42;` without a numeric type.
-Versions 1–56 retain their void-arrow restrictions; braced void payloads remain
-v56.
+Versions 1–56 retain their void-arrow restrictions; braced void payloads without
+`else if` remain v56.
 
 The independent reader consumes the entire header, arrow and statement,
 auditing the exact root, span, type, hidden identity, precedence and postorder
@@ -633,6 +633,36 @@ assignment/update arrows, declarations, static/output conditions, unit
 expressions/storage and ownership remain excluded. Existing buffer/record
 widths, resource limits, grammar, scanner and semantic/native/ABI contracts
 are unchanged.
+
+Provisional projection v58 adopts existing `else if` chains in braced scalar
+or void functions. It requires an actual kind-23 marker, expression-body flag
+41 set to zero and envelope roots 38–40 set to `-1`. The marker's `root` is
+`-1`, `slot` is the exclusive end of exactly one nested `if` subtree, and its
+raw span runs from `else` through that subtree. The nested `if` span excludes
+the preceding `else`; the parent `if` span includes the complete chain.
+Versions 1–57 reject kind 23. Feature selection takes precedence over v56 for
+braced void chains without widening v57 arrow payloads.
+
+The independent reader certifies the marker's association, sole child,
+subtree end, Boolean roots, source spans, node ownership, local visibility and
+loop ancestry. It rejects an end that consumes a sibling statement. Lowering
+uses a direct nested `BoundIf` as the false arm, not a synthetic lexical block.
+Actual source blocks retain hosted lexical flags, and v58 preserves hosted
+function, body, branch and completion spans; older representations remain
+unchanged. Each selected condition evaluates once, with existing lazy effects
+and checked-failure order under both policies. Unselected conditions and
+bodies do not execute, but unsupported inactive or following source still
+rejects before publication.
+
+Branch siblings restore visible names while retaining monotonic declaration
+identities; outer mutations, hidden discards and nearest/named loop transfer
+targets retain their existing contracts. Braced void completion and shared
+non-void fallthrough verification remain unchanged. Each nested `else if`
+consumes a real conditional structural level and marker record; there is no
+unbounded chain shortcut or extra source scope. All resource caps, widths,
+grammar, scanner, semantic/ISA/Contract/TRRM/native formats and ABI remain.
+General calls, richer types, ownership/cleanup and new Q37 label-shadowing
+decisions remain excluded.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

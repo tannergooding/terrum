@@ -268,10 +268,20 @@ Projection v57 adds void arrow bodies containing exactly one existing
 requirement or non-void scalar discard statement. It preserves hosted
 statement/body/function spans, managed lexical wrapping and implicit null
 completion at the semicolon under both policies. Earlier versions retain their
-arrow restrictions, and braced void functions remain v56. It adds no unit
+arrow restrictions, and braced void functions without `else if` remain v56. It adds no unit
 expression domain, calls, assignment/update arrows or ABI change; the
 [implementation reference](implementation.md) defines the exact record and
 source-audit boundary.
+
+Projection v58 adds existing `else if` chains to braced scalar and void
+functions. False arms lower directly to nested conditionals without synthetic
+lexical blocks; selected conditions, local scopes, loop targets and checked
+failures retain hosted behavior under both policies. Existing structural,
+record and expression limits still apply to each nested conditional. Versions
+1–57 retain their restrictions, and arrow bodies are not widened. The
+[implementation reference](implementation.md) specifies marker association,
+source coverage and feature precedence. Source-free indexed TRRM and the
+native ABI are unchanged.
 
 The native scalar frontend's provisional projection v48 represents scalar
 returns as structured body statements: kind 8, slot 0, a typed result root and
