@@ -435,10 +435,9 @@ mutability rules remain unchanged. Eight locals means eight total declaration
 identities across the function, not eight per scope. The 392 words, 64 tokens,
 12 statement records, 32 nodes, three parameters, 16 expression-recursion
 levels, six structural levels, scanner IDs and public ABI remain fixed.
-The hosted parser and indexed TRRM path support standalone lexical blocks, but
-the Terrum-authored scalar frontend does not project them.
-Vacant locals, calls, richer values and new persisted semantic/native formats
-remain unsupported.
+Projection v50 did not add standalone block statements; projection v52 adds
+them below. Vacant or owning locals, general calls, named transfers, richer
+values and new persisted semantic/native formats remain unsupported.
 
 Projection v51 adds braced scalar `do` and `for` loops through the existing
 verified `BoundWhile` lowering under both runtime policies. `do` executes the
@@ -464,6 +463,34 @@ structured bodies need no synthetic return. In v51 alone, an infinite empty
 All upper bounds, three-parameter ABI, scanner inventory and v1–50 servicing
 remain unchanged. This adds no named transfers, standalone blocks, calls,
 vacant/richer locals, source grammar decision or persisted-format revision.
+
+Provisional projection v52 adds nested empty or nonempty standalone lexical
+blocks using existing brace syntax; it adds no grammar spelling.
+Older projection layouts cannot identify or authorize a source-bound
+standalone-block scope, so only v52 selects the new record.
+Statement kind 14 stores the exclusive body-end statement index in `slot`,
+uses root `-1`, spans the opening through closing brace, and precedes its child
+records in preorder. Only a recognized standalone block selects kind 14 and
+its structured failure path. Raw-token resemblance cannot select it, and
+there is no successful hosted-parse fallback.
+
+The independent source-bound reader validates brace spans, nested extents,
+visible names and local identities before lowering to the existing managed
+lexical `BoundBlock` and shared verified path. Names use ordinal normalized
+identity: initializer references resolve only to preceding visible declaration
+identities, active names cannot be shadowed, and closed sibling scopes may
+reuse spellings with monotonic slots. Scope exit removes inner name/write
+authority through the existing cleanup path without undoing outer mutations;
+returns and nearest loop transfers retain their existing targets. Failed
+validation publishes no partial projection.
+
+Only projection v52 admits standalone blocks. Versions 1–51 retain their
+exact feature restrictions and source audits. The 392-`int32` buffer and all
+record widths remain fixed: 16,384 UTF-16 source units, 64 tokens, eight total
+local declarations, 12 statement records, 32 expression nodes, three
+parameters, 16 expression-recursion levels, six structural levels and the
+shared 100,000-visit limit. Scanner-8/schema-8, diagnostic kinds 1–12, token
+IDs, semantic/ISA/Contract/TRRM formats and native ABI remain unchanged.
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain

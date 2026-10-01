@@ -43,10 +43,11 @@ fixed.
 
 The native scalar frontend remains a bounded projection, not a standalone
 compiler: it shares the hosted verifier/emitter and is limited to 16K source
-units, 64 tokens, 8 locals, 12 statement records, 32 expression nodes and
-3 parameters. Projection versions 1–51 remain readable within their declared
-shapes. The bounded generic, ownership, initialization and constant-evaluation
-contracts are detailed in the [implementation reference](../docs/implementation.md);
+units, 64 tokens, 8 total local declarations, 12 statement records, 32
+expression nodes and 3 parameters. Projection versions 1–52 remain readable
+within their declared shapes. The bounded generic, ownership, initialization
+and constant-evaluation contracts are detailed in the
+[implementation reference](../docs/implementation.md);
 candidate library declarations do not become executable APIs by appearing here.
 
 Host fixtures retain syntax round trips and add native execution of
@@ -176,8 +177,8 @@ native emitter or compiler self-build.
 | [TokenIntegerSnapshot](TokenIntegerSnapshot.terrum) | Separately owned scanner-6 numeric-token indices and raw unsigned magnitude words, published with tokens and trivia by `TryScanCompilerInput` | AOT/JIT full-`uint64`, radix and overflow fixtures, indexed token lookup, invalid index/status/tag/owner rejection and atomic failure; shape checks do not prove a producer's arithmetic, and general binding remains hosted |
 | [TokenDiagnosticSnapshot](TokenDiagnosticSnapshot.terrum) | Independently owned lexical diagnostic codes and source ranges, available after a scan with errors even when token snapshots cannot publish | AOT/JIT host diagnostic parity under both policies, invalid buffer rejection, stable reads after host mutation and no success-shaped empty token stream on lexical failure |
 | [ScalarParserTypes](ScalarParserTypes.terrum) | Shared scalar type recognition, token-name equality, scalar comparison and scanner-integer decoding for separately compiled bounded parser probes | Scanner-owned source ranges, UTF-16 spelling and integer records, with no independent syntax or semantic ABI |
-| [ScalarFrontend](ScalarFrontend.terrum) | Bounded frontend over a successful scanner snapshot: one scalar function with up to three named parameters; supported scalar expressions, literals, grouping, conditionals, returns, and explicit `public`/`internal` visibility. Projection 48 adds structured returns, 49 adds shifts/compounds/local updates, 50 adds scoped local declarations, and 51 adds `do`/`for`. | Produces a source-bound scalar projection for the shared host verifier/emitter; scanner integer records and destination bounds supply constants without rescanning digits. Uses `Host.Source` and managed tokens; the persisted primitives DLL and `build-component` do not consume its typed result. |
-| [ScalarFrontendProjection](ScalarFrontendProjection.terrum) | Provisional 392-word host-owned buffer with completion status written last. Versions 21–47 add initialized locals, conversions, conditional trees, nested loops/branches and transfers; 48 adds structured returns, 49 shifts and local mutations, 50 scoped declarations, and 51 `do`/`for`. Older payloads remain supported; unused extensions are zero. | `ScalarFrontendHost` independently checks source anchors, types, literals, node order, precedence, roots, local binding, control-flow extents, transfers, returns, mutability and conversions before lowering to verified `BoundProgram`. Reachable non-void fallthrough rejects. The buffer bounds input to 64 tokens, 8 locals, 12 statements, 32 nodes, 16 expression-recursion levels and 6 structural levels; this is not a standalone compiler or machine-code encoder. |
+| [ScalarFrontend](ScalarFrontend.terrum) | Bounded frontend over a successful scanner snapshot: one scalar function with up to three named parameters; supported scalar expressions, literals, grouping, conditionals, returns, and explicit `public`/`internal` visibility. Projection 48 adds structured returns, 49 adds shifts/compounds/local updates, 50 adds scoped local declarations, 51 adds `do`/`for`, and 52 adds standalone lexical blocks. | Produces a source-bound scalar projection for the shared host verifier/emitter; scanner integer records and destination bounds supply constants without rescanning digits. Uses `Host.Source` and managed tokens; the persisted primitives DLL and `build-component` do not consume its typed result. |
+| [ScalarFrontendProjection](ScalarFrontendProjection.terrum) | Provisional 392-word host-owned buffer with completion status written last. Versions 21–47 add initialized locals, conversions, conditional trees, nested loops/branches and transfers; 48 adds structured returns, 49 shifts and local mutations, 50 scoped declarations, 51 `do`/`for`, and 52 standalone lexical blocks. Older payloads retain their feature restrictions; unused extensions are zero. | `ScalarFrontendHost` independently checks source anchors, types, literals, node order, precedence, roots, local binding, control-flow extents, transfers, returns, mutability and conversions before lowering to verified `BoundProgram`. Reachable non-void fallthrough rejects. The buffer bounds input to 64 tokens, 8 total local declarations, 12 statements, 32 nodes, 16 expression-recursion levels and 6 structural levels; this is not a standalone compiler or machine-code encoder. |
 | [ScalarFunctionParser](ScalarFunctionParser.terrum) | Provisional scalar function probe: grouped/unary literals, two-literal checked arithmetic and bitwise operations, typed integer/`char16` comparisons, and one named scalar parameter in comparisons or integer checked addition | Hosted-span and executed-value parity with AOT/JIT at decimal/based boundaries across all four integer widths and `char16` comparisons; names bind to declarations, invalid magnitudes and checked addition overflow reject; requires `ScalarParserTypes`; other declarations still require the host parser |
 | [ScalarParameterPairParser](ScalarParameterPairParser.terrum) | Separate bounded probe of two named scalar parameters returned through checked integer addition/subtraction, `x + y + literal` with both checked steps, or a Boolean comparison (including `char16`) | AOT/JIT under both policies across signed/unsigned 32-/64-bit extrema, code-unit comparisons and decimal/based literal boundaries; both identifiers bind to distinct declarations, either overflow or unsigned subtraction underflow rejects; requires `ScalarParserTypes`, not a bootstrap compiler |
 | [ScalarConditionalParser](ScalarConditionalParser.terrum) | Separately compiled probe of a `bool` parameter selecting between two named, same-typed scalar parameters with explicit `if`/`else` returns | AOT/JIT under both policies check both reachable arms across six scalar types and reject swapped/unbound names and missing branches; uses scanner-owned tokens and `ScalarParserTypes`, not the general hosted parser or a bootstrap compiler |
@@ -331,6 +332,14 @@ proven non-fallthrough loops need no synthetic return, and v51 permits zero
 nodes for an empty infinite for. All existing upper bounds, scanner IDs,
 ABI/persistence and v1–50 shapes remain unchanged. Named transfers, calls,
 standalone blocks and vacant/richer locals are not added.
+
+Projection v52 adds standalone lexical blocks as kind 14 with an exclusive
+body-end index, root `-1`, exact brace span and preorder children. The
+independent source-bound reader validates scope and extent before shared
+lowering; failure does not publish a partial projection. Versions 1–51 retain
+their prior feature restrictions. See the
+[implementation reference](../docs/implementation.md) for scope, resolution
+and compatibility rules.
 
 The host's syntax-29 post-tested loops and named enclosing-loop transfers
 also execute through existing checked lowering; semantic v39 is selected

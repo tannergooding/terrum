@@ -209,6 +209,17 @@ need no synthetic return; reachable non-void fallthrough rejects. Both policies,
 all existing upper bounds and v1–50 servicing remain; no ABI/profile/scanner
 change, named transfers, standalone blocks or richer values are added.
 
+Provisional projection v52 adds standalone lexical blocks using existing
+brace syntax as statement kind 14: `slot` is the exclusive body-end index,
+`root` is `-1`, and the span covers both
+braces, with child statements in preorder. An independent source-bound audit
+checks extents and scope before lowering to the existing managed `BoundBlock`;
+failed validation publishes no partial projection. Versions 1–51 retain their
+feature restrictions. The 392-word shape, record widths, existing bounds,
+scanner IDs and semantic/native ABI remain unchanged. See the
+[implementation reference](implementation.md) for name resolution and scope
+rules.
+
 The native scalar frontend's provisional projection v48 represents scalar
 returns as structured body statements: kind 8, slot 0, a typed result root and
 the keyword-through-semicolon span. Header words 38–40 are `-1`; the source
