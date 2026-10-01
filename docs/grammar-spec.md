@@ -439,7 +439,7 @@ permit it in an arbitrary context.
 | Associated types | `type` | Declare an interface requirement or bind it in a conformance. |
 | Declaration composition | `partial` | Merge parts of one identity. |
 | Extension declarations | `extension` | Declare scoped extensions; exact syntax remains open. |
-| External declarations | `extern` | Bind external definitions; exact syntax remains open. |
+| External declarations | `extern` | Bind a complete callable to an external implementation under its declared contract. |
 | Member kinds | `static`, `operator` | Declare static members and operators. |
 | Property accessors | `get`, `set`, `init` | Read, write or initialize properties. |
 | Property backing | `field` | Access only the enclosing property's backing place. |
@@ -505,9 +505,14 @@ The productions below are subject to their stated semantic restrictions and
 explicit open boundaries. `Identifier`
 means one lexical identifier token; dotted names are written explicitly.
 Semantic constraints are stated separately.
-The prefix names below are metasyntactic placeholders for only the
-attributes/modifiers valid in each declaration context. Legal prefix
-modifiers may be permuted; duplicate or conflicting modifiers reject.
+Declaration prefixes have fixed role-specific order. Attributes precede
+visibility; every primary declaration has explicit visibility. `partial`,
+when present, is last before the type-kind modifiers and kind or the
+callable's return type and signature. A secondary partial declaration omits
+visibility and other contract-prefix modifiers. Duplicates, misordering and
+illegal modifier/declaration pairs reject rather than being reinterpreted
+through type lookup. Prefix productions give ordered syntactic slots, not
+permission to use every slot on every declaration kind.
 
 ### 3.1 Source-file structure and declarations
 
@@ -523,8 +528,9 @@ NamespaceDecl   = "namespace", DottedIdentifier, "{", NamespaceBody, "}" ;
 NamespaceBody   = { UsingDirective }, { TopDeclaration | NamespaceDecl } ;
 DottedIdentifier = Identifier, { ".", Identifier } ;
 
-TopDeclaration = TopPrefix, ( StructDecl | ClassDecl | InterfaceDecl
-                              | EnumDecl | UnionDecl | FunctionDefinition )
+TopDeclaration = TypePrefix, ( StructDecl | ClassDecl | InterfaceDecl
+                               | EnumDecl | UnionDecl )
+               | CallablePrefix, FunctionDefinition
                | AliasPrefix, AliasDecl ;
 MemberDeclaration = MemberPrefix,
                     ( ConstructorDecl | FunctionDefinition | OperatorDefinition
@@ -537,10 +543,13 @@ InterfaceMemberDeclaration = InterfaceMemberPrefix,
                              | InterfaceProperty | InterfaceIndexer
                              | AssociatedTypeRequirement
                              | InterfaceConstant ) ;
-TopPrefix       = ContextualPrefix ;
-MemberPrefix    = ContextualPrefix ;
-InterfaceMemberPrefix = ContextualPrefix ;
-AliasPrefix     = { Attribute | NamespaceVisibilityModifier } ;
+TypePrefix      = { Attribute }, [ VisibilityModifier ], [ "partial" ] ;
+CallablePrefix  = { Attribute }, [ VisibilityModifier ], [ "static" ],
+                  [ "extern" ], [ "mut" ], [ "unsafe" ], [ "async" ],
+                  [ "partial" ] ;
+MemberPrefix    = CallablePrefix ;
+InterfaceMemberPrefix = CallablePrefix ;
+AliasPrefix     = { Attribute }, NamespaceVisibilityModifier ;
 Attribute       = "[", [ AttributeTarget, ":" ], AttributeName,
                   [ AttributeArguments ], "]" ;
 AttributeTarget = SingletonTarget
@@ -553,21 +562,23 @@ AttributeArguments = "(", [ ConstantExpression,
 VisibilityModifier = "public" | "internal" | "private" ;
 NamespaceVisibilityModifier = "public" | "internal" ;
 DeclarationModifier = "public" | "internal" | "private" | "static"
-                    | "mut" | "unique" | "unsafe" | "partial" | "async" ;
+                    | "extern" | "mut" | "unique" | "unsafe" | "partial" | "async" ;
 
-StructDecl      = "struct", Identifier, [ TypeParameterList ],
+StructDecl      = [ "mut" ], [ "unique" ], "struct", Identifier, [ TypeParameterList ],
                   [ ConformanceList ], { ConstraintClause },
                   "{", { MemberDeclaration }, "}" ;
-ClassDecl       = "class", Identifier, [ TypeParameterList ],
+ClassDecl       = ( [ "mut" ], [ "unique" ] | "static" ), "class",
+                  Identifier, [ TypeParameterList ],
                   [ ConformanceList ], { ConstraintClause },
                   "{", { MemberDeclaration }, "}" ;
 InterfaceDecl   = "interface", Identifier, [ InterfaceTypeParameters ],
                   [ InterfaceBaseList ], { ConstraintClause },
                   "{", { InterfaceMemberDeclaration }, "}" ;
-EnumDecl        = "enum", Identifier, ":", IntegralType,
+EnumDecl        = "enum", Identifier, [ ":", IntegralType ],
                   "{", [ EnumMember, { ",", EnumMember }, [ "," ] ], "}" ;
 EnumMember      = Identifier, [ "=", ConstantExpression ] ;
-UnionDecl       = "union", Identifier, [ TypeParameterList ],
+UnionDecl       = [ "unique" ], ( "struct" | "class" ), "union",
+                  Identifier, [ TypeParameterList ],
                   { ConstraintClause }, "{", { UnionCaseDecl }, "}" ;
 UnionCaseDecl   = Identifier,
                   ( ";" | "(", UnionPayload, { ",", UnionPayload }, ")", ";" ) ;
@@ -665,14 +676,57 @@ declaring the same namespace does not extend either access domain, and
 linking or unsafe authorization does not grant friend-module access.
 File-limited visibility is not a selected source form.
 
+The optional visibility slot in the prefix productions exists only for
+secondary partial declarations, not a default access level. A declaration
+without visibility must identify a secondary part with `partial`; otherwise
+it rejects. Every composed identity has exactly one primary declaration.
+Namespace declarations, local bindings, parameters, enum constants, union
+cases and accessor introducers are not independent visibility-bearing
+primary declarations.
+
+Type heads keep their compound form together:
+
+| Kind | Kind modifiers, in order | Restrictions |
+|---|---|---|
+| `struct` | Optional `mut`, then optional `unique` | Inline storage; ownership and mutable storage remain distinct. |
+| `class` | Optional `mut`, then optional `unique` | Managed handle form; uniqueness does not imply a unique reachable graph. |
+| `static class` | `static` is part of the kind | Non-instantiable container without instance members; cannot combine with nominal `mut` or `unique`. |
+| `struct union` / `class union` | Optional `unique` | Explicit inline/managed sum storage; no nominal `mut`. |
+| `enum` / `interface` | None | No nominal `mut`, `unique` or `static`. |
+
+There is no bare `union` or `static struct` declaration. A type prefix has
+no callable `extern`, `unsafe` or `async` slot. For example,
+`public partial mut unique struct Lease` and a matching
+`partial mut unique struct Lease` keep the kind form intact; the secondary's
+kind modifiers identify the same form rather than granting new authority.
+An enum primary explicitly supplies its integral base; a secondary enum
+part inherits that contract and does not repeat it.
+
+Named functions and methods use attributes, visibility, placement `static`,
+linkage `extern`, receiver `mut`, caller obligation `unsafe`, execution
+`async`, then composition `partial`, omitting absent slots. Receiver `mut`
+requires an instance receiver; it cannot combine with `static` or qualify a
+top-level function. On a type, nominal `mut` instead belongs after `partial`
+as shown above. Return-type qualifiers remain part of the return type, not
+reordered declaration modifiers. Other member kinds use the same ordered
+prefix slots only where applicable; their remaining applicability boundaries
+do not become legal merely because a prefix parses. Passing-mode and type
+constructor productions retain their own fixed word order.
+
+An `extern` callable is complete through its checked external binding,
+ends with `;` and has no Terrum body or secondary implementation. It cannot
+combine with `partial` or `async`; an extern member may occur in a partial
+type. Returning an eligible awaitable value through a declared external ABI
+does not make the callable `async`. A generator implementing an ordinary
+partial callable cannot add `extern` to its secondary declaration.
+
 Fields and constructors occur in class/struct bodies; interface members do
 not include fields or constructors. An interface
 constant with an initializer is fixed by its declaration; one without an
 initializer requires an implementer-supplied `const` binding of that selected
 member identity. An unrelated same-named constant does not satisfy it.
-The `ContextualPrefix` placeholder still requires context-specific
-validation; permutation does not make every modifier legal on every
-declaration. Repeated visibility and conflicting effects reject. Callable
+Ordered prefix slots still require context-specific validation.
+Repeated visibility and conflicting effects reject. Callable
 contract clauses follow the parameter list and any generic constraints;
 return types remain before the callable name, consistently for functions
 and operators.
@@ -710,6 +764,13 @@ controls together without adding a layout-specific argument grammar or
 choosing a universal positional overload here. Unsupported target
 combinations diagnose; custom controls on `Transparent` remain invalid.
 Packing or alignment alone does not grant `Blittable` or freeze a layout.
+Attribute schemas also govern placement on secondary partial declarations.
+Secondary attributes are permitted unless their resolved schema disallows
+that placement, and combine only under the ordinary target and multiplicity
+rules. Contract-changing semantic attributes must enforce primary-only
+contract authorship; a schema cannot authorize a secondary to change layout,
+calling obligations or another primary contract. Attributes on a new member
+introduced in a secondary type part belong to that member's own declaration.
 Attributes may attach directly to their target or identify a named target on
 the enclosing declaration: `[param(count): Attr]` and `[typeparam(T): Attr]`
 bind the same formal identities as inline attributes. A selector must resolve
@@ -718,7 +779,7 @@ merge rules. An untargeted callable attribute applies to the callable, not
 its result; result attributes use `[return: Attr]`. No selector performs
 overload guessing.
 `[Iterator]` is a compiler-recognized semantic attribute selecting a producer
-implementation on a callable with a body and an eligible declared producer
+implementation on a completed callable with a body and an eligible declared producer
 result contract. Recognition follows the resolved attribute identity, not
 arbitrary same-named library attributes. It introduces no `iterator` keyword
 and does not infer a result type, item type or stronger lifetime contract
@@ -752,7 +813,8 @@ precondition inferred from the body. Published clauses obey ordinary
 effective-visibility, access, ownership, lifetime and effect restrictions.
 
 Top-level and concrete function/operator definitions have bodies unless
-explicitly marked `partial`; a bodyless partial function must have exactly
+an applicable external binding or partial declaration supplies their
+implementation; a bodyless partial function must have exactly
 one matching implementation in the compilation. A concrete property accessor
 ending in `;` uses checked compiler-generated backing storage; an explicit
 accessor needs a body. Interface members may end in `;` to require a
@@ -764,6 +826,14 @@ body; if neither exists, the conformance is incomplete. An explicit
 implementation may replace a default without changing the member identity or
 weakening its published contract. Same-named extensions do not satisfy or
 replace a witness.
+Interface requirements may be `public` or `internal`. A public interface can
+be consumed through its accessible operations and used in constraints while
+an internal requirement restricts new conformances to its defining module.
+Inherited requirements preserve that restriction; interface composition
+does not reopen implementation authority. Controlling the implementers lets
+a module evolve requirements and its implementations together, but does not
+make an otherwise incompatible ABI change compatible. Private-interface
+requirement/helper applicability remains outside this matrix.
 These are interface contract and witness rules, not concrete inheritance (see
 [§5.12](#512-modifiers-cleanup-and-finalization)).
 
@@ -807,14 +877,24 @@ retains the evolvable default. Recognition uses the registered library
 attribute identity and checked schema, not arbitrary same-named attributes;
 the exact library definition and metadata encoding belong to the library/metadata contracts.
 Closed cases do not freeze representation, layout or the rest of the API.
-Generic constraints and `unique union` preserve their separate contracts.
+Union declarations specify `struct union` or `class union`, optionally
+preceded by `unique`. An ordinary struct union is an inline discriminated
+value whose possible payloads must all support its promised Copy contract;
+the unique form transfers noncopyable inline ownership. An ordinary class
+union uses managed handles, so copying aliases the same object rather than
+copying its active payload; a unique class union uses a unique owning handle
+under the ordinary unique-class rules. Case validity, active-payload access
+and cleanup remain checked in every form. Changing storage or ownership is
+a contract change, not an inferred representation optimization. There is no
+implicit storage default, nominal `mut union` or raw overlapping-layout
+permission. Generic constraints retain their separate contracts.
 No `case` keyword is introduced. Pattern/extraction forms remain in §4 and
 Q28; this declaration does not select tag numbers, native exports or a public
 payload accessor surface.
 
 ```terrum
 [ClosedCases]
-union Lookup<T> where T : [Copy]
+public struct union Lookup<T> where T : [Copy]
 {
     Missing;
     Found(T value);
@@ -853,11 +933,11 @@ arguments in `Type` are excluded. See [§5.11](#511-nested-types-and-scoped-oper
 
 ```terrum
 // Informative interface example.
-interface IAdd<T>
+public interface IAdd<T>
 {
-    static T operator +(T left, T right);
-    int32 Size();
-    int32 DefaultSize() { return 0; }
+    public static T operator +(T left, T right);
+    public int32 Size();
+    public int32 DefaultSize() { return 0; }
 }
 ```
 
@@ -1314,6 +1394,13 @@ lifetime rules, not an alias to a hidden value-type copy. A reference pattern
 cannot narrow or reinterpret the actual storage type because its current
 value passed a presence or type test. Movement remains an explicit operation
 after selection, not a separate implicitly consuming pattern.
+For initialized nullable storage, `ref<var>` filters out the nullable
+storage type even when its current value is non-null. `ref<var?>` admits
+nullable and non-nullable storage and retains the complete actual referent
+type: an `int32?` slot yields `ref<int32?>`, while an `int32` slot yields
+`ref<int32>`. `var?` permits nullability; it does not add it. Writable forms
+use the same storage-type filters and require existing write authority.
+This differs from ordinary value-binding `var`, which tests current presence.
 
 Generic type patterns name a particular generic declaration and match one
 argument per written slot. `List<_>` matches an eligible closed application
@@ -1969,10 +2056,10 @@ required by this direction.
 
 ```terrum
 // Declarations illustrating overload semantics.
-int32 Parse(int32 value) { return value; }
-uint32 Parse(uint32 value) { return value; }
+public int32 Parse(int32 value) { return value; }
+public uint32 Parse(uint32 value) { return value; }
 
-void ParseExample()
+public void ParseExample()
 {
     // Parse(42) is ambiguous; explicit target construction selects int32.
     int32 parsed = Parse(int32(42));
@@ -1984,9 +2071,9 @@ wins for ordinary `Inspect(item)` when both candidates apply:
 
 ```terrum
 // Parameter forms illustrating overload semantics.
-int32 Inspect(Item value) { return 0; }
-int32 Inspect(implicit ref<Item> value) { return 1; }
-void InspectExample(Item item) { int32 selected = Inspect(item); }
+public int32 Inspect(Item value) { return 0; }
+public int32 Inspect(implicit ref<Item> value) { return 1; }
+public void InspectExample(Item item) { int32 selected = Inspect(item); }
 ```
 
 Retain ordinary same-name declarations as
@@ -2016,10 +2103,10 @@ not regardless of argument quality. Explicit generic arguments select only
 eligible generic candidates.
 
 ```terrum
-int32 Select(int32 value) => value;
-T Select<T>(T value) where T : [Copy] => value;
-int32 OrdinarySelection() => Select(int32(7));
-int32 ExplicitGenericSelection() => Select<int32>(int32(7));
+public int32 Select(int32 value) => value;
+public T Select<T>(T value) where T : [Copy] => value;
+public int32 OrdinarySelection() => Select(int32(7));
+public int32 ExplicitGenericSelection() => Select<int32>(int32(7));
 ```
 
 Both candidates give an exact `int32` argument match in `OrdinarySelection`;
@@ -2054,16 +2141,16 @@ work, not implicit provider discovery.
 For eligible providers with these ordinary static helpers:
 
 ```terrum
-struct MetricsA
+public struct MetricsA
 {
     public static int32 Measure(int32 value) => value;
 }
-struct MetricsB
+public struct MetricsB
 {
     public static int32 Measure(int32 value) => value + 1;
 }
-int32 ChooseA(int32 value) => value.via<MetricsA>.Measure();
-int32 ChooseB(int32 value) => value.via<MetricsB>.Measure();
+public int32 ChooseA(int32 value) => value.via<MetricsA>.Measure();
+public int32 ChooseB(int32 value) => value.via<MetricsB>.Measure();
 ```
 
 The selected calls have the behavior of `MetricsA.Measure(value)` and
@@ -2086,7 +2173,7 @@ extension-block/registration syntax or runtime provider discovery.
 ### 5.3 Caller-unsafe declarations and explicit unsafe scopes
 
 `unsafe` on a callable declaration exposes its
-caller obligations, e.g. `unsafe void M()`. An ordinary `void M()` does not
+caller obligations, e.g. `public unsafe void M()`. An ordinary `public void M()` does not
 propagate a caller-unsafe obligation. The declaration modifier does not make
 its body an unsafe context: unsafe operations inside either form still require
 an explicit `unsafe { ... }` block or `unsafe(expr)` expression. A caller invoking the unsafe declaration
@@ -2095,18 +2182,18 @@ must likewise satisfy the contract in an explicit unsafe context. The
 
 ```terrum
 // Caller-unsafe declaration.
-unsafe uint32 LoadAligned(uint64 address)
+public unsafe uint32 LoadAligned(uint64 address)
 {
     unsafe { return 0; }
 }
 
-uint32 Read(uint64 address)
+public uint32 Read(uint64 address)
 {
     unsafe { return LoadAligned(address); }
 }
 
 // This ordinary declaration does not pass caller obligations onward.
-uint32 LoadValidated(uint64 address)
+public uint32 LoadValidated(uint64 address)
 {
     unsafe { return 0; } // Unsafe implementation work remains explicitly scoped.
 }
@@ -2295,7 +2382,7 @@ including when the annotation precedes its parameter list.
 
 ```terrum
 [return: DependsOn(nameof(left), nameof(right))]
-ref<T> Select<T>(ref<T> left, ref<T> right, bool useLeft)
+public ref<T> Select<T>(ref<T> left, ref<T> right, bool useLeft)
 {
     return useLeft ? left : right;
 }
@@ -2520,9 +2607,9 @@ the getter:
 
 ```terrum
 // Informative property example.
-struct Point
+public struct Point
 {
-    int32 _x;
+    private int32 _x;
 
     public int32 X
     {
@@ -2530,9 +2617,9 @@ struct Point
     }
 }
 
-class Counter
+public class Counter
 {
-    int32 _count;
+    private int32 _count;
 
     public int32 Count
     {
@@ -2578,7 +2665,7 @@ to a caller initializer; every successful constructor path must establish
 its live backing before publication.
 
 ```terrum
-struct Point
+public struct Point
 {
     public int32 X { get; } = 0;
     public int32 Y { get; }
@@ -2699,17 +2786,19 @@ no inheritance-order tie-break or implicit linearization selects one.
 Adding a default to an existing interface remains subject to compatible
 binding/dispatch for older implementations, not an assumption that an older
 binary has a newly appended slot. Exact witness-mapping syntax and metadata
-representation remain open. Do not infer legality from the permissive `ContextualPrefix` placeholder.
-Legal prefix modifiers may be permuted without changing the contract;
-duplicates, conflicting visibility and illegal modifier/declaration pairs
-reject. Named callable contract clauses follow the parameter list and generic
-constraints as specified in §3.1; result types remain in prefix position.
+representation remain open. Ordered prefixes and the type-kind/callable
+matrix are defined in §3.1; duplicates, conflicting visibility, misordering
+and illegal modifier/declaration pairs reject. Named callable contract
+clauses follow the parameter list and generic constraints as specified in
+§3.1; result types remain in prefix position.
 
 **External-declaration direction:** an external callable explicitly declares
 its import identity, calling convention and complete Terrum callable contract.
 An ABI annotation cannot suppress caller-unsafe obligations, failure
-containment, rooting, access, ownership or loans. Exact `extern` productions,
-registered annotation identities and target ABI mappings remain specification
+containment, rooting, access, ownership or loans. `extern` occupies the
+primary linkage slot after `static`, supplies a complete bodyless binding
+and cannot combine with `partial` or `async`. Registered annotation identities,
+import-selection schemas and target ABI mappings remain specification
 work; no P/Invoke or marshalling model is implied.
 `extension` remains proposed vocabulary for a scoped extension declaration.
 Its productions, restrictions, effects and lowering remain open.
@@ -2802,13 +2891,20 @@ This order also applies to layouts where field order is observable.
 in one module, including generated parts, in the order the compiler receives
 the files and then source order within each file. Every merged part must
 declare `partial`, have matching kind and generic identity, and yield one
-resulting identity without duplicate members or implementations. A partial
-member may have a bodyless defining part, but exactly one implementation
-body must be provided in the compilation; the implementing part cannot
-change its signature, published contract or accessor shape. Explicitly
-repeated visibility, modifiers, constraints and contract-affecting attributes
-must agree, but need not be repeated on every part. Compatible noncontract
-attributes combine in input/source order subject to their multiplicity rules.
+resulting identity without duplicate members or implementations. Exactly one
+part is the primary, identified by explicit visibility rather than file
+order. It authors visibility, contract-prefix modifiers, conformances,
+constraints, defaults and pre/postconditions. Secondary parts must not
+repeat or add those contract items; they use only applicable attributes,
+`partial` and the matching kind modifiers/kind or return type/signature.
+A partial member may have a bodyless primary, but exactly one implementation
+body must be provided in the compilation; a secondary cannot change its
+signature, published contract or accessor shape. Secondary attributes remain
+subject to their resolved schema's placement, target and multiplicity rules.
+Contract-changing semantic schemas preserve primary-only authorship.
+New members contributed by a secondary type part have their own primaries,
+explicit visibility and contracts. Type-kind modifiers repeated by a
+secondary identify the primary's storage/ownership form and must match.
 A source generator running within the compilation may supply new parts and
 implementations, but must not add or alter the published contract of an
 existing declaration, including making a method unsafe or changing a
@@ -2816,9 +2912,9 @@ type's layout. Independently pre-generated files have ordinary source-file
 status, not the compiler-known provenance of an in-compilation generator.
 Partial parts match by declared identity and complete signature, including
 generic formal names/order, callable parameters and accessor shape.
-Explicitly repeated defaults and contracts must agree after their required
-type/constant normalization rather than accumulate stronger obligations;
-omitting a repetition does not erase the existing promise. Attribute
+Defaults and conditions come from the primary alone; secondaries cannot
+accumulate stronger obligations or erase an existing promise. Structural
+signature matching uses the required type/constant normalization. Attribute
 multiplicity remains a separate declared schema. A generator cannot silently
 remove an API by failing to provide its required implementation; any future
 API-absence mechanism needs explicit source permission and a separate
@@ -3092,8 +3188,8 @@ appears in §2.
 | Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw framing/headers, deterministic interpolation, identifier/quoted/expression formats and runtime alignment. | Complete floating token recovery, character diagnostics, raw/interpolation recovery and registered text/whole-output normalization APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or nested block namespaces without mixing, with lexically scoped imports before declarations. | Other namespace forms, if any. |
-| Visibility | §3.1 permits namespace-level `public`/module-internal declarations and declaring-type `private`; equal namespace names do not cross module access boundaries. | File-limited visibility and the remaining declaration-kind modifier matrix. |
-| Nominal types | §3.1 gives structs, classes, interfaces, integral-base enums and unions with named cases, qualified construction and explicit closedness. Enum constants have checked successor overflow and deliberate aliases. | Nested declarations, selected integer catalogs, flags schemas and contextual attributes. |
+| Visibility and declaration prefixes | §3.1 requires explicit primary visibility, fixed role-specific ordering and a sole partial contract author. Secondary attributes obey schema placement; internal interface requirements preserve module-only implementation authority. | File-limited visibility, private-interface applicability and the remaining non-callable member modifier matrix. |
+| Nominal types | §3.1 gives ordered class/struct kind forms, static-class containers, interfaces, integral-base enums and explicit struct/class unions with qualified cases and independent closedness. Enum constants have checked successor overflow and deliberate aliases. | Nested declarations, selected integer catalogs, flags schemas and contextual attributes. |
 | Generic declarations | §§3.1–3.2 give bounded constant domains, checked opt-in primitive-wrapper constants, earlier-only defaults, `_` inference and explicit `default` selection. | Wrapper capability spelling/value encoding and complete inference contracts. |
 | Aliases | §§3.1 and 5.4 give finite qualified expansion, cycle rejection, namespace-level aliases and transparent public export. | Metadata encoding. |
 | Associated types | §§3.1 and 5.4 give requirements, replaceable defaults, inherited identity resolution, qualified bindings, optional `<this T>`, `.via<I>` selection and exact `is` identity constraints. | Complete checking diagnostics and metadata. |

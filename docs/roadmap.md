@@ -12,9 +12,11 @@ this roadmap for adoption sequencing and remaining work.
 
 ## Active work (priority order)
 
-1. Review source-contract decisions from the [grammar](grammar-spec.md) and
-   [decision queue](proposals/grammar-open-questions.md). Preserve accepted
-   decisions; recommendations remain proposals until approved.
+1. Carry settled runtime/initialization contracts through compiler binding,
+   verification, persistence and lowering. The remaining
+   [source-decision review](proposals/grammar-open-questions.md) is paused;
+   preserve its unanswered choices rather than selecting them during
+   implementation. The [grammar](grammar-spec.md) records settled forms.
 2. Refine concrete library proposals. Candidate signatures and contracts do
    not imply parser, compiler, runtime or library support.
 

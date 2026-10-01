@@ -2,6 +2,17 @@
 
 ## Current boundary: syntax-44, semantic v43–v45 updates, native-10 through native-20
 
+The normative declaration grammar additionally requires explicit primary
+visibility, fixed role-specific ordering, primary/secondary partial contract
+ownership, static-class containers, explicit struct/class union storage and
+primary-only complete external bindings. Internal interface requirements
+restrict implementation authority. These source contracts are not new
+compiler support: syntax-44 does not enforce the new prefix/partial rules or
+implement unions, static containers, caller-unsafe/async declarations or
+foreign external binding. Existing compiler declaration defaults and
+accepted modifier orders retain their current behavior until adopted
+through binding, verification, persistence and lowering.
+
 Syntax-44 requires a single loop label and its `while`, `do` or `for`
 introducer to occupy the same physical source line (`TRM1012`). The colon
 still attaches to the name; trivia after it is optional, but cannot contain

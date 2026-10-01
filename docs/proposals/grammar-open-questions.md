@@ -41,63 +41,37 @@ labeled, not another vote.
 
 ### Q06. Visibility, modifier applicability and ordering
 
-**Settled context:** Module-scoped visibility and declaring-type `private`
-are in the [official declaration contract](../grammar-spec.md#31-source-file-structure-and-declarations).
-Neither is awaiting another vote.
+**Settled context:** The
+[official declaration contract](../grammar-spec.md#31-source-file-structure-and-declarations)
+now defines explicit primary visibility, mandatory role-specific ordering,
+primary/secondary partial ownership and schema-governed secondary attributes.
+Class/struct kind modifiers, static-class containers, explicit struct/class
+union storage, bare enum/interface kinds and callable prefix order are settled.
+`extern` is primary-only, complete through its external binding, and cannot
+combine with callable `partial` or `async`. Internal interface requirements
+restrict new conformances to the defining module while a public interface
+remains usable by consumers and in constraints. These are not additional votes
+or implementation claims.
 
-**Accepted direction:** Specify legal modifiers independently for each
-declaration kind; a legal modifier on one kind does not become legal everywhere.
-Module and declaring-type boundaries remain fixed. File-limited visibility
-needs a separate concrete use/decision, not an invented friend-module domain.
+**Remaining questions (review paused):**
 
-**Remaining question:** Complete the concrete declaration-kind matrix:
-interface-member access, static nominal containers, default access, and combinations of
-`mut`, `unique`, `partial`, `unsafe` and `async`. The currently approved
-prefix permits permutation; the proposed stricter order below would replace
-that rule only after acceptance. Duplicates/conflicts remain invalid.
-Should a separate file-limited access domain be
-available, and to which declaration kinds would it apply? `file private` and
-`file internal` are review ideas, not adopted modifier combinations.
-**Example:** Candidate `file internal struct Helper { }` would introduce a
-file-limited helper; that modifier combination is not currently adopted.
+- Private interface members: should they be implemented helpers only, or may
+  they be conformance requirements? The helper-only recommendation was asked
+  but not answered. Preserve declaring-type `private` rather than silently
+  widening it to module access.
+- Complete the remaining non-function member matrix: constructors, fields,
+  properties/accessors, operators/conversions and associated bindings. The
+  fixed prefix order is not permission to apply every slot to each kind.
+- Decide whether a file-limited access domain is needed and, if so, its exact
+  eligible declarations. Candidate `file internal struct Helper { }` is not
+  an adopted combination or a new friend-module boundary.
 
-**C# model:** Partly modeled on explicit declaration modifiers. Do not import
-`protected`, friend assemblies, stateful class inheritance, or C#'s different
-top-level-private restrictions.
-
-**Ordering recommendation (not yet adopted):** Use one fixed declaration-prefix
-order, omitting inapplicable/absent slots:
-
-| Order | Role | Candidate spelling |
-|---|---|---|
-| 1 | Targeted semantic metadata | Attribute lists |
-| 2 | Visibility | `public`, `internal` or `private` |
-| 3 | Placement | `static` |
-| 4 | Receiver/storage access | `mut` |
-| 5 | Ownership | `unique` |
-| 6 | Caller obligation | `unsafe` |
-| 7 | Execution form | `async` |
-| 8 | Declaration composition | `partial` |
-
-For example, `public mut unique struct Lease { }` follows the proposed order;
-`unique public mut struct Lease { }` would reject under it, despite being
-permitted by the current permutation rule. This table is an ordering rule,
-not permission to combine every slot on every declaration.
-
-Passing modes and type constructors are separately ordered productions,
-not interchangeable declaration modifiers. `mut ref T`, `init ref<T>` and
-`implicit ref<T>` have fixed roles/word order; `ref mut T` is not a reordered
-passing mode. The existing type production places `write` before `pin` when
-both are valid. A future two-word construct must declare its complete
-production, not happen to emerge from arbitrary adjacent modifiers.
-Reject a misordered prefix explicitly instead of letting type lookup reinterpret
-it. Formatter output uses that same canonical sequence.
-
-This is stricter than C#'s mixture of permutable modifiers and ordered compound
-forms. Reserve semantic roles rather than assuming today's keyword adjacency
-is always safe to reuse. Exact applicability/defaults and file-local access
-remain separate choices; neither `file` nor a replacement modifier order is
-silently approved by this recommendation.
+**C# model:** C#'s preferred callable modifier order is familiar, but Terrum
+requires ordering and primary visibility, keeps compound type forms together,
+and gives one partial primary ownership of the contract. Do not import
+`protected`, friend assemblies, stateful class inheritance or top-level-private
+rules. C#'s partial attribute merge alone does not supply Terrum's checked
+secondary placement restrictions.
 
 **C# comparison:**
 
@@ -115,14 +89,13 @@ class Counter
 
 C# accepts modifier order such as `static public`; `file` restricts a
 top-level type to one source file, and `field` is contextual property backing
-syntax in C# 14. Terrum's pending matrix must state its own canonical order,
-applicability and file-local boundary rather than infer them from this mix
-of C# keywords and multiword terms.
+syntax in C# 14. These are comparisons, not permission to infer Terrum's
+remaining member applicability or file-local access rules.
 
 ### Q28. Complete pattern and type-test forms
 
 **Question:** Confirm the remaining boundaries for runtime-only type capture
-and reference-pattern formation. Registered object extraction and richer-status
+and already-reference-valued pattern subjects. Registered object extraction and richer-status
 contract spelling remain separate library/schema work. Existing guards,
 `and`/`or`/`not`, compatible `or` bindings and fallback behavior remain fixed.
 **Accepted direction:** Replace the target `some` introducer with inferred
@@ -212,6 +185,12 @@ payloads require explicit borrow/move rather than an implicit copy.
 forms. They preserve ordinary addressability, authorized access, backing and
 lifetime rules; requesting write does not create write authority. A matched
 value does not authorize narrowing the actual aliased storage type.
+Inside those reference forms, `var`/`var?` filter the actual initialized
+storage type, not its current value: `ref<var>` does not match an `int32?`
+slot merely because it contains `42`; `ref<var?>` matches and retains
+`ref<int32?>`. For non-nullable storage, either form retains `ref<int32>`.
+The writable forms follow the same rule. This nullable-storage decision is
+settled; already-reference-valued subjects remain a distinct question.
 Matching does not implicitly move during an attempted arm or its guard;
 non-consuming inspection precedes an explicit move after selection.
 Explicit guard effects are not rolled back, and ordinary loan/backing checks
@@ -287,8 +266,8 @@ and have checked successful-path scope.
 **Remaining boundaries:** Runtime-only type capture needs an explicit
 type-witness/representation contract; it must not silently introduce boxing or
 arbitrary runtime generic instantiation. Reference patterns retain the actual
-storage type, but exact nullable-referent and already-reference-value cases
-still need reconciliation with these generic-slot filters. General
+storage type; nullable-storage filters are settled, but already-reference-value
+cases still need reconciliation with reference formation. General
 application/constraint `var` binders and higher-kinded application are deferred,
 not inferred from pattern syntax. Registered object observations,
 richer-status availability contract spelling and metadata remain library/schema
@@ -587,11 +566,12 @@ syntax is introduced.
 ### Q27. Nominal sums and closed-case declarations
 
 Resolved; semicolon-terminated named cases, type-first payload parameters,
-qualified `.Missing`/`.Found(value)` construction and the checked parameterless
-`[ClosedCases]` marker are approved target forms. No `case` keyword or record
+qualified `.Missing`/`.Found(value)` construction, explicit struct/class union
+storage and the checked parameterless `[ClosedCases]` marker are approved
+target forms. No `case` keyword or record
 synthesis is introduced. See
 [union declarations](../grammar-spec.md#31-source-file-structure-and-declarations).
-Exact metadata/representation and library attribute definition remain work;
+Exact metadata/ABI representation and library attribute definition remain work;
 pattern/extraction forms remain in [Q28](#q28-complete-pattern-and-type-test-forms).
 Approval does not claim compiler support or adopt the concrete Core sum types.
 

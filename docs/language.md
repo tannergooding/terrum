@@ -30,6 +30,8 @@ value) and `own<T>` (native owning indirection).
 - Concrete types are sealed by default; `sealed` prohibits inheritance, not interface dispatch or API evolution. Types are evolvable by default: closed case sets, fixed layouts and frozen APIs are separate scoped contracts. Interface inheritance and composition replace general concrete inheritance. Public namespaces express concepts, not library tiers. Public source visibility is `public`, `internal` (module) and `private` (declaring type). Namespace/file-level declarations allow `public` or `internal`, not `private`; file-limited visibility remains unspecified. Another module declaring the same namespace does not extend internal or private access; there is no protected-family or friend-module access through `unsafe` or linking. Author-approved generation may act within the declaring module's implementation scope, but grants no consumer private access. A public Terrum surface is not automatically a native export.
 - Exceptions propagate exceptional failures; expected alternatives use conditional outputs or explicit domain statuses. `require` is a safe checked failure; catching/recovering requires unsafe recovery authorization, while unsafe operations and caller-unsafe invocations require explicit `unsafe { ... }` blocks or `unsafe(expr)` expressions. Cleanup and `try/finally` do not require unsafe authorization. Unsafe recovery does not prove an object's invariant has survived. Platform callbacks must contain faults or terminate rather than unwind across a foreign ABI.
 - Type, declaration, interface and metadata contracts are authoritative. A compiler may infer private implementation facts but cannot silently publish stronger or weaker promises from a replaceable body. Consumers bind against the producer's resolved contracts and rule version, not their own reinterpretation of its source defaults. [Lifetimes](lifetimes.md) specifies this distinction for borrowed results.
+- Primary declarations require explicit visibility and fixed role-specific modifier order. Types place `partial` immediately before their kind modifiers and kind; functions/methods order `static`, `extern`, receiver `mut`, `unsafe`, `async`, then `partial` before the return type/signature. A partial identity has exactly one primary contract author; secondaries cannot repeat or alter visibility, prefix modifiers, conformances, constraints, defaults or conditions. Secondary attributes are permitted unless their resolved schema disallows placement, with contract-changing semantic schemas enforcing primary-only authorship. New members contributed by a secondary type part have their own declarations and contracts. See [declaration forms](grammar-spec.md#31-source-file-structure-and-declarations).
+- A public interface may have internal conformance requirements to restrict new implementers to its defining module while remaining accessible for public operations and constraints. Inherited requirements retain that boundary. Control over implementers is not a blanket ABI-compatibility promise; private-interface member applicability remains a separate decision.
 - Source compilation checks authored bodies against declared contracts. Ordinary binary consumers safely decode and structurally validate artifacts, resolve references, check binding/contract compatibility and validate caller use, then trust declared metadata contracts for external dependencies instead of re-proving dependency implementations. Callers still satisfy imported preconditions, access, ownership and effects. This is not permission to trust malformed bytes; optional deeper audit tooling is not a v1 promise. Signing/provenance is separate from semantic correctness; no mandatory signature or trust store is selected, and signer identity does not prove a contract true. Current reader and verifier support is documented in [implementation](implementation.md).
 - Keep minimum language requirements separate from the standard application-library/runtime surface and feature-specific dependencies. Foundational types such as `ref<T>`, `ptr<T>` and `int32` are illustrative, not a complete mandatory API list. Language conformance alone does not require heap/GC, a scheduler or OS services; richer features retain their dependencies and checked contracts when used, with no silent semantic weakening or fallback. This can enable embedded/kernel environments in principle, but does not promise a backend there or universal support for every feature.
 
@@ -43,8 +45,8 @@ explicit checks remain. Optional diagnostics may identify misuse without
 inserting repairs or changing the contract after inlining or specialization.
 
 Mark caller obligations with `unsafe` on the callable declaration:
-`unsafe void M()` propagates obligations to callers, while ordinary
-`void M()` does not. This modifier does not make the callable body an unsafe
+`public unsafe void M()` propagates obligations to callers, while ordinary
+`public void M()` does not. This modifier does not make the callable body an unsafe
 context: unsafe operations inside either form still require explicit
 `unsafe { ... }` blocks or `unsafe(expr)` expressions, and calls to
 caller-unsafe declarations require an explicit unsafe context at the call site.
@@ -59,9 +61,9 @@ documented in [implementation](implementation.md).
 ### Types and operations
 
 Declarations are immutable by default. A bare local is fixed after initialization;
-`mut T value` permits rebinding that local. `mut class C` and `mut struct S`
+`mut T value` permits rebinding that local. `public mut class C` and `public mut struct S`
 declare mutable nominal storage; an instance method's receiver is read-only by
-default, and `mut void Update()` explicitly requires a writable receiver. Keep
+default, and `public mut void Update()` explicitly requires a writable receiver. Keep
 `mut` for writable places and receivers, not as a referent qualifier.
 
 `write T` is a capability-qualified reference/view that permits writes through
@@ -161,7 +163,7 @@ from an unknown, caller-qualified `T`. The exact generic constraint syntax,
 representation-aware mutation rules, and required protocol for writable
 generic operations remain open.
 
-An ordinary `struct` is inline and promises checked `[Copy]`; every field must support a code-free, allocation-free copy without duplicating a unique obligation. Adding a destructor or unique field must fail the declaration instead of silently removing that public capability. A `unique struct` or `unique union` is noncopyable even if its bytes look trivial. An ordinary `class` uses aliasable managed handles; copying a handle shares its object, not its payload. A `unique class` has a unique owning handle, not necessarily a unique reachable graph or a prohibition on GC. `unique` restricts duplication; `move` explicitly transfers a named value (including a copyable value when invalidating its source is desired). By-value copy/consume is based on the **complete qualified form**, not merely the payload declaration. A moved handle need not relocate the payload; large `[Copy]` values are not assumed cheap.
+An ordinary `struct` is inline and promises checked `[Copy]`; every field must support a code-free, allocation-free copy without duplicating a unique obligation. Adding a destructor or unique field must fail the declaration instead of silently removing that public capability. A `unique struct` or `unique struct union` is noncopyable even if its bytes look trivial. An ordinary `class` uses aliasable managed handles; copying a handle shares its object, not its payload. A `unique class` or `unique class union` has a unique owning handle, not necessarily a unique reachable graph or a prohibition on GC. `unique` restricts duplication; `move` explicitly transfers a named value (including a copyable value when invalidating its source is desired). By-value copy/consume is based on the **complete qualified form**, not merely the payload declaration. A moved handle need not relocate the payload; large `[Copy]` values are not assumed cheap.
 
 Representation projections are separate: `val<T>` denotes an eligible inline
 payload, `box<T>` a reference form, `ref<T>` a bounded loan, `ptr<T>` an
@@ -229,6 +231,13 @@ This replaces target `some` pattern spelling, not the compiler's current
 
 Integer-backed `enum` values include unnamed underlying values; `[Flags]`
 defines named bit-set operations without closing the set. Nominal unions are
+declared as `struct union` for inline values or `class union` for managed
+objects; neither storage form is an implicit default. Struct-union copying
+requires every possible payload to support the promised Copy contract.
+Class-union copying aliases the managed object through its handle, not a copy
+of the active payload. Both forms have explicit unique variants and no
+nominal `mut` form. Case-set promises remain separate from storage, layout
+and ownership contracts. Unions are
 evolvable by default; an explicitly closed case-set promise makes adding a case
 a breaking change, ordinarily rejected before consumers bind to it. Union
 representations still require a valid active payload;
