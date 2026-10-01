@@ -42,7 +42,7 @@ public unique struct TokenSnapshot
 
     // Scalar input has no generic lists or operator declarations. Its operand-ending
     // token kinds determine unary versus binary/update roles without name lookup.
-    // A colon attached to an identifier before a loop keyword introduces its label.
+    // A colon attached to an identifier before a same-line loop keyword introduces its label.
     public SourceRange GetScalarOperatorSpacingError()
     {
         var run = GetScalarPunctuationRunError();
@@ -81,6 +81,13 @@ public unique struct TokenSnapshot
                 if (previous.Kind != 2 || previous.Range.End != op.Range.Start)
                 {
                     return op.Range;
+                }
+                for (mut int32 at = op.Range.End; at < next.Range.Start; at = at + 1)
+                {
+                    if (IsNewline(PeekUnit(at)))
+                    {
+                        return op.Range;
+                    }
                 }
                 separated = false;
             }

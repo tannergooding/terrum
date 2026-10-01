@@ -803,7 +803,14 @@ internal sealed class Parser
                 if (Current.Kind == TokenKind.Identifier && Peek(1).Kind == TokenKind.Colon
                     && Peek(2).Kind is TokenKind.WhileKeyword or TokenKind.ForKeyword or TokenKind.DoKeyword)
                 {
-                    node = Node(SyntaxKind.LabeledLoopStatement, [Take(), TakeNameColon(), ParseStatement()]);
+                    var name = Take();
+                    var colon = TakeNameColon();
+                    if (_source.GetLinePosition(colon.Span.Start).Line
+                        != _source.GetLinePosition(Current.Span.Start).Line)
+                    {
+                        Report("TRM1012", "A loop label and its loop introducer must be on the same source line.", colon.Span);
+                    }
+                    node = Node(SyntaxKind.LabeledLoopStatement, [name, colon, ParseStatement()]);
                 }
                 else if (Current.Kind == TokenKind.Identifier && Current.Text == "const"
                     && LooksLikeLocal(1))

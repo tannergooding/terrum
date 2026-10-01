@@ -1,6 +1,19 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-43, semantic v43–v45 updates, native-10 through native-20
+## Current boundary: syntax-44, semantic v43–v45 updates, native-10 through native-20
+
+Syntax-44 requires a single loop label and its `while`, `do` or `for`
+introducer to occupy the same physical source line (`TRM1012`). The colon
+still attaches to the name; trivia after it is optional, but cannot contain
+CR, LF, CRLF, NEL, line separator or paragraph separator, including inside
+comments. Stacked labels remain invalid. Named-argument colons are unaffected.
+Hosted, trusted prelexed and compiled-scanner parsing enforce the same rule.
+The native scalar snapshot checks the raw gap before parser selection, and
+independent historical/current projections audit the same source boundary.
+Loop-label namespaces, active-duplicate rejection, disjoint reuse, transfer
+targets, scopes and cleanup are unchanged. Existing semantic/module/TRRM
+payloads remain readable; no scanner schema, projection width/version,
+resource limit or native ABI changes.
 
 Syntax-43 enforces maximal contiguous ASCII punctuation runs from
 `!%&*+-./:<=>?^|~`. A run must be one implemented spelling; unlisted runs
@@ -665,7 +678,8 @@ consumes a real conditional structural level and marker record; there is no
 unbounded chain shortcut or extra source scope. All resource caps, widths,
 grammar, scanner, semantic/ISA/Contract/TRRM/native formats and ABI remain.
 General calls, richer types and ownership/cleanup remain excluded; this
-projection does not add the newly approved same-line label enforcement.
+projection does not itself add same-line label enforcement; syntax-44 applies
+that source rule independently.
 
 Provisional projection v59 adopts the existing distinct parameterless
 `[NoThrow]` and `[DoesNotReturn]` contracts on top-level functions. Header word
@@ -699,7 +713,7 @@ All projection widths and source/token/local/record/node/depth limits remain,
 including the shared 100,000-visit verification budget. General attributes,
 calls, richer types and ownership/cleanup remain excluded. This adds no
 grammar, scanner, semantic/ISA/Contract/TRRM/native format or ABI contract;
-same-line loop-label enforcement remains a separate adoption.
+same-line loop-label enforcement is the separate syntax-44 adoption.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

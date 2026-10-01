@@ -596,7 +596,9 @@ public static class ScalarFrontendHost
                             label = tokens[at - 1].Name;
                             if (activeLoops.Any(loop => loop.Label == label)
                                 || !Take(TokenKind.Colon)
-                                || tokens[at - 2].Span.End != tokens[at - 1].Span.Start)
+                                || tokens[at - 2].Span.End != tokens[at - 1].Span.Start
+                                || source.GetLinePosition(tokens[at - 1].Span.Start).Line
+                                    != source.GetLinePosition(tokens[at].Span.Start).Line)
                             {
                                 throw InvalidResult();
                             }

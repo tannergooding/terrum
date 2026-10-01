@@ -95,6 +95,46 @@ public sealed class NamedTransferFrontendProjectionTests
     }
 
     [Theory]
+    [InlineData("", false)]
+    [InlineData(" ", false)]
+    [InlineData("\t", false)]
+    [InlineData("/* gap */", false)]
+    [InlineData("//** gap **//", false)]
+    [InlineData("\r", true)]
+    [InlineData("\n", true)]
+    [InlineData("\r\n", true)]
+    [InlineData("\u0085", true)]
+    [InlineData("\u2028", true)]
+    [InlineData("\u2029", true)]
+    [InlineData("/*\n*/", true)]
+    [InlineData("/*\r\n*/", true)]
+    [InlineData("/*\u2028*/", true)]
+    [InlineData("// gap\n", true)]
+    [InlineData("/// gap\n", true)]
+    public void IndependentHistoricalAndEffectHeadersEnforcePhysicalLineAttachment(string gap, bool invalid)
+    {
+        foreach (var effects in new[] { false, true })
+        {
+            var text = (effects ? "[NoThrow] " : "")
+                + Source.Replace("@const: ", "@const:" + gap, StringComparison.Ordinal);
+            var words = Projection(text, false);
+            if (effects)
+            {
+                words[0] = 59;
+                words[2] = 3;
+            }
+            if (invalid)
+            {
+                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+            }
+            else
+            {
+                Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
+            }
+        }
+    }
+
+    [Theory]
     [InlineData(16384, true)]
     [InlineData(16385, false)]
     public void IndependentNamedTransferEnforcesUtf16SourceBudget(int length, bool valid)

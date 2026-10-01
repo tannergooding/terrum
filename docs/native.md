@@ -120,7 +120,7 @@ ABI changes; imported functions cannot satisfy required constant calls.
 Syntax-26 adds scalar `const expression` requirements in nested executable
 expressions, with the same limits and deferred constant substitution; no new
 native or semantic wire representation is emitted. The current parser version
-is syntax-43. The native scalar frontend checks supported raw spacing and
+is syntax-44. The native scalar frontend checks supported raw spacing and
 attachment rules before shape selection or fallback, and audits successful
 current and historical projections against that syntax. Its punctuation-run
 check is linear and grants no generic/type-context exemptions. Native `?`/`:`
@@ -293,6 +293,12 @@ exports retain the existing primitive-parameter ABI. Versions 1–58 keep their
 restrictions, all resource limits remain, and general attributes/calls are not
 added. The [implementation reference](implementation.md) specifies header
 bits and body shapes; source-free indexed TRRM is unchanged.
+
+Syntax-44 independently enforces single same-line loop-label attachment in
+hosted/scanner parsing, the native snapshot and successful projection audits.
+Newlines inside comments also detach a label. Existing label lookup, transfer
+and cleanup semantics, historical semantic/module payloads, projection
+versions and native ABI remain unchanged.
 
 The native scalar frontend's provisional projection v48 represents scalar
 returns as structured body statements: kind 8, slot 0, a typed result root and

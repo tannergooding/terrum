@@ -416,6 +416,14 @@ inactive source still rejects. Attribute tokens count against existing limits;
 the 392-word buffer and 100,000-visit verification budget are unchanged.
 Nonterminating test programs are compiled and audited, not executed.
 
+Syntax-44 requires a single label and its loop introducer on the same
+physical source line. `TokenSnapshot` rejects line breaks in the raw
+colon-to-keyword gap before native parser selection, including comment
+interiors; independent current/historical projection audits enforce the same
+boundary. Same-line trivia remains optional. Hosted and compiled-scanner
+parsing share this rule without changing named-argument colons, label lookup,
+transfer/cleanup semantics, projections, scanner records or native ABI.
+
 The host's syntax-29 post-tested loops and named enclosing-loop transfers
 also execute through existing checked lowering; semantic v39 is selected
 when those retained nodes require it. Scanner record/schema and native ABI
