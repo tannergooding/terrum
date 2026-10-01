@@ -14,9 +14,9 @@ this roadmap for adoption sequencing and remaining work.
 
 1. Carry settled runtime/initialization contracts through compiler binding,
    verification, persistence and lowering. The remaining
-   [source-decision review](proposals/grammar-open-questions.md) is paused;
-   preserve its unanswered choices rather than selecting them during
-   implementation. The [grammar](grammar-spec.md) records settled forms.
+   [source-decision review](proposals/grammar-open-questions.md) proceeds
+   incrementally; preserve unanswered choices rather than selecting them
+   during implementation. The [grammar](grammar-spec.md) records settled forms.
 2. Refine concrete library proposals. Candidate signatures and contracts do
    not imply parser, compiler, runtime or library support.
 

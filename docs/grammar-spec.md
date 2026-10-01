@@ -532,8 +532,9 @@ TopDeclaration = TypePrefix, ( StructDecl | ClassDecl | InterfaceDecl
                                | EnumDecl | UnionDecl )
                | CallablePrefix, FunctionDefinition
                | AliasPrefix, AliasDecl ;
-MemberDeclaration = MemberPrefix,
-                    ( ConstructorDecl | FunctionDefinition | OperatorDefinition
+MemberDeclaration = ConstructorPrefix, ConstructorDecl
+                  | MemberPrefix,
+                    ( FunctionDefinition | OperatorDefinition
                     | ConversionDefinition
                     | FieldDecl | PropertyDefinition | IndexerDefinition
                     | AssociatedTypeBinding
@@ -547,6 +548,8 @@ TypePrefix      = { Attribute }, [ VisibilityModifier ], [ "partial" ] ;
 CallablePrefix  = { Attribute }, [ VisibilityModifier ], [ "static" ],
                   [ "extern" ], [ "mut" ], [ "unsafe" ], [ "async" ],
                   [ "partial" ] ;
+ConstructorPrefix = { Attribute }, [ VisibilityModifier ], [ "unsafe" ],
+                    [ "partial" ] ;
 MemberPrefix    = CallablePrefix ;
 InterfaceMemberPrefix = CallablePrefix ;
 AliasPrefix     = { Attribute }, NamespaceVisibilityModifier ;
@@ -595,7 +598,8 @@ InterfaceBaseList = ":", Type, { ",", Type } ;
 IntegralType    = DottedIdentifier ;
 ConstantExpression = Expression ;
 MemberName      = Identifier | Type, ".", Identifier ;
-ConstructorDecl = Identifier, ParameterList, ContractClauses, CallableBody ;
+ConstructorDecl = Identifier, ParameterList, ContractClauses,
+                  ( CallableBody | ";" ) ;
 ContractClauses = { PreconditionClause }, { PostconditionClause } ;
 PreconditionClause = "require", ContractPredicate ;
 PostconditionClause = "ensure", ContractPredicate ;
@@ -713,6 +717,10 @@ prefix slots only where applicable; their remaining applicability boundaries
 do not become legal merely because a prefix parses. Passing-mode and type
 constructor productions retain their own fixed word order.
 
+`extern` is permitted on top-level functions and static methods, not instance
+methods or constructors. Instance methods and constructors may call permitted
+external bindings under their ordinary checked contracts; a shared prefix
+does not introduce an implicit-receiver or constructor ABI.
 An `extern` callable is complete through its checked external binding,
 ends with `;` and has no Terrum body or secondary implementation. It cannot
 combine with `partial` or `async`; an extern member may occur in a partial
@@ -817,10 +825,10 @@ an applicable external binding or partial declaration supplies their
 implementation; a bodyless partial function must have exactly
 one matching implementation in the compilation. A concrete property accessor
 ending in `;` uses checked compiler-generated backing storage; an explicit
-accessor needs a body. Interface members may end in `;` to require a
-conformance implementation. A body on an
-interface member supplies a default. For each inherited interface member, a
-checked nominal conformance maps its declaring-interface member identity to a
+accessor needs a body. Interface conformance members may end in `;` to require
+a conformance implementation. A body on an interface conformance member
+supplies a default. For each inherited conformance member, a checked nominal
+conformance maps its declaring-interface member identity to a
 compatible explicit implementation when present, otherwise to its default
 body; if neither exists, the conformance is incomplete. An explicit
 implementation may replace a default without changing the member identity or
@@ -832,8 +840,12 @@ an internal requirement restricts new conformances to its defining module.
 Inherited requirements preserve that restriction; interface composition
 does not reopen implementation authority. Controlling the implementers lets
 a module evolve requirements and its implementations together, but does not
-make an otherwise incompatible ABI change compatible. Private-interface
-requirement/helper applicability remains outside this matrix.
+make an otherwise incompatible ABI change compatible. Private interface
+members are complete implementation helpers owned by the declaring interface,
+not conformance requirements or replaceable defaults. A private member cannot
+require a conforming type to supply its implementation or participate in
+conformance witness mapping. Its access remains declaring-type `private`,
+not module access or access inherited by another interface.
 These are interface contract and witness rules, not concrete inheritance (see
 [§5.12](#512-modifiers-cleanup-and-finalization)).
 
@@ -927,6 +939,21 @@ executes one legal statement for void methods, setters, init accessors and
 constructors. It is shorthand for the corresponding checked block, not a
 general assignment-expression feature. Constructors name their enclosing
 type and must still establish their published completion guarantees.
+Constructors perform synchronous instance initialization and complete before
+publishing the instance. They have initialization-phase write authority over
+their unpublished receiver, not a method's writable-live-receiver requirement.
+Their prefix orders attributes, explicit primary visibility, optional `unsafe`,
+then optional `partial`; `static`, `extern`, `mut` and `async` are invalid.
+There is no static constructor/type-initializer form. Asynchronous creation
+uses an ordinary async factory under its declared suspension and publication
+contracts, not
+suspension inside a constructor.
+A partial constructor follows sole-primary ownership: its primary authors
+visibility, defaults, conditions and completion guarantees. A bodyless
+constructor is legal only as a partial primary with exactly one matching
+implementing secondary. The secondary omits visibility and caller-unsafe
+modifiers, repeats the matching signature, and must establish the primary's
+completion guarantees. An ordinary constructor requires a body.
 Nested type declarations are outside this
 grammar; this is a scope boundary, not a claim that nested type
 arguments in `Type` are excluded. See [§5.11](#511-nested-types-and-scoped-operators).
@@ -2796,7 +2823,8 @@ clauses follow the parameter list and generic constraints as specified in
 its import identity, calling convention and complete Terrum callable contract.
 An ABI annotation cannot suppress caller-unsafe obligations, failure
 containment, rooting, access, ownership or loans. `extern` occupies the
-primary linkage slot after `static`, supplies a complete bodyless binding
+primary linkage slot after `static`, applies only to top-level functions and
+static methods, supplies a complete bodyless binding
 and cannot combine with `partial` or `async`. Registered annotation identities,
 import-selection schemas and target ABI mappings remain specification
 work; no P/Invoke or marshalling model is implied.
@@ -3188,7 +3216,7 @@ appears in §2.
 | Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw framing/headers, deterministic interpolation, identifier/quoted/expression formats and runtime alignment. | Complete floating token recovery, character diagnostics, raw/interpolation recovery and registered text/whole-output normalization APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or nested block namespaces without mixing, with lexically scoped imports before declarations. | Other namespace forms, if any. |
-| Visibility and declaration prefixes | §3.1 requires explicit primary visibility, fixed role-specific ordering and a sole partial contract author. Secondary attributes obey schema placement; internal interface requirements preserve module-only implementation authority. | File-limited visibility, private-interface applicability and the remaining non-callable member modifier matrix. |
+| Visibility and declaration prefixes | §3.1 requires explicit primary visibility, fixed role-specific ordering and a sole partial contract author. Secondary attributes obey schema placement; internal interface requirements preserve module-only implementation authority, while private members are complete helpers. Constructor prefixes and top-level/static-only external binding are specified. | File-limited visibility and the remaining non-function member modifier matrix. |
 | Nominal types | §3.1 gives ordered class/struct kind forms, static-class containers, interfaces, integral-base enums and explicit struct/class unions with qualified cases and independent closedness. Enum constants have checked successor overflow and deliberate aliases. | Nested declarations, selected integer catalogs, flags schemas and contextual attributes. |
 | Generic declarations | §§3.1–3.2 give bounded constant domains, checked opt-in primitive-wrapper constants, earlier-only defaults, `_` inference and explicit `default` selection. | Wrapper capability spelling/value encoding and complete inference contracts. |
 | Aliases | §§3.1 and 5.4 give finite qualified expansion, cycle rejection, namespace-level aliases and transparent public export. | Metadata encoding. |

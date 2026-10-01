@@ -50,16 +50,18 @@ union storage, bare enum/interface kinds and callable prefix order are settled.
 `extern` is primary-only, complete through its external binding, and cannot
 combine with callable `partial` or `async`. Internal interface requirements
 restrict new conformances to the defining module while a public interface
-remains usable by consumers and in constraints. These are not additional votes
+remains usable by consumers and in constraints. Private interface members are
+complete helpers, never conformance requirements. Constructors use attributes,
+visibility, optional `unsafe`, then optional `partial`, with implicit
+initialization-phase write authority and sole-primary completion guarantees.
+They exclude `static`, `extern`, `mut` and `async`; no static type initializer
+is selected. External bindings apply only to top-level functions and static
+methods. These are not additional votes
 or implementation claims.
 
-**Remaining questions (review paused):**
+**Remaining questions:**
 
-- Private interface members: should they be implemented helpers only, or may
-  they be conformance requirements? The helper-only recommendation was asked
-  but not answered. Preserve declaring-type `private` rather than silently
-  widening it to module access.
-- Complete the remaining non-function member matrix: constructors, fields,
+- Complete the remaining non-function member matrix: fields,
   properties/accessors, operators/conversions and associated bindings. The
   fixed prefix order is not permission to apply every slot to each kind.
 - Decide whether a file-limited access domain is needed and, if so, its exact
