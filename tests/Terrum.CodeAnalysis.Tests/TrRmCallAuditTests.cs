@@ -108,7 +108,7 @@ public sealed class TrRmCallAuditTests
         {
             bytes.Add(0);
         }
-        bytes.AddRange([1, 0, 0, 0, (byte)count]);
+        bytes.AddRange([1, 0, 0, 0, (byte)(count & byte.MaxValue)]);
         if (width == 2)
         {
             bytes.Add((byte)(count >> 8));

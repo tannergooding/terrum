@@ -232,7 +232,7 @@ public sealed class TrRmIndexedMutationTests
         bytes.AddRange([1, 2, 2]);
         for (var index = 0; index < width; index++)
         {
-            bytes.Add((byte)(count >> (index * 8)));
+            bytes.Add((byte)((count >> (index * 8)) & byte.MaxValue));
         }
         bytes.AddRange([0x15, 3, 6, 1, 2, 0x83, 3]);
         return bytes.ToArray();

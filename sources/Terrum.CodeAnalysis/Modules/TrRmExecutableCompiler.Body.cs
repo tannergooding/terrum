@@ -444,7 +444,7 @@ public static partial class TrRmExecutableCompiler
     {
         for (var shift = 0; shift < width * 8; shift += 8)
         {
-            bytes.Add((byte)(value >> shift));
+            bytes.Add((byte)((value >> shift) & byte.MaxValue));
         }
     }
     private static byte ReadByte(ReadOnlySpan<byte> bytes, ref int position)

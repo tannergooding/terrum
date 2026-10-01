@@ -1654,6 +1654,17 @@ results. Failed compilation/loading leaves an existing output unchanged.
 Input/output failures use status 2; invalid source or unsupported/malformed
 executable contracts use status 1.
 
+Scalar Body and indexed graph fields use canonical little-endian 1/2/4/8-byte
+encodings. Each written byte selects its low octet explicitly, so full-width
+magnitudes, high-bit payloads and multi-byte value/index fields remain valid
+under the checked C# build policy. Internal validated widths still select
+low-width two's-complement bits; this is not a new unsigned range check.
+The String table's validated u24 unit count uses the same octet selection.
+Minimal widths, tags, type identities, readers/auditors, malformed/truncated
+input rejection, resource limits and every persisted/native format remain
+unchanged. The TRRM runtime contract remains fail-fast only; checked-exception
+source peers use the existing backend, not a new TRRM runtime policy.
+
 The current envelope is one self-contained Windows x64 Module
 (`targetRequirement=1`, `runtimePolicy=0`), with module-level scalar functions
 and by-value parameters. Supported types are `bool`, `char16`, `int32`,

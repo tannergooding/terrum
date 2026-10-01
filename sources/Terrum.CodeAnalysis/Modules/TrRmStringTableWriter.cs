@@ -88,8 +88,8 @@ public static class TrRmStringTableWriter
             var units = content.Length / width;
             var row = result.AsSpan(dataStart + offset, length);
             row[0] = (byte)encoding;
-            row[1] = (byte)units;
-            row[2] = (byte)(units >> 8);
+            row[1] = (byte)(units & byte.MaxValue);
+            row[2] = (byte)((units >> 8) & byte.MaxValue);
             row[3] = (byte)(units >> 16);
             content.CopyTo(row[4..]);
             offset += length;

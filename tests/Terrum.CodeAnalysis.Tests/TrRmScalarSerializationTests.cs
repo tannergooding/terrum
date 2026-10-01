@@ -1,0 +1,326 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
+using System.Buffers.Binary;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
+using Xunit;
+
+namespace Terrum.CodeAnalysis.Tests;
+
+public sealed class TrRmScalarSerializationTests
+{
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong ScalarUInt64(ulong value);
+
+    public static IEnumerable<object[]> Scalars
+    {
+        get
+        {
+            (string Type, string Literal, string Hex, int TypeId)[] values = [
+                ("bool", "false", "00", 1), ("bool", "true", "01", 1),
+                ("char16", "255", "FF", 2), ("char16", "256", "0001", 2),
+                ("char16", "65535", "FFFF", 2),
+                ("int32", "255", "FF", 3), ("int32", "256", "0001", 3),
+                ("int32", "65535", "FFFF", 3), ("int32", "65536", "00000100", 3),
+                ("int32", "2147483647", "FFFFFF7F", 3),
+                ("int32", "-2147483648", "00000080", 3), ("int32", "-1", "FFFFFFFF", 3),
+                ("uint32", "255", "FF", 4), ("uint32", "256", "0001", 4),
+                ("uint32", "65535", "FFFF", 4), ("uint32", "65536", "00000100", 4),
+                ("uint32", "2147483648", "00000080", 4),
+                ("uint32", "4294967295", "FFFFFFFF", 4),
+                ("int64", "4294967295", "FFFFFFFF", 5),
+                ("int64", "4294967296", "0000000001000000", 5),
+                ("int64", "9223372036854775807", "FFFFFFFFFFFFFF7F", 5),
+                ("int64", "-9223372036854775808", "0000000000000080", 5),
+                ("int64", "-1", "FFFFFFFFFFFFFFFF", 5),
+                ("uint64", "4294967295", "FFFFFFFF", 6),
+                ("uint64", "4294967296", "0000000001000000", 6),
+                ("uint64", "9223372036854775808", "0000000000000080", 6),
+                ("uint64", "18446744073709551615", "FFFFFFFFFFFFFFFF", 6),
+                ("uint64", "0x0123456789ABCDEF", "EFCDAB8967452301", 6),
+            ];
+            foreach (var (type, literal, hex, typeId) in values)
+            {
+                yield return [type, literal, hex, typeId, false];
+                yield return [type, literal, hex, typeId, true];
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Scalars))]
+    public void CanonicalScalarBytesRoundTripThroughLinearAndIndexedGraphs(
+        string type, string literal, string hex, int typeId, bool indexed)
+    {
+        var function = indexed
+            ? $"public {type} Value(bool choose) {{ if (choose) {{ return {literal}; }} else {{ return {literal}; }} }}"
+            : $"public {type} Value() {{ return {literal}; }}";
+        var expectedValue = type == "bool" ? literal : $"{type}({literal})";
+        var source = function + $" int32 Main() {{ return Value({(indexed ? "true" : "")}) == {expectedValue} ? 42 : 0; }}";
+        var original = Compile(source, BoundRuntimePolicy.FailFast);
+        var artifact = TrRmExecutableCompiler.Emit(original, "full-width");
+        TrRmStructuralMetadataValidator.ValidateCompact(artifact);
+        var body = Body(artifact, 1);
+        var payload = Convert.FromHexString(hex);
+        if (!indexed)
+        {
+            var expected = new List<byte> { 4, 6 };
+            foreach (var row in new[] { 2, 3, 4, 5, 6, 7 })
+            {
+                var bytes = new byte[4];
+                BinaryPrimitives.WriteInt32LittleEndian(bytes, row);
+                expected.AddRange(bytes);
+            }
+            expected.Add(1);
+            if (payload.Length != 1)
+            {
+                expected.AddRange([0xF0, Layout(payload.Length)]);
+            }
+            expected.AddRange([1, 1, (byte)typeId]);
+            expected.AddRange(payload);
+            expected.AddRange([0x83, 1]);
+            Assert.Equal(expected.ToArray(), body);
+        }
+        else
+        {
+            AssertIndexedConstants(body, payload, typeId);
+        }
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
+        var checkedSource = Compile(source, BoundRuntimePolicy.CheckedExceptions);
+        Assert.Equal(42, NativeJit.Execute(checkedSource, NativeRuntimePolicy.CheckedExceptions));
+        // The persisted scalar contract remains fail-fast; serialization does not add a policy.
+        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(checkedSource, "checked"));
+    }
+
+    [Theory]
+    [InlineData(1, "EF")]
+    [InlineData(2, "EFCD")]
+    [InlineData(4, "EFCDAB89")]
+    [InlineData(8, "EFCDAB8967452301")]
+    public void InternalValidatedWidthSelectsLowOctetsWithoutUnsignedRangeValidation(int width, string hex)
+    {
+        var write = Assert.IsAssignableFrom<MethodInfo>(typeof(TrRmExecutableCompiler).GetMethod("Write",
+            BindingFlags.NonPublic | BindingFlags.Static));
+        var bytes = new List<byte>();
+        write.Invoke(null, [bytes, 0x0123456789ABCDEFUL, width]);
+        Assert.Equal(Convert.FromHexString(hex), bytes.ToArray());
+        bytes.Clear();
+        write.Invoke(null, [bytes, ulong.MaxValue, width]);
+        Assert.Equal(Enumerable.Repeat(byte.MaxValue, width), bytes);
+    }
+
+    [Theory]
+    [InlineData(-1L, 1, "FF")]
+    [InlineData(-128L, 1, "80")]
+    [InlineData(-129L, 2, "7FFF")]
+    [InlineData(-32768L, 2, "0080")]
+    [InlineData(-32769L, 4, "FF7FFFFF")]
+    [InlineData(-2147483648L, 4, "00000080")]
+    [InlineData(long.MinValue, 8, "0000000000000080")]
+    public void SignedNarrowFieldsRetainCanonicalTwosComplement(long value, int width, string hex)
+    {
+        var write = Assert.IsAssignableFrom<MethodInfo>(typeof(TrRmExecutableCompiler).GetMethod("Write",
+            BindingFlags.NonPublic | BindingFlags.Static));
+        var bytes = new List<byte> { 4, 1, (byte)(width == 8 ? 5 : 1), 0, 0, 0, 1 };
+        if (width != 1)
+        {
+            bytes.AddRange([0xF0, Layout(width)]);
+        }
+        bytes.AddRange([2, 1, 1]);
+        var start = bytes.Count;
+        write.Invoke(null, [bytes, unchecked((ulong)value), width]);
+        Assert.Equal(Convert.FromHexString(hex), bytes.Skip(start).ToArray());
+        bytes.AddRange([0x83, 1]);
+        var artifact = TrRmExecutionAuditTests.Artifact(bytes.ToArray(),
+            resultRow: width == 8 ? 5 : 1, entry: width != 8, exported: width == 8);
+        TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var local = Assert.IsType<BoundLocal>(loaded.Functions[0].Body.Statements[0]);
+        Assert.Equal(value, Assert.IsType<BoundConstant>(local.Initializer).Value);
+        if (width != 8)
+        {
+            Assert.Equal((int)value, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        }
+        else
+        {
+            Assert.NotEmpty(NativeEmitter.EmitLibrary(loaded, ["Main"], NativeRuntimePolicy.FailFast));
+        }
+    }
+
+    [Theory]
+    [InlineData(127, true)]
+    [InlineData(128, false)]
+    public void IndexedValue256WidensReferencesWithoutChangingTheResourceBoundary(int updates, bool supported)
+    {
+        var source = "int32 Main() { mut int32 x = 0; "
+            + string.Concat(Enumerable.Repeat("x++; ", updates)) + "return +x; }";
+        var original = Compile(source, BoundRuntimePolicy.FailFast);
+        if (!supported)
+        {
+            Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(original, "limit"));
+            return;
+        }
+        var artifact = TrRmExecutableCompiler.Emit(original, "limit");
+        var body = Body(artifact, 1);
+        Assert.Equal(9, body[0]);
+        Assert.Equal(256, BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(3)));
+        Assert.Equal(new byte[] { 0xF0, 1, 0x83, 0, 1 }, body[^5..]);
+        TrRmStructuralMetadataValidator.ValidateCompact(artifact);
+        Assert.Equal(updates, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact), NativeRuntimePolicy.FailFast));
+        Assert.Equal(updates, NativeJit.Execute(Compile(source, BoundRuntimePolicy.CheckedExceptions),
+            NativeRuntimePolicy.CheckedExceptions));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PersistedFullWidthScalarLibraryServicesNativeExportsAsync(bool indexed)
+    {
+        var source = indexed
+            ? "public uint64 Value(uint64 x) { if (x == 0) { return 18446744073709551615; } else { return x ^ 18446744073709551615; } }"
+            : "public uint64 Value(uint64 x) { return x ^ 18446744073709551615; }";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(program, "scalar-service"));
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var path = Path.Combine(root, "artifacts", $"trrm-scalar-{Guid.NewGuid():N}.dll");
+        try
+        {
+            foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+            {
+                BoundProgram executable;
+                if (policy == NativeRuntimePolicy.FailFast)
+                {
+                    executable = loaded;
+                }
+                else
+                {
+                    var peer = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+                    Assert.False(peer.HasErrors, string.Join(Environment.NewLine, peer.Diagnostics));
+                    executable = Assert.IsType<BoundProgram>(peer.Program);
+                    Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(executable, "checked"));
+                }
+                await File.WriteAllBytesAsync(path, NativeEmitter.EmitLibrary(executable, ["Value"], policy));
+                var handle = NativeLibrary.Load(path);
+                try
+                {
+                    var invoke = Marshal.GetDelegateForFunctionPointer<ScalarUInt64>(NativeLibrary.GetExport(handle, "Value"));
+                    Assert.Equal(ulong.MaxValue, invoke(0));
+                    Assert.Equal(0UL, invoke(ulong.MaxValue));
+                    Assert.Equal(0xFEDCBA9876543210UL, invoke(0x0123456789ABCDEF));
+                }
+                finally
+                {
+                    NativeLibrary.Free(handle);
+                }
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x30, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0x83, 1 })]
+    [InlineData(new byte[] { 4, 1, 2, 0, 0, 0, 1, 1, 1, 1, 2, 0x83, 1 })]
+    [InlineData(new byte[] { 4, 1, 3, 0, 0, 0, 1, 0xF0, 0x20, 1, 1, 1, 0, 0, 1, 0, 0x83, 1 })]
+    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x20, 1, 1, 1, 0xFF, 0xFF })]
+    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x10, 1, 1, 1, 42, 0, 0x83, 1 })]
+    public void FullWidthWriteDoesNotRelaxPublicMagnitudeTruncationOrCanonicalWidthAudits(byte[] body)
+    {
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
+    }
+
+    private static byte Layout(int width) => width switch {
+        2 => 0x10, 4 => 0x20, 8 => 0x30, _ => throw new InvalidOperationException(),
+    };
+
+    private static BoundProgram Compile(string source, BoundRuntimePolicy policy)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return Assert.IsType<BoundProgram>(compilation.Program);
+    }
+
+    private static byte[] Body(byte[] artifact, int method)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x20, out var bytes, out var count));
+        return new TrRmBodyTableReader(bytes, count).GetRow(method).ToArray();
+    }
+
+    private static void AssertIndexedConstants(byte[] body, byte[] payload, int typeId)
+    {
+        Assert.Equal(8, body[0] & 0xFC);
+        var width = 1 << (body[0] & 3);
+        var at = 1;
+        var blocks = Read();
+        var values = Read();
+        var regions = Read();
+        var types = Read();
+        Assert.Equal(0, regions);
+        at += types * 4 + values * 2 * width + (blocks + 1 + values) * width;
+        var offsets = new int[blocks + 1];
+        for (var block = 0; block <= blocks; block++)
+        {
+            offsets[block] = Read();
+        }
+        at += blocks * width;
+        var start = at;
+        var constants = 0;
+        for (var block = 0; block < blocks; block++)
+        {
+            at = start + offsets[block];
+            var presence = body[at++];
+            if ((presence & 1) != 0) { _ = Read(); }
+            foreach (var bit in new[] { 2, 4, 8, 16 })
+            {
+                if ((presence & bit) != 0)
+                {
+                    var count = Read();
+                    at += count * width * (bit == 16 ? 2 : 1);
+                }
+            }
+            var operations = Read();
+            if (operations == 0) { continue; }
+            Assert.Equal(1, operations);
+            if (payload.Length != 1)
+            {
+                Assert.Equal(0xF0, body[at++]);
+                Assert.Equal(Layout(payload.Length), body[at++]);
+            }
+            Assert.Equal(1, body[at++]);
+            Assert.InRange(body[at++], 2, 3);
+            Assert.Equal(typeId, body[at++]);
+            Assert.Equal(payload, body.AsSpan(at, payload.Length).ToArray());
+            constants++;
+        }
+        Assert.Equal(2, constants);
+
+        int Read()
+        {
+            var value = width switch {
+                1 => body[at], 2 => BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(at)),
+                4 => checked((int)BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(at))),
+                _ => throw new InvalidOperationException(),
+            };
+            at += width;
+            return value;
+        }
+    }
+}

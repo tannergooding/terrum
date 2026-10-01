@@ -33,6 +33,23 @@ public sealed class TrRmStringTableWriterTests
         Assert.Equal("A", reader.DecodeName(4));
     }
 
+    [Theory]
+    [InlineData(255, "FF0000")]
+    [InlineData(256, "000100")]
+    [InlineData(65535, "FFFF00")]
+    [InlineData(65536, "000001")]
+    [InlineData(0x12345, "452301")]
+    public void FullU24UnitCountsPreserveEachLittleEndianOctet(int units, string hex)
+    {
+        foreach (var encoding in new[] { 0, 1, 2, 3 })
+        {
+            var text = new string('A', units);
+            var section = TrRmStringTableWriter.EncodeNames([(text, encoding)]);
+            Assert.Equal(Convert.FromHexString(hex), section.AsSpan(9, 3).ToArray());
+            Assert.Equal(text, new TrRmStringTableReader(section, 1).DecodeName(1));
+        }
+    }
+
     [Fact]
     public void EmptyNamespaceRoundTripsInAllEncodingsWithoutBecomingAValidName()
     {
