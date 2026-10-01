@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading;
@@ -547,6 +548,16 @@ public static class ScannerHost
 
     private static void ValidatePunctuationProfile(LexResult result, CancellationToken cancellationToken)
     {
+        HashSet<(string Code, TextSpan Span)>? punctuationDiagnostics = null;
+        foreach (var diagnostic in result.Diagnostics)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (diagnostic.Code is PunctuationRun.InvalidCode or PunctuationRun.UnsupportedCode)
+            {
+                punctuationDiagnostics ??= [];
+                punctuationDiagnostics.Add((diagnostic.Code, diagnostic.Span));
+            }
+        }
         for (var index = 0; index < result.Tokens.Length - 1; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -597,16 +608,7 @@ public static class ScannerHost
             if (kind is PunctuationRunKind.Invalid or PunctuationRunKind.Unsupported)
             {
                 var code = kind == PunctuationRunKind.Unsupported ? PunctuationRun.UnsupportedCode : PunctuationRun.InvalidCode;
-                var found = false;
-                foreach (var diagnostic in result.Diagnostics)
-                {
-                    if (diagnostic.Code == code && diagnostic.Span == token.Span)
-                    {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found)
+                if (punctuationDiagnostics is null || !punctuationDiagnostics.Contains((code, token.Span)))
                 {
                     throw new ArgumentException("Scanner records omit a punctuation diagnostic.", nameof(result));
                 }

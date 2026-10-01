@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
@@ -166,6 +167,71 @@ public sealed class OperatorRunTests
         Assert.Equal(text, result.Tokens[0].Text);
         Assert.Equal($"TRM{code:0000}", Assert.Single(result.Diagnostics).Code);
         Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(source, 2, tokens, new byte[4], new byte[4]));
+    }
+
+    [Theory]
+    [InlineData(11)]
+    [InlineData(12)]
+    [InlineData(0)]
+    public void DiagnosticHeavyMaximumSourceRecordsRequireEveryExactCodeAndSpan(int code)
+    {
+        const int runs = 5461;
+        var text = new StringBuilder(ScannerHost.MaximumSourceLength);
+        var records = new (TokenKind Kind, int Start, int Length)[runs + 1];
+        var trivia = new byte[(1 + runs * 4) * sizeof(int)];
+        var diagnostics = new byte[(1 + runs * 3) * sizeof(int)];
+        BinaryPrimitives.WriteInt32LittleEndian(trivia, runs);
+        BinaryPrimitives.WriteInt32LittleEndian(diagnostics, runs);
+        for (var index = 0; index < runs; index++)
+        {
+            var kind = code == 0 ? 11 + index % 2 : code;
+            text.Append(kind == 11 ? "!! " : ".. ");
+            records[index] = (TokenKind.Bad, index * 3, 2);
+            var diagnosticOffset = (1 + index * 3) * sizeof(int);
+            BinaryPrimitives.WriteInt32LittleEndian(diagnostics.AsSpan(diagnosticOffset), kind);
+            BinaryPrimitives.WriteInt32LittleEndian(diagnostics.AsSpan(diagnosticOffset + 4), index * 3);
+            BinaryPrimitives.WriteInt32LittleEndian(diagnostics.AsSpan(diagnosticOffset + 8), 2);
+            var triviaOffset = (1 + index * 4) * sizeof(int);
+            BinaryPrimitives.WriteInt32LittleEndian(trivia.AsSpan(triviaOffset), (int)TriviaKind.Whitespace);
+            BinaryPrimitives.WriteInt32LittleEndian(trivia.AsSpan(triviaOffset + 4), index * 3 + 2);
+            BinaryPrimitives.WriteInt32LittleEndian(trivia.AsSpan(triviaOffset + 8), index == runs - 1 ? 2 : 1);
+            BinaryPrimitives.WriteInt32LittleEndian(trivia.AsSpan(triviaOffset + 12), index + 1);
+        }
+        text.Append(' ');
+        Assert.Equal(ScannerHost.MaximumSourceLength, text.Length);
+        records[runs] = (TokenKind.EndOfFile, text.Length, 0);
+        var source = SourceText.From(text.ToString());
+        var tokens = TokenRecords(records);
+        var result = ScannerHost.ReadLexResult(source, records.Length, tokens, trivia, diagnostics);
+        Assert.Equal(runs, result.Diagnostics.Length);
+        Assert.Equal(records.Length, result.Tokens.Length);
+        Assert.Equal(source.Text, SyntaxTree.Parse(result).Root.ToFullString());
+        for (var index = 0; index < runs; index++)
+        {
+            Assert.Equal($"TRM{(code == 0 ? 11 + index % 2 : code):0000}", result.Diagnostics[index].Code);
+            Assert.Equal(new TextSpan(index * 3, 2), result.Diagnostics[index].Span);
+        }
+        var middle = runs / 2;
+        var offset = (1 + middle * 3) * sizeof(int);
+        var wrongCode = (byte[])diagnostics.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(wrongCode.AsSpan(offset), 1);
+        Assert.Throws<ArgumentException>(() =>
+            ScannerHost.ReadLexResult(source, records.Length, tokens, trivia, wrongCode));
+        var wrongSpan = (byte[])diagnostics.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(wrongSpan.AsSpan(offset + 4), middle * 3 + 1);
+        Assert.Throws<ArgumentException>(() =>
+            ScannerHost.ReadLexResult(source, records.Length, tokens, trivia, wrongSpan));
+        var wrongRunKind = (byte[])diagnostics.Clone();
+        var expected = code == 0 ? 11 + middle % 2 : code;
+        BinaryPrimitives.WriteInt32LittleEndian(wrongRunKind.AsSpan(offset), expected == 11 ? 12 : 11);
+        Assert.Throws<ArgumentException>(() =>
+            ScannerHost.ReadLexResult(source, records.Length, tokens, trivia, wrongRunKind));
+        var missing = new byte[diagnostics.Length - 3 * sizeof(int)];
+        diagnostics.AsSpan(0, offset).CopyTo(missing);
+        diagnostics.AsSpan(offset + 3 * sizeof(int)).CopyTo(missing.AsSpan(offset));
+        BinaryPrimitives.WriteInt32LittleEndian(missing, runs - 1);
+        Assert.Throws<ArgumentException>(() =>
+            ScannerHost.ReadLexResult(source, records.Length, tokens, trivia, missing));
     }
 
     [Fact]
