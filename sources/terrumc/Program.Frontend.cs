@@ -210,6 +210,8 @@ internal static partial class Program
                 writer.WriteStartObject("result");
                 writer.WriteBoolean("valid", frontend.IsValid);
                 writer.WriteBoolean("public", frontend.IsPublic);
+                writer.WriteBoolean("noThrow", frontend.IsNoThrow);
+                writer.WriteBoolean("doesNotReturn", frontend.DoesNotReturn);
                 writer.WriteNumber("errorCode", frontend.ErrorCode);
                 WriteFrontendSpan(writer, "errorSpan", frontend.ErrorSpan);
                 if (frontend.IsValid)
@@ -314,6 +316,10 @@ internal static partial class Program
                         if (frontend.Statements.Any(static statement => statement.Kind == 23))
                         {
                             projectionVersion = 58;
+                        }
+                        if (frontend.IsNoThrow || frontend.DoesNotReturn)
+                        {
+                            projectionVersion = 59;
                         }
                         writer.WriteNumber("projectionVersion", projectionVersion);
                         writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);

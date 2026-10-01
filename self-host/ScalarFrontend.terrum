@@ -530,18 +530,8 @@ mut class ScalarFrontendState
                 {
                     comparisonOperation = comparisonOperation - 1200;
                 }
-                if (nested.Type == 5 && nestedBase < 2000
-                    && ((nestedBase >= 65 && nestedBase <= 75
-                            && nested.LeftParameter >= 1
-                            && nested.RightParameter >= 1)
-                        || ((nestedGroup == 7 || nestedGroup == 9
-                                || nestedGroup == 11)
-                            && (nestedKind == 65 || nestedKind == 66
-                                || (nestedKind >= 71 && nestedKind <= 75)))
-                        || (comparisonOperation / 100 >= 1
-                            && comparisonOperation / 100 <= 4
-                            && comparisonOperation % 100 >= 65
-                            && comparisonOperation % 100 <= 70)))
+                if (IsScalarFrontendNegatableBinary(nested, nestedBase, nestedGroup,
+                    nestedKind, comparisonOperation))
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
@@ -1333,8 +1323,36 @@ mut class ScalarFrontendState
         return true;
     }
 
+    private mut bool ParseDeclarationEffects()
+    {
+        mut int32 effects = 0;
+        require _tokens.TryGet(_at, out var firstAttribute);
+        mut Token attribute = firstAttribute;
+        while (attribute.Kind == 50)
+        {
+            if (!Take(50, out var openAttribute) || !Take(2, out var effect))
+            {
+                return false;
+            }
+            int32 flag = ScalarFrontendEffect(effect);
+            if (flag == 0 || (effects & flag) != 0 || !Take(51, out var closeAttribute))
+            {
+                FailAt(1, effect.Range);
+                return false;
+            }
+            effects = effects | flag;
+            require _tokens.TryGet(_at, out attribute);
+        }
+        Host.Frontend[2] = effects;
+        return true;
+    }
+
     private mut bool ParseHeader(out int32 returnType, out SourceRange name)
     {
+        if (!ParseDeclarationEffects())
+        {
+            return false;
+        }
         require _tokens.TryGet(_at, out var visibility);
         if (visibility.Kind == 7)
         {
@@ -1352,6 +1370,11 @@ mut class ScalarFrontendState
         }
         mut int32 selected = 0;
         if (typeToken.Kind != 11 && !TryGetScalarType(typeToken, out selected))
+        {
+            FailAt(2, typeToken.Range);
+            return false;
+        }
+        if ((Host.Frontend[2] & 4) != 0 && selected != 0)
         {
             FailAt(2, typeToken.Range);
             return false;
@@ -2072,9 +2095,7 @@ mut class ScalarFrontendState
                 int32 kind = TreeStatementKind(index);
                 if (kind == 11 || kind == 12 || kind == 21) { hasTerminatingStatement = true; }
             }
-            if (_error == 0 && returnType != 0
-                && (_structuredReturnCount == 0 && !hasTerminatingStatement
-                    || !TreeBodyReturns(0, _statementCount)))
+            if (_error == 0 && !HasStructuredCompletion(returnType, hasTerminatingStatement))
             {
                 Fail(1);
             }
@@ -2094,6 +2115,13 @@ mut class ScalarFrontendState
             returnType, _parameterCount, _firstType, _secondType, _thirdType,
             name, _first.Range, _second.Range, _third.Range,
             false, false, absent, absent, absent, out result);
+    }
+
+    private bool HasStructuredCompletion(int32 returnType, bool hasTerminatingStatement)
+    {
+        if (returnType == 0 || Host.Frontend[2] != 0) { return true; }
+        if (_structuredReturnCount == 0 && !hasTerminatingStatement) { return false; }
+        return TreeBodyReturns(0, _statementCount);
     }
 
     private bool IsTreeElseMarker(int32 index)
@@ -3090,7 +3118,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     {
         return false;
     }
-    if (legacy.IsValid)
+    if (legacy.IsValid && Host.Frontend[2] == 0)
     {
         result = legacy;
         return true;
@@ -3100,10 +3128,17 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     {
         return false;
     }
-    if (modern.IsValid)
+    if (modern.IsValid && CanPublishScalarFrontendTreeEnvelope())
     {
         result = modern;
         return true;
+    }
+    if (modern.IsValid)
+    {
+        for (mut int32 index = 37; index < Host.Frontend.Length; index = index + 1)
+        {
+            Host.Frontend[index] = 0;
+        }
     }
     if (ScalarFrontendState.TryCreate(chain, empty, out var structured)
         && structured.TryParseStructuredReturns(out var completed))
@@ -3162,6 +3197,31 @@ bool IsScalarFrontendTreeMarker(int32 kind)
     return kind == 56;
 }
 
+bool CanPublishScalarFrontendTreeEnvelope()
+{
+    return Host.Frontend[2] == 0 || Host.Frontend[41] == 1;
+}
+
+// Isolate this legacy predicate to avoid repeated Boolean-tree walks within the
+// unchanged shared source-verification budget.
+bool IsScalarFrontendNegatableBinary(ScalarFrontendExpression expression, int32 operation,
+    int32 group, int32 kind, int32 comparison)
+{
+    if (expression.Type != 5 || operation >= 2000) { return false; }
+    if (operation >= 65 && operation <= 75
+        && expression.LeftParameter >= 1 && expression.RightParameter >= 1)
+    {
+        return true;
+    }
+    if ((group == 7 || group == 9 || group == 11)
+        && (kind == 65 || kind == 66 || (kind >= 71 && kind <= 75)))
+    {
+        return true;
+    }
+    return comparison / 100 >= 1 && comparison / 100 <= 4
+        && comparison % 100 >= 65 && comparison % 100 <= 70;
+}
+
 bool TryScanScalarFrontend(out ScalarFrontendResult result)
 {
     if (!TokenSnapshot.TryScan(init var tokens))
@@ -3169,4 +3229,39 @@ bool TryScanScalarFrontend(out ScalarFrontendResult result)
         return false;
     }
     return TryParseScalarFrontend(move tokens, out result);
+}
+
+// Pack at most four validated UTF16 source units, first unit in the low16bits.
+// Fixed caller lengths keep every read in the token and every shift below64.
+uint64 ScalarFrontendSourceUnits(int32 start, int32 count)
+{
+    mut uint64 units = 0;
+    for (mut int32 index = 0; index < count; index = index + 1)
+    {
+        units = units | (uint64(Host.Source[start + index]) << (index * 16));
+    }
+    return units;
+}
+
+// Exact UTF16 packing retains case and rejects escapes; these are not name identities.
+int32 ScalarFrontendEffect(Token token)
+{
+    int32 at = token.Range.Start;
+    if (token.Range.Length == 7)
+    {
+        // "NoTh", "row".
+        if (ScalarFrontendSourceUnits(at, 4) != uint64(0x00680054006F004E)) { return 0; }
+        if (ScalarFrontendSourceUnits(at + 4, 3) != uint64(0x0077006F0072)) { return 0; }
+        return 2;
+    }
+    if (token.Range.Length == 13)
+    {
+        // "Does", "NotR", "etur", "n".
+        if (ScalarFrontendSourceUnits(at, 4) != uint64(0x00730065006F0044)) { return 0; }
+        if (ScalarFrontendSourceUnits(at + 4, 4) != uint64(0x00520074006F004E)) { return 0; }
+        if (ScalarFrontendSourceUnits(at + 8, 4) != uint64(0x0072007500740065)) { return 0; }
+        if (Host.Source[at + 12] != char16(110)) { return 0; }
+        return 4;
+    }
+    return 0;
 }
