@@ -101,6 +101,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `df788b8` | Hosted explicit local lifetime ending, checked cleanup/root and loan retirement, and semantic v47 graph persistence |
 | `1c80cc9` | Hosted assignment initialization of definitely vacant locals, checked publication and semantic v46 |
 | `e40d0b4` | Single same-line loop-label attachment, syntax-44 |
 | `586aa4b` | Native parameterless NoThrow/DoesNotReturn function contracts, projection 59 |
