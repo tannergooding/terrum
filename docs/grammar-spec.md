@@ -963,8 +963,14 @@ underlying pin cannot end while any derived address depends on it. A raw
 `ptr<T>` is an address, not a relocatable managed reference; its value
 does not itself pin or root a GC allocation. Forming one into GC storage
 requires a live pin with an enforced provenance/lifetime dependency, or
-independently stable storage. Neither applying a qualifier to an existing
-reference nor forming a raw pointer silently acquires a pin. `mut` qualifies
+independently stable storage. Merely retyping an existing reference or
+forming a raw pointer cannot manufacture pin acquisition. A successfully
+acquired `pin ref<T>` does root and stabilize its backing; the concrete
+acquisition operation, including whether an initialized local binding
+performs it, remains in
+[Q26](proposals/grammar-open-questions.md#q26-pointer-formation-dereference-and-pin-acquisition).
+Pinning a slot containing a class handle does not also pin the separately
+allocated object reached through that handle. `mut` qualifies
 a binding/receiver or a `mut ref` mode.
 Neither `write` nor `init` is an unrestricted declaration modifier. Exact
 `write ref<T>` legality in `Parameter` and the other target parameter forms
@@ -1934,6 +1940,39 @@ for alternatives and a recommendation. Implicit borrowing must use the
 same mechanism as its explicit expansion, not select a distinct mechanism
 merely because it is convenience syntax.
 
+<a id="result-dependency-declarations"></a>
+**Accepted result dependency declaration:** a borrowed result can publish
+its possible parameter dependencies with
+`[return: DependsOn(nameof(left), nameof(right))]`. Prefer `nameof` over a
+literal parameter name; the named parameters belong to the annotated callable,
+including when the annotation precedes its parameter list.
+
+```terrum
+[return: DependsOn(nameof(left), nameof(right))]
+ref<T> Select<T>(ref<T> left, ref<T> right, bool useLeft)
+{
+    return useLeft ? left : right;
+}
+```
+
+Arguments are checked constant names of eligible parameter declarations,
+not runtime lookups. Unknown names or incompatible dependency kinds are
+errors. The body must satisfy the published relationship. Since either
+input may supply the result, callers retain both possible backing obligations;
+this is not the intersection of the inputs' backing sets, and neither input's
+permitted lifetime is extended. An independently compiled caller relies on
+that published relationship, not today's branch implementation.
+
+This result annotation does not authorize capturing an input into receiver
+storage, erase a lease/root obligation, or identify a receiver's own storage
+with the backing forwarded through its descriptor. Receiver selectors,
+capture/storage contracts, suspension dependencies and the default treatment
+of unannotated results remain separate source decisions in
+[Q20.1](proposals/grammar-open-questions.md#q201-remaining-result-capture-and-backing-contracts).
+Concrete attribute registration and metadata encoding are implementation work;
+this approval does not claim current compiler support or settle the full
+general compile-time-query catalog.
+
 ### 5.6 Reserved underscore and discard statement
 
 **Accepted target semantics:** `_` is reserved and is never an identifier.
@@ -2176,8 +2215,33 @@ property-local `field`, creates exactly one implicit backing field shared by
 that property's accessors at its declaration position. A body may omit
 `field` even when another accessor needs it. A property with only authored
 bodies and no `field` use has no implicit storage. Indexers do not acquire a
-per-index backing field from this rule. Detailed initialization of implicit
-storage, accessor applicability and metadata representation remain work.
+per-index backing field from this rule. Implicit backing begins vacant, not
+as an invented zero/default value. A property initializer such as
+`int32 X { get; } = 0;` explicitly initializes it. A declaring constructor
+may instead initialize a backed getter-only property with `X = value;`,
+including a property whose authored accessor uses `field`. This is a
+construction privilege to initialize its backing, not a generated public
+setter/init accessor or permission to assign an arbitrary computed getter.
+A getter-only property without a public `init` cannot leave this obligation
+to a caller initializer; every successful constructor path must establish
+its live backing before publication.
+
+```terrum
+struct Point
+{
+    public int32 X { get; } = 0;
+    public int32 Y { get; }
+
+    public Point(int32 y)
+    {
+        Y = y;
+    }
+}
+```
+
+Other properties may defer initialization only through the declared
+construction obligations below. Accessor applicability and metadata
+representation remain work.
 `mut get` and `mut set` follow ordinary method receiver contracts; writing
 through an independently writable referent does not by itself mutate `this`.
 `init` provides mutability within its initialization scope without a redundant
@@ -2458,10 +2522,26 @@ ordinary writable-place checks, not merely parse as an expression. Built-in
 integer shift assignments evaluate the place once and check shift counts.
 `??=` is the built-in initialized-optional operation described in §3.4,
 not a grant of arbitrary nominal overloading.
+For class-like values, writable handle-slot access and writable referent
+authority remain independent. `write ref<C>` permits replacing a stored
+readonly `C` handle, not mutating that object's contents; `ref<write C>`
+permits access through a writable handle without granting slot replacement.
+Whether content-only compound operations should also accept that latter
+destination instead of requiring a writable slot is an unresolved eligibility
+decision in
+[Q23](proposals/grammar-open-questions.md#q23-nominal-compound-operator-declaration-shape),
+not settled by choosing static versus instance declaration syntax.
 Do not split compound operator spellings into an ordinary binary operator
-followed by `=`. Pointer dereference/address formation and short-circuit
-`&&`/`||` overloading need their own access and evaluation-order contracts;
-they are not ordinary overloads merely because they use operator punctuation.
+followed by `=`. Pointer dereference/address formation needs its own access
+and evaluation-order contract; it is not an ordinary overload merely because
+it uses operator punctuation.
+
+**Explicitly deferred:** nominal `&&`/`||` short-circuiting remains unavailable
+until a concrete need motivates a complete protocol for truth testing,
+conditional right-operand evaluation, result and ownership obligations.
+The paired `true`/`false` declarations do not adopt C#'s derivation through
+`&`/`|`, nor can an ordinary binary witness license eager evaluation of both
+operands. Built-in Boolean short-circuit ordering is unchanged.
 
 Still **OPEN** for a full source grammar: nominal safe union cases and complete
 patterns, full associated-identity checking and family/adapter declarations,

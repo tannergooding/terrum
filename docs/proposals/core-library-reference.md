@@ -1594,8 +1594,11 @@ public interface IAsyncConsumingCursor<T>
 
 The associated `Cursor` spelling uses the grammar's associated-type
 declaration form, but its binding and selection contract is not adopted here.
-`[return: DependsOn("this")]` is only a dependency-annotation candidate from
-[Q20](grammar-open-questions.md#q20-declaring-result-capture-and-backing-dependencies);
+Parameter-directed result dependencies are
+[accepted](../grammar-spec.md#result-dependency-declarations), with `nameof`
+preferred for named parameters. The receiver selector
+`[return: DependsOn("this")]` remains a candidate under
+[Q20.1](grammar-open-questions.md#q201-remaining-result-capture-and-backing-contracts);
 it is **UNAPPROVED** and does not itself specify which advancement invalidates
 the borrow. An item borrowing cursor state cannot outlive that state or
 silently survive a conflicting advance/suspension. A backing-only item loan

@@ -265,6 +265,14 @@ direction; current compiler support is documented in
 
 An eligible view source can provide backing/borrowed access; outputs and independent scalars do not automatically qualify. A numeric parser's result is independent; a parser returning a view of input text retains the input dependency. A parameterless projection generally uses its receiver. An independent freshly allocated result needs its own owner/root and cost contract. More than one eligible input is not resolved by inspecting current control flow. Returning a view does **not** authorize storing it in an unrelated receiver. Constructor capture, exported callback factories and registrations need a declared destination/boundary. Local closures carry actual capture relationships; consuming a unique owner retains its ordinary transfer/cleanup rules rather than becoming an invisible borrowed capture.
 
+The accepted parameter-directed result annotation is
+`[return: DependsOn(nameof(left), nameof(right))]`; `nameof` is preferred
+over literal parameter names. All possible declared input dependencies remain
+obligations at the caller, without extending their permitted lifetimes.
+See the [source contract](grammar-spec.md#result-dependency-declarations).
+Unannotated-result defaults and receiver/capture/suspension selector forms
+remain [separate decisions](proposals/grammar-open-questions.md#q201-remaining-result-capture-and-backing-contracts).
+
 Working annotations `[ViewOf(From = nameof(source))]`,
 `[ViewOf(Access.Write)]` and `[Captures(nameof(value))]` express **exceptions
 to defaults**, not unchecked assertions, and their spelling is provisional.
