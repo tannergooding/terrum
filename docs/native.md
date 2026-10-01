@@ -38,20 +38,25 @@ identities, never uninitialized inner locals. Loop initializers execute per
 iteration. Copy-local scope adoption does not enable lexical region kind `02`,
 mutable places, cleanup or a new ABI.
 Indexed `do` loops enter at the body before testing. Scoped `for` initializers
-run once, and normal completion or nearest `continue` reaches the iterator
-before the next condition; break/return bypass it. Existing direct branches
+run once. Normal completion or `continue` targeting that loop reaches its
+iterator before the next condition; break/return bypass it. Existing branches
 and staged edge copies preserve local/call snapshots through these targets.
 Non-nearest named `break`/`continue` in the source-free scalar path route
 through designated single-exit indexed regions, carrying target-visible values
 and preserving continuation order. Direct edges that bypass a designated exit
 remain unsupported; nearest transfers keep their existing representation.
 This adds no labels, opcodes, region kinds, widths, versions or ABI.
-Emission still requires a reachable loop backedge; always-transferring bodies
-reject rather than acquiring synthetic edges or unaudited inactive blocks.
-It supports fail-fast only; the approved Body subset does not
+Indexed emission still requires a reachable loop backedge; always-transferring
+bodies reject rather than acquiring synthetic edges or unaudited inactive
+blocks. This source-free indexed path supports fail-fast only; the approved
+Body subset does not
 encode checked-exception dispatch, even though the native backend supports
 that policy for the existing source and development-module paths. Loading
 does not rebind producer source, bypass verification or introduce a new ABI.
+
+Separately, native scalar projection v54 admits named nearest and non-nearest
+loop transfers under both runtime policies. It does not change the fail-fast
+indexed-TRRM routing protocol or reader.
 
 ## Implemented profiles and versioned contracts
 
@@ -223,8 +228,9 @@ failed validation publishes no partial projection. Versions 1–51 retain their
 feature restrictions. The 392-word shape, record widths, existing bounds,
 scanner IDs and semantic/native ABI remain unchanged. See the
 [implementation reference](implementation.md) for name resolution and scope
-rules. Native scalar frontend transfers remain nearest-only; non-nearest named
-transfers described there apply to the source-free indexed TRRM path.
+rules. Projection v54 supports named transfers to enclosing loop headers; the
+source-free indexed TRRM path uses its separate routing protocol, which remains
+fail-fast-only and unchanged.
 
 Provisional projection v53 appends non-void standalone `_ = expression;`
 statements for the existing six primitive scalar types. Discard has no
@@ -232,8 +238,9 @@ contextual target type, so `_ = 1;` rejects while `_ = int32(1);` is valid.
 The independently audited hidden readonly local preserves the expression's
 existing single-evaluation, checked-failure and lazy-effect behavior and
 counts toward the existing eight-identity limit. Versions 1–52 retain their
-prior shapes and do not admit discard records. This appends only a provisional
-frontend feature version: source grammar, syntax-43, scanner-8/schema-8,
+prior shapes and do not admit discard records; later projections may carry
+kind 15 alongside newer kinds. This appends only a provisional frontend feature
+version: source grammar, syntax-43, scanner-8/schema-8,
 diagnostic/token inventories, semantic/ISA/Contract/TRRM formats, native
 formats and ABI do not change. The exact record and publication contract is
 in the [implementation reference](implementation.md).

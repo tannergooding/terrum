@@ -468,8 +468,9 @@ Provisional projection v52 adds nested empty or nonempty standalone lexical
 blocks using existing brace syntax; it adds no grammar spelling.
 Older projection layouts cannot identify or authorize a source-bound
 standalone-block scope. Kind 14 is admitted beginning in v52: a recognized
-block selects at least v52, while a v53 projection may contain it alongside
-kind 15. Versions 1–51 retain their standalone-block restrictions.
+block selects at least v52, and projections v53 or later may carry it
+alongside newer record kinds. Versions 1–51 retain their standalone-block
+restrictions.
 Statement kind 14 stores the exclusive body-end statement index in `slot`,
 uses root `-1`, spans the opening through closing brace, and precedes its child
 records in preorder. Only a recognized standalone block selects kind 14 and
@@ -485,8 +486,8 @@ the scalar type, readonly bit zero, and the exact underscore source start and
 length. The source-bound reader consumes the exact underscore, equals sign,
 root and semicolon, and checks complete postorder-node/source coverage.
 Duplicate slots, anchors or roots, wrong type/span/version, invisible
-identities and discards in a `for` header reject. Only an actual kind-15 record
-selects v53.
+identities and discards in a `for` header reject. Kind 15 is admitted
+beginning in v53; later projections may carry it alongside newer record kinds.
 
 There is no contextual discard target type: `_ = 1;` rejects while
 `_ = int32(1);` is well typed. Existing conversion, read, update, Boolean,
@@ -508,6 +509,48 @@ reinterpretation. Syntax-43, scanner-8/schema-8, diagnostic and token
 inventories, semantic/ISA/Contract/TRRM formats, native formats and ABI are
 unchanged. Only the provisional frontend feature version is appended.
 
+Provisional projection v54 appends labeled loop headers and named transfers
+within the existing 392-word projection and five-word statement records:
+kinds 16/17/18 are labeled `while`/`do`/`for`, and 19/20 are named
+`break`/`continue`. Versions 1–53 reject these kinds; existing kinds 6/7
+remain unnamed nearest transfers and are never reinterpreted. A labeled
+header's `slot` is its exclusive body-end index and `root` is its existing
+condition (`-1` for an omitted `for` condition). Its exact raw span covers the
+label, colon and loop, while the independently audited `LoopSpan` covers the
+underlying loop keyword through its end for hosted `BoundProgram` spans.
+
+A named transfer's `slot` identifies an actually enclosing labeled-loop
+header and its `root` is `-1`. Its full span covers the exact keyword, raw
+identifier and semicolon; `IdentifierSpan` preserves the raw token, including
+an `@` escape, while name matching separately uses ordinal normalized
+identity. The source-bound reader independently verifies active loop ancestry
+and ordinal normalized names; forward, inactive, sibling, non-loop,
+wrong-kind/depth/span/root/version targets reject. Blocks and branch
+labels are not transfer targets. Duplicate active normalized loop labels
+reject and disjoint scopes may reuse a label under this bounded projection;
+this does not adopt a broader grammar or label-shadowing policy. The binder
+derives the existing one-based `TargetDepth` from audited enclosing loops and
+uses the existing `BoundBreak`/`BoundContinue` lowering. Selected `continue`
+reaches the target `while` header, `for` iterator or `do` condition exactly
+once. Selected `break` bypasses the target `for` iterator or `do` condition.
+Intervening statements and exited inner-loop
+iterators or `do` conditions are skipped, while effects before the transfer
+remain ordered as in the hosted source semantics.
+
+Native flow analysis accounts for reachable nested-loop transfers targeting
+an outer loop, including literal-false preconditions and termination by other
+transfers; the shared verifier remains authoritative for fallthrough and
+inactive-source checks. Both runtime policies use the same verified lowering.
+The existing error catalog is reused: code 3 reports a missing label at its
+raw span, code 4 a duplicate active normalized label at its declaration, and
+code 1 unsupported, spacing or non-fallthrough failures. Shared lookup,
+parsing and version classification preserve the existing semantic work limit.
+Invalid source, spans, versions or targets fail closed without publishing a
+partial projection, and failed CLI builds retain existing PE bytes. Existing
+local, source-depth, record, node, visit and backend resource limits remain;
+the projection width, scanner and semantic formats, indexed-TRRM protocol and
+native ABI do not change.
+
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed
 lexical `BoundBlock` and shared verified path. Names use ordinal normalized
@@ -515,12 +558,13 @@ identity: initializer references resolve only to preceding visible declaration
 identities, active names cannot be shadowed, and closed sibling scopes may
 reuse spellings with monotonic slots. Scope exit removes inner name/write
 authority through the existing cleanup path without undoing outer mutations;
-returns and nearest loop transfers retain their existing targets. Failed
+returns and nearest or named loop transfers retain their audited targets. Failed
 validation publishes no partial projection.
 
 Standalone blocks use kind 14 beginning in v52; non-void scalar discard uses
-kind 15 in v53. Versions 1–51 retain their block restrictions, and versions
-1–52 retain their discard restrictions and prior source audits. The
+kind 15 beginning in v53; named-loop kinds begin in v54. Versions 1–51 retain
+their block restrictions, versions 1–52 their discard restrictions, and
+versions 1–53 their named-transfer restrictions and prior source audits. The
 392-`int32` buffer and all record widths remain fixed:
 16,384 UTF-16 source units, 64 tokens, eight total named/hidden local
 identities, 12 statement records, 32 expression nodes, three parameters,
