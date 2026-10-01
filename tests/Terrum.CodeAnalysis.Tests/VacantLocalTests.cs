@@ -145,7 +145,7 @@ public sealed class VacantLocalTests
     [InlineData("return value;", "TRM3016")]
     [InlineData("if (Fill(true, init value)) { return value; } return value;", "TRM3016")]
     [InlineData("require Fill(true, init value); require Fill(true, init value); return value;", "TRM3016")]
-    [InlineData("require Fill(true, init value); value = 1; return value;", "TRM3008")]
+    [InlineData("require Fill(true, init value); value = 1; return value;", "TRM3016")]
     [InlineData("require Fill(true, out value); return value;", "TRM3011")]
     [InlineData("init var value;", "TRM3016")]
     public void VacantLocalCannotBeReadOrReinitializedOutsideItsCheckedCompletion(string body, string code)

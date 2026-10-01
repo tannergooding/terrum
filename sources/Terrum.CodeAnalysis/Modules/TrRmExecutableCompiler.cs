@@ -87,7 +87,7 @@ public static partial class TrRmExecutableCompiler
             {
                 var variable = function.Variables[parameter];
                 if (!Scalar(variable.Type) || variable.Type == PrimitiveType.Void
-                    || variable.IsOut || variable.IsInit)
+                    || variable.IsOut || variable.IsInit || variable.IsInitializationLocal)
                 {
                     throw Unsupported($"Function '{function.Name}' has a non-value scalar parameter.");
                 }

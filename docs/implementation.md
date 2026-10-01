@@ -213,10 +213,25 @@ initialization. Existing definite-assignment, owner cleanup and managed-root
 rules apply. Semantic v40 is selected only when a retained body contains such
 a declaration; older feature-selected modules and the native ABI are unchanged.
 The bounded constant evaluator does not support vacant declarations.
-The accepted target `name = _;` lifetime-end statement and `=` initialization
-or reinitialization of vacant `init` locals are not implemented. Current
-vacant-local publication still requires the supported checked `init` call;
-source approval does not change its executable boundary.
+Hosted `=` assignment can also initialize a definitely vacant `init` local.
+The first supported assignment fixes an inferred local's type; later
+initializations retain that type. This is initialization authority, not
+permission to replace a live readonly value. An ordinary immutable local does
+not gain this authority when its owner is moved. Assignment evaluates the
+right-hand side before publication, cleanup eligibility and managed-root
+activation; checked failure leaves the destination vacant. The right-hand side
+cannot also reserve or initialize that destination.
+Flow joins distinguish definite vacancy from possible publication. Ignoring
+a conditional output's Boolean status therefore does not authorize another
+initialization; checked false/failure paths retain vacancy. Loop-local slots
+begin a fresh dynamic lifetime on each iteration, while outer slots retain
+their joined state.
+Semantic v46 is selected when a retained assignment targets an initialization
+local. Declaration-only/checked-call bodies retain their existing formats;
+the reader reconstructs local authority from vacant declarations and rejects
+initialization assignments under older headers. The native ABI is unchanged.
+The accepted target `name = _;` lifetime-end statement, nullable inferred
+`var?` syntax and native scalar frontend initialization remain unimplemented.
 
 Syntax-31 adds right-associative `condition ? whenTrue : whenFalse` expressions
 below binary-operator precedence. The Boolean condition runs once; only its

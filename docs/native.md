@@ -317,6 +317,14 @@ Standalone `init T name;` and `init var name;` declare vacant
 readonly local slots without a default value. Existing checked initialization
 controls publication, owner cleanup and managed-root activation. Semantic v40
 persists these declarations when retained; they add no native ABI operation.
+Hosted assignment to a definitely vacant `init` local uses the same checked
+AOT/JIT publication, cleanup and rooting paths. It fixes inferred storage type
+without granting live-value replacement authority; failed evaluation leaves
+vacancy. Retained initialization assignments select semantic v46, with local
+authority reconstructed from the vacant declaration. Conditional publication
+must be resolved before another initialization, including across loop and
+exception joins. This does not add vacant locals to the native scalar frontend
+or implement `name = _;`.
 Syntax-27 adds compile-time-only body `static require`
 and outer-body `static ensure` for closed scalar proofs. Successful proofs
 leave no native operation or semantic wire record; known false, unsupported

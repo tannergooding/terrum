@@ -322,7 +322,7 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     public int ClassConstructor { get; init; } = -1;
 }
 
-/// <summary>A parameter or initialized local declaration.</summary>
+/// <summary>A parameter or local storage declaration.</summary>
 /// <param name="Name">The source name.</param>
 /// <param name="Type">The stored type.</param>
 /// <param name="IsMutable">Whether assignment is permitted.</param>
@@ -334,6 +334,9 @@ public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutab
 
     /// <summary>Whether this source parameter uses the vacant initialization loan mode.</summary>
     public bool IsInit { get; init; }
+
+    /// <summary>Whether a vacant local may initialize its storage without replacing a live value.</summary>
+    public bool IsInitializationLocal { get; init; }
 }
 
 /// <summary>A structured statement, retaining its source range.</summary>

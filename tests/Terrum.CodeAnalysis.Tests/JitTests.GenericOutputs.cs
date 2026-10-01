@@ -145,7 +145,7 @@ public sealed partial class JitTests
             int32 Main() {
                 if (None<int32>(init var target)) { return 1; }
                 unsafe {
-                    try { FailAfterWrite<int32>(41, init target); }
+                    try { if (FailAfterWrite<int32>(41, init target)) { return 1; } }
                     catch { }
                 }
                 require Fill(42, init target);

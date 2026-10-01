@@ -1496,6 +1496,7 @@ internal sealed partial class Binder
                     Report("TRM3023", "Native buffer views require an initialized lexical owner loan.", node.Span);
                 }
                 var slot = AddVariable(name.Name, type, false, name.Span);
+                _variables[slot] = _variables[slot] with { IsInitializationLocal = true };
                 if (inferred)
                 {
                     _ = _unresolvedVacantLocals.Add(slot);
@@ -1577,12 +1578,19 @@ internal sealed partial class Binder
                 {
                     Report("TRM3008", "A method cannot rebind its receiver.", token.Span);
                 }
-                else if (!_variables[slot].IsMutable)
+                else if (!_variables[slot].IsMutable && !_variables[slot].IsInitializationLocal)
                 {
                     Report("TRM3008", $"Variable '{token.Text}' is immutable.", token.Span);
                 }
 
-                return new BoundAssignment(slot, BindExpression(valueNode, _variables[slot].Type), node.Span);
+                var unresolved = _unresolvedVacantLocals.Contains(slot);
+                var value = BindExpression(valueNode, unresolved ? null : _variables[slot].Type);
+                if (unresolved && value.Type != PrimitiveType.Void)
+                {
+                    _variables[slot] = _variables[slot] with { Type = value.Type };
+                    _ = _unresolvedVacantLocals.Remove(slot);
+                }
+                return new BoundAssignment(slot, value, node.Span);
             }
 
             case SyntaxKind.CompoundAssignmentStatement:

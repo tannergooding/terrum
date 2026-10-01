@@ -51,6 +51,7 @@ public static partial class ModuleCompiler
     private const int UpdateVersion = 43;
     private const int NominalUpdateVersion = 44;
     private const int CompoundAssignmentVersion = 45;
+    private const int InitializationAssignmentVersion = 46;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -842,7 +843,7 @@ public static partial class ModuleCompiler
         Action<BoundStatement>? visitStructuredLoop = null, Action<BoundVacantLocal>? visitVacantLocal = null,
         Action<BoundConditional>? visitConditional = null, Action? visitCoalesce = null,
         Action? visitUpdate = null, Action? visitNominalUpdate = null,
-        Action? visitCompoundAssignment = null)
+        Action? visitCompoundAssignment = null, Action<BoundAssignment>? visitAssignment = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -865,6 +866,7 @@ public static partial class ModuleCompiler
                     visitVacantLocal?.Invoke(vacant);
                     break;
                 case BoundAssignment assignment:
+                    visitAssignment?.Invoke(assignment);
                     VisitExpression(assignment.Value);
                     break;
                 case BoundOptionalAssignment optionalAssignment:
@@ -1064,6 +1066,15 @@ public static partial class ModuleCompiler
     {
         var found = false;
         _ = Calls(body, visitVacantLocal: _ => found = true);
+        return found;
+    }
+
+    private static bool HasInitializationAssignment(BoundFunction function)
+    {
+        var found = false;
+        _ = Calls(function.Body, visitAssignment: assignment => found |=
+            assignment.Variable >= 0 && assignment.Variable < function.Variables.Length
+                && function.Variables[assignment.Variable].IsInitializationLocal);
         return found;
     }
 
@@ -1650,6 +1661,11 @@ public static partial class ModuleCompiler
         {
             version = Math.Max(version, CompoundAssignmentVersion);
         }
+        if (module.Functions.Any(item => item.Function is BoundFunction function
+            && HasInitializationAssignment(function)))
+        {
+            version = Math.Max(version, InitializationAssignmentVersion);
+        }
         writer.Write(Magic);
         writer.Write(version);
         PutString(writer, RetainedNativeProfile(module));
@@ -1893,6 +1909,13 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Compound assignments and shifts require semantic module version 45.");
             }
+            if ((version < InitializationAssignmentVersion && items.Any(item => item.Function is BoundFunction function
+                && HasInitializationAssignment(function)))
+                || (version == InitializationAssignmentVersion && !items.Any(item => item.Function is BoundFunction function
+                    && HasInitializationAssignment(function))))
+            {
+                throw new ModuleFormatException("Vacant-local assignments require semantic module version 46.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1947,7 +1970,8 @@ public static partial class ModuleCompiler
             or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion
             or TransparentLayoutVersion or WideClassFieldsVersion or CorePrimitiveVersion
             or CorePrimitiveGetterVersion or StructuredLoopVersion or VacantLocalVersion or ConditionalVersion
-            or CoalescingVersion or UpdateVersion or NominalUpdateVersion or CompoundAssignmentVersion))
+            or CoalescingVersion or UpdateVersion or NominalUpdateVersion or CompoundAssignmentVersion
+            or InitializationAssignmentVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -2276,6 +2300,12 @@ public static partial class ModuleCompiler
         }
         var body = GetStatement(reader, ref remaining, 0, version) as BoundBlock
             ?? throw new ModuleFormatException("Function requires a block body.");
+        _ = Calls(body, visitVacantLocal: vacant => {
+            if (vacant.Variable >= 0 && vacant.Variable < variables.Count)
+            {
+                variables[vacant.Variable] = variables[vacant.Variable] with { IsInitializationLocal = true };
+            }
+        });
         return new BoundFunction(name, type, variables.ToImmutable(), parameters, body, span) {
             IsConstructor = constructor,
             IsPrivate = isPrivate,

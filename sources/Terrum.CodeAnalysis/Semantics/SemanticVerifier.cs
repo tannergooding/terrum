@@ -298,6 +298,11 @@ public static class SemanticVerifier
                     {
                         throw Invalid();
                     }
+                    if (variable.IsInitializationLocal && (variableIndex < function.ParameterCount
+                            + (function.IsConstructor ? 1 : 0) || variable.IsMutable || variable.IsOut || variable.IsInit))
+                    {
+                        throw Invalid();
+                    }
                     if ((variable.IsInit && (!variable.IsOut
                         || (variable.Type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
                             or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
@@ -527,14 +532,14 @@ public static class SemanticVerifier
             {
                 continue;
             }
-            var initialized = new bool[function.Variables.Length];
+            var initialized = new InitializationState(function.Variables.Length);
             if (function.IsConstructor)
             {
-                Array.Fill(initialized, true, 1, function.ParameterCount);
+                initialized.Fill(true, 1, function.ParameterCount);
             }
             else
             {
-                Array.Fill(initialized, true, 0, function.ParameterCount);
+                initialized.Fill(true, 0, function.ParameterCount);
             }
             if (function.IsClassConstructor)
             {
@@ -1483,7 +1488,7 @@ public static class SemanticVerifier
         }
     }
 
-    private static bool Statement(BoundStatement statement, bool[] initialized, uint[] fieldMasks, HashSet<int> declarations,
+    private static bool Statement(BoundStatement statement, InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
         BoundFunction function, BoundProgram program, ref int remaining, int depth, bool reachable = true,
         List<CleanupScope>? cleanups = null, bool inCleanup = false, bool inUnsafe = false, FailureEdges? failures = null,
         List<LoopScope>? loops = null)
@@ -1517,7 +1522,8 @@ public static class SemanticVerifier
             case BoundLocal local:
                 if (local.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                     || local.Variable >= initialized.Length
-                    || !declarations.Add(local.Variable) || initialized[local.Variable])
+                    || !declarations.Add(local.Variable) || initialized[local.Variable]
+                    || function.Variables[local.Variable].IsInitializationLocal)
                 {
                     throw Invalid();
                 }
@@ -1536,15 +1542,18 @@ public static class SemanticVerifier
                 if (vacant.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                     || vacant.Variable >= initialized.Length
                     || !declarations.Add(vacant.Variable) || initialized[vacant.Variable]
-                    || function.Variables[vacant.Variable].IsMutable)
+                    || function.Variables[vacant.Variable].IsMutable
+                    || !function.Variables[vacant.Variable].IsInitializationLocal)
                 {
                     throw Invalid(vacant.Span);
                 }
+                initialized[vacant.Variable] = false;
                 return false;
             case BoundOwnerDeclaration output:
                 if (output.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                     || output.Variable >= initialized.Length
                     || !IsUnique(program, function.Variables[output.Variable].Type)
+                    || function.Variables[output.Variable].IsInitializationLocal
                     || initialized[output.Variable] || declarations.Contains(output.Variable))
                 {
                     throw Invalid(output.Span);
@@ -1584,9 +1593,16 @@ public static class SemanticVerifier
                     || (function.IsConstructor && assignment.Variable == 0)
                     || (!initialized[assignment.Variable] && !function.Variables[assignment.Variable].IsOut
                         && !declarations.Contains(assignment.Variable))
-                    || !function.Variables[assignment.Variable].IsMutable)
+                    || (!function.Variables[assignment.Variable].IsMutable
+                        && (!function.Variables[assignment.Variable].IsInitializationLocal
+                            || !initialized.IsVacant(assignment.Variable))))
                 {
-                    throw Invalid();
+                    throw Invalid(assignment.Span);
+                }
+                if (function.Variables[assignment.Variable].IsInitializationLocal
+                    && InvalidatesReservedOwner(assignment.Value, assignment.Variable, ref remaining, depth + 1))
+                {
+                    throw InvalidEffect(assignment.Span, "Ownership");
                 }
                 Expression(assignment.Value, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 if (assignment.Value.Type != function.Variables[assignment.Variable].Type)
@@ -1635,7 +1651,7 @@ public static class SemanticVerifier
                 }
                 Expression(optionalAssignment.Place, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
-                var assignedState = (bool[])initialized.Clone();
+                var assignedState = initialized.Clone();
                 var assignedMasks = (uint[])fieldMasks.Clone();
                 var assignedDeclarations = new HashSet<int>(declarations);
                 Expression(optionalAssignment.Value, assignedState, assignedMasks, assignedDeclarations, function, program,
@@ -1643,7 +1659,7 @@ public static class SemanticVerifier
                 declarations.UnionWith(assignedDeclarations);
                 for (var index = 0; index < initialized.Length; index++)
                 {
-                    initialized[index] &= assignedState[index];
+                    initialized.Merge(index, assignedState);
                     fieldMasks[index] &= assignedMasks[index];
                 }
                 return false;
@@ -1796,7 +1812,7 @@ public static class SemanticVerifier
                 return expressionStatement.Expression is BoundCall statementCall
                     && program.Functions[statementCall.Function].DoesNotReturn;
             case BoundIf conditional:
-                var beforeCondition = (bool[])initialized.Clone();
+                var beforeCondition = initialized.Clone();
                 Expression(conditional.Condition, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 if (conditional.Condition.Type != PrimitiveType.Bool || conditional.Then is null)
                 {
@@ -1817,8 +1833,9 @@ public static class SemanticVerifier
                         reachable && elseReachable, cleanups, inCleanup, inUnsafe, failures, loops);
                 for (var i = 0; i < initialized.Length; i++)
                 {
-                    initialized[i] = !thenReachable || thenReturns ? elseState[i]
-                        : !elseReachable || elseReturns ? thenState[i] : thenState[i] && elseState[i];
+                    initialized.SetPossibilities(i, !thenReachable || thenReturns ? elseState.Possibilities(i)
+                        : !elseReachable || elseReturns ? thenState.Possibilities(i)
+                        : (byte)(thenState.Possibilities(i) | elseState.Possibilities(i)));
                     fieldMasks[i] = !thenReachable || thenReturns ? elseMasks[i]
                         : !elseReachable || elseReturns ? thenMasks[i] : thenMasks[i] & elseMasks[i];
                 }
@@ -1830,15 +1847,15 @@ public static class SemanticVerifier
                 {
                     throw Invalid(loop.Span);
                 }
-                var entryState = (bool[])initialized.Clone();
+                var entryState = initialized.Clone();
                 var entryMasks = (uint[])fieldMasks.Clone();
-                var headState = (bool[])entryState.Clone();
+                var headState = entryState.Clone();
                 var headMasks = (uint[])entryMasks.Clone();
                 var priorDeclarations = new HashSet<int>(declarations);
                 for (var iteration = 0; iteration <= initialized.Length * 9; iteration++)
                 {
-                    var conditionInput = (bool[])headState.Clone();
-                    var conditionState = (bool[])headState.Clone();
+                    var conditionInput = headState.Clone();
+                    var conditionState = headState.Clone();
                     var conditionMasks = (uint[])headMasks.Clone();
                     var iterationDeclarations = new HashSet<int>(priorDeclarations);
                     if (!loop.IsPostTested)
@@ -1850,7 +1867,7 @@ public static class SemanticVerifier
                     {
                         throw Invalid();
                     }
-                    var bodyState = loop.IsPostTested ? (bool[])headState.Clone()
+                    var bodyState = loop.IsPostTested ? headState.Clone()
                         : Outcome(loop.Condition, conditionInput, true, ref remaining);
                     var bodyMasks = (uint[])conditionMasks.Clone();
                     MarkOutMasks(bodyState, bodyMasks, function, program);
@@ -1862,7 +1879,7 @@ public static class SemanticVerifier
                     var bodyReturns = Statement(loop.Body, bodyState, bodyMasks, iterationDeclarations, function, program, ref remaining, depth + 1,
                         reachable && bodyReachable, cleanups, inCleanup, inUnsafe, failures, loops);
                     loops.RemoveAt(loops.Count - 1);
-                    var exitState = loop.IsPostTested ? (bool[])conditionState.Clone()
+                    var exitState = loop.IsPostTested ? conditionState.Clone()
                         : Outcome(loop.Condition, conditionInput, false, ref remaining);
                     var exitMasks = (uint[])conditionMasks.Clone();
                     MarkOutMasks(exitState, exitMasks, function, program);
@@ -1877,7 +1894,7 @@ public static class SemanticVerifier
                     }
                     if (loop.Iterator is not null)
                     {
-                        var iteratorState = backEdges.HasEdges ? backEdges.State : (bool[])bodyState.Clone();
+                        var iteratorState = backEdges.HasEdges ? backEdges.State : bodyState.Clone();
                         var iteratorMasks = backEdges.HasEdges ? backEdges.Masks : (uint[])bodyMasks.Clone();
                         for (var slot = function.ParameterCount + (function.IsConstructor ? 1 : 0);
                             slot < iteratorState.Length; slot++)
@@ -1900,7 +1917,7 @@ public static class SemanticVerifier
                     }
                     if (loop.IsPostTested)
                     {
-                        var conditionInputState = backEdges.HasEdges ? backEdges.State : (bool[])bodyState.Clone();
+                        var conditionInputState = backEdges.HasEdges ? backEdges.State : bodyState.Clone();
                         var conditionInputMasks = backEdges.HasEdges ? backEdges.Masks : (uint[])bodyMasks.Clone();
                         var conditionDeclarations = new HashSet<int>(iterationDeclarations);
                         for (var slot = function.ParameterCount + (function.IsConstructor ? 1 : 0);
@@ -1912,7 +1929,7 @@ public static class SemanticVerifier
                                 conditionInputMasks[slot] = 0;
                             }
                         }
-                        var evaluatedState = (bool[])conditionInputState.Clone();
+                        var evaluatedState = conditionInputState.Clone();
                         var evaluatedMasks = (uint[])conditionInputMasks.Clone();
                         Expression(loop.Condition, evaluatedState, evaluatedMasks, conditionDeclarations,
                             function, program, ref remaining, depth + 1, failures);
@@ -1946,17 +1963,20 @@ public static class SemanticVerifier
                     var changed = false;
                     for (var i = 0; i < headState.Length; i++)
                     {
-                        var nextState = entryState[i] && (backState is null || backState[i]);
+                        var localToIteration = i >= function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                            && !priorDeclarations.Contains(i);
+                        var nextState = backState is null || localToIteration ? entryState.Possibilities(i)
+                            : (byte)(entryState.Possibilities(i) | backState.Possibilities(i));
                         var nextMask = entryMasks[i] & (backMasks is null ? uint.MaxValue : backMasks[i]);
-                        changed |= nextState != headState[i] || nextMask != headMasks[i];
-                        headState[i] = nextState;
+                        changed |= nextState != headState.Possibilities(i) || nextMask != headMasks[i];
+                        headState.SetPossibilities(i, nextState);
                         headMasks[i] = nextMask;
                     }
                     if (!changed)
                     {
                         if (exits.HasEdges)
                         {
-                            Array.Copy(exits.State, initialized, initialized.Length);
+                            exits.State.CopyTo(initialized);
                             Array.Copy(exits.Masks, fieldMasks, fieldMasks.Length);
                         }
                         declarations.UnionWith(iterationDeclarations);
@@ -1972,7 +1992,7 @@ public static class SemanticVerifier
                     throw InvalidEffect(statement.Span, inCleanup ? "FinallyReturn" : "LoopTransfer");
                 }
                 var target = loops[^targetDepth];
-                var transferState = (bool[])initialized.Clone();
+                var transferState = initialized.Clone();
                 var transferMasks = (uint[])fieldMasks.Clone();
                 var transferDeclarations = new HashSet<int>(declarations);
                 for (var index = cleanups.Count - 1; index >= target.CleanupDepth; index--)
@@ -2070,7 +2090,7 @@ public static class SemanticVerifier
                 return TryCatchStatement(recovery, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth, reachable, cleanups, inCleanup, inUnsafe, failures, loops);
             case BoundRequire requirement:
-                var beforeRequirement = (bool[])initialized.Clone();
+                var beforeRequirement = initialized.Clone();
                 Expression(requirement.Condition, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 if (requirement.Condition.Type != PrimitiveType.Bool)
                 {
@@ -2088,7 +2108,7 @@ public static class SemanticVerifier
                     failures?.Add(rejected, rejectedMasks);
                 }
                 var accepted = Outcome(requirement.Condition, beforeRequirement, true, ref remaining);
-                Array.Copy(accepted, initialized, initialized.Length);
+                accepted.CopyTo(initialized);
                 MarkOutMasks(initialized, fieldMasks, function, program);
                 return !CanBe(requirement.Condition, true, ref remaining);
             case BoundReturn result:
@@ -2105,7 +2125,7 @@ public static class SemanticVerifier
                 {
                     throw InvalidEffect(result.Span, "Ownership");
                 }
-                var beforeReturn = (bool[])initialized.Clone();
+                var beforeReturn = initialized.Clone();
                 if (result.Value is null)
                 {
                     if (function.ReturnType != PrimitiveType.Void)
@@ -2168,7 +2188,7 @@ public static class SemanticVerifier
                 }
                 else if (cleanups.Count != 0)
                 {
-                    var returnState = (bool[])initialized.Clone();
+                    var returnState = initialized.Clone();
                     var returnMasks = (uint[])fieldMasks.Clone();
                     var returnDeclarations = new HashSet<int>(declarations);
                     for (var index = cleanups.Count - 1; index >= 0; index--)
@@ -2183,7 +2203,7 @@ public static class SemanticVerifier
         }
     }
 
-    private static bool TryFinallyStatement(BoundTryFinally cleanup, bool[] initialized, uint[] fieldMasks,
+    private static bool TryFinallyStatement(BoundTryFinally cleanup, InitializationState initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function, BoundProgram program, ref int remaining, int depth,
         bool reachable, List<CleanupScope> cleanups, bool inCleanup, bool inUnsafe, FailureEdges? failures, List<LoopScope> loops)
     {
@@ -2208,7 +2228,7 @@ public static class SemanticVerifier
         }
         if (tryReturns)
         {
-            var unreachableState = (bool[])initialized.Clone();
+            var unreachableState = initialized.Clone();
             var unreachableMasks = (uint[])fieldMasks.Clone();
             for (var index = 0; index < unreachableMasks.Length; index++)
             {
@@ -2230,7 +2250,7 @@ public static class SemanticVerifier
         return tryReturns;
     }
 
-    private static bool TryCatchStatement(BoundTryCatch recovery, bool[] initialized, uint[] fieldMasks,
+    private static bool TryCatchStatement(BoundTryCatch recovery, InitializationState initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function, BoundProgram program, ref int remaining, int depth,
         bool reachable, List<CleanupScope> cleanups, bool inCleanup, bool inUnsafe, FailureEdges? failures, List<LoopScope> loops)
     {
@@ -2246,7 +2266,7 @@ public static class SemanticVerifier
         {
             throw Invalid(recovery.Span);
         }
-        var recoveryEntryState = (bool[])initialized.Clone();
+        var recoveryEntryState = initialized.Clone();
         var recoveryEntryMasks = (uint[])fieldMasks.Clone();
         var recoveryDeclarations = new HashSet<int>(declarations);
         var caughtFailures = new FailureEdges();
@@ -2291,9 +2311,9 @@ public static class SemanticVerifier
         }
         for (var i = 0; i < initialized.Length; i++)
         {
-            initialized[i] = recoveryBodyReturns && caughtFailures.HasEdges ? catchState[i]
-                : !caughtFailures.HasEdges || catchReturns ? initialized[i]
-                : initialized[i] && catchState[i];
+            initialized.SetPossibilities(i, recoveryBodyReturns && caughtFailures.HasEdges ? catchState.Possibilities(i)
+                : !caughtFailures.HasEdges || catchReturns ? initialized.Possibilities(i)
+                : (byte)(initialized.Possibilities(i) | catchState.Possibilities(i)));
             fieldMasks[i] = recoveryBodyReturns && caughtFailures.HasEdges ? catchMasks[i]
                 : !caughtFailures.HasEdges || catchReturns ? fieldMasks[i]
                 : fieldMasks[i] & catchMasks[i];
@@ -2308,7 +2328,7 @@ public static class SemanticVerifier
         return recoveryBodyReturns && (!caughtFailures.HasEdges || catchReturns);
     }
 
-    private static void VerifyCleanup(BoundBlock cleanup, bool[] initialized, uint[] fieldMasks,
+    private static void VerifyCleanup(BoundBlock cleanup, InitializationState initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function, BoundProgram program, ref int remaining, int depth, bool reachable,
         bool inUnsafe, HashSet<int>? visible = null, bool? successfulReturn = null)
     {
@@ -2326,7 +2346,7 @@ public static class SemanticVerifier
         }
         var outputTransfer = successfulReturn == true
             && cleanup.Statements is [BoundDrop { IsOutput: true }];
-        var checkState = outputTransfer ? (bool[])initialized.Clone() : initialized;
+        var checkState = outputTransfer ? initialized.Clone() : initialized;
         var checkMasks = outputTransfer ? (uint[])fieldMasks.Clone() : fieldMasks;
         if (Statement(cleanup, checkState, checkMasks, declarations, function with { IsNoThrow = true },
             program, ref remaining, depth, reachable, inCleanup: true, inUnsafe: inUnsafe)
@@ -2384,28 +2404,79 @@ public static class SemanticVerifier
         }
     }
 
+    private sealed class InitializationState
+    {
+        // A join must preserve possible liveness as well as definite liveness:
+        // not definitely initialized does not prove that initialization is permitted.
+        private readonly byte[] _possibilities;
+
+        internal InitializationState(int length)
+        {
+            _possibilities = new byte[length];
+            Array.Fill(_possibilities, (byte)1);
+        }
+
+        internal int Length => _possibilities.Length;
+
+        internal void Fill(bool value, int start, int count) =>
+            Array.Fill(_possibilities, value ? (byte)2 : (byte)1, start, count);
+
+        internal bool this[int index]
+        {
+            get
+            {
+                return _possibilities[index] == 2;
+            }
+            set
+            {
+                _possibilities[index] = value ? (byte)2 : (byte)1;
+            }
+        }
+
+        internal bool IsVacant(int index) => _possibilities[index] == 1;
+
+        internal byte Possibilities(int index) => _possibilities[index];
+
+        internal void SetPossibilities(int index, byte value) => _possibilities[index] = value;
+
+        internal void MarkConditional(int index) => _possibilities[index] = 3;
+
+        internal void Merge(int index, InitializationState other) =>
+            _possibilities[index] |= other._possibilities[index];
+
+        internal InitializationState Clone()
+        {
+            var result = new InitializationState(Length);
+            CopyTo(result);
+            return result;
+        }
+
+        internal void CopyTo(InitializationState destination) =>
+            Array.Copy(_possibilities, destination._possibilities, Length);
+    }
+
     private sealed class FailureEdges
     {
-        private bool[]? _state;
+        private InitializationState? _state;
         private uint[]? _masks;
 
         internal bool HasEdges => _state is not null;
 
-        internal bool[] State => (bool[])(_state ?? throw Invalid()).Clone();
+        internal InitializationState State => (_state ?? throw Invalid()).Clone();
 
         internal uint[] Masks => (uint[])(_masks ?? throw Invalid()).Clone();
 
-        internal void Add(bool[] state, uint[] masks)
+        internal void Add(InitializationState state, uint[] masks)
         {
             if (_state is null)
             {
-                _state = (bool[])state.Clone();
+                _state = state.Clone();
                 _masks = (uint[])masks.Clone();
                 return;
             }
             for (var index = 0; index < state.Length; index++)
             {
-                _state[index] &= state[index];
+                _state.Merge(index, state);
                 _masks![index] &= masks[index];
             }
         }
@@ -2449,7 +2520,7 @@ public static class SemanticVerifier
         throw InvalidEffect(place.Span, "Ownership");
     }
 
-    private static int VerifyUniqueFieldPlace(BoundFieldRead place, bool[] initialized, uint[] fieldMasks,
+    private static int VerifyUniqueFieldPlace(BoundFieldRead place, InitializationState initialized, uint[] fieldMasks,
         BoundFunction function, BoundProgram program, ref int remaining, int depth)
     {
         Count(ref remaining, depth);
@@ -2484,7 +2555,7 @@ public static class SemanticVerifier
         return root.Variable;
     }
 
-    private static int VerifyMutableFieldPlace(BoundFieldRead place, bool[] initialized,
+    private static int VerifyMutableFieldPlace(BoundFieldRead place, InitializationState initialized,
         BoundFunction function, BoundProgram program, ref int remaining, int depth, bool allowBufferLeaf = false)
     {
         Count(ref remaining, depth);
@@ -2518,7 +2589,7 @@ public static class SemanticVerifier
     }
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Unsupported token kinds must remain invalid rather than becoming accepted operators.")]
-    private static void Expression(BoundExpression expression, bool[] initialized, uint[] fieldMasks,
+    private static void Expression(BoundExpression expression, InitializationState initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function,
         BoundProgram program, ref int remaining, int depth, FailureEdges? failures = null,
         bool statementCompound = false)
@@ -2573,7 +2644,7 @@ public static class SemanticVerifier
                 }
                 Expression(coalesce.Optional, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
-                var absentState = (bool[])initialized.Clone();
+                var absentState = initialized.Clone();
                 var absentMasks = (uint[])fieldMasks.Clone();
                 var absentDeclarations = new HashSet<int>(declarations);
                 Expression(coalesce.Fallback, absentState, absentMasks, absentDeclarations, function, program,
@@ -2581,14 +2652,14 @@ public static class SemanticVerifier
                 declarations.UnionWith(absentDeclarations);
                 if (coalesce.Optional is BoundNull)
                 {
-                    Array.Copy(absentState, initialized, initialized.Length);
+                    absentState.CopyTo(initialized);
                     Array.Copy(absentMasks, fieldMasks, fieldMasks.Length);
                 }
                 else if (coalesce.Optional is not BoundOptionalLift)
                 {
                     for (var i = 0; i < initialized.Length; i++)
                     {
-                        initialized[i] &= absentState[i];
+                        initialized.Merge(i, absentState);
                         fieldMasks[i] &= absentMasks[i];
                     }
                 }
@@ -2888,7 +2959,7 @@ public static class SemanticVerifier
                 }
                 break;
             case BoundBinary binary:
-                var beforeLeft = (bool[])initialized.Clone();
+                var beforeLeft = initialized.Clone();
                 Expression(binary.Left, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe)
                 {
@@ -2905,8 +2976,9 @@ public static class SemanticVerifier
                     var skips = CanBe(binary.Left, !evaluateWhenTrue, ref remaining);
                     for (var i = 0; i < initialized.Length; i++)
                     {
-                        initialized[i] = !evaluates ? skippedState[i] : !skips ? rightState[i]
-                            : rightState[i] && skippedState[i];
+                        initialized.SetPossibilities(i, !evaluates ? skippedState.Possibilities(i)
+                            : !skips ? rightState.Possibilities(i)
+                            : (byte)(rightState.Possibilities(i) | skippedState.Possibilities(i)));
                         fieldMasks[i] = !evaluates ? skippedMasks[i] : !skips ? rightMasks[i]
                             : rightMasks[i] & skippedMasks[i];
                     }
@@ -2962,7 +3034,7 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                var beforeCondition = (bool[])initialized.Clone();
+                var beforeCondition = initialized.Clone();
                 Expression(conditional.Condition, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
                 var trueFeasible = CanBe(conditional.Condition, true, ref remaining);
@@ -2983,8 +3055,9 @@ public static class SemanticVerifier
                 declarations.UnionWith(falseDeclarations);
                 for (var i = 0; i < initialized.Length; i++)
                 {
-                    initialized[i] = !trueFeasible ? falseState[i] : !falseFeasible ? trueState[i]
-                        : trueState[i] && falseState[i];
+                    initialized.SetPossibilities(i, !trueFeasible ? falseState.Possibilities(i)
+                        : !falseFeasible ? trueState.Possibilities(i)
+                        : (byte)(trueState.Possibilities(i) | falseState.Possibilities(i)));
                     fieldMasks[i] = !trueFeasible ? falseMasks[i] : !falseFeasible ? trueMasks[i]
                         : trueMasks[i] & falseMasks[i];
                 }
@@ -3043,10 +3116,11 @@ public static class SemanticVerifier
                             || (output.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                                 && (!function.Variables[output.Variable].IsOut || output.DeclaresVariable))
                             || output.Type != function.Variables[output.Variable].Type
-                            || (output.DeclaresVariable && (!declarations.Add(output.Variable) || initialized[output.Variable]))
+                            || (output.DeclaresVariable && (!declarations.Add(output.Variable) || initialized[output.Variable]
+                                || function.Variables[output.Variable].IsInitializationLocal))
                             || (!output.DeclaresVariable && !output.IsInit
                                 && !function.Variables[output.Variable].IsMutable)
-                            || (output.IsInit && initialized[output.Variable])
+                            || (output.IsInit && !output.DeclaresVariable && !initialized.IsVacant(output.Variable))
                             || output.IsInit != target.Variables[i + (target.IsConstructor ? 1 : 0)].IsInit)
                         {
                             throw Invalid();
@@ -3156,6 +3230,10 @@ public static class SemanticVerifier
                 if (!target.IsNoThrow)
                 {
                     failures?.Add(initialized, fieldMasks);
+                }
+                foreach (var output in outTargets)
+                {
+                    initialized.MarkConditional(output);
                 }
                 break;
             default:
@@ -3340,7 +3418,7 @@ public static class SemanticVerifier
     private static bool CanAccessField(BoundFunction function, BoundStruct structure, int field) =>
         !structure.Fields[field].IsPrivate || function.DeclaringStruct == structure.Name;
 
-    private static void MarkOutMasks(bool[] initialized, uint[] masks, BoundFunction function, BoundProgram program)
+    private static void MarkOutMasks(InitializationState initialized, uint[] masks, BoundFunction function, BoundProgram program)
     {
         for (var i = 0; i < initialized.Length; i++)
         {
@@ -3352,7 +3430,7 @@ public static class SemanticVerifier
         }
     }
 
-    private static bool[] Outcome(BoundExpression expression, bool[] initialized, bool result, ref int remaining)
+    private static InitializationState Outcome(BoundExpression expression, InitializationState initialized, bool result, ref int remaining)
     {
         Count(ref remaining, 0);
         if (expression is BoundUnary { Operator: TokenKind.Bang } unary)
@@ -3392,7 +3470,7 @@ public static class SemanticVerifier
                 Outcome(conditional.WhenFalse, whenFalse, result, ref remaining),
                 CanBe(conditional.Condition, false, ref remaining) && CanBe(conditional.WhenFalse, result, ref remaining));
         }
-        var state = (bool[])initialized.Clone();
+        var state = initialized.Clone();
         if (expression is BoundIsSome pattern)
         {
             VacateNestedOutputs(pattern.Value, state, ref remaining);
@@ -3420,7 +3498,7 @@ public static class SemanticVerifier
         return state;
     }
 
-    private static void VacateNestedOutputs(BoundExpression expression, bool[] state, ref int remaining)
+    private static void VacateNestedOutputs(BoundExpression expression, InitializationState state, ref int remaining)
     {
         Count(ref remaining, 0);
         switch (expression)
@@ -3430,7 +3508,7 @@ public static class SemanticVerifier
                 {
                     if (argument is BoundOutArgument output)
                     {
-                        state[output.Variable] = false;
+                        state.MarkConditional(output.Variable);
                     }
                     else
                     {
@@ -3445,7 +3523,7 @@ public static class SemanticVerifier
                 var skipped = Outcome(logical.Left, state, !evaluateWhenTrue, ref remaining);
                 var combined = Combine(evaluated, CanBe(logical.Left, evaluateWhenTrue, ref remaining),
                     skipped, CanBe(logical.Left, !evaluateWhenTrue, ref remaining));
-                Array.Copy(combined, state, state.Length);
+                combined.CopyTo(state);
                 break;
             case BoundBinary binary:
                 VacateNestedOutputs(binary.Left, state, ref remaining);
@@ -3458,15 +3536,15 @@ public static class SemanticVerifier
                 VacateNestedOutputs(conditional.WhenFalse, falseState, ref remaining);
                 var joined = Combine(trueState, CanBe(conditional.Condition, true, ref remaining),
                     falseState, CanBe(conditional.Condition, false, ref remaining));
-                Array.Copy(joined, state, state.Length);
+                joined.CopyTo(state);
                 break;
             case BoundCoalesce coalesce:
                 VacateNestedOutputs(coalesce.Optional, state, ref remaining);
-                var absentState = (bool[])state.Clone();
+                var absentState = state.Clone();
                 VacateNestedOutputs(coalesce.Fallback, absentState, ref remaining);
                 for (var index = 0; index < state.Length; index++)
                 {
-                    state[index] &= absentState[index];
+                    state.Merge(index, absentState);
                 }
                 break;
             case BoundUnary unary:
@@ -3549,7 +3627,8 @@ public static class SemanticVerifier
         };
     }
 
-    private static bool[] Combine(bool[] left, bool leftFeasible, bool[] right, bool rightFeasible)
+    private static InitializationState Combine(InitializationState left, bool leftFeasible,
+        InitializationState right, bool rightFeasible)
     {
         if (!leftFeasible)
         {
@@ -3561,7 +3640,7 @@ public static class SemanticVerifier
         }
         for (var i = 0; i < left.Length; i++)
         {
-            left[i] &= right[i];
+            left.Merge(i, right);
         }
         return left;
     }
