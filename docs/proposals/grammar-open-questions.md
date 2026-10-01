@@ -8,7 +8,7 @@
 > to choose new semantics on the user's behalf.
 
 This is a decision inventory, not a compiler backlog. Stable question numbers
-are retained; gaps in the pending queue are intentional. Fourteen resolved IDs
+are retained; gaps in the pending queue are intentional. Fifteen resolved IDs
 have only [canonical link redirects](#resolved-question-link-redirects) at
 the end of this document, so old review links remain usable without mixing
 their rules into the questions below.
@@ -30,7 +30,7 @@ labeled, not another vote.
 | Pending area | Stable IDs |
 |---|---|
 | Declaration applicability and modifier order | Q06 |
-| Extension, adapter and family declaration forms | Q16-Q18 |
+| Extension eligibility, adapter and family declaration forms | Q16.1, Q17-Q18 |
 | References, initialization and operators | Q19-Q26 |
 | Other source forms and contracts | Q27-Q37, Q40-Q42 |
 | Documentation | Q38-Q39 |
@@ -101,72 +101,24 @@ silently approved by this recommendation.
 
 ## Types, lookup and references
 
-### Q16. Extension declarations and call disambiguation
+### Q16.1. Extension declaration and import eligibility
 
-**Question:** Choose declaration/import scope and an explicit way to name a
-selected extension when ordinary lookup is ambiguous. Extensions do not
-satisfy interface witnesses; applicable members already outrank extensions.
-**Example:** `value.Measure()` could have two imported extension candidates;
-`value.via<IMeasure>.Measure()` instead selects a real witness, not either
-unrelated extension.
+**Remaining question:** Choose how source marks a provider's members as
+extensions and makes them eligible in one lexical scope. Q16's explicit
+provider selector and receiver behavior are approved in the
+[official grammar](../grammar-spec.md#extension-provider-selection), not
+another pending vote.
 
-**C# model:** Extension lookup is C#-inspired, but do not import C# 14 extension
-block syntax or permit retroactive conformance merely because it is available.
+**Example:** A public `MetricsA.Measure(int32)` static helper does not become
+eligible for `value.Measure()` or `value.via<MetricsA>.Measure()` merely
+because its container can be named. Which declaration/import grants eligibility?
 
-**Settled context; syntax still open:** Keep explicit static-call qualification available and
-make extension eligibility lexical, with the receiver's full access/loan
-contract. Avoid a second overload-ranking system.
+**C# model:** Lookup is C#-inspired, but no C# 14 extension block or retroactive
+conformance is adopted by approving the selector.
 
-**Concrete candidates and callers:**
-
-```terrum
-struct MetricsA
-{
-    public static int32 Measure(int32 value) => value;
-}
-struct MetricsB
-{
-    public static int32 Measure(int32 value) => value + 1;
-}
-int32 ChooseA(int32 value) => MetricsA.Measure(value);
-int32 ChooseB(int32 value) => MetricsB.Measure(value);
-```
-
-These are ordinary qualified static calls. If both methods are explicitly
-made eligible as extensions in one lexical scope, `value.Measure()` has
-two equally good candidates and is ambiguous; the qualified calls select
-7 and 8 respectively for argument 7. An applicable ordinary instance member
-wins before extension lookup. `value.via<IMeasure>` selects an actual
-interface witness, not an unrelated extension. Extension declaration/import eligibility syntax remains pending;
-no registration attribute or block syntax is invented by this example.
-
-**Revised recommendation (not yet adopted):** Allow `.via<Provider>` to
-select an explicitly eligible extension provider as well as retaining
-`.via<I>` for witness selection. They share the meaning "select this declared
-behavior route"; provider selection does not invent an interface conformance.
-Initially use a nominal non-interface provider container, keeping the
-resolved selector kinds disjoint. It still needs explicit lexical extension
-eligibility and ordinary access/loan checks; naming a container does not
-expose every static/private member as an extension.
-
-With the one-parameter helpers above:
-
-```terrum
-// CANDIDATE provider selection; eligibility declaration remains open.
-int32 ExplicitA(int32 value) => value.via<MetricsA>.Measure();
-int32 ExplicitB(int32 value) => value.via<MetricsB>.Measure();
-```
-
-These calls would lower to `MetricsA.Measure(value)` and
-`MetricsB.Measure(value)`. The receiver is evaluated once before explicit
-arguments and occupies the extension receiver parameter. Consequently
-`value.via<MetricsA>.Measure(value)` would pass two values, not repeat or replace
-the implicit receiver; it requires a corresponding two-parameter extension
-and rejects for the shown helper. An explicit provider selection may choose
-that provider even when an ordinary same-named member would win an unqualified
-call. Overloads within the selected provider use the ordinary ranking rules,
-not declaration/import order. This is not C# syntax; qualified static calls
-remain available without approving this selector extension.
+**Recommendation:** Require explicit lexical eligibility, retain ordinary
+access/loan checks and ranking, and choose its concrete declaration/import
+spelling separately. No registration attribute or block syntax is selected.
 
 ### Q17. Adapter declaration and forwarding
 
@@ -204,12 +156,37 @@ negative `int32` bits, and `List<int32>` cannot become `List<MeasuredInt>`
 merely because their element payload sizes match. Dedicated adapter and
 one-way container-projection syntax remain pending.
 
-**Recommendation (not yet adopted):** Use a checked adapter attribute naming
+**Requested forwarding cases:** For a wrapped type with illustrative members
+`Foo`, `Bar` and `Baz`, both of these authoring modes need consideration:
+
+| Requested selection | Generated forwarding surface |
+|---|---|
+| Forward only `Foo` | Selected `Foo` declarations, no generated `Bar` or `Baz` |
+| Forward everything except `Foo` | Eligible `Bar` and `Baz` declarations, no generated `Foo` |
+
+These names describe hypothetical wrapped members, not claims that `int32`
+has a `Foo` member. Full signatures, overload groups, access and effects
+still need checked target selection; a name filter is not overload resolution.
+A source generator could materialize ordinary forwarding bodies in compatible
+partial declarations. That is distinct from a live compiler wildcard which
+changes lookup when the wrapped type gains a member. Regenerating source can
+change the wrapper's declared API, but replacing a wrapped dependency must not
+be confused with regenerating the wrapper.
+
+**Pending choice:** Should include/exclude filters be a generator/partial
+convenience producing explicit checked members, a built-in live wildcard, or
+distinct opt-in mechanisms for both? The exact selector syntax, treatment of
+overloads/operators/accessors and evolution guarantees also remain pending.
+
+**Recommendation (not yet adopted):** Prefer generated explicit declarations
+for those selections, so the produced API can be inspected and versioned.
+One candidate is a checked adapter attribute naming
 the carried field, and opt-in forwarding attributes on explicitly declared
-members. Forward nothing by default; there is no wildcard forwarding followed
-by a hiding list. Omitting a forwarding declaration keeps that wrapped member
-off the adapter's public surface, and adding a member to the wrapped type does
-not silently add one to the adapter.
+members. Forward nothing by default in this candidate; this does not rule out
+the separately pending include/exclude convenience. Omitting a forwarding
+declaration does not expose that wrapped member automatically; explicitly
+authored adapter members remain available. Adding a member to the wrapped type does
+not silently add one to an unchanged generated adapter.
 
 ```terrum
 // CANDIDATE attribute identities and generated-member contract.
@@ -249,7 +226,7 @@ projection, foreign ABI promise or primitive constant domain automatically.
 
 ### Q18. Family and conditional-member declarations
 
-**Question:** Choose source declarations for family opt-in, member eligibility,
+**Remaining question:** Choose source declarations for family opt-in, member eligibility,
 conditional conformance and checked erased projections.
 **Example:** `TextSpan<char16>` and `TextSpan<void>` name an already described
 family, but ordinary `struct Box<T> { }` must not acquire `Box<void>` erasure.
@@ -261,10 +238,13 @@ relationships that C# name/arity matching does not provide.
 declared projection and per-member constraints. Keep a conditional member's
 guarantee visible to definition-site generic checking.
 
-**Review boundary:** Explicit family membership and checked projections are
-already accepted contracts. The following source-level example clarifies
-the proposed conditional-member behavior without selecting a family-registration
-attribute or keyword.
+**Accepted context, not another vote:** Explicit family membership and checked
+projections retain the [canonical family contract](../grammar-spec.md#54-aliases-and-associated-types-declarations-and-open-binding).
+Identity retains complete qualification and ownership; declared typed erasure
+hides static information, with no unconditional erased-to-typed projection.
+A checked refinement can use retained runtime evidence, not invent a `T`
+from the no-data `void` value. The following example clarifies conditional
+member guarantees without selecting a family-registration attribute or keyword.
 
 **Concrete family/member distinction (APIs remain proposals):**
 
@@ -859,6 +839,13 @@ Resolved; see [exact `is` identity constraints](../grammar-spec.md#54-aliases-an
 ### Q15. Inherited default/member resolution
 
 Resolved; see the [official grammar](../grammar-spec.md#54-aliases-and-associated-types-declarations-and-open-binding).
+
+### Q16. Extension declarations and call disambiguation
+
+Provider selection approved; see the
+[official grammar](../grammar-spec.md#extension-provider-selection).
+Only the concrete declaration/import eligibility spelling remains in
+[Q16.1](#q161-extension-declaration-and-import-eligibility).
 
 ## Official comparison sources
 

@@ -1552,8 +1552,9 @@ claim an implementation or settle the explicitly open boundaries.
   search is performed, constraints do not create overloads, return type is not
   a tie-breaker, and applicable members outrank extensions. By-value `T` beats
   `implicit ref<T>` when both apply; fixed arity beats an equally good expanded
-  `params` candidate. Exact grammar, diagnostics and extension disambiguation
-  remain open.
+  `params` candidate. Explicit extension-provider selection is specified in
+  §5.2; extension declaration/import eligibility, complete applicability and
+  diagnostics remain open.
 - **Types and declarations:** type/declaration semantics follow [language
   interfaces and generic properties](language.md#interfaces-access-and-generic-properties).
   An intended reserved word does not establish a declaration or statement
@@ -1719,8 +1720,52 @@ unresolved positions, and declared defaults fill omitted unresolved positions
 before contextual literals/lambdas are checked. Do not infer generic arguments
 from field capture, private constructor implementation or arbitrary witness
 search. Constructor-versus-conversion selection is a separate open question.
-Complete applicability details, exact diagnostics, extension-provider
-disambiguation and serialized binding metadata remain specification work.
+Complete applicability details, exact diagnostics, extension declaration/import
+eligibility and serialized binding metadata remain specification work.
+
+#### Extension-provider selection
+
+**Accepted target syntax:** `value.via<Provider>.Member(arguments)` selects
+an explicitly eligible extension provider. Initially `Provider` is a nominal
+non-interface container, distinct from the interface selector in
+`value.via<I>.Member(arguments)`. The latter still selects an actual declared
+witness; neither form creates conformance, bypasses access or loan checks, or
+makes every static/private member of a named container eligible as an extension.
+Extension eligibility is lexical and explicit; its declaration/import syntax
+remains open.
+
+For eligible providers with these ordinary static helpers:
+
+```terrum
+struct MetricsA
+{
+    public static int32 Measure(int32 value) => value;
+}
+struct MetricsB
+{
+    public static int32 Measure(int32 value) => value + 1;
+}
+int32 ChooseA(int32 value) => value.via<MetricsA>.Measure();
+int32 ChooseB(int32 value) => value.via<MetricsB>.Measure();
+```
+
+The selected calls have the behavior of `MetricsA.Measure(value)` and
+`MetricsB.Measure(value)`. The receiver is evaluated once before explicit
+arguments and occupies the extension receiver parameter. Thus
+`value.via<MetricsA>.Measure(value)` supplies two values and rejects for the
+one-parameter helper above; it needs an eligible two-parameter overload.
+Receiver access, ownership and lifetime obligations remain those of the
+selected declaration; this evaluation rule does not select a new loan
+reservation/activation policy.
+
+An applicable ordinary member outranks extensions in unqualified lookup.
+Explicit provider selection can choose that provider even when an ordinary
+same-named member would win `value.Member()`. Overloads within the selected
+provider use the ordinary applicability/ranking rules, not declaration/import
+order. Equally good providers remain ambiguous without selection; ordinary
+qualified static calls remain available. Approval of this selector is not
+approval of extension-block/registration syntax, runtime provider discovery or
+current compiler support.
 
 ### 5.3 Caller-unsafe declarations and explicit unsafe scopes
 
@@ -1850,6 +1895,25 @@ when the otherwise resolved `U` is `int32` or its transparent alias, not
 Preserve the selected inherited-identity/default resolution rules. Keep family
 opt-in and declared checked projections; do not introduce universal erasure
 or inferred covariance.
+
+**Accepted family projection direction:** identity preserves the complete
+qualified type and its ownership obligations; it does not duplicate an affine
+value. Within an explicitly opted-in family, a declared typed-to-erased
+projection can hide static information while retaining the actual
+representation, validity, access and backing/lifetime dependencies. It does
+not imply an unconditional reverse projection from the erased member.
+For example, `TextSpan<char16>` can expose declared erasure to
+`TextSpan<void>`, but erased text cannot manufacture a `char16` view from the
+requested result type. A separately declared checked refinement may succeed
+when retained encoding information proves that relationship; mismatch
+publishes no typed view.
+
+This is a relationship between declared family members, not a universal
+conversion from arbitrary `T` to `void` and back. The language's no-data value
+is `()` of type `void`; `void` in an encoding-erased family argument is not a
+default encoding or a new primitive named `unit`. Exact family opt-in,
+conditional-member/conformance and projection declaration syntax remain open.
+
 Interface constructors are deferred: a future requirement
 needs a checked construction and initialization-completion contract. Fixed
 `const T Name = value;` interface constants are owned by the interface

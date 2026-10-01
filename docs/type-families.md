@@ -3,7 +3,7 @@
 These are accepted semantic directions expressed as design contracts, not
 implemented APIs. The [source grammar](grammar-spec.md) specifies approved
 alias, interface and associated-member forms. The spelling of family declarations,
-conditional members, extensions and witnesses remains open; participation
+conditional members, extension declaration/import eligibility and witnesses remains open; participation
 itself requires an explicit family opt-in with declared projections and
 constraints. The local pseudo-code below labels relationships rather than
 specifying Terrum grammar. Current compiler support for any part of this
@@ -82,7 +82,13 @@ invariant is not a total projection just because its payload bits match.
 Exact adapter/projection syntax, forwarding, conflicts, dispatch metadata and
 eligibility remain specification work. `Blittable` is a separate
 fixed-representation promise. Applicable members outrank ordinary extension
-members; member-extension qualification syntax is open. Ordinary
+members; the accepted
+[explicit provider selector](grammar-spec.md#extension-provider-selection)
+uses `value.via<Provider>.Member()` for an eligible nominal non-interface
+provider, distinct from selecting an interface witness. Receiver evaluation
+occurs once and supplies the extension receiver parameter; naming a provider
+does not bypass lexical eligibility, access or loan checks. Extension
+declaration/import eligibility syntax remains open. Ordinary
 extension-member lookup never substitutes for a nominal witness; an explicitly
 declared adapter has its own nominal extension-interface witness and leaves
 the original type unchanged.
@@ -137,6 +143,15 @@ effective target accessibility. Alias metadata encoding remains open. See the
 `TextSpan<TCodeUnit = void>` is **one** family; bare `TextSpan` expands to exactly `TextSpan<void>`. The allowed members are `TextSpan<char8>`, `TextSpan<char16>`, `TextSpan<char32>` and the declared encoding-erased `TextSpan<void>`. `[TextCodeUnit]` describes only the three character types; it does **not** admit `void`. There is no unconditional `where TCodeUnit : [TextCodeUnit]` on the entire family. Here `void` is neither a zero-sized code unit, a default encoding, a top/bottom type nor a raw `Span<void>`.
 
 Every member denotes validated immutable text. An erased view carries the *actual* UTF-8/16/32 encoding together with its validated text, immutable backing, access, root/lease and lifetime dependencies. Erasing a typed view forwards those dependencies without allocating, copying or transcoding. A checked typed projection succeeds only if the recorded encoding matches the requested character width; failure exposes no typed view. The caller cannot get mutable backing from a text view. A typed `AsSpan()` drops text validity as a *view* but retains the immutable backing and dependencies. Only typed members expose `AsSpan()` and `IContiguousSequence<TCodeUnit>`; an erased member exposes neither, and there is no `Span<void>`. `IsEmpty`, ordinal equality/comparison and formatting are common to all members. Ordinal operations compare Unicode scalar sequences across encodings without implicit normalization or locale; formatting retains the existing typed-writer protocol. `EqualsOrdinal(rune)` requires the *whole view* to contain exactly that one scalar, not a matching prefix, normalization or case folding. Thus `operation.EqualsOrdinal('+')` accepts only the ASCII plus operator regardless of backing encoding.
+
+The projection direction is explicit: identity retains the fully qualified
+member; declared typed erasure hides static encoding without losing its
+runtime evidence. There is no unconditional erased-to-typed projection.
+`TryProject<char16>` is instead a checked refinement of retained encoding
+information, not an attempt to recover a type from the no-data `void` value
+or infer it from a return context. This does not generalize to unrelated
+`Family<T>` types, weaken writable invariance or select family declaration
+syntax.
 
 **Local pseudo-code -- conditional and extension syntax provisional:**
 

@@ -113,6 +113,7 @@ and feature-to-runtime support remain open.
 - `write Span<T>` lends write access to backing slots; `mut Span<T>` only permits descriptor rebinding. `Span<write C>` is separately writable through each retained handle. Generic substitutions preserve their complete qualification.
 - `[Copy]`, `[Sized]`, `[ManagedStorable]`, `[TextCodeUnit]`, and `[SimdElement]` are checked properties/capabilities, not user assertions inferred from an interface name.
 - The approved interface grammar permits an optional first `<this TSelf>` formal, but does not force every protocol to use it. Associated defaults and interface-qualified bindings have approved declaration forms; selecting a witness and conditional family registration still need checked contracts. `.via<I>` and `default<I>` are not arbitrary runtime dispatch or construction: `default<I>` is restricted to the conforming `this` in an interface default body.
+- The approved [extension-provider selector](../grammar-spec.md#extension-provider-selection), `.via<Provider>`, selects an explicitly eligible nominal non-interface provider; the receiver supplies one argument and is evaluated once. It does not add an interface witness, widen access or define extension declaration/import eligibility syntax.
 - A `params` parameter must be final; its approved production does not include a default expression. Eligible ordinary by-value parameters may have compile-time `[Copy]` defaults under the approved call rules. Neither a defaulted parameter nor `init ref<T>` supplies an uninitialized value to the callee; `init` remains a vacant output until publication. Constructor and `init`-property guarantees belong to contract clauses; mixed property backing and `init` mutability do not turn a readonly receiver into writable storage.
 - A signature does not express all dependencies. A returned view retains its backing/root/lease and any shape metadata. Ownership, allocation, checked failure, effect and task-completion rules are stated under the relevant family.
 
@@ -393,9 +394,12 @@ ordinary extension lookup cannot establish an interface witness. Typed
 erasure and successful projection preserve actual encoding, validation,
 access, backing/root/lease and lifetime without copying/transcoding. Mismatch
 exposes no typed view. `AsSpan()` drops text validity as a view, never
-immutability or backing lifetime; there is no `Span<void>`. Ordinal
-comparisons operate over scalar sequences without normalization, culture or
-case folding. `EqualsOrdinal(rune)` requires the *whole* view to be precisely
+immutability or backing lifetime; there is no `Span<void>`.
+A projection cannot infer an erased view's encoding from a requested result
+type. A typed-to-erased projection and a checked erased-to-typed refinement
+are different guarantees; the latter must prove the retained encoding match.
+Ordinal comparisons operate over scalar sequences without normalization,
+culture or case folding. `EqualsOrdinal(rune)` requires the *whole* view to be precisely
 one scalar. The approved character forms are target-typed: `char8` admits
 only ASCII as a standalone unit, `char16` a nonsurrogate BMP scalar, and
 `char32`/`rune` any scalar. There is no default character-literal type.
