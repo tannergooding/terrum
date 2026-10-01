@@ -38,6 +38,9 @@ public static partial class TrRmExecutableCompiler
         internal IndexedBlock ContinueTarget = header;
         internal IndexedBlock? Exit;
         internal int[] VisibleSlots = visibleSlots;
+        internal bool HasSourceContinuation;
+        internal readonly Dictionary<int, (IndexedRegion Target, bool Continue)> Transfers = [];
+        internal readonly List<(IndexedBlock Source, IndexedEdge Edge, int Code)> ExitEdges = [];
     }
 
     private sealed class IndexedBuilder
@@ -1117,10 +1120,10 @@ public static partial class TrRmExecutableCompiler
                     Statement(loop.Body);
                     if (_current is not null)
                     {
+                        loopRegion.HasSourceContinuation = true;
                         Jump(continuation ?? header, _slots, entrySlots);
                     }
-                    if (continuation is not null && !_blocks.Any(block =>
-                        block.True?.Target == continuation || block.False?.Target == continuation))
+                    if (continuation is not null && !loopRegion.HasSourceContinuation)
                     {
                         throw Unsupported("A scalar loop iterator or post-test requires a reachable body continuation.");
                     }
@@ -1143,7 +1146,11 @@ public static partial class TrRmExecutableCompiler
                     var postCondition = loop.IsPostTested ? Expression(loop.Condition) : 0;
                     var exit = NewBlock(parent);
                     loopRegion.Exit = exit;
-                    var exitSlots = Parameters(exit, entrySlots);
+                    var exitSlots = Parameters(exit, entrySlots,
+                        loopRegion.Transfers.Count == 0 ? null : PrimitiveType.Int32);
+                    var normalExitPossible = loop.Condition is not BoundConstant {
+                        Type: PrimitiveType.Bool, Value: not 0,
+                    } || loopRegion.ExitEdges.Any(static edge => edge.Code == 0);
                     if (loop.IsPostTested)
                     {
                         var conditionBlock = _current ?? throw Unsupported("Post-tested condition did not produce a branch.");
@@ -1151,12 +1158,15 @@ public static partial class TrRmExecutableCompiler
                         conditionBlock.Condition = postCondition;
                         conditionBlock.True = new IndexedEdge(header, Arguments(conditionSlots, entrySlots));
                         conditionBlock.False = new IndexedEdge(exit, Arguments(conditionSlots, entrySlots));
+                        loopRegion.ExitEdges.Add((conditionBlock, conditionBlock.False, 0));
                     }
                     else
                     {
-                        (testBlock ?? throw Unsupported("Pre-tested condition block is missing.")).False =
-                            new IndexedEdge(exit, Arguments(testSlots
-                                ?? throw Unsupported("Pre-tested condition slots are missing."), entrySlots));
+                        var preTest = testBlock ?? throw Unsupported("Pre-tested condition block is missing.");
+                        var falseEdge = new IndexedEdge(exit, Arguments(testSlots
+                            ?? throw Unsupported("Pre-tested condition slots are missing."), entrySlots));
+                        preTest.False = falseEdge;
+                        loopRegion.ExitEdges.Add((preTest, falseEdge, 0));
                     }
                     foreach (var block in _blocks)
                     {
@@ -1168,18 +1178,41 @@ public static partial class TrRmExecutableCompiler
                     }
                     _current = exit;
                     _slots = exitSlots;
+                    if (loopRegion.Transfers.Count != 0)
+                    {
+                        // Every edge leaves exactly one region. Carry pending source transfers
+                        // as ordinary scalar data until the selected enclosing loop is reached.
+                        foreach (var (source, edge, code) in loopRegion.ExitEdges)
+                        {
+                            var value = NewValue(PrimitiveType.Int32);
+                            source.Operations.Add((value, new BoundConstant(code, PrimitiveType.Int32, default)));
+                            edge.Arguments = [value, .. edge.Arguments];
+                        }
+                        var remainingTransfers = loopRegion.Transfers.Count;
+                        foreach (var (code, transfer) in loopRegion.Transfers)
+                        {
+                            // An always-true loop without a source break has no normal
+                            // continuation. Do not manufacture one from routing state zero.
+                            if (--remainingTransfers == 0 && !normalExitPossible)
+                            {
+                                Transfer(transfer.Target, transfer.Continue);
+                                break;
+                            }
+                            var value = Add(new BoundConstant(code, PrimitiveType.Int32, default));
+                            var pending = Add(new BoundBinary(TokenKind.EqualsEquals,
+                                Read(exit.Parameters[0]), Read(value), PrimitiveType.Bool, default));
+                            _ = Merge(pending, () => {
+                                Transfer(transfer.Target, transfer.Continue);
+                                return 0;
+                            }, () => 0, null);
+                        }
+                    }
                     break;
-                case BoundBreak { TargetDepth: 1 } when _loops.Count > 0:
-                    var breakRegion = _loops.Peek();
-                    // The designated exit is allocated after the body, but all break edges must
-                    // carry their snapshots to that same exit.
-                    var deferred = new IndexedBlock(-1, breakRegion.Parent);
-                    Jump(deferred, _slots, breakRegion.VisibleSlots);
-                    _pendingBreaks.Add((breakRegion, deferred));
+                case BoundBreak transfer:
+                    Transfer(TransferTarget(transfer.TargetDepth), false);
                     break;
-                case BoundContinue { TargetDepth: 1 } when _loops.Count > 0:
-                    var continueRegion = _loops.Peek();
-                    Jump(continueRegion.ContinueTarget, _slots, continueRegion.VisibleSlots);
+                case BoundContinue transfer:
+                    Transfer(TransferTarget(transfer.TargetDepth), true);
                     break;
                 default:
                     throw Unsupported($"Statement {statement.GetType().Name} has no executable indexed scalar encoding.");
@@ -1187,6 +1220,40 @@ public static partial class TrRmExecutableCompiler
         }
 
         private readonly List<(IndexedRegion Region, IndexedBlock Placeholder)> _pendingBreaks = [];
+
+        private IndexedRegion TransferTarget(int depth)
+        {
+            if (depth < 1 || depth > _loops.Count)
+            {
+                throw Unsupported("Invalid enclosing scalar loop transfer depth.");
+            }
+            return depth == 1 ? _loops.Peek() : _loops.ElementAt(depth - 1);
+        }
+
+        private void Transfer(IndexedRegion target, bool isContinue)
+        {
+            var region = _loops.Peek();
+            if (region == target && isContinue)
+            {
+                region.HasSourceContinuation = true;
+                Jump(region.ContinueTarget, _slots, region.VisibleSlots);
+                return;
+            }
+            var code = 0;
+            if (region != target)
+            {
+                code = target.Id * 2 + (isContinue ? 1 : 0);
+                region.Transfers.TryAdd(code, (target, isContinue));
+            }
+            var source = _current ?? throw Unsupported("Unreachable source transfer.");
+            var deferred = new IndexedBlock(-1, region.Parent);
+            // Visibility selects membership only; the edge carries the values at this
+            // transfer, including outer writes, not the loop-entry definitions.
+            Jump(deferred, _slots, region.VisibleSlots);
+            region.ExitEdges.Add((source, source.True
+                ?? throw Unsupported("Missing scalar transfer edge."), code));
+            _pendingBreaks.Add((region, deferred));
+        }
 
         internal byte[] Encode()
         {
@@ -1207,7 +1274,7 @@ public static partial class TrRmExecutableCompiler
             }
             foreach (var region in _regions)
             {
-                if (!_blocks.Any(block => block.Region == region.Id && block != region.Header
+                if (!region.HasSourceContinuation || !_blocks.Any(block => block.Region == region.Id && block != region.Header
                     && block.True?.Target == region.Header))
                 {
                     throw Unsupported("An indexed loop requires a reachable header backedge.");
