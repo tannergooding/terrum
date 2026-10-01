@@ -123,6 +123,7 @@ mut class ScalarFrontendState
     private mut int32 _statementCount;
     private mut int32 _structuredReturnType;
     private mut int32 _structuredReturnCount;
+    private mut bool _hasStandaloneBlock;
 
     public ScalarFrontendState(ManagedTokenChain tokens, SourceRange empty)
     {
@@ -144,6 +145,12 @@ mut class ScalarFrontendState
         _statementCount = 0;
         _structuredReturnType = 0;
         _structuredReturnCount = 0;
+        _hasStandaloneBlock = false;
+    }
+
+    public bool HasStandaloneBlocks()
+    {
+        return _hasStandaloneBlock;
     }
 
     private mut void FailAt(int32 code, SourceRange span)
@@ -1707,7 +1714,11 @@ mut class ScalarFrontendState
         mut Token next = first;
         while (next.Kind != 49 && _error == 0)
         {
-            if (next.Kind == 18)
+            if (next.Kind == 48)
+            {
+                if (!ParseTreeBlock(depth, nearestLoop)) { return false; }
+            }
+            else if (next.Kind == 18)
             {
                 if (!ParseTreeWhile(depth)) { return false; }
             }
@@ -1788,7 +1799,13 @@ mut class ScalarFrontendState
             int32 header = cursor;
             int32 kind = Host.Frontend[332 + cursor * 5];
             mut bool returns = kind == 8 || kind == 6 || kind == 7;
-            if (kind == 3 || kind == 4 || kind == 11 || kind == 12)
+            if (kind == 14)
+            {
+                int32 blockEnd = Host.Frontend[332 + cursor * 5 + 1];
+                returns = TreeBodyReturns(cursor + 1, blockEnd);
+                cursor = blockEnd;
+            }
+            else if (kind == 3 || kind == 4 || kind == 11 || kind == 12)
             {
                 int32 armEnd = Host.Frontend[332 + cursor * 5 + 1];
                 int32 bodyStart = kind == 12 ? cursor + 3 : cursor + 1;
@@ -1885,7 +1902,16 @@ mut class ScalarFrontendState
                 return true;
             }
             if (kind == 8 || kind == 7) { return false; }
-            if (kind == 3 || kind == 11 || kind == 12)
+            if (kind == 14)
+            {
+                int32 blockEnd = Host.Frontend[332 + cursor * 5 + 1];
+                if (TreeBodyHasTransfer(cursor + 1, blockEnd, loop, transfer))
+                {
+                    return true;
+                }
+                cursor = blockEnd;
+            }
+            else if (kind == 3 || kind == 11 || kind == 12)
             {
                 cursor = Host.Frontend[332 + cursor * 5 + 1];
             }
@@ -1966,6 +1992,32 @@ mut class ScalarFrontendState
             returnType, _parameterCount, _firstType, _secondType, _thirdType,
             name, _first.Range, _second.Range, _third.Range,
             false, false, absent, absent, absent, out result);
+    }
+
+    private mut bool ParseTreeBlock(int32 depth, int32 nearestLoop)
+    {
+        _hasStandaloneBlock = true;
+        if (depth >= 6 || _statementCount >= 12)
+        {
+            Fail(1);
+            return false;
+        }
+        if (!Take(48, out var open))
+        {
+            return false;
+        }
+        int32 header = _statementCount;
+        int32 enclosingLocals = _activeLocals;
+        if (!AddTreeStatement(14, 0, -1, open.Range.Start, open.Range.End)
+            || !ParseTreeStructuredBody(depth + 1, nearestLoop)
+            || !Take(49, out var close))
+        {
+            return false;
+        }
+        _activeLocals = enclosingLocals;
+        Host.Frontend[332 + header * 5 + 1] = _statementCount;
+        Host.Frontend[332 + header * 5 + 4] = close.Range.End - open.Range.Start;
+        return true;
     }
 
     private mut bool ParseTreeIf(int32 depth, int32 nearestLoop)
@@ -2916,6 +2968,11 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
         && structured.TryParseStructuredReturns(out var completed))
     {
         if (completed.IsValid)
+        {
+            result = completed;
+            return true;
+        }
+        if (structured.HasStandaloneBlocks())
         {
             result = completed;
             return true;

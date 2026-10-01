@@ -46,6 +46,20 @@ namespace Terrum.CodeAnalysis;
 // root belongs to the header after the body, not to the body lexical scope.
 // Header roots remain -1 without return records when verified non-fallthrough;
 // an omitted-condition infinite for may need no expression nodes at all.
+// Version 52 adds kind-14 standalone lexical blocks: slot is the exclusive body end,
+// root is -1, and the span covers both braces. Each header counts as one record.
+bool HasScalarFrontendStatement(int32 kind)
+{
+    for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
+    {
+        if (Host.Frontend[332 + statement * 5] == kind)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
     Host.Frontend[offset] = expression.Type;
@@ -54,6 +68,30 @@ void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expres
     Host.Frontend[offset + 3] = expression.RightParameter;
     Host.Frontend[offset + 4] = expression.Span.Start;
     Host.Frontend[offset + 5] = expression.Span.Length;
+}
+
+int32 GetScalarFrontendStatementVersion()
+{
+    mut int32 version = 0;
+    for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
+    {
+        int32 kind = Host.Frontend[332 + statement * 5];
+        if (kind == 14) { return 52; }
+        if (kind == 11 || kind == 12) { version = 51; }
+        if (kind == 8 && version < 48) { version = 48; }
+        if (kind != 1 || version >= 50) { continue; }
+        for (mut int32 header = 0; header < statement; header = header + 1)
+        {
+            int32 headerKind = Host.Frontend[332 + header * 5];
+            if ((headerKind == 3 || headerKind == 4 || headerKind == 5)
+                && Host.Frontend[332 + header * 5 + 1] > statement)
+            {
+                version = 50;
+                break;
+            }
+        }
+    }
+    return version;
 }
 
 bool TryPublishScalarFrontend()
@@ -86,22 +124,14 @@ bool TryPublishScalarFrontend()
             else { Host.Frontend[0] = 23; }
         }
         if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 4; }
-        mut bool hasWhile = false;
-        for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
-        {
-            if (Host.Frontend[332 + statement * 5] == 3) { hasWhile = true; }
-        }
+        bool hasWhile = HasScalarFrontendStatement(3);
         if (hasWhile)
         {
             Host.Frontend[0] = 28;
             if (conversion) { Host.Frontend[0] = Host.Frontend[0] + 1; }
             if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 2; }
         }
-        mut bool hasBranch = false;
-        for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
-        {
-            if (Host.Frontend[332 + statement * 5] == 4) { hasBranch = true; }
-        }
+        bool hasBranch = HasScalarFrontendStatement(4);
         if (hasBranch)
         {
             Host.Frontend[0] = 32;
@@ -109,26 +139,13 @@ bool TryPublishScalarFrontend()
             if (conversion) { Host.Frontend[0] = Host.Frontend[0] + 1; }
             if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 2; }
         }
-        mut bool hasTransfer = false;
-        for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
-        {
-            int32 kind = Host.Frontend[332 + statement * 5];
-            if (kind == 6 || kind == 7) { hasTransfer = true; }
-        }
+        bool hasTransfer = HasScalarFrontendStatement(6) || HasScalarFrontendStatement(7);
         if (hasTransfer)
         {
             Host.Frontend[0] = 40;
             if (hasBranch) { Host.Frontend[0] = 44; }
             if (conversion) { Host.Frontend[0] = Host.Frontend[0] + 1; }
             if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 2; }
-        }
-        for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
-        {
-            if (Host.Frontend[332 + statement * 5] == 8)
-            {
-                Host.Frontend[0] = 48;
-                break;
-            }
         }
         for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
         {
@@ -140,28 +157,10 @@ bool TryPublishScalarFrontend()
                 break;
             }
         }
-        for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
+        int32 statementVersion = GetScalarFrontendStatementVersion();
+        if (statementVersion > Host.Frontend[0])
         {
-            if (Host.Frontend[332 + statement * 5] != 1) { continue; }
-            for (mut int32 header = 0; header < statement; header = header + 1)
-            {
-                int32 kind = Host.Frontend[332 + header * 5];
-                if ((kind == 3 || kind == 4 || kind == 5)
-                    && Host.Frontend[332 + header * 5 + 1] > statement)
-                {
-                    Host.Frontend[0] = 50;
-                    break;
-                }
-            }
-        }
-        for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
-        {
-            int32 kind = Host.Frontend[332 + statement * 5];
-            if (kind == 11 || kind == 12)
-            {
-                Host.Frontend[0] = 51;
-                break;
-            }
+            Host.Frontend[0] = statementVersion;
         }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
@@ -248,35 +247,7 @@ bool TryPublishScalarFrontend()
     }
     if (maximum >= 4000)
     {
-        Host.Frontend[0] = 11;
-    }
-    if (maximum >= 6000)
-    {
-        Host.Frontend[0] = 12;
-    }
-    if (maximum >= 10000)
-    {
-        Host.Frontend[0] = 13;
-    }
-    if (maximum >= 12000)
-    {
-        Host.Frontend[0] = 14;
-    }
-    if (maximum >= 16000)
-    {
-        Host.Frontend[0] = 15;
-    }
-    if (maximum >= 22000)
-    {
-        Host.Frontend[0] = 16;
-    }
-    if (maximum >= 30000)
-    {
-        Host.Frontend[0] = 17;
-    }
-    if (maximum >= 38000)
-    {
-        Host.Frontend[0] = 18;
+        Host.Frontend[0] = GetScalarFrontendExtendedVersion(maximum);
     }
     if (result.ParameterCount == 3)
     {
@@ -286,8 +257,20 @@ bool TryPublishScalarFrontend()
     return true;
 }
 
-// Reuse the monotone threshold classification rather than repeat its branch
-// analysis twelve times within the whole-program verification work bound.
+// Factor threshold classification to keep publication within the shared
+// whole-program verification work bound without changing legacy identities.
+int32 GetScalarFrontendExtendedVersion(int32 maximum)
+{
+    if (maximum >= 38000) { return 18; }
+    if (maximum >= 30000) { return 17; }
+    if (maximum >= 22000) { return 16; }
+    if (maximum >= 16000) { return 15; }
+    if (maximum >= 12000) { return 14; }
+    if (maximum >= 10000) { return 13; }
+    if (maximum >= 6000) { return 12; }
+    return 11;
+}
+
 int32 GetScalarFrontendMaximumOperation(ScalarFrontendResult result)
 {
     mut int32 maximum = result.WhenTrue.Operation;

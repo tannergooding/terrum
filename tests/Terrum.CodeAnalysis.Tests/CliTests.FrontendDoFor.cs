@@ -163,7 +163,6 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { do { int32 x = 0; } while (false); return x; }")]
     [InlineData("int32 Main() { for (init var x; false;) { } return 42; }")]
     [InlineData("int32 Main() { do { break label; } while (false); return 42; }")]
-    [InlineData("int32 Main() { do { { return 42; } } while (false); }")]
     [InlineData("int32 Main() { do { } while (false); }")]
     [InlineData("int32 Main() { for (; false;) { } }")]
     [InlineData("int32 Main() { for (;; Value()) { return 42; } }")]

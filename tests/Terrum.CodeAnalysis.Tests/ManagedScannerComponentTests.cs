@@ -4073,6 +4073,62 @@ public sealed class ManagedScannerComponentTests
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task NativeScalarStandaloneBlocksPublishAndExecuteAsync(NativeRuntimePolicy policy)
+    {
+        const string text = "int32 Value() { { mut int32 x = 1; x++; } { int32 x = 42; return x; } }";
+        var source = SourceText.From(text);
+        var stage = await CompileAsync(text,
+            "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+            (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(stage, policy);
+        Assert.Equal(42, native.ExitCode);
+        var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+            ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+        Assert.Equal(52, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        var result = ScalarFrontendHost.ReadResult(source, bytes);
+        Assert.Equal(2, result.Locals.Length);
+        Assert.Equal(6, result.Statements.Length);
+        Assert.Equal(14, result.Statements[0].Kind);
+        Assert.Equal(14, result.Statements[3].Kind);
+        await ExecuteAotAsync(stage, policy).ConfigureAwait(true);
+        var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
+        var call = new BoundCall(0, [], PrimitiveType.Int32, default);
+        var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
+            new BoundBlock([new BoundReturn(call, default)], default), default);
+        var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
+        SemanticVerifier.Verify(executable);
+        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { { int32 x = 1; } return x; }", 3, "x;")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { { int32 x = 1; } return x; }", 3, "x;")]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { int32 x = 1; { int32 x = 2; } return x; }", 4, "x = 2")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { int32 x = 1; { int32 x = 2; } return x; }", 4, "x = 2")]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { { var x = x; } return 42; }", 3, "x;")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { { var x = x; } return 42; }", 3, "x;")]
+    public async Task NativeScalarStandaloneBlocksRejectInvalidNamesAtTheirRawSpanAsync(
+        NativeRuntimePolicy policy, string text, int code, string marker)
+    {
+        var stage = await CompileAsync(text,
+            "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+            (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(stage, policy);
+        Assert.Equal(42, native.ExitCode);
+        var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+            ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+        var result = ScalarFrontendHost.ReadResult(SourceText.From(text), bytes);
+        Assert.False(result.IsValid);
+        Assert.Equal(code, result.ErrorCode);
+        Assert.Equal(new TextSpan(text.IndexOf(marker, StringComparison.Ordinal), 1), result.ErrorSpan);
+        Assert.All(bytes.AsSpan(37 * sizeof(int)).ToArray(), value => Assert.Equal(0, value));
+        await ExecuteAotAsync(stage, policy).ConfigureAwait(true);
+    }
+
     private static Task<BoundProgram> CompilePairParserAsync(string text, string entry, BoundRuntimePolicy policy) =>
         CompileAsync(text, entry, policy, "ScalarParameterPairParser");
 
