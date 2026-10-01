@@ -242,8 +242,10 @@ public sealed class TrRmScalarSerializationTests
     [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x10, 1, 1, 1, 42, 0, 0x83, 1 })]
     public void FullWidthWriteDoesNotRelaxPublicMagnitudeTruncationOrCanonicalWidthAudits(byte[] body)
     {
+        var resultRow = body[2];
         Assert.Throws<InvalidDataException>(() =>
-            TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
+            TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body, resultRow: resultRow,
+                entry: resultRow == 1, exported: resultRow != 1)));
     }
 
     private static byte Layout(int width) => width switch {
