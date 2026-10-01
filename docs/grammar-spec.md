@@ -533,23 +533,31 @@ TopDeclaration = TypePrefix, ( StructDecl | ClassDecl | InterfaceDecl
                | CallablePrefix, FunctionDefinition
                | AliasPrefix, AliasDecl ;
 MemberDeclaration = ConstructorPrefix, ConstructorDecl
+                  | FieldPrefix, FieldDecl
+                  | PropertyPrefix, PropertyDefinition
+                  | IndexerPrefix, IndexerDefinition
                   | MemberPrefix,
                     ( FunctionDefinition | OperatorDefinition
                     | ConversionDefinition
-                    | FieldDecl | PropertyDefinition | IndexerDefinition
                     | AssociatedTypeBinding
                     | AssociatedConstantBinding ) ;
 InterfaceMemberDeclaration = InterfaceMemberPrefix,
                              ( InterfaceFunction | InterfaceOperator
-                             | InterfaceProperty | InterfaceIndexer
                              | AssociatedTypeRequirement
-                             | InterfaceConstant ) ;
+                             | InterfaceConstant )
+                           | PropertyPrefix, InterfaceProperty
+                           | IndexerPrefix, InterfaceIndexer ;
 TypePrefix      = { Attribute }, [ VisibilityModifier ], [ "partial" ] ;
 CallablePrefix  = { Attribute }, [ VisibilityModifier ], [ "static" ],
                   [ "extern" ], [ "mut" ], [ "unsafe" ], [ "async" ],
                   [ "partial" ] ;
 ConstructorPrefix = { Attribute }, [ VisibilityModifier ], [ "unsafe" ],
                     [ "partial" ] ;
+FieldPrefix     = { Attribute }, VisibilityModifier, [ "static" ],
+                  [ "extern" ], [ "mut" ], [ "unsafe" ] ;
+PropertyPrefix  = { Attribute }, [ VisibilityModifier ], [ "static" ],
+                  [ "partial" ] ;
+IndexerPrefix   = { Attribute }, [ VisibilityModifier ], [ "partial" ] ;
 MemberPrefix    = CallablePrefix ;
 InterfaceMemberPrefix = CallablePrefix ;
 AliasPrefix     = { Attribute }, NamespaceVisibilityModifier ;
@@ -623,10 +631,11 @@ PropertyDefinition = Type, MemberName,
                      ( "{", GetterDefinition,
                        [ SetterDefinition | InitDefinition ], "}"
                      | ContractClauses, ExpressionBody ) ;
-AccessorPrefix  = { Attribute | "mut" } ;
+AccessorPrefix  = { Attribute }, [ VisibilityModifier ], [ "mut" ], [ "unsafe" ] ;
+InitAccessorPrefix = { Attribute }, [ VisibilityModifier ], [ "unsafe" ] ;
 GetterDefinition = AccessorPrefix, "get", ContractClauses, ( CallableBody | ";" ) ;
 SetterDefinition = AccessorPrefix, "set", ContractClauses, ( CallableBody | ";" ) ;
-InitDefinition   = { Attribute }, "init", ContractClauses, ( CallableBody | ";" ) ;
+InitDefinition   = InitAccessorPrefix, "init", ContractClauses, ( CallableBody | ";" ) ;
 InterfaceProperty = Type, Identifier, "{", InterfaceGetter,
                     [ InterfaceSetter | InterfaceInit ], "}" ;
 InterfaceGetter = GetterDefinition ;
@@ -636,9 +645,9 @@ IndexerDefinition = Type, [ Type, "." ], "this", IndexParameters,
                     ( "{", IndexGetter, [ IndexSetter | IndexInit ], "}"
                     | ContractClauses, ExpressionBody ) ;
 IndexParameters = "[", Parameter, { ",", Parameter }, "]" ;
-IndexGetter     = AccessorPrefix, "get", ContractClauses, CallableBody ;
-IndexSetter     = AccessorPrefix, "set", ContractClauses, CallableBody ;
-IndexInit       = { Attribute }, "init", ContractClauses, CallableBody ;
+IndexGetter     = AccessorPrefix, "get", ContractClauses, ( CallableBody | ";" ) ;
+IndexSetter     = AccessorPrefix, "set", ContractClauses, ( CallableBody | ";" ) ;
+IndexInit       = InitAccessorPrefix, "init", ContractClauses, ( CallableBody | ";" ) ;
 InterfaceIndexer = Type, "this", IndexParameters,
                    "{", InterfaceGetter, [ InterfaceSetter | InterfaceInit ], "}" ;
 
@@ -680,13 +689,15 @@ declaring the same namespace does not extend either access domain, and
 linking or unsafe authorization does not grant friend-module access.
 File-limited visibility is not a selected source form.
 
-The optional visibility slot in the prefix productions exists only for
-secondary partial declarations, not a default access level. A declaration
+Optional visibility in type, callable, constructor, property and indexer
+declaration prefixes exists only for secondary partial declarations, not a
+default access level. A declaration
 without visibility must identify a secondary part with `partial`; otherwise
 it rejects. Every composed identity has exactly one primary declaration.
 Namespace declarations, local bindings, parameters, enum constants, union
 cases and accessor introducers are not independent visibility-bearing
-primary declarations.
+primary declarations. An accessor inherits its containing property's/indexer's
+visibility unless it explicitly narrows that domain; it cannot broaden it.
 
 Type heads keep their compound form together:
 
@@ -717,9 +728,9 @@ prefix slots only where applicable; their remaining applicability boundaries
 do not become legal merely because a prefix parses. Passing-mode and type
 constructor productions retain their own fixed word order.
 
-`extern` is permitted on top-level functions and static methods, not instance
-methods or constructors. Instance methods and constructors may call permitted
-external bindings under their ordinary checked contracts; a shared prefix
+For callables, `extern` is permitted on top-level functions and static methods,
+not instance methods or constructors. Instance methods and constructors may
+call permitted external bindings under their ordinary checked contracts; a shared prefix
 does not introduce an implicit-receiver or constructor ABI.
 An `extern` callable is complete through its checked external binding,
 ends with `;` and has no Terrum body or secondary implementation. It cannot
@@ -727,6 +738,35 @@ combine with `partial` or `async`; an extern member may occur in a partial
 type. Returning an eligible awaitable value through a declared external ABI
 does not make the callable `async`. A generator implementing an ordinary
 partial callable cannot add `extern` to its secondary declaration.
+
+Field prefixes order attributes, visibility, optional `static`, optional
+`extern`, optional storage `mut`, then optional caller-`unsafe`, before the
+type and name. Fields reject `async` and member-level `partial`; a partial
+type may contribute a complete field declaration. A bare ordinary field is
+fixed after initialization; `mut` permits later replacement of its stored
+value, subject to nominal-storage and receiver authority. It does not grant
+referent mutation. For reference type `C`, `write C` permits referent mutation
+without slot replacement, `mut C` permits slot replacement without referent
+mutation, and `mut write C` permits both. Directly held structs or `val<C>`
+require `mut` place authority without an extra referent `write` qualifier;
+nominal and member restrictions still apply.
+
+An `extern` field requires `static` and binds foreign data storage, not a
+function or an instance-layout member. It has no Terrum initializer and does
+not implicitly allocate or initialize Terrum storage. Its binding explicitly
+covers compatible data representation, permitted access, validity,
+synchronization and storage lifetime. A non-`mut` extern field is a read-only
+Terrum access path, not a promise that foreign code cannot change the value;
+the compiler cannot infer load stability from the missing modifier.
+Concrete data-import schemas and target mappings remain unspecified.
+Ordinary static-field initialization and lifetime are separate contracts;
+`static` alone does not introduce an implicit type initializer.
+
+Field-level `unsafe` requires an explicit unsafe context for every direct
+read, write, move or reference/pointer formation. It expresses caller
+obligations, not permission to bypass visibility, type, initialization,
+ownership or lifetime checks. Operation-specific access obligations instead
+belong on property/indexer accessors.
 
 Fields and constructors occur in class/struct bodies; interface members do
 not include fields or constructors. An interface
@@ -932,8 +972,38 @@ accessors may write through an independently writable referent without
 mutating the receiver. `init` alone grants initialization-phase mutability;
 there is no `mut init` form. An auto-setter that writes receiver backing
 storage requires `mut set`. An indexer has no implicit per-index backing
-`field`; concrete indexer accessors require bodies. Interface accessor
-semicolons instead declare implementation requirements.
+`field`; concrete implementing indexer accessors require bodies. Interface
+conformance accessor semicolons instead declare implementation requirements;
+a private interface accessor must be a complete helper.
+Named properties may be instance or static; `this[...]` indexers are
+instance-only. Property prefixes order attributes, visibility, optional
+`static`, then optional `partial`; indexer prefixes omit `static`.
+Receiver and caller-safety modifiers belong on individual accessors, not
+the containing member prefix. Getter/setter prefixes order attributes,
+optional narrowing visibility, optional `mut`, then optional `unsafe`;
+init-accessor prefixes omit `mut`. Receiver `mut` requires an instance
+accessor. Each `get`, `set` or `init` independently declares caller-safety
+obligations for the selected operation. An unsafe declaration does not
+make its body an unsafe context; unsafe operations still require explicit
+authorization within the body.
+Properties/indexers and their accessors are synchronous and reject `async`.
+A getter may return an awaitable as an ordinary value; asynchronously
+executing operations use named methods. Extern properties/accessors have
+no source form without a separate concrete interop design; authored accessors
+may call permitted external bindings. Static init-accessor applicability
+remains outside the specified initialization-phase contracts.
+
+A partial property/indexer primary owns its value/index types, accessor
+set, accessor visibility, receiver/safety contracts and conditions.
+Its accessor semicolons describe the contract, not automatic backing storage.
+One matching secondary supplies the implementation without adding or
+changing accessors or contracts. Secondary accessor introducers omit
+visibility, receiver and caller-safety modifiers; their bodies satisfy the
+primary's resolved contracts. Bodyless concrete indexer accessors are legal
+only in such a partial primary, not as automatic per-index storage.
+An expression-bodied property/indexer uses the ordinary getter with inherited
+visibility and no explicit receiver/safety modifiers. A getter needing such
+modifiers or narrower visibility uses the accessor-list form.
 An expression body returns its expression for value-producing members and
 executes one legal statement for void methods, setters, init accessors and
 constructors. It is shorthand for the corresponding checked block, not a
@@ -1997,11 +2067,11 @@ These semantic constraints accompany the source forms above.
   or equality/hash/formatting root is implied. Exact source forms, forwarding,
   metadata, projection eligibility and readonly-view backing/lifetime/cost
   remain open.
-- **Layout and interop:** `Auto` leaves fields private/unfixed; `Sequential`
+- **Layout and interop:** `Auto` leaves instance fields private/unfixed; `Sequential`
   follows declaration order; `Union` overlays at offset zero and requires
   `Blittable`. `Transparent` is exactly one carrier field; `Blittable` fixes
   per-profile size/alignment/offsets; `Transparent` commits to its carrier's
-  representation and direct call classification. Public fields require fixed `Blittable`
+  representation and direct call classification. Public instance fields require fixed `Blittable`
   representation. Declared overlap is available only with `Union`; alternative
   access is unsafe, with no active-member tracking or safe typed-overlap form.
   Unsafe pointer aliasing is separate. Safe tagged sums require tag checks
@@ -2824,10 +2894,14 @@ its import identity, calling convention and complete Terrum callable contract.
 An ABI annotation cannot suppress caller-unsafe obligations, failure
 containment, rooting, access, ownership or loans. `extern` occupies the
 primary linkage slot after `static`, applies only to top-level functions and
-static methods, supplies a complete bodyless binding
+static methods for callables, and supplies a complete bodyless binding
 and cannot combine with `partial` or `async`. Registered annotation identities,
 import-selection schemas and target ABI mappings remain specification
 work; no P/Invoke or marshalling model is implied.
+Static extern fields instead bind data symbols under the separate
+representation, access, validity, synchronization and storage-lifetime
+contract in §3.1. They do not import a callable ABI or grant permission
+for extern properties, accessors or instance fields.
 `extension` remains proposed vocabulary for a scoped extension declaration.
 Its productions, restrictions, effects and lowering remain open.
 Accessors and `when` guards have bounded
@@ -3216,16 +3290,16 @@ appears in §2.
 | Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw framing/headers, deterministic interpolation, identifier/quoted/expression formats and runtime alignment. | Complete floating token recovery, character diagnostics, raw/interpolation recovery and registered text/whole-output normalization APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or nested block namespaces without mixing, with lexically scoped imports before declarations. | Other namespace forms, if any. |
-| Visibility and declaration prefixes | §3.1 requires explicit primary visibility, fixed role-specific ordering and a sole partial contract author. Secondary attributes obey schema placement; internal interface requirements preserve module-only implementation authority, while private members are complete helpers. Constructor prefixes and top-level/static-only external binding are specified. | File-limited visibility and the remaining non-function member modifier matrix. |
+| Visibility and declaration prefixes | §3.1 requires explicit primary visibility, fixed role-specific ordering and a sole partial contract author. Secondary attributes obey schema placement; internal interface requirements preserve module-only implementation authority, while private members are complete helpers. Constructor, field and property/indexer prefixes, narrowing accessor visibility and per-accessor safety are specified. | File-limited visibility, operator/conversion and associated-binding modifier applicability. |
 | Nominal types | §3.1 gives ordered class/struct kind forms, static-class containers, interfaces, integral-base enums and explicit struct/class unions with qualified cases and independent closedness. Enum constants have checked successor overflow and deliberate aliases. | Nested declarations, selected integer catalogs, flags schemas and contextual attributes. |
 | Generic declarations | §§3.1–3.2 give bounded constant domains, checked opt-in primitive-wrapper constants, earlier-only defaults, `_` inference and explicit `default` selection. | Wrapper capability spelling/value encoding and complete inference contracts. |
 | Aliases | §§3.1 and 5.4 give finite qualified expansion, cycle rejection, namespace-level aliases and transparent public export. | Metadata encoding. |
 | Associated types | §§3.1 and 5.4 give requirements, replaceable defaults, inherited identity resolution, qualified bindings, optional `<this T>`, `.via<I>` selection and exact `is` identity constraints. | Complete checking diagnostics and metadata. |
-| Partial declarations | §5.12 defines one-identity merge, complete-signature agreement, consistent repeated defaults/contracts and required body provision; §3.1 requires resolved attribute schemas/multiplicity. | Concrete attribute catalogs/encoding and any explicitly permissioned future API-absence mechanism. |
+| Partial declarations | §5.12 defines one-identity merge, complete-signature agreement, primary-owned defaults/contracts and required body provision; §3.1 requires resolved attribute schemas/multiplicity. | Concrete attribute catalogs/encoding and any explicitly permissioned future API-absence mechanism. |
 | Core primitive declarations | §2 preserves reserved primitive identities with a privileged backing field. | Artifact identity, permitted members and separate-compilation enforcement. |
-| Fields | §3.1 sketches instance fields. | Applicable attribute contracts and layout restrictions. |
+| Fields | §3.1 gives fixed/mutable storage, qualified referent access, caller-unsafe direct access and static foreign-data bindings without Terrum initializers. | Ordinary static initialization/lifetime, concrete external-data schemas/target mappings and applicable layout/attribute contracts. |
 | Constructors | §§3.1 and 5.10 give `ensure P is init` minimum guarantees and repeatable unpublished init-property writes. | Completion validation hooks, value/effect compatibility and metadata encoding. |
-| Properties | §§3.1, 5.10 and 5.12 give mixed backing, receiver modes, expression bodies and authored indexers. | Implicit storage initialization, ref-result contracts and metadata. |
+| Properties | §§3.1, 5.10 and 5.12 give instance/static named properties, instance-only indexers, synchronous accessor-local receiver/safety/access contracts and sole-primary partial implementation without primary backing storage. | Implicit storage initialization, static init-accessor applicability, ref-result contracts and metadata; external accessor binding needs a separate interop design. |
 | Operators | §§3.1, 5.7 and 5.13 describe nominal unary/binary operators and static void compound operations over struct slots or writable object contents. | Complete applicability and checked witness/metadata encoding. |
 | Conversions | §§3.1 and 5.13 give `operator T(U source)`, destination-first `T(value)` and explicit `.via<Owner>` selection, distinct from `new T(...)`. | Complete eligible conversion catalogs and binding/metadata diagnostics. |
 | Interface members | §§3.1, 5.4 and 5.12 give explicit qualified implementations, shared implicit implementations and restricted current-receiver default-body bypass. | Complete inherited-default resolution and representation; constructors have no production here. |

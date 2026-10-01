@@ -32,7 +32,10 @@ value) and `own<T>` (native owning indirection).
 - Type, declaration, interface and metadata contracts are authoritative. A compiler may infer private implementation facts but cannot silently publish stronger or weaker promises from a replaceable body. Consumers bind against the producer's resolved contracts and rule version, not their own reinterpretation of its source defaults. [Lifetimes](lifetimes.md) specifies this distinction for borrowed results.
 - Primary declarations require explicit visibility and fixed role-specific modifier order. Types place `partial` immediately before their kind modifiers and kind; functions/methods order `static`, `extern`, receiver `mut`, `unsafe`, `async`, then `partial` before the return type/signature. A partial identity has exactly one primary contract author; secondaries cannot repeat or alter visibility, prefix modifiers, conformances, constraints, defaults or conditions. Secondary attributes are permitted unless their resolved schema disallows placement, with contract-changing semantic schemas enforcing primary-only authorship. New members contributed by a secondary type part have their own declarations and contracts. See [declaration forms](grammar-spec.md#31-source-file-structure-and-declarations).
 - A public interface may have internal conformance requirements to restrict new implementers to its defining module while remaining accessible for public operations and constraints. Inherited requirements retain that boundary. Control over implementers is not a blanket ABI-compatibility promise. Private interface members are complete helpers owned by their declaring interface, not conformance requirements or replaceable defaults.
-- Constructors synchronously initialize an unpublished instance before completion/publication. Their ordered prefix is attributes, visibility, optional `unsafe`, then optional `partial`; initialization grants receiver write authority without `mut`. Partial constructors retain sole-primary ownership of defaults, conditions and completion guarantees. Static constructors/type initializers and `async` or `extern` constructors are absent. External bindings apply only to top-level functions and static methods; instance methods and constructors may wrap those bindings under ordinary checked contracts.
+- Constructors synchronously initialize an unpublished instance before completion/publication. Their ordered prefix is attributes, visibility, optional `unsafe`, then optional `partial`; initialization grants receiver write authority without `mut`. Partial constructors retain sole-primary ownership of defaults, conditions and completion guarantees. Static constructors/type initializers and `async` or `extern` constructors are absent. External callable bindings apply only to top-level functions and static methods; instance methods and constructors may wrap those bindings under ordinary checked contracts.
+- Fields order attributes, visibility, optional `static`, `extern`, storage `mut`, then caller-`unsafe` before their type/name. Ordinary bare storage is fixed after initialization. For reference type `C`, `write C` permits referent mutation, `mut C` permits slot replacement, and `mut write C` permits both; directly held structs or `val<C>` need `mut` place authority, retaining nominal/member restrictions. An unsafe field requires an explicit unsafe context for every direct read/write/move or reference/pointer formation. Fields reject `async` and member-level `partial`.
+- Static extern fields bind foreign data symbols under explicit representation, access, validity, synchronization and lifetime contracts, without Terrum initializers. A non-mut import limits Terrum access but does not promise immutable foreign storage or stable loads. Ordinary static initialization/lifetime remains a separate contract, not an implicit type initializer.
+- Named properties may be instance/static; `this[...]` indexers are instance-only. Accessors inherit visibility or explicitly narrow it, and independently declare receiver/caller-safety contracts. Accessors are synchronous; awaitables may be returned as values, while async execution uses methods. A partial primary owns accessor shape and contracts without allocating backing storage; one matching secondary implements them. Extern properties/accessors require a separate concrete interop design.
 - Source compilation checks authored bodies against declared contracts. Ordinary binary consumers safely decode and structurally validate artifacts, resolve references, check binding/contract compatibility and validate caller use, then trust declared metadata contracts for external dependencies instead of re-proving dependency implementations. Callers still satisfy imported preconditions, access, ownership and effects. This is not permission to trust malformed bytes; optional deeper audit tooling is not a v1 promise. Signing/provenance is separate from semantic correctness; no mandatory signature or trust store is selected, and signer identity does not prove a contract true. Current reader and verifier support is documented in [implementation](implementation.md).
 - Keep minimum language requirements separate from the standard application-library/runtime surface and feature-specific dependencies. Foundational types such as `ref<T>`, `ptr<T>` and `int32` are illustrative, not a complete mandatory API list. Language conformance alone does not require heap/GC, a scheduler or OS services; richer features retain their dependencies and checked contracts when used, with no silent semantic weakening or fallback. This can enable embedded/kernel environments in principle, but does not promise a backend there or universal support for every feature.
 
@@ -251,7 +254,7 @@ pattern extraction remains separate. See the accepted
 [declaration grammar](grammar-spec.md#31-source-file-structure-and-declarations);
 current union implementation and exact metadata encoding remain absent.
 The layout-kind spellings below are illustrative, not compiler syntax. `Auto`
-is the default: fields are private and external access uses properties or
+is the default: instance fields are private and external access uses properties or
 methods; it grants no `Blittable`, packing or aggregate-alignment commitment.
 `Sequential` places fields in declaration order; `Union` places every field at
 offset zero. Neither kind permits arbitrary user-selected field offsets or
@@ -268,11 +271,13 @@ compatible fields. `Blittable: true` is conceptual notation; exact attribute
 and schema spelling remain specification work.
 Ordinary `ref<T>` is excluded; `ptr<T>` may qualify subject to ordinary pointer
 safety. The exact source spelling, target limits and metadata remain
-specification work. Unfrozen fields remain private; a frozen representation
-may expose fields without changing ordinary readonly or `mut` access rules.
+specification work. Unfrozen instance fields remain private; a frozen representation
+may expose them without changing ordinary readonly or `mut` access rules.
 `Blittable` does not imply `Copy`, atomicity, sharing, arbitrary-bit validity,
-or a universal cross-platform wire format. Public field access requires the
-fixed `Blittable` commitment, regardless of layout kind. Published
+or a universal cross-platform wire format. Public instance-field access requires the
+fixed `Blittable` commitment, regardless of layout kind. Static storage is
+not part of instance layout; foreign data bindings have their own explicit
+compatible representation contract. Published
 language-level signatures and their layout, access, ownership and effect
 contracts are binary compatibility commitments even without foreign
 interoperability; a public method does not need a foreign-layout annotation

@@ -55,18 +55,33 @@ complete helpers, never conformance requirements. Constructors use attributes,
 visibility, optional `unsafe`, then optional `partial`, with implicit
 initialization-phase write authority and sole-primary completion guarantees.
 They exclude `static`, `extern`, `mut` and `async`; no static type initializer
-is selected. External bindings apply only to top-level functions and static
-methods. These are not additional votes
-or implementation claims.
+is selected. External callable bindings apply only to top-level functions
+and static methods. Fields order optional `static`, `extern`, storage `mut`
+and caller-`unsafe` after visibility; `write` remains part of their type.
+Static extern fields bind compatible foreign data without Terrum initializers;
+read-only imports do not promise immutable foreign storage. Field safety
+applies to all direct accesses. Properties have synchronous accessor-local
+safety and inherited-or-narrowed visibility. Partial property/indexer primaries
+own their accessor contracts without allocating backing storage. Static named
+properties are permitted, but indexers remain instance-only. These are not
+additional votes or implementation claims.
 
 **Remaining questions:**
 
-- Complete the remaining non-function member matrix: fields,
-  properties/accessors, operators/conversions and associated bindings. The
+- Complete operator/conversion and associated-binding modifier applicability. The
   fixed prefix order is not permission to apply every slot to each kind.
 - Decide whether a file-limited access domain is needed and, if so, its exact
   eligible declarations. Candidate `file internal struct Helper { }` is not
   an adopted combination or a new friend-module boundary.
+- Ordinary static-field initialization/lifetime and static init-accessor
+  applicability still need explicit contracts; static storage does not imply
+  a C# type initializer. Concrete external-data schemas and target mappings
+  remain specification work.
+
+Extern property/accessor forms are deferred until a concrete interop need
+and complete design; Objective-C or another interop model is not imported by
+analogy. This is not an additional pending vote or permission to bind an
+accessor externally.
 
 **C# model:** C#'s preferred callable modifier order is familiar, but Terrum
 requires ordering and primary visibility, keeps compound type forms together,

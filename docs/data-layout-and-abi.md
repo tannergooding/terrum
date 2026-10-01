@@ -13,7 +13,7 @@
 |---|---|
 | `Blittable` | A per-target-profile commitment that fixes a type's size, alignment and field offsets, and requires every field to be transitively `Blittable`. It is a fixed, directly-interoperable representation promise, not selected compiler syntax or a universal byte encoding. |
 | `Transparent` | A layout commitment that a type has exactly one field, with that field's representation and carrier-equivalent argument/result classification. It inherits the carrier ABI and does not accept custom packing or aggregate alignment. |
-| `Auto` | The default layout: fields are private, external access goes through properties or methods, and the declaration carries no `Blittable`, packing or aggregate-alignment commitment. |
+| `Auto` | The default instance layout: fields are private, external access goes through properties or methods, and the declaration carries no `Blittable`, packing or aggregate-alignment commitment. |
 | `Sequential` | A layout that places fields at offsets following declaration order, subject to the target's natural alignment, packing and aggregate-alignment rules. |
 | `Union` | A layout that places every field at offset zero, requiring the `Blittable` commitment. It permits overlapping storage; it does not by itself provide safe typed access to inactive alternatives. |
 | Independently replaceable boundary | A crossing point between separately compiled or separately versioned artifacts, where the physical contract must be explicit and versioned rather than an internal implementation detail. |
@@ -134,11 +134,15 @@ validity, lifetime and access-safety rules are met.
 Blittability/frozen representation does not initialize padding bytes, validate
 arbitrary bit patterns, imply `Copy` or sharing, grant atomic access, or
 authorize every raw operation.
-`Auto` is the default: fields are private, external access goes through
+These restrictions describe instance payloads. Static storage is not part
+of instance layout; a foreign static data binding requires its own compatible
+representation, access, validity, synchronization and lifetime contract under
+the [source declaration rules](grammar-spec.md#31-source-file-structure-and-declarations).
+`Auto` is the default: instance fields are private, external access goes through
 properties or methods, and the declaration has no `Blittable`, packing or
-aggregate-alignment commitment. Unfrozen fields remain private; a frozen
+aggregate-alignment commitment. Unfrozen instance fields remain private; a frozen
 representation may expose fields without changing ordinary readonly or `mut`
-access rules. Public field access requires the fixed `Blittable` commitment,
+access rules. Public instance-field access requires the fixed `Blittable` commitment,
 regardless of layout kind; neither `Sequential` nor `Transparent` alone makes
 an exposed field a `Blittable` field. `Sequential` lays fields out in
 declaration order; `Union` places every field at offset zero and requires the

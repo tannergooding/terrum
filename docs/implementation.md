@@ -5,12 +5,15 @@
 The normative declaration grammar additionally requires explicit primary
 visibility, fixed role-specific ordering, primary/secondary partial contract
 ownership, static-class containers, explicit struct/class union storage and
-primary-only complete external bindings restricted to top-level functions and
-static methods. Internal interface requirements restrict implementation
+primary-only complete external callable bindings restricted to top-level
+functions and static methods, plus separate static foreign-data bindings.
+Internal interface requirements restrict implementation
 authority; private members are complete helpers. Constructors have their own
 synchronous initialization prefix and partial completion contracts. These
-source contracts are not new compiler support: syntax-44 does not enforce
-the new prefix/partial rules or
+source contracts also distinguish field storage/referent authority and
+caller-unsafe access, with synchronous accessor-local visibility/safety and
+sole-primary property/indexer implementation. These are not new compiler
+support: syntax-44 does not enforce the new prefix/partial rules or
 implement unions, static containers, caller-unsafe/async declarations or
 foreign external binding. Existing compiler declaration defaults and
 accepted modifier orders retain their current behavior until adopted
