@@ -403,10 +403,15 @@ handler; its registration and `Text.Create` forwarding remain **OPEN**.
 public mut unique class TextBuilder<TCodeUnit>
     where TCodeUnit : [TextCodeUnit]
 {
+    public TextBuilder();
     public TextBuilder(nuint capacityHint);
     public nuint Length { get; }
+    public nuint Capacity { get; }
+    public mut Result<void, Error> Reserve(nuint minimumCapacity);
     public mut void Append(TextSpan source);
     public mut void AppendScalar(rune value);
+    public mut bool TryAppend(TextSpan source);
+    public mut bool TryAppendScalar(rune value);
     public mut bool TryBuild(init ref<own<val<Text>>> result);
     public mut void Clear();
 }
@@ -497,6 +502,36 @@ returns scalar offsets, not byte offsets; an empty needle matches position
 zero (or the source's scalar length for the last match). Ordinal search does
 not normalize or fold. Its `TryIndexOfOrdinal`/`TryLastIndexOfOrdinal` false
 outcomes leave `scalarIndex` vacant.
+
+The builder constructor, capacity/reservation and allocation-refusal
+additions are **PROPOSED**. `Length` counts initialized code units in the
+builder's declared encoding, not Unicode scalars or bytes; `Capacity`
+counts usable code-unit storage and is at least `Length`. The empty
+constructor starts with no text. Capacity construction and `Reserve`
+request at least the given code-unit capacity without creating readable
+text in unused storage. Reservation never reduces capacity or changes
+existing text; an already sufficient capacity succeeds without allocation.
+Expected allocation failure returns `Failure(Error)` and preserves text,
+length and capacity. Constructor-failure transport remains **OPEN**, as
+for the other managed collection constructors.
+
+`TryAppend` and `TryAppendScalar` return false only on expected allocation
+refusal, preserving all prior text, length and capacity. Success accepts the
+entire borrowed fragment or complete scalar in the chosen encoding, without
+retaining the source view. Required encoded length and capacity arithmetic
+must be checked before publication; invalid arithmetic, conflicting loans
+and other checked failures are not allocation-refusal results. An empty
+fragment succeeds without allocation or content changes. A scalar needing
+multiple code units is never partly appended on a false result.
+`Clear` releases the initialized text while retaining capacity; unused
+storage is not a sequence of default code units to expose as text.
+
+This adds no automatic literal-handler registration, public writable
+builder-buffer view, allocator singleton or failure rollback for the
+ordinary throwing `Append` methods. Their exceptional partial-progress
+contract, the builder's reusable state after successful `TryBuild`, and
+effect/publication metadata remain **OPEN**. Transferring an owned result
+does not permit shared writable aliases to its immutable text storage.
 
 `Convert` accepts the reported prefix and never partially writes an encoded
 scalar. Counts are in input and output *elements*, respectively. The codec
