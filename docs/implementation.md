@@ -1,6 +1,25 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-39, semantic v43–v45 updates, native-10 through native-20
+## Current boundary: syntax-40, semantic v43–v45 updates, native-10 through native-20
+
+Syntax-40 adopts role-specific dot attachment. Supported qualified type names,
+namespace declarations and imports require both raw token boundaries attached.
+Expression member access requires at least one side attached, including when
+lookup resolves the receiver to a type or namespace. Whitespace, LF/CRLF and
+ordinary/documentation/line comments break the corresponding boundary.
+`TRM1007` identifies the original dot; CST, trivia and incomplete-input
+recovery retain the source. Generic shape selection stays syntactic and does
+not fall back after a qualified-dot error. Existing attached generic interiors
+may still be multiline. Hosted and current prelexed/component parsing share
+these checks before binding.
+Qualified attribute names and optional member access are not currently
+supported and are not introduced here. Native scalar input has no supported
+dot-bearing forms: no namespace/import, member or qualified type constructs
+are added. Its existing successful-projection current-syntax audit follows
+syntax-40; existing record/source audits still reject forged dot-bearing
+shapes that no scalar projection can represent. Scanner-7/schema-7, projections
+1–51, resource bounds, semantic/native formats, name identity and ABI remain
+unchanged. Other punctuation and spacing adoption remains separate work.
 
 Syntax-39 adopts receiver/name-attached opening delimiters across supported
 calls, indexing, generic applications and type arguments, generic declaration

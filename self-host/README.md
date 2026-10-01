@@ -59,7 +59,17 @@ interior trivia and structural grouping remain legal. The host independently
 audits current syntax before reconstructing successful projections, including
 historical projection shapes. This does not add native general calls, indexing
 or generics, or change scanner-7/schema-7, projections 1–51 or any bounds.
-The host parser's current language version is syntax-39. Syntax-18's qualified
+Syntax-40 enforces both-sided qualified type/namespace/import dots and
+either-sided expression member dots before lookup. This applies when hosted
+parsing compiles these candidates, including their ordinary/static member
+expressions. The native scalar frontend and maintained scalar probes have no
+supported dot-bearing input forms; no native namespace/import, qualified type
+or member syntax is added. Existing successful-projection current-syntax and
+source/record audits reject contradictory or unrepresentable dot shapes.
+Scanner-7/schema-7, projections 1–51 and all resource bounds are unchanged.
+Qualified attributes, optional member access and other spacing remain outside
+this adoption.
+The host parser's current language version is syntax-40. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile

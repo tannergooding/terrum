@@ -264,7 +264,7 @@ internal sealed class Parser
 
         while (Current.Kind == TokenKind.Dot)
         {
-            children.Add(Take());
+            children.Add(TakeDot(qualified: true));
             children.Add(Expect(TokenKind.Identifier));
         }
 
@@ -501,7 +501,7 @@ internal sealed class Parser
 
         while (Current.Kind == TokenKind.Dot)
         {
-            children.Add(Take());
+            children.Add(TakeDot(qualified: true));
             children.Add(Expect(TokenKind.Identifier));
         }
 
@@ -1066,7 +1066,7 @@ internal sealed class Parser
         {
             if (Current.Kind == TokenKind.Dot)
             {
-                expression = Node(SyntaxKind.MemberAccessExpression, [expression, Take(), Expect(TokenKind.Identifier)]);
+                expression = Node(SyntaxKind.MemberAccessExpression, [expression, TakeDot(qualified: false), Expect(TokenKind.Identifier)]);
             }
             else if (Current.Kind == TokenKind.OpenParen)
             {
@@ -1173,10 +1173,26 @@ internal sealed class Parser
         }
     }
 
+    private bool IsAttachedToPrevious() =>
+        _position > 0 && _tokens[_position - 1].Span.End == Current.Span.Start;
+
+    private SyntaxTokenElement TakeDot(bool qualified)
+    {
+        var leftAttached = IsAttachedToPrevious();
+        var rightAttached = Current.Span.End == Peek(1).Span.Start;
+        if (qualified ? !leftAttached || !rightAttached : !leftAttached && !rightAttached)
+        {
+            Report("TRM1007", qualified
+                ? "A qualified-name dot must attach on both sides."
+                : "An expression member-access dot must attach on at least one side.", Current.Span);
+        }
+
+        return Take();
+    }
+
     private SyntaxTokenElement ExpectAttached(TokenKind kind)
     {
-        if (Current.Kind == kind && _position > 0
-            && _tokens[_position - 1].Span.End != Current.Span.Start)
+        if (Current.Kind == kind && _position > 0 && !IsAttachedToPrevious())
         {
             Report("TRM1006", "The opening delimiter must attach to the preceding name or receiver.", Current.Span);
         }

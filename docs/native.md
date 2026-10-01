@@ -110,7 +110,7 @@ ABI changes; imported functions cannot satisfy required constant calls.
 Syntax-26 adds scalar `const expression` requirements in nested executable
 expressions, with the same limits and deferred constant substitution; no new
 native or semantic wire representation is emitted. The current parser version
-is syntax-39. Generalized comment fences and closed-catalog `@keyword` names
+is syntax-40. Generalized comment fences and closed-catalog `@keyword` names
 execute in the compiled scanner and native frontend input path, preserving
 raw source ranges and underlying name identity without changing native
 profiles, persisted symbol identities or ABI.
@@ -121,6 +121,13 @@ permissive. Successful frontend projections, including historical shapes,
 must satisfy current source syntax independently of the producer. Native
 general calls, indexing and generics are not added. Scanner-7/schema-7,
 frontend projections 1–51 and all existing resource bounds are unchanged.
+Syntax-40 distinguishes both-sided qualified-name dots from either-sided
+expression member dots before lookup, including receivers resolving to types.
+Compiled-scanner input uses the same hosted parser rule. Native scalar input
+does not support dot-bearing names or member access; this adoption adds no
+such shapes. Existing host current-syntax and source/record audits reject
+contradictory successful projections without changing native execution,
+persisted identity, projection versions or budgets.
 Conditional expressions evaluate one Boolean condition and only
 the selected target-checked arm, with existing cleanup and rooting behavior.
 Retained conditional nodes select semantic v41, not a new native ABI.

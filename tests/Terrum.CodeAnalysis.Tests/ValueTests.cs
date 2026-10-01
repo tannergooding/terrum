@@ -23,7 +23,7 @@ public sealed class ValueTests
     [InlineData("int32 Main() { if (uint32.MaxValue > 2147483647) { return 1; } return 0; }", 1)]
     [InlineData("int32 Main() { uint32 n = 4000000000; return int32(n / 1000000000); }", 4)]
     [InlineData("namespace Example; int32 Main() { return int32(Value()); } uint32 Value() { return 7; }", 7)]
-    [InlineData("namespace Example; public struct Value { public int32 Number; public Value(int32 number) { Number = number; } } int32 F(Example /*type*/ . Value value) { return value.Number; } int32 Main() { Example /*local*/ . Value value = new Example /*new*/ . Value(7); require int32 /*constant*/ . MaxValue > value.Number; return Example /*call*/ . F(value); }", 7)]
+    [InlineData("namespace Example; public struct Value { public int32 Number; public Value(int32 number) { Number = number; } } int32 F(/*type*/ Example.Value value) { return value.Number; } int32 Main() { /*local*/ Example.Value value = new /*new*/ Example.Value(7); require int32 /*constant*/ .MaxValue > value.Number; return Example /*call*/ .F(value); }", 7)]
     public async Task ScalarValuesExecuteInNativeCodeAsync(string source, int expected)
     {
         var program = Compile(source);
@@ -234,8 +234,8 @@ public sealed class ValueTests
     public async Task QualifiedNamesIgnoreDirectiveTriviaAcrossSourcesAsync()
     {
         var trees = new[] {
-            SyntaxTree.Parse("namespace /* scope */ Example . Utility; public int32 Value() { return 9; }"),
-            SyntaxTree.Parse("using Example /* scope */ . Utility; namespace Client; int32 Main() { return Value(); }"),
+            SyntaxTree.Parse("namespace /* scope */ Example.Utility; public int32 Value() { return 9; }"),
+            SyntaxTree.Parse("using /* scope */ Example.Utility; namespace Client; int32 Main() { return Value(); }"),
         };
         var compilation = Compilation.Create(trees);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));

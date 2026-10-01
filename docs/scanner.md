@@ -262,6 +262,17 @@ audits current syntax before accepting successful frontend projections.
 Compatible historical token records remain readable; no scanner record,
 catalog, buffer or projection revision is needed for this syntax migration.
 
+Syntax-40 likewise uses unchanged raw dot and neighboring token spans:
+qualified type/namespace/import dots attach on both sides, while expression
+member dots attach on either side, independent of binding. The current
+hosted/prelexed/component parser reports `TRM1007` at a violating dot.
+Whitespace and every supported comment/newline trivia kind break attachment;
+the scanner still tokenizes them normally and compatible historical raw
+records remain readable. Qualified attributes and optional access are not
+added. Native scalar input has no supported dot-bearing forms, and its
+existing successful-projection current-syntax audit follows this profile.
+Scanner-7/schema-7, record widths, catalogs and frontend bounds are unchanged.
+
 Keyword records are generated from the host `TokenKind` catalog's `*Keyword`
 members. Operator records use their lexical spellings, with fixture comparisons
 covering the entire punctuation/operator catalog. Packed lexeme records contain
