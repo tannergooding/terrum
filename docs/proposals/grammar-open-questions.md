@@ -123,14 +123,41 @@ of C# keywords and multiword terms.
 ### Q26.1. Pointer formation and dereference/member boundaries
 
 **Remaining question:** Choose implicit versus explicit pin-to-pointer
-conversion, release/rebind spelling and any safe-context address-formation
-warning policy. Only these three choices need acceptance:
+conversion, release/rebind spelling and diagnostics for invalid lifetime or
+pin use. Only these three choices need acceptance:
 
 | Choice | What remains undecided |
 |---|---|
 | Conversion | Implicit `ptr<int32> p = pinned;` versus an explicit conversion such as `ptr<int32>(pinned)`. These are candidate spellings, not new productions. |
 | Release/rebind | Whether assignment of `nullref` and explicit ref reassignment perform release/rebind, or a dedicated operation is required. The exact writable-binding syntax must also fit Q06; this does not make the approved local implicitly mutable. |
-| Warning | Whether otherwise-valid address formation with `&` warns in a safe context. This is diagnostic policy, not another safety-proof decision. |
+| Diagnostics | Whether proven lifetime escapes and missing required pins are errors or warnings. Pointer creation is not itself unsafe; the recommendation below does not warn on valid formation. |
+
+**Recommendations for review, not approval:**
+
+- Permit implicit pin-to-pointer conversion when it preserves referent access,
+  lifetime and pin/backing dependencies. A type change alone need not require
+  an explicit cast. This does not promise identical machine representation or
+  permit an ordinary relocatable reference to manufacture a stable pointer.
+- Use `nullref` for clearing an eligible writable reference binding and
+  explicit ref reassignment for rebinding. Clearing means no usable referent;
+  it does not construct a default `T`. The existing dependency checks prohibit
+  releasing a pin still needed by derived pointers or loans.
+- Do not warn merely because a valid pointer is formed. Diagnose proven
+  lifetime escapes and missing required pins; recommend errors for these
+  checked-contract violations rather than allowing them with warnings.
+  Choosing diagnostic severity remains part of this proposal.
+
+`ref(x)` is a possible alternative spelling for place acquisition, not an
+ordinary value cast: it must not read/copy `x` and then reference the copy.
+A conceptual identity operation receives `implicit ref<T> x` and returns a
+`ref<T>` with a declared dependency on that input. That does not acquire a
+pin. Replacing existing `ref x` source syntax needs separate explicit approval
+and is not a prerequisite for the conversion decision.
+Likewise, `ref null`/`ref(null)` could mean borrowing a null-valued place or
+temporary rather than having no referent; `ref()` would need an explicit
+empty-reference contract. `_` already denotes discarding and should not
+silently gain a pin-release meaning. None of these alternatives has been
+adopted.
 
 Pin acquisition/dependency safety and ordinary prefix dereference with
 explicit member grouping are already in the
