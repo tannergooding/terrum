@@ -8,13 +8,13 @@ Approval, implementation, and pre-v1 stability are separate.
 
 ## Active work (priority order)
 
-1. Extend native void functions to existing expression-bodied requirement
-   and non-void scalar discard statements. Reuse hosted statement binding,
-   implicit null completion and checked-failure behavior under both policies.
-   Preserve the six-primitive domains, source/resource limits, historical
-   projection servicing and existing ABI. A void arrow body is a statement,
-   not an implicit unit-valued return; general calls, unit expressions,
-   ownership, new grammar and new metadata contracts remain outside this unit.
+1. Adopt existing `else if` chains in bounded native scalar and void braced
+   functions. Preserve hosted conditional evaluation, lexical scopes and
+   nearest-`if` association without a synthetic source block. Reuse existing
+   branch/loop transfer and failure behavior under both policies, respecting
+   source/resource limits, historical projection restrictions and existing ABI.
+   General calls, new grammar, label-shadowing decisions and new metadata
+   contracts remain outside this unit.
 2. Review source-contract decisions from the [grammar](grammar-spec.md) and
    [decision queue](proposals/grammar-open-questions.md). Preserve accepted
    decisions; recommendations remain proposals until approved.
@@ -102,6 +102,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e43ea1c` | Native void arrow requirements and scalar discards, projection 57 |
 | `6952d2d` | Native braced void functions and null returns, projection 56 |
 | `e1fe270` | Native scalar standalone runtime requirements, projection 55 |
 | `3b10d51` | Native scalar labeled loops and named transfers, projection 54 |

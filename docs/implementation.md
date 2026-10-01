@@ -605,10 +605,34 @@ The independent reader audits the void keyword, header, null-return root,
 spans, grouping, complete source coverage and existing scalar roots and local
 visibility. Scalar-valued returns and void parameters or locals reject; the
 six-primitive expression/local/parameter domains and all resource limits
-remain unchanged. Expression-bodied void functions, general calls and void
+remain unchanged. Expression-bodied void functions in v56, general calls and void
 call-return expressions, a general unit-expression domain, vacant storage,
 ownership and managed cleanup remain outside this projection. No grammar,
 scanner, semantic/ISA/Contract/TRRM/native format or ABI contract changes.
+
+Provisional projection v57 adopts existing void expression-bodied requirements
+and non-void scalar discards, for example `void Main() => require true;` and
+`public void F(int32 x) => _ = x + 1;`. It requires return-type code zero,
+expression-body flag 41 set to one, envelope roots 38–40 set to `-1`, and
+exactly one existing kind-21 requirement or kind-15 discard record. Requirements
+have no local; discards have exactly one readonly hidden identity after the
+parameters. The Boolean-target condition and self-determined scalar discard
+rules are unchanged, including rejection of `_ = 42;` without a numeric type.
+Versions 1–56 retain their void-arrow restrictions; braced void payloads remain
+v56.
+
+The independent reader consumes the entire header, arrow and statement,
+auditing the exact root, span, type, hidden identity, precedence and postorder
+coverage. Lowering retains hosted statement, function and arrow-body spans,
+the outer managed lexical block, existing requirement or hidden-discard
+lowering, and implicit null completion at the semicolon end. Supported lazy
+evaluation and checked-failure order are preserved under both policies.
+An arrow body is a statement, not an implicit unit-valued return: `=> ();`
+and `=> return;` are not hosted-valid void callable forms. General calls,
+assignment/update arrows, declarations, static/output conditions, unit
+expressions/storage and ownership remain excluded. Existing buffer/record
+widths, resource limits, grammar, scanner and semantic/native/ABI contracts
+are unchanged.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed
@@ -624,8 +648,9 @@ Standalone blocks use kind 14 beginning in v52; non-void scalar discard uses
 kind 15 beginning in v53; named-loop kinds begin in v54; require uses kind 21
 in v55. Versions 1–51 retain their block restrictions, versions 1–52 their
 discard restrictions, versions 1–53 their named-transfer restrictions,
-versions 1–54 their require restrictions, and versions 1–55 their void-function
-restrictions and prior source audits. The
+versions 1–54 their require restrictions, versions 1–55 their void-function
+restrictions, and versions 1–56 their void-arrow restrictions and prior source
+audits. The
 392-`int32` buffer and all record widths remain fixed:
 16,384 UTF-16 source units, 64 tokens, eight total named/hidden local
 identities, 12 statement records, 32 expression nodes, three parameters,

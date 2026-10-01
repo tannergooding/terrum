@@ -259,9 +259,19 @@ unit-literal returns. It reuses null-return lowering under both policies;
 parameterless `void Main()` exits zero, and public void exports retain the
 existing primitive-parameter ABI. The six-primitive expression, local and
 parameter domains are unchanged. Versions 1–55 retain their void restrictions.
-Void expression bodies and general calls remain excluded; the
+These v56 payloads do not admit void expression bodies; general calls remain
+excluded. The
 [implementation reference](implementation.md) specifies exact source auditing
 and completion behavior. This does not widen source-free indexed TRRM.
+
+Projection v57 adds void arrow bodies containing exactly one existing
+requirement or non-void scalar discard statement. It preserves hosted
+statement/body/function spans, managed lexical wrapping and implicit null
+completion at the semicolon under both policies. Earlier versions retain their
+arrow restrictions, and braced void functions remain v56. It adds no unit
+expression domain, calls, assignment/update arrows or ABI change; the
+[implementation reference](implementation.md) defines the exact record and
+source-audit boundary.
 
 The native scalar frontend's provisional projection v48 represents scalar
 returns as structured body statements: kind 8, slot 0, a typed result root and
