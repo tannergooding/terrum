@@ -1023,10 +1023,35 @@ ordinary backing/root lifetime dependency. A raw `ptr<T>` is a
 non-relocatable address and does not root or pin GC storage; forming one into
 GC storage requires a live pin with enforced provenance/lifetime or
 independently stable storage.
+Initializing vacant pin storage acquires the new pin before publishing the
+value; acquisition failure leaves that destination vacant and cleans any
+partially acquired state under the ordinary initialization rules. Replacing
+an eligible live mutable pin binding keeps its old value and pin valid while
+evaluating and acquiring the replacement. Failed acquisition leaves the old
+value and pin in place. Successful replacement publishes the acquired value
+and retires the old pin only when its outstanding dependencies permit that.
+Neither staging nor successful acquisition bypasses those checks or permits
+early unpinning. This does not roll back initializer side effects.
+
+Reacquisition uses the existing vacant-initialization or mutable-assignment
+authority, not a dedicated release/rebind keyword. An ordinary immutable pin
+local can end its value lifetime but cannot be assigned again. For eligible
+initialized backing places `first` and `second`, the target forms include:
+
+```terrum
+init pin ref<int32> pinned;
+pinned = ref first;
+pinned = _;
+pinned = ref second;
+
+mut pin ref<int32> current = ref first;
+current = ref second;
+```
+
+These are accepted target contracts, not current compiler support.
 The narrow implicit pin-to-pointer conversion and prefix dereference are
 specified in §5.13. A named local's current value can end through `name = _;`
-under §3.3; pin reacquisition/rebinding and address diagnostics remain in
-[Q26.1](proposals/grammar-open-questions.md#q261-pointer-formation-and-dereferencemember-boundaries).
+under §3.3; §5.13 also specifies pointer-formation diagnostics.
 Pinning a slot containing a class handle does not also pin the separately
 allocated object reached through that handle. `mut` qualifies
 a binding/receiver or a `mut ref` mode.
@@ -2820,8 +2845,11 @@ Existing specificity rules apply to ties; unresolved ties or crossed
 candidates remain ambiguous. Future exceptions
 require separately selected rules, not extrapolation from this one.
 Named-local early lifetime ending uses `name = _;` under §3.3 and retains all
-pin dependency checks. Pin reacquisition/rebinding and diagnostic policy remain in
-[Q26.1](proposals/grammar-open-questions.md#q261-pointer-formation-and-dereferencemember-boundaries).
+pin dependency checks. Pin acquisition/replacement follows §3.2.
+Proven lifetime escapes and missing required pins are checked errors,
+including in an unsafe context; valid pointer formation itself produces no
+warning merely for creating a pointer. Formation does not require unsafe
+when its initialization, access, backing/root and pin obligations are satisfied.
 Dereference uses ordinary attached prefix `*` and requires unsafe access;
 it does not create a new `(* ... )` fence. `*p`, `*(p + offset)`,
 `*GetPointer()` and `*pointers[index]` retain ordinary prefix/postfix precedence.

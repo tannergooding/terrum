@@ -25,7 +25,7 @@ C# comparisons are illustrative fragments, with ordinary namespace imports
 omitted. Placeholder APIs/types are identified where relevant; these are not
 claims that the snippets were compiled or that Terrum adopts their contracts.
 
-There are **4 pending numbered groups**. Q03 and all seven punctuation
+There are **3 pending numbered groups**. Q03 and all seven punctuation
 subquestions have canonical redirects, not pending votes. Partially resolved
 groups ask only about their remaining choice; settled context is linked or
 labeled, not another vote.
@@ -33,7 +33,6 @@ labeled, not another vote.
 | Pending area | Stable IDs |
 |---|---|
 | Declaration applicability and modifier order | Q06 |
-| Pin reacquisition/rebinding and address diagnostics | Q26.1 |
 | Other source forms and contracts | Q28, Q32.1 |
 
 ## Lexical and declaration choices
@@ -119,129 +118,6 @@ top-level type to one source file, and `field` is contextual property backing
 syntax in C# 14. Terrum's pending matrix must state its own canonical order,
 applicability and file-local boundary rather than infer them from this mix
 of C# keywords and multiword terms.
-
-### Q26.1. Pointer formation and dereference/member boundaries
-
-**Accepted context:** The narrow implicit `pin ref<T>` to matching `ptr<T>`
-conversion preserves complete referent type, access and lifetime/pin/backing
-dependencies. Identity ranks ahead of this direct projection under existing
-per-argument overload rules; it enables neither conversion chains nor general
-implicit conversion operators. See the
-[conversion contract](../grammar-spec.md#513-operators-assignments-and-expression-gaps).
-
-`name = _;` ends a local's current value lifetime, performing its scope-exit
-obligations and leaving the binding vacant. The declaration remains in scope,
-so this does not permit same-scope redeclaration. It grants no mutation
-authority: ordinary immutable `var` cannot be assigned again; `init var` can
-be initialized again when vacant without changing its established type.
-Ending a borrow releases it, not its referent; a GC handle retires this root,
-not the shared object. Outstanding dependencies prohibit premature owner or
-pin release. See [local lifetime ending](../lifetimes.md#explicit-local-lifetime-end).
-These are accepted target contracts, not current implementation.
-
-**Remaining question:** Specify pin reacquisition/rebinding and diagnostics
-for invalid lifetime or pin use. Early lifetime ending itself is settled.
-
-| Choice | What remains undecided |
-|---|---|
-| Reacquisition/rebinding | Exact eligible binding syntax and pin-acquisition failure/publication ordering when initializing vacant storage or replacing a live pin. This must fit Q06 and existing initialization/mutation authority; ending a value does not make an immutable binding writable. |
-| Diagnostics | Whether proven lifetime escapes and missing required pins are errors or warnings. Pointer creation is not itself unsafe; the recommendation below does not warn on valid formation. |
-
-**Recommendations for review, not approval:**
-
-- Do not warn merely because a valid pointer is formed. Diagnose proven
-  lifetime escapes and missing required pins; recommend errors for these
-  checked-contract violations rather than allowing them with warnings.
-  Choosing diagnostic severity remains part of this proposal.
-
-`ref(x)` is a possible alternative spelling for place acquisition, not an
-ordinary value cast: it must not read/copy `x` and then reference the copy.
-A conceptual identity operation receives `implicit ref<T> x` and returns a
-`ref<T>` with a declared dependency on that input. That does not acquire a
-pin. Replacing existing `ref x` source syntax needs separate explicit approval
-and is not a prerequisite for the conversion decision.
-No empty-reference value or `nullref` keyword is selected by local lifetime
-ending. `ref null`/`ref(null)` could mean borrowing a null-valued place or
-temporary rather than having no referent; `ref()` would need a separately
-approved empty-reference contract.
-
-Pin acquisition/dependency safety and ordinary prefix dereference with
-explicit member grouping are already in the
-[official grammar](../grammar-spec.md#513-operators-assignments-and-expression-gaps).
-
-<details>
-<summary>Settled pin and dereference context (not another vote)</summary>
-
-**Example:** A successfully acquired `pin ref<int32>` roots and stabilizes
-its backing for the pin loan's lifetime. `ptr<int32>` does not. Merely
-casting/requalifying an ordinary reference cannot manufacture that pin.
-
-**C# model:** Pointer operators and `fixed` are comparison points, not adopted
-syntax. Distinguish the original C# unsafe model from the C# 15/.NET 11
-updated-memory-safety preview: the latter allows pointer formation and
-`fixed` outside unsafe, while pointer memory access still requires unsafe.
-Terrum has its own checked provenance/backing dependencies and does not use
-`pin` as a statement keyword.
-
-**Settled direction:** taking an address need not itself require
-unsafe when the place's lifetime, access and stable/rooted backing are
-established. For GC storage, require a statically known covering pin;
-independently stable storage still needs liveness and initialization
-obligations. `unsafe` does not substitute for a missing root or pin.
-A `pin ref<T>` to `ptr<T>` conversion is allowed in a safe context,
-retaining its access and pin/backing dependencies. A safe-context warning
-for address formation is a separate proposed diagnostic policy, not a
-proof that the address is unsafe or permission to dereference it.
-
-**Approved pin-acquiring local:**
-
-```terrum
-pin ref<int32> pinned = ref storage;
-```
-
-Here `storage` denotes eligible initialized storage. The initializer is
-an explicit checked acquisition operation, not a qualifier-only cast.
-The binding keeps its backing pinned for the promised local lifetime
-or an explicit release/rebind. An address/conversion expression must designate
-the pinned `int32` backing, not the storage of the reference descriptor.
-The local acquisition is approved target grammar, **not current compiler
-support**. Implicit pointer conversion and `pinned = _;` early lifetime ending
-are approved; reacquisition/rebinding details and diagnostic severity remain pending.
-A potential `Pin.TryAcquire` API is not required in place of this local form.
-
-Clearing/rebinding the local cannot release its pin while a derived address,
-copy, capture or loan still depends on it. For example, deriving `p`,
-copying it to `q`, clearing `pinned`, then using `q` must not unpin early.
-The compiler must reject premature release or use a separately approved
-ownership-transfer mechanism, not silently shorten a promised pin to the
-ordinary last-use lifetime of its local. Pinning a class-handle slot also
-does not stabilize the separately allocated object reached through it.
-
-**C# comparison (original model, also valid inside unsafe in the preview):**
-
-```csharp
-unsafe
-{
-    fixed (int* p = &values[0])
-    {
-        int value = *p;
-    }
-}
-```
-
-With an existing `int[] values`, `fixed` holds the containing allocation
-stable during the block; an ordinary `ref int` into it is relocatable and
-does not acquire that pin. The pointer must not escape its pin's lifetime.
-Neither this spelling nor C#'s lexical restrictions selects Terrum's
-pin-acquiring local syntax.
-
-Prefix `*p`, grouped `(*p).M` versus `*(p.M)`, and the rejection of ambiguous
-unparenthesized member chains are settled. No dedicated dereference fence,
-pointer indexer protocol, `->`, or pointer-to-reference `ref(p)` form was
-selected by that approval. Those alternatives are not additional pending
-votes or implicit safe conversion paths.
-
-</details>
 
 ### Q28. Complete pattern and type-test forms
 
@@ -582,11 +458,24 @@ short-circuit ordering.
 
 ### Q26. Pointer formation, dereference and pin acquisition
 
-The initialized `pin ref<T> name = ref place;` acquisition is approved;
-see [pin/reference contracts](../grammar-spec.md#32-types-parameters-and-arguments).
-Implicit conversion and named-local `name = _;` early lifetime ending are
-approved. Only reacquisition/rebinding and diagnostic choices
-remain in [Q26.1](#q261-pointer-formation-and-dereferencemember-boundaries).
+Resolved; pin acquisition, acquire-before-publication/replacement ordering,
+implicit pin-to-pointer conversion, local lifetime ending and pointer
+formation/dereference diagnostics are approved target contracts. See
+[pin/reference contracts](../grammar-spec.md#32-types-parameters-and-arguments)
+and [pointer rules](../grammar-spec.md#513-operators-assignments-and-expression-gaps).
+This does not claim executable pin/reference support.
+
+#### Q26.1. Pointer formation and dereference/member boundaries
+
+Resolved; failed acquisition leaves vacant storage vacant or preserves an
+existing value and pin during eligible replacement. Successful replacement
+still requires valid dependencies before retiring the old pin. Proven lifetime
+escapes and missing required pins are errors; valid pointer formation alone
+does not warn or require unsafe. Dereference still requires unsafe and the
+specified prefix/member grouping. See the
+[canonical pointer rules](../grammar-spec.md#513-operators-assignments-and-expression-gaps).
+No empty-reference value, dedicated release keyword or alternative `ref(x)`
+syntax is introduced.
 
 ### Q27. Nominal sums and closed-case declarations
 

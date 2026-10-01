@@ -58,6 +58,20 @@ write authority. Overload binding recognizes only this direct projection;
 identity matches rank ahead of it, with no search for intermediate conversions.
 This is a target contract, not current executable reference/pointer support.
 
+Pin initialization acquires before publication: failure leaves a vacant
+destination vacant and cleans partial acquisition state. Eligible mutable
+replacement preserves the old value and pin through evaluation/acquisition
+of its replacement; failed acquisition leaves them in place. On success,
+publication and retirement still require that no outstanding dependency needs
+the old pin. Initializer side effects are not rolled back. Existing
+initialization/write authority applies; early lifetime ending does not make an
+immutable pin binding reassignable. See
+[pin acquisition](grammar-spec.md#32-types-parameters-and-arguments).
+Proven lifetime escapes and missing required pins are checked errors, not
+safe-context warnings or obligations erased by `unsafe`. Valid pointer
+formation itself does not warn or require unsafe; dereference still does.
+These are accepted target contracts, not current executable pin support.
+
 Current executable ownership, view and managed-root boundaries are documented
 in [implementation](implementation.md) and [native](native.md); staged work
 is tracked in [roadmap](roadmap.md). A slice does not thereby become the
