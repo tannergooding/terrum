@@ -121,8 +121,9 @@ of C# keywords and multiword terms.
 
 ### Q28. Complete pattern and type-test forms
 
-**Question:** Complete relational, nominal-case, type-test and destructuring
-patterns, including binding ownership and access. Existing guards,
+**Question:** Confirm the remaining boundaries for runtime-only type capture
+and reference-pattern formation. Registered object extraction and richer-status
+contract spelling remain separate library/schema work. Existing guards,
 `and`/`or`/`not`, compatible `or` bindings and fallback behavior remain fixed.
 **Accepted direction:** Replace the target `some` introducer with inferred
 `var`/`var?` bindings. `var item` requires initialization and non-nullness;
@@ -136,8 +137,11 @@ See the [source contracts](../grammar-spec.md#33-statements-and-local-declaratio
 Contextual multi-output matching views evaluate one call and support structural
 output patterns such as `(var x, _)`, `(_, var? y)` and `(var x, var y)`.
 They retain declared status/output correlations; output availability is not
-call success, and ignored live owners still require cleanup. Exact call-site
-activation, output selection and metadata remain specification work. See
+call success, and ignored live owners still require cleanup. Omitted eligible
+output arguments select the lifted projection, including partial omission;
+supplied destinations stay ordinary arguments. With all outputs supplied,
+matching examines the ordinary return value. Required inputs remain required,
+and neither arm types nor implicit conversions determine the channel. See
 [output matching](../language-contracts.md#23-checking-and-consuming-the-contract).
 No mandatory library `Option`/`Result` or general implicit tuple conversion
 is introduced.
@@ -145,8 +149,21 @@ is introduced.
 Guards and catch filters use consistent `when expression`, with parentheses
 as ordinary grouping. This does not change their checked effects/failures,
 select catch-filter/unwind timing or replace function `require`/`ensure`.
-Pattern `where` qualification and a two-stage `where`/`when` composition
-remain unselected proposals.
+Ordinary guard expressions provide member and relational conditions.
+Dedicated member/relational pattern syntax and pattern `where` are deferred
+until a concrete need, not pending adoption votes.
+
+**Accepted lifted availability and requirements:** Matching uses declared
+per-output availability and may bind initialized failure outputs. Boolean init
+contracts already supply true publication/false vacancy; no additional matching
+marker is required merely for that signature shape. Enum and object-backed
+statuses retain checked availability relations rather than a universal
+success gate. The call is evaluated once, preserving correlated initialization
+facts for explicitly supplied destinations. Bare lifted `require` demands
+initialization of every omitted/selected output, with full optional/ownership
+types. Selective extraction uses an explicit pattern requirement, such as
+`require (Read() is (var value, _));`. Ignored outputs need not be initialized
+or read, but live ignored owners still require cleanup.
 
 **C# model:** Pattern families are C#-inspired; Terrum does not inherit
 property-getter duplication, implicit numeric conversion, or ownership-neutral
@@ -155,8 +172,8 @@ payload extraction merely from similar spelling.
 **Design constraint:** Composition must be clear and consistent with Terrum's
 existing types, places, access and ownership. Do not adopt C#'s `x is { }`
 or `{ X: > 10 }` composition by familiarity. Once-only scrutinee evaluation
-does not settle member/extractor observation, refinement invalidation or
-copy/borrow/move bindings. Tuple structure remains distinct from
+does not by itself authorize an observation optimization or invalidate
+ordinary access/loan checks. Tuple structure remains distinct from
 name-discovered `Deconstruct`.
 
 **Terrum counterpart (accepted target direction, not current compiler support):**
@@ -177,41 +194,107 @@ nonmatches and cannot be silently retried.
 The compiler still uses `is some item`; neither this switch form nor `var?`
 inference/output matching is implemented.
 
-The additional choice is whether reads of `Value` are reused. Recommend
-one read per member path within an attempted arm, feeding its relational
-subpatterns from that value, and a new observation in a later attempted arm.
+**Accepted observation rule:** One read per member path within an attempted
+arm feeds that path's subpatterns; a later attempted arm observes it afresh.
 A false, effectful guard could have changed the backing: "evaluate once"
 must not freeze every getter for the entire switch. Getters/extractors
 retain ordinary effects/failures; do not call `Deconstruct` by name.
-Optimizations require proof that changed observations/effects are
-unobservable. This precise member-read rule remains a recommendation.
+Ordinary member expressions written in guards/bodies retain ordinary reads,
+not an implicit pattern cache. Optimizations must fit the memory/side-effect
+contract; an explicit local lets the author retain a stable observation.
 
-Binding ownership is a different question: binding a copyable `int32` is
-not permission to copy a unique payload, move out of a borrowed scrutinee,
-or retain a reference beyond its backing.
+**Accepted binding rule:** Typed and inferred value bindings follow ordinary
+value initialization: copy eligible value types or shared handles with their
+complete access/rooting contracts. They do not create hidden aliases for
+value-type structs. Aliasing requires an explicit reference form; unique
+payloads require explicit borrow/move rather than an implicit copy.
+`ref<var> item` and `write ref<var> item` are selected explicit borrowing
+forms. They preserve ordinary addressability, authorized access, backing and
+lifetime rules; requesting write does not create write authority. A matched
+value does not authorize narrowing the actual aliased storage type.
+Matching does not implicitly move during an attempted arm or its guard;
+non-consuming inspection precedes an explicit move after selection.
+Explicit guard effects are not rolled back, and ordinary loan/backing checks
+still apply, as in equivalent `if`-style code.
+
+**Accepted nominal-case spelling:**
+
+```terrum
+switch (result)
+{
+    Lookup<int32>.Found(var item) when item > 10 => Use(item),
+    Lookup<int32>.Missing => Missing(),
+    _ => Other(),
+}
+```
+
+Patterns test the declared case and match payload positions in declaration
+order and arity. They invoke neither a constructor nor name-discovered
+`Deconstruct`, and add no `case` keyword or synthesized public payload members.
+`Found(null)` remains distinct from `Missing`; `var?` permits its live null
+payload. These source contracts do not claim executable union/pattern support.
 
 **C# comparison:**
 
 ```csharp
-record Point(int X, int Y);
-object value = new Point(3, 4);
-if (value is Point { X: > 0, Y: var y })
+var subject = Next();
+var firstValue = subject.Value;
+if (firstValue > 10 && firstValue < 100 && Guard(subject))
 {
-    Console.WriteLine(y);
+    Use(firstValue);
+}
+else
+{
+    var secondValue = subject.Value;
+    // Test the next arm with this fresh observation.
 }
 ```
 
-C# combines type/property/relational patterns and binds `y`; positional
-record patterns can instead use generated `Deconstruct`. Similar spelling
-does not select Terrum's copy/borrow/move binding, permit getter repetition,
-or authorize name-discovered destructuring. Those additional contracts
-must be explicit before adding the corresponding forms.
-C# property-pattern lowering can reuse observations and does not provide
-the proposed per-attempt Terrum getter contract merely from similar syntax.
-For a direct operational comparison, ordinary C# code could store `Next()`
-once, read `Value` for the first attempt, run the guard if eligible, then
-read `Value` again before a later attempt. The point is which calls/reads
-are authorized, not just which new pattern tokens are accepted.
+This is an operational comparison, not adoption of C# property patterns or
+record synthesis. An ordinary value binding is analogous to
+`init T y; if (x is T) { y = T(x); }`: checked projection/initialization, not
+a hidden struct alias or permission to select arbitrary implicit conversions.
+An explicit reference binding corresponds to an ordinary reference alias,
+subject to Terrum's access, backing and lifetime rules. C# does not enforce
+Terrum's unique ownership.
+
+**Accepted generic type-pattern direction:** `_` and each `var` form occupy
+one argument slot of the named constructor, not a pack or an unapplied type
+constructor. `List<_>` matches without naming its argument; `List<var T>`
+captures a non-nullable argument type, and `List<var? T>` captures either
+nullable or non-nullable arguments with their actual complete type.
+Anonymous `var`/`var?` have the same filters without a name. These tests
+inspect generic argument types, not initialization or values of list elements.
+Ordinary application `_` inference remains distinct from a pattern wildcard.
+
+```terrum
+switch (items)
+{
+    List<var T> list when typeof(T) is typeof(int32) => HandleInt32(list),
+    List<var? T> list => HandleOther(list),
+}
+```
+
+The second arm includes other non-nullable arguments as well as nullable ones.
+The direct `List<int32> list` pattern is the simpler equivalent for the first
+arm. Type capture is distinct from value binding and permits `typeof(T)` in
+the guard. A recognized exact identity test refines `T` on its proven path,
+including the successful arm body, without a runtime conversion or rewriting
+the generic declaration. Arbitrary user type-object comparisons do not
+establish that proof. Captures retain ordinary access/ownership obligations
+and have checked successful-path scope.
+
+**Remaining boundaries:** Runtime-only type capture needs an explicit
+type-witness/representation contract; it must not silently introduce boxing or
+arbitrary runtime generic instantiation. Reference patterns retain the actual
+storage type, but exact nullable-referent and already-reference-value cases
+still need reconciliation with these generic-slot filters. General
+application/constraint `var` binders and higher-kinded application are deferred,
+not inferred from pattern syntax. Registered object observations,
+richer-status availability contract spelling and metadata remain library/schema
+work; compiler adoption is downstream, not an additional source vote.
+Call-site channel selection, partial output omission, availability-based
+matching and all-lifted-output `require` are settled.
 
 ### Q32.1. Catchability registration and filter phase
 

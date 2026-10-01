@@ -195,8 +195,35 @@ initialization, then the requested presence contract, preserving access and
 ownership. Structural output patterns such as `(var x, _)` can consume a
 contextual multi-output matching view of one call; the view retains status
 correlations and never reads vacant outputs to construct an ordinary tuple.
-Ignored live owners still require cleanup. General projection activation,
-generic inference positions and copy/borrow/move extraction remain to specify.
+Ignored live owners still require cleanup. Ordinary value bindings copy only
+when the type permits it; shared handles preserve access and rooting, while
+value-type bindings do not acquire hidden aliases. Reference binding and
+ownership transfer require explicit operations. Pattern observations are
+once per member path within an attempted arm, fresh in later attempts, with
+ordinary effects and failures; optimization must preserve the memory/side-effect
+contract. Matching does not implicitly consume a unique source before arm
+selection or roll back explicitly written guard effects. Union-case patterns
+mirror qualified construction, matching declared payload positions rather
+than invoking constructors or name-discovered `Deconstruct`. Omitted eligible
+output arguments activate lifting in matching/`require` contexts; explicit
+destinations are not lifted, and partial omission is permitted. The channel
+is fixed by the call, not arm types, so Boolean payloads and generic
+specializations do not introduce status/payload ambiguity. Matching follows
+declared per-output availability, including initialized failure outputs.
+Ordinary `when` expressions provide member/relational conditions; dedicated
+pattern syntax and pattern `where` are deferred. Explicit `ref<var>` and
+`write ref<var>` patterns request ordinary checked borrowing, not hidden
+value-type copies or storage narrowing. Generic type-pattern slots distinguish
+wildcard `_` from inferred `var`/`var?`: the latter filter non-nullable versus
+either argument type, not contained values. Named forms such as
+`List<var? T> list` capture the actual complete type as `T` and bind `list`
+separately as a value. `typeof(T)` permits type inspection; a recognized
+exact identity test refines `T` on the proven path without a conversion.
+Each slot denotes one argument of the selected constructor, not a pack or
+higher-kinded application. Ordinary generic `_` inference remains distinct
+from pattern wildcard matching. General application/constraint binders,
+runtime-only type-witness representation and richer-status/object registration
+remain separate work.
 This replaces target `some` pattern spelling, not the compiler's current
 `is some` support or its existing whole-type `var` inference.
 
@@ -801,14 +828,16 @@ properties or user-defined comparisons. The implicit-destination expression
 form below follows the same declared output contract; current support for
 statement and expression forms is documented in [implementation](implementation.md).
 
-The expression form can lift one declared success-conditioned output:
+The expression form lifts eligible output destinations omitted from a call:
 `int32 value = require int32.TryParse(text);`. The operation runs once; success
-publishes the complete value, while false cleans partial initialization and
-raises rather than exposing a vacant destination or manufacturing `default(T)`.
-This is based on declaration metadata, not a `Try` naming convention. Multiple
-outputs stay explicit; status APIs use an explicit declared success predicate
-and preserve other statuses for explicit matching/diagnostics rather than
-guessing an enum-zero member. Bounded patterns and `init` argument forms are
+publishes the complete value under that Boolean contract, while false cleans
+partial initialization and raises rather than exposing vacancy or manufacturing
+`default(T)`. More generally, bare lifted `require` demands initialization of
+every lifted output, with its full nullable/ownership type; supplied destinations
+remain ordinary arguments. An explicit pattern requirement can request
+selected outputs or non-nullness instead. This follows declared per-output
+availability, including richer statuses, not a `Try` naming convention,
+enum-zero guess or universal success group. Patterns and `init` argument forms are
 specified in the [source grammar](grammar-spec.md); lifting metadata remains open.
 
 Declaration placement determines contract visibility. A declaration

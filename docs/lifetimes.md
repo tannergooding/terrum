@@ -298,20 +298,24 @@ captures. Cancellation does not shorten a borrowed input's declared lifetime:
 backing and guards remain live until the operation actually stops and performs
 required cleanup.
 
-A `require` expression may lift one declared success-conditioned destination
-without an explicit output argument at the use site. It evaluates the call once,
-publishes the fully initialized value only on the declared success, and on
-false cleans partial state before raising the selected requirement failure.
-It never reads a vacant destination or synthesizes `default(T)`. This uses the
-same output metadata as an explicit branch, not a method-name convention;
-multiple outputs are not inferred by this `require` form. Contextual
-multiple-output matching is a separate accepted direction, preserving
-per-output initialization/presence and status correlations rather than
-constructing a tuple from vacant storage. `_` does not read an ignored
-output or erase its live cleanup obligations. Exact projection activation
-and extraction contracts remain specification work. A selected exception applies to the false condition only and does
-not catch an exception raised while evaluating the call. The syntax is target
-direction; current compiler support is documented in
+A `require` expression or matching context lifts eligible destinations omitted
+from the call; explicitly supplied destinations are not lifted, and partial
+omission is permitted. With all destinations supplied, matching uses the
+ordinary return value. The call evaluates once, and projections preserve
+per-output initialization/presence, status correlations and complete
+ownership/access/backing contracts. Matching may select initialized failure
+outputs rather than imposing a universal success gate.
+Bare lifted `require` requires every lifted output initialized and yields its
+complete value type, including permitted nullability. An explicit pattern
+requirement can select fewer outputs or require non-nullness. `_` does not
+read or require initialization of an ignored output, but cannot erase its live
+cleanup obligations. No vacant read, ordinary tuple construction from vacant
+slots, fabricated `default(T)` or mandatory `Option`/`Result` is introduced.
+Definition/import checking establishes the availability relations; output
+registration, richer-status spellings, metadata and exact reference extraction
+remain work. A selected exception applies to the false condition only and does
+not catch an exception raised while evaluating the call. These are target
+contracts; current compiler support is documented in
 [implementation](implementation.md).
 
 An eligible view source can provide backing/borrowed access; outputs and independent scalars do not automatically qualify. A numeric parser's result is independent; a parser returning a view of input text retains the input dependency. A parameterless projection generally uses its receiver. An independent freshly allocated result needs its own owner/root and cost contract. More than one eligible input is not resolved by inspecting current control flow. Returning a view does **not** authorize storing it in an unrelated receiver. Constructor capture, exported callback factories and registrations need a declared destination/boundary. Local closures carry actual capture relationships; consuming a unique owner retains its ordinary transfer/cleanup rules rather than becoming an invisible borrowed capture.

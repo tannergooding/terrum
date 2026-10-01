@@ -694,7 +694,8 @@ targets and repetition policy. Arguments use the ordinary checked, encodable
 compile-time constant evaluator, not a separate attribute evaluator or
 arbitrary runtime objects. A constant must also match its declared argument
 type and encoding. Type-reference arguments require an explicitly supported
-schema; this does not introduce `typeof`, open-generic type literals or a
+schema; expression-level `typeof` does not define attribute type encoding,
+open-generic type literals or a
 first-class type-object API. Repeated placements merge in source order only
 where that identity permits repetition; otherwise they reject. Registration
 syntax, concrete schema catalogs and metadata encoding are outside this source grammar.
@@ -1123,10 +1124,22 @@ ArmHeader       = { Attribute }, Pattern, [ "when", Expression ] ;
 Pattern         = PatternOperand, { PatternOperator, PatternOperand } ;
 PatternOperand  = { "not" }, PatternAtom ;
 PatternOperator = "and" | "or" ;
-PatternAtom     = "_" | "null" | InferredBindingPattern | TuplePattern
+PatternAtom     = "_" | "null" | InferredBindingPattern | TypedBindingPattern
+                | ReferenceBindingPattern | TuplePattern | UnionCasePattern
                 | ConstantExpression | "(", Pattern, ")" ;
 InferredBindingPattern = InferredType, ( Identifier | "_" ) ;
+TypedBindingPattern = PatternType, [ Identifier ] ;
+PatternType     = Type | GenericTypePattern ;
+GenericTypePattern = [ "write" ], DottedIdentifier,
+                     "<", GenericPatternArgument,
+                     { ",", GenericPatternArgument }, ">", [ "?" ] ;
+GenericPatternArgument = "_" | InferredType, [ Identifier ]
+                       | Type | GenericTypePattern | ConstantGenericArgument ;
+ReferenceBindingPattern = [ "write" ], "ref", "<", GenericPatternArgument,
+                          ">", ( Identifier | "_" ) ;
 TuplePattern    = "(", Pattern, ",", Pattern, { ",", Pattern }, ")" ;
+UnionCasePattern = Type, ".", Identifier,
+                   [ "(", Pattern, { ",", Pattern }, ")" ] ;
 ```
 
 `for` initializers and iterators omit their internal semicolon; an iterator
@@ -1256,6 +1269,16 @@ delimits the arm rather than forming a guard lambda. A lambda within the
 predicate must be grouped or nested in another expression delimiter.
 This spelling does not select catch-filter/unwind timing.
 
+Each member path observed by a pattern is read once within an attempted arm;
+that observation supplies the path's subpatterns. A later attempted arm makes
+a fresh observation, including after a false guard. This does not cache
+ordinary member expressions written in a guard or body, or make a readonly
+getter pure. Getters and registered extractors retain their checked effects
+and failures; failure is not a nonmatch or permission to retry silently.
+Observation reuse or elimination requires proof that it preserves the
+memory/side-effect contract. A source local can explicitly retain an observation
+when the author wants subsequent tests to use that value.
+
 For eligible nullable forms, inferred binding patterns distinguish
 initialization from nullability:
 
@@ -1273,15 +1296,101 @@ does not upgrade authority, implicitly copy a unique value or narrow an
 aliased source place. `_` does not read or bind an ignored output, but does
 not cancel cleanup obligations for a live ignored value.
 
-Tuple patterns are structural. Multiple-output calls may supply a contextual
-matching projection of one evaluated call, preserving per-output
-initialization, nullability, ownership and the declared status correlations.
-This is not an ordinary tuple constructed by reading potentially vacant
-outputs, a mandatory library `Option`/`Result`, or a general implicit
-conversion. A success-output projection tests declared success; initialized
-failure outputs remain distinguishable through a status-aware projection.
-Exact call-site activation, output selection and projection metadata remain
-specification work, not permission to omit arbitrary required arguments.
+An ordinary typed or inferred value binding uses ordinary checked value
+initialization after its test succeeds. Copyable value types copy their
+values; shared references copy handles with their access and rooting
+contracts, not the objects. A value-type binding does not implicitly alias
+the source storage. Aliasing requires an explicit reference binding, and
+unique payloads cannot use a value binding without copy permission.
+Matching does not implicitly consume ownership while testing an arm or its
+guard. Explicit borrows support non-consuming inspection, with explicit
+movement after selection subject to their ordinary backing and loan checks.
+Explicit effects in a guard are not rolled back if it returns false; the
+same operations retain their ordinary `if`-style ownership and failure rules.
+`ref<var> item` requests an explicit readonly borrowing pattern;
+`write ref<var> item` requests writable access and requires the source to
+authorize it. Reference formation uses ordinary addressability, backing and
+lifetime rules, not an alias to a hidden value-type copy. A reference pattern
+cannot narrow or reinterpret the actual storage type because its current
+value passed a presence or type test. Movement remains an explicit operation
+after selection, not a separate implicitly consuming pattern.
+
+Generic type patterns name a particular generic declaration and match one
+argument per written slot. `List<_>` matches an eligible closed application
+without naming its argument. `List<var>` restricts the argument type to a
+non-nullable form; `List<var?>` permits nullable or non-nullable forms.
+Neither examines elements or asserts that a contained value is initialized.
+`List<var T>` and `List<var? T>` additionally capture the actual complete
+argument type as `T`, preserving nullability and access rather than promoting,
+stripping or erasing them. A named capture is a type binding, distinct from
+the ordinary value binding in `List<var T> list`.
+The constructor, arity and declared argument kinds still have to match;
+`_` and each inferred argument occupy one slot, not a pack or an unapplied
+type constructor. Named `var` captures in these forms bind type arguments;
+general constant-argument capture and higher-kinded application are outside
+these forms. In an ordinary generic application, `_` remains an inference
+hole requiring sufficient context, not an existential or erased argument.
+Pattern captures do not authorize `var` in arbitrary ordinary applications
+or introduce implicit generic formals in method constraints.
+
+Named type captures are scoped to the successful pattern's guard and body,
+and to later code only where an explicit checked requirement establishes
+that successful path. They permit checked type inspection with `typeof(T)`.
+`typeof(T) is typeof(int32)` is a recognized exact type-identity test:
+where its truth is established, `T` refines to `int32`, permitting operations
+justified by that identity without a runtime conversion. Logical composition
+retains the proof only on paths that establish it; an arbitrary user comparison
+of type objects is not proof. Type inspection does not inspect element values,
+grant copying, alter generic declaration contracts or upgrade reference access.
+Statically recoverable arguments or declared type evidence support capture;
+discovering a type argument only at runtime requires a separate checked
+type-witness/representation contract, not hidden boxing or arbitrary runtime
+generic instantiation.
+
+Union-case patterns mirror qualified case construction:
+`Lookup<int32>.Missing` tests the no-payload case, while
+`Lookup<int32>.Found(var item)` tests the declared case and matches its payload
+positions. Payload patterns have the declaration's arity and order; a
+no-payload case has no parentheses. These tests do not invoke a constructor,
+discover a `Deconstruct` method by name, or synthesize public payload members.
+Payload bindings retain the ordinary copy/reference/ownership rules.
+An initialized `Found(null)` remains distinct from `Missing`; its payload
+does not match `var item`, but can match `var? item`.
+
+Tuple patterns are structural. In matching and value-producing `require`
+contexts, omission of eligible output destinations requests lifting those
+outputs. Explicitly supplied destinations remain ordinary arguments and are
+not lifted. Partial omission is permitted; one omitted output has its own
+binding shape, while multiple omitted outputs have a structural shape in
+declaration order. Supplying every output destination leaves the ordinary
+return value as the matching subject. Required inputs remain required.
+Argument positions and names select the outputs, not arm types or implicit
+conversions, and pattern arms do not steer callable selection. Ambiguous
+callable selection diagnoses; specialization to `bool` or a status enum does
+not change which channel an arm matches.
+
+The call evaluates once. Its contextual output projection preserves each
+output's initialization, nullability, ownership and declared status
+correlations; it is not an ordinary tuple constructed by reading vacant
+slots, a mandatory library `Option`/`Result`, or a general implicit conversion.
+Patterns test the selected outputs' availability and presence. Initialized
+failure outputs may match; there is no universal success gate. Boolean
+conditional-init contracts remain the case where true publishes the outputs
+and false leaves them vacant. Enum and richer statuses retain their declared
+per-output availability relations, not a guessed zero value or member name.
+Matching an available output establishes the declared correlated facts about
+explicitly supplied destinations as well.
+
+A value-producing `require` demands complete initialization of every lifted
+output and yields their values with their complete types. It does not add a
+non-null check to a declared nullable output or select a separate default
+success group. Selective extraction uses an explicit requirement on a pattern,
+such as `require (Read() is (var value, _));`; `_` neither reads nor demands
+initialization of the ignored output. Live ignored owners still require
+cleanup. Ordinary explicitly written predicates retain their Boolean
+requirement semantics. Exact eligible-output registration, richer-status
+contract spelling and projection metadata are outside these source forms;
+omission does not authorize skipping arbitrary required arguments.
 `continue N;` enters an existing unguarded constant arm in the same statement
 switch directly without rematching; the target must have no pattern bindings.
 Named or compound constant targets use `continue (N);`, while
@@ -1295,8 +1404,9 @@ remains a possible separate design.
 Pattern combinators use precedence `not`, then `and`, then `or`.
 An `or` pattern may expose bindings only when all alternatives establish
 the same names with the same complete type, ownership, access and lifetime
-contracts. Full nominal-case, relational and destructuring patterns remain
-to specify beyond the bounded forms above.
+contracts. Member and relational conditions use ordinary `when` expressions.
+Dedicated member/relational pattern syntax, pattern `where` and registered
+object-extractor forms are outside the forms above.
 An ordinary wildcard suppresses missing-known-case warnings.
 `[Exhaustive] _ => ...` retains a fallback while requesting those warnings;
 guarded arms do not establish coverage merely by naming a case. The compiler
@@ -1382,7 +1492,7 @@ BinaryOperator  = "*" | "/" | "%" | "+" | "-"
                 | "<<" | ">>" | ">>>"
                 | "<" | "<=" | ">" | ">=" | "==" | "!="
                 | "&" | "^" | "|" | "&&" | "||" | "??" ;
-IsTest          = "is", ( "null" | InferredBindingPattern | "init" ) ;
+IsTest          = "is", ( "init" | Pattern ) ;
 Postfix         = Primary, { PostfixPart } ;
 PostfixPart     = ".", Identifier, [ TypeArguments ]
                 | ".", "via", "<", Type, ">"
@@ -1396,11 +1506,12 @@ FromEndBound    = "^", Operand ;
 SliceRange      = [ IndexBound ], "..", [ IndexBound ]
                 | [ IndexBound ], "..^", Operand ;
 Primary         = "(", [ Expression ], ")" | TupleExpression
-                | SwitchExpression | CollectionExpression
+                | SwitchExpression | CollectionExpression | RequireLift
                 | "new", Type, Arguments,
                   [ ObjectInitializer ]
                 | Number | String | RawText | InterpolatedText | InterpolatedRawText
                 | Character | Boolean | Null | "field" | "this" | ReturnValueReference
+                | "typeof", "(", Type, ")"
                 | Identifier, [ TypeArguments, Arguments ]
                 | "unsafe", "(", Expression, ")"
                 | [ "require" ], "policy", PolicyCases, "(", Expression, ")"
@@ -1412,6 +1523,7 @@ ConstantGenericArgument = ConstantLiteral | DottedIdentifier
 ConstantLiteral = Number | String | RawText | Character | Boolean | Null ;
 PolicyCases     = "<", PolicyCase, { ",", PolicyCase }, ">" ;
 PolicyCase      = DottedIdentifier ;
+RequireLift     = "require", Postfix ;
 ObjectInitializer = "{", { Identifier, "=", Expression, ";" }, "}" ;
 TupleExpression = "(", TupleElement, ",", TupleElement,
                   { ",", TupleElement }, ")" ;
@@ -1430,7 +1542,7 @@ CollectionElement = Expression | "..", Expression ;
 ```
 
 `IsTest` is a postfix-like binary test at equality precedence: it consumes
-the preceding expression as its left operand and its `null`, inferred binding or `init`
+the preceding expression as its left operand and its pattern or `init`
 tail as the right form. Unlike an ordinary binary operator, it may bind
 `name` for the appropriate checked scope. The table, not the flat
 `BinaryOperator` alternatives, resolves any mixed expression. `HexFloat`
@@ -1493,7 +1605,7 @@ distinguish type arguments from constant-value expressions; the broad
 alternatives above do not permit arbitrary runtime expressions as constants.
 The grammar includes explicit `_` inference holes and `default` selectors,
 not source type packs or unresolved exported holes. Constructor-specific
-inference, first-class range values, full type-test and prefix-cast forms remain
+inference, first-class range values and prefix-cast forms remain
 separate work; assignment remains a statement. `T(expression)` is an
 ordinary type-call-shaped expression; its checked-conversion interpretation
 is semantic.
@@ -1752,8 +1864,11 @@ These semantic constraints accompany the source forms above.
   closedness; no `case` keyword is introduced.
   New pattern syntax must compose clearly with Terrum's existing types,
   access, places and ownership rather than importing C# property-pattern
-  punctuation. Per-arm member observation/reuse and extractor binding remain
-  open; once-only scrutinee evaluation does not settle them.
+  punctuation. Pattern members are observed once per path per attempted arm,
+  with fresh observations in later attempts and ordinary checked effects.
+  Value bindings follow ordinary copying; references and ownership transfer
+  require explicit operations. Registered extractor forms and the remaining
+  reference-formation details are outside these source forms.
   Owner withers require an explicit consuming or borrowing update contract
   with checked old/new ownership and failure cleanup. No nominal declaration
   automatically synthesizes a copy-based wither or record machinery.
@@ -2998,7 +3113,7 @@ appears in §2.
 | Statements | §3.3 gives blocks, transfers, vacant and inferred `var`/`var?` locals, explicit local lifetime ending, standalone discard and `yield expression;` / producer `return;`; §§3.1 and 5.12 give the `[Iterator]` marker; §3.4 permits await expressions in async bodies. | Statement-place checks and producer protocol/lifetime contracts. |
 | Iteration | §3.3 gives post-tested `do` loops and by-value/`ref`/`mut ref` iteration, including `await for` and structured close; §5.12 gives producer unwind. | Iterator loan/backing, protocol identities and cancellation integration. |
 | Expressions | §3.4 gives conditional/coalescing/optional access, half-open slicing, end-relative bounds, tuples, target-directed static/async lambdas, await and collection spreads. | Slice/first-class index/range protocols, callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition have no production here. |
-| Patterns | §§3.3–3.4 give inferred `var`/`var?` bindings, distinct initialization tests, structural tuples, shared switch arms, `when expression`, compatible `or` bindings and explicit constant/wildcard transfers. | Full nominal-case, relational and extraction contracts; contextual output-view activation and metadata. |
+| Patterns | §§3.3–3.4 give inferred/value/reference bindings, generic-slot type matching and named capture, checked `typeof` identity refinement, distinct initialization tests, qualified union cases, structural tuples, per-attempt observations, shared switch arms, ordinary `when` conditions, compatible `or` bindings and explicit transfers. Omitted eligible output arguments select availability-based lifting, including partial omission and initialization-requiring extraction. | Runtime-only type-witness representation, registered object observations and richer-status/projection metadata. General application/constraint `var` binders, higher-kinded application, dedicated member/relational pattern syntax and pattern `where` are excluded from these forms. |
 | Policies | §§3.3–3.4 and 5.12 describe lexical preferences, strict selection, signature-bound variants and constant-formal forwarding. | Registered variant attribute/catalog encoding and general policy-query subjects. |
 | Contracts | §§3.1, 3.3–3.4 and 5.8 give grouped named/lambda `require`/`ensure`, contextual result `return`, distinct body-level checks and registered producer phases. | Concrete phase selectors and correlated-output metadata; declaration-level static qualifiers have no production here. |
 | Static proof | §5.9 describes the portable static-proof floor. | Constant-evaluation and symbolic source forms. |

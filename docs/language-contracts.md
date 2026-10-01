@@ -267,26 +267,36 @@ owner, or relevant aliasing effects invalidate the affected facts. Enum statuses
 use declared predicates, including explicitly declared sets of success statuses;
 neither enum zero nor member names supply a condition.
 
-The `require TryGet(...)` lifting form still tests the declared success
-condition, not whether some output happened to be initialized. On true it
-extracts the designated output with its full optional/ownership type. True-null
-remains a legitimate optional value if the API permits it. On false, even an
-API that provides an initialized failure output still fails the requirement;
-the temporary's cleanup remains due. This `require` lifting contract still
-designates one output; it does not infer multiple outputs or a failure mapping.
-No vacant read or manufactured default is needed.
+Output omission selects lifting in matching and value-producing `require`
+contexts. Explicit destinations remain ordinary arguments; only omitted
+eligible outputs participate in the projection, in declaration order.
+Partial omission is permitted. With all destinations supplied, matching
+examines the ordinary return value. Required inputs remain required, and
+arm types do not select a channel or influence callable selection. This also
+disambiguates Boolean payloads from Boolean status without new arm qualifiers
+or a meaning change when a generic payload specializes to `bool`.
 
-Separately, the accepted matching direction permits contextual multiple-output
-views with structural patterns such as `(var x, _)`, `(_, var? y)` and
-`(var x, var y)`. The call evaluates once; requested bindings establish their
-own initialization/presence facts, while `_` does not read or bind an ignored
-output. Live ignored owners remain subject to cleanup. A success-output view
-tests the declared success condition even when failure publishes a live value;
-a status-aware view preserves declared failure outputs instead of collapsing
-availability into success. This is not ordinary tuple construction from
-possibly vacant storage, a library-wide `Option`/`Result`, or a general implicit
-conversion. Exact view activation, output selection and metadata remain
-specification work; current call/output support is unchanged.
+Contextual structural patterns such as `(var x, _)`, `(_, var? y)` and
+`(var x, var y)` evaluate one call and establish the selected outputs'
+initialization/presence facts. `_` does not read or bind an ignored output;
+live ignored owners remain subject to cleanup. Matching follows declared
+availability, so initialized failure outputs may match. Boolean conditional
+init contracts have true publication and false vacancy; enum and richer
+statuses require their own checked per-output relations. Output availability
+does not imply a successful status. Correlations with explicitly supplied
+destinations remain available to caller flow.
+
+Bare lifted `require` demands initialization of every lifted output and yields
+those values with their complete optional/ownership types. An initialized
+null remains a legitimate nullable value, not an implicit unwrap. There is no
+separate default success/output group. An explicit pattern requirement, such
+as `require (Read() is (var value, _));`, can request narrower availability or
+non-nullness without requiring the ignored output to be initialized.
+No vacant read, fabricated default, ordinary tuple of vacant slots, mandatory
+library `Option`/`Result`, or general implicit conversion is introduced.
+Eligible-output registration, richer-status contract spelling, object-backed
+observation and concrete metadata remain separate work. Current executable
+call/output support is unchanged.
 
 Changing a declared output-initialization relation can change caller
 obligations and compatibility. Compare the published conditional facts and
