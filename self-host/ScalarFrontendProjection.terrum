@@ -54,6 +54,8 @@ namespace Terrum.CodeAnalysis;
 // the label, and named break/continue (19/20), whose slots select enclosing headers.
 // Version 55 adds kind-21 standalone requirements: slot zero, Boolean root,
 // and an exact keyword-through-semicolon span, without a local or source scope.
+// Version 56 admits void headers (return type zero) and kind-22 null returns.
+// Bare and parenthesized unit-literal returns have root -1 and no expression node.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -123,9 +125,9 @@ bool TryPublishScalarFrontend()
 
     WriteScalarFrontendHeader(result);
     Host.Frontend[5] = result.ReturnType;
-    if (Host.Frontend[37] != 0 || Host.Frontend[298] != 0)
+    if (result.ReturnType == 0 || Host.Frontend[37] != 0 || Host.Frontend[298] != 0)
     {
-        Host.Frontend[0] = GetScalarFrontendTreeVersion();
+        Host.Frontend[0] = result.ReturnType == 0 ? 56 : GetScalarFrontendTreeVersion();
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {

@@ -143,7 +143,7 @@ mut class ScalarFrontendState
         _localCount = 0;
         _activeLocals = 0;
         _statementCount = 0;
-        _structuredReturnType = 0;
+        _structuredReturnType = -1;
         _structuredReturnCount = 0;
         _hasStructuredStatement = false;
     }
@@ -1345,11 +1345,13 @@ mut class ScalarFrontendState
         {
             _at = _at + 1;
         }
-        if (!Take(2, out var typeToken))
+        require _tokens.TryGet(_at, out var returnToken);
+        if (!Take(returnToken.Kind == 11 ? 11 : 2, out var typeToken))
         {
             return false;
         }
-        if (!TryGetScalarType(typeToken, out var selected))
+        mut int32 selected = 0;
+        if (typeToken.Kind != 11 && !TryGetScalarType(typeToken, out selected))
         {
             FailAt(2, typeToken.Range);
             return false;
@@ -1731,7 +1733,7 @@ mut class ScalarFrontendState
                 }
                 if (!ParseTreeTransfer(next, nearestLoop)) { return false; }
             }
-            else if (next.Kind == 41 || next.Kind == 19 && _structuredReturnType != 0)
+            else if (next.Kind == 41 || next.Kind == 19 && _structuredReturnType >= 0)
             {
                 if (!ParseTreeTerminatedStatement(next)) { return false; }
             }
@@ -1761,6 +1763,10 @@ mut class ScalarFrontendState
 
     private mut bool ParseTreeTerminatedStatement(Token keyword)
     {
+        if (keyword.Kind == 19 && _structuredReturnType == 0)
+        {
+            return ParseTreeVoidReturn(keyword);
+        }
         mut int32 kind = 8;
         mut int32 type = _structuredReturnType;
         if (keyword.Kind == 41)
@@ -1776,6 +1782,29 @@ mut class ScalarFrontendState
         }
         if (kind == 8) { _structuredReturnCount = _structuredReturnCount + 1; }
         return true;
+    }
+
+    private mut bool ParseTreeVoidReturn(Token keyword)
+    {
+        _at = _at + 1;
+        mut int32 groups = 0;
+        require _tokens.TryGet(_at, out var first);
+        mut Token next = first;
+        while (next.Kind == 46)
+        {
+            if (groups == 16) { FailAt(1, next.Range); return false; }
+            groups = groups + 1;
+            _at = _at + 1;
+            require _tokens.TryGet(_at, out next);
+        }
+        for (mut int32 index = 0; index < groups; index = index + 1)
+        {
+            if (!Take(47, out var close)) { return false; }
+        }
+        if (!Take(52, out var semicolon)) { return false; }
+        _hasStructuredStatement = true;
+        _structuredReturnCount = _structuredReturnCount + 1;
+        return AddTreeStatement(22, 0, -1, keyword.Range.Start, semicolon.Range.End);
     }
 
     private int32 TreeStatementKind(int32 index)
@@ -1865,7 +1894,7 @@ mut class ScalarFrontendState
         {
             int32 header = cursor;
             int32 kind = TreeStatementKind(cursor);
-            mut bool returns = kind == 8 || kind == 6 || kind == 7;
+            mut bool returns = kind == 8 || kind == 6 || kind == 7 || kind == 22;
             if (kind == 21) { returns = TreeLiteralBoolean(TreeStatementWord(cursor, 2)) == 0; }
             if (kind == 14)
             {
@@ -2046,8 +2075,9 @@ mut class ScalarFrontendState
                 int32 kind = TreeStatementKind(index);
                 if (kind == 11 || kind == 12 || kind == 21) { hasTerminatingStatement = true; }
             }
-            if (_error == 0 && (_structuredReturnCount == 0 && !hasTerminatingStatement
-                || !TreeBodyReturns(0, _statementCount)))
+            if (_error == 0 && returnType != 0
+                && (_structuredReturnCount == 0 && !hasTerminatingStatement
+                    || !TreeBodyReturns(0, _statementCount)))
             {
                 Fail(1);
             }

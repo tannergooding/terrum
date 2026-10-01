@@ -129,10 +129,10 @@ internal static partial class Program
                     WriteInputError(json, "TRM4002", "A native frontend library export must be declared public.");
                     return 1;
                 }
-                if ((buildExecutable || runExecutable) && (result.ParameterCount != 0 || result.ReturnType != 1
+                if ((buildExecutable || runExecutable) && (result.ParameterCount != 0 || result.ReturnType is not (0 or 1)
                     || !source.Text.AsSpan(result.Name.Start, result.Name.Length).SequenceEqual("Main")))
                 {
-                    WriteInputError(json, "TRM4002", "A native frontend entry requires int32 Main() without parameters.");
+                    WriteInputError(json, "TRM4002", "A native frontend entry requires int32 or void Main() without parameters.");
                     return 1;
                 }
                 var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
@@ -306,6 +306,10 @@ internal static partial class Program
                         if (frontend.Statements.Any(static statement => statement.Kind == 21))
                         {
                             projectionVersion = 55;
+                        }
+                        if (frontend.ReturnType == 0)
+                        {
+                            projectionVersion = 56;
                         }
                         writer.WriteNumber("projectionVersion", projectionVersion);
                         writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);
