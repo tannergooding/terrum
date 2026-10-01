@@ -8,13 +8,13 @@ Approval, implementation, and pre-v1 stability are separate.
 
 ## Active work (priority order)
 
-1. Add bounded native-scalar `require condition;` using hosted Boolean-target
-   binding and existing `BoundRequire`/checked-failure lowering. Evaluate the
-   supported Boolean expression once and preserve `0xE0540003` failure
-   behavior under both runtime policies and existing source/resource limits.
-   Keep output-expression, `static require`, declaration conditions, custom
-   failure selection, calls and ownership out of scope; add no runtime-policy
-   or metadata contracts and preserve historical projection servicing.
+1. Extend the bounded native frontend to existing `void` function contracts:
+   empty bodies, implicit completion, bare returns and unit-literal returns.
+   Reuse hosted entry-point, export and checked-failure behavior under both
+   runtime policies. Preserve the six-primitive expression, local and parameter
+   domains, source/resource limits and historical projection servicing.
+   General calls, unit-valued call expressions, ownership, new grammar and new
+   ABI or metadata contracts remain outside this unit.
 2. Review source-contract decisions from the [grammar](grammar-spec.md) and
    [decision queue](proposals/grammar-open-questions.md). Preserve accepted
    decisions; recommendations remain proposals until approved.
@@ -102,6 +102,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e1fe270` | Native scalar standalone runtime requirements, projection 55 |
 | `3b10d51` | Native scalar labeled loops and named transfers, projection 54 |
 | `cee8c31` | Native scalar non-void discard statements, projection 53 |
 | `9e20137` | Non-nearest named loop transfers through indexed region exits |

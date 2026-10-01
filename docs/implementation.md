@@ -551,6 +551,37 @@ local, source-depth, record, node, visit and backend resource limits remain;
 the projection width, scanner and semantic formats, indexed-TRRM protocol and
 native ABI do not change.
 
+Provisional projection v55 appends statement kind 21 for standalone
+`require condition;` in the existing 392-word projection and five-word
+statement record. `slot` is zero, `root` is the Boolean condition, and the
+span covers the exact `require` keyword through semicolon. Kind 21 selects at
+least v55; v55 may also carry the existing block, discard and named-transfer
+records. Versions 1–54 retain their prior shapes and reject kind 21.
+
+The parser binds the condition to `bool`; lowering reuses the existing
+`BoundRequire` under both runtime policies. It creates no hidden local and
+does not extend source scope. The condition is evaluated once, preserving
+existing lazy Boolean/conditional evaluation, selected-arm effects and update
+ordering. A checked condition failure occurs before the existing
+`0xE0540003` requirement failure. Shared hosted flow verification remains
+authoritative: Boolean forms it proves false may establish non-fallthrough;
+an unknown comparison or variable condition does not. No synthetic return or
+new flow rule is added.
+
+The independent source-bound audit checks the exact keyword, Boolean root,
+span, postorder/source coverage and local membership; requirements in `for`
+headers reject. Shared terminated-expression parsing and maximum
+statement-kind classification preserve the existing verification work cap.
+There is no hosted-success fallback. Failure clears provisional extensions
+and leaves completion last; failed CLI source preserves prior PE bytes.
+Existing source, token, local, record, node, expression-depth,
+structural-depth, verifier and backend limits remain unchanged, as do source
+grammar, scanner, semantic/ISA/Contract/TRRM/native formats and ABI.
+`static require`/`static ensure`, output-expression forms, custom failure
+selection, declaration conditions, calls, richer types, ownership, managed
+cleanup and new policy or metadata contracts are outside this projection.
+Q37 decisions are unchanged.
+
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed
 lexical `BoundBlock` and shared verified path. Names use ordinal normalized
@@ -562,9 +593,10 @@ returns and nearest or named loop transfers retain their audited targets. Failed
 validation publishes no partial projection.
 
 Standalone blocks use kind 14 beginning in v52; non-void scalar discard uses
-kind 15 beginning in v53; named-loop kinds begin in v54. Versions 1–51 retain
-their block restrictions, versions 1–52 their discard restrictions, and
-versions 1–53 their named-transfer restrictions and prior source audits. The
+kind 15 beginning in v53; named-loop kinds begin in v54; require uses kind 21
+in v55. Versions 1–51 retain their block restrictions, versions 1–52 their
+discard restrictions, versions 1–53 their named-transfer restrictions, and
+versions 1–54 their require restrictions and prior source audits. The
 392-`int32` buffer and all record widths remain fixed:
 16,384 UTF-16 source units, 64 tokens, eight total named/hidden local
 identities, 12 statement records, 32 expression nodes, three parameters,

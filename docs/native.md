@@ -245,6 +245,14 @@ diagnostic/token inventories, semantic/ISA/Contract/TRRM formats, native
 formats and ABI do not change. The exact record and publication contract is
 in the [implementation reference](implementation.md).
 
+Projection v55 adds standalone `require condition;` to the bounded native
+scalar frontend. It uses the existing Boolean binding and checked-require
+behavior, under both runtime policies, without a hidden local or new source
+scope. Versions 1–54 retain their prior shapes; later projections may carry
+kind 21 with earlier feature kinds. It does not extend the source-free
+indexed-TRRM contract; see the [implementation reference](implementation.md)
+for the bounded audit and flow rules.
+
 The native scalar frontend's provisional projection v48 represents scalar
 returns as structured body statements: kind 8, slot 0, a typed result root and
 the keyword-through-semicolon span. Header words 38–40 are `-1`; the source
