@@ -20,6 +20,9 @@ approved.
 - [Self-host frontend verification budget](self-host-frontend-verification-budget.md)
   records a deferred, unapproved architecture option if memoization no longer
   suffices to grow the authored scalar frontend within its shared limit.
+- [Reference-call metadata](reference-call-metadata.md) records the proposed
+  first dependency and caller-safety metadata slice for general cross-call
+  references; it does not change the accepted source contracts.
 - [Checked-exception TRRM](checked-exception-trrm.md) records the unapproved
   exceptional-control-flow contract needed before source-free checked-exception
   Bodies can be considered.

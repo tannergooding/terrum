@@ -61,7 +61,10 @@ prerequisite has already been met.
 1. **Full runtime/structured contracts — references and safety.** Define
    general reference/access/loan metadata and caller-unsafe declaration
    contracts before relying on them across calls or imports. Exact syntax and
-   implementation remain pending.
+   implementation remain pending. The unapproved
+   [reference-call metadata proposal](proposals/reference-call-metadata.md)
+   recommends a narrow first dependency registry and reuse of the assigned
+   caller-unsafe effect bit.
 2. **Full runtime/structured contracts — initialization and outputs.** Complete
    general `out`/`init ref<T>` declaration and call migration with definite
    initialization, cleanup and publication rules. Preserve their distinct
