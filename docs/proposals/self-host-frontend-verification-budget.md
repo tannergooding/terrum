@@ -18,15 +18,20 @@ identity within one function's verification. The cache is shared by flow
 state clones; recursive cache hits still consume a visit, so the limit and
 budget accounting remain unchanged. With this change, projection v60 and its
 source-bound reader compile, and the frontend builds and executes the lifetime
-ending port under both runtime policies. No visit-count telemetry or
-before/after timing benchmark has been collected. One short CPU-sampling trace
-of `terrumc frontend-component` after the cache showed `VerifyCore` at 18.8%
-inclusive sampled CPU and both `CanBe` overloads among the top 100 at 4.43%
-each. This confirms feasibility checks remain active, but the single
-post-change trace neither measures cache speedup nor establishes them as the
-dominant cost. For a future budget failure, capture before/after profiles on
-the same representative source and compare hot methods and repeated-proof
-work before changing the limit or considering a component boundary.
+ending port under both runtime policies. Replacing only the verifier with its
+pre-cache implementation reproduces `TRM3016` against the current frontend
+sources; the cached build succeeds. The no-cache run stops early, so its CPU
+profile is not a like-for-like throughput baseline. No visit-count telemetry
+or before/after timing benchmark has been collected.
+
+One short post-cache CPU-sampling trace of `terrumc frontend-component` showed
+`VerifyCore` at 18.8% inclusive sampled CPU and both `CanBe` overloads among
+the top 100 at 4.43% each. This confirms feasibility checks remain active,
+but does not measure cache speedup or establish them as the dominant cost.
+For a future budget failure, capture profiles on the same representative
+source, account for whether each run completes, and compare hot methods and
+repeated-proof work before changing the limit or considering a component
+boundary.
 
 ## Deferred option
 
