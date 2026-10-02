@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
 using Xunit;
 
@@ -173,6 +174,31 @@ public sealed class LocalFrontendProjectionTests
             var old = words[index];
             words[index] = value;
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            words[index] = old;
+        }
+    }
+
+    [Fact]
+    public void ReadResultAuditsUnsafeCatchExtentsAndRuntimePolicy()
+    {
+        const string text = "int32 Main() { unsafe { try { return 42; } catch { return 0; } } }";
+        var words = CheckedCatchProjection(text);
+        var source = SourceText.From(text);
+        Assert.True(ScalarFrontendHost.ReadResult(source, Bytes(words),
+            BoundRuntimePolicy.CheckedExceptions).IsValid);
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+
+        Reject(0, 65);
+        Reject(333, 4);
+        Reject(338, 4);
+        Reject(348, 4);
+
+        void Reject(int index, int value)
+        {
+            var old = words[index];
+            words[index] = value;
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words),
+                BoundRuntimePolicy.CheckedExceptions));
             words[index] = old;
         }
     }
@@ -384,6 +410,69 @@ public sealed class LocalFrontendProjectionTests
         words[46] = -1;
         words[47] = -1;
         words[48] = 42;
+        return words;
+    }
+
+    private static int[] CheckedCatchProjection(string text)
+    {
+        var words = new int[ScalarFrontendHost.WordCount];
+        words[0] = 66;
+        words[1] = 1;
+        words[5] = 1;
+        words[9] = text.IndexOf("Main", StringComparison.Ordinal);
+        words[10] = 4;
+        words[37] = 2;
+        words[38] = -1;
+        words[39] = -1;
+        words[40] = -1;
+        words[298] = 5;
+        var unsafeStart = text.IndexOf("unsafe", StringComparison.Ordinal);
+        var tryStart = text.IndexOf("try", StringComparison.Ordinal);
+        var catchStart = text.IndexOf("catch", StringComparison.Ordinal);
+        var catchEnd = text.IndexOf('}', catchStart) + 1;
+        var unsafeEnd = text.IndexOf('}', catchEnd) + 1;
+        var firstReturn = text.IndexOf("return", tryStart, StringComparison.Ordinal);
+        var secondReturn = text.IndexOf("return", catchStart, StringComparison.Ordinal);
+        words[332] = 31;
+        words[333] = 5;
+        words[334] = -1;
+        words[335] = unsafeStart;
+        words[336] = unsafeEnd - unsafeStart;
+        words[337] = 32;
+        words[338] = 3;
+        words[339] = -1;
+        words[340] = tryStart;
+        words[341] = catchEnd - tryStart;
+        words[342] = 8;
+        words[343] = 0;
+        words[344] = 0;
+        words[345] = firstReturn;
+        words[346] = "return 42;".Length;
+        words[347] = 33;
+        words[348] = 5;
+        words[349] = -1;
+        words[350] = catchStart;
+        words[351] = catchEnd - catchStart;
+        words[352] = 8;
+        words[353] = 0;
+        words[354] = 1;
+        words[355] = secondReturn;
+        words[356] = "return 0;".Length;
+        var firstLiteral = text.IndexOf("42", firstReturn, StringComparison.Ordinal);
+        var secondLiteral = text.IndexOf("0", secondReturn, StringComparison.Ordinal);
+        words[42] = 3;
+        words[43] = 1;
+        words[44] = firstLiteral;
+        words[45] = 2;
+        words[46] = -1;
+        words[47] = -1;
+        words[48] = 42;
+        words[50] = 3;
+        words[51] = 1;
+        words[52] = secondLiteral;
+        words[53] = 1;
+        words[54] = -1;
+        words[55] = -1;
         return words;
     }
 

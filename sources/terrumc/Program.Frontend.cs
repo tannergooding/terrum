@@ -121,7 +121,7 @@ internal static partial class Program
             }
             var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int));
-            var result = ScalarFrontendHost.ReadResult(source, bytes);
+            var result = ScalarFrontendHost.ReadResult(source, bytes, (BoundRuntimePolicy)policy);
             if ((build || runExecutable) && result.IsValid)
             {
                 if (buildLibrary && !result.IsPublic)
@@ -344,6 +344,10 @@ internal static partial class Program
                         if (frontend.Statements.Any(static statement => statement.Kind is 29 or 30))
                         {
                             projectionVersion = 65;
+                        }
+                        if (frontend.Statements.Any(static statement => statement.Kind is >= 31 and <= 33))
+                        {
+                            projectionVersion = 66;
                         }
                         writer.WriteNumber("projectionVersion", projectionVersion);
                         writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);

@@ -1,7 +1,7 @@
 # Self-host frontend verification-budget proposal
 
 **Status: unapproved, deferred architecture option.** The scalar frontend
-currently compiles through projection v64 under the unchanged shared
+currently compiles through projection v66 under the unchanged shared
 100,000-visit verification limit. This proposal does not change language
 semantics, the accepted source grammar, native ABI, or verification budget.
 

@@ -1883,6 +1883,10 @@ mut class ScalarFrontendState
             {
                 if (!ParseTreeTryFinally(depth, nearestLoop)) { return false; }
             }
+            else if (next.Kind == 76)
+            {
+                if (!ParseTreeUnsafe(depth, nearestLoop)) { return false; }
+            }
             else if (next.Kind == 33 || next.Kind == 34)
             {
                 if (nearestLoop < 0)
@@ -2401,6 +2405,25 @@ mut class ScalarFrontendState
             return false;
         }
         FinishTreeBody(header, enclosingLocals, endBody.Range.End);
+        if (_tokens.TryGet(_at, out var following) && following.Kind == 43)
+        {
+            Host.Frontend[332 + header * 5] = 32;
+            int32 marker = _statementCount;
+            if (_statementCount >= 12 || !Take(43, out var catchKeyword)
+                || !Take(48, out var openCatch))
+            {
+                return false;
+            }
+            if (!AddTreeStatement(33, 0, -1, catchKeyword.Range.Start, openCatch.Range.End)
+                || !ParseTreeStructuredBody(depth + 1, nearestLoop)
+                || !Take(49, out var endCatch))
+            {
+                return false;
+            }
+            FinishTreeBody(marker, enclosingLocals, endCatch.Range.End);
+            Host.Frontend[332 + header * 5 + 4] = endCatch.Range.End - keyword.Range.Start;
+            return true;
+        }
         if (_statementCount >= 12
             || !Take(44, out var finallyKeyword)
             || !Take(48, out var openCleanup))
@@ -2416,6 +2439,30 @@ mut class ScalarFrontendState
         }
         FinishTreeBody(cleanup, enclosingLocals, endCleanup.Range.End);
         Host.Frontend[332 + header * 5 + 4] = endCleanup.Range.End - keyword.Range.Start;
+        return true;
+    }
+
+    private mut bool ParseTreeUnsafe(int32 depth, int32 nearestLoop)
+    {
+        if (depth >= 6 || _statementCount >= 12)
+        {
+            Fail(1);
+            return false;
+        }
+        if (!Take(76, out var keyword) || !Take(48, out var openBody))
+        {
+            return false;
+        }
+        int32 header = _statementCount;
+        int32 enclosingLocals = _activeLocals;
+        if (!AddTreeStatement(31, 0, -1, keyword.Range.Start, openBody.Range.End)
+            || !ParseTreeStructuredBody(depth + 1, nearestLoop)
+            || !Take(49, out var endBody))
+        {
+            return false;
+        }
+        FinishTreeBody(header, enclosingLocals, endBody.Range.End);
+        Host.Frontend[332 + header * 5 + 4] = endBody.Range.End - keyword.Range.Start;
         return true;
     }
 

@@ -348,6 +348,14 @@ cleanup and control-flow restrictions under both runtime policies. This
 remains a bounded frontend projection that depends on the hosted verifier and
 emitter, not a standalone compiler or a native ABI/schema change.
 
+Projection v66 adds kind 31 for explicit `unsafe` blocks and kinds 32 and 33
+for bounded bare `try`/`catch` recovery inside them. Catch recovery is
+available only with the checked-exceptions runtime policy; typed catches,
+filters and `finally` on a catching region remain unsupported. The reader
+audits both extents and lowers to the hosted `BoundUnsafe`/`BoundTryCatch`
+verifier and emitter path. This remains a bounded projection, not a standalone
+compiler or a native ABI/schema change.
+
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer

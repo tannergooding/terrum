@@ -186,6 +186,52 @@ public sealed partial class CliTests
     }
 
     [Theory]
+    [InlineData("int32 Main() { unsafe { try { require false; } catch { return 42; } } return 0; }", 42)]
+    [InlineData("int32 Main() { mut int32 value = 0; unsafe { try { try { require false; } finally { value = 1; } } catch { return value + 41; } } return 0; }", 42)]
+    public async Task CheckedCatchProjectionMatchesHostedExecutionAsync(string source, int expected)
+    {
+        var root = RepositoryRoot();
+        var frontend = Path.Combine(root, "self-host");
+        var nativePath = Path.Combine(root, $"checked-catch-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = Path.Combine(root, $"checked-catch-{Guid.NewGuid():N}.hosted.exe");
+        try
+        {
+            var input = Encoding.UTF8.GetBytes(source);
+            var (componentExit, componentOutput, componentError) = await RunAsync(input,
+                "frontend-component", frontend, "-", "--runtime", "checked-exceptions", "--json");
+            Assert.True(componentExit == 0, $"checked-exceptions: {componentExit}: {componentOutput}{componentError}");
+            using var document = JsonDocument.Parse(componentOutput);
+            Assert.Equal(66, document.RootElement.GetProperty("result")
+                .GetProperty("projectionVersion").GetInt32());
+
+            var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
+                "frontend-build", frontend, "-", "-o", nativePath, "--runtime", "checked-exceptions", "--json");
+            var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
+                "build", "-", "-o", hostedPath, "--runtime", "checked-exceptions", "--json");
+            Assert.True(nativeExit == 0, $"checked-exceptions: {nativeOutput}{nativeError}");
+            Assert.True(hostedExit == 0, $"checked-exceptions: {hostedOutput}{hostedError}");
+            Assert.Equal(expected, await ExecuteNativeImageAsync(nativePath));
+            Assert.Equal(expected, await ExecuteNativeImageAsync(hostedPath));
+
+            var (runExit, runOutput, runError) = await RunAsync(input,
+                "frontend-run", frontend, "-", "--runtime", "checked-exceptions", "--json");
+            var (jitExit, jitOutput, jitError) = await RunAsync(input,
+                "jit", "-", "--runtime", "checked-exceptions", "--json");
+            Assert.True(runExit == expected, $"checked-exceptions: {runExit}: {runOutput}{runError}");
+            Assert.Equal(jitExit, runExit);
+
+            var (failFastExit, failFastOutput, failFastError) = await RunAsync(input,
+                "frontend-build", frontend, "-", "-o", nativePath, "--runtime", "fail-fast", "--json");
+            Assert.True(failFastExit != 0, $"{failFastOutput}{failFastError}");
+        }
+        finally
+        {
+            File.Delete(nativePath);
+            File.Delete(hostedPath);
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Main() { if (true) { int32 x = 1 / 0; return x; } return 42; }", unchecked((int)0xE0540002))]
     [InlineData("int32 Main() { while (true) { mut int32 x = 2147483647; x++; break; } return 42; }", unchecked((int)0xE0540001))]
     public async Task ScopedLocalsPreserveCheckedFailureStatusAsync(string source, int expected)
@@ -242,6 +288,8 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { const int32 value = 42; value = 43; return value; }")]
     [InlineData("int32 Main() { for (const int32 value = 42; false;) { } return 42; }")]
     [InlineData("int32 Main() { try { return 42; } catch { return 0; } }")]
+    [InlineData("int32 Main() { unsafe { try { return 42; } catch (int32 failure) { return 0; } } }")]
+    [InlineData("int32 Main() { unsafe { try { return 42; } catch { return 0; } finally { } } }")]
     [InlineData("int32 Main() { try { return 42; } finally { return 0; } }")]
     [InlineData("int32 Main() { try { return 42; } finally { require false; } }")]
     [InlineData("int32 Main() { try { int32 hidden = 42; } finally { int32 copy = hidden; } return 0; }")]
