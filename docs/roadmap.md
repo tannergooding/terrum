@@ -137,6 +137,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e8f0465` | Native scalar foldable const initializers, projection 64 |
 | `8bcd3ff` | Native scalar literal-initialized const locals, projection 63 |
 | `7d162b6` | Native scalar inferred vacant locals, projection 62 |
 | `088b732` | Native scalar explicit vacant locals, projection 61 |
