@@ -1,7 +1,7 @@
 # Self-host frontend verification-budget proposal
 
 **Status: unapproved, deferred architecture option.** The scalar frontend
-currently compiles through projection v68 under the unchanged shared
+currently compiles through projection v71 under the unchanged shared
 100,000-visit verification limit. This proposal does not change language
 semantics, the accepted source grammar, native ABI, or verification budget.
 
@@ -19,8 +19,14 @@ state clones; recursive cache hits still consume a visit, so the limit and
 budget accounting remain unchanged. With this change, projection v60 and its
 source-bound reader compile, and the frontend builds and executes the lifetime
 ending port under both runtime policies. No visit-count telemetry or
-before/after timing benchmark has been collected, so the evidence establishes
-budget feasibility for this workload, not a general speedup magnitude.
+before/after timing benchmark has been collected. One short CPU-sampling trace
+of `terrumc frontend-component` after the cache showed `VerifyCore` at 18.8%
+inclusive sampled CPU and both `CanBe` overloads among the top 100 at 4.43%
+each. This confirms feasibility checks remain active, but the single
+post-change trace neither measures cache speedup nor establishes them as the
+dominant cost. For a future budget failure, capture before/after profiles on
+the same representative source and compare hot methods and repeated-proof
+work before changing the limit or considering a component boundary.
 
 ## Deferred option
 
