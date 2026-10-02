@@ -374,7 +374,8 @@ Projection v69 adds a three-bit parameter-mode mask for scalar `out`
 declarations. The source-bound reader audits each mode against the declaration
 tokens and lowers it to the shared verifier as a mutable output parameter.
 Hosted Boolean-return and definite-publication rules still apply; general
-`out` call sites and `init ref<T>` migration remain scheduled.
+`out` call sites and general `init ref<T>` migration remain scheduled; the
+later multi-function projections add only the existing scalar output modes.
 
 Projection v70 adds direct calls from the one projected function to itself,
 including existing mutable local or output-parameter destinations for `out`
@@ -437,8 +438,15 @@ complete declarations and direct operation-105 calls. Explicit destinations
 and `out var` are accepted only for matching `bool`-returning scalar `out`
 parameters; the independent reader audits the target mode and source argument,
 then the hosted verifier retains definite-publication authority. V74–v76
-continue to reject output parameters in multi-function snapshots. This does
-not add `init ref<T>`, reference arguments or source-free TRRM support.
+continue to reject output parameters in multi-function snapshots.
+
+Program projection v78 adds a separate mask for the existing scalar
+`init ref<T>` parameter mode and matching `init name`/`init var name`
+destinations. It is limited to the six scalar types and complete multi-function
+snapshots; the independent reader audits each mode and the hosted verifier
+retains the true-publishes/false-vacant contract. V74–v77 reject init-ref
+modes. This does not add general reference arguments, source-free TRRM support
+or standalone compiler support.
 
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.

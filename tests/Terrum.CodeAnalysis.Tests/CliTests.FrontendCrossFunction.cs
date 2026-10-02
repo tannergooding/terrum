@@ -97,6 +97,40 @@ public sealed partial class CliTests
     }
 
     [Fact]
+    public async Task ScalarFrontendCrossFunctionInitReferencesCliUsesProjection78Async()
+    {
+        const string text = "public int32 Main() { init int32 second; if (Fill(init var first)) { require Fill(init second); return first + second; } return 0; } bool Fill(init ref<int32> value) { value = 42; return true; }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var input = Encoding.UTF8.GetBytes(text);
+        foreach (var runtime in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(input, "frontend-component",
+                directory, "-", "--runtime", runtime, "--json");
+            Assert.True(exit == 0, $"{exit}: {output}{error}");
+            using (var document = JsonDocument.Parse(output))
+            {
+                var result = document.RootElement.GetProperty("result");
+                Assert.Equal(78, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(0, result.GetProperty("functions")[0]
+                    .GetProperty("initRefParameterMask").GetInt32());
+                Assert.Equal(1, result.GetProperty("functions")[1]
+                    .GetProperty("initRefParameterMask").GetInt32());
+                Assert.Contains(result.GetProperty("functions")[0].GetProperty("nodes")
+                    .EnumerateArray(), static node =>
+                    node.GetProperty("operation").GetInt32() == 107);
+                Assert.Contains(result.GetProperty("functions")[0].GetProperty("nodes")
+                    .EnumerateArray(), static node =>
+                    node.GetProperty("operation").GetInt32() == 108);
+            }
+            var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
+                directory, "-", "--runtime", runtime, "--json");
+            Assert.Equal(84, runExit);
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+        }
+    }
+
+    [Fact]
     public async Task ScalarFrontendCrossFunctionCliSelectsEntryAndExportsInDeclarationOrderAsync()
     {
         const string text = "public int32 Next(int32 value) => value + 1; public int32 Main() => Next(41);";

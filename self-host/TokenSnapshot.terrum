@@ -40,8 +40,8 @@ public unique struct TokenSnapshot
         return true;
     }
 
-    // Scalar input has no generic lists or operator declarations. Its operand-ending
-    // token kinds determine unary versus binary/update roles without name lookup.
+    // Scalar input only treats init-ref's type delimiters as generic punctuation.
+    // Its operand-ending token kinds determine unary versus binary/update roles.
     // A colon attached to an identifier before a same-line loop keyword introduces its label.
     public SourceRange GetScalarOperatorSpacingError()
     {
@@ -73,7 +73,10 @@ public unique struct TokenSnapshot
             }
             if (kind >= 59 && kind <= 61) { separated = true; }
             if (kind == 55 || kind == 56) { separated = true; }
-            if (kind >= 64 && kind <= 75) { separated = true; }
+            if (kind >= 64 && kind <= 75 && !IsInitRefAngleDelimiter(index, previous, op))
+            {
+                separated = true;
+            }
             if (kind == 82 || kind == 84 || kind == 85) { separated = true; }
             if (kind >= 88 && kind <= 101) { separated = true; }
             if (kind == 55 && (next.Kind == 18 || next.Kind == 83 || next.Kind == 31))
@@ -108,6 +111,36 @@ public unique struct TokenSnapshot
         }
         require SourceRange.TryCreate(0, 0, out var empty);
         return empty;
+    }
+
+    private bool IsInitRefAngleDelimiter(int32 index, Token previous, Token operation)
+    {
+        if (operation.Kind == 67 && previous.Kind == 14 && index >= 2)
+        {
+            if (!TryGet(index - 2, out var mode))
+            {
+                return false;
+            }
+            return IsInitKeyword(mode);
+        }
+        if (operation.Kind != 69 || previous.Kind != 2 || index < 4
+            || !TryGet(index - 2, out var less) || !TryGet(index - 3, out var refKeyword)
+            || !TryGet(index - 4, out var mode))
+        {
+            return false;
+        }
+        return less.Kind == 67 && refKeyword.Kind == 14 && IsInitKeyword(mode);
+    }
+
+    private bool IsInitKeyword(Token token)
+    {
+        if (token.Kind != 2 || token.Range.Length != 4)
+        {
+            return false;
+        }
+        int32 at = token.Range.Start;
+        return Host.Source[at] == char16(105) && Host.Source[at + 1] == char16(110)
+            && Host.Source[at + 2] == char16(105) && Host.Source[at + 3] == char16(116);
     }
 
     private SourceRange GetScalarPunctuationRunError()

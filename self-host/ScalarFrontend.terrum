@@ -162,6 +162,7 @@ mut class ScalarFrontendState
     public mut bool TryInventoryHeader(out ScalarFrontendResult result, out int32 end)
     {
         end = 0;
+        _outParameterMask = _outParameterMask | (1 << 30);
         require SourceRange.TryCreate(0, 0, out var empty);
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
         if (!ParseHeader(out var selected, out var name))
@@ -169,10 +170,14 @@ mut class ScalarFrontendState
             return TryCreateScalarFrontendError(_error, _errorSpan, out result);
         }
         end = _at;
-        return ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
+        if (!ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
             selected, _parameterCount, _firstType, _secondType, _thirdType,
-            _outParameterMask, name, _first.Range, _second.Range, _third.Range,
-            false, false, absent, absent, absent, out result);
+            _outParameterMask & 63, name, _first.Range, _second.Range, _third.Range,
+            false, false, absent, absent, absent, out result))
+        {
+            return false;
+        }
+        return true;
     }
 
     private mut void FailAt(int32 code, SourceRange span)
@@ -209,13 +214,26 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private mut bool ParseParameter(out int32 type, out Token name, out bool isOut)
+    private mut bool ParseParameter(out int32 type, out Token name, out bool isOut,
+        out bool isInitRef)
     {
         require _tokens.TryGet(_at, out var mode);
         isOut = mode.Kind == 15;
+        isInitRef = !isOut && ((_outParameterMask & (1 << 30)) != 0
+            || Host.FrontendProgram[2] >= 2 && Host.FrontendProgram[0] >= 74)
+            && IsInitKeyword(mode);
         if (isOut)
         {
             _at = _at + 1;
+        }
+        else if (isInitRef)
+        {
+            _at = _at + 1;
+            if (!Take(14, out var refKeyword) || !Take(67, out var less)
+                || !TokensAttach(refKeyword, less))
+            {
+                return false;
+            }
         }
         if (!Take(2, out var typeToken))
         {
@@ -224,6 +242,10 @@ mut class ScalarFrontendState
         if (!TryGetScalarType(typeToken, out var selected))
         {
             FailAt(2, typeToken.Range);
+            return false;
+        }
+        if (isInitRef && !Take(69, out var greater))
+        {
             return false;
         }
         if (!Take(2, out var parameter))
@@ -324,6 +346,17 @@ mut class ScalarFrontendState
     {
         return slot >= 1 && slot <= _parameterCount
             && (_outParameterMask & (1 << (slot - 1))) != 0;
+    }
+
+    private bool IsInitRefParameter(int32 slot)
+    {
+        return slot >= 1 && slot <= _parameterCount
+            && (_outParameterMask & (1 << (slot + 2))) != 0;
+    }
+
+    private bool IsOutputParameter(int32 slot)
+    {
+        return IsOutParameter(slot) || IsInitRefParameter(slot);
     }
 
     private mut bool TryResolveParameter(Token token, out int32 index, out int32 type)
@@ -1427,37 +1460,43 @@ mut class ScalarFrontendState
         require _tokens.TryGet(_at, out var next);
         if (next.Kind != 47)
         {
-            if (!ParseParameter(out var firstType, out var first, out var firstIsOut))
+            if (!ParseParameter(out var firstType, out var first, out var firstIsOut,
+                    out var firstIsInitRef))
             {
                 return false;
             }
             _firstType = firstType;
             _first = first;
             if (firstIsOut) { _outParameterMask = _outParameterMask | 1; }
+            if (firstIsInitRef) { _outParameterMask = _outParameterMask | 8; }
             _parameterCount = 1;
             require _tokens.TryGet(_at, out var comma);
             if (comma.Kind == 53)
             {
                 _at = _at + 1;
-                if (!ParseParameter(out var secondType, out var second, out var secondIsOut))
+                if (!ParseParameter(out var secondType, out var second, out var secondIsOut,
+                        out var secondIsInitRef))
                 {
                     return false;
                 }
                 _secondType = secondType;
                 _second = second;
                 if (secondIsOut) { _outParameterMask = _outParameterMask | 2; }
+                if (secondIsInitRef) { _outParameterMask = _outParameterMask | 16; }
                 _parameterCount = 2;
                 require _tokens.TryGet(_at, out var thirdComma);
                 if (thirdComma.Kind == 53)
                 {
                     _at = _at + 1;
-                    if (!ParseParameter(out var thirdType, out var third, out var thirdIsOut))
+                    if (!ParseParameter(out var thirdType, out var third, out var thirdIsOut,
+                            out var thirdIsInitRef))
                     {
                         return false;
                     }
                     _thirdType = thirdType;
                     _third = third;
                     if (thirdIsOut) { _outParameterMask = _outParameterMask | 4; }
+                    if (thirdIsInitRef) { _outParameterMask = _outParameterMask | 32; }
                     _parameterCount = 3;
                 }
             }
@@ -1607,7 +1646,7 @@ mut class ScalarFrontendState
                 return false;
             }
             if (slot <= _parameterCount
-                    ? !IsOutParameter(slot)
+                    ? !IsOutputParameter(slot)
                     : (Host.Frontend[300 + (slot - _parameterCount - 1) * 4 + 1] & 3) == 0)
             {
                 FailAt(2, first.Range);
@@ -2887,55 +2926,79 @@ mut class ScalarFrontendState
             mut int32 expectedType = _firstType;
             if (ordinal == 1) { expectedType = _secondType; }
             if (ordinal == 2) { expectedType = _thirdType; }
-            mut bool isOutArgument = false;
+            mut int32 outputMode = 0;
             if (program)
             {
                 int32 header = 4 + callee * 428 + 4;
                 int32 field = ordinal == 0 ? 7 : (ordinal == 1 ? 8 : 34);
                 expectedType = Host.FrontendProgram[header + field];
-                isOutArgument = (Host.FrontendProgram[header + 16] & (1 << ordinal)) != 0;
+                if ((Host.FrontendProgram[header + 16] & (1 << ordinal)) != 0)
+                {
+                    outputMode = 1;
+                }
+                else if ((Host.FrontendProgram[header + 17] & (1 << ordinal)) != 0)
+                {
+                    outputMode = 2;
+                }
             }
             else
             {
-                isOutArgument = IsOutParameter(ordinal + 1);
+                if (IsOutParameter(ordinal + 1)) { outputMode = 1; }
             }
             mut int32 argument = -1;
-            if (isOutArgument)
+            if (outputMode != 0)
             {
-                if (!Take(15, out var outputKeyword)
-                    || !_tokens.TryGet(_at, out var outputTarget))
+                if (!_tokens.TryGet(_at, out var outputTarget))
                 {
                     return false;
                 }
-                mut int32 operation = 103;
-                mut int32 slot = -1;
-                mut int32 type = 0;
-                mut SourceRange outputRange = outputTarget.Range;
-                mut bool writable = false;
-                if (outputTarget.Kind == 12)
+                mut Token outputModeToken = outputTarget;
+                if (outputMode == 2)
                 {
-                    if (!Take(12, out var variableKeyword)
-                        || !Take(2, out var outputName)
-                        || !ParseTreeOutLocal(outputName, expectedType, out slot))
+                    if (!IsInitKeyword(outputTarget))
                     {
                         return false;
                     }
-                    operation = 104;
+                    _at = _at + 1;
+                }
+                else if (!Take(15, out outputModeToken))
+                {
+                    return false;
+                }
+                mut bool newLocal = false;
+                if (_tokens.TryGet(_at, out var targetKind) && targetKind.Kind == 12)
+                {
+                    _at = _at + 1;
+                    newLocal = true;
+                }
+                if (!Take(2, out var outputName))
+                {
+                    return false;
+                }
+                mut int32 operation = outputMode == 2 ? 107 : 103;
+                mut int32 slot = -1;
+                mut int32 type = 0;
+                mut bool writable = false;
+                if (newLocal)
+                {
+                    if (!ParseTreeOutLocal(outputName, expectedType,
+                            out slot))
+                    {
+                        return false;
+                    }
+                    operation = outputMode == 2 ? 108 : 104;
                     type = expectedType;
-                    outputRange = outputName.Range;
                     writable = true;
                 }
                 else
                 {
-                    if (!Take(2, out var outputName)
-                        || !TryResolveParameter(outputName, out slot, out type))
+                    if (!TryResolveParameter(outputName, out slot, out type))
                     {
                         return false;
                     }
-                    outputRange = outputName.Range;
                     if (slot <= _parameterCount)
                     {
-                        writable = IsOutParameter(slot);
+                        writable = IsOutputParameter(slot);
                     }
                     else
                     {
@@ -2943,13 +3006,14 @@ mut class ScalarFrontendState
                         writable = (flags & 1) != 0;
                     }
                 }
+                if (outputMode == 2) { writable = true; }
                 if (type != expectedType || !writable)
                 {
-                    FailAt(2, outputRange);
+                    FailAt(2, outputName.Range);
                     return false;
                 }
-                if (!AddTreeNode(operation, expectedType, outputKeyword.Range.Start,
-                    outputRange.End,
+                if (!AddTreeNode(operation, expectedType, outputModeToken.Range.Start,
+                    outputName.Range.End,
                     slot, -1, 0, 0, out argument))
                 {
                     return false;
@@ -3548,10 +3612,14 @@ mut class ScalarFrontendState
         Host.Frontend[39] = whenTrue;
         Host.Frontend[40] = whenFalse;
         if (expressionBody) { Host.Frontend[41] = 1; }
-        return ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
-            returnType, _parameterCount, _firstType, _secondType, _thirdType, _outParameterMask,
+        if (!ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
+            returnType, _parameterCount, _firstType, _secondType, _thirdType, _outParameterMask & 63,
             name, _first.Range, _second.Range, _third.Range,
-            hasCondition, hasFallthrough, absent, absent, absent, out result);
+            hasCondition, hasFallthrough, absent, absent, absent, out result))
+        {
+            return false;
+        }
+        return true;
     }
 
     public mut bool TryParse(out ScalarFrontendResult result)

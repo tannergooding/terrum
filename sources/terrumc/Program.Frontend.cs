@@ -243,6 +243,7 @@ internal static partial class Program
                         writer.WriteNumber("returnType", function.ReturnType);
                         writer.WriteNumber("parameterCount", function.ParameterCount);
                         writer.WriteNumber("outParameterMask", function.OutParameterMask);
+                        writer.WriteNumber("initRefParameterMask", function.InitRefParameterMask);
                         writer.WriteNumber("firstType", function.FirstType);
                         writer.WriteNumber("secondType", function.SecondType);
                         writer.WriteNumber("thirdType", function.ThirdType);
@@ -460,6 +461,7 @@ internal static partial class Program
                             projectionVersion = frontend.ReturnType == 0 ? 73 : 72;
                         }
                         var programProjectionVersion = frontend.Functions.IsDefault ? projectionVersion
+                            : frontend.Functions.Any(static function => function.InitRefParameterMask != 0) ? 78
                             : frontend.Functions.Any(static function => function.OutParameterMask != 0) ? 77
                             : frontend.Functions.Any(static function => function.DoesNotReturn) ? 76
                             : frontend.Functions.Any(static function => function.Nodes.Any(

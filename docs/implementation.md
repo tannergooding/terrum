@@ -903,11 +903,14 @@ Ten frames derive from `floor((64 - 1) / 6)`: even an empty void declaration
 needs six tokens. The existing 32-node, 12-statement and eight-local capacities
 apply to each function; no verifier/emitter budgets change. V74 excludes
 non-self void-call support, and v74/v75 exclude `[DoesNotReturn]` declarations.
-V74–v76 exclude output parameters; v77 retains the existing scalar `out`
-parameter contract and adds those modes to multi-function call resolution.
-All versions exclude reference parameters, named/default/params
-arguments, overload/conversion search, namespaces/imports, templates/members,
-external bindings and callable values. This adds source frontend support, not
+V74–v76 exclude output parameters; v77 adds the existing scalar `out` mode to
+multi-function call resolution, and v78 adds existing scalar `init ref<T>`
+parameters and matching `init`/`init var` destinations. This retains the
+hosted contract: true publishes initialized values and false leaves
+destinations vacant. All versions exclude general reference parameters,
+named/default/params arguments, overload/conversion search, namespaces/imports,
+templates/members, external bindings and callable values. This adds source
+frontend support, not
 source-free TRRM checked-exception Bodies or a bootstrap-gate claim.
 
 Program projection v75 retains the same framing and scalar-call target table,
@@ -941,10 +944,16 @@ destinations and `out var` declarations only for matching scalar `out`
 parameters; those functions retain the established `bool` return contract.
 The independent reader audits the declaration mode, argument position,
 destination type and source spelling, while the shared verifier checks
-definite publication and cleanup under both runtime policies. V74–v76 reject
-`out` declarations and output arguments. This does not add `init ref<T>`,
-reference arguments, output calls to external targets or new publication
-semantics; single-function v1–v73 layouts remain unchanged.
+definite publication and cleanup under both runtime policies.
+
+Program projection v78 adds a distinct init-ref parameter mask and matching
+`init name`/`init var name` destinations for the existing six scalar types.
+The independent reader audits declaration modes, argument positions,
+destination types and source spellings; the shared verifier retains definite
+publication authority. V74–v76 reject output modes, and v77 rejects init-ref
+modes. These projections do not add general reference arguments, external
+output targets or new publication semantics; single-function v1–v73 layouts
+remain unchanged.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

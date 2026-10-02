@@ -88,6 +88,8 @@ namespace Terrum.CodeAnalysis;
 // their target contracts when proving call-statement continuation.
 // Program version 77 carries existing scalar out-parameter modes through
 // complete declaration snapshots and direct operation-105 call arguments.
+// Program version 78 adds init-ref modes in frame word 17, distinct from the
+// out mask in word 16; operations 107/108 encode existing and declared targets.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -294,7 +296,8 @@ void WriteScalarFrontendHeader(ScalarFrontendResult result)
     Host.Frontend[12] = result.FirstName.Length;
     Host.Frontend[13] = result.SecondName.Start;
     Host.Frontend[14] = result.SecondName.Length;
-    Host.Frontend[16] = result.OutParameterMask;
+    Host.Frontend[16] = result.OutParameterMask & 7;
+    Host.Frontend[17] = (result.OutParameterMask >> 3) & 7;
     Host.Frontend[34] = result.ThirdType;
     Host.Frontend[35] = result.ThirdName.Start;
     Host.Frontend[36] = result.ThirdName.Length;

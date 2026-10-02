@@ -1,7 +1,7 @@
 # Self-host frontend verification-budget proposal
 
 **Status: unapproved, deferred architecture option.** The scalar frontend
-currently compiles through projection v71 under the unchanged shared
+currently compiles through projection v78 under the unchanged shared
 100,000-visit verification limit. This proposal does not change language
 semantics, the accepted source grammar, native ABI, or verification budget.
 
@@ -28,10 +28,19 @@ One short post-cache CPU-sampling trace of `terrumc frontend-component` showed
 `VerifyCore` at 18.8% inclusive sampled CPU and both `CanBe` overloads among
 the top 100 at 4.43% each. This confirms feasibility checks remain active,
 but does not measure cache speedup or establish them as the dominant cost.
-For a future budget failure, capture profiles on the same representative
-source, account for whether each run completes, and compare hot methods and
-repeated-proof work before changing the limit or considering a component
-boundary.
+
+During the v78 budget investigation, temporary visit counters measured 100,001
+semantic-analysis visits across 210 functions before the limit failure. In the
+largest function, `ParseExpressionCore`, output-vacating traversal accounted
+for 9,271 visits; caching whether an expression can affect initialization
+state reduced that count to 3,150 and the function's total from 19,477 to
+14,268. `IsSourceWhitespace` visits fell from 4,627 to 2,959 in the same
+profile. The counters were removed after measurement. These are work counts,
+not wall-time or throughput measurements; the pre-cache run stopped at the
+budget while the cached run progressed. For a future budget failure, capture
+profiles on the same representative source, account for whether each run
+completes, and compare hot methods and repeated-proof work before changing the
+limit or considering a component boundary.
 
 ## Deferred option
 

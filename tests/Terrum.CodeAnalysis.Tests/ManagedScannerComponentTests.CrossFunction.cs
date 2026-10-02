@@ -31,6 +31,7 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("public int32 Main() { mut int32 n = 0; Sink(n++, n++, n++); return n; } void Sink(int32 a, int32 b, int32 c) { }", 3)]
     [InlineData("public int32 Main() { mut int32 result = 0; if (Set(out result)) { return result; } return 0; } bool Set(out int32 value) { value = 42; return true; }", 42)]
     [InlineData("public int32 Main() { if (Set(40, out var value, out var extra)) { return value + extra; } return 0; } bool Set(int32 seed, out int32 value, out int32 extra) { value = seed + 1; extra = 1; return true; }", 42)]
+    [InlineData("public int32 Main() { init int32 second; if (Fill(init var first)) { require Fill(init second); return first + second; } return 0; } bool Fill(init ref<int32> value) { value = 42; return true; }", 84)]
     [InlineData("public int32 Main() { for (Sink(1); false; Sink(2)) { } return 42; } void Sink(int32 value) { }", 42)]
     [InlineData("[DoesNotReturn] void Halt() { require false; } public int32 Main() { if (false) { Halt(); } return 42; }", 42)]
     [InlineData("[NoThrow] public void Main() { Step(); } [NoThrow] void Step() { }", 0)]
@@ -111,6 +112,8 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("int32 Main() { Set(42); return 0; } bool Set(out int32 value) { value = 42; return true; }")]
     [InlineData("int32 Main() { Set(out var value); return 0; } bool Set(int32 value) { return true; }")]
     [InlineData("bool Main() { mut int32 result = 0; if (Set(out result)) { return true; } return false; } int32 Set(out int32 value) { value = 42; return value; }")]
+    [InlineData("int32 Main() { if (Fill(true, out var value)) { return value; } return 0; } bool Fill(bool publish, init ref<int32> value) { value = 42; return true; }")]
+    [InlineData("int32 Main() { if (Fill(true, init var value)) { return value; } return 0; } bool Fill(bool publish, out int32 value) { value = 42; return true; }")]
     [InlineData("int32 Main() => Next(1); int32 Next(out int32 value) => 42;")]
     [InlineData("int32 Main(uint32 value) => Next(value); int32 Next(int32 value) => value;")]
     [InlineData("[DoesNotReturn] int32 Halt() => 42; int32 Main() => 0;")]
@@ -216,6 +219,35 @@ public sealed partial class ManagedScannerComponentTests
                 bytes, programBytes, BoundRuntimePolicy.FailFast));
         }
         BinaryPrimitives.WriteInt32LittleEndian(programBytes, 77);
+        BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(modeOffset), 0);
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
+            bytes, programBytes, BoundRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public async Task ScalarFrontendCrossFunctionInitReferencesRequireProjection78AndExactModesAsync()
+    {
+        const string text = "public int32 Main() { init int32 second; if (Fill(init var first)) { require Fill(init second); return first + second; } return 0; } bool Fill(init ref<int32> value) { value = 42; return true; }";
+        var source = SourceText.From(text);
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
+        Assert.Equal(78, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
+        var result = ScalarFrontendHost.ReadResult(source, bytes, programBytes,
+            BoundRuntimePolicy.FailFast);
+        Assert.True(result.IsValid, $"Error {result.ErrorCode} at {result.ErrorSpan}");
+        Assert.Contains(result.Functions[0].Nodes,
+            static node => node.Operation == 107);
+        Assert.Contains(result.Functions[0].Nodes,
+            static node => node.Operation == 108);
+        var modeOffset = (4 + ScalarFrontendHost.ProgramFrameWordCount + 4 + 17) * sizeof(int);
+        var mode = BinaryPrimitives.ReadInt32LittleEndian(programBytes.AsSpan(modeOffset));
+        Assert.Equal(1, mode);
+        foreach (var version in new[] { 74, 75, 76, 77 })
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(programBytes, version);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
+                bytes, programBytes, BoundRuntimePolicy.FailFast));
+        }
+        BinaryPrimitives.WriteInt32LittleEndian(programBytes, 78);
         BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(modeOffset), 0);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
             bytes, programBytes, BoundRuntimePolicy.FailFast));
