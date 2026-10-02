@@ -146,6 +146,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `5e30392` | Native scalar calls to other void functions as expression statements, projection 75 |
 | `3e7fcf8` | Native scalar multi-function snapshots and source-order scalar call targets, projection 74 |
 | `296658a` | Native scalar void direct self-call expression statements, projection 73 |
 | `324c2d4` | Native scalar direct self-call expression statements, projection 72 |
