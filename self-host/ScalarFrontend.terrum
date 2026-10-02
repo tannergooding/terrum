@@ -1560,6 +1560,25 @@ mut class ScalarFrontendState
             return AddTreeStatement(24, slot, -1, first.Range.Start, TreeStatementEnd());
         }
         if (first.Kind == 2
+            && _tokens.TryGet(_at + 1, out var callOpen)
+            && callOpen.Kind == 46)
+        {
+            if (!ParseTreeExpression(0, 1, 0, out var call))
+            {
+                return false;
+            }
+            if (TreeWord(call, 0) != 102)
+            {
+                FailAt(1, first.Range);
+                return false;
+            }
+            if (semicolon && !Take(52, out var callEnd))
+            {
+                return false;
+            }
+            return AddTreeStatement(37, 0, call, first.Range.Start, TreeStatementEnd());
+        }
+        if (first.Kind == 2
             && _tokens.TryGet(_at + 1, out var equals)
             && (equals.Kind == 64 || equals.Kind >= 91 && equals.Kind <= 101))
         {
@@ -1938,7 +1957,7 @@ mut class ScalarFrontendState
             }
             else if (next.Kind == 81 || next.Kind == 12 || next.Kind == 13
                 || next.Kind == 2 && _tokens.TryGet(_at + 1, out var following)
-                    && following.Kind == 2)
+                    && (following.Kind == 2 || following.Kind == 46))
             {
                 if (!ParseTreeStatement()) { return false; }
             }

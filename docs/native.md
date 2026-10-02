@@ -383,6 +383,12 @@ the expression to the shared verifier/emitter as a recursive call. Other call
 targets and `init ref<T>` arguments remain outside this subset; it does not
 complete general `out` call-site migration.
 
+Projection v72 also permits those direct self-calls as expression statements
+when their result type is non-void. The source-bound reader verifies the
+statement's call root and source spelling before lowering; void self-calls
+remain unsupported. General call targets and unresolved `init ref<T>`
+call-site metadata remain outside this frontend boundary.
+
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer

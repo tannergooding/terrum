@@ -77,6 +77,8 @@ namespace Terrum.CodeAnalysis;
 // Version 69 uses header word 16 as a parameter out-mode bitmask.
 // Version 70 adds bounded direct self-call expressions and existing out targets.
 // Version 71 adds out var destinations to bounded direct self-calls.
+// Version 72 adds kind-37 direct self-call expression statements; slot is zero,
+// root is the call node, and the span includes the semicolon outside for clauses.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -174,6 +176,7 @@ bool TryPublishScalarFrontend()
         if (result.OutParameterMask != 0) { Host.Frontend[0] = 69; }
         if (HasScalarFrontendOperation(102)) { Host.Frontend[0] = 70; }
         if (HasScalarFrontendOperation(104)) { Host.Frontend[0] = 71; }
+        if (HasScalarFrontendStatement(37)) { Host.Frontend[0] = 72; }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {

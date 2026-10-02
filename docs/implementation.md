@@ -133,7 +133,7 @@ The current scanner is version 8/schema 8; it appends diagnostic kinds 11/12
 for invalid/unsupported maximal punctuation runs to the prior diagnostic
 catalog. Earlier raw records remain readable where compatible, while current
 snapshot adapters reject forged framing, invalid escapes and conflicting
-classification. The bounded scalar frontend's projections through v71 share a
+classification. The bounded scalar frontend's projections through v72 share a
 392-word buffer and enforce the documented limits: 16,384 UTF-16 source units, 64 tokens,
 eight total local identities including hidden discards, 12 statement records,
 32 expression nodes, three parameters, 16 expression-recursion levels, six
@@ -835,6 +835,13 @@ then lowers operation 104 to a declaring `BoundOutArgument`; shared
 verification remains responsible for path-sensitive assignment. This does
 not enable `out var` for other call targets or general output call-site
 migration.
+
+Projection v72 permits a direct self-call with a non-void result as an
+expression statement. Kind 37 roots the statement at the audited operation
+102 call; the shared verifier and emitter retain responsibility for call
+semantics. The existing parser restriction against void self-calls remains,
+and this does not add calls to other functions or settle `init ref<T>`
+call-site metadata.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed
