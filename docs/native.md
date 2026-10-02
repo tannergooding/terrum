@@ -286,16 +286,17 @@ record and expression limits still apply to each nested conditional. Versions
 source coverage and feature precedence. Source-free indexed TRRM and the
 native ABI are unchanged.
 
-Projection v59 adds exact parameterless `[NoThrow]` and `[DoesNotReturn]`
-declaration contracts over the current top-level scalar/void braced and arrow
-forms. Existing shared folding and effect verification remain authoritative
-under both policies; DoesNotReturn requires void and removes implicit normal
-completion. Source audits preserve raw spelling, distinct flags, all source
-coverage, hosted spans/scopes and conservative failure proofs. Normalized
-exports retain the existing primitive-parameter ABI. Versions 1–58 keep their
-restrictions, all resource limits remain, and general attributes/calls are not
-added. The [implementation reference](implementation.md) specifies header
-bits and body shapes; source-free indexed TRRM is unchanged.
+Projection v59 adds exact `[NoThrow]` and `[DoesNotReturn]` declaration
+contracts over the current top-level scalar/void braced and arrow forms,
+including supported primitive-parameter forms. Existing shared folding and
+effect verification remain authoritative under both policies; DoesNotReturn
+requires void and removes implicit normal completion. Source audits preserve
+raw spelling, distinct flags, all source coverage, hosted spans/scopes and
+conservative failure proofs. Normalized exports retain the existing
+primitive-parameter ABI. Versions 1–58 keep their restrictions, all resource
+limits remain, and general attributes/calls are not added. The
+[implementation reference](implementation.md) specifies header bits and body
+shapes; source-free indexed TRRM is unchanged.
 
 Projection v60 adds explicit lifetime ending for a visible named scalar local.
 Kind 24 stores the local slot, root `-1`, and source span through the

@@ -697,14 +697,15 @@ General calls, richer types and ownership/cleanup remain excluded; this
 projection does not itself enforce same-line label attachment, which the
 current source parser checks independently.
 
-Provisional projection v59 encodes the existing distinct parameterless
-`[NoThrow]` and `[DoesNotReturn]` contracts on top-level functions. Header word
-2 uses bit 0 for public visibility, bit 1 for NoThrow and bit 2 for
-DoesNotReturn; v59 requires an actual effect bit. Attributes precede visibility
-and use exact raw spellings, in either order. Unknown, duplicate, escaped,
-case-folded or argument-bearing attributes reject. Attribute tokens count
-against the existing 64-token limit. Versions 1–58 retain their masks and
-source/body restrictions.
+Provisional projection v59 encodes the existing distinct `[NoThrow]` and
+`[DoesNotReturn]` contracts on top-level scalar/void functions, including the
+existing supported primitive-parameter forms. Header word 2 uses bit 0 for
+public visibility, bit 1 for NoThrow and bit 2 for DoesNotReturn; v59 requires
+an actual effect bit. Attributes precede visibility and use exact raw
+spellings, in either order. Unknown, duplicate, escaped, case-folded or
+argument-bearing attributes reject. Attribute tokens count against the
+existing 64-token limit. Versions 1–58 retain their masks and source/body
+restrictions.
 
 Effect selection takes precedence over v56–58. Annotated braced scalar/void
 bodies use structured statement records with no terminal envelope roots.

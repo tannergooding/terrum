@@ -185,6 +185,100 @@ public sealed partial class CliTests
         }
     }
 
+    [Fact]
+    public async Task NativeNoThrowSupportsParameterizedScalarFunctionsAsync()
+    {
+        const string text = "[NoThrow] public int32 Identity(int32 value) { return value; }";
+        var root = RepositoryRoot();
+        var frontend = Path.Combine(root, "self-host");
+        var native = Path.Combine(root, $"effects-{Guid.NewGuid():N}.native.dll");
+        var hosted = Path.Combine(root, $"effects-{Guid.NewGuid():N}.hosted.dll");
+        try
+        {
+            foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var (componentExit, componentOutput, componentError) = await RunAsync(
+                    Encoding.UTF8.GetBytes(text), "frontend-component", frontend, "-",
+                    "--runtime", runtimeName, "--json");
+                Assert.Equal(0, componentExit);
+                Assert.Empty(componentError);
+                using (var document = JsonDocument.Parse(componentOutput))
+                {
+                    var result = document.RootElement.GetProperty("result");
+                    Assert.True(result.GetProperty("valid").GetBoolean());
+                    Assert.True(result.GetProperty("noThrow").GetBoolean());
+                    Assert.Equal(59, result.GetProperty("projectionVersion").GetInt32());
+                }
+
+                var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(text),
+                    "frontend-build-library", frontend, "-", "-o", native, "--runtime", runtimeName, "--json");
+                Assert.True(buildExit == 0, $"{runtimeName}: {buildOutput}{buildError}");
+                var (hostExit, hostOutput, hostError) = await RunAsync(Encoding.UTF8.GetBytes(text),
+                    "build-library", "-", "--export", "Identity", "-o", hosted, "--runtime", runtimeName, "--json");
+                Assert.True(hostExit == 0, $"{runtimeName}: {hostOutput}{hostError}");
+                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+
+                var handle = NativeLibrary.Load(native);
+                try
+                {
+                    var invoke = Marshal.GetDelegateForFunctionPointer<ParameterizedIdentity>(
+                        NativeLibrary.GetExport(handle, "Identity"));
+                    Assert.Equal(42, invoke(42));
+                }
+                finally
+                {
+                    NativeLibrary.Free(handle);
+                }
+            }
+        }
+        finally
+        {
+            File.Delete(native);
+            File.Delete(hosted);
+        }
+    }
+
+    [Fact]
+    public async Task NativeDoesNotReturnSupportsParameterizedScalarFunctionsAsync()
+    {
+        const string text = "[DoesNotReturn] public void Stop(int32 value) { require false; }";
+        var root = RepositoryRoot();
+        var frontend = Path.Combine(root, "self-host");
+        var native = Path.Combine(root, $"effects-{Guid.NewGuid():N}.native.dll");
+        var hosted = Path.Combine(root, $"effects-{Guid.NewGuid():N}.hosted.dll");
+        try
+        {
+            foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var (componentExit, componentOutput, componentError) = await RunAsync(
+                    Encoding.UTF8.GetBytes(text), "frontend-component", frontend, "-",
+                    "--runtime", runtimeName, "--json");
+                Assert.Equal(0, componentExit);
+                Assert.Empty(componentError);
+                using (var document = JsonDocument.Parse(componentOutput))
+                {
+                    var result = document.RootElement.GetProperty("result");
+                    Assert.True(result.GetProperty("valid").GetBoolean());
+                    Assert.True(result.GetProperty("doesNotReturn").GetBoolean());
+                    Assert.Equal(59, result.GetProperty("projectionVersion").GetInt32());
+                }
+
+                var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(text),
+                    "frontend-build-library", frontend, "-", "-o", native, "--runtime", runtimeName, "--json");
+                Assert.True(buildExit == 0, $"{runtimeName}: {buildOutput}{buildError}");
+                var (hostExit, hostOutput, hostError) = await RunAsync(Encoding.UTF8.GetBytes(text),
+                    "build-library", "-", "--export", "Stop", "-o", hosted, "--runtime", runtimeName, "--json");
+                Assert.True(hostExit == 0, $"{runtimeName}: {hostOutput}{hostError}");
+                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+            }
+        }
+        finally
+        {
+            File.Delete(native);
+            File.Delete(hosted);
+        }
+    }
+
     [Theory]
     [InlineData("[DoesNotReturn] void Main() { while (true) {} }")]
     [InlineData("[NoThrow][DoesNotReturn] void Main() { for (;;) {} }")]
@@ -345,4 +439,7 @@ public sealed partial class CliTests
             }
         }
     }
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int ParameterizedIdentity(int value);
 }
