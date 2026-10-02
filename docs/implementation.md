@@ -133,7 +133,7 @@ The current scanner is version 8/schema 8; it appends diagnostic kinds 11/12
 for invalid/unsupported maximal punctuation runs to the prior diagnostic
 catalog. Earlier raw records remain readable where compatible, while current
 snapshot adapters reject forged framing, invalid escapes and conflicting
-classification. The bounded scalar frontend's projections through v63 share a
+classification. The bounded scalar frontend's projections through v64 share a
 392-word buffer and enforce the documented limits: 16,384 UTF-16 source units, 64 tokens,
 eight total local identities including hidden discards, 12 statement records,
 32 expression nodes, three parameters, 16 expression-recursion levels, six
@@ -766,6 +766,14 @@ literal initializer and inlines later reads as its verified constant value;
 constant expressions, inferred const locals and `for`-initializer const
 declarations remain outside this bounded subset. The projection adds no native
 ABI, source-free TRRM or semantic-module format.
+
+Projection v64 adds kind 28 for typed numeric `const` initializers whose
+expression tree the shared scalar folder reduces to a `BoundConstant`. Direct
+literals remain projection v63 kind 27; folded initializers may use earlier
+constant locals. Runtime-dependent or unsupported expression forms, inferred
+const locals and `for`-initializer const declarations remain outside this
+bounded subset. The projection adds no native ABI, source-free TRRM or
+semantic-module format.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

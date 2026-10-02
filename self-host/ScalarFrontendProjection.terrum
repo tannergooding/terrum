@@ -69,6 +69,7 @@ namespace Terrum.CodeAnalysis;
 // Version 62 adds kind 26 for an inferred vacant scalar local with its resolved
 // type in the local record; the source declaration uses `init var`.
 // Version 63 adds kind 27 for a scalar constant local with a literal initializer.
+// Version 64 adds kind 28 for a scalar constant local with a foldable expression initializer.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -112,6 +113,7 @@ int32 GetScalarFrontendStatementVersion()
             }
         }
     }
+    if (maximumKind == 28) { return 64; }
     if (maximumKind == 27) { return 63; }
     if (maximumKind == 26) { return 62; }
     if (maximumKind == 25) { return 61; }
@@ -153,6 +155,7 @@ bool TryPublishScalarFrontend()
         if (HasScalarFrontendStatement(25)) { Host.Frontend[0] = 61; }
         if (HasScalarFrontendStatement(26)) { Host.Frontend[0] = 62; }
         if (HasScalarFrontendStatement(27)) { Host.Frontend[0] = 63; }
+        if (HasScalarFrontendStatement(28)) { Host.Frontend[0] = 64; }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {

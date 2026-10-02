@@ -105,8 +105,12 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { const uint32 value = 42; return int32(value); }", 42, 63)]
     [InlineData("int32 Main() { const int64 value = 42; return int32(value); }", 42, 63)]
     [InlineData("int32 Main() { const uint64 value = 42; return int32(value); }", 42, 63)]
+    [InlineData("int32 Main() { const uint64 value = 18446744073709551615; return value == 18446744073709551615 ? 42 : 0; }", 42, 63)]
     [InlineData("int32 Main() { const bool value = true; if (value) { return 42; } return 0; }", 42, 63)]
     [InlineData("int32 Main() { const char16 value = 42; return int32(value); }", 42, 63)]
+    [InlineData("int32 Main() { const int32 value = 40 + 2; return value; }", 42, 64)]
+    [InlineData("int32 Main() { const int32 value = -42 + 84; return value; }", 42, 64)]
+    [InlineData("int32 Main() { const int32 first = 40 + 2; const int32 value = first + 1; return value; }", 43, 64)]
     public async Task ScopedLocalProjectionMatchesHostedExecutionAsync(string source, int expected,
         int projectionVersion)
     {
@@ -207,7 +211,8 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { init var value; value = 42; return value; }")]
     [InlineData("int32 Main() { init var value; int32 copy = value; value = int32(42); return copy; }")]
     [InlineData("int32 Main() { init var value; value = true; value = int32(42); return value; }")]
-    [InlineData("int32 Main() { const int32 value = 40 + 2; return value; }")]
+    [InlineData("int32 Main(int32 seed) { const int32 value = 40 + seed; return value; }")]
+    [InlineData("int32 Main() { const int32 value = 2147483647 + 1; return value; }")]
     [InlineData("int32 Main() { const int32 value = 42; value = 43; return value; }")]
     [InlineData("int32 Main() { for (const int32 value = 42; false;) { } return 42; }")]
     [InlineData("int32 Main() { if (true) { int32 x = 1; } while (false) { return x; } return 42; }")]

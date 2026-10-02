@@ -138,6 +138,8 @@ public sealed class LocalFrontendProjectionTests
         Reject(0, 62);
         Reject(301, 0);
         Reject(332, 1);
+        Reject(332, 28);
+        Reject(0, 64);
         var altered = text.Replace("const int32 value", "const uint32 value", StringComparison.Ordinal);
         Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(SourceText.From(altered), Bytes(words)));

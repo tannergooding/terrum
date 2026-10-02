@@ -1793,11 +1793,6 @@ mut class ScalarFrontendState
         {
             return FailTreeType(initializer);
         }
-        if (constant && TreeWord(initializer, 0) != 3
-            && TreeWord(initializer, 0) != 20 && TreeWord(initializer, 0) != 21)
-        {
-            return FailTreeType(initializer);
-        }
         if (!ResolveTreeLiteral(initializer, type, false)
             || semicolon && !Take(52, out var endDeclaration))
         {
@@ -1821,8 +1816,13 @@ mut class ScalarFrontendState
             }
             _activeLocals = _activeLocals | bit;
         }
-        return AddTreeStatement(first.Kind == 81 ? 15 : constant ? 27 : 1,
-            _parameterCount + index + 1, initializer,
+        mut int32 statementKind = first.Kind == 81 ? 15 : 1;
+        if (constant)
+        {
+            statementKind = TreeWord(initializer, 0) == 3
+                || TreeWord(initializer, 0) == 20 || TreeWord(initializer, 0) == 21 ? 27 : 28;
+        }
+        return AddTreeStatement(statementKind, _parameterCount + index + 1, initializer,
             first.Range.Start, TreeStatementEnd());
     }
 
