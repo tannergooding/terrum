@@ -99,7 +99,7 @@ public sealed partial class CliTests
     [Fact]
     public async Task ScalarFrontendCrossFunctionInitReferencesCliUsesProjection78Async()
     {
-        const string text = "public int32 Main() { init int32 second; if (Fill(init var first)) { require Fill(init second); return first + second; } return 0; } bool Fill(init ref<int32> value) { value = 42; return true; }";
+        const string text = "public int32 Main() { require !Fill(false, init var value); return Fill(true, init value) ? value : 0; } bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return false; }";
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var input = Encoding.UTF8.GetBytes(text);
         foreach (var runtime in new[] { "fail-fast", "checked-exceptions" })
@@ -113,7 +113,7 @@ public sealed partial class CliTests
                 Assert.Equal(78, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Equal(0, result.GetProperty("functions")[0]
                     .GetProperty("initRefParameterMask").GetInt32());
-                Assert.Equal(1, result.GetProperty("functions")[1]
+                Assert.Equal(2, result.GetProperty("functions")[1]
                     .GetProperty("initRefParameterMask").GetInt32());
                 Assert.Contains(result.GetProperty("functions")[0].GetProperty("nodes")
                     .EnumerateArray(), static node =>
@@ -124,7 +124,7 @@ public sealed partial class CliTests
             }
             var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
                 directory, "-", "--runtime", runtime, "--json");
-            Assert.Equal(84, runExit);
+            Assert.Equal(42, runExit);
             Assert.Empty(runOutput);
             Assert.Empty(runError);
         }
