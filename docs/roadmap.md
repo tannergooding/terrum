@@ -137,6 +137,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `b4e477a` | Native scalar conditional const initializers with lazy branch evaluation, projection 64 |
 | `daadff9` | Native scalar short-circuit static proof folding, projection 68 |
 | `1f4635b` | Native scalar constant-conditional static proof folding, projection 68 |
 | `cdc392c` | Native scalar foldable-true static proofs, projection 68 |
