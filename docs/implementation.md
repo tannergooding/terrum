@@ -20,6 +20,14 @@ also require semantic scope identity, access provenance and generic grant
 matching that current syntax/semantic modules do not implement. The `(1, 0)`
 metadata visibility bits and optional diagnostic SourceFile rows are not a
 file/friend encoding.
+The target static-storage contracts additionally define load-scoped groups,
+explicit-policy `static T()` bodies, separately lazy fields, normal explicit
+concurrency opt-in even for reads, blocking initialization entry, cyclic
+completion failure and unsafe recovery/suppression obligations. Static
+`init` authority ends at group completion. These contracts require new
+binding, initialization-state, effect, publication, dependency, root/cleanup
+and unload support; neither syntax-44 nor semantic v43-v47 implements them.
+No existing `(1, 0)` metadata flag is a static-initialization policy encoding.
 These are not new compiler
 support: syntax-44 does not enforce the new prefix/partial rules or
 implement unions, static containers, caller-unsafe/async declarations or

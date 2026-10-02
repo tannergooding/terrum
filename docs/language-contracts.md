@@ -229,13 +229,19 @@ declaration's result through its live destination, not a consumed source or
 an entry snapshot. It is unavailable in preconditions and ordinary body
 expressions. A nested lambda does not rebind it, and captures obey ordinary
 lifetime and ownership rules. For an ordinary async callable it denotes the
-completed payload, not its task handle. Constructors use receiver
-initialization facts instead; producer phase mapping remains open.
+completed payload, not its task handle. Instance constructors use receiver
+initialization facts instead; static constructors use their owning group's
+initialization facts. Producer phase mapping remains open.
 
-Constructors publish a minimum set of guaranteed initialized properties
+Instance constructors publish a minimum set of guaranteed initialized properties
 with clauses such as `ensure P is init`. Callers initialize the remainder
-before publication. Init-property assignment may repeat during unpublished
-construction, in source order with ordinary replacement/cleanup checks; it
+before publication. Declaration field/property initializers execute before
+constructor preconditions, body and postconditions; caller initializer entries
+follow the constructor, then independent completion validation precedes
+publication. Constructor postconditions are not automatically rerun after
+caller initialization; assignments invalidate affected facts under the
+ordinary mutation/dependency rules. Init-property assignment may repeat during
+unpublished construction, in source order with ordinary replacement/cleanup checks; it
 is not permission to initialize an already live object. Removing a guarantee
 breaks callers that relied on it; strengthening one can retain older callers'
 explicit assignments. See the [construction rules](grammar-spec.md#510-properties-and-accessor-local-effects).
@@ -335,6 +341,18 @@ callee-owned argument cleanup on a defined unwind, not transactional restoration
 of the caller's moved variables. A `finally` inside the body has not been
 entered and does not run for that precondition failure. If the selected policy
 is fail-fast, no cleanup is promised.
+
+Instance construction additionally establishes an unpublished receiver and
+executes declaration field/property initializers before constructor
+preconditions. Their acquired values retain partial-state cleanup obligations
+on defined unwinding, even when the constructor body was never entered.
+Static initialization likewise places grouped field initializers before
+static-constructor preconditions/body/postconditions. Its runtime entry and
+publication effects participate in the triggering operation's contract; it is
+not an exemption from declared no-throw, blocking or other effect bounds.
+The [static initialization contract](grammar-spec.md#static-initialization-and-load-scoped-storage)
+separates completed-group guarantees from internal unpublished initialization
+authority and from post-publication concurrent access.
 
 ### 3.2 Saved results and cleanup
 

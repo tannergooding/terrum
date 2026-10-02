@@ -44,7 +44,13 @@ prerequisite has already been met.
 2. **Full runtime/structured contracts — initialization and outputs.** Complete
    general `out`/`init ref<T>` declaration and call migration with definite
    initialization, cleanup and publication rules. Preserve their distinct
-   contracts; this is not a parser-only rename.
+   contracts; this is not a parser-only rename. Carry the
+   [static initialization contracts](grammar-spec.md#static-initialization-and-load-scoped-storage)
+   through separate metadata/schema work before compiler adoption: loaded
+   closed-type groups and lazy units, explicit constructor triggers, checked
+   sharing, failure/recovery, initialization effects and load-scope cleanup.
+   Do not infer sharing permission from `static` or adopt source forms without
+   their state, lifetime and publication machinery.
 3. **Full runtime/structured contracts — conditions and constants.** Specify
    published/static conditions and required literal/constant domains, including
    proof/effect limits, before claiming general proof execution.

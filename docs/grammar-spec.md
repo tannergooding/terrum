@@ -533,6 +533,7 @@ TopDeclaration = TypePrefix, ( StructDecl | ClassDecl | InterfaceDecl
                | CallablePrefix, FunctionDefinition
                | AliasPrefix, AliasDecl ;
 MemberDeclaration = ConstructorPrefix, ConstructorDecl
+                  | StaticConstructorPrefix, StaticConstructorDecl
                   | FieldPrefix, FieldDecl
                   | PropertyPrefix, PropertyDefinition
                   | IndexerPrefix, IndexerDefinition
@@ -552,6 +553,7 @@ CallablePrefix  = { Attribute }, [ VisibilityModifier ], [ "static" ],
                   [ "partial" ] ;
 ConstructorPrefix = { Attribute }, [ VisibilityModifier ], [ "unsafe" ],
                     [ "partial" ] ;
+StaticConstructorPrefix = { Attribute }, "static", [ "partial" ] ;
 FieldPrefix     = { Attribute }, VisibilityModifier, [ "static" ],
                   [ "extern" ], [ "mut" ], [ "unsafe" ] ;
 PropertyPrefix  = { Attribute }, [ VisibilityModifier ], [ "static" ],
@@ -613,6 +615,8 @@ ConstantExpression = Expression ;
 MemberName      = Identifier | Type, ".", Identifier ;
 ConstructorDecl = Identifier, ParameterList, ContractClauses,
                   ( CallableBody | ";" ) ;
+StaticConstructorDecl = Identifier, "(", ")", ContractClauses,
+                        ( CallableBody | ";" ) ;
 ContractClauses = { PreconditionClause }, { PostconditionClause } ;
 PreconditionClause = "require", ContractPredicate ;
 PostconditionClause = "ensure", ContractPredicate ;
@@ -750,7 +754,9 @@ type beyond its own domain.
 
 Optional visibility in type, callable, constructor, property, indexer and operator
 declaration prefixes exists only for secondary partial declarations, not a
-default access level. A declaration
+default access level. Static constructors have a separate prefix without
+visibility; their primary is identified by the required initialization-policy
+attribute. Other declarations
 without visibility must identify a secondary part with `partial`; otherwise
 it rejects. Every composed identity has exactly one primary declaration.
 Namespace declarations, local bindings, parameters, enum constants, union
@@ -819,8 +825,16 @@ synchronization and storage lifetime. A non-`mut` extern field is a read-only
 Terrum access path, not a promise that foreign code cannot change the value;
 the compiler cannot infer load stability from the missing modifier.
 Concrete data-import schemas and target mappings remain unspecified.
-Ordinary static-field initialization and lifetime are separate contracts;
-`static` alone does not introduce an implicit type initializer.
+Ordinary static storage follows the
+[initialization and load-scoped lifetime rules](#static-initialization-and-load-scoped-storage).
+`static` specifies placement and lifetime, not concurrency permission.
+Runtime static fields require the same explicit checked concurrency opt-in
+as other shared storage, including shared reads. A fixed slot or readonly
+access path does not establish permission to share its reachable state.
+An access without that contract requires a proven nonconcurrent restriction,
+such as an applicable single-threaded execution profile; otherwise it rejects.
+Neither implicit thread-local copies nor first-accessing-thread ownership
+repairs a missing contract.
 
 Field-level `unsafe` requires an explicit unsafe context for every direct
 read, write, move or reference/pointer formation. It expresses caller
@@ -1112,21 +1126,125 @@ executes one legal statement for void methods, setters, init accessors and
 constructors. It is shorthand for the corresponding checked block, not a
 general assignment-expression feature. Constructors name their enclosing
 type and must still establish their published completion guarantees.
-Constructors perform synchronous instance initialization and complete before
+Instance constructors perform synchronous initialization and complete before
 publishing the instance. They have initialization-phase write authority over
 their unpublished receiver, not a method's writable-live-receiver requirement.
 Their prefix orders attributes, explicit primary visibility, optional `unsafe`,
 then optional `partial`; `static`, `extern`, `mut` and `async` are invalid.
-There is no static constructor/type-initializer form. Asynchronous creation
-uses an ordinary async factory under its declared suspension and publication
-contracts, not
-suspension inside a constructor.
+Asynchronous instance creation uses an ordinary async factory under its
+declared suspension and publication contracts, not suspension inside a
+constructor.
 A partial constructor follows sole-primary ownership: its primary authors
 visibility, defaults, conditions and completion guarantees. A bodyless
 constructor is legal only as a partial primary with exactly one matching
 implementing secondary. The secondary omits visibility and caller-unsafe
 modifiers, repeats the matching signature, and must establish the primary's
 completion guarantees. An ordinary constructor requires a body.
+
+<a id="static-initialization-and-load-scoped-storage"></a>
+
+**Static initialization and load-scoped storage.** Each loaded closed nominal
+type with ordinary static storage or an authored static constructor has one
+type-wide initialization group.
+Different generic instantiations and independently loaded type identities have
+distinct storage and initialization state. The group contains ordinary
+non-lazy static fields and property backing storage, plus any authored static
+constructor body. Constants and foreign `extern` storage do not acquire
+Terrum initialization obligations through this rule. There is no implicit
+zero/default value that makes vacant storage live.
+
+An authored static constructor names its enclosing type, has no parameters or
+result type, and has the ordered prefix attributes, `static`, optional
+`partial`. It has no visibility, caller-`unsafe`, `extern`, receiver `mut` or
+`async` modifier and is not ordinarily callable. Unsafe implementation work
+still requires explicit unsafe scopes and must satisfy the safe initialization
+contract. Each composed type identity has at most one static constructor.
+It uses the ordinary grouped `require`/`ensure` clauses.
+
+The primary static constructor requires the resolved compiler-recognized
+semantic attribute `[StaticInitializer(...)]` with an explicit trigger choice:
+grouped-static-field access or runtime static-member access. There is no
+default trigger inferred from the presence of its body. Type names, metadata
+inspection and compile-time member binding are not runtime access triggers.
+The concrete policy argument catalog and schema are separate attribute work;
+an arbitrary same-named attribute cannot select this behavior.
+With no authored static constructor, a synthesized group triggers on first
+runtime access to a grouped static field without requiring a source annotation.
+
+A partial static constructor has exactly one primary policy/contract author
+and one implementation. The required policy attribute identifies the primary
+instead of visibility. A bodyless primary ends in `;`; the secondary repeats
+`static partial` and the matching empty-parameter signature but omits the
+initialization policy, conditions and other contract-changing items. A
+non-partial static constructor requires a body. Other secondary attributes
+obey the ordinary resolved schema rules.
+
+Ordinary static initializer expressions execute in the existing merged
+declaration order: compiler-received source-input order, then source order
+within each input, including property backing at its declaration position.
+The primary part has no ordering priority. These initializers precede the
+static constructor's preconditions, body and normal-return postconditions.
+The static constructor and checked helpers have initialization authority for
+vacant group storage, not new permission to replace fixed live fields.
+Successful group completion establishes all required initialization and
+completion guarantees before publishing the group to ordinary callers.
+Missing initialization diagnoses; no caller can read vacant storage to
+determine its state.
+
+`[LazyInitialization]` is a compiler-recognized semantic attribute selecting
+an individually demand-initialized ordinary static field, outside the ordinary
+group initializer sequence. Its initializer remains subject to the ordinary
+type, effect, access and completion checks. An external access completes the
+type group before initializing the requested lazy field. Other lazy fields
+remain untouched unless actually accessed. Initializers and checked helpers
+may access already-initialized fields within their unpublished initialization
+authority; this is not permission for ordinary reentrant callers to observe
+partial group state. A cyclic demand for an unfinished unit's completion
+fails rather than waiting indefinitely or exposing an invented default.
+
+The default initialization execution protocol permits one execution flow to
+initialize a unit while competing permitted callers wait for its outcome.
+Completion publication supplies the memory-model guarantees required by the
+declared sharing contract; the gate does not authorize sharing or synchronize
+subsequent field or referent mutation. The body need not be pure. Alternative
+execution-policy schemas must separately establish valid initialization,
+publication, ownership and failure behavior; removing blocking is not
+permission for unchecked races or unvalidated duplicate initialization.
+
+Initialization follows the existing exception policy. Fail-fast termination
+promises no cleanup. Defined unwinding cleans acquired partial state without
+publishing a live unit or rolling back external effects. A caught failure
+leaves the unit failed and unpublished, with its failure outcome retained;
+ordinary subsequent accesses do not automatically retry. A lazy-field failure
+after group completion fails that lazy unit, not the completed group. If its
+failure escapes during group initialization, the group fails as well.
+
+An explicit unsafe recovery API may retry a failed unit only with exclusive
+recovery authority, completed partial-state cleanup and no dependencies
+invalidated by the retry. It is not a reset of a live initialized unit.
+An explicit unsafe suppression API may bypass initialization execution;
+suppression alone does not establish checked initialized-state facts. Any
+unsafe assertion of valid state retains the caller's validity, lifetime,
+ownership and publication obligations; an incorrect assumption can cause
+undefined behavior. Concrete recovery/suppression APIs and their schemas
+remain separate library work.
+
+Static state belongs to its load scope, not an inherently process-immortal
+lifetime. Checked unload requires quiescence and discharge of active calls,
+loans, roots, pins and ownership dependencies before invalidating storage or
+code. Applicable cleanup retires acquired values under the ordinary lifetime
+and ownership rules; code needed by cleanup remains available until those
+obligations complete. Removing the image is not resource cleanup.
+
+AOT/JIT compilation, precomputation and hoisting preserve observable
+initialization timing, effects, failures, identity, ownership, cleanup and
+the memory model. Purity of immediate computation alone does not establish
+all these facts. Stricter source trigger selection does not forbid sound
+semantics-preserving optimization. Initialization requirements and effects
+are part of the triggering operation's published contract; a scalar read or
+otherwise effect-bounded static method cannot hide throwing, allocation or
+blocking initialization behind its ordinary operation.
+
 Nested type declarations are outside this
 grammar; this is a scope boundary, not a claim that nested type
 arguments in `Type` are excluded. See [§5.11](#511-nested-types-and-scoped-operators).
@@ -2884,6 +3002,11 @@ representation are outside this source grammar.
 through an independently writable referent does not by itself mutate `this`.
 `init` provides mutability within its initialization scope without a redundant
 `mut init` modifier.
+For a static property, `init` is available only within its owning type group's
+unpublished initialization phase, including checked helpers. Group completion
+ends that authority. An ordinary later assignment requires an applicable
+setter; neither static lookup nor unsafe authorization silently reopens
+initialization.
 
 **Construction rule:** a constructor initializes all private state
 it does not leave to declared `init` properties. Its published completion
@@ -2895,9 +3018,17 @@ body inference or duplicated by a routine attribute. The caller must initialize
 each remaining property before the object is fully constructed. In
 `new T(...) { P = value; }`, initializer entries execute in source order
 after the constructor, within the same unpublished construction phase.
+Declaration field/property initializers precede constructor preconditions,
+followed by the constructor body and normal-return postconditions.
+The caller initializer entries then run, followed by completion validation
+and the final construction guarantees. Constructor postconditions establish
+the constructor's outcome, not an automatic second check after caller
+initialization; later assignments invalidate affected facts under the ordinary
+mutation and dependency rules.
 Construction publishes the object only after all storage and property
 obligations are fulfilled and the final invariant/postcondition checks
-succeed. Failures clean partial state without publishing a live object.
+succeed. Defined unwinding cleans partial state without publishing a live
+object; fail-fast termination promises no cleanup.
 This is not a general right to invoke `init` on an already constructed value.
 An init property is writable during the unpublished construction phase,
 not restricted to one assignment. Constructor and caller initializers may
@@ -3098,7 +3229,9 @@ the files and then source order within each file. Every merged part must
 declare `partial`, have matching kind and generic identity, and yield one
 resulting identity without duplicate members or implementations. Exactly one
 part is the primary, identified by explicit visibility rather than file
-order. It authors visibility, contract-prefix modifiers, conformances,
+order, except that a static constructor's required initialization-policy
+attribute identifies its primary. It authors visibility where applicable,
+contract-prefix modifiers, conformances,
 constraints, defaults and pre/postconditions. Secondary parts must not
 repeat or add those contract items; they use only applicable attributes,
 `partial` and the matching kind modifiers/kind or return type/signature.
@@ -3397,16 +3530,16 @@ appears in §2.
 | Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw framing/headers, deterministic interpolation, identifier/quoted/expression formats and runtime alignment. | Complete floating token recovery, character diagnostics, raw/interpolation recovery and registered text/whole-output normalization APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or nested block namespaces without mixing, with lexically scoped imports before declarations. | Other namespace forms, if any. |
-| Visibility and declaration prefixes | §3.1 defines fixed role-specific primary prefixes, strict source-unit file access, member-scoped same-module friend grants and restricted interface conformance authority. Source-unit identity disambiguates same-named file-local definitions; grants preserve effective access and partial-body provenance. | Complete file/friend metadata encoding and explicit static initialization/lifetime contracts. |
+| Visibility and declaration prefixes | §3.1 defines fixed role-specific primary prefixes, strict source-unit file access, member-scoped same-module friend grants and restricted interface conformance authority. Static constructors have a policy-identified primary without visibility. | Complete access/provenance/grant and initialization-policy metadata encoding. |
 | Nominal types | §3.1 gives ordered class/struct kind forms, static-class containers, interfaces, integral-base enums and explicit struct/class unions with qualified cases and independent closedness. Enum constants have checked successor overflow and deliberate aliases. | Nested declarations, selected integer catalogs, flags schemas and contextual attributes. |
 | Generic declarations | §§3.1–3.2 give bounded constant domains, checked opt-in primitive-wrapper constants, earlier-only defaults, `_` inference and explicit `default` selection. | Wrapper capability spelling/value encoding and complete inference contracts. |
 | Aliases | §§3.1 and 5.4 give finite qualified expansion, cycle rejection, namespace-level aliases and transparent public export. | Metadata encoding. |
 | Associated types | §§3.1 and 5.4 give requirements, replaceable defaults, inherited identity resolution, qualified bindings, optional `<this T>`, `.via<I>` selection and exact `is` identity constraints. | Complete checking diagnostics and metadata. |
 | Partial declarations | §5.12 defines one-identity merge, complete-signature agreement, primary-owned defaults/contracts and required body provision; §3.1 requires resolved attribute schemas/multiplicity. | Concrete attribute catalogs/encoding and any explicitly permissioned future API-absence mechanism. |
 | Core primitive declarations | §2 preserves reserved primitive identities with a privileged backing field. | Artifact identity, permitted members and separate-compilation enforcement. |
-| Fields | §3.1 gives fixed/mutable storage, qualified referent access, caller-unsafe direct access and static foreign-data bindings without Terrum initializers. | Ordinary static initialization/lifetime, concrete external-data schemas/target mappings and applicable layout/attribute contracts. |
-| Constructors | §§3.1 and 5.10 give `ensure P is init` minimum guarantees and repeatable unpublished init-property writes. | Completion validation hooks, value/effect compatibility and metadata encoding. |
-| Properties | §§3.1, 5.10 and 5.12 give instance/static named properties, instance-only indexers, synchronous accessor-local receiver/safety/access contracts and sole-primary partial implementation without primary backing storage. | Implicit storage initialization, static init-accessor applicability, ref-result contracts and metadata; external accessor binding needs a separate interop design. |
+| Fields | §3.1 gives storage/referent authority, caller-unsafe access, foreign-data bindings, load-scoped static groups and lazy fields with explicit sharing, checked initialization and recovery rules. | Concrete sharing/policy/recovery schemas, unload machinery, external-data mappings and layout/metadata contracts. |
+| Constructors | §§3.1 and 5.10 give instance completion guarantees, repeatable unpublished init writes, static constructor policy/partial ownership and field/constructor/caller/final-validation ordering. | Completion-validation registration, value/effect compatibility and metadata encoding. |
+| Properties | §§3.1, 5.10 and 5.12 give instance/static named properties, instance-only indexers, accessor-local contracts and static init authority limited to unpublished group initialization. | Ref-result contracts and metadata; external accessor binding needs a separate interop design. |
 | Operators | §§3.1, 5.7 and 5.13 give static explicit operands, eligible implicit-reference inputs, ordinary visibility, synchronous caller-safety, partial primary ownership and distinct void compound operations. | Complete applicability and witness/metadata encoding; external binding needs a separate interop design. |
 | Conversions | §§3.1 and 5.13 give static by-value/implicit-reference logical inputs, synchronous caller-safety, partial primary ownership, destination-first `T(value)` and `.via<Owner>` selection, distinct from `new T(...)`. | Complete eligible conversion catalogs and binding/metadata diagnostics; external binding needs a separate interop design. |
 | Interface members | §§3.1, 5.4 and 5.12 give explicit qualified implementations, shared implicit implementations and restricted current-receiver default-body bypass. | Complete inherited-default resolution and representation; constructors have no production here. |

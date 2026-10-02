@@ -129,6 +129,35 @@ and its reader/binding rules must be specified before such artifacts can
 claim support; readers must not silently lower the permissions to existing
 visibility or infer them from filenames.
 
+## Static initialization and load scope: encoding pending
+
+The [source static-storage contract](grammar-spec.md#static-initialization-and-load-scoped-storage)
+requires semantic records beyond the current `(1, 0)` design. Existing
+FieldDef, MethodDef and PropertyDef flags do not encode static storage,
+initialization units, constructor trigger policy or lazy state. Source
+approval assigns no additional bits, table kinds, operation tags or revision.
+
+A future encoding must identify owning closed types and load scopes, ordinary
+group members and separately lazy fields, ordered initializer operations, the
+sole authored constructor policy/contract and its implementation. It preserves
+compiler-input/source execution order rather than reconstructing it from
+packed row numbers, filename sorting or primary-part priority. Linking and
+generic substitution preserve exact owning identities and dependencies.
+
+Published records also carry explicit sharing/access and initialization-phase
+authority, trigger effects, completion guarantees, failure/recovery policy,
+ownership, roots, cleanup and unload dependencies. Runtime waiting/publication
+state is distinct from those producer contracts. Unsafe retry or suppression
+is not a byte flag granting safe initialized-state facts. An effect-bounded
+consumer cannot ignore a producer's initialization obligations merely because
+the requested member is a scalar field or an otherwise simple static method.
+
+Unknown required initialization, sharing or lifetime semantics reject before
+binding/execution; readers must not reinterpret these declarations as ordinary
+instance fields/methods, silently skip policy attributes, or substitute the
+host's static-constructor timing and unload behavior. Concrete schemas and
+runtime state/ABI remain separate specification work.
+
 ## Format identity and revision scope
 
 `TRRM` is the format identifier, with ASCII signature bytes `54 52 52 4D`.
@@ -1095,6 +1124,7 @@ following byte-level contracts:
 |---|---|
 | Encoding and revisions | Future version/feature policy and reader compatibility rules. The approved current `(1, 0)` design accepts only its registered semantic forms but is not a released schema. |
 | Declarations | Resource references, generic/witness exportability, further type/field/layout flags, richer qualifier/contract clauses and their validation. Module identity and export-key equality are specified; assigning a stable key to a source declaration is a writer policy. |
+| Static storage | Loaded closed-type groups/lazy units, ordered initialization, constructor policy/primary ownership, initialization effects, sharing/phase authority, failure/recovery and cleanup/unload records. No current `(1, 0)` row or flag supplies this encoding. |
 | Executable bodies | Beyond the [narrow executable subset and other assigned decode shapes](il-instruction-set.md#executable-subset-versus-assigned-decode-shapes): output places, exceptional handlers/cleanup, loans, roots, witness bindings and their precise verifier rules. |
 | Limits | Per-record and per-artifact sizes, nesting and work budgets, allocation limits and canonical encoding requirements. |
 | Unknown data | Kind-specific extension schemas, reserved values and feature negotiation; generic skip, remap and discard policies are assigned above. |

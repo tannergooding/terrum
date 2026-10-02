@@ -8,7 +8,7 @@
 > to choose new semantics on the user's behalf.
 
 This is a decision inventory, not a compiler backlog. Stable question numbers
-are retained; gaps in the pending queue are intentional. Forty parent IDs
+are retained; gaps in the pending queue are intentional. Forty-one parent IDs
 have only [canonical link redirects](#resolved-question-link-redirects) at
 the end of this document, so old review links remain usable without mixing
 their rules into the questions below.
@@ -25,105 +25,16 @@ C# comparisons are illustrative fragments, with ordinary namespace imports
 omitted. Placeholder APIs/types are identified where relevant; these are not
 claims that the snippets were compiled or that Terrum adopts their contracts.
 
-There are **3 pending numbered groups**. Q03 and all seven punctuation
+There are **2 pending numbered groups**. Q03 and all seven punctuation
 subquestions have canonical redirects, not pending votes. Partially resolved
 groups ask only about their remaining choice; settled context is linked or
 labeled, not another vote.
 
 | Pending area | Stable IDs |
 |---|---|
-| Declaration applicability and modifier order | Q06 |
 | Other source forms and contracts | Q28, Q32.1 |
 
-## Lexical and declaration choices
-
-<a id="q06-visibility-and-modifier-applicability"></a>
-
-### Q06. Visibility, modifier applicability and ordering
-
-**Settled context:** The
-[official declaration contract](../grammar-spec.md#31-source-file-structure-and-declarations)
-now defines explicit primary visibility, mandatory role-specific ordering,
-primary/secondary partial ownership and schema-governed secondary attributes.
-Class/struct kind modifiers, static-class containers, explicit struct/class
-union storage, bare enum/interface kinds and callable prefix order are settled.
-`extern` is primary-only, complete through its external binding, and cannot
-combine with callable `partial` or `async`. Internal interface requirements
-restrict new conformances to the defining module while a public interface
-remains usable by consumers and in constraints. Private interface members are
-complete helpers, never conformance requirements. Constructors use attributes,
-visibility, optional `unsafe`, then optional `partial`, with implicit
-initialization-phase write authority and sole-primary completion guarantees.
-They exclude `static`, `extern`, `mut` and `async`; no static type initializer
-is selected. External callable bindings apply only to top-level functions
-and static methods. Fields order optional `static`, `extern`, storage `mut`
-and caller-`unsafe` after visibility; `write` remains part of their type.
-Static extern fields bind compatible foreign data without Terrum initializers;
-read-only imports do not promise immutable foreign storage. Field safety
-applies to all direct accesses. Properties have synchronous accessor-local
-safety and inherited-or-narrowed visibility. Partial property/indexer primaries
-own their accessor contracts without allocating backing storage. Static named
-properties are permitted, but indexers remain instance-only.
-Operators/conversions use ordinary visibility and explicit static operands,
-with optional caller-`unsafe` and `partial`, not receiver `mut` or `async`.
-Operator operands and conversion inputs may use `implicit ref<T>` under the
-existing borrow and ranking rules. Associated type/constant declarations and
-bindings use attributes/visibility only; an enclosing partial declaration can
-contribute a complete binding.
-Strict `file` access covers namespace declarations, members and accessors in
-one compiler source unit, not all declaring-type partial parts or equal paths.
-`friend<F, G>` is private access plus those same-module types' own code, not
-module friendship or a transitive grant. Exact generic matching and explicit
-one-slot `_` wildcards are selected; `var` filters/captures/guards are not.
-Same-named file-local definitions in different units have distinct semantic
-scope identities and definition references; same-scope collisions diagnose.
-File/friend interface requirements preserve the corresponding conformance
-authority and effective-access boundaries. These are not additional votes or
-implementation claims.
-
-**Remaining questions:**
-
-- Ordinary static-field initialization/lifetime and static init-accessor
-  applicability still need explicit contracts; static storage does not imply
-  a C# type initializer. Concrete external-data schemas and target mappings
-  remain specification work.
-
-File/friend metadata needs a complete required encoding, separate from
-optional diagnostic SourceFile paths. Its target identities/access
-requirements are selected; table/bit assignments, compatibility and
-representation are specification work, not another visibility vote.
-
-Extern property/accessor and operator/conversion forms are deferred until a
-concrete interop need
-and complete design; Objective-C or another interop model is not imported by
-analogy. This is not an additional pending vote or permission to bind an
-member externally.
-
-**C# model:** C#'s preferred callable modifier order is familiar, but Terrum
-requires ordering and primary visibility, keeps compound type forms together,
-and gives one partial primary ownership of the contract. Do not import
-`protected`, friend assemblies, stateful class inheritance or top-level-private
-rules. C#'s partial attribute merge alone does not supply Terrum's checked
-secondary placement restrictions.
-
-**C# comparison:**
-
-```csharp
-static public class Utility
-{
-    public static int Read() => 1;
-}
-file class GeneratedHelper { }
-class Counter
-{
-    public int Count { get => field; set => field = value; }
-}
-```
-
-C# accepts modifier order such as `static public`; `file` restricts a
-top-level type to one source file, and `field` is contextual property backing
-syntax in C# 14. These are comparisons, not permission to infer
-Terrum's member file/friend domains from C#'s top-level file-type rule.
+## Other source forms and contracts
 
 ### Q28. Complete pattern and type-test forms
 
@@ -377,11 +288,11 @@ not implicitly import C#'s `System.Exception` hierarchy.
 
 | Category | Treatment |
 |---|---|
-| Already settled | Raw quote fences/framing/newline directives/brace splitting; interpolation format alternatives and capture order; grouped callable/lambda clauses and contextual `return`; aliases' transparent export; optional `<this T>`; `.via<I>` and restricted default-body calls; parameter-directed result dependency annotations; vacant backing and explicit getter-only property initialization; constructor minimum guarantees; repeated unpublished init; params/default/named-argument order; tuples/constant indexing; optional/coalescing forms; switch transfers; eager async versus lazy `[Iterator]`; awaited structured close. Do not ask these again. |
-| Explicitly deferred | Nominal `&&`/`||` derivation until a concrete need and complete protocol; declaration `static require`/`static ensure`; entry snapshots/history; nested nominal types; interface constructors; source type packs and zero/one-arity tuple extensions; collection comprehensions/repetition pending deeper library/tensor design. They are not pending votes in this inventory. |
+| Already settled | Raw quote fences/framing/newline directives/brace splitting; interpolation format alternatives and capture order; grouped callable/lambda clauses and contextual `return`; aliases' transparent export; optional `<this T>`; `.via<I>` and restricted default-body calls; parameter-directed result dependency annotations; vacant backing and getter-only property initialization; constructor minimum guarantees and independent final completion validation; repeated unpublished init; load-scoped static groups/lazy fields, explicit constructor policy, deterministic field order, explicit sharing even for reads and phase-bound static init accessors; params/default/named-argument order; tuples/constant indexing; optional/coalescing forms; switch transfers; eager async versus lazy `[Iterator]`; awaited structured close. Do not ask these again. |
+| Explicitly deferred | Nominal `&&`/`||` derivation until a concrete need and complete protocol; extern accessor/operator/conversion forms until a concrete interop need and design; declaration `static require`/`static ensure`; entry snapshots/history; nested nominal types; interface constructors; source type packs and zero/one-arity tuple extensions; collection comprehensions/repetition pending deeper library/tensor design. They are not pending votes in this inventory. |
 | Implementation work | Parser/binder/verifier/native lowering, compiler-component parity, lossless recovery and diagnostics, regression fixtures and support-version migration. Approval does not claim any of these are complete. |
-| Metadata/ABI work | Wire rows, witness/capture representation, dispatch tables, compatibility encoding, exception transport, public tuple/callable ABI, layouts and resource limits. These must carry chosen source contracts, not choose them. Existing reserved fields remain generically reserved. |
-| Library API work | Iterator/awaiter/close operation identities, scheduler/executor/cancellation APIs, task ownership surfaces, text/collection handler registration APIs, primitive comparer names, allocator and tensor APIs. Review in the [core-library proposal](core-library-reference.md), with source dependencies above where needed. |
+| Metadata/ABI work | Wire rows, mandatory file/friend scope/access/provenance/grants, static group/lazy/policy/phase/sharing and unload contracts, witness/capture representation, dispatch tables, compatibility encoding, exception transport, public tuple/callable ABI, layouts and resource limits. These must carry chosen source contracts, not choose them. Existing reserved fields remain generically reserved. |
+| Library API work | Static initialization-policy schemas, checked sharing and unsafe retry/suppression operations, external-data mappings, completion-validation registration, iterator/awaiter/close identities, scheduler/executor/cancellation APIs, task ownership surfaces, text/collection handler registration, primitive comparer names, allocator and tensor APIs. Review in the [core-library proposal](core-library-reference.md), with source dependencies above where needed. |
 | Proof/tooling work | Exact portable proof rules/budgets remain in the [proof proposal](static-proof-and-constant-evaluation.md). XML schema/member IDs, package layout and optional documentation tests follow the approved attachment/reference decisions; they are not extra language features. |
 
 ## Resolved question link redirects
@@ -440,6 +351,15 @@ Resolved; see the [official grammar](../grammar-spec.md#2-lexical-notation).
 ### Q05. Namespace nesting and local imports
 
 Resolved; see the [official grammar](../grammar-spec.md#31-source-file-structure-and-declarations).
+
+<a id="q06-visibility-and-modifier-applicability"></a>
+
+### Q06. Visibility, modifier applicability and ordering
+
+Resolved; see [declaration contracts](../grammar-spec.md#31-source-file-structure-and-declarations)
+and [static initialization and load-scoped storage](../grammar-spec.md#static-initialization-and-load-scoped-storage).
+Concrete semantic schemas, recovery APIs and wire/runtime machinery remain
+separate specification and implementation work, not additional source votes.
 
 ### Q07. Attribute arguments and multiplicity
 
