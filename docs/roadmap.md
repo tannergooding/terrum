@@ -41,7 +41,9 @@ parameter modes, explicit destinations and `out var` call destinations.
 Projection v78 adds the existing scalar `init ref<T>` mode and matching
 `init`/`init var` destinations to complete snapshots. Hosted
 definite-publication verification remains authoritative; general
-`init ref<T>` migration and bootstrap compilation remain pending.
+`init ref<T>` migration and bootstrap compilation remain pending. Single-
+function projection v79 adds the same existing scalar mode to the bounded
+self-call frontend without changing earlier layouts.
 
 ## Planned work (priority order)
 
@@ -156,6 +158,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `d919c6a` | Native scalar `init ref<T>` parameters and recursive self-call destinations, single-function projection 79 |
 | `40664fb` | Native scalar `init ref<T>` parameter modes and call destinations in multi-function snapshots, projection 78 |
 | `e0cf111` | Native scalar `out` parameter modes and call destinations in multi-function snapshots, projection 77 |
 | `4c17397` | Native scalar multi-function snapshots with `[DoesNotReturn]` contracts and call continuation, projection 76 |
