@@ -133,8 +133,8 @@ The current scanner is version 8/schema 8; it appends diagnostic kinds 11/12
 for invalid/unsupported maximal punctuation runs to the prior diagnostic
 catalog. Earlier raw records remain readable where compatible, while current
 snapshot adapters reject forged framing, invalid escapes and conflicting
-classification. The bounded scalar frontend's projections through v59 share a 392-word buffer
-and enforce the documented limits: 16,384 UTF-16 source units, 64 tokens,
+classification. The bounded scalar frontend's projections through v60 share a
+392-word buffer and enforce the documented limits: 16,384 UTF-16 source units, 64 tokens,
 eight total local identities including hidden discards, 12 statement records,
 32 expression nodes, three parameters, 16 expression-recursion levels, six
 structural levels and a shared 100,000-visit budget. Source-bound audits
@@ -729,6 +729,17 @@ including the shared 100,000-visit verification budget. General attributes,
 calls, richer types and ownership/cleanup remain excluded. This adds no
 grammar, scanner, semantic/ISA/Contract/TRRM/native format or ABI contract;
 same-line loop-label enforcement is checked separately by the current parser.
+
+Provisional projection v60 adds `name = _;` for a visible named scalar local.
+Statement kind 24 stores the local slot, root `-1`, and span through the
+semicolon (or excludes the delimiter in a `for` clause). The source parser and
+independent reader reject parameters, unknown/inactive names and non-local
+targets. The hosted semantic verifier remains responsible for definite
+liveness and existing cleanup and reinitialization authority; ending a mutable
+local does not grant immutable locals new assignment authority. The projection
+reuses `BoundLifetimeEnd`, the shared verified emitter and both runtime
+policies. It adds no vacant-local syntax, native ABI/profile or persisted
+semantic format.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

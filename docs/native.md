@@ -138,7 +138,7 @@ defined-but-unsupported maximal runs; see the
 [scanner contract](scanner.md) for spans and record compatibility. Hosted
 role-specific punctuation rules are in the
 [implementation reference](implementation.md). The bounded frontend accepts
-projection versions 1–59 with their declared shapes in a 392-word buffer and
+projection versions 1–60 with their declared shapes in a 392-word buffer and
 fixed source/token/local/statement/node/parameter/depth/work limits. Independent
 source audits check current syntax for compatible older shapes. Scanner,
 projection, semantic and native-profile versions are separate compatibility
@@ -296,6 +296,16 @@ exports retain the existing primitive-parameter ABI. Versions 1–58 keep their
 restrictions, all resource limits remain, and general attributes/calls are not
 added. The [implementation reference](implementation.md) specifies header
 bits and body shapes; source-free indexed TRRM is unchanged.
+
+Projection v60 adds explicit lifetime ending for a visible named scalar local.
+Kind 24 stores the local slot, root `-1`, and source span through the
+semicolon; a `for` clause omits its delimiter as usual. The independent
+source-bound reader rejects parameters, unknown or inactive names and
+non-local targets. Shared semantic verification still enforces definite
+liveness and hosted cleanup/reinitialization rules; mutable locals retain
+their existing reassignment authority. Version 60 composes with v59 effects.
+Earlier projection layouts and gates remain unchanged; no ABI or native
+profile operation is added.
 
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.

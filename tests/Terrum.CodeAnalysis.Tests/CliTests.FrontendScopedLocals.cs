@@ -77,6 +77,56 @@ public sealed partial class CliTests
     }
 
     [Theory]
+    [InlineData("int32 Main() { int32 value = 1; value = _; return 42; }", 42)]
+    [InlineData("int32 Main() { mut int32 value = 1; value = _; value = 42; return value; }", 42)]
+    [InlineData("int32 Main() { if (true) { int32 value = 1; value = _; } return 42; }", 42)]
+    [InlineData("[NoThrow] int32 Main() { int32 value = 1; value = _; return 42; }", 42)]
+    [InlineData("int32 Main() { for (int32 value = 1; false; value = _) { } return 42; }", 42)]
+    [InlineData("void Main() { int32 value = 1; value = _; }", 0)]
+    public async Task LifetimeEndProjectionMatchesHostedExecutionAsync(string source, int expected)
+    {
+        var root = RepositoryRoot();
+        var frontend = Path.Combine(root, "self-host");
+        var nativePath = Path.Combine(root, $"lifetime-end-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = Path.Combine(root, $"lifetime-end-{Guid.NewGuid():N}.hosted.exe");
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var input = Encoding.UTF8.GetBytes(source);
+                var (componentExit, componentOutput, componentError) = await RunAsync(input,
+                    "frontend-component", frontend, "-", "--runtime", policy, "--json");
+                Assert.True(componentExit == 0,
+                    $"{policy}: {componentExit}: {componentOutput}{componentError}");
+                using var document = JsonDocument.Parse(componentOutput);
+                Assert.Equal(60, document.RootElement.GetProperty("result")
+                    .GetProperty("projectionVersion").GetInt32());
+
+                var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
+                    "frontend-build", frontend, "-", "-o", nativePath, "--runtime", policy, "--json");
+                var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
+                    "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
+                Assert.True(nativeExit == 0, $"{policy}: {nativeOutput}{nativeError}");
+                Assert.True(hostedExit == 0, $"{policy}: {hostedOutput}{hostedError}");
+                Assert.Equal(await File.ReadAllBytesAsync(hostedPath), await File.ReadAllBytesAsync(nativePath));
+                Assert.Equal(expected, await ExecuteNativeImageAsync(nativePath));
+
+                var (runExit, runOutput, runError) = await RunAsync(input,
+                    "frontend-run", frontend, "-", "--runtime", policy, "--json");
+                var (jitExit, jitOutput, jitError) = await RunAsync(input,
+                    "jit", "-", "--runtime", policy, "--json");
+                Assert.True(runExit == expected, $"{policy}: {runExit}: {runOutput}{runError}");
+                Assert.Equal(jitExit, runExit);
+            }
+        }
+        finally
+        {
+            File.Delete(nativePath);
+            File.Delete(hostedPath);
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Main() { if (true) { int32 x = 1 / 0; return x; } return 42; }", unchecked((int)0xE0540002))]
     [InlineData("int32 Main() { while (true) { mut int32 x = 2147483647; x++; break; } return 42; }", unchecked((int)0xE0540001))]
     public async Task ScopedLocalsPreserveCheckedFailureStatusAsync(string source, int expected)
@@ -118,6 +168,10 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { if (true) { int32 x = 1; x++; } return 42; }")]
     [InlineData("int32 Main() { int32 x = 1; if (true) { int32 x = 2; } return x; }")]
     [InlineData("int32 Main(int32 x) { if (true) { int32 x = 2; } return x; }")]
+    [InlineData("int32 Main(int32 value) { value = _; return 42; }")]
+    [InlineData("int32 Main() { int32 value = 1; value = _; return value; }")]
+    [InlineData("int32 Main() { int32 value = 1; value = _; value = 42; return value; }")]
+    [InlineData("int32 Main() { if (true) { int32 value = 1; } value = _; return 42; }")]
     [InlineData("int32 Main() { if (true) { int32 x = 1; } while (false) { return x; } return 42; }")]
     [InlineData("int32 Main() { if (true) { int32 x = 1; } else { int32 y = x; } return 42; }")]
     [InlineData("int32 Main() { if (true) { int32 int32 = 1; return int32(uint64(42)); } return 0; }")]

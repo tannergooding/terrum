@@ -18,8 +18,8 @@ approved.
   built-in type word and compact-profile follow-up, separate from the
   approved `(1, 0)` designs.
 - [Self-host frontend verification budget](self-host-frontend-verification-budget.md)
-  records an unapproved implementation-architecture recommendation for growing
-  the authored scalar frontend without changing its shared verification limit.
+  records a deferred, unapproved architecture option if memoization no longer
+  suffices to grow the authored scalar frontend within its shared limit.
 
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,

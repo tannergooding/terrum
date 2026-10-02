@@ -1511,6 +1511,33 @@ mut class ScalarFrontendState
             return ParseTreeDiscard(first);
         }
         if (first.Kind == 2
+            && _tokens.TryGet(_at + 1, out var lifetimeEquals)
+            && lifetimeEquals.Kind == 64
+            && _tokens.TryGet(_at + 2, out var lifetimeValue)
+            && lifetimeValue.Kind == 81)
+        {
+            if (!TryResolveParameter(first, out var slot, out var lifetimeType))
+            {
+                return false;
+            }
+            if (slot <= _parameterCount)
+            {
+                FailAt(2, first.Range);
+                return false;
+            }
+            if (lifetimeType < 1 || lifetimeType > 6)
+            {
+                FailAt(2, first.Range);
+                return false;
+            }
+            _at = _at + 3;
+            if (semicolon && !Take(52, out var end))
+            {
+                return false;
+            }
+            return AddTreeStatement(24, slot, -1, first.Range.Start, TreeStatementEnd());
+        }
+        if (first.Kind == 2
             && _tokens.TryGet(_at + 1, out var equals)
             && (equals.Kind == 64 || equals.Kind >= 91 && equals.Kind <= 101))
         {

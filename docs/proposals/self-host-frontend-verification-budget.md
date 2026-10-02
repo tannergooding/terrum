@@ -1,42 +1,38 @@
 # Self-host frontend verification-budget proposal
 
-**Status: unapproved implementation architecture.** This does not change
-language semantics, the accepted source grammar, projection version 59,
-native ABI, or the shared 100,000-visit verification limit.
+**Status: unapproved, deferred architecture option.** The scalar frontend
+currently compiles with projection v60 under the unchanged shared
+100,000-visit verification limit. This proposal does not change language
+semantics, the accepted source grammar, native ABI, or verification budget.
 
-## Summary
+## Evidence
 
-The frontend CLI compiles and verifies the scalar parser, projection publisher,
-and their scanner dependencies in one compilation. A mechanical addition to
-parse and project the hosted `name = _;` lifetime-ending statement caused
-compilation of that component to fail with `TRM3016`
-(`Source exceeds the semantic verification work limit`).
-The error is raised while verifying the component's own Terrum source, before
-the new projection can be used. A shorter parser formulation still exceeded
-the same fixed budget.
+An initial mechanical attempt to add hosted `name = _;` lifetime ending to
+the authored scalar frontend failed with `TRM3016` while verifying the
+frontend's own Terrum source. The hot path included repeated recursive
+`CanBe` feasibility proofs over Boolean expressions while flow analysis
+cloned initialization states.
 
-Moving methods into additional source files would not split that verification
-unit. The attempted feature and projection changes were removed; projection
-version 59 and the existing source-support boundary remain unchanged.
+The verifier now memoizes both feasibility outcomes by bound-expression
+identity within one function's verification. The cache is shared by flow
+state clones; recursive cache hits still consume a visit, so the limit and
+budget accounting remain unchanged. With this change, projection v60 and its
+source-bound reader compile, and the frontend builds and executes the lifetime
+ending port under both runtime policies. No visit-count telemetry or
+before/after timing benchmark has been collected, so the evidence establishes
+budget feasibility for this workload, not a general speedup magnitude.
 
-## Decision
+## Deferred option
 
-How should authored scalar-frontend implementation grow while preserving the
-current shared verification limit and all existing component behavior?
+Do not split the frontend or add an internal phase handoff for the current
+budget issue; the cache removes the observed blocker without a new component
+boundary. If future aligned frontend growth again reaches `TRM3016` after
+hot-path identification and behavior-preserving repeated-work reductions,
+consider partitioning independently verified bounded components while
+retaining the existing limit per verification. Moving methods between files
+alone would not split a compilation/verification unit.
 
-## Recommendation
-
-Partition the frontend across independently verified phase components using
-an explicit, bounded internal handoff record, retaining the existing
-100,000-visit limit for each verification. Choose a boundary that removes
-unrelated frontend bodies from the scalar component's verification unit
-without changing its accepted inputs or published facts. Do not raise the
-global limit or remove existing candidate support to make room for a new
-feature. Keep hosted verification/emission dependencies explicit; this
-partition would not make the scalar frontend a standalone compiler.
-
-Before implementation, validate that existing fixtures preserve the same
-source diagnostics, projection facts, AOT/JIT output and runtime-policy
-behavior across the component boundary. The handoff is an implementation
-detail of these hosted-verified components, not a new language-level
+Any future partition must preserve existing source diagnostics, projection
+facts, AOT/JIT output and runtime-policy behavior. Its handoff would remain an
+implementation detail of the hosted-verified components, not a language-level
 separate-compilation or module-ABI contract.

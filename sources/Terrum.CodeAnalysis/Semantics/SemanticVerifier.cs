@@ -1869,8 +1869,8 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                var thenReachable = CanBe(conditional.Condition, true, ref remaining);
-                var elseReachable = CanBe(conditional.Condition, false, ref remaining);
+                var thenReachable = CanBe(conditional.Condition, true, ref remaining, initialized);
+                var elseReachable = CanBe(conditional.Condition, false, ref remaining, initialized);
                 var thenState = Outcome(conditional.Condition, beforeCondition, true, ref remaining);
                 var thenMasks = (uint[])fieldMasks.Clone();
                 MarkOutMasks(thenState, thenMasks, function, program);
@@ -1922,8 +1922,8 @@ public static class SemanticVerifier
                         : Outcome(loop.Condition, conditionInput, true, ref remaining);
                     var bodyMasks = (uint[])conditionMasks.Clone();
                     MarkOutMasks(bodyState, bodyMasks, function, program);
-                    var bodyReachable = loop.IsPostTested || CanBe(loop.Condition, true, ref remaining);
-                    var exitReachable = CanBe(loop.Condition, false, ref remaining);
+                    var bodyReachable = loop.IsPostTested || CanBe(loop.Condition, true, ref remaining, initialized);
+                    var exitReachable = CanBe(loop.Condition, false, ref remaining, initialized);
                     var iteratorDeclarations = new HashSet<int>(iterationDeclarations);
                     var loopScope = new LoopScope(cleanups.Count);
                     loops.Add(loopScope);
@@ -1993,7 +1993,7 @@ public static class SemanticVerifier
                         exitMasks = evaluatedMasks;
                         backEdges = new FailureEdges();
                         if (bodyReachable && (loopScope.Continues.HasEdges || !bodyReturns)
-                            && CanBe(loop.Condition, true, ref remaining))
+                            && CanBe(loop.Condition, true, ref remaining, initialized))
                         {
                             backEdges.Add(trueState, trueMasks);
                         }
@@ -2147,11 +2147,11 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                if (function.IsNoThrow && CanBe(requirement.Condition, false, ref remaining))
+                if (function.IsNoThrow && CanBe(requirement.Condition, false, ref remaining, initialized))
                 {
                     throw InvalidEffect(requirement.Span);
                 }
-                if (CanBe(requirement.Condition, false, ref remaining))
+                if (CanBe(requirement.Condition, false, ref remaining, initialized))
                 {
                     var rejected = Outcome(requirement.Condition, beforeRequirement, false, ref remaining);
                     var rejectedMasks = (uint[])fieldMasks.Clone();
@@ -2161,7 +2161,7 @@ public static class SemanticVerifier
                 var accepted = Outcome(requirement.Condition, beforeRequirement, true, ref remaining);
                 accepted.CopyTo(initialized);
                 MarkOutMasks(initialized, fieldMasks, function, program);
-                return !CanBe(requirement.Condition, true, ref remaining);
+                return !CanBe(requirement.Condition, true, ref remaining, initialized);
             case BoundReturn result:
                 if (inCleanup)
                 {
@@ -2211,7 +2211,7 @@ public static class SemanticVerifier
                 {
                     foreach (var predicate in new[] { true, false })
                     {
-                        if (!CanBe(boolResult, predicate, ref remaining))
+                        if (!CanBe(boolResult, predicate, ref remaining, initialized))
                         {
                             continue;
                         }
@@ -2401,7 +2401,7 @@ public static class SemanticVerifier
         var checkMasks = outputTransfer ? (uint[])fieldMasks.Clone() : fieldMasks;
         if (Statement(cleanup, checkState, checkMasks, declarations, function with { IsNoThrow = true },
             program, ref remaining, depth, reachable, inCleanup: true, inUnsafe: inUnsafe)
-            || HasUnsupportedCleanupFlow(cleanup, program, ref remaining, depth))
+            || HasUnsupportedCleanupFlow(cleanup, program, ref remaining, depth, checkState.CanBeFacts))
         {
             throw InvalidEffect(cleanup.Span, "FinallyNoReturn");
         }
@@ -2416,7 +2416,8 @@ public static class SemanticVerifier
         internal FailureEdges Continues { get; } = new();
     }
 
-    private static bool HasUnsupportedCleanupFlow(BoundStatement statement, BoundProgram program, ref int remaining, int depth)
+    private static bool HasUnsupportedCleanupFlow(BoundStatement statement, BoundProgram program,
+        ref int remaining, int depth, Dictionary<BoundExpression, byte> canBeFacts)
     {
         Count(ref remaining, depth);
         switch (statement)
@@ -2424,7 +2425,7 @@ public static class SemanticVerifier
             case BoundBlock block:
                 foreach (var child in block.Statements)
                 {
-                    if (HasUnsupportedCleanupFlow(child, program, ref remaining, depth + 1))
+                    if (HasUnsupportedCleanupFlow(child, program, ref remaining, depth + 1, canBeFacts))
                     {
                         return true;
                     }
@@ -2433,23 +2434,24 @@ public static class SemanticVerifier
             case BoundExpressionStatement { Expression: BoundCall call }:
                 return program.Functions[call.Function].DoesNotReturn;
             case BoundIf conditional:
-                return (CanBe(conditional.Condition, true, ref remaining)
-                    && HasUnsupportedCleanupFlow(conditional.Then, program, ref remaining, depth + 1))
-                    || (conditional.Else is not null && CanBe(conditional.Condition, false, ref remaining)
-                        && HasUnsupportedCleanupFlow(conditional.Else, program, ref remaining, depth + 1));
+                return (CanBe(conditional.Condition, true, ref remaining, canBeFacts)
+                    && HasUnsupportedCleanupFlow(conditional.Then, program, ref remaining, depth + 1, canBeFacts))
+                    || (conditional.Else is not null
+                        && CanBe(conditional.Condition, false, ref remaining, canBeFacts)
+                        && HasUnsupportedCleanupFlow(conditional.Else, program, ref remaining, depth + 1, canBeFacts));
             case BoundWhile loop:
-                return (loop.IsPostTested || CanBe(loop.Condition, true, ref remaining))
+                return (loop.IsPostTested || CanBe(loop.Condition, true, ref remaining, canBeFacts))
                     && loop is not {
                         Condition: BoundConstant { Type: PrimitiveType.Bool, Value: 1 },
                         Body: BoundBlock { Statements: [BoundBreak] },
                     };
             case BoundTryFinally nested:
-                return HasUnsupportedCleanupFlow(nested.Body, program, ref remaining, depth + 1)
-                    || HasUnsupportedCleanupFlow(nested.Finally, program, ref remaining, depth + 1);
+                return HasUnsupportedCleanupFlow(nested.Body, program, ref remaining, depth + 1, canBeFacts)
+                    || HasUnsupportedCleanupFlow(nested.Finally, program, ref remaining, depth + 1, canBeFacts);
             case BoundViewScope view:
-                return HasUnsupportedCleanupFlow(view.Body, program, ref remaining, depth + 1);
+                return HasUnsupportedCleanupFlow(view.Body, program, ref remaining, depth + 1, canBeFacts);
             case BoundUnsafe unsafeBlock:
-                return HasUnsupportedCleanupFlow(unsafeBlock.Body, program, ref remaining, depth + 1);
+                return HasUnsupportedCleanupFlow(unsafeBlock.Body, program, ref remaining, depth + 1, canBeFacts);
             default:
                 return false;
         }
@@ -2461,15 +2463,23 @@ public static class SemanticVerifier
         // vacancy (4). Retiring an immutable value cannot authorize another init
         // call, but an inline output may still retry before its first publication.
         private readonly byte[] _possibilities;
+        private readonly Dictionary<BoundExpression, byte> _canBeFacts;
         internal Dictionary<BoundStatement, InitializationState>? StatementInputs { get; init; }
 
         internal InitializationState(int length)
+            : this(length, new Dictionary<BoundExpression, byte>(ReferenceEqualityComparer.Instance))
+        {
+        }
+
+        private InitializationState(int length, Dictionary<BoundExpression, byte> canBeFacts)
         {
             _possibilities = new byte[length];
+            _canBeFacts = canBeFacts;
             Array.Fill(_possibilities, (byte)1);
         }
 
         internal int Length => _possibilities.Length;
+        internal Dictionary<BoundExpression, byte> CanBeFacts => _canBeFacts;
 
         internal void Fill(bool value, int start, int count) =>
             Array.Fill(_possibilities, value ? (byte)2 : (byte)1, start, count);
@@ -2503,7 +2513,7 @@ public static class SemanticVerifier
 
         internal InitializationState Clone()
         {
-            var result = new InitializationState(Length) { StatementInputs = StatementInputs };
+            var result = new InitializationState(Length, _canBeFacts) { StatementInputs = StatementInputs };
             CopyTo(result);
             return result;
         }
@@ -3044,12 +3054,12 @@ public static class SemanticVerifier
                     var rightMasks = (uint[])fieldMasks.Clone();
                     MarkOutMasks(rightState, rightMasks, function, program);
                     Expression(binary.Right, rightState, rightMasks, declarations, function, program, ref remaining, depth + 1,
-                        CanBe(binary.Left, evaluateWhenTrue, ref remaining) ? failures : null);
+                        CanBe(binary.Left, evaluateWhenTrue, ref remaining, initialized) ? failures : null);
                     var skippedState = Outcome(binary.Left, beforeLeft, !evaluateWhenTrue, ref remaining);
                     var skippedMasks = (uint[])fieldMasks.Clone();
                     MarkOutMasks(skippedState, skippedMasks, function, program);
-                    var evaluates = CanBe(binary.Left, evaluateWhenTrue, ref remaining);
-                    var skips = CanBe(binary.Left, !evaluateWhenTrue, ref remaining);
+                    var evaluates = CanBe(binary.Left, evaluateWhenTrue, ref remaining, initialized);
+                    var skips = CanBe(binary.Left, !evaluateWhenTrue, ref remaining, initialized);
                     for (var i = 0; i < initialized.Length; i++)
                     {
                         initialized.SetPossibilities(i, !evaluates ? skippedState.Possibilities(i)
@@ -3113,8 +3123,8 @@ public static class SemanticVerifier
                 var beforeCondition = initialized.Clone();
                 Expression(conditional.Condition, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
-                var trueFeasible = CanBe(conditional.Condition, true, ref remaining);
-                var falseFeasible = CanBe(conditional.Condition, false, ref remaining);
+                var trueFeasible = CanBe(conditional.Condition, true, ref remaining, initialized);
+                var falseFeasible = CanBe(conditional.Condition, false, ref remaining, initialized);
                 var trueState = Outcome(conditional.Condition, beforeCondition, true, ref remaining);
                 var falseState = Outcome(conditional.Condition, beforeCondition, false, ref remaining);
                 var trueMasks = (uint[])fieldMasks.Clone();
@@ -3526,8 +3536,9 @@ public static class SemanticVerifier
             }
             var firstFalse = Outcome(and.Left, initialized, false, ref remaining);
             var rightFalse = Outcome(and.Right, leftTrue, false, ref remaining);
-            return Combine(firstFalse, CanBe(and.Left, false, ref remaining), rightFalse,
-                CanBe(and.Left, true, ref remaining) && CanBe(and.Right, false, ref remaining));
+            return Combine(firstFalse, CanBe(and.Left, false, ref remaining, initialized), rightFalse,
+                CanBe(and.Left, true, ref remaining, initialized)
+                    && CanBe(and.Right, false, ref remaining, initialized));
         }
         if (expression is BoundBinary { Operator: TokenKind.PipePipe } or)
         {
@@ -3538,17 +3549,20 @@ public static class SemanticVerifier
             }
             var firstTrue = Outcome(or.Left, initialized, true, ref remaining);
             var rightTrue = Outcome(or.Right, leftFalse, true, ref remaining);
-            return Combine(firstTrue, CanBe(or.Left, true, ref remaining), rightTrue,
-                CanBe(or.Left, false, ref remaining) && CanBe(or.Right, true, ref remaining));
+            return Combine(firstTrue, CanBe(or.Left, true, ref remaining, initialized), rightTrue,
+                CanBe(or.Left, false, ref remaining, initialized)
+                    && CanBe(or.Right, true, ref remaining, initialized));
         }
         if (expression is BoundConditional conditional)
         {
             var whenTrue = Outcome(conditional.Condition, initialized, true, ref remaining);
             var whenFalse = Outcome(conditional.Condition, initialized, false, ref remaining);
             return Combine(Outcome(conditional.WhenTrue, whenTrue, result, ref remaining),
-                CanBe(conditional.Condition, true, ref remaining) && CanBe(conditional.WhenTrue, result, ref remaining),
+                CanBe(conditional.Condition, true, ref remaining, initialized)
+                    && CanBe(conditional.WhenTrue, result, ref remaining, initialized),
                 Outcome(conditional.WhenFalse, whenFalse, result, ref remaining),
-                CanBe(conditional.Condition, false, ref remaining) && CanBe(conditional.WhenFalse, result, ref remaining));
+                CanBe(conditional.Condition, false, ref remaining, initialized)
+                    && CanBe(conditional.WhenFalse, result, ref remaining, initialized));
         }
         var state = initialized.Clone();
         if (expression is BoundIsSome pattern)
@@ -3601,8 +3615,9 @@ public static class SemanticVerifier
                 var evaluated = Outcome(logical.Left, state, evaluateWhenTrue, ref remaining);
                 VacateNestedOutputs(logical.Right, evaluated, ref remaining);
                 var skipped = Outcome(logical.Left, state, !evaluateWhenTrue, ref remaining);
-                var combined = Combine(evaluated, CanBe(logical.Left, evaluateWhenTrue, ref remaining),
-                    skipped, CanBe(logical.Left, !evaluateWhenTrue, ref remaining));
+                var combined = Combine(evaluated,
+                    CanBe(logical.Left, evaluateWhenTrue, ref remaining, state),
+                    skipped, CanBe(logical.Left, !evaluateWhenTrue, ref remaining, state));
                 combined.CopyTo(state);
                 break;
             case BoundBinary binary:
@@ -3614,8 +3629,8 @@ public static class SemanticVerifier
                 VacateNestedOutputs(conditional.WhenTrue, trueState, ref remaining);
                 var falseState = Outcome(conditional.Condition, state, false, ref remaining);
                 VacateNestedOutputs(conditional.WhenFalse, falseState, ref remaining);
-                var joined = Combine(trueState, CanBe(conditional.Condition, true, ref remaining),
-                    falseState, CanBe(conditional.Condition, false, ref remaining));
+                var joined = Combine(trueState, CanBe(conditional.Condition, true, ref remaining, state),
+                    falseState, CanBe(conditional.Condition, false, ref remaining, state));
                 joined.CopyTo(state);
                 break;
             case BoundCoalesce coalesce:
@@ -3686,25 +3701,48 @@ public static class SemanticVerifier
         }
     }
 
-    private static bool CanBe(BoundExpression expression, bool result, ref int remaining)
+    // Feasibility is independent of initialization state. Share both outcomes across
+    // flow-state clones, while still charging every cache lookup to the visit budget.
+    private static bool CanBe(BoundExpression expression, bool result, ref int remaining,
+        InitializationState initialized) =>
+        CanBe(expression, result, ref remaining, initialized.CanBeFacts);
+
+    private static bool CanBe(BoundExpression expression, bool result, ref int remaining,
+        Dictionary<BoundExpression, byte> remainingCanBeFacts)
     {
         Count(ref remaining, 0);
-        return expression switch {
+        var known = result ? (byte)1 : (byte)4;
+        var possible = result ? (byte)2 : (byte)8;
+        if (remainingCanBeFacts.TryGetValue(expression, out var facts) && (facts & known) != 0)
+        {
+            return (facts & possible) != 0;
+        }
+
+        var canBe = expression switch {
             BoundConstant { Type: PrimitiveType.Bool } constant => constant.Value != (result ? 0 : 1),
-            BoundUnary { Operator: TokenKind.Bang } unary => CanBe(unary.Operand, !result, ref remaining),
+            BoundUnary { Operator: TokenKind.Bang } unary =>
+                CanBe(unary.Operand, !result, ref remaining, remainingCanBeFacts),
             BoundBinary { Operator: TokenKind.AmpersandAmpersand } and => result
-                ? CanBe(and.Left, true, ref remaining) && CanBe(and.Right, true, ref remaining)
-                : CanBe(and.Left, false, ref remaining) || (CanBe(and.Left, true, ref remaining) && CanBe(and.Right, false, ref remaining)),
+                ? CanBe(and.Left, true, ref remaining, remainingCanBeFacts)
+                    && CanBe(and.Right, true, ref remaining, remainingCanBeFacts)
+                : CanBe(and.Left, false, ref remaining, remainingCanBeFacts)
+                    || (CanBe(and.Left, true, ref remaining, remainingCanBeFacts)
+                        && CanBe(and.Right, false, ref remaining, remainingCanBeFacts)),
             BoundBinary { Operator: TokenKind.PipePipe } or => result
-                ? CanBe(or.Left, true, ref remaining) || (CanBe(or.Left, false, ref remaining) && CanBe(or.Right, true, ref remaining))
-                : CanBe(or.Left, false, ref remaining) && CanBe(or.Right, false, ref remaining),
+                ? CanBe(or.Left, true, ref remaining, remainingCanBeFacts)
+                    || (CanBe(or.Left, false, ref remaining, remainingCanBeFacts)
+                        && CanBe(or.Right, true, ref remaining, remainingCanBeFacts))
+                : CanBe(or.Left, false, ref remaining, remainingCanBeFacts)
+                    && CanBe(or.Right, false, ref remaining, remainingCanBeFacts),
             BoundConditional conditional =>
-                (CanBe(conditional.Condition, true, ref remaining)
-                    && CanBe(conditional.WhenTrue, result, ref remaining))
-                || (CanBe(conditional.Condition, false, ref remaining)
-                    && CanBe(conditional.WhenFalse, result, ref remaining)),
+                (CanBe(conditional.Condition, true, ref remaining, remainingCanBeFacts)
+                    && CanBe(conditional.WhenTrue, result, ref remaining, remainingCanBeFacts))
+                || (CanBe(conditional.Condition, false, ref remaining, remainingCanBeFacts)
+                    && CanBe(conditional.WhenFalse, result, ref remaining, remainingCanBeFacts)),
             _ => true,
         };
+        remainingCanBeFacts[expression] = (byte)(facts | known | (canBe ? possible : 0));
+        return canBe;
     }
 
     private static InitializationState Combine(InitializationState left, bool leftFeasible,
