@@ -7,25 +7,22 @@ quoted strings and escapes, leading trivia and lexical diagnostics in Terrum.
 The C# host supplies buffers and pinned lexical data; it does not pretokenize
 or make source-dependent classification decisions for the component.
 `_` remains a distinct token, while underscore-prefixed names remain
-identifiers. Syntax-29–31 reuse existing spellings for `do`, contextual
-`init`, `?` and `:`; loop labels and named transfers also reuse identifiers,
-`:`, `break` and `continue`. Syntax-32 adds `??`/`??=`; syntax-33 appends
-`++`/`--` as token IDs 86/87; syntax-35 reuses those IDs for nominal static
-updates. Syntax-34 keeps slot 77 reserved and treats `abstract` as an ordinary
-identifier; `this` remains contextual. Adjacent runs such as `x+++y` diagnose
-instead of being reinterpreted, while trivia distinguishes `x++ +y` from
-`x+ ++y`.
-
-Syntax-36 appends `<<`, `>>`, `>>>` and `+=`, `-=`, `*=`, `/=`, `%=`, `&=`,
-`|=`, `^=`, `<<=`, `>>=` and `>>>=` without renumbering earlier tokens.
-Hosted and compiled scanners share longest-match selection. In generic type
+identifiers. The scanner recognizes contextual `init`, loop labels and named
+transfers using the existing identifier, colon, `break` and `continue`
+spellings. It also recognizes `??`/`??=`, prefix/postfix `++`/`--` (token IDs
+86/87), shifts `<<`, `>>`, `>>>`, and compound assignments `+=`, `-=`, `*=`,
+`/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=` and `>>>=`. Slot 77 remains
+reserved; `abstract` is an ordinary identifier and `this` remains contextual.
+Hosted and compiled scanners share longest-match selection. Adjacent runs such
+as `x+++y` diagnose instead of being reinterpreted, while trivia distinguishes
+`x++ +y` from `x+ ++y`. In generic type
 context, the parser partitions `>>`/`>>>` into CST closers, retaining leading
 trivia on the first part; `SyntaxTree.Tokens` keeps the original lexical
 stream. The internal match reserves three width bits for `>>>=`; published
 records remain unchanged through scanner-5.
 
-Syntax-37 advances the component to scanner-6/schema-6 for generalized
-ordinary and documentation comment fences. Maximal opening star runs select
+Scanner-6/schema-6 supports generalized ordinary and documentation comment
+fences. Maximal opening star runs select
 whole equal-length closing runs with one slash for ordinary blocks and two
 for documentation blocks. Shorter runs and missing slash suffixes are payload;
 overlong runs with the required suffix diagnose `TRM0010`. Payload is opaque,
@@ -34,8 +31,8 @@ Trivia IDs 0–3 retain their meanings; 4/5 append documentation line/block
 comments. Diagnostic 10 is added without changing any record width, token ID,
 source/token budget or native/semantic protocol.
 
-Syntax-38 advances the current component to scanner-7/schema-7 for contiguous
-`@keyword` identifiers. The escape catalog is grammar §2's exact reserved and
+Scanner-7/schema-7 supports contiguous `@keyword` identifiers. The escape
+catalog is grammar §2's exact reserved and
 contextual vocabulary, independent of legacy unescaped classification.
 It includes future unsupported words without implementing their constructs,
 and excludes `_`, primitive spellings and legacy-only `out`, `foreach`,
@@ -50,11 +47,11 @@ The compiled scanner consults a separate read-only host escape catalog,
 not a host re-lexing fallback. No token IDs, record widths, integer magnitudes,
 frontend projection versions or resource budgets change.
 
-The shared operator catalog includes syntax-28's `=>` token for expression
-bodies; no scanner record or schema revision is needed. Syntax-16 rejects attached
-numeric width suffixes with `TRM0006`, diagnoses missing hexadecimal and
-binary prefix digits with `TRM0007` and `TRM0008`, and reports malformed digit
-separators as `TRM0009`. Valid decimal, hexadecimal and binary integer records
+The shared operator catalog includes `=>` for expression bodies; no scanner
+record or schema revision is needed. Attached numeric width suffixes diagnose
+as `TRM0006`; missing hexadecimal and binary prefix digits diagnose as
+`TRM0007` and `TRM0008`, and malformed digit separators diagnose as
+`TRM0009`. Valid decimal, hexadecimal and binary integer records
 are untagged, while recognized rejected suffixes retain their tag value in the
 existing integer-record field for diagnostic fidelity. For example,
 `0x1f32` is an untagged hexadecimal integer; `0x1u32` is rejected as a
@@ -242,14 +239,13 @@ with the current syntax profile reject as `TRM5001` in CLI adaptation rather tha
 A malformed token remains a `Bad`, `NumericLiteral`, or `StringLiteral` token
 with its raw source span; diagnostics do not replace source characters.
 
-Syntax-39–42 adopt delimiter attachment and role-specific dot/operator/
-contextual-punctuation spacing over existing raw token spans; they do not
-change tokenization. Hosted parsing and supported native scalar shapes enforce
-their respective boundaries. See the
+Hosted parsing and supported native scalar shapes enforce current delimiter
+attachment, role-specific dot/operator spacing and contextual-punctuation
+boundaries over raw token spans; these checks do not change tokenization. See the
 [implementation reference](implementation.md) for exact roles and
 diagnostics.
 
-Syntax-43 classifies maximal ASCII punctuation runs in the compiled scanner.
+Scanner-8 classifies maximal ASCII punctuation runs in the compiled scanner.
 Unlisted runs are one Bad token with whole-run `TRM0011`; unsupported `..`,
 `..^` and `?.` are one Bad token with `TRM0012`. Deferred `>`/`?`
 type-boundary candidates retain existing splitting only when actual hosted

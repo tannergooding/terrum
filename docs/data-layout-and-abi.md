@@ -1,6 +1,6 @@
 # Data layout and ABI contracts
 
-> **Accepted core contracts; remaining decisions are listed separately.** The
+> **Accepted core contracts; target profiles remain to be specified.** The
 > memory guarantees, opaque-layout direction and boundary-preservation rules
 > below are accepted. This is not a completed target ABI specification or a
 > universal Terrum managed ABI. Current support remains defined by
@@ -21,9 +21,9 @@
 
 ## Scope
 
-Per-target size/alignment/representation tables, procedure-call
-classification and compiler conformance are [open questions](#open-questions);
-current compiler support for any part of this contract is tracked in
+Per-target size/alignment/representation tables, procedure-call classification
+and compiler conformance remain target-profile work; current compiler support
+for any part of this contract is tracked in
 [implementation](implementation.md) and the [native profile](native.md), not
 restated here.
 
@@ -308,7 +308,7 @@ caller's contract rather than reinterpret it. The current implementation does
 not support public managed-handle exports; no new export surface or stable
 managed ABI is implied here.
 
-## Open questions
+## Unsupported extensions
 
 No unresolved policy choice remains in the accepted layout model. Keep
 unsupported forms unsupported until their specifications and implementations

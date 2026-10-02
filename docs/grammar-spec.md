@@ -15,9 +15,11 @@ contracts. The [semantic IL/metadata specification](il-metadata.md),
 [IL extension proposal](proposals/il-extensions.md) are separate documents;
 Source productions do not define library APIs or metadata extensions.
 
-The [remaining source-question proposal](proposals/grammar-open-questions.md)
-collects unresolved decisions, comparisons and recommendations. Those
-recommendations are not normative.
+Sections [5](#5-open-grammar-and-semantic-choices) and
+[6](#6-source-form-coverage-and-open-boundaries) identify unresolved source
+choices and scope boundaries. Unapproved library APIs and format extensions
+are collected separately in the [proposal index](proposals/README.md); they do
+not add source productions or contracts.
 
 <a id="1-scope-status-and-notation"></a>
 

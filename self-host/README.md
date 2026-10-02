@@ -14,28 +14,17 @@ compiler-primitives library exports `Terrum.CodeAnalysis.IsAsciiDigit`,
 it is not a self-host compiler or an executable scanner/parser.
 The host test runner remains C#, even when it compiles and executes a candidate.
 The hosted [TRRM scalar pipeline](../docs/implementation.md#executable-trrm-scalar-interchange)
-now emits approved metadata and compact-linear/indexed Bodies and loads them for
-shared native execution without producer source, including bounded branches,
-loops, integer shifts, initialized writable-local compounds/updates and
-module-local scalar calls with the existing direct-call ABI. It also lowers
-non-nearest named loop transfers through scalar routing codes and designated
-single-exit indexed regions; that source-free path remains fail-fast-only and
-its reader is unchanged. The native scalar frontend is separate: projection
-v52 adds standalone blocks, v53 adds bounded non-void scalar discards, and v54
-adds labeled loops with named transfers to nearest or outer loops under both
-runtime policies. Projection v55 adds standalone `require condition;` under
-both policies. Projection v56 adds existing braced void functions with
-empty/implicit completion and bare or grouped unit-literal returns.
-Projection v57 adds void arrow bodies containing one requirement or non-void
-scalar discard statement, with hosted implicit completion at the semicolon.
-Projection v58 adds existing `else if` chains to braced scalar and void
-functions, preserving direct nested conditionals without synthetic scopes.
-Projection v59 adds existing distinct parameterless `[NoThrow]` and
-`[DoesNotReturn]` contracts over top-level scalar/void braced and arrow forms.
-The shared host verifier retains effect and normal-completion proofs under
-both policies; DoesNotReturn is void-only and suppresses implicit completion.
-Source audits preserve exact annotation spelling, scopes and spans. General
-attributes/calls, source-free TRRM and the native ABI are not widened.
+emits approved metadata and compact-linear/indexed Bodies and loads them for
+shared native execution without producer source. It supports bounded branches,
+loops, integer operations and module-local scalar calls; non-nearest transfers
+use scalar routing codes and designated single-exit indexed regions. This
+source-free path remains fail-fast-only. The separate native scalar frontend
+currently supports scalar/void functions, initialized scalar locals, structured
+branches and loops, named loop transfers, standalone requirements/discards,
+and selected function-effect contracts. Exact projection shapes and version
+gates are in the [native profile](../docs/native.md) and
+[implementation reference](../docs/implementation.md). General attributes and
+calls remain outside the frontend's subset.
 Initialized six-primitive locals in lexical blocks, branches and loops preserve
 scope visibility, outer mutations and per-iteration initialization through
 existing indexed values, without adding executable lexical regions or places.
@@ -56,9 +45,9 @@ Scanner-8/schema-8 appends diagnostics 11/12 for invalid and unsupported
 maximal runs, including atomic Bad tokens for `..`, `..^` and `?.`. Hosted
 generic closers and optional suffixes require parser consumption; native
 scalar snapshots have no type exemptions. Historical raw records remain
-readable, while completed current adapters enforce current framing and syntax.
-The scanner update did not change token IDs, record widths, projections 1–51,
-resource bounds or ABI.
+readable, while current adapters enforce current framing and syntax. Scanner,
+projection and ABI compatibility are distinct: the frontend accepts its
+declared projection shapes through v59 in a 392-word buffer.
 
 The native scalar frontend remains a bounded projection, not a standalone
 compiler: it shares the hosted verifier/emitter and is limited to 16K source
@@ -101,13 +90,13 @@ Compilation-local Copy helpers may publish `bool`/`init ref<T>` outputs after
 definition-site verification, without introducing a public generic ABI.
 Explicit homogeneous Copy-struct witnesses support `+`, `-`, `*`, `/`, `%`,
 `&`, `|` and `^`; generic code still requires the corresponding declared
-nominal constraints. Syntax-19 also implements six separately constrained
+nominal constraints. The hosted compiler supports six separately constrained
 nominal comparison protocols over homogeneous Copy structs with `bool`
 results; see the [bounded generic contract](../docs/implementation.md#bounded-generic-functions).
 No comparison law or universal equality/hash behavior is inferred. Unary
 protocols have independent `Copy` results, including non-`bool` `!`; these
 protocol sets still exclude heterogeneous binary, shift and `true`/`false`
-witnesses. Syntax-35's nominal `++`/`--` calls are a separate update contract,
+witnesses. Nominal `++`/`--` calls are a separate update contract,
 not an addition to those protocol sets.
 `build-component` uses the compiled scanner's records as the lexical input to
 the official host parser, binder and native emitter; the binder also consumes
@@ -196,8 +185,8 @@ native emitter or compiler self-build.
 | [TokenIntegerSnapshot](TokenIntegerSnapshot.terrum) | Separately owned scanner-6 numeric-token indices and raw unsigned magnitude words, published with tokens and trivia by `TryScanCompilerInput` | AOT/JIT full-`uint64`, radix and overflow fixtures, indexed token lookup, invalid index/status/tag/owner rejection and atomic failure; shape checks do not prove a producer's arithmetic, and general binding remains hosted |
 | [TokenDiagnosticSnapshot](TokenDiagnosticSnapshot.terrum) | Independently owned lexical diagnostic codes and source ranges, available after a scan with errors even when token snapshots cannot publish | AOT/JIT host diagnostic parity under both policies, invalid buffer rejection, stable reads after host mutation and no success-shaped empty token stream on lexical failure |
 | [ScalarParserTypes](ScalarParserTypes.terrum) | Shared scalar type recognition, token-name equality, scalar comparison and scanner-integer decoding for separately compiled bounded parser probes | Scanner-owned source ranges, UTF-16 spelling and integer records, with no independent syntax or semantic ABI |
-| [ScalarFrontend](ScalarFrontend.terrum) | Bounded frontend over a successful scanner snapshot: one function with a scalar or void result and up to three named scalar parameters; supported scalar expressions, literals, grouping, conditionals, returns, and explicit `public`/`internal` visibility. Projection 48 adds structured returns, 49 adds shifts/compounds/local updates, 50 adds scoped local declarations, 51 adds `do`/`for`, 52 adds standalone lexical blocks, 53 adds non-void scalar discards, 54 adds labeled loops and named transfers, 55 adds standalone requirements, 56 adds braced void functions, 57 adds void arrow requirements and scalar discards, 58 adds braced scalar/void `else if` chains, and 59 adds parameterless NoThrow/DoesNotReturn declaration contracts. | Produces a source-bound scalar projection for the shared host verifier/emitter; scanner integer records and destination bounds supply constants without rescanning digits. Uses `Host.Source` and managed tokens; the persisted primitives DLL and `build-component` do not consume its typed result. |
-| [ScalarFrontendProjection](ScalarFrontendProjection.terrum) | Provisional 392-word host-owned buffer with completion status written last. Versions 21–47 add initialized locals, conversions, conditional trees, nested loops/branches and transfers; 48 adds structured returns, 49 shifts and local mutations, 50 scoped declarations, 51 `do`/`for`, 52 standalone lexical blocks, 53 non-void scalar discards, 54 labeled loops and named transfers, 55 standalone requirements, 56 braced void functions and null returns, 57 void arrow requirements and scalar discards, 58 braced scalar/void `else if` chains, and 59 parameterless NoThrow/DoesNotReturn flags. Older payloads retain their feature restrictions; unused extensions are zero. | `ScalarFrontendHost` independently checks source anchors, types, literals, node order, precedence, roots, local binding, control-flow extents, transfers, returns, mutability, conversions and exact declaration effects before lowering to verified `BoundProgram`. Shared verification checks effects and reachable completion. The buffer bounds input to 64 tokens, 8 total named/hidden local identities, 12 statements, 32 nodes, 16 expression-recursion levels and 6 source structural levels; this is not a standalone compiler or machine-code encoder. |
+| [ScalarFrontend](ScalarFrontend.terrum) | Bounded frontend over a successful scanner snapshot: one source-bound scalar or void function, up to three named scalar parameters, supported expressions and structured control flow, with explicit visibility/effect forms in its current subset. Projection compatibility extends through v59; see the [native profile](../docs/native.md) for the component boundary. | Produces a source-bound scalar projection for the shared host verifier/emitter; scanner integer records and destination bounds supply constants without rescanning digits. Uses `Host.Source` and managed tokens; the persisted primitives DLL and `build-component` do not consume its typed result. |
+| [ScalarFrontendProjection](ScalarFrontendProjection.terrum) | Provisional 392-word host-owned buffer with completion status written last. The reader accepts projection versions 1–59 under their version-specific shapes and rejects malformed or unsupported records; unused extensions are zero. | `ScalarFrontendHost` independently checks source anchors, types, literals, node order, precedence, roots, local binding, control-flow extents, transfers, returns, mutability, conversions and exact declaration effects before lowering to verified `BoundProgram`. Shared verification checks effects and reachable completion. The buffer bounds input to 64 tokens, 8 total named/hidden local identities, 12 statements, 32 nodes, 16 expression-recursion levels and 6 source structural levels; exact shape gates are in the [implementation reference](../docs/implementation.md). This is not a standalone compiler or machine-code encoder. |
 | [ScalarFunctionParser](ScalarFunctionParser.terrum) | Provisional scalar function probe: grouped/unary literals, two-literal checked arithmetic and bitwise operations, typed integer/`char16` comparisons, and one named scalar parameter in comparisons or integer checked addition | Hosted-span and executed-value parity with AOT/JIT at decimal/based boundaries across all four integer widths and `char16` comparisons; names bind to declarations, invalid magnitudes and checked addition overflow reject; requires `ScalarParserTypes`; other declarations still require the host parser |
 | [ScalarParameterPairParser](ScalarParameterPairParser.terrum) | Separate bounded probe of two named scalar parameters returned through checked integer addition/subtraction, `x + y + literal` with both checked steps, or a Boolean comparison (including `char16`) | AOT/JIT under both policies across signed/unsigned 32-/64-bit extrema, code-unit comparisons and decimal/based literal boundaries; both identifiers bind to distinct declarations, either overflow or unsigned subtraction underflow rejects; requires `ScalarParserTypes`, not a bootstrap compiler |
 | [ScalarConditionalParser](ScalarConditionalParser.terrum) | Separately compiled probe of a `bool` parameter selecting between two named, same-typed scalar parameters with explicit `if`/`else` returns | AOT/JIT under both policies check both reachable arms across six scalar types and reject swapped/unbound names and missing branches; uses scanner-owned tokens and `ScalarParserTypes`, not the general hosted parser or a bootstrap compiler |
@@ -416,76 +405,22 @@ inactive source still rejects. Attribute tokens count against existing limits;
 the 392-word buffer and 100,000-visit verification budget are unchanged.
 Nonterminating test programs are compiled and audited, not executed.
 
-Syntax-44 requires a single label and its loop introducer on the same
-physical source line. `TokenSnapshot` rejects line breaks in the raw
+The hosted parser requires a single loop label and its loop introducer on the
+same physical source line. `TokenSnapshot` rejects line breaks in the raw
 colon-to-keyword gap before native parser selection, including comment
-interiors; independent current/historical projection audits enforce the same
-boundary. Same-line trivia remains optional. Hosted and compiled-scanner
-parsing share this rule without changing named-argument colons, label lookup,
-transfer/cleanup semantics, projections, scanner records or native ABI.
+interiors; independent projection audits enforce the same boundary. Same-line
+trivia remains optional. The
+[implementation reference](../docs/implementation.md) records this contract
+and the hosted semantic-version gates.
 
-The host's syntax-29 post-tested loops and named enclosing-loop transfers
-also execute through existing checked lowering; semantic v39 is selected
-when those retained nodes require it. Scanner record/schema and native ABI
-remain unchanged.
-Syntax-30 additionally supports standalone typed/inferred vacant locals in the
-host, with feature-selected semantic v40 persistence and existing checked
-publication, cleanup and managed rooting.
-The host also initializes definitely vacant `init` locals by assignment,
-fixing inferred types and selecting semantic v46 for retained initialization
-assignments. Existing AOT/JIT lowering preserves failure vacancy, cleanup and
-managed-root publication. Hosted `name = _;` additionally ends a definitely
-live named local value, retiring unique cleanup, a local managed root or a
-bounded buffer-view loan at that statement. Its declaration/type survive;
-ordinary immutable bindings cannot initialize again, while standalone `init`
-and mutable storage retain their existing authority. Possibly live backing
-loans prevent premature owner ending. Retained end nodes select private
-semantic v47, with hostile/older-header rejection and PE/JIT parity under both
-policies. No scanner schema, native ABI/profile or source-free TRRM operation
-changes. General ref/pin types, enums, arbitrary guards/ARC and view rebinding
-remain unsupported. Neither initialization locals/assignments nor lifetime
-ending are added to the compiled scalar frontend.
-Host syntax-31 adds target-checked `?:` with selected-arm execution, conditional
-output facts and feature-selected semantic v41. The compiled scanner supplies
-the existing punctuation tokens; the native scalar subset is described above.
-Host syntax-32 adds managed-handle `??` and statement-form `??=` through
-feature-selected semantic v42. The scanner's shared catalog recognizes both
-new operator tokens without changing its records or schema. Managed optionals
-remain outside the native scalar frontend.
-Host syntax-33 additionally implements checked integer `++`/`--` and scalar
-ConstEval updates; retained nodes select semantic v43. The compiled scanner
-recognizes their appended token IDs, but the scalar frontend does not accept
-update expressions in its loop bodies.
-Host syntax-34 adopts bodyless static operator requirements and an optional
-first `<this T>` implementing-type formal for its bounded local protocols.
-Conformances and generic constraints supply self, not an explicit argument;
-ordinary no-self protocols remain supported. This source change does not
-alter the scanner record/schema, semantic formats or native ABI.
-Host syntax-35 additionally supports nominal static `++`/`--` calls for eligible
-writable `Copy`-struct places. Existing static requirements, constrained
-generic definition proofs, witness identity and self/no-self protocols apply;
-the exact result type equals the operand, writeback occurs only after operator
-success, and earlier effects are not rolled back. Instance mutation, owning
-updates, arbitrary `char16` arithmetic and a new witness ABI are not added.
-Retained nominal calls select semantic v44 while primitive updates retain
-v43. Private operator bodies and closed specializations are replaceable behind
-unchanged semantic/native consumers. This does not add public generic witnesses
-or cross-module source-operator discovery. Nominal updates are outside the
-scalar-only ConstEval interpreter and remain unsupported in this native
-scalar frontend.
-Host syntax-36 adds primitive `<<`, `>>` and `>>>`, and statement-form
-`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=` and `>>>=`
-for initialized writable `int32`, `uint32`, `int64` and `uint64` places.
-Arithmetic and bitwise operands match the destination type; shift counts are
-`int32`. The place and old value are captured once before the right-hand side,
-which runs once; checked computation precedes writeback, while earlier effects
-remain on failure. Primitive scalar-slot compounds are supported by bounded
-ConstEval. These operations reuse existing update-place/root machinery;
-nominal compounds, `char16`, unique-value update destinations and new
-destination loans remain unsupported. Shift and compound-assignment features
-select semantic v45; compound statements use tag 26. The shared scanner
-catalog appends their token identities without changing scanner-5 records or
-schema-5.
+The hosted compiler additionally supports post-tested loops, named transfers,
+vacant-local initialization, lifetime ending, target-checked conditionals,
+managed-handle coalescing, scalar and nominal updates, primitive shifts and
+compound assignments. Their verified behavior and semantic-reader gates are
+in the [implementation reference](../docs/implementation.md). The scalar
+frontend supports named loop transfers but excludes vacant initialization,
+local lifetime ending, optional types and managed handles; its accepted
+operations and projection gates are in the [native profile](../docs/native.md).
 
 `SourceRange` deliberately mirrors the current host's signed 32-bit UTF-16
 coordinates, including the checked end bound. This is an interchange limit for

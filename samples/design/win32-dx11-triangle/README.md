@@ -2,7 +2,15 @@
 
 [Source](main.terrum) | [HLSL](triangle.hlsl) | [helper API](interop.api.terrum) | [sample index](../../../docs/samples.md)
 
-**Design source, not a built program or compiled MVP sample.** The current host is a P0 syntax-only front end, not an implementation of this native interop surface. Proposed target: Windows desktop, x64 first; feature level 11.0, fixed-size window, one immediate context. Default hardware device; `--warp` explicitly selects software. No automatic driver fallback, resizing, device recreation, multithreaded rendering or application-state callback capture.
+**Design source, not a built program or supported compiler sample.** The
+repository now has a bounded Windows x64 native compiler and runtime, but does
+not implement this sketch's COM, Win32, DXGI or Direct3D 11 interop surface.
+See the current [compiler support boundary](../../../docs/implementation.md)
+and [native profile](../../../docs/native.md). Proposed target: Windows desktop,
+x64 first; feature level 11.0, fixed-size window, one immediate context.
+Default hardware device; `--warp` explicitly selects software. No automatic
+driver fallback, resizing, device recreation, multithreaded rendering or
+application-state callback capture.
 
 The flow follows [Microsoft's Tutorial02](https://github.com/walbourn/directx-sdk-samples-reworked/tree/main/Direct3D11Tutorials/Tutorial02), with independent Terrum source and different ownership/error handling. See [NOTICE](NOTICE.txt). Keep `triangle.hlsl` beside the eventual executable and provide the D3DCompiler 47 runtime; shader compilation here is D3DCompiler, not a Terrum compiler.
 

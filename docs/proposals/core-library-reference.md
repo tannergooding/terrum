@@ -1648,8 +1648,9 @@ An item borrowing cursor state cannot outlive that state or survive a
 conflicting advance; a backing-only item loan retains its declared backing
 dependency rather than being shortened to cursor-state lifetime. Async item
 loans retain backing and access obligations through each awaitable completion.
-Only exact producer protocol and phase identities remain open
-([Q31.1](grammar-open-questions.md#q311-producer-protocol-identities-and-phase-selectors)).
+Only exact producer protocol and phase identities remain open; the source
+grammar's producer and iteration boundaries are summarized in its
+[coverage index](../grammar-spec.md#6-source-form-coverage-and-open-boundaries).
 
 `TryMoveNext(init ref<T>)` and its async counterpart are alternative
 consuming-advance candidates: a successful completion would transfer one
@@ -1658,8 +1659,9 @@ form, publication would occur at task completion, not when the task is
 returned. Exact advancement, close registration and failure contracts are
 unresolved; no consuming or writable binding is implied by ordinary
 by-value iteration. Selection among by-value, borrowed and consuming element
-modes, including when advancement invalidates an item, remains open
-([Q41](grammar-open-questions.md#q41-iteration-element-binding-modes)).
+modes, including when advancement invalidates an item, remains open; the
+grammar's iteration entry records the corresponding source boundary in its
+[coverage index](../grammar-spec.md#6-source-form-coverage-and-open-boundaries).
 
 ### Proposed ordered and sequential collection declarations
 
@@ -2622,7 +2624,8 @@ signatures. Creation/result backing syntax is **OPEN**: a shape must preserve
 its own metadata lifetime, and a returned view must preserve both storage and
 shape dependencies. The following signatures are inventory shapes wherever
 they need those unresolved dependency annotations; none selects new syntax.
-See [Q20 on backing dependencies](grammar-open-questions.md#q20-declaring-result-capture-and-backing-dependencies).
+See the [lifetime contract](../lifetimes.md#three-independent-dependencies)
+for the distinction between receiver, backing and access dependencies.
 
 ```terrum
 public struct TensorShape
@@ -2852,9 +2855,9 @@ Standard output is default; `Error` selects stderr. Writes can expose partial pr
 
 ## 9. Accepted direction and unresolved choices
 
-Unresolved source-language decisions are collected separately in the
-[grammar question proposal](grammar-open-questions.md); this section retains
-the library/API choices and their dependencies.
+This proposal records the library/API choices and their dependencies.
+Source-language choices and unspecified forms remain in the
+[grammar specification](../grammar-spec.md), not in this API inventory.
 
 The following separates semantic constraints from source and API decisions
 that remain open:

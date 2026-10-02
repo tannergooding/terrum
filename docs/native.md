@@ -101,45 +101,48 @@ granted. A legacy header cannot contain v24 write identifiers.
 The `native-18` through `native-20` labels below identify bounded runtime
 features; they do not imply that general references/views, ownership forms, or
 managed public ABI are implemented.
-The syntax-16 numeric surface uses unsuffixed contextual decimal, hexadecimal
+The current numeric surface accepts unsuffixed contextual decimal, hexadecimal
 and binary integers, `_` digit separators, and checked `T(expression)`
 conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`. Attached
 width suffixes diagnose as `TRM0006`; missing hexadecimal/binary digits and
-malformed separators diagnose as `TRM0007`–`TRM0009`; prefix casts are no
-longer parsed. Based literals construct target-width bit patterns, while
-decimal literals retain numeric range semantics. Floating/custom literal
-parsing and registered literal targets remain outside this executable profile.
-Syntax-25 supports internal scalar `[ConstEval]`
-functions and required `const T name = expression;` locals. The compiler
-replaces successful required initializers with scalar constants before
-verification and native emission; ordinary calls remain executable. Checked
-arithmetic, short-circuiting and branch/loop behavior match the target; failures
-and the 64-call/4,096-step limits diagnose at compile time rather than falling
-back to native execution. No public contract, semantic wire field or native
-ABI changes; imported functions cannot satisfy required constant calls.
-Syntax-26 adds scalar `const expression` requirements in nested executable
-expressions, with the same limits and deferred constant substitution; no new
-native or semantic wire representation is emitted. The current parser version
-is syntax-44. The native scalar frontend checks supported raw spacing and
-attachment rules before shape selection or fallback, and audits successful
-current and historical projections against that syntax. Its punctuation-run
-check is linear and grants no generic/type-context exemptions. Native `?`/`:`
-are conditional connectors only; labels, named arguments, optional types,
-attribute targets, general calls/indexing/generics and dot-bearing forms are
-not added. Function headers and supported scalar type calls require attached
-delimiters, with interior and structural-parenthesis trivia unchanged.
-String/format interiors are unchanged. The compiled scanner and native input
-path support generalized comment fences and closed-catalog `@keyword` names,
-preserving raw source ranges and underlying name identity.
+malformed separators diagnose as `TRM0007`–`TRM0009`. Based literals construct
+target-width bit patterns; decimal literals retain numeric range semantics.
+Floating/custom literal parsing and registered literal targets remain outside
+this executable profile.
+
+The hosted compiler supports internal scalar `[ConstEval]` functions,
+required `const T name = expression;` locals and nested scalar `const`
+expressions. It substitutes successful required values before verification
+and emission; ordinary calls remain executable. Checked arithmetic,
+short-circuiting and branch/loop behavior follow the source contracts. The
+64-call and 4,096-step limits diagnose during compilation; imported functions
+cannot satisfy required constant calls. See the
+[implementation reference](implementation.md) for the exact evaluator and
+proof boundaries.
+
+The current host parser language version is 44. The bounded native scalar
+frontend is a separate source subset: its raw checks and source-bound audits
+enforce supported spacing and attachment rules before projection selection.
+It supports named loop transfers, but not optional types or managed handles;
+those belong to the hosted compiler's broader native profiles. The scalar
+frontend also excludes named arguments, attribute targets, general calls,
+indexing, generics and dot-bearing forms. Its `?`/`:` spellings are conditional
+connectors only. Supported function headers and scalar type calls require
+attached delimiters. String and format interiors retain their lexical rules.
+The compiled scanner and native input path support generalized comment fences
+and closed-catalog `@keyword` names, preserving raw source ranges and name
+identity.
 
 Scanner-8/schema-8 appends diagnostic identities 11/12 for invalid and
 defined-but-unsupported maximal runs; see the
-[scanner contract](scanner.md) for their spans and record compatibility.
-Hosted role-specific punctuation rules are in the
-[implementation reference](implementation.md). Native scalar profiles,
-persisted identities and ABI remain unchanged; token IDs, scanner record
-widths, projection versions 1–51, resource bounds and the whole-program
-verification bound are fixed.
+[scanner contract](scanner.md) for spans and record compatibility. Hosted
+role-specific punctuation rules are in the
+[implementation reference](implementation.md). The bounded frontend accepts
+projection versions 1–59 with their declared shapes in a 392-word buffer and
+fixed source/token/local/statement/node/parameter/depth/work limits. Independent
+source audits check current syntax for compatible older shapes. Scanner,
+projection, semantic and native-profile versions are separate compatibility
+gates.
 Conditional expressions evaluate one Boolean condition and only
 the selected target-checked arm, with existing cleanup and rooting behavior.
 Retained conditional nodes select semantic v41, not a new native ABI.
@@ -155,7 +158,7 @@ writable class-field and host-buffer places retain receiver/index
 single evaluation, access checks and managed-root cleanup. Prefix returns
 the replacement; postfix returns the saved value. Primitive update nodes
 select semantic v43 without changing the native ABI.
-Syntax-35 additionally supports nominal static `++`/`--` calls for the
+The hosted compiler also supports nominal static `++`/`--` calls for the
 eligible writable `Copy`-struct place envelope. These preserve the same
 single-evaluation and checked-writeback behavior: operator failure prevents
 writeback but does not roll back earlier effects. The exact result type must
@@ -171,7 +174,7 @@ Nominal updates diagnose in required constant work: the ConstEval interpreter
 still admits only scalar values, not struct construction/operator calls.
 `char16` primitive updates, unique-value updates and nested owning-child paths
 remain unsupported.
-Syntax-36 adds primitive binary `<<`, `>>` and `>>>`, plus statement-form
+The hosted compiler supports primitive binary `<<`, `>>` and `>>>`, plus statement-form
 `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=` and `>>>=`
 for initialized writable `int32`, `uint32`, `int64` and `uint64` places.
 Binary shifts take one of those four integer types as the left operand.
@@ -240,7 +243,7 @@ existing single-evaluation, checked-failure and lazy-effect behavior and
 counts toward the existing eight-identity limit. Versions 1–52 retain their
 prior shapes and do not admit discard records; later projections may carry
 kind 15 alongside newer kinds. This appends only a provisional frontend feature
-version: source grammar, syntax-43, scanner-8/schema-8,
+version: source grammar (host language version 44), scanner-8/schema-8,
 diagnostic/token inventories, semantic/ISA/Contract/TRRM formats, native
 formats and ABI do not change. The exact record and publication contract is
 in the [implementation reference](implementation.md).
@@ -294,7 +297,7 @@ restrictions, all resource limits remain, and general attributes/calls are not
 added. The [implementation reference](implementation.md) specifies header
 bits and body shapes; source-free indexed TRRM is unchanged.
 
-Syntax-44 independently enforces single same-line loop-label attachment in
+The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer
 and cleanup semantics, historical semantic/module payloads, projection
@@ -342,53 +345,33 @@ change. Parameter/receiver aliases, fields, indexers, const aliases and
 unresolved/vacant locals reject. General ref/pin types, enums, arbitrary
 guards/ARC, view rebinding, source-free TRRM and the compiled scalar frontend
 are not adopted by this operation.
-Syntax-27 adds compile-time-only body `static require`
-and outer-body `static ensure` for closed scalar proofs. Successful proofs
-leave no native operation or semantic wire record; known false, unsupported
-and unevaluated proofs diagnose before emission. Existing executable
-`require` remains unchanged. Syntax-18 qualified generic-call type
-arguments such as `write C` and `write C?` enable bounded managed-handle
-substitutions in compilation-local `Copy` templates. Syntax-19 adds the
-bounded nominal comparison protocols; neither changes the native profile,
-scanner record/schema or semantic wire format. Managed-handle substitutions
-reuse the existing managed contracts, with feature-dependent semantic version
-selection.
-Syntax-28 supports expression-bodied functions, methods, static operators,
-constructors and direct/explicit by-value getters through the existing
-verified return/statement and cleanup paths. AOT/JIT, compiled-scanner builds
-and persisted semantic/native consumers retain their existing ABI and format
-versions; conversion declarations and broader accessor/callable forms remain
+The hosted compiler also supports closed scalar `static require`/`static
+ensure` proofs, compilation-local generic substitutions and nominal operator
+protocols. Expression-bodied functions, methods, static operators,
+constructors and explicit by-value getters reuse checked return, statement and
+cleanup paths. Their source, proof and specialization boundaries are detailed
+in the [implementation reference](implementation.md).
+
+The hosted `bool`/`init ref<T>` contract publishes vacant storage only on true.
+Semantic v33 persists the distinct parameter/call mode; exported contracts use
+`init:`, while older private declarations retain their legacy `out` spelling.
+Public scalar, handle-free Copy and eligible unique outputs reuse checked
+scratch, cleanup and the existing native ABI. Managed graph boundaries admit
+Copy outputs only; generic contracts remain compilation-local.
+
+Explicit by-value getters use readonly receiver calls. Semantic v34 persists
+property identity and accessor effects; Core primitive getters require v38.
+Exports remain subject to existing public Copy-layout and image-local managed
+state boundaries. Setters, auto-properties and ref-return accessors remain
 unsupported.
-Syntax-21 adds compilation-local unary `+`, `-`, `!` and `~` protocols with
-separate operand/result formals. Their closed calls reuse existing verified
-native calls and private module servicing without a new scanner record,
-semantic wire format, native profile, or public generic ABI.
-Syntax-22 adds bounded `bool`/`init ref<T>` initialization loans:
-the caller supplies vacant storage via `init name`, or declares it with
-`init var name`; a completed value transfers only on true. Semantic v33
-retains the distinct parameter and call mode across module servicing. Exported
-contracts use `init:` rather than `out:`; older private v33 declarations retain
-their original contract spelling. Public scalar, handle-free Copy and eligible
-unique outputs use the existing checked `out` scratch/cleanup and native ABI
-without a profile change. Managed graph boundaries admit Copy outputs only;
-compilation-local `Copy` generic templates may conditionally initialize
-`init ref<T>` using the existing private module contract and output scratch.
-General references and public generic contracts remain unsupported.
-Syntax-23 introduces explicit by-value getters on Copy structs and source
-classes. Semantic v34 persists property member identity and accessor effects
-independently of the callable implementation name. Getter reads use the
-existing readonly receiver call and result ABI in AOT and JIT. Public
-Copy-struct getters can be exported only where the existing public value
-layout permits it; private class getters remain within image-local managed
-state. Older field and method contracts retain their selected semantic
-versions, and the native profile/package format is unchanged.
-Syntax-24 supports one-field transparent Copy wrappers over `bool`, `char16`,
-`int32`, `uint32`, `int64` and `uint64`. Semantic v35 records the distinct
-layout intent, and replacement checks require it to match. Their natural
-storage size/alignment and direct Windows x64 argument/result classification
-match the scalar field; identity, field authority and effects stay nominal.
-Nested and owning carriers, custom packing/alignment and broader field-policy
-changes are not implemented.
+
+One-field transparent Copy wrappers over `bool`, `char16`, `int32`, `uint32`,
+`int64` and `uint64` retain nominal identity and field authority while storage
+and direct Windows x64 argument/result classification match the scalar
+carrier. Semantic v35 persists this layout intent and replacements must
+preserve it. Nested or owning carriers, custom packing/alignment and broader
+field-policy changes remain unsupported; see the
+[layout reference](data-layout-and-abi.md).
 
 Terrum has no built-in marshalling. Source or generated tooling defines and
 performs conversions and wrappers for imported C APIs; the compiler/runtime
@@ -674,7 +657,7 @@ also returns 42, using explicitly declared subtraction, division, remainder
 and bitwise `&`, `|`, `^` witnesses. The same concrete call lowering preserves
 ordinary checked arithmetic and declaration-site effect checks; bitwise
 spelling alone does not make an arbitrary operator implementation NoThrow.
-Syntax-19 implements the six nominal Copy-struct equality/comparison protocols
+The hosted compiler supports the six nominal Copy-struct equality/comparison protocols
 (`==`, `!=`, `<`, `<=`, `>` and `>=`); see the
 [bounded generic contract](implementation.md#bounded-generic-functions).
 Templates and witnesses remain compilation-local. Bounded generic functions
@@ -1036,10 +1019,10 @@ with a braced body. Initialization runs once; each successful condition is
 followed by the body and then the iterator. Returning or breaking from the body
 skips the iterator; continuing reaches it before the next condition.
 An omitted condition is true. Header locals are scoped to the loop;
-the iterator cannot access body locals. Use assignments such as `i = i + 1`:
-increment operators and comma-separated clauses are not implemented.
-Bare `break` and `continue` target the nearest loop; syntax-29 named forms
-select an enclosing labeled loop. Both clean exited scopes inside-out,
+the iterator cannot access body locals. Supported integer updates and compound
+assignments may occupy the iterator; comma-separated clauses are not implemented.
+Bare `break` and `continue` target the nearest loop; named forms select an
+enclosing labeled loop. Both clean exited scopes inside-out,
 including `finally`, unique owners and exact managed roots. A `for` initializer's
 owner survives continue and retires on loop exit. Transfers out of `finally`
 are rejected; loops entirely within a `finally` may use their own transfers.
@@ -1050,7 +1033,7 @@ The [native loop-transfer fixture](../tests/native/managed-loop-transfer-abi.ter
 combines a retained initializer buffer, nested transfers/finally and managed
 cycles. Its C caller checks exact allocation/release counts under both policies.
 
-Syntax-29 also accepts `do { ... } while (condition);`: the body executes
+The hosted parser and binder also accept `do { ... } while (condition);`: the body executes
 before the first test, and `continue` reaches that test after exited-scope
 cleanup. Labels may identify enclosing `while`, `for` and `do` loops.
 The bounded implementation rejects duplicate enclosing labels and permits
@@ -1255,7 +1238,7 @@ backend storage, not language pointers, escaping borrows or shared mutable
 references. This direct/indirect choice preserves the complete `T`'s source
 semantics; it does not itself introduce a loan of the original value's storage.
 A source-level borrowed result needs its own declared lifetime, access
-and alias contract. The bounded syntax-24 one-field scalar transparent wrapper
+and alias contract. The bounded one-field scalar transparent wrapper
 inherits its carrier's direct ABI; no other transparent-wrapper ABI is
 implemented. Outputs use separate exact-size publication into the caller's
 storage only on a true return.

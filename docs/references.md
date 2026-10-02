@@ -32,6 +32,20 @@ TerraFX revision [`9def09f6c24a0465035ce004ab240ecce0a97a04`](https://github.com
 - [`sources/Core/Numerics/Vector4.cs`](https://github.com/terrafx/terrafx/blob/9def09f6c24a0465035ce004ab240ecce0a97a04/sources/Core/Numerics/Vector4.cs) shows a domain vector with typed component operations layered over `Vector128<float>`. Geometric vectors, fixed hardware vectors and scalar numbers should not share a single accidental contract.
 - [`sources/Core/Collections/UnmanagedValueLinkedList\`1.cs`](https://github.com/terrafx/terrafx/blob/9def09f6c24a0465035ce004ab240ecce0a97a04/sources/Core/Collections/UnmanagedValueLinkedList%601.cs) and its neighboring collection files illustrate explicit unmanaged versus observable/managed storage choices; Terrum's three layers keep those ownership differences without imposing allocator policy parameters on every ordinary interface.
 
+## Compiler and runtime
+
+These sources inform compiler architecture and compatibility boundaries; they
+do not select Terrum APIs or implementations.
+
+| Source | Design input |
+|---|---|
+| [Roslyn syntax model](https://learn.microsoft.com/en-us/dotnet/csharp/roslyn-sdk/work-with-syntax) | Full-fidelity syntax and explicit recovery are useful shared tooling surfaces; a compact CST does not require premature red/green reuse or a parallel AI AST. |
+| [Roslyn incremental generator design](https://github.com/dotnet/roslyn/blob/main/docs/features/incremental-generators.md) | Immutable declared transform inputs enable caching; pipeline APIs also require explicit generation authority. |
+| [rustc incremental queries](https://rustc-dev-guide.rust-lang.org/queries/incremental-compilation.html) | Cached results depend on actual query dependencies, not only file timestamps; source identity alone is not semantic validity. |
+| [Clang AST](https://clang.llvm.org/docs/IntroductionToTheClangAST.html) and [AST importer](https://clang.llvm.org/docs/InternalsManual.html#the-astimporter) | Written syntax and semantic identity/redeclaration graphs serve distinct purposes and should not be collapsed into a lossy syntax tree. |
+| [LLVM language reference](https://llvm.org/docs/LangRef.html) | Explicit IR contracts and linkage distinctions matter; LLVM linkage is not Terrum lexical visibility and does not select LLVM as a backend. |
+| [.NET runtime type-loader design](https://github.com/dotnet/runtime/blob/bd6d336bfd95a333e8b3f22f26259bbb659974cf/docs/design/coreclr/botr/type-loader.md) | Type identity, metadata validation and load phases affect compatibility and failure timing; these require explicit boundaries rather than accidental JIT-time discovery. |
+
 ## Other official library-specific prior art
 
 - [Arm ACLE, “Sizeless types”](https://arm-software.github.io/acle/main/acle.html#sizeless-types): SVE vectors **and predicates** have sizeless types. ACLE permits automatic locals and function parameters/results but disallows array elements, `sizeof`, and ordinary struct members. Terrum's proposed scalable profile draws a boundary from these restrictions, without claiming its own ABI or suspension semantics follow automatically from C/C++ ACLE.

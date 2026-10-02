@@ -40,24 +40,18 @@ inventing one.
 It does not replace the `.trm`
 producer/consumer commands or add TRRM import linking. This page describes
 the existing development semantic/native module paths.
-The native scalar frontend's projection v49 lowers integer shifts and local
-mutations to the same verified operations before these module writers run.
-It therefore reuses feature-selected semantic v43/v45 and existing native
-profiles rather than introducing a new persisted module format. Independently
-projected producers can service unchanged semantic/native consumers; this does
-not add general call parsing to the native frontend.
-Projection v50 adds initialized scalar declarations in existing braced
-branch/loop bodies through the same verified local/block representation.
-Lexical visibility does not recycle declaration slots or change the eight-local
-function limit. Existing feature-selected semantic/native writers and consumers
-remain unchanged; this projection revision is not a persisted module revision.
-Projection v51 adds bounded native-frontend `do`/`for` clauses and header scopes
-using existing verified block/loop nodes, including post-tested and iterator
-forms. Existing semantic/native feature selection handles those nodes without a
-new format or ABI revision. The separately implemented approved-TRRM loop
-envelope is described above; the frontend projection is not its wire format.
-The highest implemented semantic revision is 45, selected
-by the artifact's required features; not every artifact uses revision 45.
+The bounded native scalar frontend validates its versioned source projections,
+then lowers supported constructs to the same verified operations used by these
+module writers. Projection versions are not persisted semantic-module
+revisions; the current source subset and projection compatibility gates are
+specified in the [native profile](native.md). The separately implemented
+approved-TRRM loop envelope described above is a different wire format.
+The highest implemented semantic revision is 47. It is selected only when a
+retained function contains an explicit local lifetime end, encoded as statement
+tag 26. Both semantic-module and native-graph readers reject the operation
+under older revisions and reject revision 47 when no such operation is
+present. Other features select their own required revision; not every artifact
+uses revision 47.
 Revision-specific reader behavior and feature-dependent writer selection
 describe repository support, not an externally released binary compatibility
 matrix. See [implementation](implementation.md) for the compiler support
@@ -102,8 +96,7 @@ Calls use symbolic function identities rather than binder-local indexes.
 Types use declaration names, visibility and ordered field layouts as their contract;
 public import keys include declaring-type and signature-type visibility, while
 the complete ordered layout is checked separately before execution. The
-current module format does not relax its exact layout checks. The bounded
-syntax-24 transparent `Copy` wrapper is a specific v35 contract: one-field
+current module format does not relax its exact layout checks. The bounded transparent `Copy` wrapper is a specific v35 contract: one-field
 wrappers over `bool`, `char16`, `int32`, `uint32`, `int64`, or `uint64` retain
 nominal identity and field visibility/mutation rules, while storage and direct
 argument/result classification match the carrier. Semantic artifact v35

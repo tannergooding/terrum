@@ -12,12 +12,11 @@ this roadmap for adoption sequencing and remaining work.
 
 ## Active work (priority order)
 
-1. Carry settled runtime/initialization contracts through compiler binding,
-   verification, persistence and lowering. The
-   [source-decision inventory](proposals/grammar-open-questions.md) has canonical
-   redirects for all numbered choices. Its deferred designs and separate
-   schema/API/ABI work remain explicit; this is not compiler completeness.
-   The [grammar](grammar-spec.md) records settled forms.
+1. Carry accepted runtime and initialization contracts through compiler
+   binding, verification, persistence and lowering. Keep their required
+   metadata, proof, API and ABI work explicit in the planned areas below; an
+   accepted source form is not a support claim. The
+   [grammar](grammar-spec.md) records source contracts and their boundaries.
 2. Refine concrete library proposals. Candidate signatures and contracts do
    not imply parser, compiler, runtime or library support.
 
@@ -105,6 +104,31 @@ Production JIT, additional backends, wholesale source generation/reflection/
 interop and scalable SIMD remain outside these four current areas. This does
 not exclude the existing bounded JIT proof or the targeted asynchronous
 contracts listed above.
+
+Future tooling prerequisites also remain outside the four current areas and
+are not implementation claims. Semantic facts must distinguish unknown,
+invalid and proven; an empty diagnostic set is not safety proof. Semantic
+queries need snapshot, target/options and dependency identity with fact
+provenance, and semantic edits must recheck affected contracts and diagnostics
+against the resulting compilation before publication. Edits should be
+candidate batches with checked preconditions. Generated source needs a stable
+document identity, producer/version/input digest and authorization, with
+separate spelling and expansion maps that can associate a generated range
+with zero, one or several original ranges; diagnostics may carry related
+locations, rule arguments and fixes scoped to the same snapshot.
+
+Analyzer and generator APIs should be versioned snapshot consumers, not
+callbacks that mutate compiler internals. Pin dependencies and input manifests;
+require explicit capabilities, cancellation and resource bounds. Generators
+approved by the author may access only declared implementation scope; consumer
+analyzers do not inherit that grant. Comments and generated text grant no
+execution, filesystem, network or private-member authority. Generation must
+use declared deterministic inputs and not depend on undeclared clock,
+environment or network state. An in-process interface alone is not a security
+boundary. Plugin discovery, query scheduling, remote services and persistent
+query caches remain deferred until usage establishes requirements; cache keys
+must include compiler/schema versions, target, references, contract-rule
+version and authorization context, not just source content.
 
 ## Completed work (newest first)
 
