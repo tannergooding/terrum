@@ -137,6 +137,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `296658a` | Native scalar void direct self-call expression statements, projection 73 |
 | `324c2d4` | Native scalar direct self-call expression statements, projection 72 |
 | `7346396` | Native scalar direct self-calls with inferred `out var` destinations, projection 71 |
 | `a1f5cb6` | Native scalar direct self-calls with existing `out` destinations, projection 70 |
