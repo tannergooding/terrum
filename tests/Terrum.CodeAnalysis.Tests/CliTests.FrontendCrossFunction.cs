@@ -136,6 +136,8 @@ public sealed partial class CliTests
         const string text = "public bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return Fill(true, init value); }";
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var input = Encoding.UTF8.GetBytes(text);
+        var outputDirectory = Path.Combine(RepositoryRoot(), "artifacts", "scanner-tests");
+        Directory.CreateDirectory(outputDirectory);
         foreach (var runtime in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(input, "frontend-component",
@@ -148,6 +150,25 @@ public sealed partial class CliTests
             Assert.Equal(2, result.GetProperty("initRefParameterMask").GetInt32());
             Assert.Contains(result.GetProperty("nodes").EnumerateArray(), static node =>
                 node.GetProperty("operation").GetInt32() == 107);
+
+            var path = Path.Combine(outputDirectory, $"v79-library-{Guid.NewGuid():N}.dll");
+            try
+            {
+                var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
+                    directory, "-", "-o", path, "--runtime", runtime, "--json");
+                Assert.True(buildExit == 0, $"{buildExit}: {buildOutput}{buildError}");
+                var policy = runtime == "fail-fast"
+                    ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions;
+                var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
+                Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+                var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+                Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Fill"], (NativeRuntimePolicy)policy),
+                    await File.ReadAllBytesAsync(path));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
         }
     }
 
