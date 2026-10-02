@@ -97,6 +97,7 @@ public sealed class ConstEvalTests
     [InlineData("const int32 value = Divide(1, 0);", "ConstEval checked arithmetic")]
     [InlineData("const int32 value = Add(2147483647, 1);", "ConstEval checked arithmetic")]
     [InlineData("const int32 value = Identity(arg);", "required constant")]
+    [InlineData("const int32 value = true ? arg : 42;", "required constant needs scalar values")]
     [InlineData("const int32 value = Identity(Loop(1));", "ConstEval work limit")]
     [InlineData("const int32 value = Recurse(100);", "ConstEval call depth")]
     [InlineData("const int32 value = Divide(int32(0x80000000), -1);", "ConstEval checked arithmetic")]
