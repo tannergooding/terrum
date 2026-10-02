@@ -137,6 +137,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f55f904` | Native scalar checked bare catch with optional `finally`, projection 67 |
 | `158999e` | Native scalar explicit unsafe scopes and checked bare catch, projection 66 |
 | `264e7ee` | Native scalar nested `try`/`finally`, projection 65 |
 | `e8f0465` | Native scalar foldable const initializers, projection 64 |
