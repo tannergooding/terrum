@@ -20,6 +20,9 @@ approved.
 - [Self-host frontend verification budget](self-host-frontend-verification-budget.md)
   records a deferred, unapproved architecture option if memoization no longer
   suffices to grow the authored scalar frontend within its shared limit.
+- [Checked-exception TRRM](checked-exception-trrm.md) records the unapproved
+  exceptional-control-flow contract needed before source-free checked-exception
+  Bodies can be considered.
 
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,
