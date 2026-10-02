@@ -89,6 +89,7 @@ public sealed partial class CliTests
     [Theory]
     [InlineData("static require true; return 42;")]
     [InlineData("const bool proven = true; static require proven; return 42;")]
+    [InlineData("const bool proven = true ? true : false; static require proven; return 42;")]
     [InlineData("static require true || false; return 42;")]
     [InlineData("static require true ? true : false; return 42;")]
     [InlineData("static require true ? true : int32(1) / int32(0) == 0; return 42;")]
