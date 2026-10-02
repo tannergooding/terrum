@@ -335,7 +335,7 @@ public sealed partial class CliTests
     [Fact]
     public async Task ScalarFrontendProjectsRecursiveOutVariableCallStatementsAsync()
     {
-        const string recursive = "public bool Try(int32 value, out int32 result) { if (value == 0) { result = 1; return true; } Try(value - 1, out var previous); result = value; return true; }";
+        const string recursive = "public bool Try(int32 value, out int32 result) { if (value == 0) { result = 1; return true; } Try(value - 1, out var previous); mut int32 ignored = 0; Try(value - 1, out ignored); result = value; return true; }";
         const string readsUnpublished = "public bool Try(int32 value, out int32 result) { if (value == 0) { result = 1; return true; } Try(value - 1, out var previous); result = previous; return true; }";
         var frontend = Path.Combine(RepositoryRoot(), "self-host");
         foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
@@ -349,6 +349,8 @@ public sealed partial class CliTests
                 Assert.Equal(72, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
                     node => node.GetProperty("operation").GetInt32() == 104);
+                Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
+                    node => node.GetProperty("operation").GetInt32() == 103);
                 Assert.Contains(result.GetProperty("statements").EnumerateArray(),
                     statement => statement.GetProperty("kind").GetInt32() == 37);
             }
