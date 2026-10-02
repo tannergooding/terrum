@@ -1879,6 +1879,10 @@ mut class ScalarFrontendState
             {
                 if (!ParseTreeIf(depth, nearestLoop)) { return false; }
             }
+            else if (next.Kind == 42)
+            {
+                if (!ParseTreeTryFinally(depth, nearestLoop)) { return false; }
+            }
             else if (next.Kind == 33 || next.Kind == 34)
             {
                 if (nearestLoop < 0)
@@ -2374,6 +2378,44 @@ mut class ScalarFrontendState
             FinishTreeBody(marker, enclosingLocals, end);
         }
         Host.Frontend[332 + header * 5 + 4] = end - keyword.Range.Start;
+        return true;
+    }
+
+    private mut bool ParseTreeTryFinally(int32 depth, int32 nearestLoop)
+    {
+        if (depth >= 6 || _statementCount >= 12)
+        {
+            Fail(1);
+            return false;
+        }
+        if (!Take(42, out var keyword) || !Take(48, out var openBody))
+        {
+            return false;
+        }
+        int32 header = _statementCount;
+        int32 enclosingLocals = _activeLocals;
+        if (!AddTreeStatement(29, 0, -1, keyword.Range.Start, openBody.Range.End)
+            || !ParseTreeStructuredBody(depth + 1, nearestLoop)
+            || !Take(49, out var endBody))
+        {
+            return false;
+        }
+        FinishTreeBody(header, enclosingLocals, endBody.Range.End);
+        if (_statementCount >= 12
+            || !Take(44, out var finallyKeyword)
+            || !Take(48, out var openCleanup))
+        {
+            return false;
+        }
+        int32 cleanup = _statementCount;
+        if (!AddTreeStatement(30, 0, -1, finallyKeyword.Range.Start, openCleanup.Range.End)
+            || !ParseTreeStructuredBody(depth + 1, nearestLoop)
+            || !Take(49, out var endCleanup))
+        {
+            return false;
+        }
+        FinishTreeBody(cleanup, enclosingLocals, endCleanup.Range.End);
+        Host.Frontend[332 + header * 5 + 4] = endCleanup.Range.End - keyword.Range.Start;
         return true;
     }
 

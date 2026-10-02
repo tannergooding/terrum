@@ -340,6 +340,14 @@ const locals and `for`-initializer const declarations remain outside this
 bounded subset. The projection adds no native ABI, source-free TRRM or
 semantic-module format.
 
+Projection v65 adds kinds 29 and 30 for nested scalar
+`try { ... } finally { ... }` regions. The source-bound reader verifies both
+block extents and lexical visibility before lowering to `BoundTryFinally`;
+`catch` remains unsupported. Shared verification enforces the existing NoThrow
+cleanup and control-flow restrictions under both runtime policies. This
+remains a bounded frontend projection that depends on the hosted verifier and
+emitter, not a standalone compiler or a native ABI/schema change.
+
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer

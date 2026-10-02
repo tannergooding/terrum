@@ -133,7 +133,7 @@ The current scanner is version 8/schema 8; it appends diagnostic kinds 11/12
 for invalid/unsupported maximal punctuation runs to the prior diagnostic
 catalog. Earlier raw records remain readable where compatible, while current
 snapshot adapters reject forged framing, invalid escapes and conflicting
-classification. The bounded scalar frontend's projections through v64 share a
+classification. The bounded scalar frontend's projections through v65 share a
 392-word buffer and enforce the documented limits: 16,384 UTF-16 source units, 64 tokens,
 eight total local identities including hidden discards, 12 statement records,
 32 expression nodes, three parameters, 16 expression-recursion levels, six
@@ -774,6 +774,15 @@ constant locals. Runtime-dependent or unsupported expression forms, inferred
 const locals and `for`-initializer const declarations remain outside this
 bounded subset. The projection adds no native ABI, source-free TRRM or
 semantic-module format.
+
+Projection v65 adds kinds 29 and 30 for nested `try { ... } finally { ... }`
+regions in the bounded scalar statement subset. The source-bound reader
+validates both block extents and lexical visibility before lowering to
+`BoundTryFinally`; catches remain unsupported. The shared verifier enforces
+the hosted cleanup contract, including NoThrow cleanup, no return or transfer
+out of cleanup, and the existing bounded cleanup-flow restrictions. This
+projection adds no native ABI, source-free TRRM or semantic-module format, and
+continues to depend on the hosted verifier and emitter.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

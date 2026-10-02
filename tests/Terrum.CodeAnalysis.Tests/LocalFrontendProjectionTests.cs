@@ -153,6 +153,30 @@ public sealed class LocalFrontendProjectionTests
         }
     }
 
+    [Fact]
+    public void ReadResultAuditsTryFinallyExtentsAndVersionGate()
+    {
+        const string text = "int32 Main() { try { return 42; } finally { } }";
+        var words = TryFinallyProjection(text);
+        var source = SourceText.From(text);
+        var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
+        Assert.True(result.IsValid);
+        Assert.Equal(65, words[0]);
+        Assert.Equal(3, result.Statements.Length);
+
+        Reject(0, 64);
+        Reject(333, 3);
+        Reject(346, words[346] - 1);
+
+        void Reject(int index, int value)
+        {
+            var old = words[index];
+            words[index] = value;
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            words[index] = old;
+        }
+    }
+
     private static int[] Projection(string text, bool assignment)
     {
         var words = new int[ScalarFrontendHost.WordCount];
@@ -319,6 +343,48 @@ public sealed class LocalFrontendProjectionTests
                 words[offset + 6] = 42;
             }
         }
+    }
+
+    private static int[] TryFinallyProjection(string text)
+    {
+        var words = new int[ScalarFrontendHost.WordCount];
+        words[0] = 65;
+        words[1] = 1;
+        words[5] = 1;
+        words[9] = text.IndexOf("Main", StringComparison.Ordinal);
+        words[10] = 4;
+        words[37] = 1;
+        words[38] = -1;
+        words[39] = -1;
+        words[40] = -1;
+        words[298] = 3;
+        var tryStart = text.IndexOf("try", StringComparison.Ordinal);
+        var returnStart = text.IndexOf("return", StringComparison.Ordinal);
+        var finallyStart = text.IndexOf("finally", StringComparison.Ordinal);
+        words[332] = 29;
+        words[333] = 2;
+        words[334] = -1;
+        words[335] = tryStart;
+        words[336] = text.Length - tryStart - 2;
+        words[337] = 8;
+        words[338] = 0;
+        words[339] = 0;
+        words[340] = returnStart;
+        words[341] = "return 42;".Length;
+        words[342] = 30;
+        words[343] = 3;
+        words[344] = -1;
+        words[345] = finallyStart;
+        words[346] = text.Length - finallyStart - 2;
+        var literalStart = text.IndexOf("42", returnStart, StringComparison.Ordinal);
+        words[42] = 3;
+        words[43] = 1;
+        words[44] = literalStart;
+        words[45] = 2;
+        words[46] = -1;
+        words[47] = -1;
+        words[48] = 42;
+        return words;
     }
 
     private static byte[] Bytes(int[] words)

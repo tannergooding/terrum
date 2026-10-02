@@ -70,6 +70,7 @@ namespace Terrum.CodeAnalysis;
 // type in the local record; the source declaration uses `init var`.
 // Version 63 adds kind 27 for a scalar constant local with a literal initializer.
 // Version 64 adds kind 28 for a scalar constant local with a foldable expression initializer.
+// Version 65 adds kind 29 for a try body and kind 30 for its finally body.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -113,6 +114,7 @@ int32 GetScalarFrontendStatementVersion()
             }
         }
     }
+    if (maximumKind >= 29) { return 65; }
     if (maximumKind == 28) { return 64; }
     if (maximumKind == 27) { return 63; }
     if (maximumKind == 26) { return 62; }
@@ -156,6 +158,7 @@ bool TryPublishScalarFrontend()
         if (HasScalarFrontendStatement(26)) { Host.Frontend[0] = 62; }
         if (HasScalarFrontendStatement(27)) { Host.Frontend[0] = 63; }
         if (HasScalarFrontendStatement(28)) { Host.Frontend[0] = 64; }
+        if (HasScalarFrontendStatement(29)) { Host.Frontend[0] = 65; }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {
