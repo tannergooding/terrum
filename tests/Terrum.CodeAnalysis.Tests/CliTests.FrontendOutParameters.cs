@@ -336,6 +336,7 @@ public sealed partial class CliTests
     public async Task ScalarFrontendProjectsRecursiveOutVariableCallStatementsAsync()
     {
         const string recursive = "public bool Try(int32 value, out int32 result) { if (value == 0) { result = 1; return true; } Try(value - 1, out var previous); result = value; return true; }";
+        const string readsUnpublished = "public bool Try(int32 value, out int32 result) { if (value == 0) { result = 1; return true; } Try(value - 1, out var previous); result = previous; return true; }";
         var frontend = Path.Combine(RepositoryRoot(), "self-host");
         foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
         {
@@ -384,6 +385,15 @@ public sealed partial class CliTests
                 File.Delete(outputPath);
             }
         }
+
+        var (invalidExit, invalidOutput, invalidError) = await RunAsync(
+            Encoding.UTF8.GetBytes(readsUnpublished), "frontend-component", frontend, "-",
+            "--runtime", "fail-fast", "--json");
+        Assert.Equal(1, invalidExit);
+        Assert.Empty(invalidError);
+        using var invalidDocument = JsonDocument.Parse(invalidOutput);
+        Assert.Equal("TRM5001", invalidDocument.RootElement.GetProperty("diagnostics")[0]
+            .GetProperty("code").GetString());
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
