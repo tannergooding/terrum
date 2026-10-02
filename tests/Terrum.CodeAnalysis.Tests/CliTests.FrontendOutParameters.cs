@@ -161,6 +161,60 @@ public sealed partial class CliTests
         }
     }
 
+    [Fact]
+    public async Task ScalarFrontendProjectsRecursiveValueCallsAsync()
+    {
+        const string recursive = "public int32 Sum(int32 value) { if (value == 0) { return 0; } return Sum(value - 1) + value; }";
+        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
+                "frontend-component", frontend, "-", "--runtime", runtimeName, "--json");
+            Assert.True(exit == 0, $"{runtimeName}: {exit}: {output}{error}");
+            using (var document = JsonDocument.Parse(output))
+            {
+                var result = document.RootElement.GetProperty("result");
+                Assert.Equal(70, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
+                    node => node.GetProperty("operation").GetInt32() == 102);
+            }
+
+            var policy = runtimeName == "fail-fast"
+                ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions;
+            var hostedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(SourceText.From(recursive)), policy);
+            Assert.False(hostedCompilation.HasErrors,
+                string.Join(Environment.NewLine, hostedCompilation.Diagnostics));
+            var hosted = Assert.IsType<BoundProgram>(hostedCompilation.Program);
+            var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-sum-{Guid.NewGuid():N}.dll");
+            try
+            {
+                var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
+                    "frontend-build-library", frontend, "-", "-o", outputPath, "--runtime", runtimeName, "--json");
+                Assert.True(buildExit == 0, $"{runtimeName}: {buildExit}: {buildOutput}{buildError}");
+                Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Sum"], (NativeRuntimePolicy)policy),
+                    await File.ReadAllBytesAsync(outputPath));
+                var handle = NativeLibrary.Load(outputPath);
+                try
+                {
+                    var invoke = Marshal.GetDelegateForFunctionPointer<RecursiveSum>(
+                        NativeLibrary.GetExport(handle, "Sum"));
+                    Assert.Equal(15, invoke(5));
+                }
+                finally
+                {
+                    NativeLibrary.Free(handle);
+                }
+            }
+            finally
+            {
+                File.Delete(outputPath);
+            }
+        }
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate bool RecursiveTry(int value, out int result);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int RecursiveSum(int value);
 }
