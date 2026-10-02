@@ -215,7 +215,7 @@ public sealed partial class CliTests
     [Fact]
     public async Task ScalarFrontendProjectsRecursiveCallStatementsAsync()
     {
-        const string recursive = "public int32 Sum(int32 value) { if (value > 0) { Sum(value - 1); } for (; value > 0; Sum(value - 1)) { break; } return value + 42; }";
+        const string recursive = "public int32 Sum(int32 value) { mut int32 remaining = value; if (value > 0) { Sum(value - 1); for (Sum(0); remaining > 0; Sum(0)) { remaining = remaining - 1; } } return value + 42; }";
         var frontend = Path.Combine(RepositoryRoot(), "self-host");
         foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
         {
