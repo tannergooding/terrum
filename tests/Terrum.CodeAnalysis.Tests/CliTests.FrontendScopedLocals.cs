@@ -107,6 +107,8 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { const uint64 value = 42; return int32(value); }", 42, 63)]
     [InlineData("int32 Main() { const uint64 value = 18446744073709551615; return value == 18446744073709551615 ? 42 : 0; }", 42, 63)]
     [InlineData("int32 Main() { const bool value = true; if (value) { return 42; } return 0; }", 42, 63)]
+    [InlineData("int32 Main() { const int32 value = true ? 42 : int32(1) / int32(0); return value; }", 42, 64)]
+    [InlineData("int32 Main() { int32 seed = 0; const int32 value = true ? 42 : seed; return value; }", 42, 64)]
     [InlineData("int32 Main() { const char16 value = 42; return int32(value); }", 42, 63)]
     [InlineData("int32 Main() { const bool value = !false; if (value) { return 42; } return 0; }", 42, 64)]
     [InlineData("int32 Main() { const bool value = true && !false; if (value) { return 42; } return 0; }", 42, 64)]

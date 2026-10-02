@@ -211,8 +211,10 @@ type is established by the first assignment's already-typed expression.
 Untyped numeric literals do not infer a vacant local; unresolved inference and
 incompatible later assignments reject. Projection v63 adds literal-initialized
 scalar `const` locals. Projection v64 adds foldable typed scalar constant
-expressions, including references to earlier const locals; runtime-dependent or
-unsupported expressions and inferred const declarations remain excluded.
+expressions, including references to earlier const locals and
+constant-selected conditional or Boolean short-circuit paths;
+runtime-dependent evaluated expressions, unsupported forms and inferred const
+declarations remain excluded.
 Projection v65 adds nested `try { ... } finally { ... }` regions. Its source
 reader validates separate body and cleanup extents, and shared verification
 enforces NoThrow cleanup and existing cleanup-flow restrictions. `catch`

@@ -2155,16 +2155,16 @@ public static class ScalarFrontendHost
         return BindLibraryCore(source, result, policy);
     }
 
-    private static BoundExpression FoldStaticProofExpression(BoundExpression expression)
+    private static BoundExpression FoldBoundedConstantExpression(BoundExpression expression)
     {
         switch (expression)
         {
             case BoundConditional conditional:
             {
-                var condition = FoldStaticProofExpression(conditional.Condition);
+                var condition = FoldBoundedConstantExpression(conditional.Condition);
                 if (condition is BoundConstant { Type: PrimitiveType.Bool } value)
                 {
-                    var selected = FoldStaticProofExpression(value.Value != 0
+                    var selected = FoldBoundedConstantExpression(value.Value != 0
                         ? conditional.WhenTrue : conditional.WhenFalse);
                     return selected is BoundConstant constant && constant.Type == conditional.Type
                         ? constant with { Span = conditional.Span }
@@ -2174,11 +2174,11 @@ public static class ScalarFrontendHost
             }
             case BoundUnary unary:
                 return Binder.FoldScalarConstant(unary with {
-                    Operand = FoldStaticProofExpression(unary.Operand),
+                    Operand = FoldBoundedConstantExpression(unary.Operand),
                 });
             case BoundBinary binary:
             {
-                var left = FoldStaticProofExpression(binary.Left);
+                var left = FoldBoundedConstantExpression(binary.Left);
                 if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe
                     && left is BoundConstant { Type: PrimitiveType.Bool } boolean
                     && (binary.Operator == TokenKind.AmpersandAmpersand && boolean.Value == 0
@@ -2189,12 +2189,12 @@ public static class ScalarFrontendHost
                 }
                 return Binder.FoldScalarConstant(binary with {
                     Left = left,
-                    Right = FoldStaticProofExpression(binary.Right),
+                    Right = FoldBoundedConstantExpression(binary.Right),
                 });
             }
             case BoundCast cast:
                 return Binder.FoldScalarConstant(cast with {
-                    Operand = FoldStaticProofExpression(cast.Operand),
+                    Operand = FoldBoundedConstantExpression(cast.Operand),
                 });
             default:
                 return expression;
@@ -2333,10 +2333,12 @@ public static class ScalarFrontendHost
                 treeExpressions[i] = bound;
                 if (constantDeclarations.TryGetValue(i, out var localIndex))
                 {
-                    if (bound is not BoundConstant constant || constant.Type != types[localIndex].Type)
+                    if (FoldBoundedConstantExpression(bound) is not BoundConstant constant
+                        || constant.Type != types[localIndex].Type)
                     {
                         throw InvalidResult();
                     }
+                    treeExpressions[i] = constant;
                     constantLocals[localIndex] = constant;
                 }
             }
@@ -2346,7 +2348,7 @@ public static class ScalarFrontendHost
             foreach (var proof in result.Statements.Where(static statement => statement.Kind is 35 or 36))
             {
                 if (treeExpressions is null
-                    || FoldStaticProofExpression(treeExpressions[proof.Root]) is not BoundConstant {
+                    || FoldBoundedConstantExpression(treeExpressions[proof.Root]) is not BoundConstant {
                         Type: PrimitiveType.Bool, Value: 1,
                     })
                 {

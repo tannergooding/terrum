@@ -333,12 +333,13 @@ declarations remain outside this bounded subset. The projection adds no native
 ABI, source-free TRRM or semantic-module format.
 
 Projection v64 adds kind 28 for typed scalar `const` initializers whose
-expression tree the shared scalar folder reduces to a `BoundConstant`. Direct
-literals remain projection v63 kind 27; folded initializers may use earlier
-constant locals. Runtime-dependent or unsupported expression forms, inferred
-const locals and `for`-initializer const declarations remain outside this
-bounded subset. The projection adds no native ABI, source-free TRRM or
-semantic-module format.
+expression tree the bounded constant folder reduces to a `BoundConstant`.
+Direct literals remain projection v63 kind 27; folded initializers may use
+earlier constant locals. Constant-selected conditional arms and Boolean
+short-circuit paths follow only the evaluated branch. Runtime-dependent
+evaluated expressions, unsupported forms, inferred const locals and
+`for`-initializer const declarations remain outside this bounded subset. The
+projection adds no native ABI, source-free TRRM or semantic-module format.
 
 Projection v65 adds kinds 29 and 30 for nested scalar
 `try { ... } finally { ... }` regions. The source-bound reader verifies both
