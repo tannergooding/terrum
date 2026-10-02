@@ -24,6 +24,14 @@ The source-free TRRM scalar path remains fail-fast; checked-exception Bodies
 and richer contracts are not implemented. See
 [implementation](implementation.md) for the current support boundary.
 
+The bounded Terrum-authored scalar source frontend now supports v74 complete
+global-function snapshots and source-order scalar call targets, including
+forward and recursive calls with up to three by-value scalar arguments.
+Independent source auditing precedes the existing hosted verifier/emitter.
+Its source/token/body bounds and v1–v73 compatibility are unchanged. General
+binding/imports, output/reference call migration and bootstrap compilation
+remain pending; this does not extend source-free TRRM checked exceptions.
+
 ## Planned work (priority order)
 
 The roadmap has four current areas, in area priority order. The sequence below

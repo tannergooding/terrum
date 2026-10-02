@@ -1,0 +1,222 @@
+namespace Terrum.CodeAnalysis;
+
+// A snapshot still has at most 64 tokens including EOF. Even an empty void
+// declaration needs six tokens, so ten frames cover the existing source bound.
+// Each frame contains token bounds, a source span, 392 body words, and 32
+// zero-based target identities (-1 for nodes other than operation 105).
+int32 FindScalarProgramFunction(Token name)
+{
+    for (mut int32 index = 0; index < Host.FrontendProgram[2]; index = index + 1)
+    {
+        int32 header = 8 + index * 428;
+        require SourceRange.TryCreate(Host.FrontendProgram[header + 9],
+            Host.FrontendProgram[header + 10], out var span);
+        if (SameTokenSpelling(new Token(2, span), name)) { return index; }
+    }
+    return -1;
+}
+
+bool ScalarProgramError(int32 code, SourceRange span, out bool handled)
+{
+    for (mut int32 index = 0; index < Host.FrontendProgram.Length; index = index + 1)
+    {
+        Host.FrontendProgram[index] = 0;
+    }
+    for (mut int32 index = 0; index < Host.Frontend.Length; index = index + 1)
+    {
+        Host.Frontend[index] = 0;
+    }
+    Host.Frontend[0] = 3;
+    Host.Frontend[1] = 2;
+    Host.Frontend[2] = code;
+    Host.Frontend[3] = span.Start;
+    Host.Frontend[4] = span.Length;
+    handled = true;
+    return true;
+}
+
+bool CopyScalarProgramTokens(ManagedTokenChain tokens, int32 start, int32 end,
+    out ManagedTokenChain chain)
+{
+    if (!ManagedTokenChain.TryCreate(out var created)) { return false; }
+    for (mut int32 index = start; index < end; index = index + 1)
+    {
+        require tokens.TryGet(index, out var token);
+        require created.TryAppend(token.Kind, token.Range.Start, token.Range.Length);
+    }
+    require tokens.TryGet(end - 1, out var last);
+    require created.TryAppend(0, last.Range.End, 0);
+    chain = created;
+    return true;
+}
+
+bool TryPublishScalarFrontendProgram(out bool handled)
+{
+    handled = false;
+    if (!TokenSnapshot.TryScan(init var tokens)) { return false; }
+    int32 count = tokens.GetCount();
+    if (count > 64)
+    {
+        require tokens.TryGet(64, out var excess);
+        return ScalarProgramError(1, excess.Range, out handled);
+    }
+    var spacing = tokens.GetScalarOperatorSpacingError();
+    if (spacing.Length != 0) { return ScalarProgramError(1, spacing, out handled); }
+    if (!ManagedTokenChain.TryCreate(out var sourceTokens)) { return false; }
+    for (mut int32 index = 0; index < count; index = index + 1)
+    {
+        require tokens.TryGet(index, out var token);
+        require sourceTokens.TryAppend(token.Kind, token.Range.Start, token.Range.Length);
+    }
+    require SourceRange.TryCreate(0, 0, out var empty);
+    mut int32 start = 0;
+    mut int32 functions = 0;
+    while (start < count - 1)
+    {
+        if (!CopyScalarProgramTokens(sourceTokens, start, count - 1, out var remaining)
+            || !ScalarFrontendState.TryCreate(remaining, empty, out var probe)
+            || !probe.TryInventoryHeader(out var header, out var headerEnd))
+        {
+            return false;
+        }
+        if (!header.IsValid)
+        {
+            // A single declaration retains the legacy parser's diagnostics.
+            if (functions == 0)
+            {
+                for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
+                return true;
+            }
+            return ScalarProgramError(header.ErrorCode, header.ErrorSpan, out handled);
+        }
+        int32 body = start + headerEnd;
+        require tokens.TryGet(body, out var opening);
+        mut int32 end = body;
+        if (opening.Kind == 82)
+        {
+            while (end < count - 1)
+            {
+                require tokens.TryGet(end, out var token);
+                end = end + 1;
+                if (token.Kind == 52) { break; }
+            }
+        }
+        else if (opening.Kind == 48)
+        {
+            mut int32 depth = 1;
+            end = body + 1;
+            while (end < count - 1 && depth != 0)
+            {
+                require tokens.TryGet(end, out var token);
+                if (token.Kind == 48) { depth = depth + 1; }
+                if (token.Kind == 49) { depth = depth - 1; }
+                end = end + 1;
+            }
+            if (depth != 0) { return ScalarProgramError(1, opening.Range, out handled); }
+        }
+        else
+        {
+            return ScalarProgramError(1, opening.Range, out handled);
+        }
+        if (functions == 10) { return ScalarProgramError(1, header.Name, out handled); }
+        int32 frame = 4 + functions * 428;
+        require tokens.TryGet(start, out var first);
+        require tokens.TryGet(end - 1, out var last);
+        Host.FrontendProgram[frame] = start;
+        Host.FrontendProgram[frame + 1] = end;
+        Host.FrontendProgram[frame + 2] = first.Range.Start;
+        Host.FrontendProgram[frame + 3] = last.Range.End - first.Range.Start;
+        WriteScalarFrontendHeader(header);
+        Host.Frontend[5] = header.ReturnType;
+        for (mut int32 word = 0; word < 37; word = word + 1)
+        {
+            Host.FrontendProgram[frame + 4 + word] = Host.Frontend[word];
+            Host.Frontend[word] = 0;
+        }
+        functions = functions + 1;
+        start = end;
+    }
+    if (functions < 2)
+    {
+        for (mut int32 word = 0; word < Host.FrontendProgram.Length; word = word + 1)
+        {
+            Host.FrontendProgram[word] = 0;
+        }
+        return true;
+    }
+    Host.FrontendProgram[0] = 74;
+    Host.FrontendProgram[2] = functions;
+    for (mut int32 index = 0; index < functions; index = index + 1)
+    {
+        for (mut int32 node = 0; node < 32; node = node + 1)
+        {
+            Host.FrontendProgram[4 + index * 428 + 396 + node] = -1;
+        }
+    }
+    for (mut int32 index = 0; index < functions; index = index + 1)
+    {
+        int32 header = 8 + index * 428;
+        require SourceRange.TryCreate(Host.FrontendProgram[header + 9],
+            Host.FrontendProgram[header + 10], out var name);
+        if (Host.FrontendProgram[header + 16] != 0
+            || (Host.FrontendProgram[header + 2] & 4) != 0)
+        {
+            return ScalarProgramError(1, name, out handled);
+        }
+        if (FindScalarProgramFunction(new Token(2, name)) != index)
+        {
+            return ScalarProgramError(4, name, out handled);
+        }
+    }
+    if (Host.IntegerValues[0] != 0
+        && !TokenIntegerSnapshot.TryBuild(count, init var integers))
+    {
+        return false;
+    }
+    for (mut int32 index = 0; index < functions; index = index + 1)
+    {
+        int32 frame = 4 + index * 428;
+        Host.FrontendProgram[3] = index;
+        for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
+        if (!CopyScalarProgramTokens(sourceTokens, Host.FrontendProgram[frame],
+                Host.FrontendProgram[frame + 1], out var chain)
+            || !ScalarFrontendState.TryCreate(chain, empty, out var tree)
+            || !tree.TryParseTree(out var treeResult))
+        {
+            return false;
+        }
+        mut ScalarFrontendResult result = treeResult;
+        if (!result.IsValid)
+        {
+            for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
+            for (mut int32 node = 0; node < 32; node = node + 1)
+            {
+                Host.FrontendProgram[frame + 396 + node] = -1;
+            }
+            if (!ScalarFrontendState.TryCreate(chain, empty, out var structured)
+                || !structured.TryParseStructuredReturns(out var completed))
+            {
+                return false;
+            }
+            result = completed;
+        }
+        if (!result.IsValid)
+        {
+            return ScalarProgramError(result.ErrorCode, result.ErrorSpan, out handled);
+        }
+        WriteScalarFrontendHeader(result);
+        Host.Frontend[0] = 74;
+        Host.Frontend[1] = 1;
+        Host.Frontend[5] = result.ReturnType;
+        Host.Frontend[15] = result.HasCondition ? (result.HasFallthrough ? 2 : 1) : 0;
+        for (mut int32 word = 0; word < 392; word = word + 1)
+        {
+            Host.FrontendProgram[frame + 4 + word] = Host.Frontend[word];
+        }
+    }
+    for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
+    Host.FrontendProgram[1] = 1;
+    Host.FrontendProgram[3] = 0;
+    handled = true;
+    return true;
+}

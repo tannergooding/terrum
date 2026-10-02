@@ -80,6 +80,8 @@ namespace Terrum.CodeAnalysis;
 // Version 72 adds kind-37 direct self-call expression statements; slot is zero,
 // root is the call node, and the span includes the semicolon outside for clauses.
 // Version 73 permits void self-call nodes in kind-37 expression statements.
+// Version 74 uses the separate FrontendProgram framing and operation-105
+// target table defined in ScalarFrontendProgram; the legacy buffer is zero.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -110,18 +112,9 @@ int32 GetScalarFrontendStatementVersion()
     {
         int32 kind = Host.Frontend[332 + statement * 5];
         if (kind > maximumKind) { maximumKind = kind; }
-        if (kind == 8 && version < 48) { version = 48; }
-        if (kind != 1 || version >= 50) { continue; }
-        for (mut int32 header = 0; header < statement; header = header + 1)
-        {
-            int32 headerKind = Host.Frontend[332 + header * 5];
-            if ((headerKind == 3 || headerKind == 4 || headerKind == 5)
-                && Host.Frontend[332 + header * 5 + 1] > statement)
-            {
-                version = 50;
-                break;
-            }
-        }
+        if (kind == 8) { if (version < 48) { version = 48; } }
+        if (kind != 1) { continue; }
+        if (HasScalarFrontendEnclosingHeader(statement)) { version = 50; }
     }
     if (maximumKind >= 35) { return 68; }
     if (maximumKind >= 34) { return 67; }
@@ -140,8 +133,22 @@ int32 GetScalarFrontendStatementVersion()
     return version;
 }
 
+bool HasScalarFrontendEnclosingHeader(int32 statement)
+{
+    for (mut int32 header = 0; header < statement; header = header + 1)
+    {
+        int32 kind = Host.Frontend[332 + header * 5];
+        if (kind < 3 || kind > 5) { continue; }
+        if (Host.Frontend[332 + header * 5 + 1] > statement) { return true; }
+    }
+    return false;
+}
+
 bool TryPublishScalarFrontend()
 {
+    if (Host.FrontendProgram.Length != 4284) { return false; }
+    if (!TryPublishScalarFrontendProgram(out var handled)) { return false; }
+    if (handled) { return true; }
     if (Host.Frontend.Length != 392 || !TryScanScalarFrontend(out var result))
     {
         return false;

@@ -41,7 +41,7 @@ internal static partial class Program
         string[] names = ["SourceRange", "Token", "ManagedTokenChain", "Scanner",
             "ManagedScanner", "TokenSnapshot", "TokenTriviaSnapshot",
             "TokenIntegerSnapshot", "TokenDiagnosticSnapshot", "ScalarParserTypes",
-            "ScalarFrontend", "ScalarFrontendProjection"];
+            "ScalarFrontend", "ScalarFrontendProgram", "ScalarFrontendProjection"];
         try
         {
             if (build)
@@ -121,26 +121,43 @@ internal static partial class Program
             }
             var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int));
-            var result = ScalarFrontendHost.ReadResult(source, bytes, (BoundRuntimePolicy)policy);
+            var programBytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
+                ScalarFrontendHost.ProgramWordCount * sizeof(int));
+            var read = ScalarFrontendHost.ReadProgram(source, bytes, programBytes, (BoundRuntimePolicy)policy);
+            var result = read.Projection;
             if ((build || runExecutable) && result.IsValid)
             {
-                if (buildLibrary && !result.IsPublic)
+                var functions = result.Functions.IsDefault ? ImmutableArray.Create(result) : result.Functions;
+                var exports = functions.Where(static function => function.IsPublic)
+                    .Select(function => IdentifierName.GetName(source.Text.Substring(function.Name.Start, function.Name.Length)))
+                    .ToImmutableArray();
+                var entryIndex = -1;
+                for (var i = 0; i < functions.Length; i++)
+                {
+                    if (IdentifierName.GetName(source.Text.Substring(functions[i].Name.Start,
+                        functions[i].Name.Length)) == "Main")
+                    {
+                        entryIndex = i;
+                    }
+                }
+                if (buildLibrary && exports.IsEmpty)
                 {
                     WriteInputError(json, "TRM4002", "A native frontend library export must be declared public.");
                     return 1;
                 }
-                if ((buildExecutable || runExecutable) && (result.ParameterCount != 0 || result.ReturnType is not (0 or 1)
-                    || !source.Text.AsSpan(result.Name.Start, result.Name.Length).SequenceEqual("Main")))
+                if ((buildExecutable || runExecutable) && (entryIndex < 0
+                    || functions[entryIndex].ParameterCount != 0 || functions[entryIndex].ReturnType is not (0 or 1)))
                 {
                     WriteInputError(json, "TRM4002", "A native frontend entry requires int32 or void Main() without parameters.");
                     return 1;
                 }
-                var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
+                var library = read.Program ?? ScalarFrontendHost.BindLibrary(source, bytes, programBytes,
+                    (BoundRuntimePolicy)policy);
                 if (runExecutable)
                 {
                     try
                     {
-                        return NativeJit.Execute(library with { EntryPoint = 0 }, policy,
+                        return NativeJit.Execute(library with { EntryPoint = entryIndex }, policy,
                             GraphJitRegistrarAssemblyPath());
                     }
                     catch (Exception exception) when (exception is NotSupportedException or IOException
@@ -154,9 +171,8 @@ internal static partial class Program
                 try
                 {
                     image = buildExecutable
-                        ? NativeEmitter.Emit(library with { EntryPoint = 0 }, policy)
-                        : NativeEmitter.EmitLibrary(library,
-                            [IdentifierName.GetName(source.Text.Substring(result.Name.Start, result.Name.Length))], policy);
+                        ? NativeEmitter.Emit(library with { EntryPoint = entryIndex }, policy)
+                        : NativeEmitter.EmitLibrary(library, exports, policy);
                 }
                 catch (NotSupportedException exception)
                 {
@@ -214,6 +230,75 @@ internal static partial class Program
                 writer.WriteBoolean("doesNotReturn", frontend.DoesNotReturn);
                 writer.WriteNumber("errorCode", frontend.ErrorCode);
                 WriteFrontendSpan(writer, "errorSpan", frontend.ErrorSpan);
+                if (!frontend.Functions.IsDefault)
+                {
+                    writer.WriteStartArray("functions");
+                    for (var functionIndex = 0; functionIndex < frontend.Functions.Length; functionIndex++)
+                    {
+                        var function = frontend.Functions[functionIndex];
+                        writer.WriteStartObject();
+                        writer.WriteNumber("index", functionIndex);
+                        writer.WriteBoolean("public", function.IsPublic);
+                        writer.WriteBoolean("noThrow", function.IsNoThrow);
+                        writer.WriteNumber("returnType", function.ReturnType);
+                        writer.WriteNumber("parameterCount", function.ParameterCount);
+                        writer.WriteNumber("firstType", function.FirstType);
+                        writer.WriteNumber("secondType", function.SecondType);
+                        writer.WriteNumber("thirdType", function.ThirdType);
+                        WriteFrontendSpan(writer, "name", function.Name);
+                        WriteFrontendSpan(writer, "firstName", function.FirstName);
+                        WriteFrontendSpan(writer, "secondName", function.SecondName);
+                        WriteFrontendSpan(writer, "thirdName", function.ThirdName);
+                        writer.WriteBoolean("expressionBody", function.IsExpressionBody);
+                        writer.WriteNumber("conditionRoot", function.ConditionRoot);
+                        writer.WriteNumber("trueRoot", function.TrueRoot);
+                        writer.WriteNumber("falseRoot", function.FalseRoot);
+                        writer.WriteStartArray("nodes");
+                        for (var nodeIndex = 0; nodeIndex < function.Nodes.Length; nodeIndex++)
+                        {
+                            var node = function.Nodes[nodeIndex];
+                            writer.WriteStartObject();
+                            writer.WriteNumber("operation", node.Operation);
+                            writer.WriteNumber("type", node.Type);
+                            WriteFrontendSpan(writer, "span", node.Span);
+                            writer.WriteNumber("left", node.Left);
+                            writer.WriteNumber("right", node.Right);
+                            writer.WriteNumber("low", node.Low);
+                            writer.WriteNumber("high", node.High);
+                            if (node.Operation == 105)
+                            {
+                                writer.WriteNumber("function", function.CallTargets[nodeIndex]);
+                            }
+                            writer.WriteEndObject();
+                        }
+                        writer.WriteEndArray();
+                        writer.WriteStartArray("locals");
+                        foreach (var local in function.Locals)
+                        {
+                            writer.WriteStartObject();
+                            writer.WriteNumber("type", local.Type);
+                            writer.WriteBoolean("mutable", local.IsMutable);
+                            writer.WriteBoolean("initialization", local.IsInitialization);
+                            writer.WriteBoolean("constant", local.IsConstant);
+                            WriteFrontendSpan(writer, "name", local.Name);
+                            writer.WriteEndObject();
+                        }
+                        writer.WriteEndArray();
+                        writer.WriteStartArray("statements");
+                        foreach (var statement in function.Statements)
+                        {
+                            writer.WriteStartObject();
+                            writer.WriteNumber("kind", statement.Kind);
+                            writer.WriteNumber("slot", statement.Slot);
+                            writer.WriteNumber("root", statement.Root);
+                            WriteFrontendSpan(writer, "span", statement.Span);
+                            writer.WriteEndObject();
+                        }
+                        writer.WriteEndArray();
+                        writer.WriteEndObject();
+                    }
+                    writer.WriteEndArray();
+                }
                 if (frontend.IsValid)
                 {
                     writer.WriteNumber("returnType", frontend.ReturnType);
@@ -373,14 +458,15 @@ internal static partial class Program
                         {
                             projectionVersion = frontend.ReturnType == 0 ? 73 : 72;
                         }
-                        writer.WriteNumber("projectionVersion", projectionVersion);
+                        writer.WriteNumber("projectionVersion", frontend.Functions.IsDefault ? projectionVersion : 74);
                         writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);
                         writer.WriteNumber("conditionRoot", frontend.ConditionRoot);
                         writer.WriteNumber("trueRoot", frontend.TrueRoot);
                         writer.WriteNumber("falseRoot", frontend.FalseRoot);
                         writer.WriteStartArray("nodes");
-                        foreach (var node in frontend.Nodes)
+                        for (var nodeIndex = 0; nodeIndex < frontend.Nodes.Length; nodeIndex++)
                         {
+                            var node = frontend.Nodes[nodeIndex];
                             writer.WriteStartObject();
                             writer.WriteNumber("operation", node.Operation);
                             writer.WriteNumber("type", node.Type);
@@ -389,6 +475,10 @@ internal static partial class Program
                             writer.WriteNumber("right", node.Right);
                             writer.WriteNumber("low", node.Low);
                             writer.WriteNumber("high", node.High);
+                            if (node.Operation == 105)
+                            {
+                                writer.WriteNumber("function", frontend.CallTargets[nodeIndex]);
+                            }
                             writer.WriteEndObject();
                         }
                         writer.WriteEndArray();
@@ -436,7 +526,9 @@ internal static partial class Program
             if (frontend.IsValid)
             {
                 Console.Out.WriteLine(outputPath is null
-                    ? $"Scalar function at [{frontend.Name.Start}..{frontend.Name.End}), {frontend.ParameterCount} parameters."
+                    ? frontend.Functions.IsDefault
+                        ? $"Scalar function at [{frontend.Name.Start}..{frontend.Name.End}), {frontend.ParameterCount} parameters."
+                        : $"Scalar program with {frontend.Functions.Length} functions (projection 74)."
                     : $"{outputPath}: native scalar {(command == "frontend-build" ? "executable" : "library")}");
             }
             else

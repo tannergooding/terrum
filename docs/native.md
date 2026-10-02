@@ -395,6 +395,27 @@ statements. Their zero-typed call node must be the root of kind 37; the shared
 verifier/emitter continue to define call behavior. Void call values and other
 call targets remain unsupported.
 
+Projection v74 separately adds complete snapshots of top-level global
+functions with unique normalized names and zero through three positional
+by-value scalar parameters. Calls resolve against all declarations, including
+forward calls and self/mutual recursion; visible locals and parameters
+take precedence over function names. A distinct operation 105 and target table
+carry each call's zero-based source-order function identity and callee-specific
+argument roots/count/types. The independent reader audits every declaration,
+body and call against the complete source before constructing a multi-function
+`BoundProgram`. Existing single-function v1–v73 payloads remain unchanged.
+The existing 16K-source-unit/64-token snapshot bound is retained; body limits
+apply per function. Ten function frames cover even the six-token empty void
+declaration under that bound.
+
+V74 admits only scalar-returning callees, including when the caller returns
+void. It does not add non-self void calls, namespaces/imports, members,
+templates, external bindings, callable values, overload/conversion search,
+named/default/params arguments, reference/output parameters or
+`[DoesNotReturn]` support in multi-function snapshots. Hosted verification and
+emission remain authoritative for execution under both runtime policies;
+source-free TRRM checked exceptions and bootstrap gates are unchanged.
+
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer

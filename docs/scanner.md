@@ -144,6 +144,8 @@ The compilation host explicitly grants named fixed-buffer capabilities through
 The first nine grants retain their indices; the appended escape catalog is
 grant 9. The scalar frontend output grant follows at index 10, without changing
 its 392-word projection or historical payload versions.
+V74 appends `Host.FrontendProgram` at index 11 for complete multi-function
+snapshots; scanner grants and records are unchanged.
 
 An index is evaluated once, must be `int32`, and is checked against the fixed
 length before access. Negative indices fail as well as indices past the end.

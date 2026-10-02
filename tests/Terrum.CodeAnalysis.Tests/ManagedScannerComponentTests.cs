@@ -18,7 +18,7 @@ using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
 
-public sealed class ManagedScannerComponentTests
+public sealed partial class ManagedScannerComponentTests
 {
     [Theory]
     [InlineData("@await", true)]
@@ -4142,8 +4142,10 @@ public sealed class ManagedScannerComponentTests
         if (parserName is not null)
         {
             names = parserName == "ScalarFrontendProjection"
-                ? [.. names, "ScalarParserTypes", "ScalarFrontend", parserName]
-                : [.. names, "ScalarParserTypes", parserName];
+                ? [.. names, "ScalarParserTypes", "ScalarFrontend", "ScalarFrontendProgram", parserName]
+                : parserName == "ScalarFrontend"
+                    ? [.. names, "ScalarParserTypes", parserName, "ScalarFrontendProgram", "ScalarFrontendProjection"]
+                    : [.. names, "ScalarParserTypes", parserName];
         }
         var trees = new List<SyntaxTree>(names.Length + 1);
         foreach (var name in names)

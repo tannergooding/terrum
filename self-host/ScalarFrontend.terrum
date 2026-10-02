@@ -159,6 +159,22 @@ mut class ScalarFrontendState
         return _hasStructuredStatement;
     }
 
+    public mut bool TryInventoryHeader(out ScalarFrontendResult result, out int32 end)
+    {
+        end = 0;
+        require SourceRange.TryCreate(0, 0, out var empty);
+        require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
+        if (!ParseHeader(out var selected, out var name))
+        {
+            return TryCreateScalarFrontendError(_error, _errorSpan, out result);
+        }
+        end = _at;
+        return ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
+            selected, _parameterCount, _firstType, _secondType, _thirdType,
+            _outParameterMask, name, _first.Range, _second.Range, _third.Range,
+            false, false, absent, absent, absent, out result);
+    }
+
     private mut void FailAt(int32 code, SourceRange span)
     {
         if (_error == 0)
@@ -232,12 +248,14 @@ mut class ScalarFrontendState
     private mut bool TryReadMagnitude(Token token, int32 tokenIndex, int32 type,
         bool negative, SourceRange errorSpan, out int32 low, out int32 high)
     {
+        int32 lookupIndex = tokenIndex + (Host.FrontendProgram[0] == 74
+            ? Host.FrontendProgram[4 + Host.FrontendProgram[3] * 428] : 0);
         mut int32 first = 0;
         mut int32 end = Host.IntegerValues[0];
         while (first < end)
         {
             int32 middle = first + (end - first) / 2;
-            if (Host.IntegerValues[middle * 5 + 1] < tokenIndex)
+            if (Host.IntegerValues[middle * 5 + 1] < lookupIndex)
             {
                 first = middle + 1;
             }
@@ -247,7 +265,7 @@ mut class ScalarFrontendState
             }
         }
         if (first >= Host.IntegerValues[0]
-            || Host.IntegerValues[first * 5 + 1] != tokenIndex
+            || Host.IntegerValues[first * 5 + 1] != lookupIndex
             || Host.IntegerValues[first * 5 + 2] != 0)
         {
             FailAt(2, errorSpan);
@@ -1567,7 +1585,7 @@ mut class ScalarFrontendState
             {
                 return false;
             }
-            if (TreeWord(call, 0) != 102)
+            if (TreeWord(call, 0) != 102 && TreeWord(call, 0) != 105)
             {
                 FailAt(1, first.Range);
                 return false;
@@ -2810,7 +2828,20 @@ mut class ScalarFrontendState
 
     private mut bool ParseTreeSelfCall(Token functionName, int32 depth, out int32 node)
     {
-        if (!SameTokenSpelling(_function, functionName)
+        bool program = Host.FrontendProgram[0] == 74;
+        mut int32 callee = -1;
+        mut int32 argumentCount = _parameterCount;
+        mut int32 returnType = _functionReturnType;
+        if (program)
+        {
+            callee = FindScalarProgramFunction(functionName);
+            if (callee < 0) { FailAt(3, functionName.Range); return false; }
+            int32 header = 4 + callee * 428 + 4;
+            argumentCount = Host.FrontendProgram[header + 6];
+            returnType = Host.FrontendProgram[header + 5];
+            if (returnType == 0) { FailAt(1, functionName.Range); return false; }
+        }
+        if ((!program && !SameTokenSpelling(_function, functionName))
             || IsParameterName(functionName))
         {
             FailAt(1, functionName.Range);
@@ -2838,7 +2869,7 @@ mut class ScalarFrontendState
         mut int32 first = -1;
         mut int32 second = -1;
         mut int32 third = -1;
-        for (mut int32 ordinal = 0; ordinal < _parameterCount; ordinal = ordinal + 1)
+        for (mut int32 ordinal = 0; ordinal < argumentCount; ordinal = ordinal + 1)
         {
             if (ordinal != 0 && !Take(53, out var comma))
             {
@@ -2847,8 +2878,14 @@ mut class ScalarFrontendState
             mut int32 expectedType = _firstType;
             if (ordinal == 1) { expectedType = _secondType; }
             if (ordinal == 2) { expectedType = _thirdType; }
+            if (program)
+            {
+                int32 header = 4 + callee * 428 + 4;
+                int32 field = ordinal == 0 ? 7 : (ordinal == 1 ? 8 : 34);
+                expectedType = Host.FrontendProgram[header + field];
+            }
             mut int32 argument = -1;
-            if (IsOutParameter(ordinal + 1))
+            if (!program && IsOutParameter(ordinal + 1))
             {
                 if (!Take(15, out var outputKeyword)
                     || !_tokens.TryGet(_at, out var outputTarget))
@@ -2921,8 +2958,17 @@ mut class ScalarFrontendState
         {
             return false;
         }
-        return AddTreeNode(102, _functionReturnType, functionName.Range.Start,
-            close.Range.End, first, second, third, _parameterCount, out node);
+        if (!AddTreeNode(program ? 105 : 102, returnType, functionName.Range.Start,
+            close.Range.End, first, second, third, argumentCount, out var added))
+        {
+            return false;
+        }
+        if (program)
+        {
+            Host.FrontendProgram[4 + Host.FrontendProgram[3] * 428 + 396 + added] = callee;
+        }
+        node = added;
+        return true;
     }
 
     private mut bool ParseTreeOutLocal(Token name, int32 type, out int32 slot)
@@ -2979,6 +3025,10 @@ mut class ScalarFrontendState
             {
                 FailAt(1, opening.Range);
                 return false;
+            }
+            if (Host.FrontendProgram[0] == 74 && FindScalarProgramFunction(token) >= 0)
+            {
+                return ParseTreeSelfCall(token, depth, out node);
             }
             if (!TryGetScalarType(token, out var target)
                 || target == 5)
@@ -3228,17 +3278,7 @@ mut class ScalarFrontendState
                 rightType = context;
             }
             bool comparison = operation.Kind >= 65 && operation.Kind <= 70;
-            bool logical = operation.Kind == 72 || operation.Kind == 74;
-            bool bitwise = operation.Kind == 71 || operation.Kind == 73
-                || operation.Kind == 75;
-            if ((shift ? (leftType != 0 && (leftType < 1 || leftType > 4)
-                    || rightType != 1) : leftType != rightType)
-                || (logical && leftType != 5)
-                || (comparison && leftType == 6 && operation.Kind >= 67)
-                || (comparison && leftType == 5 && operation.Kind >= 67)
-                || (bitwise && leftType == 6)
-                || (!logical && !bitwise && !comparison
-                    && leftType != 0 && (leftType < 1 || leftType > 4)))
+            if (!IsScalarFrontendBinaryTypeValid(operation.Kind, leftType, rightType))
             {
                 FailAt(2, operation.Range);
                 return false;
@@ -3581,6 +3621,28 @@ mut class ScalarFrontendState
     }
 }
 
+// Keep type classification separate from expression parsing so the existing
+// shared verification bound does not repeatedly walk its Boolean decision tree.
+bool IsScalarFrontendBinaryTypeValid(int32 operation, int32 left, int32 right)
+{
+    if (operation >= 88 && operation <= 90)
+    {
+        if (right != 1) { return false; }
+        if (left == 0) { return true; }
+        return left >= 1 && left <= 4;
+    }
+    if (left != right) { return false; }
+    if (operation == 72 || operation == 74) { return left == 5; }
+    if (operation >= 65 && operation <= 70)
+    {
+        if (left == 5 || left == 6) { return operation < 67; }
+        return true;
+    }
+    if (operation == 71 || operation == 73 || operation == 75) { return left != 6; }
+    if (left == 0) { return true; }
+    return left >= 1 && left <= 4;
+}
+
 bool TryCreateScalarFrontendError(int32 code, SourceRange span, out ScalarFrontendResult result)
 {
     require SourceRange.TryCreate(0, 0, out var empty);
@@ -3718,19 +3780,28 @@ bool CanPublishScalarFrontendTreeEnvelope()
 bool IsScalarFrontendNegatableBinary(ScalarFrontendExpression expression, int32 operation,
     int32 group, int32 kind, int32 comparison)
 {
-    if (expression.Type != 5 || operation >= 2000) { return false; }
-    if (operation >= 65 && operation <= 75
-        && expression.LeftParameter >= 1 && expression.RightParameter >= 1)
+    if (expression.Type != 5) { return false; }
+    if (operation >= 2000) { return false; }
+    if (IsScalarFrontendParameterBinary(expression, operation))
     {
         return true;
     }
-    if ((group == 7 || group == 9 || group == 11)
-        && (kind == 65 || kind == 66 || (kind >= 71 && kind <= 75)))
+    if (group == 7 || group == 9 || group == 11)
     {
-        return true;
+        if (kind == 65 || kind == 66) { return true; }
+        if (kind >= 71 && kind <= 75) { return true; }
     }
-    return comparison / 100 >= 1 && comparison / 100 <= 4
-        && comparison % 100 >= 65 && comparison % 100 <= 70;
+    int32 parameter = comparison / 100;
+    if (parameter < 1 || parameter > 4) { return false; }
+    int32 compared = comparison % 100;
+    return compared >= 65 && compared <= 70;
+}
+
+bool IsScalarFrontendParameterBinary(ScalarFrontendExpression expression, int32 operation)
+{
+    if (operation < 65 || operation > 75) { return false; }
+    if (expression.LeftParameter < 1) { return false; }
+    return expression.RightParameter >= 1;
 }
 
 bool TryScanScalarFrontend(out ScalarFrontendResult result)

@@ -139,6 +139,10 @@ eight total local identities including hidden discards, 12 statement records,
 32 expression nodes, three parameters, 16 expression-recursion levels, six
 structural levels and a shared 100,000-visit budget. Source-bound audits
 require current syntax even when reading compatible older projection shapes.
+V74 appends a separate complete-program buffer; the source/token limits remain
+per snapshot, and the local/statement/expression/parameter limits apply per
+function. Predicate factoring keeps the authored producer within the unchanged
+shared verification budget.
 These syntax and
 scanner contracts do not change semantic-module, ISA, Contract, TRRM or native
 ABI formats.
@@ -849,6 +853,55 @@ statement. The operation-102 node has type zero only in this version and only
 for a kind-37 statement; hosted call verification and emission retain
 responsibility for its behavior. Void calls are not admitted in value contexts,
 and calls to other functions remain outside the bounded frontend.
+
+Projection v74 is a separate complete-source, multi-function shape. The
+Terrum-authored producer inventories declarations before parsing their bodies.
+Top-level global function names must be ordinal-unique after identifier
+normalization, even when signatures differ. Zero through three positional
+by-value parameters and scalar return values use the existing six scalar
+types. Forward, self and mutual calls are permitted; visible locals/parameters
+shadow function names. Void callers are supported, but v74 callees must return
+a scalar. Single-function projections, including v72/v73 output and void
+self-call statements, retain their existing shapes and behavior.
+
+The appended `Host.FrontendProgram` buffer at index 11 has 4,284 `int32`
+words. Its four-word header is `(74, 1, function count, 0)`. Ten source-order
+frames of 428 words follow:
+
+| Frame words | Contents |
+|---|---|
+| 0–3 | Inclusive token start, exclusive token end, declaration source start/length |
+| 4–395 | Existing 392-word per-function header/body layout, with version 74 |
+| 396–427 | One zero-based callee function index per operation-105 node; `-1` for every other or unused node |
+
+Unused frames are all zero. Operation 105 uses the existing eight-word node
+shape: scalar result type, exact call span, first/second/third argument roots
+(`-1` when absent), and argument count in the high word. Its target identity is
+in the dedicated table, not operation 102's occupied fields. Single-function
+success and rejection keep the old buffer and a zero program buffer; v74
+success has a zero old buffer. No partial program is published on rejection.
+
+The independent host reader lexes/parses the entire source to inventory names,
+signatures, declaration order, token boundaries and full body spans. It
+requires frame agreement and complete non-trivia source coverage, then audits
+each body using the existing source-bound grammar with absolute spans retained.
+It checks every call's source-resolved target and lexical shadowing,
+callee-specific type/arity, ordered argument roots/spans and exclusive node
+ownership. Only after all functions pass does it lower `BoundCall.Function`
+to the corresponding `BoundProgram.Functions` declaration index and verify
+the complete program. CLI JSON includes the ordered function inventory and
+call targets; executable commands select `Main` by name rather than assuming
+function zero, and library builds export the public declarations.
+
+The source bound remains 16,384 UTF-16 units and 64 tokens including EOF.
+Ten frames derive from `floor((64 - 1) / 6)`: even an empty void declaration
+needs six tokens. The existing 32-node, 12-statement and eight-local capacities
+apply to each function; no verifier/emitter budgets change. Multi-function
+snapshots exclude reference/output parameters, named/default/params arguments,
+overload/conversion search, namespaces/imports, templates/members, external
+bindings, callable values, non-self void-call support and `[DoesNotReturn]`
+extension. This adds source frontend support, not source-free TRRM
+checked-exception Bodies or a bootstrap-gate claim.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

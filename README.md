@@ -19,6 +19,12 @@ source-free, fail-fast scalar subset. It uses the shared verifier and backend;
 general imported-call linking and checked-exception Body support are not
 implemented.
 
+The bounded [Terrum-authored scalar source frontend](self-host/README.md)
+projects one snapshot of global functions with unique names and direct scalar
+calls, including forward calls and recursion. Its v74 multi-function reader
+audits source-order target identities before using the hosted verifier/emitter.
+This is separate from source-free TRRM support and is not a bootstrap compiler.
+
 The [grammar](docs/grammar-spec.md) and design documents specify target
 contracts independently of compiler support. Places default to readonly,
 `mut` qualifies writable places/receivers, and `write` grants writable
