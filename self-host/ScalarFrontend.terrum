@@ -2832,28 +2832,54 @@ mut class ScalarFrontendState
             if (IsOutParameter(ordinal + 1))
             {
                 if (!Take(15, out var outputKeyword)
-                    || !Take(2, out var outputName)
-                    || !TryResolveParameter(outputName, out var slot, out var type))
+                    || !_tokens.TryGet(_at, out var outputTarget))
                 {
                     return false;
                 }
+                mut int32 operation = 103;
+                mut int32 slot = -1;
+                mut int32 type = 0;
+                mut SourceRange outputRange = outputTarget.Range;
                 mut bool writable = false;
-                if (slot <= _parameterCount)
+                if (outputTarget.Kind == 12)
                 {
-                    writable = IsOutParameter(slot);
+                    if (!Take(12, out var variableKeyword)
+                        || !Take(2, out var outputName)
+                        || !ParseTreeOutLocal(outputName, expectedType, out slot))
+                    {
+                        return false;
+                    }
+                    operation = 104;
+                    type = expectedType;
+                    outputRange = outputName.Range;
+                    writable = true;
                 }
                 else
                 {
-                    int32 flags = Host.Frontend[300 + (slot - _parameterCount - 1) * 4 + 1];
-                    writable = (flags & 1) != 0;
+                    if (!Take(2, out var outputName)
+                        || !TryResolveParameter(outputName, out slot, out type))
+                    {
+                        return false;
+                    }
+                    outputRange = outputName.Range;
+                    if (slot <= _parameterCount)
+                    {
+                        writable = IsOutParameter(slot);
+                    }
+                    else
+                    {
+                        int32 flags = Host.Frontend[300 + (slot - _parameterCount - 1) * 4 + 1];
+                        writable = (flags & 1) != 0;
+                    }
                 }
                 if (type != expectedType || !writable)
                 {
-                    FailAt(2, outputName.Range);
+                    FailAt(2, outputRange);
                     return false;
                 }
-                if (!AddTreeNode(103, expectedType, outputKeyword.Range.Start,
-                    outputName.Range.End, slot, -1, 0, 0, out argument))
+                if (!AddTreeNode(operation, expectedType, outputKeyword.Range.Start,
+                    outputRange.End,
+                    slot, -1, 0, 0, out argument))
                 {
                     return false;
                 }
@@ -2878,6 +2904,44 @@ mut class ScalarFrontendState
         }
         return AddTreeNode(102, _functionReturnType, functionName.Range.Start,
             close.Range.End, first, second, third, _parameterCount, out node);
+    }
+
+    private mut bool ParseTreeOutLocal(Token name, int32 type, out int32 slot)
+    {
+        slot = -1;
+        if (_localCount >= 8 || IsParameterName(name))
+        {
+            FailAt(1, name.Range);
+            return false;
+        }
+        for (mut int32 local = 0; local < _localCount; local = local + 1)
+        {
+            if (!IsActiveLocal(local)) { continue; }
+            int32 offset = 300 + local * 4;
+            require SourceRange.TryCreate(Host.Frontend[offset + 2],
+                Host.Frontend[offset + 3], out var localName);
+            if (SameTokenSpelling(new Token(2, localName), name))
+            {
+                FailAt(1, name.Range);
+                return false;
+            }
+        }
+        int32 index = _localCount;
+        int32 offset = 300 + index * 4;
+        Host.Frontend[offset] = type;
+        Host.Frontend[offset + 1] = 0;
+        Host.Frontend[offset + 2] = name.Range.Start;
+        Host.Frontend[offset + 3] = name.Range.Length;
+        _localCount = index + 1;
+        Host.Frontend[299] = _localCount;
+        mut int32 bit = 1;
+        for (mut int32 local = 0; local < index; local = local + 1)
+        {
+            bit = bit * 2;
+        }
+        _activeLocals = _activeLocals | bit;
+        slot = _parameterCount + index + 1;
+        return true;
     }
 
     private mut bool ParseTreePrefix(int32 expected, int32 depth, out int32 node)

@@ -54,7 +54,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is < 1 or > 70
+        if (words[0] is < 1 or > 71
             || words[0] >= 53 && source.Length > 16_384
             || words[1] is not (1 or 2))
         {
@@ -89,7 +89,7 @@ public static class ScalarFrontendHost
                 : words[0] == 59 ? words[2] is < 2 or > 7
                 : words[0] >= 60 ? words[2] is < 0 or > 7 : words[2] is not (0 or 1))
             || !AllZero(3, 5)
-            || (words[5] == 0 ? words[0] is not (56 or 57 or 58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70)
+            || (words[5] == 0 ? words[0] is not (56 or 57 or 58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71)
                 : !ScalarType(words[5]) || words[0] is 56 or 57)
             || (effects & 4) != 0 && words[5] != 0
             || count is < 0 or > 3
@@ -111,7 +111,7 @@ public static class ScalarFrontendHost
             throw InvalidResult();
         }
 
-        if (words[0] is >= 20 and <= 70)
+        if (words[0] is >= 20 and <= 71)
         {
             return ReadTree();
         }
@@ -151,11 +151,11 @@ public static class ScalarFrontendHost
 
         ScalarFrontendResult ReadTree()
         {
-            var voidArrow = words[0] == 57 || words[0] is 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 && words[5] == 0 && words[41] == 1;
+            var voidArrow = words[0] == 57 || words[0] is 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71 && words[5] == 0 && words[41] == 1;
             if ((words[0] < 69 ? !AllZero(16, 34)
                     : !AllZero(17, 34) || words[16] < 0
                         || (words[16] & ~((1 << count) - 1)) != 0)
-                || words[37] < (words[0] is >= 51 and <= 56 or 58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 ? 0 : 1) || words[37] > 32
+                || words[37] < (words[0] is >= 51 and <= 56 or 58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71 ? 0 : 1) || words[37] > 32
                 || words[41] is not (0 or 1)
                 || words[0] == 56 && words[41] != 0
                 || words[0] == 57 && words[41] != 1
@@ -163,19 +163,19 @@ public static class ScalarFrontendHost
                 || (words[41] == 1 && words[15] != 0)
                 || !AllZero(42 + words[37] * 8, 298)
                 || (words[0] is 20 or 22 or 24 or 26 && !AllZero(298, WordCount))
-                || (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 70 && ((words[0] is >= 49 and <= 70
+                || (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 71 && ((words[0] is >= 49 and <= 71
                         ? words[298] is < 0 or > 12 : words[298] is < 1 or > 12)
                     || words[299] is < 0 or > 8 || words[0] < 28 && words[299] == 0
                     || words[41] != 0 && (voidArrow ? words[298] != 1
-                        : words[0] is not (>= 49 and <= 56 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70) || words[298] != 0 || words[299] != 0)
+                        : words[0] is not (>= 49 and <= 56 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71) || words[298] != 0 || words[299] != 0)
                     || !AllZero(300 + words[299] * 4, 332)
                     || !AllZero(332 + words[298] * 5, WordCount))))
             {
                 throw InvalidResult();
             }
             var locals = ImmutableArray.CreateBuilder<ScalarFrontendLocal>(
-                words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 70 ? words[299] : 0);
-            for (var i = 0; i < (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 70 ? words[299] : 0); i++)
+                words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 71 ? words[299] : 0);
+            for (var i = 0; i < (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 71 ? words[299] : 0); i++)
             {
                 var offset = 300 + i * 4;
                 var flags = words[offset + 1];
@@ -192,8 +192,8 @@ public static class ScalarFrontendHost
             }
             var declaredLocals = locals.MoveToImmutable();
             var statements = ImmutableArray.CreateBuilder<ScalarFrontendStatement>(
-                words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 70 ? words[298] : 0);
-            for (var i = 0; i < (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 70 ? words[298] : 0); i++)
+                words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 71 ? words[298] : 0);
+            for (var i = 0; i < (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 71 ? words[298] : 0); i++)
             {
                 var offset = 332 + i * 5;
                 var statement = new ScalarFrontendStatement(words[offset], words[offset + 1],
@@ -212,15 +212,15 @@ public static class ScalarFrontendHost
                     && (kind is not (4 or 5) || words[0] < 32
                         || words[0] is >= 40 and <= 43)
                     && (kind is not (6 or 7) || words[0] < 40)
-                    && (kind != 8 || words[0] is not (>= 48 and <= 70))
-                    && (kind is not (9 or 10) || words[0] is not (>= 49 and <= 70))
-                    && (kind is not (11 or 12 or 13) || words[0] is not (>= 51 and <= 70))
-                    && (kind != 14 || words[0] is not (>= 52 and <= 70))
-                    && (kind != 15 || words[0] is not (>= 53 and <= 70))
-                    && (kind != 21 || words[0] is not (>= 55 and <= 70))
-                    && (kind != 22 || words[0] is not (56 or 58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70))
-                    && (kind != 23 || words[0] is not (58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70))
-                    && (kind != 24 || words[0] is not (60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70))
+                    && (kind != 8 || words[0] is not (>= 48 and <= 71))
+                    && (kind is not (9 or 10) || words[0] is not (>= 49 and <= 71))
+                    && (kind is not (11 or 12 or 13) || words[0] is not (>= 51 and <= 71))
+                    && (kind != 14 || words[0] is not (>= 52 and <= 71))
+                    && (kind != 15 || words[0] is not (>= 53 and <= 71))
+                    && (kind != 21 || words[0] is not (>= 55 and <= 71))
+                    && (kind != 22 || words[0] is not (56 or 58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71))
+                    && (kind != 23 || words[0] is not (58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71))
+                    && (kind != 24 || words[0] is not (60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71))
                     && (kind != 25 || words[0] < 61)
                     && (kind != 26 || words[0] < 62)
                     && (kind != 27 || words[0] < 63)
@@ -266,12 +266,13 @@ public static class ScalarFrontendHost
                 var unary = node.Operation is 46 or 62 or 63 or 83 or 86 or 87
                     || node.Operation is 57 or 58 && node.Right == -1;
                 var call = node.Operation == 102;
-                var output = node.Operation == 103;
+                var output = node.Operation is 103 or 104;
+                var outputDeclaration = node.Operation == 104;
                 var leaf = node.Operation is 0 or 3 or 20 or 21 || output;
                 if (!ScalarType(node.Type) || !ValidSpan(node.Span, nonempty: true)
                     || (!leaf && !unary && !call && node.Operation is not (>= 57 and <= 61
                         or >= 65 and <= 75 or 84 or >= 88 and <= 101))
-                    || (node.Operation is >= 86 and <= 101 && words[0] is not (>= 49 and <= 70))
+                    || (node.Operation is >= 86 and <= 101 && words[0] is not (>= 49 and <= 71))
                     || (call && (words[0] < 70 || node.Type != words[5]
                         || node.High != count
                         || (count == 0 && (node.Left != -1 || node.Right != -1 || node.Low != -1))
@@ -280,7 +281,8 @@ public static class ScalarFrontendHost
                         || (count >= 2 && (node.Right < 0 || node.Right >= i))
                         || (count < 3 && node.Low != -1)
                         || (count == 3 && (node.Low < 0 || node.Low >= i))))
-                    || (output && (words[0] < 70 || node.Left < 1
+                    || (output && (words[0] < 70 || outputDeclaration && words[0] < 71
+                        || node.Left < 1 || outputDeclaration && node.Left <= count
                         || node.Left > count + declaredLocals.Length
                         || node.Low != 0 || node.High != 0
                         || node.Type != (node.Left <= count
@@ -320,7 +322,8 @@ public static class ScalarFrontendHost
                     {
                         var argument = nodes[arguments[ordinal]];
                         if (argument.Type != ParameterType(ordinal + 1)
-                            || ((words[16] & (1 << ordinal)) != 0) != (argument.Operation == 103))
+                            || ((words[16] & (1 << ordinal)) != 0)
+                                != (argument.Operation is 103 or 104))
                         {
                             throw InvalidResult();
                         }
@@ -401,7 +404,7 @@ public static class ScalarFrontendHost
                 }
                 // Comparison results and conditional predicates cannot establish numeric operand context.
                 intrinsicTypes[i] = node.Operation switch {
-                    0 or 20 or 21 or 62 or 83 or 86 or 87 or 102 or 103
+                    0 or 20 or 21 or 62 or 83 or 86 or 87 or 102 or 103 or 104
                         or >= 65 and <= 70 or 72 or 74 => node.Type,
                     3 => 0,
                     >= 88 and <= 90 => intrinsicTypes[node.Left],
@@ -412,7 +415,7 @@ public static class ScalarFrontendHost
                 };
                 nodes.Add(node);
             }
-            if (words[0] is not (>= 48 and <= 70) && (hasConversion != (words[0] is 22 or 23 or 26 or 27 or 29 or 31 or 33 or 35
+            if (words[0] is not (>= 48 and <= 71) && (hasConversion != (words[0] is 22 or 23 or 26 or 27 or 29 or 31 or 33 or 35
                     or 37 or 39 or 41 or 43 or 45 or 47)
                 || hasConditional != (words[0] is >= 24 and <= 27 or 30 or 31 or 34 or 35
                     or 38 or 39 or 42 or 43 or 46 or 47)
@@ -448,7 +451,9 @@ public static class ScalarFrontendHost
                 || words[0] == 67 && !orderedStatements.Any(static entry => entry.Kind == 34)
                 || words[0] == 68 && !orderedStatements.Any(static entry => entry.Kind is 35 or 36)
                 || words[0] == 69 && words[16] == 0
-                || words[0] == 70 && !nodes.Any(static node => node.Operation == 102))
+                || words[0] == 70 && !nodes.Any(static node => node.Operation == 102)
+                || words[0] == 71 && (!nodes.Any(static node => node.Operation == 102)
+                    || !nodes.Any(static node => node.Operation == 104)))
             {
                 throw InvalidResult();
             }
@@ -456,8 +461,8 @@ public static class ScalarFrontendHost
             var conditionRoot = words[38];
             var trueRoot = words[39];
             var falseRoot = words[40];
-            var structuredBody = words[0] is >= 51 and <= 70 && trueRoot == -1
-                || words[0] is >= 48 and <= 70 && orderedStatements.Any(static entry => entry.Kind == 8);
+            var structuredBody = words[0] is >= 51 and <= 71 && trueRoot == -1
+                || words[0] is >= 48 and <= 71 && orderedStatements.Any(static entry => entry.Kind == 8);
             if (words[0] == 59 && words[41] == 0 && !structuredBody)
             {
                 throw InvalidResult();
@@ -593,7 +598,7 @@ public static class ScalarFrontendHost
             {
                 throw InvalidResult();
             }
-            if (hasScopedLocal && words[0] is not (>= 50 and <= 70)
+            if (hasScopedLocal && words[0] is not (>= 50 and <= 71)
                 || words[0] == 50 && !hasScopedLocal)
             {
                 throw InvalidResult();
@@ -609,7 +614,7 @@ public static class ScalarFrontendHost
                 Locals = declaredLocals, Statements = orderedStatements
                     .Select((entry, index) => entry with { BodySpan = bodySpans[index],
                         LoopSpan = loopSpans[index] }).ToImmutableArray() };
-            if (words[0] is >= 48 and <= 70)
+            if (words[0] is >= 48 and <= 71)
             {
                 // Structured returns have no terminal envelope: check every path before publishing.
                 BindLibraryCore(source, projection, policy);
@@ -624,7 +629,7 @@ public static class ScalarFrontendHost
             bool ContainsRead(int index)
             {
                 var node = tree[index];
-                if (node.Operation == 103)
+                if (node.Operation is 103 or 104)
                 {
                     return false;
                 }
@@ -945,7 +950,7 @@ public static class ScalarFrontendHost
                     }
                     else if (entry.Kind is 1 or 27 or 28)
                     {
-                        if ((depth != 0 && words[0] is not (>= 50 and <= 70))
+                        if ((depth != 0 && words[0] is not (>= 50 and <= 71))
                             || activeLocals >= declaredLocals.Length
                             || entry.Slot != count + activeLocals + 1)
                         {
@@ -1275,7 +1280,7 @@ public static class ScalarFrontendHost
                     {
                         if (ordinal != 0 && !Take(TokenKind.Comma)
                             || ((words[16] & (1 << ordinal)) != 0)
-                                != (tree[arguments[ordinal]].Operation == 103)
+                                != (tree[arguments[ordinal]].Operation is 103 or 104)
                             || !TakeTree(arguments[ordinal], parseDepth + 1))
                         {
                             return false;
@@ -1305,6 +1310,24 @@ public static class ScalarFrontendHost
                     {
                         return false;
                     }
+                }
+                else if (node.Operation == 104)
+                {
+                    var localIndex = node.Left - count - 1;
+                    var local = declaredLocals[localIndex];
+                    if (node.Left != count + activeLocals + 1
+                        || activeLocals >= declaredLocals.Length
+                        || local.IsMutable || local.IsInitialization || local.IsConstant
+                        || !Take(TokenKind.OutKeyword) || !Take(TokenKind.VarKeyword)
+                        || !Take(TokenKind.Identifier)
+                        || tokens[at - 1].Span != local.Name
+                        || seenNames.Contains(tokens[at - 1].Name)
+                        || VisibleName(tokens[at - 1].Name))
+                    {
+                        return false;
+                    }
+                    visibleLocals |= 1 << activeLocals;
+                    activeLocals++;
                 }
                 else if (node.Operation is 86 or 87 && node.Low == 1)
                 {
@@ -2449,9 +2472,10 @@ public static class ScalarFrontendHost
                         : unchecked((long)((ulong)(uint)node.High << 32 | (uint)node.Low));
                     bound = new BoundConstant(value, type, node.Span);
                 }
-                else if (node.Operation == 103)
+                else if (node.Operation is 103 or 104)
                 {
-                    bound = new BoundOutArgument(node.Left - 1, false, type, node.Span);
+                    bound = new BoundOutArgument(node.Left - 1,
+                        node.Operation == 104, type, node.Span);
                 }
                 else if (node.Operation == 102)
                 {
