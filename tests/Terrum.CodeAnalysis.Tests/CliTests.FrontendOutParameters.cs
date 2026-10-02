@@ -332,6 +332,60 @@ public sealed partial class CliTests
         }
     }
 
+    [Fact]
+    public async Task ScalarFrontendProjectsRecursiveOutVariableCallStatementsAsync()
+    {
+        const string recursive = "public bool Try(int32 value, out int32 result) { if (value == 0) { result = 1; return true; } Try(value - 1, out var previous); result = value; return true; }";
+        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
+                "frontend-component", frontend, "-", "--runtime", runtimeName, "--json");
+            Assert.True(exit == 0, $"{runtimeName}: {exit}: {output}{error}");
+            using (var document = JsonDocument.Parse(output))
+            {
+                var result = document.RootElement.GetProperty("result");
+                Assert.Equal(72, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
+                    node => node.GetProperty("operation").GetInt32() == 104);
+                Assert.Contains(result.GetProperty("statements").EnumerateArray(),
+                    statement => statement.GetProperty("kind").GetInt32() == 37);
+            }
+
+            var policy = runtimeName == "fail-fast"
+                ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions;
+            var hostedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(SourceText.From(recursive)), policy);
+            Assert.False(hostedCompilation.HasErrors,
+                string.Join(Environment.NewLine, hostedCompilation.Diagnostics));
+            var hosted = Assert.IsType<BoundProgram>(hostedCompilation.Program);
+            var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-outvar-call-statement-{Guid.NewGuid():N}.dll");
+            try
+            {
+                var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
+                    "frontend-build-library", frontend, "-", "-o", outputPath, "--runtime", runtimeName, "--json");
+                Assert.True(buildExit == 0, $"{runtimeName}: {buildExit}: {buildOutput}{buildError}");
+                Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Try"], (NativeRuntimePolicy)policy),
+                    await File.ReadAllBytesAsync(outputPath));
+                var handle = NativeLibrary.Load(outputPath);
+                try
+                {
+                    var invoke = Marshal.GetDelegateForFunctionPointer<RecursiveTry>(
+                        NativeLibrary.GetExport(handle, "Try"));
+                    Assert.True(invoke(5, out var result));
+                    Assert.Equal(5, result);
+                }
+                finally
+                {
+                    NativeLibrary.Free(handle);
+                }
+            }
+            finally
+            {
+                File.Delete(outputPath);
+            }
+        }
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate bool RecursiveTry(int value, out int result);
 
