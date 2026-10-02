@@ -65,6 +65,7 @@ public class ScalarFrontendResult
     public int32 FirstType;
     public int32 SecondType;
     public int32 ThirdType;
+    public int32 OutParameterMask;
     public SourceRange Name;
     public SourceRange FirstName;
     public SourceRange SecondName;
@@ -77,7 +78,7 @@ public class ScalarFrontendResult
 
     public ScalarFrontendResult(bool valid, bool isPublic, int32 errorCode, SourceRange errorSpan,
         int32 returnType, int32 parameterCount, int32 firstType, int32 secondType,
-        int32 thirdType, SourceRange name, SourceRange firstName, SourceRange secondName,
+        int32 thirdType, int32 outParameterMask, SourceRange name, SourceRange firstName, SourceRange secondName,
         SourceRange thirdName,
         bool hasCondition, bool hasFallthrough, ScalarFrontendExpression condition,
         ScalarFrontendExpression whenTrue, ScalarFrontendExpression whenFalse)
@@ -91,6 +92,7 @@ public class ScalarFrontendResult
         FirstType = firstType;
         SecondType = secondType;
         ThirdType = thirdType;
+        OutParameterMask = outParameterMask;
         Name = name;
         FirstName = firstName;
         SecondName = secondName;
@@ -117,6 +119,7 @@ mut class ScalarFrontendState
     private mut int32 _secondType;
     private mut int32 _thirdType;
     private mut int32 _parameterCount;
+    private mut int32 _outParameterMask;
     private mut bool _isPublic;
     private mut int32 _localCount;
     private mut int32 _activeLocals;
@@ -139,6 +142,7 @@ mut class ScalarFrontendState
         _secondType = 0;
         _thirdType = 0;
         _parameterCount = 0;
+        _outParameterMask = 0;
         _isPublic = false;
         _localCount = 0;
         _activeLocals = 0;
@@ -187,8 +191,14 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private mut bool ParseParameter(out int32 type, out Token name)
+    private mut bool ParseParameter(out int32 type, out Token name, out bool isOut)
     {
+        require _tokens.TryGet(_at, out var mode);
+        isOut = mode.Kind == 15;
+        if (isOut)
+        {
+            _at = _at + 1;
+        }
         if (!Take(2, out var typeToken))
         {
             return false;
@@ -288,6 +298,12 @@ mut class ScalarFrontendState
         index = 0;
         type = 0;
         return false;
+    }
+
+    private bool IsOutParameter(int32 slot)
+    {
+        return slot >= 1 && slot <= _parameterCount
+            && (_outParameterMask & (1 << (slot - 1))) != 0;
     }
 
     private mut bool TryResolveParameter(Token token, out int32 index, out int32 type)
@@ -1391,34 +1407,37 @@ mut class ScalarFrontendState
         require _tokens.TryGet(_at, out var next);
         if (next.Kind != 47)
         {
-            if (!ParseParameter(out var firstType, out var first))
+            if (!ParseParameter(out var firstType, out var first, out var firstIsOut))
             {
                 return false;
             }
             _firstType = firstType;
             _first = first;
+            if (firstIsOut) { _outParameterMask = _outParameterMask | 1; }
             _parameterCount = 1;
             require _tokens.TryGet(_at, out var comma);
             if (comma.Kind == 53)
             {
                 _at = _at + 1;
-                if (!ParseParameter(out var secondType, out var second))
+                if (!ParseParameter(out var secondType, out var second, out var secondIsOut))
                 {
                     return false;
                 }
                 _secondType = secondType;
                 _second = second;
+                if (secondIsOut) { _outParameterMask = _outParameterMask | 2; }
                 _parameterCount = 2;
                 require _tokens.TryGet(_at, out var thirdComma);
                 if (thirdComma.Kind == 53)
                 {
                     _at = _at + 1;
-                    if (!ParseParameter(out var thirdType, out var third))
+                    if (!ParseParameter(out var thirdType, out var third, out var thirdIsOut))
                     {
                         return false;
                     }
                     _thirdType = thirdType;
                     _third = third;
+                    if (thirdIsOut) { _outParameterMask = _outParameterMask | 4; }
                     _parameterCount = 3;
                 }
             }
@@ -1548,7 +1567,8 @@ mut class ScalarFrontendState
                 return false;
             }
             if (slot <= _parameterCount
-                || (Host.Frontend[300 + (slot - _parameterCount - 1) * 4 + 1] & 3) == 0)
+                    ? !IsOutParameter(slot)
+                    : (Host.Frontend[300 + (slot - _parameterCount - 1) * 4 + 1] & 3) == 0)
             {
                 FailAt(2, first.Range);
                 return false;
@@ -2265,7 +2285,7 @@ mut class ScalarFrontendState
         Host.Frontend[39] = -1;
         Host.Frontend[40] = -1;
         return ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
-            returnType, _parameterCount, _firstType, _secondType, _thirdType,
+            returnType, _parameterCount, _firstType, _secondType, _thirdType, _outParameterMask,
             name, _first.Range, _second.Range, _third.Range,
             false, false, absent, absent, absent, out result);
     }
@@ -3116,9 +3136,12 @@ mut class ScalarFrontendState
     {
         int32 read = UngroupTree(node);
         int32 slot = TreeWord(read, 4);
-        if (TreeWord(read, 0) != 0 || slot <= _parameterCount
+        if (TreeWord(read, 0) != 0
+            || (slot <= _parameterCount
+                ? !IsOutParameter(slot)
+                : Host.Frontend[300 + (slot - _parameterCount - 1) * 4 + 1] != 1)
             || TreeWord(read, 1) < 1 || TreeWord(read, 1) > 4
-            || Host.Frontend[300 + (slot - _parameterCount - 1) * 4 + 1] != 1)
+            )
         {
             return FailTreeType(node);
         }
@@ -3290,7 +3313,7 @@ mut class ScalarFrontendState
         Host.Frontend[40] = whenFalse;
         if (expressionBody) { Host.Frontend[41] = 1; }
         return ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
-            returnType, _parameterCount, _firstType, _secondType, _thirdType,
+            returnType, _parameterCount, _firstType, _secondType, _thirdType, _outParameterMask,
             name, _first.Range, _second.Range, _third.Range,
             hasCondition, hasFallthrough, absent, absent, absent, out result);
     }
@@ -3372,7 +3395,7 @@ mut class ScalarFrontendState
             return TryCreateScalarFrontendError(_error, _errorSpan, out result);
         }
         return ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty, returnType, _parameterCount,
-            _firstType, _secondType, _thirdType, name, _first.Range, _second.Range, _third.Range,
+            _firstType, _secondType, _thirdType, _outParameterMask, name, _first.Range, _second.Range, _third.Range,
             hasCondition, hasFallthrough, condition, whenTrue, whenFalse, out result);
     }
 }
@@ -3382,7 +3405,7 @@ bool TryCreateScalarFrontendError(int32 code, SourceRange span, out ScalarFronte
     require SourceRange.TryCreate(0, 0, out var empty);
     require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
     return ScalarFrontendResult.TryCreate(false, false, code, span, 0, 0, 0, 0, 0,
-        empty, empty, empty, empty, false, false, absent, absent, absent, out result);
+        0, empty, empty, empty, empty, false, false, absent, absent, absent, out result);
 }
 
 bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult result)
@@ -3425,7 +3448,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     {
         return false;
     }
-    if (legacy.IsValid && Host.Frontend[2] == 0)
+    if (legacy.IsValid && legacy.OutParameterMask == 0 && Host.Frontend[2] == 0)
     {
         result = legacy;
         return true;

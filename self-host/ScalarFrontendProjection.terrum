@@ -74,6 +74,7 @@ namespace Terrum.CodeAnalysis;
 // Version 66 adds kind 31 for an unsafe block, kind 32 for a try body and kind 33 for its catch body.
 // Version 67 adds kind 34 for a catch region's optional finally body.
 // Version 68 adds kinds 35 and 36 for static require and ensure proofs.
+// Version 69 uses header word 16 as a parameter out-mode bitmask.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -168,6 +169,7 @@ bool TryPublishScalarFrontend()
         if (HasScalarFrontendStatement(31)) { Host.Frontend[0] = 66; }
         if (HasScalarFrontendStatement(34)) { Host.Frontend[0] = 67; }
         if (HasScalarFrontendStatement(35) || HasScalarFrontendStatement(36)) { Host.Frontend[0] = 68; }
+        if (result.OutParameterMask != 0) { Host.Frontend[0] = 69; }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {
@@ -268,6 +270,7 @@ void WriteScalarFrontendHeader(ScalarFrontendResult result)
     Host.Frontend[12] = result.FirstName.Length;
     Host.Frontend[13] = result.SecondName.Start;
     Host.Frontend[14] = result.SecondName.Length;
+    Host.Frontend[16] = result.OutParameterMask;
     Host.Frontend[34] = result.ThirdType;
     Host.Frontend[35] = result.ThirdName.Start;
     Host.Frontend[36] = result.ThirdName.Length;

@@ -369,6 +369,12 @@ anchors, then erases only proven-true conditions; `static ensure` must be
 closed, and unsupported or unestablished proofs reject. This does not add a
 native ABI, source-free TRRM or semantic-module format.
 
+Projection v69 adds a three-bit parameter-mode mask for scalar `out`
+declarations. The source-bound reader audits each mode against the declaration
+tokens and lowers it to the shared verifier as a mutable output parameter.
+Hosted Boolean-return and definite-publication rules still apply; general
+`out` call sites and `init ref<T>` migration remain scheduled.
+
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer
