@@ -371,7 +371,7 @@ internal static partial class Program
                         }
                         if (frontend.Statements.Any(static statement => statement.Kind == 37))
                         {
-                            projectionVersion = 72;
+                            projectionVersion = frontend.ReturnType == 0 ? 73 : 72;
                         }
                         writer.WriteNumber("projectionVersion", projectionVersion);
                         writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);

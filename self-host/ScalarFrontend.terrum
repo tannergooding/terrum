@@ -2810,7 +2810,7 @@ mut class ScalarFrontendState
 
     private mut bool ParseTreeSelfCall(Token functionName, int32 depth, out int32 node)
     {
-        if (_functionReturnType == 0 || !SameTokenSpelling(_function, functionName)
+        if (!SameTokenSpelling(_function, functionName)
             || IsParameterName(functionName))
         {
             FailAt(1, functionName.Range);

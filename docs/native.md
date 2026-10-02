@@ -389,6 +389,11 @@ statement's call root and source spelling before lowering; void self-calls
 remain unsupported. General call targets and unresolved `init ref<T>`
 call-site metadata remain outside this frontend boundary.
 
+Projection v73 permits void-returning direct self-calls only as expression
+statements. Their zero-typed call node must be the root of kind 37; the shared
+verifier/emitter continue to define call behavior. Void call values and other
+call targets remain unsupported.
+
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer

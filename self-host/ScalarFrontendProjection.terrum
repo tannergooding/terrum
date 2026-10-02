@@ -79,6 +79,7 @@ namespace Terrum.CodeAnalysis;
 // Version 71 adds out var destinations to bounded direct self-calls.
 // Version 72 adds kind-37 direct self-call expression statements; slot is zero,
 // root is the call node, and the span includes the semicolon outside for clauses.
+// Version 73 permits void self-call nodes in kind-37 expression statements.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -176,7 +177,10 @@ bool TryPublishScalarFrontend()
         if (result.OutParameterMask != 0) { Host.Frontend[0] = 69; }
         if (HasScalarFrontendOperation(102)) { Host.Frontend[0] = 70; }
         if (HasScalarFrontendOperation(104)) { Host.Frontend[0] = 71; }
-        if (HasScalarFrontendStatement(37)) { Host.Frontend[0] = 72; }
+        if (HasScalarFrontendStatement(37))
+        {
+            Host.Frontend[0] = result.ReturnType == 0 ? 73 : 72;
+        }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {
