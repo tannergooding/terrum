@@ -324,6 +324,14 @@ initializations remain errors. Nullable locals and other vacant storage remain
 outside this bounded frontend. These provisional projections change no native
 ABI, source-free TRRM or semantic-module format.
 
+Projection v63 adds block-local `const T name = literal;` declarations for the
+six scalar types. Kind 27 marks the declaration and local flag `0x4` records
+constant authority. The source-bound reader accepts only a direct scalar
+literal initializer and inlines later reads as its verified constant value;
+constant expressions, inferred const locals and `for`-initializer const
+declarations remain outside this bounded subset. The projection adds no native
+ABI, source-free TRRM or semantic-module format.
+
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer

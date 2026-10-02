@@ -124,6 +124,33 @@ public sealed class LocalFrontendProjectionTests
         }
     }
 
+    [Fact]
+    public void ReadResultAuditsLiteralConstantLocalsAndVersionGate()
+    {
+        const string text = "public int32 Value() { const int32 value = 42; return value; }";
+        var words = ConstantProjection(text);
+        var source = SourceText.From(text);
+        var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
+        Assert.True(result.IsValid);
+        Assert.Equal(63, words[0]);
+        Assert.True(Assert.Single(result.Locals).IsConstant);
+
+        Reject(0, 62);
+        Reject(301, 0);
+        Reject(332, 1);
+        var altered = text.Replace("const int32 value", "const uint32 value", StringComparison.Ordinal);
+        Assert.Throws<ArgumentException>(() =>
+            ScalarFrontendHost.ReadResult(SourceText.From(altered), Bytes(words)));
+
+        void Reject(int index, int value)
+        {
+            var old = words[index];
+            words[index] = value;
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            words[index] = old;
+        }
+    }
+
     private static int[] Projection(string text, bool assignment)
     {
         var words = new int[ScalarFrontendHost.WordCount];
@@ -238,6 +265,57 @@ public sealed class LocalFrontendProjectionTests
             words[offset + 3] = 1;
             words[offset + 4] = slot;
             words[offset + 5] = -1;
+        }
+    }
+
+    private static int[] ConstantProjection(string text)
+    {
+        var words = new int[ScalarFrontendHost.WordCount];
+        words[0] = 63;
+        words[1] = 1;
+        words[2] = 1;
+        words[5] = 1;
+        words[9] = text.IndexOf("Value", StringComparison.Ordinal);
+        words[10] = 5;
+        words[37] = 2;
+        words[38] = -1;
+        words[39] = -1;
+        words[40] = -1;
+        words[298] = 2;
+        words[299] = 1;
+        words[300] = 1;
+        words[301] = 4;
+        words[302] = text.IndexOf("value =", StringComparison.Ordinal);
+        words[303] = 5;
+        var declarationStart = text.IndexOf("const int32 value = 42;", StringComparison.Ordinal);
+        words[332] = 27;
+        words[333] = 1;
+        words[334] = 0;
+        words[335] = declarationStart;
+        words[336] = "const int32 value = 42;".Length;
+        var returnStart = text.IndexOf("return value;", StringComparison.Ordinal);
+        words[337] = 8;
+        words[338] = 0;
+        words[339] = 1;
+        words[340] = returnStart;
+        words[341] = "return value;".Length;
+        Node(0, 3, text.IndexOf("42;", declarationStart, StringComparison.Ordinal), -1, -1);
+        Node(1, 0, text.LastIndexOf("value;", StringComparison.Ordinal), 1, -1);
+        return words;
+
+        void Node(int index, int operation, int start, int left, int right)
+        {
+            var offset = 42 + index * 8;
+            words[offset] = operation;
+            words[offset + 1] = 1;
+            words[offset + 2] = start;
+            words[offset + 3] = operation == 3 ? 2 : 5;
+            words[offset + 4] = left;
+            words[offset + 5] = right;
+            if (operation == 3)
+            {
+                words[offset + 6] = 42;
+            }
         }
     }
 

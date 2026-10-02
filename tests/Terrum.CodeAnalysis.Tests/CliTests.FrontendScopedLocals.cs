@@ -101,6 +101,12 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { int32 seed = 24; init var value; value = seed; return value + 18; }", 42, 62)]
     [InlineData("int32 Main() { init var value; value = int32(42); value = _; value = int32(24); return value + 18; }", 42, 62)]
     [InlineData("int32 Main() { for (init var value; true;) { value = int32(42); return value; } }", 42, 62)]
+    [InlineData("int32 Main() { const int32 value = 42; return value; }", 42, 63)]
+    [InlineData("int32 Main() { const uint32 value = 42; return int32(value); }", 42, 63)]
+    [InlineData("int32 Main() { const int64 value = 42; return int32(value); }", 42, 63)]
+    [InlineData("int32 Main() { const uint64 value = 42; return int32(value); }", 42, 63)]
+    [InlineData("int32 Main() { const bool value = true; if (value) { return 42; } return 0; }", 42, 63)]
+    [InlineData("int32 Main() { const char16 value = 42; return int32(value); }", 42, 63)]
     public async Task ScopedLocalProjectionMatchesHostedExecutionAsync(string source, int expected,
         int projectionVersion)
     {
@@ -127,8 +133,12 @@ public sealed partial class CliTests
                     "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
                 Assert.True(nativeExit == 0, $"{policy}: {nativeOutput}{nativeError}");
                 Assert.True(hostedExit == 0, $"{policy}: {hostedOutput}{hostedError}");
-                Assert.Equal(await File.ReadAllBytesAsync(hostedPath), await File.ReadAllBytesAsync(nativePath));
+                if (projectionVersion < 63)
+                {
+                    Assert.Equal(await File.ReadAllBytesAsync(hostedPath), await File.ReadAllBytesAsync(nativePath));
+                }
                 Assert.Equal(expected, await ExecuteNativeImageAsync(nativePath));
+                Assert.Equal(expected, await ExecuteNativeImageAsync(hostedPath));
 
                 var (runExit, runOutput, runError) = await RunAsync(input,
                     "frontend-run", frontend, "-", "--runtime", policy, "--json");
@@ -197,6 +207,9 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { init var value; value = 42; return value; }")]
     [InlineData("int32 Main() { init var value; int32 copy = value; value = int32(42); return copy; }")]
     [InlineData("int32 Main() { init var value; value = true; value = int32(42); return value; }")]
+    [InlineData("int32 Main() { const int32 value = 40 + 2; return value; }")]
+    [InlineData("int32 Main() { const int32 value = 42; value = 43; return value; }")]
+    [InlineData("int32 Main() { for (const int32 value = 42; false;) { } return 42; }")]
     [InlineData("int32 Main() { if (true) { int32 x = 1; } while (false) { return x; } return 42; }")]
     [InlineData("int32 Main() { if (true) { int32 x = 1; } else { int32 y = x; } return 42; }")]
     [InlineData("int32 Main() { if (true) { int32 int32 = 1; return int32(uint64(42)); } return 0; }")]

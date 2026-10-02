@@ -1495,7 +1495,7 @@ mut class ScalarFrontendState
     {
         _hasStructuredStatement = true;
         _at = _at + 1;
-        return ParseTreeLocalInitializer(first, first, 0, false, true);
+        return ParseTreeLocalInitializer(first, first, 0, false, false, true);
     }
 
     private mut bool ParseTreeClauseStatement(bool semicolon)
@@ -1650,7 +1650,13 @@ mut class ScalarFrontendState
         mut bool mutable = false;
         mut bool initialization = false;
         mut bool inferredInitialization = false;
-        if (IsInitKeyword(first))
+        mut bool constant = false;
+        if (IsConstKeyword(first))
+        {
+            constant = true;
+            _at = _at + 1;
+        }
+        else if (IsInitKeyword(first))
         {
             initialization = true;
             _at = _at + 1;
@@ -1662,7 +1668,12 @@ mut class ScalarFrontendState
         }
         require _tokens.TryGet(_at, out var declaredType);
         mut int32 type = 0;
-        if (initialization && declaredType.Kind == 12)
+        if (constant && declaredType.Kind == 12)
+        {
+            FailAt(2, declaredType.Range);
+            return false;
+        }
+        else if (initialization && declaredType.Kind == 12)
         {
             inferredInitialization = true;
             _at = _at + 1;
@@ -1709,7 +1720,16 @@ mut class ScalarFrontendState
         }
         return initialization
             ? ParseTreeVacantLocal(first, name, type, inferredInitialization, semicolon)
-            : ParseTreeLocalInitializer(first, name, type, mutable, semicolon);
+            : ParseTreeLocalInitializer(first, name, type, mutable, constant, semicolon);
+    }
+
+    private bool IsConstKeyword(Token token)
+    {
+        int32 at = token.Range.Start;
+        return token.Kind == 2 && token.Range.Length == 5
+            && Host.Source[at] == char16(99) && Host.Source[at + 1] == char16(111)
+            && Host.Source[at + 2] == char16(110) && Host.Source[at + 3] == char16(115)
+            && Host.Source[at + 4] == char16(116);
     }
 
     private bool IsInitKeyword(Token token)
@@ -1756,7 +1776,7 @@ mut class ScalarFrontendState
     }
 
     private mut bool ParseTreeLocalInitializer(Token first, Token name, int32 expected,
-        bool mutable, bool semicolon)
+        bool mutable, bool constant, bool semicolon)
     {
         if (_localCount >= 8)
         {
@@ -1773,6 +1793,11 @@ mut class ScalarFrontendState
         {
             return FailTreeType(initializer);
         }
+        if (constant && TreeWord(initializer, 0) != 3
+            && TreeWord(initializer, 0) != 20 && TreeWord(initializer, 0) != 21)
+        {
+            return FailTreeType(initializer);
+        }
         if (!ResolveTreeLiteral(initializer, type, false)
             || semicolon && !Take(52, out var endDeclaration))
         {
@@ -1782,6 +1807,7 @@ mut class ScalarFrontendState
         int32 offset = 300 + index * 4;
         Host.Frontend[offset] = type;
         if (mutable) { Host.Frontend[offset + 1] = 1; }
+        else if (constant) { Host.Frontend[offset + 1] = 4; }
         Host.Frontend[offset + 2] = name.Range.Start;
         Host.Frontend[offset + 3] = name.Range.Length;
         _localCount = index + 1;
@@ -1795,7 +1821,8 @@ mut class ScalarFrontendState
             }
             _activeLocals = _activeLocals | bit;
         }
-        return AddTreeStatement(first.Kind == 81 ? 15 : 1, _parameterCount + index + 1, initializer,
+        return AddTreeStatement(first.Kind == 81 ? 15 : constant ? 27 : 1,
+            _parameterCount + index + 1, initializer,
             first.Range.Start, TreeStatementEnd());
     }
 
@@ -1805,6 +1832,11 @@ mut class ScalarFrontendState
         if (first.Kind == 52 || first.Kind == 47)
         {
             return AddTreeStatement(13, 0, -1, first.Range.Start, first.Range.End);
+        }
+        if (initializer && IsConstKeyword(first))
+        {
+            FailAt(1, first.Range);
+            return false;
         }
         if (!initializer && (first.Kind == 12 || first.Kind == 13
             || first.Kind == 2 && _tokens.TryGet(_at + 1, out var following)
