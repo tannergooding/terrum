@@ -138,6 +138,7 @@ boundaries remain in the [implementation reference](implementation.md).
 | Commit | Completed milestone |
 |---|---|
 | `daadff9` | Native scalar short-circuit static proof folding, projection 68 |
+| `daadff9` | Native scalar short-circuit static proof folding, projection 68 |
 | `1f4635b` | Native scalar constant-conditional static proof folding, projection 68 |
 | `cdc392c` | Native scalar foldable-true static proofs, projection 68 |
 | `f55f904` | Native scalar checked bare catch with optional `finally`, projection 67 |
