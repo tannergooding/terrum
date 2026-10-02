@@ -3,7 +3,9 @@
 using System;
 using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
 using Xunit;
 
@@ -222,6 +224,43 @@ public sealed class LocalFrontendProjectionTests
             words[index] = value;
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words),
                 BoundRuntimePolicy.CheckedExceptions));
+            words[index] = old;
+        }
+    }
+
+    [Fact]
+    public void ReadResultAuditsClosedStaticProofStatement()
+    {
+        const string text = "public int32 Value() { static require true; return 42; }";
+        var words = StaticProofProjection(text);
+        var source = SourceText.From(text);
+        var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
+        Assert.True(result.IsValid);
+        Assert.Equal(2, result.Statements.Length);
+        Assert.Equal(35, result.Statements[0].Kind);
+        Assert.Equal(8, result.Statements[1].Kind);
+
+        foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
+        {
+            var actual = ScalarFrontendHost.BindLibrary(source, Bytes(words), policy);
+            var hosted = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
+            Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+            Assert.Equal(NativeEmitter.EmitLibrary(Assert.IsType<BoundProgram>(hosted.Program), ["Value"],
+                (NativeRuntimePolicy)policy), NativeEmitter.EmitLibrary(actual, ["Value"],
+                    (NativeRuntimePolicy)policy));
+        }
+
+        Reject(0, 67);
+        Reject(332, 36);
+        Reject(334, -1);
+        Reject(335, words[335] + 1);
+        Reject(42, 21);
+
+        void Reject(int index, int value)
+        {
+            var old = words[index];
+            words[index] = value;
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
             words[index] = old;
         }
     }
@@ -506,6 +545,47 @@ public sealed class LocalFrontendProjectionTests
         words[53] = 1;
         words[54] = -1;
         words[55] = -1;
+        return words;
+    }
+
+    private static int[] StaticProofProjection(string text)
+    {
+        var words = new int[ScalarFrontendHost.WordCount];
+        words[0] = 68;
+        words[1] = words[2] = words[5] = 1;
+        words[9] = text.IndexOf("Value", StringComparison.Ordinal);
+        words[10] = 5;
+        words[37] = 2;
+        words[38] = words[39] = words[40] = -1;
+        words[298] = 2;
+        var proofStart = text.IndexOf("static", StringComparison.Ordinal);
+        var proofEnd = text.IndexOf(';', proofStart) + 1;
+        words[332] = 35;
+        words[333] = 0;
+        words[334] = 0;
+        words[335] = proofStart;
+        words[336] = proofEnd - proofStart;
+        var returnStart = text.IndexOf("return", StringComparison.Ordinal);
+        words[337] = 8;
+        words[338] = 0;
+        words[339] = 1;
+        words[340] = returnStart;
+        words[341] = text.IndexOf(';', returnStart) + 1 - returnStart;
+        var literal = text.IndexOf("true", proofStart, StringComparison.Ordinal);
+        words[42] = 20;
+        words[43] = 5;
+        words[44] = literal;
+        words[45] = 4;
+        words[46] = -1;
+        words[47] = -1;
+        var returnLiteral = text.IndexOf("42", returnStart, StringComparison.Ordinal);
+        words[50] = 3;
+        words[51] = 1;
+        words[52] = returnLiteral;
+        words[53] = 2;
+        words[54] = -1;
+        words[55] = -1;
+        words[56] = 42;
         return words;
     }
 

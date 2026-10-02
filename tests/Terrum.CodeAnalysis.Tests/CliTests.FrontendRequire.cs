@@ -87,6 +87,54 @@ public sealed partial class CliTests
     }
 
     [Theory]
+    [InlineData("static require true; return 42;")]
+    [InlineData("const bool proven = true; static require proven; return 42;")]
+    [InlineData("static require true || false; return 42;")]
+    [InlineData("static ensure true && (int32(42) == int32(42)); return 42;")]
+    public async Task NativeScalarStaticProofsMatchHostedScannerPeAndJitAsync(string body)
+    {
+        var source = $"int32 Main() {{ {body} }}";
+        var root = RepositoryRoot();
+        var native = Path.Combine(root, $"static-proof-{Guid.NewGuid():N}.native.exe");
+        var hosted = Path.Combine(root, $"static-proof-{Guid.NewGuid():N}.hosted.exe");
+        var scanner = Path.Combine(root, $"static-proof-{Guid.NewGuid():N}.scanner.exe");
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var input = Encoding.UTF8.GetBytes(source);
+                var (exit, output, error) = await RunAsync(input, "frontend-build",
+                    Path.Combine(root, "self-host"), "-", "-o", native, "--runtime", policy, "--json");
+                Assert.True(exit == 0, $"{policy}: {output}{error}");
+                using var document = JsonDocument.Parse(output);
+                Assert.Equal(68, document.RootElement.GetProperty("result")
+                    .GetProperty("projectionVersion").GetInt32());
+
+                var (hostExit, hostOutput, hostError) = await RunAsync(input, "build",
+                    "-", "-o", hosted, "--runtime", policy, "--json");
+                Assert.True(hostExit == 0, $"{hostOutput}{hostError}");
+                var (scanExit, scanOutput, scanError) = await RunAsync(input, "build-component",
+                    Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", scanner,
+                    "--runtime", policy, "--json");
+                Assert.True(scanExit == 0, $"{scanOutput}{scanError}");
+                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(scanner));
+                Assert.Equal(42, await ExecuteNativeImageAsync(native));
+
+                var (jitExit, jitOutput, jitError) = await RunAsync(input, "jit",
+                    "-", "--runtime", policy, "--json");
+                Assert.True(jitExit == 42, $"{policy}: {jitOutput}{jitError}");
+            }
+        }
+        finally
+        {
+            File.Delete(native);
+            File.Delete(hosted);
+            File.Delete(scanner);
+        }
+    }
+
+    [Theory]
     [InlineData("require 1; return 42;")]
     [InlineData("require int32(1); return 42;")]
     [InlineData("require null; return 42;")]
@@ -95,8 +143,12 @@ public sealed partial class CliTests
     [InlineData("require 1 == 1; return 42;")]
     [InlineData("require true, 7; return 42;")]
     [InlineData("require true else 7; return 42;")]
-    [InlineData("static require true; return 42;")]
-    [InlineData("static ensure true; return 42;")]
+    [InlineData("static require false; return 42;")]
+    [InlineData("static ensure false; return 42;")]
+    [InlineData("bool value = true; static require value; return 42;")]
+    [InlineData("bool value = false; static require true || value; return 42;")]
+    [InlineData("const bool value = true; static ensure value; return 42;")]
+    [InlineData("if (true) { static ensure true; } return 42;")]
     [InlineData("for (require true; false;) {} return 42;")]
     [InlineData("for (; false; require true) {} return 42;")]
     [InlineData("require true")]

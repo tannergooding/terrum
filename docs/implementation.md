@@ -133,7 +133,7 @@ The current scanner is version 8/schema 8; it appends diagnostic kinds 11/12
 for invalid/unsupported maximal punctuation runs to the prior diagnostic
 catalog. Earlier raw records remain readable where compatible, while current
 snapshot adapters reject forged framing, invalid escapes and conflicting
-classification. The bounded scalar frontend's projections through v67 share a
+classification. The bounded scalar frontend's projections through v68 share a
 392-word buffer and enforce the documented limits: 16,384 UTF-16 source units, 64 tokens,
 eight total local identities including hidden discards, 12 statement records,
 32 expression nodes, three parameters, 16 expression-recursion levels, six
@@ -799,6 +799,14 @@ extent before setting `BoundTryCatch.Finally`; the hosted verifier retains
 responsibility for failure-edge and cleanup rules. Typed catches and filters
 remain unsupported, and recovery still requires explicit `unsafe` plus the
 checked-exceptions policy.
+
+Projection v68 adds kinds 35 and 36 for bounded body `static require` and
+outer-body `static ensure` proofs. The reader validates their source spelling
+and scope, folds the condition through the shared scalar folder, and erases
+only proven-true conditions before runtime verification and emission. A
+`static require` may refer to earlier immutable scalar constants; `static
+ensure` must be closed and cannot read locals or parameters. False or
+unestablished proofs and `ConstEval` calls remain outside this frontend subset.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

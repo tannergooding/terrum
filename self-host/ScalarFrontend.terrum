@@ -1740,6 +1740,15 @@ mut class ScalarFrontendState
             && Host.Source[at + 2] == char16(105) && Host.Source[at + 3] == char16(116);
     }
 
+    private bool IsEnsureKeyword(Token token)
+    {
+        int32 at = token.Range.Start;
+        return token.Kind == 2 && token.Range.Length == 6
+            && Host.Source[at] == char16(101) && Host.Source[at + 1] == char16(110)
+            && Host.Source[at + 2] == char16(115) && Host.Source[at + 3] == char16(117)
+            && Host.Source[at + 4] == char16(114) && Host.Source[at + 5] == char16(101);
+    }
+
     private bool IsParameterName(Token name)
     {
         return TryResolveSignatureParameter(name, out var index, out var type);
@@ -1878,6 +1887,10 @@ mut class ScalarFrontendState
             else if (next.Kind == 16)
             {
                 if (!ParseTreeIf(depth, nearestLoop)) { return false; }
+            }
+            else if (next.Kind == 10)
+            {
+                if (!ParseTreeStaticProof(depth)) { return false; }
             }
             else if (next.Kind == 42)
             {
@@ -2510,6 +2523,42 @@ mut class ScalarFrontendState
         }
         FinishTreeBody(header, enclosingLocals, end.Range.End);
         return true;
+    }
+
+    private mut bool ParseTreeStaticProof(int32 depth)
+    {
+        if (!Take(10, out var keyword) || !_tokens.TryGet(_at, out var proofKeyword))
+        {
+            return false;
+        }
+        mut int32 kind = 35;
+        if (proofKeyword.Kind == 41)
+        {
+            _at = _at + 1;
+        }
+        else if (IsEnsureKeyword(proofKeyword))
+        {
+            if (depth != 0)
+            {
+                FailAt(1, proofKeyword.Range);
+                return false;
+            }
+            kind = 36;
+            _at = _at + 1;
+        }
+        else
+        {
+            FailAt(1, proofKeyword.Range);
+            return false;
+        }
+        if (!ParseTreeExpression(5, 1, 0, out var condition)
+            || TreeWord(condition, 1) != 5
+            || !Take(52, out var semicolon))
+        {
+            return false;
+        }
+        _hasStructuredStatement = true;
+        return AddTreeStatement(kind, 0, condition, keyword.Range.Start, semicolon.Range.End);
     }
 
     private mut bool ParseTreeDo(int32 depth, int32 label)

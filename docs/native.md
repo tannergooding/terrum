@@ -362,6 +362,12 @@ checks failure edges and cleanup under the checked-exceptions policy. Typed
 catches and filters remain outside the bounded frontend; no native ABI or
 schema changes.
 
+Projection v68 adds kinds 35 and 36 for foldable-true body `static require` and
+outer-body `static ensure` proofs. The reader validates the scopes and source
+anchors, then erases only proven-true conditions; `static ensure` must be
+closed, and unsupported or unestablished proofs reject. This does not add a
+native ABI, source-free TRRM or semantic-module format.
+
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer

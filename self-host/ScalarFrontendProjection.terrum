@@ -73,6 +73,7 @@ namespace Terrum.CodeAnalysis;
 // Version 65 adds kind 29 for a try body and kind 30 for its finally body.
 // Version 66 adds kind 31 for an unsafe block, kind 32 for a try body and kind 33 for its catch body.
 // Version 67 adds kind 34 for a catch region's optional finally body.
+// Version 68 adds kinds 35 and 36 for static require and ensure proofs.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -116,6 +117,7 @@ int32 GetScalarFrontendStatementVersion()
             }
         }
     }
+    if (maximumKind >= 35) { return 68; }
     if (maximumKind >= 34) { return 67; }
     if (maximumKind >= 31) { return 66; }
     if (maximumKind >= 29) { return 65; }
@@ -165,6 +167,7 @@ bool TryPublishScalarFrontend()
         if (HasScalarFrontendStatement(29)) { Host.Frontend[0] = 65; }
         if (HasScalarFrontendStatement(31)) { Host.Frontend[0] = 66; }
         if (HasScalarFrontendStatement(34)) { Host.Frontend[0] = 67; }
+        if (HasScalarFrontendStatement(35) || HasScalarFrontendStatement(36)) { Host.Frontend[0] = 68; }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {
