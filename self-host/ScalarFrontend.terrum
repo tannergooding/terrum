@@ -162,7 +162,6 @@ mut class ScalarFrontendState
     public mut bool TryInventoryHeader(out ScalarFrontendResult result, out int32 end)
     {
         end = 0;
-        _outParameterMask = _outParameterMask | (1 << 30);
         require SourceRange.TryCreate(0, 0, out var empty);
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
         if (!ParseHeader(out var selected, out var name))
@@ -219,9 +218,10 @@ mut class ScalarFrontendState
     {
         require _tokens.TryGet(_at, out var mode);
         isOut = mode.Kind == 15;
-        isInitRef = !isOut && ((_outParameterMask & (1 << 30)) != 0
-            || Host.FrontendProgram[2] >= 2 && Host.FrontendProgram[0] >= 74)
-            && IsInitKeyword(mode);
+        // `init` can also be an identifier; recognize the mode only before `ref<`.
+        isInitRef = !isOut && IsInitKeyword(mode)
+            && _tokens.TryGet(_at + 1, out var followingRef) && followingRef.Kind == 14
+            && _tokens.TryGet(_at + 2, out var followingLess) && followingLess.Kind == 67;
         if (isOut)
         {
             _at = _at + 1;
@@ -2369,7 +2369,7 @@ mut class ScalarFrontendState
         Host.Frontend[39] = -1;
         Host.Frontend[40] = -1;
         return ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
-            returnType, _parameterCount, _firstType, _secondType, _thirdType, _outParameterMask,
+            returnType, _parameterCount, _firstType, _secondType, _thirdType, _outParameterMask & 63,
             name, _first.Range, _second.Range, _third.Range,
             false, false, absent, absent, absent, out result);
     }
@@ -2944,6 +2944,7 @@ mut class ScalarFrontendState
             else
             {
                 if (IsOutParameter(ordinal + 1)) { outputMode = 1; }
+                else if (IsInitRefParameter(ordinal + 1)) { outputMode = 2; }
             }
             mut int32 argument = -1;
             if (outputMode != 0)
@@ -3779,8 +3780,11 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
         result = legacy;
         return true;
     }
-    if (!ScalarFrontendState.TryCreate(chain, empty, out var tree)
-        || !tree.TryParseTree(out var modern))
+    if (!ScalarFrontendState.TryCreate(chain, empty, out var tree))
+    {
+        return false;
+    }
+    if (!tree.TryParseTree(out var modern))
     {
         return false;
     }

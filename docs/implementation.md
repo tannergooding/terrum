@@ -955,6 +955,16 @@ modes. These projections do not add general reference arguments, external
 output targets or new publication semantics; single-function v1–v73 layouts
 remain unchanged.
 
+Single-function projection v79 adds the existing scalar `init ref<T>`
+parameter mode and matching `init name`/`init var name` destinations to
+recursive self-calls. Header word 17 stores its init-ref mask separately from
+the `out` mask in word 16; operations 107/108 encode existing and declared
+destinations. The version preserves the single-function v1–v73 and
+complete-program v74–v78 layouts.
+The reader audits parameter and destination modes before lowering; the hosted
+verifier remains authoritative for vacancy and conditional publication. This
+does not expand general reference migration or make the frontend standalone.
+
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed
 lexical `BoundBlock` and shared verified path. Names use ordinal normalized

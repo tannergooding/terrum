@@ -73,6 +73,18 @@ public static partial class ScalarFrontendHost
             words[0] = 68;
         }
 
+        var isInitRefProjection = words[0] == 79;
+        var allowInitRefArguments = context?.AllowInitRefArguments == true || isInitRefProjection;
+        if (isInitRefProjection)
+        {
+            if (context is not null || words[17] == 0)
+            {
+                throw InvalidResult();
+            }
+            // Reuse the v73 tree grammar while retaining v79's distinct source-mode checks.
+            words[0] = 73;
+        }
+
         if (words[0] is < 1 or > 73
             || words[0] >= 53 && source.Length > 16_384
             || words[1] is not (1 or 2))
@@ -173,7 +185,7 @@ public static partial class ScalarFrontendHost
             var voidArrow = words[0] == 57 || words[0] is 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71 or 72 or 73 && words[5] == 0 && words[41] == 1;
             if ((words[0] < 69 && context?.AllowOutputArguments != true
                     ? !AllZero(16, 34)
-                    : !AllZero(context?.AllowInitRefArguments == true ? 18 : 17, 34)
+                    : !AllZero(allowInitRefArguments ? 18 : 17, 34)
                         || words[16] < 0
                         || (words[16] & ~((1 << count) - 1)) != 0
                         || words[17] < 0
@@ -320,8 +332,10 @@ public static partial class ScalarFrontendHost
                         || (callCount < 3 && node.Low != -1)
                         || (callCount == 3 && (node.Low < 0 || node.Low >= i))))
                     || (output && ((words[0] < 70 && context?.AllowOutputArguments != true)
-                        || initOutput && context?.AllowInitRefArguments != true
-                        || (outputDeclaration && words[0] < 71 && context?.AllowOutputArguments != true)
+                        || initOutput && !allowInitRefArguments
+                        || (outputDeclaration && words[0] < 71
+                            && context?.AllowOutputArguments != true
+                            && !(initOutput && allowInitRefArguments))
                         || node.Left < 1 || outputDeclaration && node.Left <= count
                         || node.Left > count + declaredLocals.Length
                         || node.Low != 0 || node.High != 0
@@ -503,7 +517,7 @@ public static partial class ScalarFrontendHost
                 || words[0] == 71 && (!nodes.Any(static node => node.Operation == 102)
                     || !nodes.Any(static node => node.Operation == 104))
                 || words[0] == 72 && !orderedStatements.Any(static entry => entry.Kind == 37)
-                || words[0] == 73 && (words[5] != 0
+                || words[0] == 73 && !isInitRefProjection && (words[5] != 0
                     || !orderedStatements.Any(static entry => entry.Kind == 37)
                     || !nodes.Any(static node => node.Operation == 102 && node.Type == 0)))
             {
@@ -573,7 +587,7 @@ public static partial class ScalarFrontendHost
             for (var parameter = 0; parameter < count; parameter++)
             {
                 var isOut = (words[16] & (1 << parameter)) != 0;
-                var isInitRef = context?.AllowInitRefArguments == true
+                var isInitRef = allowInitRefArguments
                     && (words[17] & (1 << parameter)) != 0;
                 if (parameter != 0 && !Take(TokenKind.Comma)
                     || isOut && !Take(TokenKind.OutKeyword)
@@ -1601,7 +1615,7 @@ public static partial class ScalarFrontendHost
                 }
                 var isOut = (words[0] >= 69 || context?.AllowOutputArguments == true)
                     && (words[16] & (1 << parameter)) != 0;
-                var isInitRef = context?.AllowInitRefArguments == true
+                var isInitRef = allowInitRefArguments
                     && (words[17] & (1 << parameter)) != 0;
                 if (isOut)
                 {
@@ -3381,7 +3395,7 @@ public readonly record struct ScalarFrontendResult(
     public ImmutableArray<ScalarFrontendStatement> Statements { get; init; }
     /// <summary>Bitmask identifying scalar <c>out</c> parameters in the bounded projection.</summary>
     public int OutParameterMask { get; init; }
-    /// <summary>Bitmask identifying scalar <c>init ref</c> parameters in complete snapshots.</summary>
+    /// <summary>Bitmask identifying scalar <c>init ref</c> parameters in single or complete snapshots.</summary>
     public int InitRefParameterMask { get; init; }
     public ImmutableArray<int> CallTargets { get; init; }
     public ImmutableArray<ScalarFrontendResult> Functions { get; init; }

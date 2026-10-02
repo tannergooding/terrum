@@ -3054,6 +3054,53 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("public bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return Fill(true, init value); }", 107)]
+    [InlineData("public bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } if (Fill(true, init var nested)) { value = nested; return true; } return false; }", 108)]
+    public async Task NativeScalarFrontendSingleInitReferenceUsesProjection79Async(
+        string text, int outputOperation)
+    {
+        var source = SourceText.From(text);
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var stage = await CompileAsync(text,
+                "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+                (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+            var native = NativeJit.ExecuteWithData(stage, policy);
+            Assert.Equal(42, native.ExitCode);
+            var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+                ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+            Assert.True(BinaryPrimitives.ReadInt32LittleEndian(bytes) == 79,
+                $"Status {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(sizeof(int)))}, error {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(2 * sizeof(int)))} at {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(3 * sizeof(int)))}+{BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(4 * sizeof(int)))}");
+            Assert.Equal(2, BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(17 * sizeof(int))));
+            var result = ScalarFrontendHost.ReadResult(source, bytes, (BoundRuntimePolicy)policy);
+            Assert.True(result.IsValid, $"Error {result.ErrorCode} at {result.ErrorSpan}");
+            Assert.Equal(2, result.InitRefParameterMask);
+            Assert.Contains(result.Nodes, node => node.Operation == outputOperation);
+
+            var actual = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy),
+                NativeEmitter.EmitLibrary(actual, ["Fill"], policy));
+
+            foreach (var version in new[] { 73, 74, 75, 76, 77, 78 })
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(bytes, version);
+                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
+                    bytes, (BoundRuntimePolicy)policy));
+            }
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, 79);
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(17 * sizeof(int)), 1);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
+                bytes, (BoundRuntimePolicy)policy));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(17 * sizeof(int)), 0);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
+                bytes, (BoundRuntimePolicy)policy));
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Value(bool x, bool y, bool z) { if (z && x) { return 42; } return 0; }", true, false, true)]
     [InlineData("int32 Value(bool x, bool y, bool z) { if (!z) { return 42; } return 0; }", false, true, false)]
     [InlineData("int32 Value(bool x, bool y, bool z) { if (z || x) { return 42; } return 0; }", true, false, false)]

@@ -448,6 +448,14 @@ retains the true-publishes/false-vacant contract. V74–v77 reject init-ref
 modes. This does not add general reference arguments, source-free TRRM support
 or standalone compiler support.
 
+Single-function projection v79 adds the existing scalar `init ref<T>` mode to
+the bounded self-call frontend. Header word 17 stores its parameter mask
+separately from the `out` mask in word 16; operations 107/108 encode matching
+existing and declared `init`/`init var` destinations. It preserves the
+single-function v1–v73 and complete-program v74–v78 layouts; source auditing
+and hosted definite-publication verification remain in force.
+This is not general reference migration or standalone compiler support.
+
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer

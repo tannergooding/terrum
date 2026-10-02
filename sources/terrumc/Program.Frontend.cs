@@ -303,6 +303,11 @@ internal static partial class Program
                 }
                 if (frontend.IsValid)
                 {
+                    if (frontend.Functions.IsDefault)
+                    {
+                        writer.WriteNumber("outParameterMask", frontend.OutParameterMask);
+                        writer.WriteNumber("initRefParameterMask", frontend.InitRefParameterMask);
+                    }
                     writer.WriteNumber("returnType", frontend.ReturnType);
                     writer.WriteNumber("parameterCount", frontend.ParameterCount);
                     writer.WriteNumber("firstType", frontend.FirstType);
@@ -459,6 +464,10 @@ internal static partial class Program
                         if (frontend.Statements.Any(static statement => statement.Kind == 37))
                         {
                             projectionVersion = frontend.ReturnType == 0 ? 73 : 72;
+                        }
+                        if (frontend.Functions.IsDefault && frontend.InitRefParameterMask != 0)
+                        {
+                            projectionVersion = 79;
                         }
                         var programProjectionVersion = frontend.Functions.IsDefault ? projectionVersion
                             : frontend.Functions.Any(static function => function.InitRefParameterMask != 0) ? 78
