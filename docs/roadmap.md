@@ -137,6 +137,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7346396` | Native scalar direct self-calls with inferred `out var` destinations, projection 71 |
 | `a1f5cb6` | Native scalar direct self-calls with existing `out` destinations, projection 70 |
 | `3c7e65d` | Native scalar `out` parameter declarations with source-audited projection 69 and hosted definite-publication verification |
 | `b4e477a` | Native scalar conditional const initializers with lazy branch evaluation, projection 64 |
