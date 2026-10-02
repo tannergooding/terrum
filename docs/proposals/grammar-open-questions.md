@@ -69,18 +69,29 @@ with optional caller-`unsafe` and `partial`, not receiver `mut` or `async`.
 Operator operands and conversion inputs may use `implicit ref<T>` under the
 existing borrow and ranking rules. Associated type/constant declarations and
 bindings use attributes/visibility only; an enclosing partial declaration can
-contribute a complete binding. These are not additional votes or implementation
-claims.
+contribute a complete binding.
+Strict `file` access covers namespace declarations, members and accessors in
+one compiler source unit, not all declaring-type partial parts or equal paths.
+`friend<F, G>` is private access plus those same-module types' own code, not
+module friendship or a transitive grant. Exact generic matching and explicit
+one-slot `_` wildcards are selected; `var` filters/captures/guards are not.
+Same-named file-local definitions in different units have distinct semantic
+scope identities and definition references; same-scope collisions diagnose.
+File/friend interface requirements preserve the corresponding conformance
+authority and effective-access boundaries. These are not additional votes or
+implementation claims.
 
 **Remaining questions:**
 
-- Decide whether a file-limited access domain is needed and, if so, its exact
-  eligible declarations. Candidate `file internal struct Helper { }` is not
-  an adopted combination or a new friend-module boundary.
 - Ordinary static-field initialization/lifetime and static init-accessor
   applicability still need explicit contracts; static storage does not imply
   a C# type initializer. Concrete external-data schemas and target mappings
   remain specification work.
+
+File/friend metadata needs a complete required encoding, separate from
+optional diagnostic SourceFile paths. Its target identities/access
+requirements are selected; table/bit assignments, compatibility and
+representation are specification work, not another visibility vote.
 
 Extern property/accessor and operator/conversion forms are deferred until a
 concrete interop need
@@ -111,8 +122,8 @@ class Counter
 
 C# accepts modifier order such as `static public`; `file` restricts a
 top-level type to one source file, and `field` is contextual property backing
-syntax in C# 14. These are comparisons, not permission to infer Terrum's
-remaining member applicability or file-local access rules.
+syntax in C# 14. These are comparisons, not permission to infer
+Terrum's member file/friend domains from C#'s top-level file-type rule.
 
 ### Q28. Complete pattern and type-test forms
 

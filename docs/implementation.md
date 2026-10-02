@@ -15,6 +15,11 @@ caller-unsafe access, with synchronous accessor-local visibility/safety and
 sole-primary property/indexer implementation. Static operator/conversion
 prefixes additionally specify caller-safety, partial ownership and eligible
 implicit-reference inputs; associated bindings use attributes/visibility only.
+Strict source-unit file visibility and explicit same-module friend grants
+also require semantic scope identity, access provenance and generic grant
+matching that current syntax/semantic modules do not implement. The `(1, 0)`
+metadata visibility bits and optional diagnostic SourceFile rows are not a
+file/friend encoding.
 These are not new compiler
 support: syntax-44 does not enforce the new prefix/partial rules or
 implement unions, static containers, caller-unsafe/async declarations or

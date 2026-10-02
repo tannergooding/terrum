@@ -80,6 +80,55 @@ its bounded executable subset.
 | Binary reader | Bound and decode the supplied artifact; validate framing, required features and referenced contract shapes before accepting it. |
 | Linker or executable consumer | Resolve selected dependencies, check compatibility and reject unsupported semantics before lowering or execution. Trusted bodies need no repeated semantic/caller-use proof; an opt-in audit can check them. |
 
+## Source-unit access and definition identity: encoding pending
+
+The [source declaration contracts](grammar-spec.md#31-source-file-structure-and-declarations)
+define strict `file` access and explicit member-scoped `friend<...>` grants.
+Their identities and permissions require mandatory semantic metadata, not
+optional diagnostic SourceFile paths. The requirements below do not assign
+new tables, flags, row layouts or a format revision.
+
+File-local definitions preserve their source namespace/name and carry an
+explicit module-owned semantic file-scope discriminator. For example:
+
+| Definition reference | Module | File scope | Namespace | Name |
+|---|---|---|---|---|
+| TypeDef row 17 | M | Unit A | N | Foo |
+| TypeDef row 18 | M | Unit B | N | Foo |
+
+References select row 17 or 18, not an ambiguous `N.Foo` string. Name-based
+resolution also accounts for the file-scope identity; equal text does not
+coalesce nominal identities. Unique name mangling is not the semantic
+identity scheme. Unit identities are compiler input identities, not path
+or filename equality. The existing `DefId` representation already distinguishes
+definition rows, but the current row layouts do not encode these semantic
+scope/access records.
+
+File-visible members retain their declaration's access scope. Partial
+implementation bodies retain their actual source-unit origin rather than
+inheriting the primary declaration's file permissions. Friend records bind
+resolved same-module nominal type identities and exact/wildcard generic-slot
+patterns; they do not grant by textual names, interface implementation,
+extension receiver or transitive friendship. Lowering/inlining preserves
+the body's declared access principal rather than deriving it from a synthetic
+runtime type or the caller. Effective containing-type,
+accessor and interface-conformance restrictions remain part of the contract.
+
+Linking, packing and trimming must preserve/remap the definition, module,
+semantic scope and grant references without merging them merely because
+names or paths agree. Stripping debug locations cannot strip required access
+semantics. Reflection or tooling that searches only by name must retain the
+distinct matches or report ambiguity; a precise scope/definition reference
+selects the intended type. Private-state reflection authorization remains
+a separate API contract, not an identity-disambiguation mechanism.
+
+The assigned `(1, 0)` visibility flags below encode only private, internal
+and public. Neither reserved visibility `0x03` nor optional SourceFile rows
+are a file/friend encoding. A complete compatible required representation
+and its reader/binding rules must be specified before such artifacts can
+claim support; readers must not silently lower the permissions to existing
+visibility or infer them from filenames.
+
 ## Format identity and revision scope
 
 `TRRM` is the format identifier, with ASCII signature bytes `54 52 52 4D`.

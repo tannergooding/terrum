@@ -433,7 +433,7 @@ permit it in an arbitrary context.
 |---|---|---|
 | File imports | `using` | Bring names into scope. |
 | Namespace | `namespace` | Declare a file-scoped namespace or namespace blocks, without mixing them in a file. |
-| Visibility | `public`, `internal`, `private` | Restrict declaration access. |
+| Visibility | `public`, `internal`, `private`, `file`, `friend` | Restrict declaration access by module, declaring type, source unit or explicit same-module type grants. |
 | Nominal declarations | `struct`, `class`, `interface`, `enum`, `union` | Name types; unions declare explicit named cases with optional payload parameters. |
 | Type aliases | `alias` | Name a namespace-level transparent type synonym with declaration visibility. |
 | Associated types | `type` | Declare an interface requirement or bind it in a conformance. |
@@ -570,9 +570,14 @@ NamedTarget     = "field" | "property" | "method" | "param" | "typeparam" ;
 AttributeName   = DottedIdentifier ;
 AttributeArguments = "(", [ ConstantExpression,
                      { ",", ConstantExpression } ], ")" ;
-VisibilityModifier = "public" | "internal" | "private" ;
-NamespaceVisibilityModifier = "public" | "internal" ;
-DeclarationModifier = "public" | "internal" | "private" | "static"
+VisibilityModifier = "public" | "internal" | "private" | "file"
+                   | FriendVisibility ;
+NamespaceVisibilityModifier = "public" | "internal" | "file" ;
+FriendVisibility = "friend", "<", FriendTarget, { ",", FriendTarget }, ">" ;
+FriendTarget    = DottedIdentifier,
+                  [ "<", FriendArgument, { ",", FriendArgument }, ">" ] ;
+FriendArgument  = "_" | Type | ConstantGenericArgument ;
+DeclarationModifier = "public" | "internal" | "private" | "file" | "friend" | "static"
                     | "extern" | "mut" | "unique" | "unsafe" | "partial" | "async" ;
 
 StructDecl      = [ "mut" ], [ "unique" ], "struct", Identifier, [ TypeParameterList ],
@@ -686,12 +691,62 @@ blocks, not other blocks of the same namespace or other files. Namespace
 identity does not merge import scopes. Declarations retain source order within
 compiler file order.
 
-Namespace/file-level declarations permit `public` and `internal`, not
-`private`. `internal` grants access within the declaring module; `private`
-is a declaring-type member access domain within that module. Another module
-declaring the same namespace does not extend either access domain, and
-linking or unsafe authorization does not grant friend-module access.
-File-limited visibility is not a selected source form.
+Namespace/file-level types, functions and aliases permit `public`, `internal`
+or `file`, not `private` or `friend`. `internal` grants access within the
+declaring module; `private` grants access to code of the declaring type,
+including all its partial parts. Another module declaring the same namespace
+does not extend either domain. Linking or unsafe authorization does not
+grant friend-module access.
+
+`file` is a standalone visibility word, not `file internal`. It is also
+permitted on nominal members and accessors. Its domain is strictly the
+declaring compiler source input unit: another partial part of the same type
+in a different input does not gain access. Inputs with equal filenames or
+paths remain distinct units; a separately supplied generated input does not
+inherit another input's permissions. Implementation bodies retain their
+actual source unit rather than borrowing their partial primary's origin.
+
+Namespace-level file-local declarations in different units may have the same
+qualified name without sharing an identity. A file-local and ordinary module
+declaration with the same qualified name that are both visible in one unit
+diagnose a collision, rather than silently shadowing. File-visible nominal
+members retain the ordinary no-duplicate-member rules across partial parts.
+A file-local identity carries a module-owned semantic source-unit discriminator
+in addition to its name; resolved references distinguish the definitions
+even when namespace/name text is equal. File paths and optional debug data are
+not semantic identity or access authority.
+
+`friend<F, G>` occupies a nominal member's visibility slot. It means private
+access by the declaring type across its partial parts, plus access by code
+declared in the listed same-module types, across their partial parts. It grants
+access only to that member, not every private member. Grants are nontransitive
+and cannot name another module's type as the friend principal. Calling a
+friend's methods, implementing a listed interface or defining extensions for
+it does not confer friendship. A listed interface grants its own authored
+bodies access, not its implementing types. Lowering or inlining preserves
+declared code ownership rather than transferring access to unrelated code.
+
+Friend targets resolve nominal declaration identities, not runtime objects or
+name-string equality. Exact generic arguments are substituted in the owning
+type's context: `friend<ListEnumerator<T>>` on `List<int32>` selects
+`ListEnumerator<int32>`, not another specialization. A nongeneric target
+remains the same helper for every owner instantiation.
+An explicit `_` matches one generic argument slot without inference or
+capture; `friend<ListEnumerator<_>>` grants that member to every specialization
+of the named same-module generic type. Constructor, arity and argument kinds
+must still match. Exact arguments retain ordinary type/constant normalization.
+`var`, `var?`, captures, guards, runtime predicates and argument packs have
+no friend-grant form. This permission wildcard does not change `_` inference
+in ordinary generic applications.
+
+Access grants do not bypass mutation, initialization, safety, ownership,
+lifetime or containing-type access. Effective-access checks prohibit a
+file-local type in a signature or other contract accessible outside its unit.
+A hidden implementation may still be returned through an accessible public
+interface when that is the exposed contract. Access domains are not one
+linear keyword hierarchy; accessor narrowing must respect their actual access
+sets. Friendship cannot make a containing type public or expose a file-local
+type beyond its own domain.
 
 Optional visibility in type, callable, constructor, property, indexer and operator
 declaration prefixes exists only for secondary partial declarations, not a
@@ -702,6 +757,7 @@ Namespace declarations, local bindings, parameters, enum constants, union
 cases and accessor introducers are not independent visibility-bearing
 primary declarations. An accessor inherits its containing property's/indexer's
 visibility unless it explicitly narrows that domain; it cannot broaden it.
+`friend<...>` and its generic openers use the ordinary attached-angle rules.
 
 Type heads keep their compound form together:
 
@@ -885,11 +941,15 @@ body; if neither exists, the conformance is incomplete. An explicit
 implementation may replace a default without changing the member identity or
 weakening its published contract. Same-named extensions do not satisfy or
 replace a witness.
-Interface requirements may be `public` or `internal`. A public interface can
-be consumed through its accessible operations and used in constraints while
+Interface requirements may be `public`, `internal`, `file` or `friend<...>`.
+A public interface can be consumed through its accessible operations and used in constraints while
 an internal requirement restricts new conformances to its defining module.
-Inherited requirements preserve that restriction; interface composition
-does not reopen implementation authority. Controlling the implementers lets
+File requirements restrict new conformance declarations to the requirement's
+source unit; friend requirements restrict them to explicitly authorized type
+code. The conformance primary authors its conformance list under those access
+rules. Inherited requirements preserve every such restriction; interface
+composition does not reopen implementation authority. Controlling the
+implementers lets
 a module evolve requirements and its implementations together, but does not
 make an otherwise incompatible ABI change compatible. Private interface
 members are complete implementation helpers owned by the declaring interface,
@@ -913,7 +973,7 @@ owner selection are specified in §5.13; declaration order cannot break ties.
 All user-defined operators and conversions require explicit `static` on
 their primary; there is no implicit instance receiver or receiver `mut`
 modifier. Mutation authority comes from the explicit operand access contract.
-Their prefixes order attributes, ordinary `public`/`internal`/`private`
+Their prefixes order attributes, ordinary member
 visibility, `static`, optional caller-`unsafe`, then optional `partial`.
 Lookup considers accessible operations under the ordinary access rules.
 An unsafe operation requires an explicit unsafe context at its use site,
@@ -3337,7 +3397,7 @@ appears in §2.
 | Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw framing/headers, deterministic interpolation, identifier/quoted/expression formats and runtime alignment. | Complete floating token recovery, character diagnostics, raw/interpolation recovery and registered text/whole-output normalization APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or nested block namespaces without mixing, with lexically scoped imports before declarations. | Other namespace forms, if any. |
-| Visibility and declaration prefixes | §3.1 requires explicit primary visibility, fixed role-specific ordering and a sole partial contract author. Secondary attributes obey schema placement; internal interface requirements preserve module-only implementation authority, while private members are complete helpers. Constructor, field, property/indexer, operator/conversion and associated prefixes are specified. | File-limited visibility and explicit static initialization/lifetime contracts. |
+| Visibility and declaration prefixes | §3.1 defines fixed role-specific primary prefixes, strict source-unit file access, member-scoped same-module friend grants and restricted interface conformance authority. Source-unit identity disambiguates same-named file-local definitions; grants preserve effective access and partial-body provenance. | Complete file/friend metadata encoding and explicit static initialization/lifetime contracts. |
 | Nominal types | §3.1 gives ordered class/struct kind forms, static-class containers, interfaces, integral-base enums and explicit struct/class unions with qualified cases and independent closedness. Enum constants have checked successor overflow and deliberate aliases. | Nested declarations, selected integer catalogs, flags schemas and contextual attributes. |
 | Generic declarations | §§3.1–3.2 give bounded constant domains, checked opt-in primitive-wrapper constants, earlier-only defaults, `_` inference and explicit `default` selection. | Wrapper capability spelling/value encoding and complete inference contracts. |
 | Aliases | §§3.1 and 5.4 give finite qualified expansion, cycle rejection, namespace-level aliases and transparent public export. | Metadata encoding. |

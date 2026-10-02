@@ -206,7 +206,7 @@ arguments such as `(-1)` and compounds such as `(N >> 1)`. These syntax
 boundaries do not widen eligible constant domains or constrain ordinary
 default expressions.
 Designated keyword-introduced angle lists likewise attach their `<` to
-the introducer: `default<I>`, `.via<I>`, `policy<Domain.Case>` and
+the introducer: `default<I>`, `.via<I>`, `policy<Domain.Case>`, `friend<F>` and
 `ref<T>` (including `init ref<T>` and `implicit ref<T>`). Their interiors
 retain ordinary trivia, but trivia before the opener rejects. Word
 boundaries between separate keywords are unchanged.
