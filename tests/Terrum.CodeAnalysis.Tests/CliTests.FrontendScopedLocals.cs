@@ -112,8 +112,10 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { const bool value = true && !false; if (value) { return 42; } return 0; }", 42, 64)]
     [InlineData("int32 Main() { const bool value = true == false; if (!value) { return 42; } return 0; }", 42, 64)]
     [InlineData("int32 Main() { const int32 value = 40 + 2; return value; }", 42, 64)]
+    [InlineData("int32 Main() { const int32 value = int32(uint64(42)); return value; }", 42, 64)]
     [InlineData("int32 Main() { const int32 value = -42 + 84; return value; }", 42, 64)]
     [InlineData("int32 Main() { const int32 first = 40 + 2; const int32 value = first + 1; return value; }", 43, 64)]
+    [InlineData("int32 Main() { { const int32 value = 40 + 2; return value; } return 0; }", 42, 64)]
     public async Task ScopedLocalProjectionMatchesHostedExecutionAsync(string source, int expected,
         int projectionVersion)
     {
