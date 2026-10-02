@@ -411,8 +411,9 @@ declaration under that bound.
 V74 admits only scalar-returning callees, including when the caller returns
 void. It does not add non-self void calls, namespaces/imports, members,
 templates, external bindings, callable values, overload/conversion search,
-named/default/params arguments, reference/output parameters or
-`[DoesNotReturn]` support in v74/v75 multi-function snapshots. Hosted verification and
+named/default/params arguments or reference parameters. V74–v76 exclude output
+parameters, and v74/v75 exclude `[DoesNotReturn]` support in multi-function
+snapshots. Hosted verification and
 emission remain authoritative for execution under both runtime policies;
 source-free TRRM checked exceptions and bootstrap gates are unchanged.
 
@@ -430,6 +431,14 @@ the contract's normal-completion effect. V76 is selected only when a declaration
 uses the contract; ordinary void calls still require statement roots. This
 does not imply `[NoThrow]`, change v74/v75 payloads or add source-free TRRM
 checked-exception support.
+
+Program projection v77 carries existing scalar `out` parameter modes through
+complete declarations and direct operation-105 calls. Explicit destinations
+and `out var` are accepted only for matching `bool`-returning scalar `out`
+parameters; the independent reader audits the target mode and source argument,
+then the hosted verifier retains definite-publication authority. V74–v76
+continue to reject output parameters in multi-function snapshots. This does
+not add `init ref<T>`, reference arguments or source-free TRRM support.
 
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.

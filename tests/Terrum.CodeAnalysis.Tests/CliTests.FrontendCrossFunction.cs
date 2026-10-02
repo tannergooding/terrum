@@ -67,6 +67,36 @@ public sealed partial class CliTests
     }
 
     [Fact]
+    public async Task ScalarFrontendCrossFunctionOutputArgumentsCliUsesProjection77Async()
+    {
+        const string text = "public int32 Main() { if (Set(40, out var value, out var extra)) { return value + extra; } return 0; } bool Set(int32 seed, out int32 value, out int32 extra) { value = seed + 1; extra = 1; return true; }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var input = Encoding.UTF8.GetBytes(text);
+        foreach (var runtime in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(input, "frontend-component",
+                directory, "-", "--runtime", runtime, "--json");
+            Assert.True(exit == 0, $"{exit}: {output}{error}");
+            using (var document = JsonDocument.Parse(output))
+            {
+                var result = document.RootElement.GetProperty("result");
+                Assert.Equal(77, result.GetProperty("projectionVersion").GetInt32());
+                var main = result.GetProperty("functions")[0];
+                Assert.Equal(0, main.GetProperty("outParameterMask").GetInt32());
+                Assert.Equal(6, result.GetProperty("functions")[1]
+                    .GetProperty("outParameterMask").GetInt32());
+                Assert.Contains(main.GetProperty("nodes").EnumerateArray(),
+                    static node => node.GetProperty("operation").GetInt32() == 104);
+            }
+            var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
+                directory, "-", "--runtime", runtime, "--json");
+            Assert.Equal(42, runExit);
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+        }
+    }
+
+    [Fact]
     public async Task ScalarFrontendCrossFunctionCliSelectsEntryAndExportsInDeclarationOrderAsync()
     {
         const string text = "public int32 Next(int32 value) => value + 1; public int32 Main() => Next(41);";

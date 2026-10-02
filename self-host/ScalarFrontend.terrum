@@ -2887,14 +2887,20 @@ mut class ScalarFrontendState
             mut int32 expectedType = _firstType;
             if (ordinal == 1) { expectedType = _secondType; }
             if (ordinal == 2) { expectedType = _thirdType; }
+            mut bool isOutArgument = false;
             if (program)
             {
                 int32 header = 4 + callee * 428 + 4;
                 int32 field = ordinal == 0 ? 7 : (ordinal == 1 ? 8 : 34);
                 expectedType = Host.FrontendProgram[header + field];
+                isOutArgument = (Host.FrontendProgram[header + 16] & (1 << ordinal)) != 0;
+            }
+            else
+            {
+                isOutArgument = IsOutParameter(ordinal + 1);
             }
             mut int32 argument = -1;
-            if (!program && IsOutParameter(ordinal + 1))
+            if (isOutArgument)
             {
                 if (!Take(15, out var outputKeyword)
                     || !_tokens.TryGet(_at, out var outputTarget))

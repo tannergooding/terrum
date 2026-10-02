@@ -180,13 +180,17 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         int32 header = 8 + index * 428;
         require SourceRange.TryCreate(Host.FrontendProgram[header + 9],
             Host.FrontendProgram[header + 10], out var name);
-        if (Host.FrontendProgram[header + 16] != 0
-            || (Host.FrontendProgram[header + 2] & 4) != 0
+        if ((Host.FrontendProgram[header + 2] & 4) != 0
                 && Host.FrontendProgram[header + 5] != 0)
         {
             return ScalarProgramError(1, name, out handled);
         }
-        if ((Host.FrontendProgram[header + 2] & 4) != 0)
+        if (Host.FrontendProgram[header + 16] != 0)
+        {
+            Host.FrontendProgram[0] = 77;
+        }
+        if ((Host.FrontendProgram[header + 2] & 4) != 0
+            && Host.FrontendProgram[0] < 76)
         {
             Host.FrontendProgram[0] = 76;
         }
@@ -242,7 +246,7 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         }
     }
     for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
-    Host.FrontendProgram[0] = Host.FrontendProgram[0] == 76 ? 76
+    Host.FrontendProgram[0] = Host.FrontendProgram[0] >= 76 ? Host.FrontendProgram[0]
         : ScalarProgramHasVoidCall() ? 75 : 74;
     Host.FrontendProgram[1] = 1;
     Host.FrontendProgram[3] = 0;

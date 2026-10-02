@@ -61,13 +61,13 @@ public static partial class ScalarFrontendHost
         }
         if (context is not null)
         {
-            if (words[0] != 74 || words[16] != 0
+            if (words[0] != 74 || (words[16] != 0 && !context.AllowOutputArguments)
                 || (words[2] & 4) != 0 && !context.AllowDoesNotReturn)
             {
                 throw InvalidResult();
             }
-            // Reuse the existing per-body grammar. v74 target identities are
-            // independently audited against the complete declaration inventory.
+            // Reuse the existing per-body grammar. v74-v77 target identities
+            // are independently audited against the complete declaration inventory.
             words[0] = 68;
         }
 
@@ -169,7 +169,8 @@ public static partial class ScalarFrontendHost
         ScalarFrontendResult ReadTree()
         {
             var voidArrow = words[0] == 57 || words[0] is 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71 or 72 or 73 && words[5] == 0 && words[41] == 1;
-            if ((words[0] < 69 ? !AllZero(16, 34)
+            if ((words[0] < 69 && context?.AllowOutputArguments != true
+                    ? !AllZero(16, 34)
                     : !AllZero(17, 34) || words[16] < 0
                         || (words[16] & ~((1 << count) - 1)) != 0)
                 || words[37] < (words[0] is >= 51 and <= 56 or 58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71 or 72 or 73 ? 0 : 1) || words[37] > 32
@@ -309,7 +310,8 @@ public static partial class ScalarFrontendHost
                         || (callCount >= 2 && (node.Right < 0 || node.Right >= i))
                         || (callCount < 3 && node.Low != -1)
                         || (callCount == 3 && (node.Low < 0 || node.Low >= i))))
-                    || (output && (words[0] < 70 || outputDeclaration && words[0] < 71
+                    || (output && ((words[0] < 70 && context?.AllowOutputArguments != true)
+                        || (outputDeclaration && words[0] < 71 && context?.AllowOutputArguments != true)
                         || node.Left < 1 || outputDeclaration && node.Left <= count
                         || node.Left > count + declaredLocals.Length
                         || node.Low != 0 || node.High != 0
@@ -349,9 +351,11 @@ public static partial class ScalarFrontendHost
                     for (var ordinal = 0; ordinal < callCount; ordinal++)
                     {
                         var argument = nodes[arguments[ordinal]];
+                        var expectsOutput = callee is not null
+                            ? (callee.OutParameterMask & (1 << ordinal)) != 0
+                            : (words[16] & (1 << ordinal)) != 0;
                         if (argument.Type != (callee?.ParameterTypes[ordinal] ?? ParameterType(ordinal + 1))
-                            || ((words[16] & (1 << ordinal)) != 0)
-                                != (argument.Operation is 103 or 104))
+                            || expectsOutput != (argument.Operation is 103 or 104))
                         {
                             throw InvalidResult();
                         }
@@ -595,10 +599,6 @@ public static partial class ScalarFrontendHost
                     throw InvalidResult();
                 }
                 TakeStatements(orderedStatements.Length, 0, -1);
-                if (activeLocals != declaredLocals.Length)
-                {
-                    throw InvalidResult();
-                }
                 if (words[15] != 0 && (!Take(TokenKind.IfKeyword)
                     || !Take(TokenKind.OpenParen) || !TakeTree(conditionRoot)
                     || !Take(TokenKind.CloseParen) || !Take(TokenKind.OpenBrace)))
@@ -622,6 +622,10 @@ public static partial class ScalarFrontendHost
                     {
                         throw InvalidResult();
                     }
+                }
+                if (activeLocals != declaredLocals.Length)
+                {
+                    throw InvalidResult();
                 }
                 if (!Take(TokenKind.CloseBrace))
                 {
@@ -1331,9 +1335,11 @@ public static partial class ScalarFrontendHost
                     }
                     for (var ordinal = 0; ordinal < callCount; ordinal++)
                     {
+                        var expectsOutput = node.Operation == 105 && context is not null
+                            ? (context.Callee(index).OutParameterMask & (1 << ordinal)) != 0
+                            : (words[16] & (1 << ordinal)) != 0;
                         if (ordinal != 0 && !Take(TokenKind.Comma)
-                            || ((words[16] & (1 << ordinal)) != 0)
-                                != (tree[arguments[ordinal]].Operation is 103 or 104)
+                            || expectsOutput != (tree[arguments[ordinal]].Operation is 103 or 104)
                             || !TakeTree(arguments[ordinal], parseDepth + 1))
                         {
                             return false;
@@ -1554,7 +1560,8 @@ public static partial class ScalarFrontendHost
                 {
                     return false;
                 }
-                var isOut = words[0] >= 69 && (words[16] & (1 << parameter)) != 0;
+                var isOut = (words[0] >= 69 || context?.AllowOutputArguments == true)
+                    && (words[16] & (1 << parameter)) != 0;
                 if (isOut != (tokens[at].Kind == TokenKind.OutKeyword))
                 {
                     return false;

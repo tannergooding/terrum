@@ -858,17 +858,20 @@ Projection v74 is a separate complete-source, multi-function shape. The
 Terrum-authored producer inventories declarations before parsing their bodies.
 Top-level global function names must be ordinal-unique after identifier
 normalization, even when signatures differ. Zero through three positional
-by-value parameters and scalar return values use the existing six scalar
-types. Forward, self and mutual calls are permitted; visible locals/parameters
-shadow function names. Void callers are supported, but v74 callees must return
-a scalar. Single-function projections, including v72/v73 output and void
-self-call statements, retain their existing shapes and behavior.
+scalar parameters and scalar return values use the existing six scalar types.
+V74–v76 use by-value parameters; v77 adds the existing `bool`-returning scalar
+`out` parameter modes and destinations. Forward, self and mutual calls are
+permitted; visible locals/parameters shadow function names. Void callers are
+supported, but v74 callees must return a scalar. Single-function projections,
+including v72/v73 output and void self-call statements, retain their existing
+shapes and behavior.
 
 The appended `Host.FrontendProgram` buffer at index 11 has 4,284 `int32`
 words. Its four-word header is `(version, 1, function count, 0)`, with version
-74, 75 or 76. Version 75 is selected only when a void-target call
+74, 75, 76 or 77. Version 75 is selected only when a void-target call
 uses the new statement position; version 76 is selected when any declaration
-uses `[DoesNotReturn]`. Ten source-order frames of 428 words follow:
+uses `[DoesNotReturn]`; version 77 is selected when any declaration has a
+scalar `out` parameter. Ten source-order frames of 428 words follow:
 
 | Frame words | Contents |
 |---|---|
@@ -900,7 +903,9 @@ Ten frames derive from `floor((64 - 1) / 6)`: even an empty void declaration
 needs six tokens. The existing 32-node, 12-statement and eight-local capacities
 apply to each function; no verifier/emitter budgets change. V74 excludes
 non-self void-call support, and v74/v75 exclude `[DoesNotReturn]` declarations.
-All versions exclude reference/output parameters, named/default/params
+V74–v76 exclude output parameters; v77 retains the existing scalar `out`
+parameter contract and adds those modes to multi-function call resolution.
+All versions exclude reference parameters, named/default/params
 arguments, overload/conversion search, namespaces/imports, templates/members,
 external bindings and callable values. This adds source frontend support, not
 source-free TRRM checked-exception Bodies or a bootstrap-gate claim.
@@ -928,6 +933,18 @@ still reject these declarations, and v76 without one is rejected.
 `[DoesNotReturn]` does not imply `[NoThrow]`; other call positions,
 output/reference parameters, general binding and source-free TRRM
 checked-exception Bodies remain outside this projection.
+
+Program projection v77 carries the existing scalar `out` parameter-mode mask
+through complete declarations and resolves each operation-105 argument against
+the target's parameter mode. It admits the existing explicit output
+destinations and `out var` declarations only for matching scalar `out`
+parameters; those functions retain the established `bool` return contract.
+The independent reader audits the declaration mode, argument position,
+destination type and source spelling, while the shared verifier checks
+definite publication and cleanup under both runtime policies. V74–v76 reject
+`out` declarations and output arguments. This does not add `init ref<T>`,
+reference arguments, output calls to external targets or new publication
+semantics; single-function v1–v73 layouts remain unchanged.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

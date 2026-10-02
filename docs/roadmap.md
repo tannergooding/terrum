@@ -31,9 +31,15 @@ Projection v75 additionally permits calls to void functions only as direct
 expression-statement roots. Projection v76 admits the existing void-only
 `[DoesNotReturn]` contract in complete snapshots and carries its verified
 continuation effect across those calls. Independent source auditing precedes
-the existing hosted verifier/emitter. General binding/imports, output/reference
-call migration and bootstrap compilation remain pending; this does not extend
-source-free TRRM checked exceptions.
+the existing hosted verifier/emitter. General binding/imports, broader
+output/reference-call migration beyond scalar `out` and `out var`, and
+bootstrap compilation remain pending; this does not extend source-free TRRM
+checked exceptions.
+
+Projection v77 extends complete snapshots with the existing scalar `out`
+parameter modes, explicit destinations and `out var` call destinations.
+Hosted definite-publication verification remains authoritative; general
+`init ref<T>` migration and bootstrap compilation remain pending.
 
 ## Planned work (priority order)
 

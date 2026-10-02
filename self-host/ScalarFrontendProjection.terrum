@@ -86,6 +86,8 @@ namespace Terrum.CodeAnalysis;
 // permitted only as roots of kind-37 expression statements.
 // Program version 76 admits void-only DoesNotReturn declarations and tracks
 // their target contracts when proving call-statement continuation.
+// Program version 77 carries existing scalar out-parameter modes through
+// complete declaration snapshots and direct operation-105 call arguments.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
