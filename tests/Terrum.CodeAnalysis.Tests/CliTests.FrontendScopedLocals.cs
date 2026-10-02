@@ -186,9 +186,12 @@ public sealed partial class CliTests
     }
 
     [Theory]
-    [InlineData("int32 Main() { unsafe { try { require false; } catch { return 42; } } return 0; }", 42)]
-    [InlineData("int32 Main() { mut int32 value = 0; unsafe { try { try { require false; } finally { value = 1; } } catch { return value + 41; } } return 0; }", 42)]
-    public async Task CheckedCatchProjectionMatchesHostedExecutionAsync(string source, int expected)
+    [InlineData("int32 Main() { unsafe { try { require false; } catch { return 42; } } return 0; }", 42, 66)]
+    [InlineData("int32 Main() { mut int32 value = 0; unsafe { try { try { require false; } finally { value = 1; } } catch { return value + 41; } } return 0; }", 42, 66)]
+    [InlineData("int32 Main() { mut int32 value = 0; unsafe { try { value = 1; } catch { value = 0; } finally { value = 42; } } return value; }", 42, 67)]
+    [InlineData("int32 Main() { mut int32 value = 0; unsafe { try { require false; } catch { value = 1; } finally { value = 42; } } return value; }", 42, 67)]
+    public async Task CheckedCatchProjectionMatchesHostedExecutionAsync(string source, int expected,
+        int projectionVersion)
     {
         var root = RepositoryRoot();
         var frontend = Path.Combine(root, "self-host");
@@ -201,7 +204,7 @@ public sealed partial class CliTests
                 "frontend-component", frontend, "-", "--runtime", "checked-exceptions", "--json");
             Assert.True(componentExit == 0, $"checked-exceptions: {componentExit}: {componentOutput}{componentError}");
             using var document = JsonDocument.Parse(componentOutput);
-            Assert.Equal(66, document.RootElement.GetProperty("result")
+            Assert.Equal(projectionVersion, document.RootElement.GetProperty("result")
                 .GetProperty("projectionVersion").GetInt32());
 
             var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,

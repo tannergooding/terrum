@@ -133,7 +133,7 @@ The current scanner is version 8/schema 8; it appends diagnostic kinds 11/12
 for invalid/unsupported maximal punctuation runs to the prior diagnostic
 catalog. Earlier raw records remain readable where compatible, while current
 snapshot adapters reject forged framing, invalid escapes and conflicting
-classification. The bounded scalar frontend's projections through v66 share a
+classification. The bounded scalar frontend's projections through v67 share a
 392-word buffer and enforce the documented limits: 16,384 UTF-16 source units, 64 tokens,
 eight total local identities including hidden discards, 12 statement records,
 32 expression nodes, three parameters, 16 expression-recursion levels, six
@@ -792,6 +792,13 @@ unsafe and handler extents, then lowers to `BoundUnsafe` and `BoundTryCatch`;
 the selected runtime policy is used during shared verification. This adds no
 native ABI or source-free format and still depends on the hosted verifier and
 emitter.
+
+Projection v67 adds kind 34 for the optional NoThrow `finally` body attached to
+a supported bare catch region. The source-bound reader validates its separate
+extent before setting `BoundTryCatch.Finally`; the hosted verifier retains
+responsibility for failure-edge and cleanup rules. Typed catches and filters
+remain unsupported, and recovery still requires explicit `unsafe` plus the
+checked-exceptions policy.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

@@ -356,6 +356,12 @@ audits both extents and lowers to the hosted `BoundUnsafe`/`BoundTryCatch`
 verifier and emitter path. This remains a bounded projection, not a standalone
 compiler or a native ABI/schema change.
 
+Projection v67 adds kind 34 for an optional NoThrow `finally` after a supported
+bare catch. The reader audits its separate extent, while shared verification
+checks failure edges and cleanup under the checked-exceptions policy. Typed
+catches and filters remain outside the bounded frontend; no native ABI or
+schema changes.
+
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer

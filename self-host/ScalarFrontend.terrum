@@ -2421,6 +2421,25 @@ mut class ScalarFrontendState
                 return false;
             }
             FinishTreeBody(marker, enclosingLocals, endCatch.Range.End);
+            if (_tokens.TryGet(_at, out var followingCleanup) && followingCleanup.Kind == 44)
+            {
+                if (_statementCount >= 12
+                    || !Take(44, out var finallyKeyword)
+                    || !Take(48, out var openCleanup))
+                {
+                    return false;
+                }
+                int32 cleanup = _statementCount;
+                if (!AddTreeStatement(34, 0, -1, finallyKeyword.Range.Start, openCleanup.Range.End)
+                    || !ParseTreeStructuredBody(depth + 1, nearestLoop)
+                    || !Take(49, out var endCleanup))
+                {
+                    return false;
+                }
+                FinishTreeBody(cleanup, enclosingLocals, endCleanup.Range.End);
+                Host.Frontend[332 + header * 5 + 4] = endCleanup.Range.End - keyword.Range.Start;
+                return true;
+            }
             Host.Frontend[332 + header * 5 + 4] = endCatch.Range.End - keyword.Range.Start;
             return true;
         }
