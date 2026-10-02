@@ -458,7 +458,10 @@ internal static partial class Program
                         {
                             projectionVersion = frontend.ReturnType == 0 ? 73 : 72;
                         }
-                        writer.WriteNumber("projectionVersion", frontend.Functions.IsDefault ? projectionVersion : 74);
+                        var programProjectionVersion = frontend.Functions.IsDefault ? projectionVersion
+                            : frontend.Functions.Any(static function => function.Nodes.Any(
+                                static node => node.Operation == 105 && node.Type == 0)) ? 75 : 74;
+                        writer.WriteNumber("projectionVersion", programProjectionVersion);
                         writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);
                         writer.WriteNumber("conditionRoot", frontend.ConditionRoot);
                         writer.WriteNumber("trueRoot", frontend.TrueRoot);

@@ -416,6 +416,13 @@ named/default/params arguments, reference/output parameters or
 emission remain authoritative for execution under both runtime policies;
 source-free TRRM checked exceptions and bootstrap gates are unchanged.
 
+Program projection v75 keeps the v74 framing and target table, selecting
+version 75 only when an operation-105 target returns void. Void calls are
+allowed only as direct kind-37 expression-statement roots, including supported
+`for` clauses; they are still rejected in value contexts. The reader checks
+the callee return type and statement-root ownership before lowering. Version
+74 and single-function v1–v73 behavior remain unchanged.
+
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer

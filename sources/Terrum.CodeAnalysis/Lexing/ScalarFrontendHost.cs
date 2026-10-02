@@ -289,7 +289,8 @@ public static partial class ScalarFrontendHost
                 var outputDeclaration = node.Operation == 104;
                 var leaf = node.Operation is 0 or 3 or 20 or 21 || output;
                 if ((!ScalarType(node.Type)
-                        && !(words[0] == 73 && words[5] == 0 && call && node.Type == 0))
+                        && !(words[0] == 73 && words[5] == 0 && call && node.Type == 0)
+                        && !(context?.AllowVoidCalls == true && node.Operation == 105 && node.Type == 0))
                     || !ValidSpan(node.Span, nonempty: true)
                     || (!leaf && !unary && !call && node.Operation is not (>= 57 and <= 61
                         or >= 65 and <= 75 or 84 or >= 88 and <= 101))
@@ -297,6 +298,9 @@ public static partial class ScalarFrontendHost
                     || (node.Operation == 102 && context is not null)
                     || (call && (context is null && words[0] < 70
                         || node.Type != (callee?.ReturnType ?? words[5])
+                        || callee is { ReturnType: 0 }
+                            && (context?.AllowVoidCalls != true
+                                || !orderedStatements.Any(entry => entry.Kind == 37 && entry.Root == i))
                         || node.High != callCount
                         || (callCount == 0 && (node.Left != -1 || node.Right != -1 || node.Low != -1))
                         || (callCount > 0 && (node.Left < 0 || node.Left >= i))

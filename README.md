@@ -21,9 +21,10 @@ implemented.
 
 The bounded [Terrum-authored scalar source frontend](self-host/README.md)
 projects one snapshot of global functions with unique names and direct scalar
-calls, including forward calls and recursion. Its v74 multi-function reader
-audits source-order target identities before using the hosted verifier/emitter.
-This is separate from source-free TRRM support and is not a bootstrap compiler.
+calls, including forward calls and recursion. Its v74/v75 multi-function
+reader audits source-order target identities, with v75 adding void calls as
+statement roots, before using the hosted verifier/emitter. This is separate
+from source-free TRRM support and is not a bootstrap compiler.
 
 The [grammar](docs/grammar-spec.md) and design documents specify target
 contracts independently of compiler support. Places default to readonly,

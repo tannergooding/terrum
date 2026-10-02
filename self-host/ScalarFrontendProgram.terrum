@@ -16,6 +16,28 @@ int32 FindScalarProgramFunction(Token name)
     return -1;
 }
 
+bool ScalarProgramHasVoidCall()
+{
+    for (mut int32 index = 0; index < Host.FrontendProgram[2]; index = index + 1)
+    {
+        int32 frame = 4 + index * 428;
+        int32 nodeCount = Host.FrontendProgram[frame + 4 + 37];
+        for (mut int32 node = 0; node < nodeCount; node = node + 1)
+        {
+            int32 nodeOffset = frame + 4 + 42 + node * 8;
+            if (Host.FrontendProgram[nodeOffset] == 105)
+            {
+                int32 target = Host.FrontendProgram[frame + 396 + node];
+                if (Host.FrontendProgram[8 + target * 428 + 5] == 0)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 bool ScalarProgramError(int32 code, SourceRange span, out bool handled)
 {
     for (mut int32 index = 0; index < Host.FrontendProgram.Length; index = index + 1)
@@ -144,7 +166,7 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         }
         return true;
     }
-    Host.FrontendProgram[0] = 74;
+    Host.FrontendProgram[0] = 75;
     Host.FrontendProgram[2] = functions;
     for (mut int32 index = 0; index < functions; index = index + 1)
     {
@@ -215,6 +237,7 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         }
     }
     for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
+    Host.FrontendProgram[0] = ScalarProgramHasVoidCall() ? 75 : 74;
     Host.FrontendProgram[1] = 1;
     Host.FrontendProgram[3] = 0;
     handled = true;

@@ -248,7 +248,7 @@ mut class ScalarFrontendState
     private mut bool TryReadMagnitude(Token token, int32 tokenIndex, int32 type,
         bool negative, SourceRange errorSpan, out int32 low, out int32 high)
     {
-        int32 lookupIndex = tokenIndex + (Host.FrontendProgram[0] == 74
+        int32 lookupIndex = tokenIndex + (Host.FrontendProgram[0] >= 74
             ? Host.FrontendProgram[4 + Host.FrontendProgram[3] * 428] : 0);
         mut int32 first = 0;
         mut int32 end = Host.IntegerValues[0];
@@ -2828,7 +2828,7 @@ mut class ScalarFrontendState
 
     private mut bool ParseTreeSelfCall(Token functionName, int32 depth, out int32 node)
     {
-        bool program = Host.FrontendProgram[0] == 74;
+        bool program = Host.FrontendProgram[0] >= 74;
         mut int32 callee = -1;
         mut int32 argumentCount = _parameterCount;
         mut int32 returnType = _functionReturnType;
@@ -2839,7 +2839,11 @@ mut class ScalarFrontendState
             int32 header = 4 + callee * 428 + 4;
             argumentCount = Host.FrontendProgram[header + 6];
             returnType = Host.FrontendProgram[header + 5];
-            if (returnType == 0) { FailAt(1, functionName.Range); return false; }
+            if (returnType == 0 && Host.FrontendProgram[0] != 75)
+            {
+                FailAt(1, functionName.Range);
+                return false;
+            }
         }
         if ((!program && !SameTokenSpelling(_function, functionName))
             || IsParameterName(functionName))
@@ -3026,7 +3030,7 @@ mut class ScalarFrontendState
                 FailAt(1, opening.Range);
                 return false;
             }
-            if (Host.FrontendProgram[0] == 74 && FindScalarProgramFunction(token) >= 0)
+            if (Host.FrontendProgram[0] >= 74 && FindScalarProgramFunction(token) >= 0)
             {
                 return ParseTreeSelfCall(token, depth, out node);
             }

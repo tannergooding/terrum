@@ -17,6 +17,31 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed partial class CliTests
 {
     [Fact]
+    public async Task ScalarFrontendCrossFunctionVoidStatementCliUsesProjection75Async()
+    {
+        const string text = "public int32 Main() { Step(); return 42; } void Step() { }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var input = Encoding.UTF8.GetBytes(text);
+        var (exit, output, error) = await RunAsync(input, "frontend-component",
+            directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.True(exit == 0, $"{exit}: {output}{error}");
+        using (var document = JsonDocument.Parse(output))
+        {
+            var result = document.RootElement.GetProperty("result");
+            Assert.Equal(75, result.GetProperty("projectionVersion").GetInt32());
+            var main = result.GetProperty("functions")[0];
+            Assert.Contains(main.GetProperty("nodes").EnumerateArray(),
+                static node => node.GetProperty("operation").GetInt32() == 105
+                    && node.GetProperty("type").GetInt32() == 0);
+        }
+        var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
+            directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(42, runExit);
+        Assert.Empty(runOutput);
+        Assert.Empty(runError);
+    }
+
+    [Fact]
     public async Task ScalarFrontendCrossFunctionCliSelectsEntryAndExportsInDeclarationOrderAsync()
     {
         const string text = "public int32 Next(int32 value) => value + 1; public int32 Main() => Next(41);";

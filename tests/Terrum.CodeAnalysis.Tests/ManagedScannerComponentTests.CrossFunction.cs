@@ -25,6 +25,12 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("public int32 Main() => First(3); int32 First(int32 n) => n == 0 ? 42 : Second(n - 1); int32 Second(int32 n) => First(n);", 42)]
     [InlineData("public int32 Main() { Next(); return 42; } int32 Next() => 7;", 42)]
     [InlineData("public void Main() { Next(); } int32 Next() => 42;", 0)]
+    [InlineData("public int32 Main() { Next(); return 42; } void Next() { return; }", 42)]
+    [InlineData("public void Main() { Next(); } void Next() { }", 0)]
+    [InlineData("public int32 Main() { mut int32 n = 0; Sink(n++); return n; } void Sink(int32 value) { }", 1)]
+    [InlineData("public int32 Main() { mut int32 n = 0; Sink(n++, n++, n++); return n; } void Sink(int32 a, int32 b, int32 c) { }", 3)]
+    [InlineData("public int32 Main() { for (Sink(1); false; Sink(2)) { } return 42; } void Sink(int32 value) { }", 42)]
+    [InlineData("[NoThrow] public void Main() { Step(); } [NoThrow] void Step() { }", 0)]
     [InlineData("public int32 Main() => Next(42); [NoThrow] int32 Next(int32 value) => value;", 42)]
     [InlineData("public int32 Main() { int32 result = Next(41); return result; } int32 Next(int32 value) { return value + 1; }", 42)]
     [InlineData("public int32 Main() { { int32 Next = 1; } return Next(); } int32 Next() => 42;", 42)]
@@ -98,7 +104,7 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("int32 Main() { int32 Next = 1; return Next(); } int32 Next() => 42;")]
     [InlineData("int32 Main(int32 Next) => Next(); int32 Next() => 42;")]
     [InlineData("int32 Main() => Missing(); int32 Next() => 42;")]
-    [InlineData("int32 Main() { Next(); return 42; } void Next() { return; }")]
+    [InlineData("int32 Main() => Next(); void Next() { return; }")]
     [InlineData("int32 Main() => Next(1); int32 Next(out int32 value) => 42;")]
     [InlineData("int32 Main(uint32 value) => Next(value); int32 Next(int32 value) => value;")]
     [InlineData("int32 Main() => 42; [DoesNotReturn] void Halt() { for (;;) { } }")]
@@ -122,6 +128,31 @@ public sealed partial class ManagedScannerComponentTests
         var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text),
             bytes, programBytes, BoundRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public async Task ScalarFrontendCrossFunctionVoidCallsRequireV75AndStatementRootsAsync()
+    {
+        const string text = "int32 Main() { Step(); return 42; } void Step() { }";
+        var source = SourceText.From(text);
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
+        var projection = ScalarFrontendHost.ReadResult(source, bytes, programBytes, BoundRuntimePolicy.FailFast);
+        var call = Assert.Single(projection.Functions[0].Nodes,
+            static node => node.Operation == 105 && node.Type == 0);
+        var callIndex = projection.Functions[0].Nodes.IndexOf(call);
+        const int frameWord = 4;
+        var nodeTypeOffset = (frameWord + 4 + 42 + callIndex * 8 + 1) * sizeof(int);
+        var statementRootOffset = (frameWord + 4 + 332 + 2) * sizeof(int);
+        foreach (var (offset, value) in new[] {
+            (0, 74), (nodeTypeOffset, 1), (statementRootOffset, -1),
+        })
+        {
+            var previous = BinaryPrimitives.ReadInt32LittleEndian(programBytes.AsSpan(offset));
+            BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(offset), value);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes,
+                programBytes, BoundRuntimePolicy.FailFast));
+            BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(offset), previous);
+        }
     }
 
     [Fact]

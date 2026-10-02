@@ -865,8 +865,9 @@ a scalar. Single-function projections, including v72/v73 output and void
 self-call statements, retain their existing shapes and behavior.
 
 The appended `Host.FrontendProgram` buffer at index 11 has 4,284 `int32`
-words. Its four-word header is `(74, 1, function count, 0)`. Ten source-order
-frames of 428 words follow:
+words. Its four-word header is `(74 or 75, 1, function count, 0)`. Version 75
+is selected only when a void-target call uses the new statement position. Ten
+source-order frames of 428 words follow:
 
 | Frame words | Contents |
 |---|---|
@@ -902,6 +903,15 @@ overload/conversion search, namespaces/imports, templates/members, external
 bindings, callable values, non-self void-call support and `[DoesNotReturn]`
 extension. This adds source frontend support, not source-free TRRM
 checked-exception Bodies or a bootstrap-gate claim.
+
+Program projection v75 retains the same framing and scalar-call target table,
+and selects header version 75 only when an operation-105 call targets a void
+function. Such a call is admitted only as the direct root of a kind-37
+expression statement, including supported `for` clauses; void calls remain
+invalid as values, arguments or nested expressions. The independent reader
+checks the target return type and statement-root ownership before lowering.
+Version 74 continues to admit scalar-returning callees only, and single-body
+v1–v73 shapes are unchanged.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

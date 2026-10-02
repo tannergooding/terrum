@@ -22,12 +22,13 @@ public static partial class ScalarFrontendHost
     private sealed record ProgramDeclaration(string Name, int ReturnType,
         ImmutableArray<int> ParameterTypes, int TokenStart, int TokenEnd, TextSpan Span, TextSpan BodySpan);
 
-    private sealed record ProgramReadContext(ImmutableArray<ProgramDeclaration> Declarations, int[] Targets)
+    private sealed record ProgramReadContext(ImmutableArray<ProgramDeclaration> Declarations, int[] Targets,
+        bool AllowVoidCalls)
     {
         public ProgramDeclaration Callee(int node)
         {
             var target = Targets[node];
-            if ((uint)target >= (uint)Declarations.Length || Declarations[target].ReturnType == 0)
+            if ((uint)target >= (uint)Declarations.Length)
             {
                 throw InvalidResult();
             }
@@ -35,12 +36,12 @@ public static partial class ScalarFrontendHost
         }
     }
 
-    /// <summary>Reads a complete v74 declaration snapshot, or an unchanged v1–v73 result.</summary>
+    /// <summary>Reads a complete v74/v75 declaration snapshot, or an unchanged v1–v73 result.</summary>
     public static ScalarFrontendResult ReadResult(SourceText source, ReadOnlySpan<byte> bytes,
         ReadOnlySpan<byte> programBytes, BoundRuntimePolicy policy)
         => ReadProgram(source, bytes, programBytes, policy).Projection;
 
-    /// <summary>Reads and verifies a projection, retaining the bound v74 program for its consumer.</summary>
+    /// <summary>Reads and verifies a projection, retaining the bound multi-function program for its consumer.</summary>
     public static ScalarFrontendReadResult ReadProgram(SourceText source, ReadOnlySpan<byte> bytes,
         ReadOnlySpan<byte> programBytes, BoundRuntimePolicy policy)
     {
@@ -62,7 +63,7 @@ public static partial class ScalarFrontendHost
         {
             words[i] = BinaryPrimitives.ReadInt32LittleEndian(programBytes.Slice(i * sizeof(int), sizeof(int)));
         }
-        if (words[0] != 74 || words[1] != 1 || words[2] is < 2 or > MaximumFunctions
+        if (words[0] is not (74 or 75) || words[1] != 1 || words[2] is < 2 or > MaximumFunctions
             || words[3] != 0 || source.Length > 16_384
             || words.AsSpan(4 + words[2] * ProgramFrameWordCount).IndexOfAnyExcept(0) >= 0)
         {
@@ -100,7 +101,7 @@ public static partial class ScalarFrontendHost
                     throw InvalidResult();
                 }
             }
-            var context = new ProgramReadContext(declarations, targets);
+            var context = new ProgramReadContext(declarations, targets, words[0] == 75);
             var function = ReadResultCore(FunctionSource(source, declaration.Span), payload, policy, context);
             if (!function.IsValid || function.ReturnType != declaration.ReturnType
                 || function.ParameterCount != declaration.ParameterTypes.Length
@@ -111,6 +112,18 @@ public static partial class ScalarFrontendHost
             functions.Add(function);
         }
         var results = functions.MoveToImmutable();
+        var hasVoidCall = false;
+        foreach (var function in results)
+        {
+            foreach (var node in function.Nodes)
+            {
+                hasVoidCall |= node.Operation == 105 && node.Type == 0;
+            }
+        }
+        if ((words[0] == 75) != hasVoidCall)
+        {
+            throw InvalidResult();
+        }
         var program = BindProgramCore(source, results, declarations, policy);
         return new ScalarFrontendReadResult(results[0] with { Functions = results }, program);
     }

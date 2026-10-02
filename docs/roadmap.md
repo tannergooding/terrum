@@ -24,13 +24,14 @@ The source-free TRRM scalar path remains fail-fast; checked-exception Bodies
 and richer contracts are not implemented. See
 [implementation](implementation.md) for the current support boundary.
 
-The bounded Terrum-authored scalar source frontend now supports v74 complete
+The bounded Terrum-authored scalar source frontend supports v74 complete
 global-function snapshots and source-order scalar call targets, including
 forward and recursive calls with up to three by-value scalar arguments.
-Independent source auditing precedes the existing hosted verifier/emitter.
-Its source/token/body bounds and v1–v73 compatibility are unchanged. General
-binding/imports, output/reference call migration and bootstrap compilation
-remain pending; this does not extend source-free TRRM checked exceptions.
+Projection v75 additionally permits calls to void functions only as direct
+expression-statement roots. Independent source auditing precedes the existing
+hosted verifier/emitter. General binding/imports, output/reference call
+migration and bootstrap compilation remain pending; this does not extend
+source-free TRRM checked exceptions.
 
 ## Planned work (priority order)
 
@@ -145,6 +146,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `3e7fcf8` | Native scalar multi-function snapshots and source-order scalar call targets, projection 74 |
 | `296658a` | Native scalar void direct self-call expression statements, projection 73 |
 | `324c2d4` | Native scalar direct self-call expression statements, projection 72 |
 | `7346396` | Native scalar direct self-calls with inferred `out var` destinations, projection 71 |

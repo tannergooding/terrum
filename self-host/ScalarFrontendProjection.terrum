@@ -82,6 +82,8 @@ namespace Terrum.CodeAnalysis;
 // Version 73 permits void self-call nodes in kind-37 expression statements.
 // Version 74 uses the separate FrontendProgram framing and operation-105
 // target table defined in ScalarFrontendProgram; the legacy buffer is zero.
+// Program version 75 uses the same framing for void-target operation-105 nodes,
+// permitted only as roots of kind-37 expression statements.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
