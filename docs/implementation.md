@@ -767,7 +767,7 @@ constant expressions, inferred const locals and `for`-initializer const
 declarations remain outside this bounded subset. The projection adds no native
 ABI, source-free TRRM or semantic-module format.
 
-Projection v64 adds kind 28 for typed numeric `const` initializers whose
+Projection v64 adds kind 28 for typed scalar `const` initializers whose
 expression tree the shared scalar folder reduces to a `BoundConstant`. Direct
 literals remain projection v63 kind 27; folded initializers may use earlier
 constant locals. Runtime-dependent or unsupported expression forms, inferred

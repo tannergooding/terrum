@@ -210,7 +210,7 @@ explicit typed `init T` locals, and v62 adds `init var` locals whose scalar
 type is established by the first assignment's already-typed expression.
 Untyped numeric literals do not infer a vacant local; unresolved inference and
 incompatible later assignments reject. Projection v63 adds literal-initialized
-scalar `const` locals. Projection v64 adds foldable typed numeric constant
+scalar `const` locals. Projection v64 adds foldable typed scalar constant
 expressions, including references to earlier const locals; runtime-dependent or
 unsupported expressions and inferred const declarations remain excluded.
 The host buffer has 392 words: the original 37-word header,
@@ -426,7 +426,7 @@ initializers. Projection v62 adds `init var` for scalar locals when the first
 assignment expression already has a scalar type; untyped numeric literals and
 unresolved inference remain unsupported. Projection v63 adds block-local
 `const T name = literal;` declarations for direct scalar literals; v64 adds
-foldable typed numeric expression initializers and references to earlier const
+foldable typed scalar expression initializers and references to earlier const
 locals. Unsupported expressions, inferred const declarations and const
 declarations in `for` initializers remain unsupported.
 
