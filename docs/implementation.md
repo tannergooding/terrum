@@ -133,7 +133,7 @@ The current scanner is version 8/schema 8; it appends diagnostic kinds 11/12
 for invalid/unsupported maximal punctuation runs to the prior diagnostic
 catalog. Earlier raw records remain readable where compatible, while current
 snapshot adapters reject forged framing, invalid escapes and conflicting
-classification. The bounded scalar frontend's projections through v60 share a
+classification. The bounded scalar frontend's projections through v61 share a
 392-word buffer and enforce the documented limits: 16,384 UTF-16 source units, 64 tokens,
 eight total local identities including hidden discards, 12 statement records,
 32 expression nodes, three parameters, 16 expression-recursion levels, six
@@ -223,11 +223,12 @@ local-only destinations, definite liveness and initialization authority are
 reverified on import and before native PE/JIT lowering under both policies.
 Older headers cannot encode this operation and a v47 header without an end
 node is rejected. This changes no scanner record, native ABI/profile or TRRM
-encoding. Source-free executable TRRM and the compiled scalar frontend reject
-this statement. Enums, general references/pins, arbitrary guards/ARC and view
+encoding. Source-free executable TRRM still rejects this statement; the
+bounded scalar frontend represents visible scalar local endings in projection
+v60. Enums, general references/pins, arbitrary guards/ARC and view
 rebinding remain outside the existing bounded compiler. The bounded constant
 evaluator also rejects lifetime-end statements. Nullable inferred `var?`
-syntax and native scalar frontend initialization remain unimplemented.
+syntax and inferred `init var` remain outside the native scalar frontend.
 
 The parser and binder support right-associative `condition ? whenTrue : whenFalse` expressions
 below binary-operator precedence. The Boolean condition runs once; only its
@@ -738,8 +739,18 @@ targets. The hosted semantic verifier remains responsible for definite
 liveness and existing cleanup and reinitialization authority; ending a mutable
 local does not grant immutable locals new assignment authority. The projection
 reuses `BoundLifetimeEnd`, the shared verified emitter and both runtime
-policies. It adds no vacant-local syntax, native ABI/profile or persisted
-semantic format.
+policies. This v60 operation adds no vacant-local declaration, native
+ABI/profile or persisted semantic format.
+
+Provisional projection v61 adds explicit `init T name;` declarations for the
+six scalar types. Kind 25 declares a vacant local with root `-1`; local flag
+`0x2` records initialization authority. Existing assignment records initialize
+only a definitely vacant declared local, and the shared hosted verifier
+enforces publication, definite assignment and reinitialization after lifetime
+ending. The source audit binds the exact type and name, including a scoped
+`for` initializer. Inferred `init var`, nullable locals and other vacant
+storage remain outside this bounded frontend; v61 does not change native ABI,
+source-free TRRM or semantic-module formats.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

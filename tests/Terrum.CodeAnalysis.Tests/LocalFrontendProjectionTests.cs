@@ -71,6 +71,33 @@ public sealed class LocalFrontendProjectionTests
         }
     }
 
+    [Fact]
+    public void ReadResultAuditsTypedVacantLocalInitializationAuthority()
+    {
+        const string text = "public int32 Value(int32 x) { init int32 y; y = x; return y; }";
+        var words = InitializationProjection(text);
+        var source = SourceText.From(text);
+        var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
+        Assert.True(result.IsValid);
+        Assert.True(Assert.Single(result.Locals).IsInitialization);
+
+        Reject(0, 60);
+        Reject(301, 0);
+        Reject(301, 3);
+        Reject(334, 0);
+        var altered = text.Replace("init int32 y", "init int32 z", StringComparison.Ordinal);
+        Assert.Throws<ArgumentException>(() =>
+            ScalarFrontendHost.ReadResult(SourceText.From(altered), Bytes(words)));
+
+        void Reject(int index, int value)
+        {
+            var old = words[index];
+            words[index] = value;
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            words[index] = old;
+        }
+    }
+
     private static int[] Projection(string text, bool assignment)
     {
         var words = new int[ScalarFrontendHost.WordCount];
@@ -116,6 +143,63 @@ public sealed class LocalFrontendProjectionTests
         {
             Node(1, text.LastIndexOf("y;", StringComparison.Ordinal), 2);
         }
+        return words;
+
+        void Node(int index, int start, int slot)
+        {
+            var offset = 42 + index * 8;
+            words[offset] = 0;
+            words[offset + 1] = 1;
+            words[offset + 2] = start;
+            words[offset + 3] = 1;
+            words[offset + 4] = slot;
+            words[offset + 5] = -1;
+        }
+    }
+
+    private static int[] InitializationProjection(string text)
+    {
+        var words = new int[ScalarFrontendHost.WordCount];
+        words[0] = 61;
+        words[1] = 1;
+        words[2] = 1;
+        words[5] = 1;
+        words[6] = 1;
+        words[7] = 1;
+        words[9] = text.IndexOf("Value", StringComparison.Ordinal);
+        words[10] = 5;
+        words[11] = text.IndexOf("x)", StringComparison.Ordinal);
+        words[12] = 1;
+        words[37] = 2;
+        words[38] = -1;
+        words[39] = -1;
+        words[40] = -1;
+        words[300] = 1;
+        words[301] = 2;
+        words[302] = text.IndexOf("y;", StringComparison.Ordinal);
+        words[303] = 1;
+        words[298] = 3;
+        words[299] = 1;
+        var vacantStart = text.IndexOf("init int32 y;", StringComparison.Ordinal);
+        words[332] = 25;
+        words[333] = 2;
+        words[334] = -1;
+        words[335] = vacantStart;
+        words[336] = "init int32 y;".Length;
+        var assignmentStart = text.IndexOf("y = x;", StringComparison.Ordinal);
+        words[337] = 2;
+        words[338] = 2;
+        words[339] = 0;
+        words[340] = assignmentStart;
+        words[341] = "y = x;".Length;
+        var returnStart = text.IndexOf("return y;", StringComparison.Ordinal);
+        words[342] = 8;
+        words[343] = 0;
+        words[344] = 1;
+        words[345] = returnStart;
+        words[346] = "return y;".Length;
+        Node(0, text.IndexOf("x;", assignmentStart, StringComparison.Ordinal), 1);
+        Node(1, text.LastIndexOf("y;", StringComparison.Ordinal), 2);
         return words;
 
         void Node(int index, int start, int slot)

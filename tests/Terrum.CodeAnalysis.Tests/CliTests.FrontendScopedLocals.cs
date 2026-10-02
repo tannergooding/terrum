@@ -77,13 +77,23 @@ public sealed partial class CliTests
     }
 
     [Theory]
-    [InlineData("int32 Main() { int32 value = 1; value = _; return 42; }", 42)]
-    [InlineData("int32 Main() { mut int32 value = 1; value = _; value = 42; return value; }", 42)]
-    [InlineData("int32 Main() { if (true) { int32 value = 1; value = _; } return 42; }", 42)]
-    [InlineData("[NoThrow] int32 Main() { int32 value = 1; value = _; return 42; }", 42)]
-    [InlineData("int32 Main() { for (int32 value = 1; false; value = _) { } return 42; }", 42)]
-    [InlineData("void Main() { int32 value = 1; value = _; }", 0)]
-    public async Task LifetimeEndProjectionMatchesHostedExecutionAsync(string source, int expected)
+    [InlineData("int32 Main() { int32 value = 1; value = _; return 42; }", 42, 60)]
+    [InlineData("int32 Main() { mut int32 value = 1; value = _; value = 42; return value; }", 42, 60)]
+    [InlineData("int32 Main() { if (true) { int32 value = 1; value = _; } return 42; }", 42, 60)]
+    [InlineData("[NoThrow] int32 Main() { int32 value = 1; value = _; return 42; }", 42, 60)]
+    [InlineData("int32 Main() { for (int32 value = 1; false; value = _) { } return 42; }", 42, 60)]
+    [InlineData("void Main() { int32 value = 1; value = _; }", 0, 60)]
+    [InlineData("int32 Main() { init int32 value; value = 42; return value; }", 42, 61)]
+    [InlineData("int32 Main() { init int32 value; value = 42; value = _; value = 24; return value + 18; }", 42, 61)]
+    [InlineData("[NoThrow] int32 Main() { init int32 value; value = 42; return value; }", 42, 61)]
+    [InlineData("int32 Main() { for (init int32 value; true;) { value = 42; return value; } }", 42, 61)]
+    [InlineData("int32 Main() { init uint32 value; value = 42; return int32(value); }", 42, 61)]
+    [InlineData("int32 Main() { init int64 value; value = 42; return int32(value); }", 42, 61)]
+    [InlineData("int32 Main() { init uint64 value; value = 42; return int32(value); }", 42, 61)]
+    [InlineData("int32 Main() { init bool value; value = true; if (value) { return 42; } return 0; }", 42, 61)]
+    [InlineData("int32 Main() { init char16 value; value = char16(42); return int32(value); }", 42, 61)]
+    public async Task ScopedLocalProjectionMatchesHostedExecutionAsync(string source, int expected,
+        int projectionVersion)
     {
         var root = RepositoryRoot();
         var frontend = Path.Combine(root, "self-host");
@@ -99,7 +109,7 @@ public sealed partial class CliTests
                 Assert.True(componentExit == 0,
                     $"{policy}: {componentExit}: {componentOutput}{componentError}");
                 using var document = JsonDocument.Parse(componentOutput);
-                Assert.Equal(60, document.RootElement.GetProperty("result")
+                Assert.Equal(projectionVersion, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
 
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
@@ -172,6 +182,8 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { int32 value = 1; value = _; return value; }")]
     [InlineData("int32 Main() { int32 value = 1; value = _; value = 42; return value; }")]
     [InlineData("int32 Main() { if (true) { int32 value = 1; } value = _; return 42; }")]
+    [InlineData("int32 Main() { init int32 value; return value; }")]
+    [InlineData("int32 Main() { init int32 value; value = 1; value = 2; return value; }")]
     [InlineData("int32 Main() { if (true) { int32 x = 1; } while (false) { return x; } return 42; }")]
     [InlineData("int32 Main() { if (true) { int32 x = 1; } else { int32 y = x; } return 42; }")]
     [InlineData("int32 Main() { if (true) { int32 int32 = 1; return int32(uint64(42)); } return 0; }")]

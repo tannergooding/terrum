@@ -138,7 +138,7 @@ defined-but-unsupported maximal runs; see the
 [scanner contract](scanner.md) for spans and record compatibility. Hosted
 role-specific punctuation rules are in the
 [implementation reference](implementation.md). The bounded frontend accepts
-projection versions 1–60 with their declared shapes in a 392-word buffer and
+projection versions 1–61 with their declared shapes in a 392-word buffer and
 fixed source/token/local/statement/node/parameter/depth/work limits. Independent
 source audits check current syntax for compatible older shapes. Scanner,
 projection, semantic and native-profile versions are separate compatibility
@@ -307,6 +307,14 @@ their existing reassignment authority. Version 60 composes with v59 effects.
 Earlier projection layouts and gates remain unchanged; no ABI or native
 profile operation is added.
 
+Projection v61 adds explicit `init T name;` for six scalar types. Kind 25
+declares a vacant local with root `-1`, and local flag `0x2` records its
+initialization authority. Existing assignment records initialize the local
+through shared hosted verification; source audits validate the declared type,
+name and lexical visibility, including `for` initializers. Inferred `init var`
+and nullable local inference remain unsupported, with no ABI or source-free
+TRRM change.
+
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer
@@ -336,7 +344,9 @@ without granting live-value replacement authority; failed evaluation leaves
 vacancy. Retained initialization assignments select semantic v46, with local
 authority reconstructed from the vacant declaration. Conditional publication
 must be resolved before another initialization, including across loop and
-exception joins. This does not add vacant locals to the native scalar frontend.
+exception joins. The native scalar frontend separately supports explicit
+typed scalar vacant locals in projection v61; inferred `init var` remains
+outside its bounded subset and source-free TRRM is unchanged.
 Hosted `name = _;` ends a definitely live named local value without deleting
 its declaration or changing its type. A unique value uses the existing
 scope-exit drop helper, clearing cleanup eligibility before executing cleanup;

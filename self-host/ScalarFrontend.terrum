@@ -1546,7 +1546,7 @@ mut class ScalarFrontendState
                 return false;
             }
             if (slot <= _parameterCount
-                || Host.Frontend[300 + (slot - _parameterCount - 1) * 4 + 1] == 0)
+                || (Host.Frontend[300 + (slot - _parameterCount - 1) * 4 + 1] & 3) == 0)
             {
                 FailAt(2, first.Range);
                 return false;
@@ -1627,14 +1627,20 @@ mut class ScalarFrontendState
     private mut bool ParseTreeDeclaration(Token first, bool semicolon)
     {
         mut bool mutable = false;
-        if (first.Kind == 13)
+        mut bool initialization = false;
+        if (IsInitKeyword(first))
+        {
+            initialization = true;
+            _at = _at + 1;
+        }
+        else if (first.Kind == 13)
         {
             mutable = true;
             _at = _at + 1;
         }
         require _tokens.TryGet(_at, out var declaredType);
         mut int32 type = 0;
-        if (declaredType.Kind == 12)
+        if (!initialization && declaredType.Kind == 12)
         {
             _at = _at + 1;
         }
@@ -1674,12 +1680,51 @@ mut class ScalarFrontendState
                 return false;
             }
         }
-        return ParseTreeLocalInitializer(first, name, type, mutable, semicolon);
+        return initialization
+            ? ParseTreeVacantLocal(first, name, type, semicolon)
+            : ParseTreeLocalInitializer(first, name, type, mutable, semicolon);
+    }
+
+    private bool IsInitKeyword(Token token)
+    {
+        int32 at = token.Range.Start;
+        return token.Kind == 2 && token.Range.Length == 4
+            && Host.Source[at] == char16(105) && Host.Source[at + 1] == char16(110)
+            && Host.Source[at + 2] == char16(105) && Host.Source[at + 3] == char16(116);
     }
 
     private bool IsParameterName(Token name)
     {
         return TryResolveSignatureParameter(name, out var index, out var type);
+    }
+
+    private mut bool ParseTreeVacantLocal(Token first, Token name, int32 type, bool semicolon)
+    {
+        if (_localCount >= 8)
+        {
+            FailAt(1, name.Range);
+            return false;
+        }
+        if (semicolon && !Take(52, out var endDeclaration))
+        {
+            return false;
+        }
+        int32 index = _localCount;
+        int32 offset = 300 + index * 4;
+        Host.Frontend[offset] = type;
+        Host.Frontend[offset + 1] = 2;
+        Host.Frontend[offset + 2] = name.Range.Start;
+        Host.Frontend[offset + 3] = name.Range.Length;
+        _localCount = index + 1;
+        Host.Frontend[299] = _localCount;
+        mut int32 bit = 1;
+        for (mut int32 local = 0; local < index; local = local + 1)
+        {
+            bit = bit * 2;
+        }
+        _activeLocals = _activeLocals | bit;
+        return AddTreeStatement(25, _parameterCount + index + 1, -1,
+            first.Range.Start, TreeStatementEnd());
     }
 
     private mut bool ParseTreeLocalInitializer(Token first, Token name, int32 expected,
