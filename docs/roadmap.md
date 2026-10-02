@@ -137,6 +137,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7d162b6` | Native scalar inferred vacant locals, projection 62 |
 | `088b732` | Native scalar explicit vacant locals, projection 61 |
 | `4d7999c` | Native scalar local lifetime ending, projection 60; verifier feasibility memoization within the fixed work limit |
 | `df788b8` | Hosted explicit local lifetime ending, checked cleanup/root and loan retirement, and semantic v47 graph persistence |
