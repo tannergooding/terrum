@@ -2177,10 +2177,21 @@ public static class ScalarFrontendHost
                     Operand = FoldStaticProofExpression(unary.Operand),
                 });
             case BoundBinary binary:
+            {
+                var left = FoldStaticProofExpression(binary.Left);
+                if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe
+                    && left is BoundConstant { Type: PrimitiveType.Bool } boolean
+                    && (binary.Operator == TokenKind.AmpersandAmpersand && boolean.Value == 0
+                        || binary.Operator == TokenKind.PipePipe && boolean.Value != 0))
+                {
+                    return new BoundConstant(boolean.Value == 0 ? 0 : 1,
+                        PrimitiveType.Bool, binary.Span);
+                }
                 return Binder.FoldScalarConstant(binary with {
-                    Left = FoldStaticProofExpression(binary.Left),
+                    Left = left,
                     Right = FoldStaticProofExpression(binary.Right),
                 });
+            }
             case BoundCast cast:
                 return Binder.FoldScalarConstant(cast with {
                     Operand = FoldStaticProofExpression(cast.Operand),

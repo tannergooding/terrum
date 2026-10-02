@@ -92,6 +92,8 @@ public sealed partial class CliTests
     [InlineData("static require true || false; return 42;")]
     [InlineData("static require true ? true : false; return 42;")]
     [InlineData("static require true ? true : int32(1) / int32(0) == 0; return 42;")]
+    [InlineData("bool value = false; static require true || value; return 42;")]
+    [InlineData("static require true || int32(1) / int32(0) == 0; return 42;")]
     [InlineData("static ensure true && (int32(42) == int32(42)); return 42;")]
     [InlineData("static ensure false ? false : true; return 42;")]
     public async Task NativeScalarStaticProofsMatchHostedScannerPeAndJitAsync(string body)
@@ -149,7 +151,8 @@ public sealed partial class CliTests
     [InlineData("static require false; return 42;")]
     [InlineData("static ensure false; return 42;")]
     [InlineData("bool value = true; static require value; return 42;")]
-    [InlineData("bool value = false; static require true || value; return 42;")]
+    [InlineData("bool value = true; static require false || value; return 42;")]
+    [InlineData("bool value = false; static ensure true || value; return 42;")]
     [InlineData("const bool value = true; static ensure value; return 42;")]
     [InlineData("if (true) { static ensure true; } return 42;")]
     [InlineData("for (require true; false;) {} return 42;")]
