@@ -133,7 +133,7 @@ The current scanner is version 8/schema 8; it appends diagnostic kinds 11/12
 for invalid/unsupported maximal punctuation runs to the prior diagnostic
 catalog. Earlier raw records remain readable where compatible, while current
 snapshot adapters reject forged framing, invalid escapes and conflicting
-classification. The bounded scalar frontend's projections through v61 share a
+classification. The bounded scalar frontend's projections through v62 share a
 392-word buffer and enforce the documented limits: 16,384 UTF-16 source units, 64 tokens,
 eight total local identities including hidden discards, 12 statement records,
 32 expression nodes, three parameters, 16 expression-recursion levels, six
@@ -225,10 +225,10 @@ Older headers cannot encode this operation and a v47 header without an end
 node is rejected. This changes no scanner record, native ABI/profile or TRRM
 encoding. Source-free executable TRRM still rejects this statement; the
 bounded scalar frontend represents visible scalar local endings in projection
-v60. Enums, general references/pins, arbitrary guards/ARC and view
-rebinding remain outside the existing bounded compiler. The bounded constant
-evaluator also rejects lifetime-end statements. Nullable inferred `var?`
-syntax and inferred `init var` remain outside the native scalar frontend.
+v60. Enums, general references/pins, arbitrary guards/ARC and view rebinding
+remain outside the existing bounded compiler. The bounded constant evaluator
+also rejects lifetime-end statements. Nullable inferred `var?` syntax remains
+outside the native scalar frontend.
 
 The parser and binder support right-associative `condition ? whenTrue : whenFalse` expressions
 below binary-operator precedence. The Boolean condition runs once; only its
@@ -748,9 +748,16 @@ six scalar types. Kind 25 declares a vacant local with root `-1`; local flag
 only a definitely vacant declared local, and the shared hosted verifier
 enforces publication, definite assignment and reinitialization after lifetime
 ending. The source audit binds the exact type and name, including a scoped
-`for` initializer. Inferred `init var`, nullable locals and other vacant
-storage remain outside this bounded frontend; v61 does not change native ABI,
-source-free TRRM or semantic-module formats.
+`for` initializer.
+
+Projection v62 adds bounded `init var name;` scalar locals. Kind 26 marks the
+inferred declaration; the producer fixes its scalar type from the first
+assignment whose expression already has a known type, and the source-bound
+reader verifies the `init var` spelling and resolved local type. Untyped
+numeric literals do not establish the type, and unresolved or incompatible
+initializations remain errors. Nullable locals and other vacant storage remain
+outside this frontend. These provisional projections change no native ABI,
+source-free TRRM or semantic-module format.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

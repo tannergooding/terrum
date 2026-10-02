@@ -1541,7 +1541,9 @@ mut class ScalarFrontendState
             && _tokens.TryGet(_at + 1, out var equals)
             && (equals.Kind == 64 || equals.Kind >= 91 && equals.Kind <= 101))
         {
-            if (!TryResolveParameter(first, out var slot, out var type))
+            mut int32 slot = 0;
+            mut int32 type = 0;
+            if (!TryResolveParameter(first, out slot, out type))
             {
                 return false;
             }
@@ -1552,10 +1554,29 @@ mut class ScalarFrontendState
                 return false;
             }
             _at = _at + 2;
+            if (type == 0 && equals.Kind != 64)
+            {
+                FailAt(2, first.Range);
+                return false;
+            }
             mut int32 rightType = type;
             if (equals.Kind >= 99) { rightType = 1; }
-            if (!ParseTreeExpression(rightType, 1, 0, out var value)
-                || !ResolveTreeLiteral(value, rightType, false)
+            mut int32 valueType = rightType;
+            if (!ParseTreeExpression(rightType, 1, 0, out var value))
+            {
+                return false;
+            }
+            if (type == 0)
+            {
+                type = TreeWord(value, 1);
+                if (type < 1 || type > 6)
+                {
+                    return FailTreeType(value);
+                }
+                Host.Frontend[300 + (slot - _parameterCount - 1) * 4] = type;
+                valueType = type;
+            }
+            if (!ResolveTreeLiteral(value, valueType, false)
                 || semicolon && !Take(52, out var end))
             {
                 return false;
@@ -1628,6 +1649,7 @@ mut class ScalarFrontendState
     {
         mut bool mutable = false;
         mut bool initialization = false;
+        mut bool inferredInitialization = false;
         if (IsInitKeyword(first))
         {
             initialization = true;
@@ -1640,7 +1662,12 @@ mut class ScalarFrontendState
         }
         require _tokens.TryGet(_at, out var declaredType);
         mut int32 type = 0;
-        if (!initialization && declaredType.Kind == 12)
+        if (initialization && declaredType.Kind == 12)
+        {
+            inferredInitialization = true;
+            _at = _at + 1;
+        }
+        else if (!initialization && declaredType.Kind == 12)
         {
             _at = _at + 1;
         }
@@ -1681,7 +1708,7 @@ mut class ScalarFrontendState
             }
         }
         return initialization
-            ? ParseTreeVacantLocal(first, name, type, semicolon)
+            ? ParseTreeVacantLocal(first, name, type, inferredInitialization, semicolon)
             : ParseTreeLocalInitializer(first, name, type, mutable, semicolon);
     }
 
@@ -1698,7 +1725,8 @@ mut class ScalarFrontendState
         return TryResolveSignatureParameter(name, out var index, out var type);
     }
 
-    private mut bool ParseTreeVacantLocal(Token first, Token name, int32 type, bool semicolon)
+    private mut bool ParseTreeVacantLocal(Token first, Token name, int32 type,
+        bool inferred, bool semicolon)
     {
         if (_localCount >= 8)
         {
@@ -1723,7 +1751,7 @@ mut class ScalarFrontendState
             bit = bit * 2;
         }
         _activeLocals = _activeLocals | bit;
-        return AddTreeStatement(25, _parameterCount + index + 1, -1,
+        return AddTreeStatement(inferred ? 26 : 25, _parameterCount + index + 1, -1,
             first.Range.Start, TreeStatementEnd());
     }
 
@@ -2697,6 +2725,11 @@ mut class ScalarFrontendState
             {
                 return false;
             }
+            if (type == 0)
+            {
+                FailAt(2, token.Range);
+                return false;
+            }
             if (!AddTreeNode(0, type, token.Range.Start, token.Range.End,
                 parameter, -1, 0, 0, out var read))
             {
@@ -3040,6 +3073,19 @@ mut class ScalarFrontendState
                 && _at != _tokens.GetCount())
             {
                 Fail(1);
+            }
+        }
+        if (_error == 0)
+        {
+            for (mut int32 local = 0; local < _localCount; local = local + 1)
+            {
+                if (Host.Frontend[300 + local * 4] == 0)
+                {
+                    require SourceRange.TryCreate(Host.Frontend[302 + local * 4],
+                        Host.Frontend[303 + local * 4], out var unresolved);
+                    FailAt(2, unresolved);
+                    break;
+                }
             }
         }
         if (_error != 0)

@@ -66,6 +66,8 @@ namespace Terrum.CodeAnalysis;
 // root is -1, and the span includes the semicolon outside for-clause records.
 // Version 61 adds kind 25 for an explicitly typed vacant local; local flag bit 1
 // marks initialization authority and the declaration record has root -1.
+// Version 62 adds kind 26 for an inferred vacant scalar local with its resolved
+// type in the local record; the source declaration uses `init var`.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -109,6 +111,7 @@ int32 GetScalarFrontendStatementVersion()
             }
         }
     }
+    if (maximumKind == 26) { return 62; }
     if (maximumKind == 25) { return 61; }
     if (maximumKind == 24) { return 60; }
     if (maximumKind == 23) { return 58; }
@@ -146,6 +149,7 @@ bool TryPublishScalarFrontend()
         if ((Host.Frontend[2] & 6) != 0) { Host.Frontend[0] = 59; }
         if (HasScalarFrontendStatement(24)) { Host.Frontend[0] = 60; }
         if (HasScalarFrontendStatement(25)) { Host.Frontend[0] = 61; }
+        if (HasScalarFrontendStatement(26)) { Host.Frontend[0] = 62; }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {

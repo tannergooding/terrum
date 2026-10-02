@@ -329,6 +329,10 @@ internal static partial class Program
                         {
                             projectionVersion = 61;
                         }
+                        if (frontend.Statements.Any(static statement => statement.Kind == 26))
+                        {
+                            projectionVersion = 62;
+                        }
                         writer.WriteNumber("projectionVersion", projectionVersion);
                         writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);
                         writer.WriteNumber("conditionRoot", frontend.ConditionRoot);

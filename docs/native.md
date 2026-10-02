@@ -312,8 +312,17 @@ declares a vacant local with root `-1`, and local flag `0x2` records its
 initialization authority. Existing assignment records initialize the local
 through shared hosted verification; source audits validate the declared type,
 name and lexical visibility, including `for` initializers. Inferred `init var`
-and nullable local inference remain unsupported, with no ABI or source-free
-TRRM change.
+and nullable local inference remain unsupported in v61, with no ABI or
+source-free TRRM change.
+
+Projection v62 adds bounded `init var name;` scalar locals. Kind 26 marks the
+inferred declaration; the producer fixes its scalar type from the first
+assignment whose expression already has a known type, and the source-bound
+reader verifies the `init var` spelling and resolved local type. Untyped
+numeric literals do not establish the type, and unresolved or incompatible
+initializations remain errors. Nullable locals and other vacant storage remain
+outside this bounded frontend. These provisional projections change no native
+ABI, source-free TRRM or semantic-module format.
 
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
@@ -345,8 +354,8 @@ vacancy. Retained initialization assignments select semantic v46, with local
 authority reconstructed from the vacant declaration. Conditional publication
 must be resolved before another initialization, including across loop and
 exception joins. The native scalar frontend separately supports explicit
-typed scalar vacant locals in projection v61; inferred `init var` remains
-outside its bounded subset and source-free TRRM is unchanged.
+typed scalar vacant locals in projection v61 and bounded inferred scalar locals
+in projection v62; source-free TRRM is unchanged.
 Hosted `name = _;` ends a definitely live named local value without deleting
 its declaration or changing its type. A unique value uses the existing
 scope-exit drop helper, clearing cleanup eligibility before executing cleanup;

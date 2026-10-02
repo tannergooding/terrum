@@ -98,6 +98,32 @@ public sealed class LocalFrontendProjectionTests
         }
     }
 
+    [Fact]
+    public void ReadResultAuditsInferredVacantLocalTypeFromInitialization()
+    {
+        const string text = "public int32 Value(int32 x) { init var y; y = x; return y; }";
+        var words = InitializationProjection(text, inferred: true);
+        var source = SourceText.From(text);
+        var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
+        Assert.True(result.IsValid);
+        Assert.Equal(62, words[0]);
+        Assert.True(Assert.Single(result.Locals).IsInitialization);
+
+        Reject(0, 61);
+        Reject(300, 2);
+        var altered = text.Replace("init var y", "init int32 y", StringComparison.Ordinal);
+        Assert.Throws<ArgumentException>(() =>
+            ScalarFrontendHost.ReadResult(SourceText.From(altered), Bytes(words)));
+
+        void Reject(int index, int value)
+        {
+            var old = words[index];
+            words[index] = value;
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            words[index] = old;
+        }
+    }
+
     private static int[] Projection(string text, bool assignment)
     {
         var words = new int[ScalarFrontendHost.WordCount];
@@ -157,10 +183,10 @@ public sealed class LocalFrontendProjectionTests
         }
     }
 
-    private static int[] InitializationProjection(string text)
+    private static int[] InitializationProjection(string text, bool inferred = false)
     {
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 61;
+        words[0] = inferred ? 62 : 61;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;
@@ -180,12 +206,13 @@ public sealed class LocalFrontendProjectionTests
         words[303] = 1;
         words[298] = 3;
         words[299] = 1;
-        var vacantStart = text.IndexOf("init int32 y;", StringComparison.Ordinal);
-        words[332] = 25;
+        var declaration = inferred ? "init var y;" : "init int32 y;";
+        var vacantStart = text.IndexOf(declaration, StringComparison.Ordinal);
+        words[332] = inferred ? 26 : 25;
         words[333] = 2;
         words[334] = -1;
         words[335] = vacantStart;
-        words[336] = "init int32 y;".Length;
+        words[336] = declaration.Length;
         var assignmentStart = text.IndexOf("y = x;", StringComparison.Ordinal);
         words[337] = 2;
         words[338] = 2;
