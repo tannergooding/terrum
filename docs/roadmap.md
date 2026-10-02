@@ -137,6 +137,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `cdc392c` | Native scalar foldable-true static proofs, projection 68 |
 | `f55f904` | Native scalar checked bare catch with optional `finally`, projection 67 |
 | `158999e` | Native scalar explicit unsafe scopes and checked bare catch, projection 66 |
 | `264e7ee` | Native scalar nested `try`/`finally`, projection 65 |
