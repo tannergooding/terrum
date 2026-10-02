@@ -1057,8 +1057,8 @@ and cleanup remain checked in every form. Changing storage or ownership is
 a contract change, not an inferred representation optimization. There is no
 implicit storage default, nominal `mut union` or raw overlapping-layout
 permission. Generic constraints retain their separate contracts.
-No `case` keyword is introduced. Pattern/extraction forms remain in §4 and
-Q28; this declaration does not select tag numbers, native exports or a public
+No `case` keyword is introduced. Pattern/extraction forms follow §3.3;
+this declaration does not select tag numbers, native exports or a public
 payload accessor surface.
 
 ```terrum
@@ -1523,7 +1523,7 @@ Pattern         = PatternOperand, { PatternOperator, PatternOperand } ;
 PatternOperand  = { "not" }, PatternAtom ;
 PatternOperator = "and" | "or" ;
 PatternAtom     = "_" | "null" | InferredBindingPattern | TypedBindingPattern
-                | ReferenceBindingPattern | TuplePattern | UnionCasePattern
+                | ReferenceTypePattern | TuplePattern | UnionCasePattern
                 | ConstantExpression | "(", Pattern, ")" ;
 InferredBindingPattern = InferredType, ( Identifier | "_" ) ;
 TypedBindingPattern = PatternType, [ Identifier ] ;
@@ -1533,8 +1533,8 @@ GenericTypePattern = [ "write" ], DottedIdentifier,
                      { ",", GenericPatternArgument }, ">", [ "?" ] ;
 GenericPatternArgument = "_" | InferredType, [ Identifier ]
                        | Type | GenericTypePattern | ConstantGenericArgument ;
-ReferenceBindingPattern = [ "write" ], "ref", "<", GenericPatternArgument,
-                          ">", ( Identifier | "_" ) ;
+ReferenceTypePattern = [ "write" ], "ref", "<", GenericPatternArgument,
+                       ">", ( Identifier | "_" ) ;
 TuplePattern    = "(", Pattern, ",", Pattern, { ",", Pattern }, ")" ;
 UnionCasePattern = Type, ".", Identifier,
                    [ "(", Pattern, { ",", Pattern }, ")" ] ;
@@ -1665,7 +1665,7 @@ ordinary optional expression grouping, not mandatory filter punctuation.
 As with declaration contract clauses, an unparenthesized top-level `=>`
 delimits the arm rather than forming a guard lambda. A lambda within the
 predicate must be grouped or nested in another expression delimiter.
-This spelling does not select catch-filter/unwind timing.
+Catch-filter timing follows the incremental unwinding rules below.
 
 Each member path observed by a pattern is read once within an attempted arm;
 that observation supplies the path's subpatterns. A later attempted arm makes
@@ -1697,27 +1697,35 @@ not cancel cleanup obligations for a live ignored value.
 An ordinary typed or inferred value binding uses ordinary checked value
 initialization after its test succeeds. Copyable value types copy their
 values; shared references copy handles with their access and rooting
-contracts, not the objects. A value-type binding does not implicitly alias
-the source storage. Aliasing requires an explicit reference binding, and
-unique payloads cannot use a value binding without copy permission.
+contracts, not the objects. A binding does not create a reference to a
+non-reference source slot. Binding an existing reference or pointer preserves
+its ordinary alias, access and dependency contracts; unique payloads cannot
+use a value binding without copy permission.
 Matching does not implicitly consume ownership while testing an arm or its
 guard. Explicit borrows support non-consuming inspection, with explicit
 movement after selection subject to their ordinary backing and loan checks.
 Explicit effects in a guard are not rolled back if it returns false; the
 same operations retain their ordinary `if`-style ownership and failure rules.
-`ref<var> item` requests an explicit readonly borrowing pattern;
-`write ref<var> item` requests writable access and requires the source to
-authorize it. Reference formation uses ordinary addressability, backing and
-lifetime rules, not an alias to a hidden value-type copy. A reference pattern
-cannot narrow or reinterpret the actual storage type because its current
-value passed a presence or type test. Movement remains an explicit operation
-after selection, not a separate implicitly consuming pattern.
-For initialized nullable storage, `ref<var>` filters out the nullable
-storage type even when its current value is non-null. `ref<var?>` admits
-nullable and non-nullable storage and retains the complete actual referent
-type: an `int32?` slot yields `ref<int32?>`, while an `int32` slot yields
-`ref<int32>`. `var?` permits nullability; it does not add it. Writable forms
-use the same storage-type filters and require existing write authority.
+`x is T t` uses the same type/value matching rules whether `T` is concrete or
+generic, including reference and pointer forms permitted by its constraints.
+Matching introduces no reference formation, additional indirection, implicit
+dereference, boxing or arbitrary conversion chain. A reference to a
+non-reference subject must be formed explicitly before matching; parameter-only
+`implicit ref<T>` does not extend to patterns or introduce a hidden temporary.
+
+`ref<var> item` matches an existing compatible readonly reference;
+`write ref<var> item` requires existing writable reference authority.
+A valid initialized `ref<int32>` subject matches the former with a
+`ref<int32>` binding to the same referent, not a manufactured
+`ref<ref<int32>>`. A reference pattern cannot narrow or reinterpret the
+actual referent storage type because its value passed another test.
+Movement remains explicit after selection.
+For an existing reference to initialized nullable storage, `ref<var>` filters
+out the nullable referent type even when its current value is non-null.
+`ref<var?>` admits nullable and non-nullable referent types and retains them:
+`ref<int32?>` remains `ref<int32?>`, and `ref<int32>` remains `ref<int32>`.
+`var?` permits nullability; it does not add it. Writable forms use the same
+referent-type filters and require existing write authority.
 This differs from ordinary value-binding `var`, which tests current presence.
 
 Generic type patterns name a particular generic declaration and match one
@@ -1747,10 +1755,16 @@ justified by that identity without a runtime conversion. Logical composition
 retains the proof only on paths that establish it; an arbitrary user comparison
 of type objects is not proof. Type inspection does not inspect element values,
 grant copying, alter generic declaration contracts or upgrade reference access.
-Statically recoverable arguments or declared type evidence support capture;
-discovering a type argument only at runtime requires a separate checked
-type-witness/representation contract, not hidden boxing or arbitrary runtime
-generic instantiation.
+Statically recoverable arguments or declared type evidence support capture.
+A type argument discovered only at runtime may also be captured through a
+checked type-witness/representation contract. It remains an ordinary symbolic
+type within its successful-path scope, with its complete qualification,
+declared constraints, required witnesses, access and ownership/lifetime facts.
+Generic operations require a supported execution path, such as retained AOT
+specialization or shared generic code. Capture does not implicitly box,
+generate code or make unsupported runtime instantiations executable.
+Missing required evidence, contracts or execution support diagnoses or rejects,
+not a silently false pattern. Exact witness/ABI encoding remains separate work.
 
 Union-case patterns mirror qualified case construction:
 `Lookup<int32>.Missing` tests the no-payload case, while
@@ -1827,10 +1841,26 @@ handles contract-catchable failures without a universal payload object.
 `when` filters are checked Boolean code: false continues handler selection,
 and a filter failure follows ordinary failure/chaining rules rather than
 silently becoming false. Handlers test declared catchable contracts in source
-order. A matched filter has checked access to the failure payload at its
-declared filter phase; it cannot depend on invalid references into already
-unwound frames. Catchability identity/registration and exact filter/unwind
-timing and failure transport are not defined by these source forms.
+order after unwinding to each candidate handler's still-live scope.
+Cleanup of exited inner scopes, including their `finally`/`defer` actions,
+precedes that candidate's type tests and filters. Cleanup failure updates the
+pending failure under the ordinary causal-chaining rules before further
+selection. Filters have checked access to that pending failure and still-live
+state, not invalid references into already unwound frames.
+
+A false filter proceeds to the next catch in source order at that scope.
+If no catch matches, propagation continues with further outward unwinding.
+The handler body is entered only after its type and filter match; the runtime
+does not unwind past a candidate scope before testing it. This is incremental
+unwind-and-selection, not a first-pass search running authored filters before
+inner cleanup. A filter failure follows ordinary failure/chaining propagation,
+not a false result or a restart that replays completed cleanup.
+Cleanup and filter side effects are observable even if no handler is selected;
+there is no transaction deferring them until the filter succeeds. The pending
+failure must remain valid during selection without keeping exited frames live.
+Fail-fast termination retains its separate no-cleanup guarantee.
+Catchability identity/registration, failure transport and native unwind ABI
+remain separate contracts.
 Bare `throw;` rethrows the
 active handled failure; it is invalid outside a handler or in a separately
 invoked lambda merely declared there. `throw expression` evaluates its
@@ -3555,7 +3585,7 @@ appears in §2.
 | Policies | §§3.3–3.4 and 5.12 describe lexical preferences, strict selection, signature-bound variants and constant-formal forwarding. | Registered variant attribute/catalog encoding and general policy-query subjects. |
 | Contracts | §§3.1, 3.3–3.4 and 5.8 give grouped named/lambda `require`/`ensure`, contextual result `return`, distinct body-level checks and registered producer phases. | Concrete phase selectors and correlated-output metadata; declaration-level static qualifiers have no production here. |
 | Static proof | §5.9 describes the portable static-proof floor. | Constant-evaluation and symbolic source forms. |
-| Exceptions | §§3.3–3.4 give typed/bare catches, filters, throw expressions, rethrow and explicit captured-failure propagation. | Catch eligibility, capture APIs, transport, unwind phase and chaining metadata. |
+| Exceptions | §§3.3–3.4 give typed/bare catches, incremental post-unwind type/filter selection, ordinary filter-failure propagation, throw/rethrow and checked captured-failure propagation. | Catchability/capture catalogs, transport, unwind ABI and causal-chaining metadata. |
 | Cleanup | §§3.3 and 5.12 distinguish lexical `defer` from `[Cleanup]`. | Defer action validation and attribute placement. |
 | Finalization | §5.12 leaves finalizers absent unless a concrete need warrants a separate reviewed lifecycle contract. | Any future finalizer proposal and its lifecycle/ABI contract. |
 | Documentation comments | §§1 and 5.14 describe attachment and structured prose direction. | Exact markup/reference grammar and XML artifact schema. |

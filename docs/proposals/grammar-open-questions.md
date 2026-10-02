@@ -1,294 +1,26 @@
-# Remaining source-language decisions
+# Source-language decision inventory
 
 > [!IMPORTANT]
-> This is the pending source-decision queue. Recommendations are review
-> inputs, not adopted rules.
+> This inventory preserves the numbered source review and its scope boundaries.
 > The [source grammar](../grammar-spec.md) remains authoritative for settled
 > forms. This inventory does not reopen those choices or authorize a compiler
 > to choose new semantics on the user's behalf.
 
 This is a decision inventory, not a compiler backlog. Stable question numbers
-are retained; gaps in the pending queue are intentional. Forty-one parent IDs
+are retained. All forty-two parent IDs
 have only [canonical link redirects](#resolved-question-link-redirects) at
 the end of this document, so old review links remain usable without mixing
-their rules into the questions below.
-Questions are grouped
-by the source contract a user must choose, rather than by missing parser
-productions or implementation files. The number of questions is not a target.
-Examples use approved Terrum syntax where possible to expose the issue;
-referenced library types and APIs are illustrative. Explicitly labeled
-candidate spellings are unapproved alternatives, and an example whose legality
-is the question does not assert that it is valid. No candidate establishes a
-new grammar production. Method bodies omitted from surrounding
-examples are not a new bodyless-concrete-declaration rule.
-C# comparisons are illustrative fragments, with ordinary namespace imports
-omitted. Placeholder APIs/types are identified where relevant; these are not
-claims that the snippets were compiled or that Terrum adopts their contracts.
+their rules into a pending queue.
 
-There are **2 pending numbered groups**. Q03 and all seven punctuation
-subquestions have canonical redirects, not pending votes. Partially resolved
-groups ask only about their remaining choice; settled context is linked or
-labeled, not another vote.
-
-| Pending area | Stable IDs |
-|---|---|
-| Other source forms and contracts | Q28, Q32.1 |
-
-## Other source forms and contracts
-
-### Q28. Complete pattern and type-test forms
-
-**Question:** Confirm the remaining boundaries for runtime-only type capture
-and already-reference-valued pattern subjects. Registered object extraction and richer-status
-contract spelling remain separate library/schema work. Existing guards,
-`and`/`or`/`not`, compatible `or` bindings and fallback behavior remain fixed.
-**Accepted direction:** Replace the target `some` introducer with inferred
-`var`/`var?` bindings. `var item` requires initialization and non-nullness;
-`var? item` requires initialization but permits null. `is init` tests
-initialization independently. Vacancy is not null and must not be read to
-discover a nonmatch. Ordinary declaration inference follows the same
-non-null/nullable distinction, without implicit unwraps or throws; generic
-substitution keeps normalized optional semantics, not nested `T??` spelling.
-See the [source contracts](../grammar-spec.md#33-statements-and-local-declarations).
-
-Contextual multi-output matching views evaluate one call and support structural
-output patterns such as `(var x, _)`, `(_, var? y)` and `(var x, var y)`.
-They retain declared status/output correlations; output availability is not
-call success, and ignored live owners still require cleanup. Omitted eligible
-output arguments select the lifted projection, including partial omission;
-supplied destinations stay ordinary arguments. With all outputs supplied,
-matching examines the ordinary return value. Required inputs remain required,
-and neither arm types nor implicit conversions determine the channel. See
-[output matching](../language-contracts.md#23-checking-and-consuming-the-contract).
-No mandatory library `Option`/`Result` or general implicit tuple conversion
-is introduced.
-
-Guards and catch filters use consistent `when expression`, with parentheses
-as ordinary grouping. This does not change their checked effects/failures,
-select catch-filter/unwind timing or replace function `require`/`ensure`.
-Ordinary guard expressions provide member and relational conditions.
-Dedicated member/relational pattern syntax and pattern `where` are deferred
-until a concrete need, not pending adoption votes.
-
-**Accepted lifted availability and requirements:** Matching uses declared
-per-output availability and may bind initialized failure outputs. Boolean init
-contracts already supply true publication/false vacancy; no additional matching
-marker is required merely for that signature shape. Enum and object-backed
-statuses retain checked availability relations rather than a universal
-success gate. The call is evaluated once, preserving correlated initialization
-facts for explicitly supplied destinations. Bare lifted `require` demands
-initialization of every omitted/selected output, with full optional/ownership
-types. Selective extraction uses an explicit pattern requirement, such as
-`require (Read() is (var value, _));`. Ignored outputs need not be initialized
-or read, but live ignored owners still require cleanup.
-
-**C# model:** Pattern families are C#-inspired; Terrum does not inherit
-property-getter duplication, implicit numeric conversion, or ownership-neutral
-payload extraction merely from similar spelling.
-
-**Design constraint:** Composition must be clear and consistent with Terrum's
-existing types, places, access and ownership. Do not adopt C#'s `x is { }`
-or `{ X: > 10 }` composition by familiarity. Once-only scrutinee evaluation
-does not by itself authorize an observation optimization or invalidate
-ordinary access/loan checks. Tuple structure remains distinct from
-name-discovered `Deconstruct`.
-
-**Terrum counterpart (accepted target direction, not current compiler support):**
-
-```terrum
-switch (Next())
-{
-    var item when Guard(item) => Use(item),
-    null => Missing(),
-    _ => Other(),
-}
-```
-
-This uses the inferred non-null binding direction: call `Next()` once, evaluate
-the guard only after matching, then select the corresponding body. It does
-not introduce property, relational or general type patterns. Failures are not
-nonmatches and cannot be silently retried.
-The compiler still uses `is some item`; neither this switch form nor `var?`
-inference/output matching is implemented.
-
-**Accepted observation rule:** One read per member path within an attempted
-arm feeds that path's subpatterns; a later attempted arm observes it afresh.
-A false, effectful guard could have changed the backing: "evaluate once"
-must not freeze every getter for the entire switch. Getters/extractors
-retain ordinary effects/failures; do not call `Deconstruct` by name.
-Ordinary member expressions written in guards/bodies retain ordinary reads,
-not an implicit pattern cache. Optimizations must fit the memory/side-effect
-contract; an explicit local lets the author retain a stable observation.
-
-**Accepted binding rule:** Typed and inferred value bindings follow ordinary
-value initialization: copy eligible value types or shared handles with their
-complete access/rooting contracts. They do not create hidden aliases for
-value-type structs. Aliasing requires an explicit reference form; unique
-payloads require explicit borrow/move rather than an implicit copy.
-`ref<var> item` and `write ref<var> item` are selected explicit borrowing
-forms. They preserve ordinary addressability, authorized access, backing and
-lifetime rules; requesting write does not create write authority. A matched
-value does not authorize narrowing the actual aliased storage type.
-Inside those reference forms, `var`/`var?` filter the actual initialized
-storage type, not its current value: `ref<var>` does not match an `int32?`
-slot merely because it contains `42`; `ref<var?>` matches and retains
-`ref<int32?>`. For non-nullable storage, either form retains `ref<int32>`.
-The writable forms follow the same rule. This nullable-storage decision is
-settled; already-reference-valued subjects remain a distinct question.
-Matching does not implicitly move during an attempted arm or its guard;
-non-consuming inspection precedes an explicit move after selection.
-Explicit guard effects are not rolled back, and ordinary loan/backing checks
-still apply, as in equivalent `if`-style code.
-
-**Accepted nominal-case spelling:**
-
-```terrum
-switch (result)
-{
-    Lookup<int32>.Found(var item) when item > 10 => Use(item),
-    Lookup<int32>.Missing => Missing(),
-    _ => Other(),
-}
-```
-
-Patterns test the declared case and match payload positions in declaration
-order and arity. They invoke neither a constructor nor name-discovered
-`Deconstruct`, and add no `case` keyword or synthesized public payload members.
-`Found(null)` remains distinct from `Missing`; `var?` permits its live null
-payload. These source contracts do not claim executable union/pattern support.
-
-**C# comparison:**
-
-```csharp
-var subject = Next();
-var firstValue = subject.Value;
-if (firstValue > 10 && firstValue < 100 && Guard(subject))
-{
-    Use(firstValue);
-}
-else
-{
-    var secondValue = subject.Value;
-    // Test the next arm with this fresh observation.
-}
-```
-
-This is an operational comparison, not adoption of C# property patterns or
-record synthesis. An ordinary value binding is analogous to
-`init T y; if (x is T) { y = T(x); }`: checked projection/initialization, not
-a hidden struct alias or permission to select arbitrary implicit conversions.
-An explicit reference binding corresponds to an ordinary reference alias,
-subject to Terrum's access, backing and lifetime rules. C# does not enforce
-Terrum's unique ownership.
-
-**Accepted generic type-pattern direction:** `_` and each `var` form occupy
-one argument slot of the named constructor, not a pack or an unapplied type
-constructor. `List<_>` matches without naming its argument; `List<var T>`
-captures a non-nullable argument type, and `List<var? T>` captures either
-nullable or non-nullable arguments with their actual complete type.
-Anonymous `var`/`var?` have the same filters without a name. These tests
-inspect generic argument types, not initialization or values of list elements.
-Ordinary application `_` inference remains distinct from a pattern wildcard.
-
-```terrum
-switch (items)
-{
-    List<var T> list when typeof(T) is typeof(int32) => HandleInt32(list),
-    List<var? T> list => HandleOther(list),
-}
-```
-
-The second arm includes other non-nullable arguments as well as nullable ones.
-The direct `List<int32> list` pattern is the simpler equivalent for the first
-arm. Type capture is distinct from value binding and permits `typeof(T)` in
-the guard. A recognized exact identity test refines `T` on its proven path,
-including the successful arm body, without a runtime conversion or rewriting
-the generic declaration. Arbitrary user type-object comparisons do not
-establish that proof. Captures retain ordinary access/ownership obligations
-and have checked successful-path scope.
-
-**Remaining boundaries:** Runtime-only type capture needs an explicit
-type-witness/representation contract; it must not silently introduce boxing or
-arbitrary runtime generic instantiation. Reference patterns retain the actual
-storage type; nullable-storage filters are settled, but already-reference-value
-cases still need reconciliation with reference formation. General
-application/constraint `var` binders and higher-kinded application are deferred,
-not inferred from pattern syntax. Registered object observations,
-richer-status availability contract spelling and metadata remain library/schema
-work; compiler adoption is downstream, not an additional source vote.
-Call-site channel selection, partial output omission, availability-based
-matching and all-lifted-output `require` are settled.
-
-### Q32.1. Catchability registration and filter phase
-
-**Question:** At what phase relative to unwinding are checked filters evaluated?
-Catchable-contract registration and source-order matching are settled directions;
-transport bytes and exception object ABI are separate.
-**Example:** `try { Work(); } catch (Failure error) when (CanHandle(error)) { Recover(error); }`
-uses the approved typed/filter form within required unsafe recovery scope.
-
-**C# model:** Syntax is C#-inspired, not an automatic `System.Exception`
-hierarchy. A settled deviation is that a throwing filter does not silently
-become false; it follows ordinary failure/chaining rules.
-
-**Settled direction:** The
-[official catch contract](../grammar-spec.md#33-statements-and-local-declarations) uses registered
-catchable contracts, source-order selection and checked filter-phase access.
-It forbids speculative reads of invalid unwound frames and silently erased
-filter failures.
-
-**Remaining question:** Select the exact filter/unwind phase. No particular
-phase was recommended or approved; approval of registered catchability does
-not choose C# pre-unwind timing. Concrete registration/type catalogs remain
-library/metadata work, not an implicit `System.Exception` hierarchy.
-
-**Terrum counterpart (failure APIs illustrative):**
-
-```terrum
-unsafe
-{
-    try { Work(); }
-    catch (IoFailure error) when (CanHandle(error))
-    {
-        Recover(error);
-    }
-    catch (Failure error)
-    {
-        Log(error);
-    }
-}
-```
-
-The selected failure profile must declare whether `IoFailure` matches
-`Failure`; this is not inherited CLR class matching. If the first type
-matches, its filter runs under checked access. False proceeds to the next
-handler. A throwing filter propagates/chains under the normal failure
-contract rather than being silently converted to false. No catch may
-retain invalid references into frames that have already been unwound.
-
-**C# comparison:**
-
-```csharp
-try { Work(); }
-catch (IOException error) when (CanHandle(error))
-{
-    Recover(error);
-}
-catch (Exception error) { Log(error); }
-```
-
-These names stand for ordinary application APIs. C# filters run before
-unwinding; if `CanHandle` throws, its exception is discarded and that
-filter is treated as false while selection continues for the original
-exception. Terrum's ordinary checked filter-failure/chaining rule is
-deliberately different. The remaining catchable-value/type pattern must
-not implicitly import C#'s `System.Exception` hierarchy.
+There are **0 pending numbered groups**. The numbered review is complete,
+not the language implementation or its concrete semantic schemas. Deferred
+features and library/metadata/proof work remain in the boundaries below.
 
 ## Boundaries that are not unanswered source decisions
 
 | Category | Treatment |
 |---|---|
-| Already settled | Raw quote fences/framing/newline directives/brace splitting; interpolation format alternatives and capture order; grouped callable/lambda clauses and contextual `return`; aliases' transparent export; optional `<this T>`; `.via<I>` and restricted default-body calls; parameter-directed result dependency annotations; vacant backing and getter-only property initialization; constructor minimum guarantees and independent final completion validation; repeated unpublished init; load-scoped static groups/lazy fields, explicit constructor policy, deterministic field order, explicit sharing even for reads and phase-bound static init accessors; params/default/named-argument order; tuples/constant indexing; optional/coalescing forms; switch transfers; eager async versus lazy `[Iterator]`; awaited structured close. Do not ask these again. |
+| Already settled | Raw quote fences/framing/newline directives/brace splitting; interpolation format alternatives and capture order; grouped callable/lambda clauses and contextual `return`; aliases' transparent export; optional `<this T>`; `.via<I>` and restricted default-body calls; parameter-directed result dependency annotations; vacant backing and getter-only property initialization; constructor minimum guarantees and independent final completion validation; repeated unpublished init; load-scoped static groups/lazy fields, explicit constructor policy, deterministic field order, explicit sharing even for reads and phase-bound static init accessors; uniform reference/concrete/generic matching, checked runtime type capture and incremental post-unwind filter selection; params/default/named-argument order; tuples/constant indexing; optional/coalescing forms; switch transfers; eager async versus lazy `[Iterator]`; awaited structured close. Do not ask these again. |
 | Explicitly deferred | Nominal `&&`/`||` derivation until a concrete need and complete protocol; extern accessor/operator/conversion forms until a concrete interop need and design; declaration `static require`/`static ensure`; entry snapshots/history; nested nominal types; interface constructors; source type packs and zero/one-arity tuple extensions; collection comprehensions/repetition pending deeper library/tensor design. They are not pending votes in this inventory. |
 | Implementation work | Parser/binder/verifier/native lowering, compiler-component parity, lossless recovery and diagnostics, regression fixtures and support-version migration. Approval does not claim any of these are complete. |
 | Metadata/ABI work | Wire rows, mandatory file/friend scope/access/provenance/grants, static group/lazy/policy/phase/sharing and unload contracts, witness/capture representation, dispatch tables, compatibility encoding, exception transport, public tuple/callable ABI, layouts and resource limits. These must carry chosen source contracts, not choose them. Existing reserved fields remain generically reserved. |
@@ -525,8 +257,16 @@ target forms. No `case` keyword or record
 synthesis is introduced. See
 [union declarations](../grammar-spec.md#31-source-file-structure-and-declarations).
 Exact metadata/ABI representation and library attribute definition remain work;
-pattern/extraction forms remain in [Q28](#q28-complete-pattern-and-type-test-forms).
+pattern/extraction contracts are linked from [Q28](#q28-complete-pattern-and-type-test-forms).
 Approval does not claim compiler support or adopt the concrete Core sum types.
+
+### Q28. Complete pattern and type-test forms
+
+Resolved; see [patterns and type tests](../grammar-spec.md#33-statements-and-local-declarations).
+Matching is consistent for concrete/generic/reference/pointer forms and does
+not form a reference. Runtime-only captures use checked type evidence and
+ordinary generic constraints with supported execution. Witness/observation
+schemas and implementation remain separate work.
 
 ### Q29. First-class index/range values
 
@@ -559,8 +299,16 @@ See [producer contracts](../grammar-spec.md#512-modifiers-cleanup-and-finalizati
 Declared catchable contracts match in source order with checked filter-phase
 access and normal filter-failure propagation; see
 [catch contracts](../grammar-spec.md#33-statements-and-local-declarations).
-Only exact filter/unwind timing remains in
+Filter timing is resolved in
 [Q32.1](#q321-catchability-registration-and-filter-phase).
+
+### Q32.1. Catchability registration and filter phase
+
+Resolved; [catch contracts](../grammar-spec.md#33-statements-and-local-declarations)
+select incrementally after unwinding to each candidate's live scope.
+Inner cleanup precedes type/filter testing, false continues selection,
+and failures retain ordinary causal propagation without rollback or replay.
+Failure transport, registration catalogs and native ABI integration remain work.
 
 ### Q33. Policy variant declarations and compile-time queries
 

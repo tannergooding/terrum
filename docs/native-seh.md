@@ -82,7 +82,14 @@ after all callbacks and invocation frames have completed.
 Normal-exit cleanup is emitted as an explicit call. Unwind metadata alone does
 not run finally on a normal return. During exceptional propagation, Windows
 performs filter search before unwind cleanup; source cleanup therefore cannot
-be modeled by eagerly running it before filter selection.
+be modeled by eagerly running it in those first-pass search callbacks.
+The bounded marker/reason filters above are native identity discriminators,
+not authored source `when` predicates. The target
+[source handler contract](grammar-spec.md#33-statements-and-local-declarations)
+instead unwinds to each candidate's live scope before testing its catches and
+filters. Adopting that contract requires staged language-level dispatch or
+another checked integration; the probe and current bounded dispatcher do not
+establish it or permit substituting Windows' first-pass observable timing.
 
 ## Remaining integration
 

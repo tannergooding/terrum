@@ -35,6 +35,16 @@ foreign external binding. Existing compiler declaration defaults and
 accepted modifier orders retain their current behavior until adopted
 through binding, verification, persistence and lowering.
 
+Target type matching also preserves generic/concrete consistency, including
+reference/pointer forms, without pattern-driven reference formation. Checked
+runtime type captures require witnesses and supported generic execution.
+General source catches/filters select incrementally after unwinding to each
+candidate's live scope. These are not syntax-44/semantic v43-v47 support:
+current `is some`/whole-type inference and the bounded Windows checked-failure
+dispatcher retain their existing behavior. Runtime witnesses, general typed
+filters and their post-unwind phase still need binding, persistence, lifetime
+verification and native integration.
+
 Syntax-44 requires a single loop label and its `while`, `do` or `for`
 introducer to occupy the same physical source line (`TRM1012`). The colon
 still attaches to the name; trivia after it is optional, but cannot contain
@@ -2431,6 +2441,10 @@ Cleanup has out-of-line funclets that borrow the source frame in RDX
 while reserving their own call areas; they are invoked explicitly on normal
 exits and by Windows on checked-policy exceptional exits. Versioned scope
 records and filters admit only four compiler-generated checked failures.
+Those filters discriminate the bounded Windows failure identity; they are not
+authored source `when` filters. General post-unwind source-filter selection
+cannot be implemented by executing those predicates in Windows' first-pass
+search callbacks. See the [ABI probe boundary](native-seh.md).
 `BoundProgram` retains structured blocks, branches,
 loops, slot reads/writes and checked expressions; its verifier precedes
 machine lowering. It is not a claim to implement the complete semantic IL.

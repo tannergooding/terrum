@@ -13,10 +13,11 @@ this roadmap for adoption sequencing and remaining work.
 ## Active work (priority order)
 
 1. Carry settled runtime/initialization contracts through compiler binding,
-   verification, persistence and lowering. The remaining
-   [source-decision review](proposals/grammar-open-questions.md) proceeds
-   incrementally; preserve unanswered choices rather than selecting them
-   during implementation. The [grammar](grammar-spec.md) records settled forms.
+   verification, persistence and lowering. The
+   [source-decision inventory](proposals/grammar-open-questions.md) has canonical
+   redirects for all numbered choices. Its deferred designs and separate
+   schema/API/ABI work remain explicit; this is not compiler completeness.
+   The [grammar](grammar-spec.md) records settled forms.
 2. Refine concrete library proposals. Candidate signatures and contracts do
    not imply parser, compiler, runtime or library support.
 
@@ -51,6 +52,11 @@ prerequisite has already been met.
    sharing, failure/recovery, initialization effects and load-scope cleanup.
    Do not infer sharing permission from `static` or adopt source forms without
    their state, lifetime and publication machinery.
+   Preserve uniform generic/concrete reference matching and supply checked
+   runtime type evidence/generic execution before adopting runtime captures.
+   General source catches/filters require incremental post-inner-cleanup
+   selection, not reuse of the bounded Windows first-pass discriminator as an
+   authored predicate.
 3. **Full runtime/structured contracts — conditions and constants.** Specify
    published/static conditions and required literal/constant domains, including
    proof/effect limits, before claiming general proof execution.

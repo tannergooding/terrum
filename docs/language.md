@@ -208,8 +208,9 @@ contextual multi-output matching view of one call; the view retains status
 correlations and never reads vacant outputs to construct an ordinary tuple.
 Ignored live owners still require cleanup. Ordinary value bindings copy only
 when the type permits it; shared handles preserve access and rooting, while
-value-type bindings do not acquire hidden aliases. Reference binding and
-ownership transfer require explicit operations. Pattern observations are
+value-type bindings do not acquire hidden aliases. Matching a reference or
+pointer preserves its existing form and dependencies; creating a reference or
+transferring ownership requires an explicit operation. Pattern observations are
 once per member path within an attempted arm, fresh in later attempts, with
 ordinary effects and failures; optimization must preserve the memory/side-effect
 contract. Matching does not implicitly consume a unique source before arm
@@ -223,8 +224,10 @@ specializations do not introduce status/payload ambiguity. Matching follows
 declared per-output availability, including initialized failure outputs.
 Ordinary `when` expressions provide member/relational conditions; dedicated
 pattern syntax and pattern `where` are deferred. Explicit `ref<var>` and
-`write ref<var>` patterns request ordinary checked borrowing, not hidden
-value-type copies or storage narrowing. Generic type-pattern slots distinguish
+`write ref<var>` patterns match existing compatible references, not hidden
+reference formation, extra indirection, value-type copies or storage narrowing.
+`x is T t` follows the same rules for concrete and generic `T`, including
+reference/pointer forms permitted by constraints. Generic type-pattern slots distinguish
 wildcard `_` from inferred `var`/`var?`: the latter filter non-nullable versus
 either argument type, not contained values. Named forms such as
 `List<var? T> list` capture the actual complete type as `T` and bind `list`
@@ -232,9 +235,11 @@ separately as a value. `typeof(T)` permits type inspection; a recognized
 exact identity test refines `T` on the proven path without a conversion.
 Each slot denotes one argument of the selected constructor, not a pack or
 higher-kinded application. Ordinary generic `_` inference remains distinct
-from pattern wildcard matching. General application/constraint binders,
-runtime-only type-witness representation and richer-status/object registration
-remain separate work.
+from pattern wildcard matching. Runtime-only captured types use checked
+evidence and ordinary generic constraints/witnesses with supported execution;
+capture does not silently box or generate code. General application/constraint
+binders, witness representation and richer-status/object registration remain
+separate work.
 This replaces target `some` pattern spelling, not the compiler's current
 `is some` support or its existing whole-type `var` inference.
 
@@ -963,6 +968,16 @@ survived. Fail-fast termination promises no cleanup, so durable-state
 protocols must tolerate abrupt termination/restart; `finally` and destructors
 are not crash-consistency mechanisms. On defined unwinding paths, ownership,
 conditional publication and promised `NoThrow` cleanup still apply.
+
+Checked handler selection unwinds to each candidate's still-live scope before
+testing its catches and filters. Exited inner scopes have completed cleanup;
+their effects and failures can therefore affect selection. A false filter
+continues to later catches at that scope; if none matches, unwinding proceeds
+outward. The selected body is entered only after type/filter success. Pending
+failure state remains valid for filters, without retaining invalid inner-frame
+references or deferring cleanup effects until a match. This is not a
+transaction or a pre-unwind first-pass filter search. Exact transport and
+native unwind ABI remain specification work.
 
 On checked unwinding, an authored `finally` runs before the pending failure
 continues to its next handler. If that `finally` faults, the new failure

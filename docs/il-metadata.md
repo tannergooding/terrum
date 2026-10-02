@@ -158,6 +158,31 @@ instance fields/methods, silently skip policy attributes, or substitute the
 host's static-constructor timing and unload behavior. Concrete schemas and
 runtime state/ABI remain separate specification work.
 
+## Pattern evidence and handler selection: encoding pending
+
+The [source pattern and catch contracts](grammar-spec.md#33-statements-and-local-declarations)
+use uniform concrete/generic type matching and incremental post-unwind handler
+selection. They require semantic records beyond the current bounded encoding;
+no new operation tags, flags, row layouts or artifact revision are assigned.
+
+Runtime-only captured type arguments preserve complete type identity,
+qualification, declared constraints/witnesses and successful-path scope.
+Execution requires compatible retained specialization, shared generic code or
+another explicitly supported path, with its ordinary access, ownership,
+backing, root and load-lifetime contracts. A witness is not an implicit box,
+permission for arbitrary runtime instantiation or authority to generate code.
+Reference/pointer matching preserves existing forms rather than manufacturing
+indirection or deriving facts from a dependency's private representation.
+
+Handler records must preserve candidate scopes, source-order catch tests,
+filter bodies, live failure payload/dependencies and inner cleanup boundaries.
+Transport preserves pending failure and causal replacement while scopes retire.
+An imported contract cannot substitute host pre-unwind filter timing, swallow
+filter failures or replay cleanup. Source consumers check these requirements;
+unsupported retained semantics reject rather than selecting another pattern
+or silently accepting a different exception ABI. Concrete witness/transport
+encoding and target runtime integration remain specification work.
+
 ## Format identity and revision scope
 
 `TRRM` is the format identifier, with ASCII signature bytes `54 52 52 4D`.
@@ -1125,6 +1150,7 @@ following byte-level contracts:
 | Encoding and revisions | Future version/feature policy and reader compatibility rules. The approved current `(1, 0)` design accepts only its registered semantic forms but is not a released schema. |
 | Declarations | Resource references, generic/witness exportability, further type/field/layout flags, richer qualifier/contract clauses and their validation. Module identity and export-key equality are specified; assigning a stable key to a source declaration is a writer policy. |
 | Static storage | Loaded closed-type groups/lazy units, ordered initialization, constructor policy/primary ownership, initialization effects, sharing/phase authority, failure/recovery and cleanup/unload records. No current `(1, 0)` row or flag supplies this encoding. |
+| Patterns and handlers | Runtime captured-type evidence/constraints/code availability, qualified reference matching, live candidate/filter scopes, pending failure/causal replacement and post-inner-cleanup handler selection. |
 | Executable bodies | Beyond the [narrow executable subset and other assigned decode shapes](il-instruction-set.md#executable-subset-versus-assigned-decode-shapes): output places, exceptional handlers/cleanup, loans, roots, witness bindings and their precise verifier rules. |
 | Limits | Per-record and per-artifact sizes, nesting and work budgets, allocation limits and canonical encoding requirements. |
 | Unknown data | Kind-specific extension schemas, reserved values and feature negotiation; generic skip, remap and discard policies are assigned above. |

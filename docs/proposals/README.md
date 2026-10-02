@@ -3,15 +3,18 @@
 The [source grammar](../grammar-spec.md), [metadata design](../il-metadata.md)
 and bounded [coded instruction set](../il-instruction-set.md) are approved
 target designs, not claims of implementation or released formats. The
-documents in this directory contain unapproved choices. An **accepted
+proposal documents in this directory contain unapproved choices; the numbered
+source-review inventory preserves canonical redirects to settled contracts.
+An **accepted
 direction** settles a semantic boundary only; adjacent grammar and APIs remain
 open unless explicitly approved.
 
 - [Core-library proposal](core-library-reference.md) records candidate
   declarations, dependency layers and unresolved API contracts.
-- [Remaining source-language questions](grammar-open-questions.md) collects
-  unresolved source decisions, recommendations and comparisons; it is not an
-  implementation backlog.
+- [Source-language decision inventory](grammar-open-questions.md) preserves all
+  numbered review links and explicit deferred/schema/API boundaries. No
+  numbered source questions remain; this is not an implementation backlog or
+  a claim that all language/library work is complete.
 - [Static-proof and constant-evaluation proposal](static-proof-and-constant-evaluation.md)
   collects candidate minimum proof rules, effects and evaluator budgets;
   the portable-floor policy itself is accepted.

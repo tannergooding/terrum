@@ -35,6 +35,13 @@ to hidden property storage. No new implicit conversion chain is introduced.
 The complete `T` is preserved; a readonly reference to a handle slot does not
 remove write authority from the handle value it contains.
 
+Pattern matching does not invoke parameter materialization or reference
+formation. `x is T t` follows the same matching/binding rules for concrete and
+generic `T`, including pointer and reference forms admitted by constraints.
+An existing reference retains its referent, authority and dependencies;
+matching a non-reference value cannot manufacture a borrow of its slot.
+Explicit formation must occur before matching when required.
+
 The following is a semantic expansion, not proposed invocation grammar:
 
 ```text
@@ -431,6 +438,18 @@ Searching the stack for a handler is not execution of a method's normal
 epilogue. Neither handler search nor unwind itself runs `ensure`. A check after
 the authored body is also outside that body's `try`/`catch`; only an enclosing
 caller recovery scope could handle its propagated failure.
+
+On checked propagation, unwind exited inner scopes to the next candidate
+handler's still-live scope before evaluating that scope's catches and filters
+in source order. Cleanup effects and any replacement failure precede selection;
+ordinary causal chaining preserves the earlier cause. A false filter tests
+the next catch, or continues outward unwinding if none matches. A successful
+type/filter match enters the body without first unwinding past that candidate.
+Filters use valid pending-failure and live-scope state, not references into
+retired frames. Their side effects are not rolled back on false or failure,
+and completed cleanup is never replayed to restart selection. Committing to a
+handler is not a publication transaction for the exception or cleanup effects.
+Fail-fast policy remains separate and promises no cleanup.
 
 Postconditions are ordinary code in the postcondition phase. A false predicate
 fails there and follows ordinary failure/unwinding; predicate evaluation that
