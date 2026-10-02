@@ -133,7 +133,7 @@ The current scanner is version 8/schema 8; it appends diagnostic kinds 11/12
 for invalid/unsupported maximal punctuation runs to the prior diagnostic
 catalog. Earlier raw records remain readable where compatible, while current
 snapshot adapters reject forged framing, invalid escapes and conflicting
-classification. The bounded scalar frontend's projections through v69 share a
+classification. The bounded scalar frontend's projections through v70 share a
 392-word buffer and enforce the documented limits: 16,384 UTF-16 source units, 64 tokens,
 eight total local identities including hidden discards, 12 statement records,
 32 expression nodes, three parameters, 16 expression-recursion levels, six
@@ -818,6 +818,16 @@ between each bit and the source `out` keyword, then creates mutable output
 variables for the shared verifier. Hosted Boolean-return and definite
 assignment/publication rules remain authoritative. This bounded declaration
 support does not add general `out` call-site or `init ref<T>` migration.
+
+Projection v70 adds a direct self-call expression for the one projected
+function. Value arguments retain declaration order; `out` parameters accept
+only existing mutable local or output-parameter destinations, audited by the
+reader before lowering to a recursive `BoundCall`. Node operation 102 stores
+the argument-root indexes and count; operation 103 stores an existing output
+slot. Shared verification remains responsible for conditional output
+publication. Other function targets, `out var` declarations and `init ref<T>`
+call arguments remain outside this bounded subset; this is not general
+call-site migration.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

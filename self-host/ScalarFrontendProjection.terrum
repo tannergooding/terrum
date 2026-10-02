@@ -75,6 +75,7 @@ namespace Terrum.CodeAnalysis;
 // Version 67 adds kind 34 for a catch region's optional finally body.
 // Version 68 adds kinds 35 and 36 for static require and ensure proofs.
 // Version 69 uses header word 16 as a parameter out-mode bitmask.
+// Version 70 adds bounded direct self-call expressions and existing out targets.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -170,6 +171,7 @@ bool TryPublishScalarFrontend()
         if (HasScalarFrontendStatement(34)) { Host.Frontend[0] = 67; }
         if (HasScalarFrontendStatement(35) || HasScalarFrontendStatement(36)) { Host.Frontend[0] = 68; }
         if (result.OutParameterMask != 0) { Host.Frontend[0] = 69; }
+        if (HasScalarFrontendOperation(102)) { Host.Frontend[0] = 70; }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {

@@ -375,6 +375,13 @@ tokens and lowers it to the shared verifier as a mutable output parameter.
 Hosted Boolean-return and definite-publication rules still apply; general
 `out` call sites and `init ref<T>` migration remain scheduled.
 
+Projection v70 adds direct calls from the one projected function to itself,
+including existing mutable local or output-parameter destinations for `out`
+arguments. The reader audits the function name, argument order and modes, then
+lowers the expression to the shared verifier/emitter as a recursive call.
+Other call targets, `out var` declarations and `init ref<T>` arguments remain
+outside this subset; it does not complete general `out` call-site migration.
+
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer

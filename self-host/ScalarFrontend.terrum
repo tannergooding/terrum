@@ -120,6 +120,7 @@ mut class ScalarFrontendState
     private mut int32 _thirdType;
     private mut int32 _parameterCount;
     private mut int32 _outParameterMask;
+    private mut int32 _functionReturnType;
     private mut bool _isPublic;
     private mut int32 _localCount;
     private mut int32 _activeLocals;
@@ -143,6 +144,7 @@ mut class ScalarFrontendState
         _thirdType = 0;
         _parameterCount = 0;
         _outParameterMask = 0;
+        _functionReturnType = 0;
         _isPublic = false;
         _localCount = 0;
         _activeLocals = 0;
@@ -1447,6 +1449,7 @@ mut class ScalarFrontendState
             return false;
         }
         returnType = selected;
+        _functionReturnType = selected;
         name = function.Range;
         _function = function;
         return true;
@@ -2786,6 +2789,97 @@ mut class ScalarFrontendState
         return false;
     }
 
+    private mut bool ParseTreeSelfCall(Token functionName, int32 depth, out int32 node)
+    {
+        if (_functionReturnType == 0 || !SameTokenSpelling(_function, functionName)
+            || IsParameterName(functionName))
+        {
+            FailAt(1, functionName.Range);
+            return false;
+        }
+        for (mut int32 local = 0; local < _localCount; local = local + 1)
+        {
+            if (!IsActiveLocal(local)) { continue; }
+            int32 offset = 300 + local * 4;
+            require SourceRange.TryCreate(Host.Frontend[offset + 2],
+                Host.Frontend[offset + 3], out var localName);
+            if (SameTokenSpelling(new Token(2, localName), functionName))
+            {
+                FailAt(1, functionName.Range);
+                return false;
+            }
+        }
+        require _tokens.TryGet(_at + 1, out var opening);
+        if (!TokensAttach(functionName, opening))
+        {
+            FailAt(1, opening.Range);
+            return false;
+        }
+        _at = _at + 2;
+        mut int32 first = -1;
+        mut int32 second = -1;
+        mut int32 third = -1;
+        for (mut int32 ordinal = 0; ordinal < _parameterCount; ordinal = ordinal + 1)
+        {
+            if (ordinal != 0 && !Take(53, out var comma))
+            {
+                return false;
+            }
+            mut int32 expectedType = _firstType;
+            if (ordinal == 1) { expectedType = _secondType; }
+            if (ordinal == 2) { expectedType = _thirdType; }
+            mut int32 argument = -1;
+            if (IsOutParameter(ordinal + 1))
+            {
+                if (!Take(15, out var outputKeyword)
+                    || !Take(2, out var outputName)
+                    || !TryResolveParameter(outputName, out var slot, out var type))
+                {
+                    return false;
+                }
+                mut bool writable = false;
+                if (slot <= _parameterCount)
+                {
+                    writable = IsOutParameter(slot);
+                }
+                else
+                {
+                    int32 flags = Host.Frontend[300 + (slot - _parameterCount - 1) * 4 + 1];
+                    writable = (flags & 1) != 0;
+                }
+                if (type != expectedType || !writable)
+                {
+                    FailAt(2, outputName.Range);
+                    return false;
+                }
+                if (!AddTreeNode(103, expectedType, outputKeyword.Range.Start,
+                    outputName.Range.End, slot, -1, 0, 0, out argument))
+                {
+                    return false;
+                }
+            }
+            else if (!ParseTreeExpression(expectedType, 1, depth + 1, out argument))
+            {
+                return false;
+            }
+            else if (TreeWord(argument, 1) != expectedType)
+            {
+                node = -1;
+                FailTreeType(argument);
+                return false;
+            }
+            if (ordinal == 0) { first = argument; }
+            else if (ordinal == 1) { second = argument; }
+            else { third = argument; }
+        }
+        if (!Take(47, out var close))
+        {
+            return false;
+        }
+        return AddTreeNode(102, _functionReturnType, functionName.Range.Start,
+            close.Range.End, first, second, third, _parameterCount, out node);
+    }
+
     private mut bool ParseTreePrefix(int32 expected, int32 depth, out int32 node)
     {
         if (depth >= 16)
@@ -2806,6 +2900,10 @@ mut class ScalarFrontendState
             if (!TryGetScalarType(token, out var target)
                 || target == 5)
             {
+                if (SameTokenSpelling(_function, token))
+                {
+                    return ParseTreeSelfCall(token, depth, out node);
+                }
                 FailAt(1, token.Range);
                 return false;
             }
