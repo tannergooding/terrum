@@ -154,6 +154,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e0cf111` | Native scalar `out` parameter modes and call destinations in multi-function snapshots, projection 77 |
 | `4c17397` | Native scalar multi-function snapshots with `[DoesNotReturn]` contracts and call continuation, projection 76 |
 | `5e30392` | Native scalar calls to other void functions as expression statements, projection 75 |
 | `3e7fcf8` | Native scalar multi-function snapshots and source-order scalar call targets, projection 74 |
