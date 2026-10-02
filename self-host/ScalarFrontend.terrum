@@ -2311,8 +2311,8 @@ mut class ScalarFrontendState
         require _tokens.TryGet(_at, out var body);
         if (body.Kind == 82)
         {
-            _hasStructuredStatement = true;
             if (_structuredReturnType != 0) { FailAt(1, body.Range); return false; }
+            _hasStructuredStatement = true;
             _at = _at + 1;
             require _tokens.TryGet(_at, out var statement);
             if (statement.Kind == 41)
