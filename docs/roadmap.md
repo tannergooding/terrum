@@ -137,6 +137,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `3c7e65d` | Native scalar `out` parameter declarations with source-audited projection 69 and hosted definite-publication verification |
 | `b4e477a` | Native scalar conditional const initializers with lazy branch evaluation, projection 64 |
 | `daadff9` | Native scalar short-circuit static proof folding, projection 68 |
 | `1f4635b` | Native scalar constant-conditional static proof folding, projection 68 |
