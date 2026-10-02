@@ -2155,6 +2155,41 @@ public static class ScalarFrontendHost
         return BindLibraryCore(source, result, policy);
     }
 
+    private static BoundExpression FoldStaticProofExpression(BoundExpression expression)
+    {
+        switch (expression)
+        {
+            case BoundConditional conditional:
+            {
+                var condition = FoldStaticProofExpression(conditional.Condition);
+                if (condition is BoundConstant { Type: PrimitiveType.Bool } value)
+                {
+                    var selected = FoldStaticProofExpression(value.Value != 0
+                        ? conditional.WhenTrue : conditional.WhenFalse);
+                    return selected is BoundConstant constant && constant.Type == conditional.Type
+                        ? constant with { Span = conditional.Span }
+                        : expression;
+                }
+                return expression;
+            }
+            case BoundUnary unary:
+                return Binder.FoldScalarConstant(unary with {
+                    Operand = FoldStaticProofExpression(unary.Operand),
+                });
+            case BoundBinary binary:
+                return Binder.FoldScalarConstant(binary with {
+                    Left = FoldStaticProofExpression(binary.Left),
+                    Right = FoldStaticProofExpression(binary.Right),
+                });
+            case BoundCast cast:
+                return Binder.FoldScalarConstant(cast with {
+                    Operand = FoldStaticProofExpression(cast.Operand),
+                });
+            default:
+                return expression;
+        }
+    }
+
     private static BoundProgram BindLibraryCore(SourceText source, ScalarFrontendResult result,
         BoundRuntimePolicy policy)
     {
@@ -2300,7 +2335,7 @@ public static class ScalarFrontendHost
             foreach (var proof in result.Statements.Where(static statement => statement.Kind is 35 or 36))
             {
                 if (treeExpressions is null
-                    || treeExpressions[proof.Root] is not BoundConstant {
+                    || FoldStaticProofExpression(treeExpressions[proof.Root]) is not BoundConstant {
                         Type: PrimitiveType.Bool, Value: 1,
                     })
                 {

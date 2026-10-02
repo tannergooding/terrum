@@ -807,6 +807,8 @@ only proven-true conditions before runtime verification and emission. A
 `static require` may refer to earlier immutable scalar constants; `static
 ensure` must be closed and cannot read locals or parameters. False or
 unestablished proofs and `ConstEval` calls remain outside this frontend subset.
+The proof folder selects a conditional arm only when its condition is constant
+and does not evaluate the unselected arm.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed
