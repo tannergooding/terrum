@@ -412,7 +412,7 @@ V74 admits only scalar-returning callees, including when the caller returns
 void. It does not add non-self void calls, namespaces/imports, members,
 templates, external bindings, callable values, overload/conversion search,
 named/default/params arguments, reference/output parameters or
-`[DoesNotReturn]` support in multi-function snapshots. Hosted verification and
+`[DoesNotReturn]` support in v74/v75 multi-function snapshots. Hosted verification and
 emission remain authoritative for execution under both runtime policies;
 source-free TRRM checked exceptions and bootstrap gates are unchanged.
 
@@ -422,6 +422,14 @@ allowed only as direct kind-37 expression-statement roots, including supported
 `for` clauses; they are still rejected in value contexts. The reader checks
 the callee return type and statement-root ownership before lowering. Version
 74 and single-function v1–v73 behavior remain unchanged.
+
+Program projection v76 admits the existing void-only `[DoesNotReturn]`
+contract in complete snapshots. Its exact declaration effect is source-audited,
+its body is rechecked by the hosted verifier, and direct kind-37 calls preserve
+the contract's normal-completion effect. V76 is selected only when a declaration
+uses the contract; ordinary void calls still require statement roots. This
+does not imply `[NoThrow]`, change v74/v75 payloads or add source-free TRRM
+checked-exception support.
 
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.

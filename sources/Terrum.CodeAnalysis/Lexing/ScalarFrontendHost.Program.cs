@@ -19,11 +19,11 @@ public static partial class ScalarFrontendHost
     public const int ProgramFrameWordCount = 428;
     public const int MaximumFunctions = 10;
 
-    private sealed record ProgramDeclaration(string Name, int ReturnType,
+    private sealed record ProgramDeclaration(string Name, int ReturnType, int Effects,
         ImmutableArray<int> ParameterTypes, int TokenStart, int TokenEnd, TextSpan Span, TextSpan BodySpan);
 
     private sealed record ProgramReadContext(ImmutableArray<ProgramDeclaration> Declarations, int[] Targets,
-        bool AllowVoidCalls)
+        bool AllowVoidCalls, bool AllowDoesNotReturn)
     {
         public ProgramDeclaration Callee(int node)
         {
@@ -36,7 +36,7 @@ public static partial class ScalarFrontendHost
         }
     }
 
-    /// <summary>Reads a complete v74/v75 declaration snapshot, or an unchanged v1–v73 result.</summary>
+    /// <summary>Reads a complete v74–v76 declaration snapshot, or an unchanged v1–v73 result.</summary>
     public static ScalarFrontendResult ReadResult(SourceText source, ReadOnlySpan<byte> bytes,
         ReadOnlySpan<byte> programBytes, BoundRuntimePolicy policy)
         => ReadProgram(source, bytes, programBytes, policy).Projection;
@@ -63,7 +63,7 @@ public static partial class ScalarFrontendHost
         {
             words[i] = BinaryPrimitives.ReadInt32LittleEndian(programBytes.Slice(i * sizeof(int), sizeof(int)));
         }
-        if (words[0] is not (74 or 75) || words[1] != 1 || words[2] is < 2 or > MaximumFunctions
+        if (words[0] is not (74 or 75 or 76) || words[1] != 1 || words[2] is < 2 or > MaximumFunctions
             || words[3] != 0 || source.Length > 16_384
             || words.AsSpan(4 + words[2] * ProgramFrameWordCount).IndexOfAnyExcept(0) >= 0)
         {
@@ -101,10 +101,12 @@ public static partial class ScalarFrontendHost
                     throw InvalidResult();
                 }
             }
-            var context = new ProgramReadContext(declarations, targets, words[0] == 75);
+            var context = new ProgramReadContext(declarations, targets, words[0] >= 75, words[0] == 76);
             var function = ReadResultCore(FunctionSource(source, declaration.Span), payload, policy, context);
             if (!function.IsValid || function.ReturnType != declaration.ReturnType
                 || function.ParameterCount != declaration.ParameterTypes.Length
+                || function.IsNoThrow != ((declaration.Effects & 2) != 0)
+                || function.DoesNotReturn != ((declaration.Effects & 4) != 0)
                 || SourceName(source, function.Name) != declaration.Name)
             {
                 throw InvalidResult();
@@ -120,7 +122,13 @@ public static partial class ScalarFrontendHost
                 hasVoidCall |= node.Operation == 105 && node.Type == 0;
             }
         }
-        if ((words[0] == 75) != hasVoidCall)
+        var hasDoesNotReturn = false;
+        foreach (var declaration in declarations)
+        {
+            hasDoesNotReturn |= (declaration.Effects & 4) != 0;
+        }
+        var expectedVersion = hasDoesNotReturn ? 76 : hasVoidCall ? 75 : 74;
+        if (words[0] != expectedVersion)
         {
             throw InvalidResult();
         }
@@ -146,8 +154,21 @@ public static partial class ScalarFrontendHost
         var functions = ImmutableArray.CreateBuilder<BoundFunction>(results.Length);
         for (var i = 0; i < results.Length; i++)
         {
+            var hasDoesNotReturnCallStatement = false;
+            foreach (var statement in results[i].Statements)
+            {
+                if (statement.Kind == 37
+                    && results[i].Nodes[statement.Root].Operation == 105
+                    && (declarations[results[i].CallTargets[statement.Root]].Effects & 4) != 0)
+                {
+                    hasDoesNotReturnCallStatement = true;
+                    break;
+                }
+            }
+            var omitImplicitReturn = hasDoesNotReturnCallStatement && results[i].TrueRoot < 0;
             var function = BindLibraryCore(FunctionSource(source, declarations[i].Span),
-                results[i], policy, verify: false).Functions[0];
+                results[i], policy, verify: false,
+                omitImplicitReturn: omitImplicitReturn).Functions[0];
             functions.Add(function with {
                 Span = declarations[i].Span,
                 Body = function.Body with { Span = declarations[i].BodySpan },
@@ -185,13 +206,21 @@ public static partial class ScalarFrontendHost
             var effects = 0;
             while (tokens[at].Kind == TokenKind.OpenBracket)
             {
-                if (!Take(TokenKind.OpenBracket) || at >= tokens.Length
-                    || tokens[at].Text != "NoThrow" || effects != 0
+                if (!Take(TokenKind.OpenBracket) || at >= tokens.Length)
+                {
+                    throw InvalidResult();
+                }
+                var effect = tokens[at].Text switch {
+                    "NoThrow" => 2,
+                    "DoesNotReturn" => 4,
+                    _ => 0,
+                };
+                if (effect == 0 || (effects & effect) != 0
                     || !Take(TokenKind.Identifier) || !Take(TokenKind.CloseBracket))
                 {
                     throw InvalidResult();
                 }
-                effects = 2;
+                effects |= effect;
             }
             if (tokens[at].Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword) { at++; }
             var returnType = ScalarCode(tokens[at].Text, allowVoid: true);
@@ -227,6 +256,10 @@ public static partial class ScalarFrontendHost
             {
                 throw InvalidResult();
             }
+            if ((effects & 4) != 0 && returnType != 0)
+            {
+                throw InvalidResult();
+            }
             TextSpan bodySpan;
             if (Take(TokenKind.Arrow))
             {
@@ -257,7 +290,7 @@ public static partial class ScalarFrontendHost
                 throw InvalidResult();
             }
             if (declarations.Count == MaximumFunctions) { throw InvalidResult(); }
-            declarations.Add(new ProgramDeclaration(name.Name, returnType, parameterTypes.ToImmutable(),
+            declarations.Add(new ProgramDeclaration(name.Name, returnType, effects, parameterTypes.ToImmutable(),
                 start, at, new TextSpan(tokens[start].Span.Start,
                     tokens[at - 1].Span.End - tokens[start].Span.Start), bodySpan));
         }

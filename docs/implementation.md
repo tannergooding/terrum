@@ -865,9 +865,10 @@ a scalar. Single-function projections, including v72/v73 output and void
 self-call statements, retain their existing shapes and behavior.
 
 The appended `Host.FrontendProgram` buffer at index 11 has 4,284 `int32`
-words. Its four-word header is `(74 or 75, 1, function count, 0)`. Version 75
-is selected only when a void-target call uses the new statement position. Ten
-source-order frames of 428 words follow:
+words. Its four-word header is `(version, 1, function count, 0)`, with version
+74, 75 or 76. Version 75 is selected only when a void-target call
+uses the new statement position; version 76 is selected when any declaration
+uses `[DoesNotReturn]`. Ten source-order frames of 428 words follow:
 
 | Frame words | Contents |
 |---|---|
@@ -897,12 +898,12 @@ function zero, and library builds export the public declarations.
 The source bound remains 16,384 UTF-16 units and 64 tokens including EOF.
 Ten frames derive from `floor((64 - 1) / 6)`: even an empty void declaration
 needs six tokens. The existing 32-node, 12-statement and eight-local capacities
-apply to each function; no verifier/emitter budgets change. Multi-function
-snapshots exclude reference/output parameters, named/default/params arguments,
-overload/conversion search, namespaces/imports, templates/members, external
-bindings, callable values, non-self void-call support and `[DoesNotReturn]`
-extension. This adds source frontend support, not source-free TRRM
-checked-exception Bodies or a bootstrap-gate claim.
+apply to each function; no verifier/emitter budgets change. V74 excludes
+non-self void-call support, and v74/v75 exclude `[DoesNotReturn]` declarations.
+All versions exclude reference/output parameters, named/default/params
+arguments, overload/conversion search, namespaces/imports, templates/members,
+external bindings and callable values. This adds source frontend support, not
+source-free TRRM checked-exception Bodies or a bootstrap-gate claim.
 
 Program projection v75 retains the same framing and scalar-call target table,
 and selects header version 75 only when an operation-105 call targets a void
@@ -912,6 +913,21 @@ invalid as values, arguments or nested expressions. The independent reader
 checks the target return type and statement-root ownership before lowering.
 Version 74 continues to admit scalar-returning callees only, and single-body
 v1–v73 shapes are unchanged.
+
+Program projection v76 retains the same framing and admits the existing
+`[DoesNotReturn]` contract on void declarations, including its
+independent combination with `[NoThrow]`. A v76 header is selected whenever a
+function declares `[DoesNotReturn]`; the reader audits the exact declaration
+effects and the shared verifier rechecks each body for absence of reachable
+normal completion. Calls to such functions remain zero-typed operation-105
+nodes rooted directly in kind-37 expression statements. The source producer
+uses the inventoried target contract to account for those calls when checking
+structured normal completion; the host reader independently resolves the
+target and the shared verifier/emitter retain execution authority. V74/v75
+still reject these declarations, and v76 without one is rejected.
+`[DoesNotReturn]` does not imply `[NoThrow]`; other call positions,
+output/reference parameters, general binding and source-free TRRM
+checked-exception Bodies remain outside this projection.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

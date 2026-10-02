@@ -2306,9 +2306,14 @@ mut class ScalarFrontendState
             for (mut int32 index = 0; index < _statementCount; index = index + 1)
             {
                 int32 kind = TreeStatementKind(index);
-                if (kind == 11 || kind == 12 || kind == 21) { hasTerminatingStatement = true; }
+                if (kind == 11 || kind == 12 || kind == 21)
+                {
+                    hasTerminatingStatement = true;
+                }
             }
-            if (_error == 0 && !HasStructuredCompletion(returnType, hasTerminatingStatement))
+            // The host rechecks v76 completion with the complete call-target table.
+            if (_error == 0 && Host.FrontendProgram[0] != 76
+                && !HasStructuredCompletion(returnType, hasTerminatingStatement))
             {
                 Fail(1);
             }
@@ -2839,7 +2844,7 @@ mut class ScalarFrontendState
             int32 header = 4 + callee * 428 + 4;
             argumentCount = Host.FrontendProgram[header + 6];
             returnType = Host.FrontendProgram[header + 5];
-            if (returnType == 0 && Host.FrontendProgram[0] != 75)
+            if (returnType == 0 && Host.FrontendProgram[0] < 75)
             {
                 FailAt(1, functionName.Range);
                 return false;

@@ -28,9 +28,11 @@ The bounded Terrum-authored scalar source frontend supports v74 complete
 global-function snapshots and source-order scalar call targets, including
 forward and recursive calls with up to three by-value scalar arguments.
 Projection v75 additionally permits calls to void functions only as direct
-expression-statement roots. Independent source auditing precedes the existing
-hosted verifier/emitter. General binding/imports, output/reference call
-migration and bootstrap compilation remain pending; this does not extend
+expression-statement roots. Projection v76 admits the existing void-only
+`[DoesNotReturn]` contract in complete snapshots and carries its verified
+continuation effect across those calls. Independent source auditing precedes
+the existing hosted verifier/emitter. General binding/imports, output/reference
+call migration and bootstrap compilation remain pending; this does not extend
 source-free TRRM checked exceptions.
 
 ## Planned work (priority order)
@@ -146,6 +148,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| pending | Native scalar multi-function snapshots with `[DoesNotReturn]` contracts and call continuation, projection 76 |
 | `5e30392` | Native scalar calls to other void functions as expression statements, projection 75 |
 | `3e7fcf8` | Native scalar multi-function snapshots and source-order scalar call targets, projection 74 |
 | `296658a` | Native scalar void direct self-call expression statements, projection 73 |

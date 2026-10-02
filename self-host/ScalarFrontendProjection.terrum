@@ -84,6 +84,8 @@ namespace Terrum.CodeAnalysis;
 // target table defined in ScalarFrontendProgram; the legacy buffer is zero.
 // Program version 75 uses the same framing for void-target operation-105 nodes,
 // permitted only as roots of kind-37 expression statements.
+// Program version 76 admits void-only DoesNotReturn declarations and tracks
+// their target contracts when proving call-statement continuation.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)

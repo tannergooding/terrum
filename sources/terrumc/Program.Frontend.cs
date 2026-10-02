@@ -459,6 +459,7 @@ internal static partial class Program
                             projectionVersion = frontend.ReturnType == 0 ? 73 : 72;
                         }
                         var programProjectionVersion = frontend.Functions.IsDefault ? projectionVersion
+                            : frontend.Functions.Any(static function => function.DoesNotReturn) ? 76
                             : frontend.Functions.Any(static function => function.Nodes.Any(
                                 static node => node.Operation == 105 && node.Type == 0)) ? 75 : 74;
                         writer.WriteNumber("projectionVersion", programProjectionVersion);

@@ -30,6 +30,7 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("public int32 Main() { mut int32 n = 0; Sink(n++); return n; } void Sink(int32 value) { }", 1)]
     [InlineData("public int32 Main() { mut int32 n = 0; Sink(n++, n++, n++); return n; } void Sink(int32 a, int32 b, int32 c) { }", 3)]
     [InlineData("public int32 Main() { for (Sink(1); false; Sink(2)) { } return 42; } void Sink(int32 value) { }", 42)]
+    [InlineData("[DoesNotReturn] void Halt() { require false; } public int32 Main() { if (false) { Halt(); } return 42; }", 42)]
     [InlineData("[NoThrow] public void Main() { Step(); } [NoThrow] void Step() { }", 0)]
     [InlineData("public int32 Main() => Next(42); [NoThrow] int32 Next(int32 value) => value;", 42)]
     [InlineData("public int32 Main() { int32 result = Next(41); return result; } int32 Next(int32 value) { return value + 1; }", 42)]
@@ -107,7 +108,7 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("int32 Main() => Next(); void Next() { return; }")]
     [InlineData("int32 Main() => Next(1); int32 Next(out int32 value) => 42;")]
     [InlineData("int32 Main(uint32 value) => Next(value); int32 Next(int32 value) => value;")]
-    [InlineData("int32 Main() => 42; [DoesNotReturn] void Halt() { for (;;) { } }")]
+    [InlineData("[DoesNotReturn] int32 Halt() => 42; int32 Main() => 0;")]
     public async Task ScalarFrontendCrossFunctionRejectsInvalidSourcesAsync(string text)
     {
         var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
@@ -152,6 +153,42 @@ public sealed partial class ManagedScannerComponentTests
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes,
                 programBytes, BoundRuntimePolicy.FailFast));
             BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(offset), previous);
+        }
+    }
+
+    [Theory]
+    [InlineData("public int32 Main() { Halt(true); } [DoesNotReturn] void Halt(bool value) { require false; }")]
+    [InlineData("public int32 Main() { if (true) { Halt(true); } } [DoesNotReturn] void Halt(bool value) { require false; }")]
+    [InlineData("public int32 Main() { Halt(); } [NoThrow][DoesNotReturn] void Halt() { while (true) { } }")]
+    public async Task ScalarFrontendCrossFunctionDoesNotReturnCallSuppressesFallthroughAsync(string text)
+    {
+        var source = SourceText.From(text);
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
+            Assert.Equal(76, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
+            var actual = ScalarFrontendHost.BindLibrary(source, bytes, programBytes, (BoundRuntimePolicy)policy);
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.True(actual.Functions[1].DoesNotReturn);
+            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Main"], policy),
+                NativeEmitter.EmitLibrary(actual, ["Main"], policy));
+
+            foreach (var version in new[] { 74, 75 })
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(programBytes, version);
+                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
+                    bytes, programBytes, (BoundRuntimePolicy)policy));
+            }
+            BinaryPrimitives.WriteInt32LittleEndian(programBytes, 76);
+
+            var effectOffset = (4 + ScalarFrontendHost.ProgramFrameWordCount + 4 + 2) * sizeof(int);
+            var effects = BinaryPrimitives.ReadInt32LittleEndian(programBytes.AsSpan(effectOffset));
+            BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(effectOffset), effects & ~4);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
+                bytes, programBytes, (BoundRuntimePolicy)policy));
+            BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(effectOffset), effects);
         }
     }
 

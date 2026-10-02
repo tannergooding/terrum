@@ -61,7 +61,8 @@ public static partial class ScalarFrontendHost
         }
         if (context is not null)
         {
-            if (words[0] != 74 || words[16] != 0 || (words[2] & 4) != 0)
+            if (words[0] != 74 || words[16] != 0
+                || (words[2] & 4) != 0 && !context.AllowDoesNotReturn)
             {
                 throw InvalidResult();
             }
@@ -490,6 +491,10 @@ public static partial class ScalarFrontendHost
                 throw InvalidResult();
             }
             var tree = nodes.MoveToImmutable();
+            var hasDoesNotReturnCallStatement = context?.AllowDoesNotReturn == true
+                && orderedStatements.Any(statement => statement.Kind == 37
+                    && tree[statement.Root].Operation == 105
+                    && (context.Callee(statement.Root).Effects & 4) != 0);
             var conditionRoot = words[38];
             var trueRoot = words[39];
             var falseRoot = words[40];
@@ -500,7 +505,8 @@ public static partial class ScalarFrontendHost
                 throw InvalidResult();
             }
             if (structuredBody && words[5] != 0
-                && !orderedStatements.Any(static entry => entry.Kind is 8 or 11 or 12 or 17 or 18 or 21))
+                && !orderedStatements.Any(static entry => entry.Kind is 8 or 11 or 12 or 17 or 18 or 21)
+                && !hasDoesNotReturnCallStatement)
             {
                 throw InvalidResult();
             }
@@ -2434,7 +2440,7 @@ public static partial class ScalarFrontendHost
     }
 
     private static BoundProgram BindLibraryCore(SourceText source, ScalarFrontendResult result,
-        BoundRuntimePolicy policy, bool verify = true)
+        BoundRuntimePolicy policy, bool verify = true, bool omitImplicitReturn = false)
     {
         var variables = ImmutableArray.CreateBuilder<BoundVariable>(result.ParameterCount);
         if (result.ParameterCount > 0)
@@ -2805,7 +2811,8 @@ public static partial class ScalarFrontendHost
                 body.Add(Return(result.WhenFalse));
             }
         }
-        else if (result.ReturnType != 0 && (result.Statements.IsDefaultOrEmpty
+        else if (result.ReturnType != 0 && !omitImplicitReturn
+            && (result.Statements.IsDefaultOrEmpty
             || !result.Statements.Any(static statement => statement.Kind == 8)
                 && (result.TrueRoot >= 0
                     || !result.Statements.Any(static statement => statement.Kind is 11 or 12 or 17 or 18 or 21))))
