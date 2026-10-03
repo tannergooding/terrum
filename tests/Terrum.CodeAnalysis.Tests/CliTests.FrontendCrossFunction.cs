@@ -372,6 +372,93 @@ public sealed partial class CliTests
     }
 
     [Fact]
+    public async Task ScalarFrontendSingleNonBooleanInitReferenceCliUsesProjection81Async()
+    {
+        const string text = "public int32 Fill(int32 seed, init ref<int32> value) { if (seed == 0) { value = 40; return 0; } return Fill(seed - 1, init value); }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var input = Encoding.UTF8.GetBytes(text);
+        foreach (var runtime in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(input, "frontend-component",
+                directory, "-", "--runtime", runtime, "--json");
+            Assert.True(exit == 0, $"{runtime}: {exit}: {output}{error}");
+            using var document = JsonDocument.Parse(output);
+            var result = document.RootElement.GetProperty("result");
+            Assert.Equal(81, result.GetProperty("projectionVersion").GetInt32());
+            Assert.Equal(2, result.GetProperty("initRefParameterMask").GetInt32());
+            Assert.Contains(result.GetProperty("nodes").EnumerateArray(), static node =>
+                node.GetProperty("operation").GetInt32() == 107);
+
+            var path = Path.Combine(Path.GetTempPath(), $"v81-library-{Guid.NewGuid():N}.dll");
+            try
+            {
+                var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
+                    directory, "-", "-o", path, "--runtime", runtime, "--json");
+                Assert.True(buildExit == 0, $"{runtime}: {buildExit}: {buildOutput}{buildError}");
+                var policy = runtime == "fail-fast"
+                    ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions;
+                var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
+                Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+                var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+                Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Fill"], (NativeRuntimePolicy)policy),
+                    await File.ReadAllBytesAsync(path));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ScalarFrontendCrossFunctionNonBooleanAndVoidInitReferenceCliUsesProjection82Async()
+    {
+        const string text = "public int32 Main() { Fill(init var value); SetVoid(init var other); return value + other; } int32 Fill(init ref<int32> value) { value = 40; return 0; } void SetVoid(init ref<int32> value) { value = 2; }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var input = Encoding.UTF8.GetBytes(text);
+        foreach (var runtime in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(input, "frontend-component",
+                directory, "-", "--runtime", runtime, "--json");
+            Assert.True(exit == 0, $"{runtime}: {exit}: {output}{error}");
+            using (var document = JsonDocument.Parse(output))
+            {
+                var result = document.RootElement.GetProperty("result");
+                Assert.Equal(82, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(1, result.GetProperty("functions")[1]
+                    .GetProperty("initRefParameterMask").GetInt32());
+                Assert.Equal(1, result.GetProperty("functions")[2]
+                    .GetProperty("initRefParameterMask").GetInt32());
+            }
+
+            var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
+                directory, "-", "--runtime", runtime, "--json");
+            Assert.Equal(42, runExit);
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+
+            var path = Path.Combine(Path.GetTempPath(), $"v82-library-{Guid.NewGuid():N}.dll");
+            try
+            {
+                var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
+                    directory, "-", "-o", path, "--runtime", runtime, "--json");
+                Assert.True(buildExit == 0, $"{runtime}: {buildExit}: {buildOutput}{buildError}");
+                var policy = runtime == "fail-fast"
+                    ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions;
+                var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
+                Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+                var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+                Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Main"], (NativeRuntimePolicy)policy),
+                    await File.ReadAllBytesAsync(path));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    [Fact]
     public async Task ScalarFrontendCrossFunctionCliSelectsEntryAndExportsInDeclarationOrderAsync()
     {
         const string text = "public int32 Next(int32 value) => value + 1; public int32 Main() => Next(41);";
