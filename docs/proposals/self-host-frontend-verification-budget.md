@@ -100,6 +100,15 @@ expressions. The constant-conditional output-publication regression remains
 within the unchanged visit limit. This is correctness evidence, not a budget
 change or a timing claim.
 
+Optional-pattern feasibility now also recognizes `null` and syntactically
+present optional values, including a coalescing expression whose optional
+operand is a `BoundOptionalLift`. A short-circuit regression with a
+syntactically known-present coalescing result and an output-effectful RHS
+reproduced `TRM3016` before the change and passes under both runtime policies
+now. The presence fact is structural; unknown optional values retain
+conservative feasibility. This is correctness evidence only and does not
+change optional semantics.
+
 During the v78 budget investigation, temporary visit counters measured 100,001
 semantic-analysis visits across 210 functions before the limit failure. In the
 largest function, `ParseExpressionCore`, output-vacating traversal accounted

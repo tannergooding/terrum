@@ -4184,6 +4184,10 @@ public static class SemanticVerifier
             BoundConstant { Type: PrimitiveType.Bool } constant => constant.Value != (result ? 0 : 1),
             BoundUnary { Operator: TokenKind.Bang } unary =>
                 CanBe(unary.Operand, !result, ref remaining, remainingCanBeFacts),
+            BoundIsNull test => KnownOptionalPresence(test.Value) is bool isPresent
+                ? result != isPresent : true,
+            BoundIsSome test => KnownOptionalPresence(test.Value) is bool isPresent
+                ? result == isPresent : true,
             BoundBinary { Operator: TokenKind.AmpersandAmpersand } and => result
                 ? CanBe(and.Left, true, ref remaining, remainingCanBeFacts)
                     && CanBe(and.Right, true, ref remaining, remainingCanBeFacts)
@@ -4205,6 +4209,20 @@ public static class SemanticVerifier
         };
         remainingCanBeFacts[expression] = (byte)(facts | known | (canBe ? possible : 0));
         return canBe;
+    }
+
+    private static bool? KnownOptionalPresence(BoundExpression expression)
+    {
+        if (!ManagedClassTypes.IsOptional(expression.Type))
+        {
+            return null;
+        }
+        return expression switch {
+            BoundNull => false,
+            BoundOptionalLift => true,
+            BoundCoalesce { Optional: BoundOptionalLift } => true,
+            _ => null,
+        };
     }
 
     private static InitializationState Combine(InitializationState left, bool leftFeasible,
