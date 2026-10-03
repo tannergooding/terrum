@@ -18,8 +18,8 @@ internal sealed partial class Binder
     private readonly Dictionary<string, Dictionary<string, PrimitiveType>> _conformances = new(StringComparer.Ordinal);
 
     internal readonly record struct StaticOperatorKey(TokenKind Operator, int Arity);
-    private sealed record StaticProtocol(string Name, StaticOperatorKey Key, bool IsNoThrow, bool HasSelf,
-        SyntaxNode Declaration, SyntaxTree Tree);
+    private sealed record StaticProtocol(string Name, StaticOperatorKey Key, bool IsNoThrow,
+        bool RequiresUnsafeCaller, bool HasSelf, SyntaxNode Declaration, SyntaxTree Tree);
     internal sealed record GenericOperatorConstraint(string Protocol, PrimitiveType? FixedResult,
         int ResultTypeParameterIndex)
     {
@@ -323,6 +323,8 @@ internal sealed partial class Binder
                     child.Kind == SyntaxKind.Attribute && NameText(child) == "[NoThrow]");
                 var noThrowCount = member.Children.OfType<SyntaxNode>().Count(static child =>
                     child.Kind == SyntaxKind.Attribute && NameText(child) == "[NoThrow]");
+                var unsafeModifierCount = member.Children.OfType<SyntaxTokenElement>().Count(static child =>
+                    child.Token.Kind == TokenKind.UnsafeKeyword);
                 var arity = arguments.Length;
                 if (op is not TokenKind operation
                     || !((arity == 1 && IsStaticUnaryOperator(operation))
@@ -342,13 +344,14 @@ internal sealed partial class Binder
                             or TokenKind.InternalKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword)
                     || member.Children.OfType<SyntaxNode>().Any(child =>
                         child.Kind == SyntaxKind.Attribute && NameText(child) != "[NoThrow]")
-                    || noThrowCount > 1)
+                    || noThrowCount > 1 || unsafeModifierCount > 1)
                 {
                     Report("TRM3001", "Static operator protocol signatures must match their operand and result formals and end in ';'.", member.Span);
                     continue;
                 }
                 if (!_protocols.TryAdd(qualified, new StaticProtocol(qualified,
-                    new StaticOperatorKey(operation, arity), noThrow, hasSelf, node, tree)))
+                    new StaticOperatorKey(operation, arity), noThrow, unsafeModifierCount != 0,
+                    hasSelf, node, tree)))
                 {
                     Report("TRM3003", $"Duplicate static operator interface '{qualified}'.", node.Span);
                 }
@@ -908,6 +911,7 @@ internal sealed partial class Binder
                         IsExternal = true,
                         IsStatic = true,
                         IsNoThrow = _protocols[constraint.Protocol].IsNoThrow,
+                        RequiresUnsafeCaller = _protocols[constraint.Protocol].RequiresUnsafeCaller,
                         DeclaringStruct = probeName,
                     };
                     proofBinder._functions.Add(name, proofBinder._signatures.Count);
@@ -915,7 +919,10 @@ internal sealed partial class Binder
                         new Parameter(variable.Name, probeType, operatorSpan, false)).ToImmutableArray();
                     proofBinder._signatures.Add(new Signature(name, resultType, parameters,
                         null, null, template.Tree, probeName, false, false, false, false, true,
-                        external.IsNoThrow, false, external) { IsOperator = true });
+                        external.IsNoThrow, false, external) {
+                        IsOperator = true,
+                        RequiresUnsafeCaller = external.RequiresUnsafeCaller,
+                    });
                     functions.Add(external);
                 }
             }

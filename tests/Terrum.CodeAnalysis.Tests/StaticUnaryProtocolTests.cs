@@ -47,6 +47,31 @@ public sealed class StaticUnaryProtocolTests
         """;
 
     [Fact]
+    public void UnsafeProtocolOperatorRemainsUnsafeInsideGenericProofBodies()
+    {
+        const string protocol = """
+            interface UnaryPlus<T, R> { static unsafe R operator +(T value); }
+            struct Value : UnaryPlus<Value, Value> {
+                public int32 Number;
+                public Value(int32 number) { Number = number; }
+                public static Value operator +(Value value) { return value; }
+            }
+            """;
+
+        var unauthorized = Compilation.CreateLibrary(SyntaxTree.Parse(protocol + """
+            T Plus<T>(T value) where T : UnaryPlus<T, T>, [Copy] { return +value; }
+            """));
+        Assert.Null(unauthorized.Program);
+        Assert.Contains(unauthorized.Diagnostics, static diagnostic => diagnostic.Code == "TRM3028");
+
+        var authorized = Compilation.Create(SyntaxTree.Parse(protocol + """
+            T Plus<T>(T value) where T : UnaryPlus<T, T>, [Copy] { return unsafe(+value); }
+            int32 Main() { return Plus<Value>(new Value(42)).Number; }
+            """));
+        Assert.False(authorized.HasErrors, string.Join(Environment.NewLine, authorized.Diagnostics));
+    }
+
+    [Fact]
     public void DistinctArityAndIndependentResultsBindDirectAndClosedCalls()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Source + """
