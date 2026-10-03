@@ -29,6 +29,8 @@ public sealed partial class CliTests
     [InlineData("public int32 Value(int32 x, int32 y, int32 z) { if ((x + y) > (z * 2)) { return (x - z) + y; } return z + (x * 2); }")]
     [InlineData("public int32 Value(out int32 result, int32 input) { if (input == 0) { result = 42; return 0; } return Value(input: 0, result: out result); }")]
     [InlineData("public int32 Value(init ref<int32> result, int32 input) { if (input == 0) { result = 42; return 0; } return Value(input: 0, result: init result); }")]
+    [InlineData("public int32 Value(out int32 result, int32 input) { if (input == 0) { result = 42; return 0; } int32 status = Value(input: 0, result: out var nested); result = nested; return status; }")]
+    [InlineData("public int32 Value(init ref<int32> result, int32 input) { if (input == 0) { result = 42; return 0; } int32 status = Value(input: 0, result: init var nested); result = nested; return status; }")]
     [InlineData("public int32 Value(int32 x) => x + (-2147483648);")]
     [InlineData("public int64 Value(int64 x) => x + -9223372036854775808;")]
     public async Task TreeFrontendLibraryMatchesHostedBytesAsync(string source)
