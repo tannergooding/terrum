@@ -1751,6 +1751,7 @@ public static class SemanticVerifier
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
                 var targetField = Fields(program, ownerType)[fieldAssignment.Field];
+                var requiresUnsafeCaller = targetField.RequiresUnsafeCaller;
                 if (ManagedClassTypes.IsClass(ownerType) && !ManagedClassTypes.IsWritable(ownerType)
                     && !((function.IsConstructor || function.IsClassConstructor)
                         && fieldAssignment.Variable == 0 && fieldAssignment.NestedFields.IsEmpty)
@@ -1789,6 +1790,7 @@ public static class SemanticVerifier
                         throw Invalid();
                     }
                     targetField = Fields(program, nestedType)[nestedField];
+                    requiresUnsafeCaller |= targetField.RequiresUnsafeCaller;
                     if (ManagedClassTypes.IsClass(nestedType) && !ManagedClassTypes.IsWritable(nestedType)
                         && (index == fieldAssignment.NestedFields.Length - 1
                             || !ManagedClassTypes.IsClass(targetField.Type)))
@@ -1806,6 +1808,10 @@ public static class SemanticVerifier
                     {
                         throw Invalid();
                     }
+                }
+                if (requiresUnsafeCaller && !fieldAssignment.IsUnsafeAuthorized)
+                {
+                    throw InvalidEffect(fieldAssignment.Span, "UnsafeCaller");
                 }
                 Expression(fieldAssignment.Value, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 if (IsUnique(program, targetField.Type)
@@ -2890,6 +2896,11 @@ public static class SemanticVerifier
                     || fieldRead.Type != Fields(program, readType)[fieldRead.Field].Type)
                 {
                     throw Invalid();
+                }
+                if (Fields(program, readType)[fieldRead.Field].RequiresUnsafeCaller
+                    && !fieldRead.IsUnsafeAuthorized)
+                {
+                    throw InvalidEffect(fieldRead.Span, "UnsafeCaller");
                 }
                 if (IsUnique(program, readType) && fieldRead.Receiver is not BoundRead)
                 {

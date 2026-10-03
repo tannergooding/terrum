@@ -215,6 +215,7 @@ internal sealed partial class Binder
             var isPublic = false;
             var isInternal = false;
             var mutable = false;
+            var unsafeModifiers = 0;
             foreach (var modifier in child.Children)
             {
                 if (modifier is SyntaxTokenElement token)
@@ -228,9 +229,13 @@ internal sealed partial class Binder
                     }
                     else if (token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.UnsafeKeyword)
                     {
-                        Report("TRM3001", "Unsafe applies only to callable declarations.", modifier.Span);
+                        unsafeModifiers++;
                     }
                 }
+            }
+            if (unsafeModifiers > 1)
+            {
+                Report("TRM3001", "A field can declare only one unsafe modifier.", child.Span);
             }
             if (mutable && !mutableClass)
             {
@@ -240,6 +245,7 @@ internal sealed partial class Binder
                 IsMutable = mutable,
                 IsPrivate = !isPublic && !isInternal,
                 IsInternal = isInternal,
+                RequiresUnsafeCaller = unsafeModifiers != 0,
             });
             offset += width;
         }

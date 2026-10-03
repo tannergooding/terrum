@@ -39,10 +39,13 @@ binding. Existing compiler declaration defaults and accepted modifier orders
 retain their current behavior until adopted through binding, verification,
 persistence and lowering.
 
-Hosted source binding checks caller-unsafe declarations and explicit
-`unsafe(expr)` scopes within one compilation. These obligations cannot cross
-persisted semantic-module or executable-TRRM boundaries; both writers reject
-programs containing them until the source-to-metadata contract is adopted.
+Hosted source binding checks caller-unsafe callable and field declarations,
+unsafe getter accessors, and explicit `unsafe { ... }`/`unsafe(expr)` scopes
+within one compilation. Field reads and writes, including constructor writes
+and nested paths, require an explicit unsafe scope; accessor-local support is
+currently limited to getters. These obligations cannot cross persisted
+semantic-module or executable-TRRM boundaries; both writers reject programs
+containing them until the source-to-metadata contract is adopted.
 
 Target type matching also preserves generic/concrete consistency, including
 reference/pointer forms, without pattern-driven reference formation. Checked

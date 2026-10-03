@@ -269,6 +269,9 @@ public sealed record BoundStructField(string Name, PrimitiveType Type, int Offse
 
     /// <summary>Whether access is limited to the current compilation or module.</summary>
     public bool IsInternal { get; init; }
+
+    /// <summary>Whether direct access requires an explicit unsafe caller scope.</summary>
+    public bool RequiresUnsafeCaller { get; init; }
 }
 
 /// <summary>A function whose parameter slots precede its local slots.</summary>
@@ -391,6 +394,8 @@ public sealed record BoundFieldAssignment(int Variable, int Field, BoundExpressi
 {
     /// <summary>Additional field indexes descending through the initialized value of <see cref="Field"/>.</summary>
     public ImmutableArray<int> NestedFields { get; init; } = [];
+
+    internal bool IsUnsafeAuthorized { get; init; }
 }
 
 /// <summary>A checked write to a compiler-supplied writable buffer.</summary>
@@ -589,7 +594,11 @@ public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arg
 public sealed record BoundCast(BoundExpression Operand, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
 /// <summary>Reads a field from a copied struct value.</summary>
-public sealed record BoundFieldRead(BoundExpression Receiver, int Field, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+public sealed record BoundFieldRead(BoundExpression Receiver, int Field, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal bool IsUnsafeAuthorized { get; init; }
+}
 
 /// <summary>A caller-owned output slot passed through private callee scratch storage.</summary>
 public sealed record BoundOutArgument(int Variable, bool DeclaresVariable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)

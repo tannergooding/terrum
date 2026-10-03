@@ -760,6 +760,7 @@ internal sealed partial class Binder
             var fieldIsPublic = false;
             var fieldIsInternal = false;
             var mutableModifiers = 0;
+            var unsafeModifiers = 0;
             var accessModifiers = 0;
             foreach (var child in field.Children)
             {
@@ -779,7 +780,7 @@ internal sealed partial class Binder
                     }
                     else if (modifier.Token.Kind == TokenKind.UnsafeKeyword)
                     {
-                        Report("TRM3001", "Unsafe applies only to callable declarations.", modifier.Span);
+                        unsafeModifiers++;
                     }
                 }
             }
@@ -791,10 +792,15 @@ internal sealed partial class Binder
             {
                 Report("TRM3001", "A field can declare only one mut modifier.", field.Span);
             }
+            if (unsafeModifiers > 1)
+            {
+                Report("TRM3001", "A field can declare only one unsafe modifier.", field.Span);
+            }
             fields.Add(new BoundStructField(fieldName.Name, type, offset, width) {
                 IsMutable = mutableModifiers != 0,
                 IsPrivate = !fieldIsPublic && !fieldIsInternal,
                 IsInternal = fieldIsInternal,
+                RequiresUnsafeCaller = unsafeModifiers != 0,
             });
             size = offset + width;
             alignment = Math.Max(alignment, fieldAlignment);
@@ -1636,9 +1642,12 @@ internal sealed partial class Binder
                         {
                             Report("TRM3008", "An immutable receiver cannot be mutated.", target.Span);
                         }
+                        var isUnsafeAuthorized = CheckFieldAccess(_variables[0].Type, ownField, target.Span);
                         CheckFieldMutation(_variables[0].Type, ownField, _constructor, target.Span);
                         return new BoundFieldAssignment(0, ownField,
-                            BindExpression(valueNode, GetField(ResolveDeclaredType(_currentStruct), ownField).Type), node.Span);
+                            BindExpression(valueNode, GetField(ResolveDeclaredType(_currentStruct), ownField).Type), node.Span) {
+                            IsUnsafeAuthorized = isUnsafeAuthorized,
+                        };
                     }
                     Report("TRM3006", $"Unknown or not-yet-declared variable '{token.Text}'.", token.Span);
                     _ = BindExpression(valueNode, null);
@@ -2047,8 +2056,10 @@ internal sealed partial class Binder
             return new BoundBlock([], span);
         }
         var type = _variables[variable].Type;
+        var isUnsafeAuthorized = false;
         if (fields.Count != 0)
         {
+            isUnsafeAuthorized |= CheckFieldAccess(type, fields[0], root.Span);
             if (members.Count == 0 || !IsClass(type) || !IsClass(GetField(type, fields[0]).Type))
             {
                 CheckFieldMutation(type, fields[0], _constructor && variable == 0, root.Span);
@@ -2064,7 +2075,7 @@ internal sealed partial class Binder
                 _ = BindExpression(value, null);
                 return new BoundBlock([], span);
             }
-            CheckFieldAccess(type, field, member.Span);
+            isUnsafeAuthorized |= CheckFieldAccess(type, field, member.Span);
             remainingMembers--;
             if (remainingMembers == 0 || !IsClass(type) || !IsClass(GetField(type, field).Type))
             {
@@ -2094,6 +2105,7 @@ internal sealed partial class Binder
         }
         return new BoundFieldAssignment(variable, path[0], BindExpression(value, type), span) {
             NestedFields = path.RemoveAt(0),
+            IsUnsafeAuthorized = isUnsafeAuthorized,
         };
     }
 
@@ -2353,8 +2365,11 @@ internal sealed partial class Binder
                     && TryFindField(ResolveDeclaredType(_currentStruct), token.Name, out var field))
                 {
                     var structure = ResolveDeclaredType(_currentStruct);
+                    var isUnsafeAuthorized = CheckFieldAccess(structure, field, node.Span);
                     expression = new BoundFieldRead(new BoundRead(0, _variables[0].Type, node.Span),
-                        field, GetField(structure, field).Type, node.Span);
+                        field, GetField(structure, field).Type, node.Span) {
+                        IsUnsafeAuthorized = isUnsafeAuthorized,
+                    };
                 }
                 else if (_hasReceiver && _currentStruct is not null
                     && TryFindGetter(ResolveDeclaredType(_currentStruct), token.Name, out var getter))
@@ -2414,9 +2429,11 @@ internal sealed partial class Binder
                 }
                 if (receiverType is PrimitiveType fieldType && TryFindField(fieldType, member, out var field))
                 {
-                    CheckFieldAccess(fieldType, field, node.Span);
+                    var isUnsafeAuthorized = CheckFieldAccess(fieldType, field, node.Span);
                     expression = new BoundFieldRead(BindExpression(receiverNode, fieldType), field,
-                        GetField(fieldType, field).Type, node.Span);
+                        GetField(fieldType, field).Type, node.Span) {
+                        IsUnsafeAuthorized = isUnsafeAuthorized,
+                    };
                     break;
                 }
                 if (receiverType is PrimitiveType propertyType
@@ -3232,15 +3249,21 @@ internal sealed partial class Binder
         return ErrorExpression(span);
     }
 
-    private void CheckFieldAccess(PrimitiveType type, int field, TextSpan span)
+    private bool CheckFieldAccess(PrimitiveType type, int field, TextSpan span)
     {
-        if (GetField(type, field).IsPrivate
+        var declaration = GetField(type, field);
+        if (declaration.IsPrivate
             && (IsClass(type) ? _classes[ManagedClassTypes.ClassIndex(type)].Name
                 : _structs[(int)type - 100].Name) != (string.IsNullOrEmpty(_namespace)
                 ? _currentStruct : _namespace + "." + _currentStruct))
         {
             Report("TRM3011", "Private field cannot be accessed outside its declaring struct.", span);
         }
+        if (declaration.RequiresUnsafeCaller && _unsafeDepth == 0)
+        {
+            Report("TRM3028", "Field access requires an explicit unsafe context.", span);
+        }
+        return declaration.RequiresUnsafeCaller && _unsafeDepth != 0;
     }
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Unsupported literal contexts are diagnosed before code emission.")]

@@ -1020,6 +1020,9 @@ public static partial class ModuleCompiler
 
     internal static bool ContainsCallerUnsafeContracts(BoundProgram program) =>
         program.Functions.Any(static function => function.RequiresUnsafeCaller)
+        || program.Structures.Any(static structure =>
+            structure.Fields.Any(static field => field.RequiresUnsafeCaller))
+        || program.Classes.Any(static @class => @class.Fields.Any(static field => field.RequiresUnsafeCaller))
         || ContainsCallerUnsafeCalls(program);
 
     private static bool HasLoopTransfer(ImmutableArray<ModuleFunction> functions)

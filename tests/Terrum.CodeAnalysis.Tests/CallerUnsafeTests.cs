@@ -100,6 +100,97 @@ public sealed class CallerUnsafeTests
     }
 
     [Fact]
+    public void UnsafeFieldsRequireAuthorizationForReadsAndWrites()
+    {
+        const string declaration = """
+            struct Cell {
+                public unsafe mut int32 Value;
+                public Cell() { unsafe { Value = 1; } }
+            }
+            """;
+
+        var safeRead = Compilation.CreateLibrary(SyntaxTree.Parse(declaration
+            + " int32 Read() { Cell cell = new Cell(); return cell.Value; }"));
+        Assert.Null(safeRead.Program);
+        Assert.Contains(safeRead.Diagnostics, static diagnostic => diagnostic.Code == "TRM3028");
+
+        var authorizedRead = Compilation.CreateLibrary(SyntaxTree.Parse(declaration
+            + " int32 Read() { Cell cell = new Cell(); return unsafe(cell.Value); }"));
+        Assert.False(authorizedRead.HasErrors, string.Join(Environment.NewLine, authorizedRead.Diagnostics));
+
+        var safeWrite = Compilation.Create(SyntaxTree.Parse(declaration
+            + " int32 Main() { mut Cell cell = new Cell(); cell.Value = 42; return 0; }"));
+        Assert.Null(safeWrite.Program);
+        Assert.Contains(safeWrite.Diagnostics, static diagnostic => diagnostic.Code == "TRM3028");
+
+        var authorizedWrite = Compilation.Create(SyntaxTree.Parse(declaration
+            + " int32 Main() { mut Cell cell = new Cell(); unsafe { cell.Value = 42; return cell.Value; } }"));
+        Assert.False(authorizedWrite.HasErrors, string.Join(Environment.NewLine, authorizedWrite.Diagnostics));
+
+        var unscopedInitialization = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "struct Cell { public unsafe int32 Value; public Cell() { Value = 1; } }"));
+        Assert.Null(unscopedInitialization.Program);
+        Assert.Contains(unscopedInitialization.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3028");
+
+        var duplicateModifier = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "struct Cell { public unsafe unsafe int32 Value; public Cell() { unsafe { Value = 1; } } }"));
+        Assert.Null(duplicateModifier.Program);
+        Assert.Contains(duplicateModifier.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3001");
+    }
+
+    [Fact]
+    public void UnsafeFieldObligationsApplyToEveryFieldInANestedPath()
+    {
+        const string source = """
+            struct Inner {
+                public int32 Value;
+                public Inner() { Value = 42; }
+            }
+            struct Outer {
+                public unsafe mut Inner Value;
+                public Outer() { unsafe { Value = new Inner(); } }
+            }
+            """;
+
+        var safeAccess = Compilation.Create(SyntaxTree.Parse(source
+            + " int32 Main() { Outer outer = new Outer(); return outer.Value.Value; }"));
+        Assert.Null(safeAccess.Program);
+        Assert.Contains(safeAccess.Diagnostics, static diagnostic => diagnostic.Code == "TRM3028");
+
+        var authorizedAccess = Compilation.Create(SyntaxTree.Parse(source
+            + " int32 Main() { mut Outer outer = new Outer(); unsafe { outer.Value = new Inner();"
+            + " return outer.Value.Value; } }"));
+        Assert.False(authorizedAccess.HasErrors, string.Join(Environment.NewLine, authorizedAccess.Diagnostics));
+
+        var safeWrite = Compilation.Create(SyntaxTree.Parse(source
+            + " int32 Main() { mut Outer outer = new Outer(); outer.Value = new Inner(); return 0; }"));
+        Assert.Null(safeWrite.Program);
+        Assert.Contains(safeWrite.Diagnostics, static diagnostic => diagnostic.Code == "TRM3028");
+    }
+
+    [Fact]
+    public void UnsafeManagedClassFieldsRequireAuthorization()
+    {
+        const string source = """
+            class Box {
+                public unsafe int32 Value;
+                public Box(int32 value) { unsafe { Value = value; } }
+            }
+            """;
+
+        var safeAccess = Compilation.Create(SyntaxTree.Parse(source
+            + " int32 Main() { require Box.TryCreate(42, out var box); return box.Value; }"));
+        Assert.Null(safeAccess.Program);
+        Assert.Contains(safeAccess.Diagnostics, static diagnostic => diagnostic.Code == "TRM3028");
+
+        var authorizedAccess = Compilation.Create(SyntaxTree.Parse(source
+            + " int32 Main() { require Box.TryCreate(42, out var box); return unsafe(box.Value); }"));
+        Assert.False(authorizedAccess.HasErrors, string.Join(Environment.NewLine, authorizedAccess.Diagnostics));
+    }
+
+    [Fact]
     public void GenericSpecializationPreservesCallerUnsafeRequirement()
     {
         const string declaration = """
@@ -148,5 +239,33 @@ public sealed class CallerUnsafeTests
         Assert.False(caller.HasErrors, string.Join(Environment.NewLine, caller.Diagnostics));
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(
             Assert.IsType<BoundProgram>(caller.Program), "unsafe-call"));
+    }
+
+    [Fact]
+    public void PersistedWritersRejectUnsafeFieldContracts()
+    {
+        var program = CompileLibrary("""
+            public struct Cell {
+                public unsafe int32 Value;
+                public Cell() { unsafe { Value = 42; } }
+            }
+            public int32 Read() { Cell cell = new Cell(); return unsafe(cell.Value); }
+            """);
+
+        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Read"]));
+        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "unsafe-field"));
+
+        var classProgram = CompileLibrary("""
+            public class Box {
+                public unsafe int32 Value;
+                public Box(int32 value) { unsafe { Value = value; } }
+            }
+            public int32 Read() {
+                require Box.TryCreate(42, out var box);
+                return unsafe(box.Value);
+            }
+            """);
+        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(classProgram, ["Read"]));
+        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(classProgram, "unsafe-class-field"));
     }
 }
