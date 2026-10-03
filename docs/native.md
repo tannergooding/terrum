@@ -465,14 +465,13 @@ Source auditing and hosted definite-publication verification remain in force;
 this is not general reference migration or standalone compiler support.
 
 Complete-program projection v80 adds scalar `out` parameters on
-non-Boolean/void-returning functions, but admits only matching existing
+non-Boolean/void-returning functions with matching existing or `out var`
 destinations. The hosted verifier requires initialization on every normal
 return, and the emitter publishes the output after successful completion
 without treating the function's result as a success flag. Current V74–v78
 readers reject these records; that boundary is not a compatibility commitment.
-`out var` under this non-Boolean contract, non-scalar
-outputs and standalone compilation remain unsupported. This does not widen
-the separate managed-module export shape for output parameters.
+Non-scalar outputs and standalone compilation remain unsupported. This does
+not widen the separate managed-module export shape for output parameters.
 
 Single-function v79 uses the same non-Boolean/void output contract as v80 for
 bounded recursive self-calls. It requires explicit existing destinations and

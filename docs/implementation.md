@@ -975,12 +975,11 @@ vacancy, conditional publication and normal-return initialization. This does
 not expand general reference migration or make the frontend standalone.
 
 Program projection v80 carries the existing scalar `out` parameter mask for
-non-Boolean/void-returning declarations and admits matching explicit
-destinations in direct calls. Its host reader rejects the same records under
-v74–v78, and the hosted verifier/emitter require normal-return initialization
-and publish outputs after a successful call regardless of its result value.
-`out var` remains limited to the Boolean-returning contract in this bounded
-projection; non-scalar non-Boolean outputs and standalone compilation remain
+non-Boolean/void-returning declarations and admits matching explicit or
+`out var` destinations in direct calls. Its host reader rejects the same
+records under v74–v78, and the hosted verifier/emitter require normal-return
+initialization and publish outputs after a successful call regardless of its
+result value. Non-scalar non-Boolean outputs and standalone compilation remain
 outside its support. Managed-module output exports retain their separate
 existing shape restriction.
 

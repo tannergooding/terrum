@@ -395,9 +395,6 @@ public static partial class ScalarFrontendHost
                         if (argument.Type != (callee?.ParameterTypes[ordinal] ?? ParameterType(ordinal + 1))
                             || expectsOut != (argument.Operation is 103 or 104)
                             || isNonBooleanOutProjection && argument.Operation == 104
-                            || context?.AllowNonBooleanOutputParameters == true
-                                && callee is { ReturnType: not BooleanTypeCode }
-                                && argument.Operation == 104
                             || expectsInitRef != (argument.Operation is 107 or 108))
                         {
                             throw InvalidResult();
@@ -1044,12 +1041,12 @@ public static partial class ScalarFrontendHost
                     else if (entry.Kind is 1 or 27 or 28)
                     {
                         if ((depth != 0 && words[0] is not (>= 50 and <= 73))
-                            || activeLocals >= declaredLocals.Length
-                            || entry.Slot != count + activeLocals + 1)
+                            || entry.Slot <= count + activeLocals
+                            || entry.Slot > count + declaredLocals.Length)
                         {
                             throw InvalidResult();
                         }
-                        var local = declaredLocals[activeLocals];
+                        var local = declaredLocals[entry.Slot - count - 1];
                         var constant = entry.Kind is 27 or 28;
                         if (local.IsConstant != constant || local.IsInitialization
                             || (constant && local.IsMutable)
@@ -1076,6 +1073,7 @@ public static partial class ScalarFrontendHost
                             || entry.Kind == 28 && (tree[entry.Root].Operation is 3 or 20 or 21)
                             || inferred && intrinsicTypes[entry.Root] == 0
                             || !TakeTree(entry.Root)
+                            || entry.Slot != count + activeLocals + 1
                             || clause == 0 && !Take(TokenKind.Semicolon))
                         {
                             throw InvalidResult();

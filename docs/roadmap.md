@@ -47,9 +47,10 @@ non-Boolean scalar `out` mode to the bounded self-call frontend.
 Complete-program projection v80 adds existing-destination calls to scalar `out` parameters on
 non-Boolean/void-returning functions; the hosted verifier requires publication
 on every normal return, and the hosted emitter publishes them without using
-the result as a success flag. This remains a hosted-verifier/emitter-backed
-projection; it does not broaden non-scalar non-Boolean outputs. Projection tags
-are alpha implementation/validation
+the result as a success flag. It also supports matching `out var` destinations
+for these calls, with the destination available after normal return. This
+remains a hosted-verifier/emitter-backed projection; it does not broaden
+non-scalar non-Boolean outputs. Projection tags are alpha implementation/validation
 details, not roadmap or product versions: older layouts may be retired or
 reshaped, and only a small selected set should remain for comparison or
 validation.
