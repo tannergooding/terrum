@@ -650,9 +650,9 @@ public sealed partial class CliTests
     }
 
     [Fact]
-    public async Task ScalarFrontendNamedCallsMapAllThreeTypedParametersAsync()
+    public async Task ScalarFrontendNamedCallsContinuePositionallyAfterInPositionLabelAsync()
     {
-        const string text = "int32 Main() { return Select(third: char16(65), first: 1, second: true); } int32 Select(int32 first, bool second, char16 third) { if (second) { return first * 100 + int32(third); } return 0; }";
+        const string text = "int32 Main() { return Select(first: 1, true, third: char16(65)); } int32 Select(int32 first, bool second, char16 third) { if (second) { return first * 100 + int32(third); } return 0; }";
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var input = Encoding.UTF8.GetBytes(text);
         var (componentExit, componentOutput, componentError) = await RunAsync(input, "frontend-component",
