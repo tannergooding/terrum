@@ -740,18 +740,24 @@ public static partial class TrRmExecutableCompiler
                 var opcode = ReadByte(extent, ref cursor);
                 var referenceWidth = 1;
                 var countWidth = 1;
+                var dataWidth = opcode == 0x82 ? 1 : 0;
                 if (opcode == 0xF0)
                 {
                     var layout = ReadByte(extent, ref cursor);
+                    opcode = ReadByte(extent, ref cursor);
                     referenceWidth = 1 << (layout & 3);
                     countWidth = 1 << ((layout >> 2) & 3);
-                    opcode = ReadByte(extent, ref cursor);
+                    dataWidth = opcode == 0x82 ? 1 << ((layout >> 4) & 3) : 0;
                 }
                 var condition = opcode == 0x81 ? ReadInt(extent, ref cursor, referenceWidth) : 0;
                 var maximumReference = condition;
                 var maximumCount = 0;
+                var maximumBits = 0UL;
                 TrRmScalarEdge? whenTrue = null;
                 TrRmScalarEdge? whenFalse = null;
+                TrRmScalarEdge? switchDefault = null;
+                var switchValue = 0;
+                ImmutableArray<TrRmScalarSwitchCase> switchCases = default;
                 var returned = 0;
                 var failureReason = 0;
                 if (opcode is 0x80 or 0x81)
@@ -763,6 +769,41 @@ public static partial class TrRmExecutableCompiler
                         whenFalse = ReadIndexedEdge(extent, ref cursor, referenceWidth,
                             countWidth, ref maximumReference, ref maximumCount);
                     }
+                }
+                else if (opcode == 0x82)
+                {
+                    switchValue = ReadInt(extent, ref cursor, referenceWidth);
+                    maximumReference = switchValue;
+                    var caseCount = ReadInt(extent, ref cursor, countWidth);
+                    maximumCount = caseCount;
+                    if (switchValue <= 0 || switchValue > valueTypes.Count)
+                    {
+                        throw Invalid("Indexed switch selector is outside the value inventory.");
+                    }
+                    var selectorType = valueTypes[switchValue - 1];
+                    if (!IsSwitchType(selectorType))
+                    {
+                        throw Invalid("Indexed switch selector type is unsupported.");
+                    }
+                    var cases = ImmutableArray.CreateBuilder<TrRmScalarSwitchCase>(caseCount);
+                    ulong previous = 0;
+                    for (var caseIndex = 0; caseIndex < caseCount; caseIndex++)
+                    {
+                        var bits = ReadBits(extent, ref cursor, dataWidth);
+                        if (!FitsSwitchBits(selectorType, bits)
+                            || caseIndex != 0 && bits <= previous)
+                        {
+                            throw Invalid("Indexed switch cases are not canonical for their selector.");
+                        }
+                        previous = bits;
+                        maximumBits = Math.Max(maximumBits, bits);
+                        var edge = ReadIndexedEdge(extent, ref cursor, referenceWidth,
+                            countWidth, ref maximumReference, ref maximumCount);
+                        cases.Add(new TrRmScalarSwitchCase(bits, edge));
+                    }
+                    switchCases = cases.MoveToImmutable();
+                    switchDefault = ReadIndexedEdge(extent, ref cursor, referenceWidth,
+                        countWidth, ref maximumReference, ref maximumCount);
                 }
                 else if (opcode == 0x83)
                 {
@@ -782,12 +823,14 @@ public static partial class TrRmExecutableCompiler
                     throw Invalid($"Indexed terminator 0x{opcode:X2} is not executable.");
                 }
                 if (cursor != extent.Length || referenceWidth != Width((ulong)maximumReference)
-                    || countWidth != Width((ulong)maximumCount))
+                    || countWidth != Width((ulong)maximumCount)
+                    || opcode == 0x82 && dataWidth != Width(maximumBits))
                 {
                     throw Invalid("Indexed scalar terminator has trailing bytes.");
                 }
                 result.Add(new TrRmScalarBlock(parameters, operations.MoveToImmutable(),
-                    condition, whenTrue, whenFalse, returned, failureReason));
+                    condition, whenTrue, whenFalse, returned, failureReason, switchValue,
+                    switchCases, switchDefault));
             }
             return TrRmScalarGraph.FromAuditedBody(result.MoveToImmutable(),
                 valueTypes.MoveToImmutable(), parameterCount, resultType, noThrow, doesNotReturn);
@@ -826,6 +869,19 @@ public static partial class TrRmExecutableCompiler
             }
             return new TrRmScalarEdge(target, args.MoveToImmutable());
         }
+
+        private static bool IsSwitchType(PrimitiveType type)
+            => type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
+                or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
+
+        private static bool FitsSwitchBits(PrimitiveType type, ulong bits)
+            => type switch
+            {
+                PrimitiveType.Bool => bits <= 1,
+                PrimitiveType.Char16 => bits <= ushort.MaxValue,
+                PrimitiveType.Int32 or PrimitiveType.UInt32 => bits <= uint.MaxValue,
+                _ => IsSwitchType(type),
+            };
 
         private IndexedBlock NewBlock(int region)
         {

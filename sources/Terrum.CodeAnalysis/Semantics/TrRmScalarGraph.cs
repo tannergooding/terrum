@@ -10,6 +10,8 @@ namespace Terrum.CodeAnalysis.Semantics;
 
 internal sealed record TrRmScalarEdge(int Target, ImmutableArray<int> Arguments);
 
+internal sealed record TrRmScalarSwitchCase(ulong Bits, TrRmScalarEdge Edge);
+
 /// <summary>An audited, equal-width integer bit reinterpretation; never a structured source cast.</summary>
 internal sealed record TrRmScalarReinterpret(BoundExpression Operand, PrimitiveType Type)
     : BoundExpression(Type, default);
@@ -25,7 +27,9 @@ internal sealed record TrRmScalarDivRem(int QuotientVariable, int RemainderVaria
 
 internal sealed record TrRmScalarBlock(ImmutableArray<int> Parameters,
     ImmutableArray<BoundStatement> Operations, int Condition, TrRmScalarEdge? True,
-    TrRmScalarEdge? False, int ReturnValue, int FailureReason);
+    TrRmScalarEdge? False, int ReturnValue, int FailureReason, int SwitchValue = 0,
+    ImmutableArray<TrRmScalarSwitchCase> SwitchCases = default,
+    TrRmScalarEdge? SwitchDefault = null);
 
 /// <summary>Immutable, source-free scalar SSA body admitted only after compact Body validation.</summary>
 internal sealed class TrRmScalarGraph
@@ -162,6 +166,7 @@ internal sealed class TrRmScalarGraph
                     && (operationIndex != block.Operations.Length - 1
                         || operation is not BoundExpressionStatement
                         || block.Condition != 0 || block.True is not null || block.False is not null
+                        || block.SwitchValue != 0
                         || block.FailureReason != 1))
                 {
                     throw new ArgumentException("A non-returning call must terminate its indexed block.");
@@ -177,13 +182,36 @@ internal sealed class TrRmScalarGraph
                     }
                 }
             }
+            var hasSwitch = block.SwitchValue != 0;
             if (block.FailureReason is < 0 or > 4
                 || (block.FailureReason != 0 && (block.Condition != 0
-                    || block.True is not null || block.False is not null))
+                    || block.True is not null || block.False is not null || hasSwitch))
+                || (hasSwitch && (block.Condition != 0 || block.True is not null
+                    || block.False is not null || block.FailureReason != 0
+                    || (uint)(block.SwitchValue - 1) >= (uint)Types.Length
+                    || !IsSwitchType(Types[block.SwitchValue - 1])
+                    || block.SwitchCases.IsDefault || block.SwitchDefault is null))
+                || (!hasSwitch && (!block.SwitchCases.IsDefault || block.SwitchDefault is not null))
                 || (NoThrow && block.FailureReason != 0
                     && !HasTerminalDoesNotReturnCall(block, program)))
             {
-                throw new ArgumentException("Indexed failure terminator violates the declared effects.");
+                throw new ArgumentException("Indexed terminator violates the scalar graph contract.");
+            }
+            if (hasSwitch)
+            {
+                var selectorType = Types[block.SwitchValue - 1];
+                ulong previous = 0;
+                for (var caseIndex = 0; caseIndex < block.SwitchCases.Length; caseIndex++)
+                {
+                    Visit(ref remaining);
+                    var switchCase = block.SwitchCases[caseIndex];
+                    if (!FitsSwitchBits(selectorType, switchCase.Bits)
+                        || caseIndex != 0 && switchCase.Bits <= previous)
+                    {
+                        throw new ArgumentException("Indexed switch cases are not canonical for their selector.");
+                    }
+                    previous = switchCase.Bits;
+                }
             }
         }
         if (DoesNotReturn)
@@ -221,7 +249,15 @@ internal sealed class TrRmScalarGraph
             {
                 continue;
             }
-            if (block.Condition != 0)
+            if (block.SwitchValue != 0)
+            {
+                foreach (var switchCase in block.SwitchCases)
+                {
+                    Enqueue(switchCase.Edge, ref remaining);
+                }
+                Enqueue(block.SwitchDefault, ref remaining);
+            }
+            else if (block.Condition != 0)
             {
                 if (block.Condition < 1 || block.Condition >= booleanConstants.Length)
                 {
@@ -359,6 +395,18 @@ internal sealed class TrRmScalarGraph
     private static bool IsInteger(PrimitiveType type)
         => type is PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Int64 or PrimitiveType.UInt64;
+
+    private static bool IsSwitchType(PrimitiveType type)
+        => type is PrimitiveType.Bool or PrimitiveType.Char16 || IsInteger(type);
+
+    private static bool FitsSwitchBits(PrimitiveType type, ulong bits)
+        => type switch
+        {
+            PrimitiveType.Bool => bits <= 1,
+            PrimitiveType.Char16 => bits <= ushort.MaxValue,
+            PrimitiveType.Int32 or PrimitiveType.UInt32 => bits <= uint.MaxValue,
+            _ => IsInteger(type),
+        };
 
     private static void Visit(ref int remaining)
     {

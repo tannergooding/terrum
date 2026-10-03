@@ -9,7 +9,7 @@ using Terrum.CodeAnalysis.Semantics;
 namespace Terrum.CodeAnalysis.Modules;
 
 /// <summary>Inspects the root-free scalar compact-indexed subset with branches and nested loop regions.</summary>
-/// <remarks>Only scalar constants, operators, integer conversions, optional values, Copy, Select, local, expected-import and packed direct scalar calls, Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
+/// <remarks>Only scalar constants, operators, integer conversions, optional values, Copy, Select, local, expected-import and packed direct scalar calls, Branch/BranchIf/Switch, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
 public readonly ref struct TrRmCompactIndexedBodyReader
 {
     private readonly record struct Edge(int Target, int[] Arguments);

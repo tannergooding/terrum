@@ -1837,6 +1837,39 @@ internal sealed partial class PeCompiler
                 _runtimeCalls.Add((_code.RelativeCall(), target));
                 _code.Byte(0xCC);
             }
+            else if (block.SwitchValue != 0)
+            {
+                var selectorType = graph.Types[block.SwitchValue - 1];
+                LoadValue(Slot(block.SwitchValue - 1), selectorType);
+                if (IsWide(selectorType))
+                {
+                    _code.Bytes(0x49, 0x89, 0xC0);
+                }
+                else
+                {
+                    _code.Bytes(0x41, 0x89, 0xC0);
+                }
+                foreach (var switchCase in block.SwitchCases)
+                {
+                    if (IsWide(selectorType))
+                    {
+                        _code.Bytes(0x48, 0xB8);
+                        _code.Int64(unchecked((long)switchCase.Bits));
+                        _code.Bytes(0x49, 0x39, 0xC0);
+                    }
+                    else
+                    {
+                        _code.Byte(0xB8);
+                        _code.Int32(unchecked((int)switchCase.Bits));
+                        _code.Bytes(0x41, 0x39, 0xC0);
+                    }
+                    var nextCase = _code.JumpIf(0x85);
+                    EmitEdge(switchCase.Edge);
+                    _code.PatchRelative(nextCase, _code.Position);
+                }
+                EmitEdge(block.SwitchDefault
+                    ?? throw new InvalidOperationException("Indexed switch lacks a default edge."));
+            }
             else if (block.Condition != 0)
             {
                 _code.Load(Slot(block.Condition - 1));

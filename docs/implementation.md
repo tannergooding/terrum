@@ -2385,8 +2385,10 @@ wrapping integer add/subtract/multiply, checked
 integer arithmetic/negation/count shifts and dual-result `CheckedDivRem`,
 checked numeric conversion,
 equal-width integer bit reinterpretation, module-local scalar `Call`, `Branch`,
-`BranchIf`, indexed `Fail` and `Return`. `Fail` reasons retain the approved
-TRRM meaning and lower to the existing fail-fast status: requirement failure
+`BranchIf`, indexed `Switch`, `Fail` and `Return`. `Switch` compares the
+selector's exact scalar bits against strictly increasing unsigned patterns and
+transfers through exactly one matching or default edge. `Fail` reasons retain
+the approved TRRM meaning and lower to the existing fail-fast status: requirement failure
 to `0xE0540003`, overflow and invalid shift count to `0xE0540001`, and
 division by zero to `0xE0540002`.
 Integer division/remainder retain their distinct signed-minimum behavior.

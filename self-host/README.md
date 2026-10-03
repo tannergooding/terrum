@@ -16,7 +16,7 @@ The host test runner remains C#, even when it compiles and executes a candidate.
 The hosted [TRRM scalar pipeline](../docs/implementation.md#executable-trrm-scalar-interchange)
 emits approved metadata and compact-linear/indexed Bodies and loads them for
 shared native execution without producer source. It supports bounded branches,
-loops, integer operations and module-local scalar calls; non-nearest transfers
+switches, loops, integer operations and module-local scalar calls; non-nearest transfers
 use scalar routing codes and designated single-exit indexed regions. This
 source-free path remains fail-fast-only. The separate native scalar frontend
 currently supports scalar/void functions, initialized scalar locals, structured

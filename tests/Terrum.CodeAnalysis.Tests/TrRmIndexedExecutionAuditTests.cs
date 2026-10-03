@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
@@ -73,6 +74,98 @@ public sealed class TrRmIndexedExecutionAuditTests
         7, 8, 5, 6, 7,
         0x83, 8,
     ];
+
+    private static byte[] SwitchBody(ushort selector)
+    {
+        var blocks = new[]
+        {
+            new List<byte> { 16, 1, 1, 1, 1 },
+            new List<byte> { 16, 1, 2, 1, 1, 1, 2, 1, 20, 0x83, 2 },
+            new List<byte> { 16, 1, 3, 1, 1, 1, 3, 1, 42, 0x83, 3 },
+            new List<byte> { 16, 1, 4, 1, 1, 1, 4, 1, 99, 0x83, 4 },
+        };
+        var definitions = new List<byte> { 5, 5, 5, 5 };
+        var terminators = new List<byte>();
+        var offsets = new List<byte> { 0 };
+
+        if (selector <= byte.MaxValue)
+        {
+            blocks[0].AddRange([1, 1, 1, (byte)selector]);
+        }
+        else
+        {
+            blocks[0].AddRange([0xF0, 0x10, 1, 1, 1,
+                (byte)selector, (byte)(selector >> 8)]);
+        }
+        terminators.Add((byte)blocks[0].Count);
+        blocks[0].AddRange([0xF0, 0x10, 0x82, 1, 2, 0, 0, 2, 0, 0, 1, 3, 0, 4, 0]);
+        for (var index = 1; index < blocks.Length; index++)
+        {
+            terminators.Add(9);
+        }
+        var bodyData = new List<byte>();
+        foreach (var block in blocks)
+        {
+            bodyData.AddRange(block);
+            offsets.Add((byte)bodyData.Count);
+        }
+
+        var body = new List<byte> { 8, 4, 4, 0, 1, 1, 0, 0, 0 };
+        for (var value = 0; value < 4; value++)
+        {
+            body.AddRange([1, 1]);
+        }
+        body.AddRange([0, 1, 2, 3, 4]);
+        body.AddRange(definitions);
+        body.AddRange(offsets);
+        body.AddRange(terminators);
+        body.AddRange(bodyData);
+        return body.ToArray();
+    }
+
+    private static byte[] WideSwitchBody(ulong selector)
+    {
+        static void AddUInt64(List<byte> bytes, ulong value)
+        {
+            for (var index = 0; index < sizeof(ulong); index++)
+            {
+                bytes.Add((byte)(value >> (index * 8)));
+            }
+        }
+
+        var blocks = new[]
+        {
+            new List<byte> { 16, 1, 1, 1, 1 },
+            new List<byte> { 16, 1, 2, 1, 1, 1, 2, 1, 20, 0x83, 2 },
+            new List<byte> { 16, 1, 3, 1, 1, 1, 3, 1, 42, 0x83, 3 },
+            new List<byte> { 16, 1, 4, 1, 1, 1, 4, 1, 99, 0x83, 4 },
+        };
+        blocks[0].AddRange([0xF0, 0x30, 1, 1, 2]);
+        AddUInt64(blocks[0], selector);
+        var terminators = new List<byte> { (byte)blocks[0].Count, 9, 9, 9 };
+        blocks[0].AddRange([0xF0, 0x30, 0x82, 1, 2]);
+        AddUInt64(blocks[0], 0x1122_3344_5566_7788);
+        blocks[0].AddRange([2, 0]);
+        AddUInt64(blocks[0], 0xFEDC_BA98_7654_3210);
+        blocks[0].AddRange([3, 0, 4, 0]);
+
+        var offsets = new List<byte> { 0 };
+        var bodyData = new List<byte>();
+        foreach (var block in blocks)
+        {
+            bodyData.AddRange(block);
+            offsets.Add((byte)bodyData.Count);
+        }
+
+        var body = new List<byte> { 8, 4, 4, 0, 2, 1, 0, 0, 0, 6, 0, 0, 0 };
+        body.AddRange([2, 1, 1, 1, 1, 1, 1, 1]);
+        body.AddRange([0, 1, 2, 3, 4]);
+        body.AddRange([5, 5, 5, 5]);
+        body.AddRange(offsets);
+        body.AddRange(terminators);
+        body.AddRange(bodyData);
+        return body.ToArray();
+    }
 
     // Four blocks: compute flag/x/y, branch through two arms, merge with one int32 parameter.
     private static byte[] MergeBody(bool chooseFirst) =>
@@ -154,6 +247,32 @@ public sealed class TrRmIndexedExecutionAuditTests
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         Assert.Equal(42, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
             NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData((ushort)0, 20)]
+    [InlineData((ushort)256, 42)]
+    [InlineData((ushort)257, 99)]
+    public void HandwrittenSwitchExecutesMatchingAndDefaultEdges(ushort selector, int expected)
+    {
+        var artifact = TrRmExecutionAuditTests.Artifact(SwitchBody(selector));
+        TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData(0x1122334455667788UL, 20)]
+    [InlineData(0xFEDCBA9876543210UL, 42)]
+    [InlineData(0xFFFFFFFFFFFFFFFFUL, 99)]
+    public void HandwrittenWideSwitchComparesExact64BitPatterns(ulong selector, int expected)
+    {
+        var artifact = TrRmExecutionAuditTests.Artifact(WideSwitchBody(selector));
+        TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
     }
 
     [Fact]
