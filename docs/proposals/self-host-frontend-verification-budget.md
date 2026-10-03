@@ -71,6 +71,16 @@ of 3,046 visits (about 18.1%) under both runtime policies. The temporary counter
 was removed; this is work-count evidence, not a timing benchmark, and the
 shared limit remains unchanged.
 
+Nested-output vacating for conditionals now skips the infeasible arm when
+exactly one condition result is possible, retaining the original traversal and
+join when both paths or neither path are feasible. The
+`InfeasibleConditionalOutputsRemainVacant` regression places 24
+output-effectful calls in the arm made infeasible by a known-initialized local.
+The verifier used 16,842 visits before pruning and 13,796 afterward, a reduction
+of 3,046 visits (about 18.1%) under both runtime policies. The temporary counter
+was removed; this is work-count evidence, not a timing benchmark, and the
+shared limit remains unchanged.
+
 During the v78 budget investigation, temporary visit counters measured 100,001
 semantic-analysis visits across 210 functions before the limit failure. In the
 largest function, `ParseExpressionCore`, output-vacating traversal accounted

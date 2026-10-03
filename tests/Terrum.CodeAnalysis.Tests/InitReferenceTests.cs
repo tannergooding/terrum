@@ -173,6 +173,53 @@ public sealed class InitReferenceTests
         Assert.NotEmpty(NativeEmitter.Emit(program, policy));
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void InfeasibleConditionalOutputsRemainVacant(NativeRuntimePolicy policy)
+    {
+        var source = new StringBuilder("""
+            [NoThrow] bool Fill(bool publish, init ref<int32> value) {
+                if (!publish) { return false; }
+                value = 42;
+                return true;
+            }
+            [NoThrow] bool Identity(bool value, init ref<int32> result) {
+                if (!value) { return false; }
+                result = 42;
+                return true;
+            }
+            int32 Main() {
+                init int32 ready;
+            """);
+        source.AppendLine("    require Fill(true, init ready);");
+        for (var index = 0; index < 24; index++)
+        {
+            source.Append("    init int32 dead").Append(index).AppendLine(";");
+        }
+        source.Append("    if (Identity((ready is init) ? true : (");
+        for (var index = 0; index < 24; index++)
+        {
+            if (index != 0)
+            {
+                source.Append(" || ");
+            }
+            source.Append("Fill(false, init dead").Append(index).Append(')');
+        }
+        source.AppendLine("), init var live)) {");
+        source.AppendLine("        require Fill(true, init dead0);");
+        source.AppendLine("        return live + dead0;");
+        source.AppendLine("    }");
+        source.AppendLine("    return 0;");
+        source.AppendLine("}");
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()), (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(84, NativeJit.Execute(program, policy));
+        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+    }
+
     [Fact]
     public void ManagedInitReferenceRetainsWritableHandleAndVacantPassingMode()
     {

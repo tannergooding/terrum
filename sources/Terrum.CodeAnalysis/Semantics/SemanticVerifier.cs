@@ -3848,12 +3848,21 @@ public static class SemanticVerifier
                 VacateNestedOutputs(binary.Right, state, ref remaining);
                 break;
             case BoundConditional conditional:
+                var whenTruePossible = CanBe(conditional.Condition, true, ref remaining, state);
+                var whenFalsePossible = CanBe(conditional.Condition, false, ref remaining, state);
+                if (whenTruePossible != whenFalsePossible)
+                {
+                    var feasible = Outcome(conditional.Condition, state, whenTruePossible, ref remaining);
+                    VacateNestedOutputs(whenTruePossible ? conditional.WhenTrue : conditional.WhenFalse,
+                        feasible, ref remaining);
+                    feasible.CopyTo(state);
+                    break;
+                }
                 var trueState = Outcome(conditional.Condition, state, true, ref remaining);
                 VacateNestedOutputs(conditional.WhenTrue, trueState, ref remaining);
                 var falseState = Outcome(conditional.Condition, state, false, ref remaining);
                 VacateNestedOutputs(conditional.WhenFalse, falseState, ref remaining);
-                var joined = Combine(trueState, CanBe(conditional.Condition, true, ref remaining, state),
-                    falseState, CanBe(conditional.Condition, false, ref remaining, state));
+                var joined = Combine(trueState, whenTruePossible, falseState, whenFalsePossible);
                 joined.CopyTo(state);
                 break;
             case BoundCoalesce coalesce:
