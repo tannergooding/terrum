@@ -25,45 +25,6 @@ public static partial class ModuleCompiler
     private const int MaximumDepth = 128;
     private const int MaximumStringBytes = 1024;
 
-    private static bool HasInitReference(Module module) =>
-        module.Functions.Any(static item => item.Contract.Contains("|init:", StringComparison.Ordinal)
-            || (item.Function is BoundFunction function
-                && function.Variables.Any(static variable => variable.IsInit)));
-
-    private static bool HasExplicitGetter(Module module) =>
-        module.Functions.Any(static item => item.Function is BoundFunction { PropertyName: not null });
-
-    private static bool HasTransparentLayout(Module module) =>
-        module.Structures.Any(static structure => structure.IsTransparent);
-
-    private static bool HasWideClassFields(Module module) =>
-        module.Classes.Any(static @class => @class.Fields.Length > 16);
-
-    private static bool HasCorePrimitiveMembers(Module module, bool gettersOnly = false)
-    {
-        foreach (var item in module.Functions)
-        {
-            if (gettersOnly && item.Function?.PropertyName is null
-                && !item.Contract.Contains("|Property:", StringComparison.Ordinal))
-            {
-                continue;
-            }
-            var owner = item.Function?.DeclaringStruct;
-            if (owner is null && item.Import)
-            {
-                var parts = item.Contract.Split('|');
-                owner = parts.Length > 6 ? parts[5] : null;
-            }
-            if (owner is not null && Binder.TryPrimitiveType(owner, out _)
-                && !module.Structures.Any(structure => structure.Name == owner)
-                && !module.Classes.Any(@class => @class.Name == owner))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
     /// <summary>Reads and verifies a producer artifact, exposing only exported declarations and their value layouts to source binding.</summary>
     public static CompilationReference CreateReference(byte[] producerBytes)
     {

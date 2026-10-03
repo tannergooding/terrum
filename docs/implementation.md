@@ -2639,11 +2639,10 @@ but does not decode, generate or verify executable instructions.
 Separate test-only fixtures independently decode approved general and compact
 Body examples and check their indexes against the written bytes; they are not
 an executable Body reader or an adopted metadata writer.
-Historical-revision readers and feature-dependent writer
-selection are temporary implementation support to remove before v1. That
-cleanup must update writers and fixtures together and reject unsupported
-revisions rather than reinterpret their bytes. Structural decoding, binding
-and declared-contract checks remain required for supported revisions.
+Historical semantic-module revision readers and feature-dependent revision
+selection are retired. The writer always emits revision 50 and the reader
+accepts only revision 50; supported artifacts still require structural
+decoding, binding and declared-contract checks.
 
 The current backend emits Windows x64 machine instructions and PE32+ images
 directly, with no CIL/LLVM translation
