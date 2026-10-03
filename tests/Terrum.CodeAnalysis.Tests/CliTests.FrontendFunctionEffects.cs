@@ -50,7 +50,7 @@ public sealed partial class CliTests
                     "-", "-o", native, "--runtime", policy, "--json");
                 Assert.True(exit == 0, $"{output}{error}");
                 using var document = JsonDocument.Parse(output);
-                Assert.Equal(59, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
                 var (hostExit, hostOutput, hostError) = await RunAsync(source, "build", "-", "-o", hosted, "--runtime", policy, "--json");
                 Assert.True(hostExit == 0, $"{hostOutput}{hostError}");
                 var (scanExit, scanOutput, scanError) = await RunAsync(source, "build-component", Path.Combine(root, "self-host", "Scanner.terrum"),
@@ -207,7 +207,7 @@ public sealed partial class CliTests
                     var result = document.RootElement.GetProperty("result");
                     Assert.True(result.GetProperty("valid").GetBoolean());
                     Assert.True(result.GetProperty("noThrow").GetBoolean());
-                    Assert.Equal(59, result.GetProperty("projectionVersion").GetInt32());
+                    Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 }
 
                 var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(text),
@@ -260,7 +260,7 @@ public sealed partial class CliTests
                     var result = document.RootElement.GetProperty("result");
                     Assert.True(result.GetProperty("valid").GetBoolean());
                     Assert.True(result.GetProperty("doesNotReturn").GetBoolean());
-                    Assert.Equal(59, result.GetProperty("projectionVersion").GetInt32());
+                    Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 }
 
                 var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(text),
@@ -432,7 +432,7 @@ public sealed partial class CliTests
             {
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(59, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 if (resource == "nodes") { Assert.Equal(count, result.GetProperty("nodes").GetArrayLength()); }
                 if (resource == "records") { Assert.Equal(count, result.GetProperty("statements").GetArrayLength()); }
                 if (resource == "locals") { Assert.Equal(count, result.GetProperty("locals").GetArrayLength()); }

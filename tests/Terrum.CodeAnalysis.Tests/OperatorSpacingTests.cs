@@ -158,7 +158,7 @@ public sealed class OperatorSpacingTests
     {
         var text = "int32 F(int32 x, int32 y) { return x" + left + "+" + right + "y; }";
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 1; words[1] = 1; words[5] = 1; words[6] = 2; words[7] = 1; words[8] = 1;
+        words[0] = 85; words[1] = 1; words[5] = 1; words[6] = 2; words[7] = 1; words[8] = 1;
         words[9] = 6; words[10] = 1;
         words[11] = text.IndexOf("x,", StringComparison.Ordinal); words[12] = 1;
         words[13] = text.IndexOf("y)", StringComparison.Ordinal); words[14] = 1;
@@ -254,7 +254,7 @@ public sealed class OperatorSpacingTests
         {
             var text = "public int32 Value(int32 x)" + left + "=>" + right + "-" + unary + "x;";
             var words = new int[ScalarFrontendHost.WordCount];
-            words[0] = version; words[1] = 1; words[2] = 1; words[5] = 1;
+            words[0] = 85; words[1] = 1; words[2] = 1; words[5] = 1;
             words[6] = 1; words[7] = 1;
             words[9] = text.IndexOf("Value", StringComparison.Ordinal); words[10] = 5;
             words[11] = text.IndexOf("x)", StringComparison.Ordinal); words[12] = 1;
@@ -288,7 +288,7 @@ public sealed class OperatorSpacingTests
         {
             var text = "public int32 Value() { mut int32 x" + binding + "4; x" + compound + "2; return x" + postfix + "++; }";
             var words = new int[ScalarFrontendHost.WordCount];
-            words[0] = version; words[1] = 1; words[2] = 1; words[5] = 1;
+            words[0] = 85; words[1] = 1; words[2] = 1; words[5] = 1;
             words[9] = text.IndexOf("Value", StringComparison.Ordinal); words[10] = 5;
             words[37] = 6; words[38] = -1; words[39] = -1; words[40] = -1;
             words[298] = 3; words[299] = 1; words[300] = 1; words[301] = 1;
@@ -337,7 +337,7 @@ public sealed class OperatorSpacingTests
         {
             var text = "public int32 Value() { do { return +" + gap + "42; } while (false); }";
             var words = new int[ScalarFrontendHost.WordCount];
-            words[0] = 51; words[1] = 1; words[2] = 1; words[5] = 1;
+            words[0] = 85; words[1] = 1; words[2] = 1; words[5] = 1;
             words[9] = text.IndexOf("Value", StringComparison.Ordinal); words[10] = 5;
             words[37] = 3; words[38] = -1; words[39] = -1; words[40] = -1;
             words[298] = 2;

@@ -20,7 +20,7 @@ public sealed class MutationFrontendProjectionTests
         const string text = "public int64 Shift(int64 value, int32 count) => value >>> count;";
         var source = SourceText.From(text);
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 49;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 3;
@@ -92,7 +92,7 @@ public sealed class MutationFrontendProjectionTests
         const string text = "public int32 Value() { mut int32 x = 4; x += 2; return x++; }";
         var source = SourceText.From(text);
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 49;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;

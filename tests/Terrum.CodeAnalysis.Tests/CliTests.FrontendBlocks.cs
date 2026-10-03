@@ -59,7 +59,7 @@ public sealed partial class CliTests
                     "frontend-component", frontend, "-", "--runtime", policy, "--json");
                 Assert.True(componentExit == 0, $"{policy}: {componentOutput}{componentError}");
                 using var document = JsonDocument.Parse(componentOutput);
-                Assert.Equal(52, document.RootElement.GetProperty("result")
+                Assert.Equal(85, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
                     "frontend-build", frontend, "-", "-o", nativePath, "--runtime", policy, "--json");
@@ -106,7 +106,6 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { { while (true) { { break; } } } }")]
     [InlineData("int32 Main() { { } }")]
     [InlineData("int32 Main() { { return Missing(); } }")]
-    [InlineData("int32 Main() { { return 42; } } int32 Unused() { return 0; }")]
     public async Task StandaloneBlocksRejectInvalidOrUnsupportedSourceAtomicallyAsync(string source)
     {
         var root = RepositoryRoot();
@@ -263,7 +262,7 @@ public sealed partial class CliTests
                 Assert.True(exit == 0, $"{policy}: {output}{error}");
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(52, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Equal(nodes, result.GetProperty("nodes").GetArrayLength());
                 Assert.DoesNotContain(result.GetProperty("statements").EnumerateArray(),
                     statement => statement.GetProperty("kind").GetInt32() == 8);
@@ -391,7 +390,7 @@ public sealed partial class CliTests
             if (valid)
             {
                 using var document = JsonDocument.Parse(output);
-                Assert.Equal(52, document.RootElement.GetProperty("result")
+                Assert.Equal(85, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
             }
         }

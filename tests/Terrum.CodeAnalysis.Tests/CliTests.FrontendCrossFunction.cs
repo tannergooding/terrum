@@ -16,8 +16,53 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
+    [Theory]
+    [InlineData("void Main() {} void Other() {}", 0)]
+    [InlineData("void Main() => require true; void Other() {}", 0)]
+    [InlineData("int32 Main() { { return 42; } } int32 Unused() { return 0; }", 42)]
+    [InlineData("int32 Main() { _ = int32(1); return 42; } int32 Unused() { return 0; }", 42)]
+    [InlineData("void Main() { if (false) {} else if (true) {} } void Other() {}", 0)]
+    public async Task ScalarFrontendCurrentProgramIncludesSimpleAndStructuredFunctionsAsync(
+        string source, int expected)
+    {
+        var root = RepositoryRoot();
+        var native = Path.Combine(root, $"current-program-{Guid.NewGuid():N}.native.exe");
+        var hosted = Path.Combine(root, $"current-program-{Guid.NewGuid():N}.hosted.exe");
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var input = Encoding.UTF8.GetBytes(source);
+                var (componentExit, componentOutput, componentError) = await RunAsync(input,
+                    "frontend-component", Path.Combine(root, "self-host"), "-",
+                    "--runtime", policy, "--json");
+                Assert.True(componentExit == 0, $"{componentOutput}{componentError}");
+                using var component = JsonDocument.Parse(componentOutput);
+                var result = component.RootElement.GetProperty("result");
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(2, result.GetProperty("functions").GetArrayLength());
+
+                var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
+                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", native,
+                    "--runtime", policy, "--json");
+                var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
+                    "build", "-", "-o", hosted, "--runtime", policy, "--json");
+                Assert.True(nativeExit == 0, $"{nativeOutput}{nativeError}");
+                Assert.True(hostedExit == 0, $"{hostedOutput}{hostedError}");
+                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+                Assert.Equal(expected, await ExecuteNativeImageAsync(native));
+                Assert.Equal(expected, await ExecuteNativeImageAsync(hosted));
+            }
+        }
+        finally
+        {
+            File.Delete(native);
+            File.Delete(hosted);
+        }
+    }
+
     [Fact]
-    public async Task ScalarFrontendCrossFunctionVoidStatementCliUsesProjection75Async()
+    public async Task ScalarFrontendCrossFunctionVoidStatementCliUsesCurrentProjectionAsync()
     {
         const string text = "public int32 Main() { Step(); return 42; } void Step() { }";
         var directory = Path.Combine(RepositoryRoot(), "self-host");
@@ -28,7 +73,7 @@ public sealed partial class CliTests
         using (var document = JsonDocument.Parse(output))
         {
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(75, result.GetProperty("projectionVersion").GetInt32());
+            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
             var main = result.GetProperty("functions")[0];
             Assert.Contains(main.GetProperty("nodes").EnumerateArray(),
                 static node => node.GetProperty("operation").GetInt32() == 105
@@ -42,7 +87,7 @@ public sealed partial class CliTests
     }
 
     [Fact]
-    public async Task ScalarFrontendCrossFunctionDoesNotReturnCliUsesProjection76Async()
+    public async Task ScalarFrontendCrossFunctionDoesNotReturnCliUsesCurrentProjectionAsync()
     {
         const string text = "[DoesNotReturn] void Halt() { require false; } public int32 Main() { if (false) { Halt(); } return 42; }";
         var directory = Path.Combine(RepositoryRoot(), "self-host");
@@ -55,7 +100,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(76, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Equal(2, result.GetProperty("functions").GetArrayLength());
             }
             var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
@@ -67,7 +112,7 @@ public sealed partial class CliTests
     }
 
     [Fact]
-    public async Task ScalarFrontendCrossFunctionOutputArgumentsCliUsesProjection77Async()
+    public async Task ScalarFrontendCrossFunctionOutputArgumentsCliUsesCurrentProjectionAsync()
     {
         const string text = "public int32 Main() { if (Set(40, out var value, out var extra)) { return value + extra; } return 0; } bool Set(int32 seed, out int32 value, out int32 extra) { value = seed + 1; extra = 1; return true; }";
         var directory = Path.Combine(RepositoryRoot(), "self-host");
@@ -80,7 +125,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(77, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 var main = result.GetProperty("functions")[0];
                 Assert.Equal(0, main.GetProperty("outParameterMask").GetInt32());
                 Assert.Equal(6, result.GetProperty("functions")[1]
@@ -97,7 +142,7 @@ public sealed partial class CliTests
     }
 
     [Fact]
-    public async Task ScalarFrontendCrossFunctionNonBooleanOutputCliUsesProjection80Async()
+    public async Task ScalarFrontendCrossFunctionNonBooleanOutputCliUsesCurrentProjectionAsync()
     {
         const string text = "public int32 Main() { mut int32 value = 0; int32 status = Set(out value); return value + status; } int32 Set(out int32 value) { value = 40; return 2; }";
         var directory = Path.Combine(RepositoryRoot(), "self-host");
@@ -110,7 +155,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(80, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Equal(1, result.GetProperty("functions")[1]
                     .GetProperty("outParameterMask").GetInt32());
             }
@@ -123,7 +168,7 @@ public sealed partial class CliTests
     }
 
     [Fact]
-    public async Task ScalarFrontendCrossFunctionNonBooleanOutVariablesUseProjection80Async()
+    public async Task ScalarFrontendCrossFunctionNonBooleanOutVariablesUseCurrentProjectionAsync()
     {
         const string text = """
             public int32 Main() {
@@ -144,7 +189,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(80, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Contains(result.GetProperty("functions")[0].GetProperty("nodes")
                     .EnumerateArray(), static node => node.GetProperty("operation").GetInt32() == 104);
             }
@@ -191,7 +236,8 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(projectionVersion, result.GetProperty("projectionVersion").GetInt32());
+                Assert.NotEqual(projectionVersion, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Contains(result.GetProperty("functions")[0].GetProperty("nodes")
                     .EnumerateArray(), node => node.GetProperty("operation").GetInt32() == operation);
             }
@@ -205,7 +251,7 @@ public sealed partial class CliTests
     }
 
     [Fact]
-    public async Task ScalarFrontendSingleFunctionNonBooleanOutputCliUsesProjection79Async()
+    public async Task ScalarFrontendSingleFunctionNonBooleanOutputCliUsesCurrentProjectionAsync()
     {
         const string text = "public int32 Fill(int32 seed, out int32 value) { if (seed == 0) { value = 40; return 2; } return Fill(seed - 1, out value); }";
         var directory = Path.Combine(RepositoryRoot(), "self-host");
@@ -219,7 +265,7 @@ public sealed partial class CliTests
             Assert.True(exit == 0, $"{runtime}: {exit}: {output}{error}");
             using var document = JsonDocument.Parse(output);
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(79, result.GetProperty("projectionVersion").GetInt32());
+            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
             Assert.Equal(2, result.GetProperty("outParameterMask").GetInt32());
             Assert.Equal(0, result.GetProperty("initRefParameterMask").GetInt32());
             Assert.Contains(result.GetProperty("nodes").EnumerateArray(), static node =>
@@ -227,7 +273,7 @@ public sealed partial class CliTests
             Assert.Contains(result.GetProperty("nodes").EnumerateArray(), static node =>
                 node.GetProperty("operation").GetInt32() == 103);
 
-            var path = Path.Combine(outputDirectory, $"v79-library-{Guid.NewGuid():N}.dll");
+            var path = Path.Combine(outputDirectory, $"single-init-ref-{Guid.NewGuid():N}.dll");
             try
             {
                 var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
@@ -249,7 +295,7 @@ public sealed partial class CliTests
     }
 
     [Fact]
-    public async Task ScalarFrontendSingleFunctionNonBooleanOutVariablesUseProjection79Async()
+    public async Task ScalarFrontendSingleFunctionNonBooleanOutVariablesUseCurrentProjectionAsync()
     {
         const string text = """
             public int32 Fill(int32 seed, out int32 value) {
@@ -269,7 +315,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(79, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Contains(result.GetProperty("nodes").EnumerateArray(), static node =>
                     node.GetProperty("operation").GetInt32() == 104);
             }
@@ -279,7 +325,7 @@ public sealed partial class CliTests
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
             Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
             var hosted = Assert.IsType<BoundProgram>(compilation.Program);
-            var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-v79-outvar-{Guid.NewGuid():N}.dll");
+            var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-outvar-{Guid.NewGuid():N}.dll");
             try
             {
                 var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
@@ -296,7 +342,7 @@ public sealed partial class CliTests
     }
 
     [Fact]
-    public async Task ScalarFrontendCrossFunctionInitReferencesCliUsesProjection78Async()
+    public async Task ScalarFrontendCrossFunctionInitReferencesCliUsesCurrentProjectionAsync()
     {
         const string text = "public int32 Main() { require !Fill(false, init var value); return Fill(true, init value) ? value : 0; } bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return false; }";
         var directory = Path.Combine(RepositoryRoot(), "self-host");
@@ -309,7 +355,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(78, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Equal(0, result.GetProperty("functions")[0]
                     .GetProperty("initRefParameterMask").GetInt32());
                 Assert.Equal(2, result.GetProperty("functions")[1]
@@ -330,7 +376,7 @@ public sealed partial class CliTests
     }
 
     [Fact]
-    public async Task ScalarFrontendSingleInitReferencesCliUsesProjection79Async()
+    public async Task ScalarFrontendSingleInitReferencesCliUsesCurrentProjectionAsync()
     {
         const string text = "public bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return Fill(true, init value); }";
         var directory = Path.Combine(RepositoryRoot(), "self-host");
@@ -344,13 +390,13 @@ public sealed partial class CliTests
             Assert.True(exit == 0, $"{exit}: {output}{error}");
             using var document = JsonDocument.Parse(output);
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(79, result.GetProperty("projectionVersion").GetInt32());
+            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
             Assert.Equal(0, result.GetProperty("outParameterMask").GetInt32());
             Assert.Equal(2, result.GetProperty("initRefParameterMask").GetInt32());
             Assert.Contains(result.GetProperty("nodes").EnumerateArray(), static node =>
                 node.GetProperty("operation").GetInt32() == 107);
 
-            var path = Path.Combine(outputDirectory, $"v79-library-{Guid.NewGuid():N}.dll");
+            var path = Path.Combine(outputDirectory, $"single-nonboolean-init-ref-{Guid.NewGuid():N}.dll");
             try
             {
                 var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
@@ -372,7 +418,7 @@ public sealed partial class CliTests
     }
 
     [Fact]
-    public async Task ScalarFrontendSingleNonBooleanInitReferenceCliUsesProjection81Async()
+    public async Task ScalarFrontendSingleNonBooleanInitReferenceCliUsesCurrentProjectionAsync()
     {
         const string text = "public int32 Fill(int32 seed, init ref<int32> value) { if (seed == 0) { value = 40; return 0; } return Fill(seed - 1, init value); }";
         var directory = Path.Combine(RepositoryRoot(), "self-host");
@@ -384,12 +430,12 @@ public sealed partial class CliTests
             Assert.True(exit == 0, $"{runtime}: {exit}: {output}{error}");
             using var document = JsonDocument.Parse(output);
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(81, result.GetProperty("projectionVersion").GetInt32());
+            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
             Assert.Equal(2, result.GetProperty("initRefParameterMask").GetInt32());
             Assert.Contains(result.GetProperty("nodes").EnumerateArray(), static node =>
                 node.GetProperty("operation").GetInt32() == 107);
 
-            var path = Path.Combine(Path.GetTempPath(), $"v81-library-{Guid.NewGuid():N}.dll");
+            var path = Path.Combine(Path.GetTempPath(), $"nonboolean-init-ref-{Guid.NewGuid():N}.dll");
             try
             {
                 var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
@@ -411,7 +457,7 @@ public sealed partial class CliTests
     }
 
     [Fact]
-    public async Task ScalarFrontendCrossFunctionNonBooleanAndVoidInitReferenceCliUsesProjection82Async()
+    public async Task ScalarFrontendCrossFunctionNonBooleanAndVoidInitReferenceCliUsesCurrentProjectionAsync()
     {
         const string text = "public int32 Main() { Fill(init var value); SetVoid(init var other); return value + other; } int32 Fill(init ref<int32> value) { value = 40; return 0; } void SetVoid(init ref<int32> value) { value = 2; }";
         var directory = Path.Combine(RepositoryRoot(), "self-host");
@@ -424,7 +470,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(82, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Equal(1, result.GetProperty("functions")[1]
                     .GetProperty("initRefParameterMask").GetInt32());
                 Assert.Equal(1, result.GetProperty("functions")[2]
@@ -437,7 +483,7 @@ public sealed partial class CliTests
             Assert.Empty(runOutput);
             Assert.Empty(runError);
 
-            var path = Path.Combine(Path.GetTempPath(), $"v82-library-{Guid.NewGuid():N}.dll");
+            var path = Path.Combine(Path.GetTempPath(), $"cross-function-init-ref-{Guid.NewGuid():N}.dll");
             try
             {
                 var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
@@ -474,7 +520,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(74, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 var functions = result.GetProperty("functions");
                 Assert.Equal(2, functions.GetArrayLength());
                 Assert.Equal(0, functions[0].GetProperty("index").GetInt32());
@@ -489,7 +535,7 @@ public sealed partial class CliTests
             Assert.Empty(runOutput);
             Assert.Empty(runError);
 
-            var path = Path.Combine(outputDirectory, $"v74-library-{Guid.NewGuid():N}.dll");
+            var path = Path.Combine(outputDirectory, $"cross-function-library-{Guid.NewGuid():N}.dll");
             var executablePath = Path.ChangeExtension(path, ".exe");
             try
             {
@@ -511,7 +557,7 @@ public sealed partial class CliTests
                 using var process = Process.Start(new ProcessStartInfo(executablePath) {
                     UseShellExecute = false,
                     CreateNoWindow = true,
-                }) ?? throw new InvalidOperationException("Could not execute v74 frontend output.");
+                }) ?? throw new InvalidOperationException("Could not execute frontend output.");
                 await process.WaitForExitAsync();
                 Assert.Equal(42, process.ExitCode);
             }
@@ -674,7 +720,7 @@ public sealed partial class CliTests
     }
 
     [Fact]
-    public async Task ScalarFrontendNamedSelfCallsUseProjection85Async()
+    public async Task ScalarFrontendNamedSelfCallsUseCurrentProjectionAsync()
     {
         const string text = "int32 Recurse(int32 first, int32 second, int32 third) => Recurse(first: second, second: first, third);";
         var directory = Path.Combine(RepositoryRoot(), "self-host");

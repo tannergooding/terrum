@@ -16,7 +16,7 @@ public sealed class ConversionFrontendProjectionTests
         const string text = "public int32 Main() => int32(uint64(42));";
         var source = SourceText.From(text);
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 22;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;
@@ -89,7 +89,7 @@ public sealed class ConversionFrontendProjectionTests
     {
         const string text = "public int32 Main() { mut uint64 x = uint64(42); x = uint64(x); return int32(x); }";
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 23;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;
@@ -177,7 +177,7 @@ public sealed class ConversionFrontendProjectionTests
     {
         const string text = "public int32 Value(int32 int32) => int32(int32);";
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 22;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;

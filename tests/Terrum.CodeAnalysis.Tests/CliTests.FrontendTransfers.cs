@@ -40,7 +40,8 @@ public sealed partial class CliTests
                 Assert.Empty(projectionError);
                 using var document = JsonDocument.Parse(projectionOutput);
                 var projected = document.RootElement.GetProperty("result");
-                Assert.Equal(version, projected.GetProperty("projectionVersion").GetInt32());
+                Assert.NotEqual(version, projected.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, projected.GetProperty("projectionVersion").GetInt32());
                 var statements = projected.GetProperty("statements");
                 Assert.Contains(statements.EnumerateArray(), entry => entry.GetProperty("kind").GetInt32() == 3);
                 Assert.Contains(statements.EnumerateArray(), entry => entry.GetProperty("kind").GetInt32() is 6 or 7);

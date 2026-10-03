@@ -133,7 +133,7 @@ public sealed class FunctionEffectsFrontendProjectionTests
     {
         var text = $"{attributes} public void @await() {{ while (true) {{}} return; }}";
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 59;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 7;
         words[9] = text.IndexOf("@await", StringComparison.Ordinal);
@@ -178,7 +178,7 @@ public sealed class FunctionEffectsFrontendProjectionTests
     private static int[] Projection(string text, bool isVoid, bool arrow, int effects)
     {
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 59;
+        words[0] = 85;
         words[1] = 1;
         words[2] = effects | 1;
         words[5] = isVoid ? 0 : 1;

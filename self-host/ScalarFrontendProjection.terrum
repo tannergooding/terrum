@@ -1,114 +1,16 @@
 namespace Terrum.CodeAnalysis;
 
-// Version 20 retains the 37-word header. Words 37..41 hold node count,
-// condition/true/false roots (-1 when absent), and expression-body flag.
-// Each of 32 postorder nodes uses eight words: opcode, type, span start/length,
-// child/parameter, right child, and contextual magnitude low/high.
-// Version 21 adds 12 ordered statement records and eight local declarations:
-// words 298/299 count statements/locals; 300..331 hold (type, mut, name start,
-// name length); 332..391 hold (kind, slot, root, span start, span length).
-// Versions 22/23 add unary operation 83 for checked numeric conversion,
-// respectively without/with local records; its type is the destination.
-// Versions 24/25 add conditional operation 84 without/with local records;
-// its left and right are condition and true-arm nodes, and its low word is
-// the false-arm node index. Versions 26/27 combine it with operation 83.
-// Versions 28..31 require local records and at least one while header (kind 3).
-// Its slot is the exclusive body-end statement index, root is its Boolean
-// condition and span covers the entire loop; +1 selects conversion, +2
-// selects conditional expressions. Nested bodies follow headers in preorder;
-// the parser admits at most six nested loop headers.
-// Versions 32..35 require kind-4 branch headers: slot is the exclusive
-// true-arm end, root the Boolean predicate, span the whole if. An optional
-// kind-5 else marker at that index has slot at the exclusive else-arm end,
-// root -1, and span covering the else keyword and braced body. Versions
-// 36..39 additionally require kind-3 loops; +1/+2 select conversion/?:.
-// Versions 40..43 require a loop and a kind-6 break or kind-7 continue;
-// versions 44..47 additionally require a branch. Transfer slot names the
-// nearest enclosing kind-3 header record; root is -1 and span is the keyword
-// through semicolon. +1/+2 select conversion/?:.
-// Version 48 uses the same 392 words and tree/statement capacities, with
-// kind-8 source-ordered returns (slot 0, typed root, keyword-to-semicolon
-// span). Header roots 38..40 are -1 and word 15 is 0: there is no terminal
-// envelope. Version 48 admits the existing conversion, conditional, loop,
-// branch and nearest-loop transfer features without a cross-product version.
-// Version 49 selects shifts (operations 88..90), local updates (86/87,
-// low=1 prefix or 0 postfix), and compound statements (kind 9, root
-// operation 91..101), plus update expression statements (kind 10).
-// The existing node/statement and source-order capacities remain unchanged.
-// Version 50 selects declarations inside existing braced branches/loops.
-// Slots remain monotonic across scopes; the eight-local limit counts all
-// declaration identities, not only simultaneously visible names.
-// Version 51 selects kind-11 post-tested do and kind-12 for headers. Both
-// slots end the body, with a Boolean root (for may use -1 for an omitted
-// condition). For has exactly two following clause records before the body:
-// initializer and iterator, each a normal statement without a semicolon or
-// kind-13 empty marker anchored to its delimiter. Do's trailing condition
-// root belongs to the header after the body, not to the body lexical scope.
-// Header roots remain -1 without return records when verified non-fallthrough;
-// an omitted-condition infinite for may need no expression nodes at all.
-// Version 52 adds kind-14 standalone lexical blocks: slot is the exclusive body end,
-// root is -1, and the span covers both braces. Each header counts as one record.
-// Version 53 adds kind-15 non-void scalar discards. Slot identifies a readonly
-// hidden local anchored to '_'; root is self-typed and span ends at the semicolon.
-// Version 54 adds labeled while/do/for headers (16/17/18), whose spans include
-// the label, and named break/continue (19/20), whose slots select enclosing headers.
-// Version 55 adds kind-21 standalone requirements: slot zero, Boolean root,
-// and an exact keyword-through-semicolon span, without a local or source scope.
-// Version 56 admits void headers (return type zero) and kind-22 null returns.
-// Bare and parenthesized unit-literal returns have root -1 and no expression node.
-// Version 57 admits a void arrow body: flag 41 is one, envelope roots are -1,
-// and exactly one existing kind-15 discard or kind-21 requirement record owns it.
-// Version 58 adds kind-23 else-if markers: root -1, slot exclusive nested-if end,
-// and raw span from else through the direct nested if, without a lexical block.
-// Version 59 adds exact parameterless declaration effects in header word2:
-// Header flags: bit0 public, bit1 NoThrow, bit2 DoesNotReturn, bit3 caller-unsafe.
-// Program v83 adds caller-unsafe callable declarations; existing body layouts remain.
-// Program v84 adds kind 110 for a source-audited unsafe(expr) wrapper.
-// Version 60 adds kind 24 for ending a visible named local; slot is its identity,
-// root is -1, and the span includes the semicolon outside for-clause records.
-// Version 61 adds kind 25 for an explicitly typed vacant local; local flag bit 1
-// marks initialization authority and the declaration record has root -1.
-// Version 62 adds kind 26 for an inferred vacant scalar local with its resolved
-// type in the local record; the source declaration uses `init var`.
-// Version 63 adds kind 27 for a scalar constant local with a literal initializer.
-// Version 64 adds kind 28 for a scalar constant local with a foldable expression initializer.
-// Version 65 adds kind 29 for a try body and kind 30 for its finally body.
-// Version 66 adds kind 31 for an unsafe block, kind 32 for a try body and kind 33 for its catch body.
-// Version 67 adds kind 34 for a catch region's optional finally body.
-// Version 68 adds kinds 35 and 36 for static require and ensure proofs.
-// Version 69 uses header word 16 as a parameter out-mode bitmask.
-// Version 70 adds bounded direct self-call expressions and existing out targets.
-// Version 71 adds out var destinations to bounded direct self-calls.
-// Version 72 adds kind-37 direct self-call expression statements; slot is zero,
-// root is the call node, and the span includes the semicolon outside for clauses.
-// Version 73 permits void self-call nodes in kind-37 expression statements.
-// Version 74 uses the separate FrontendProgram framing and operation-105
-// target table defined in ScalarFrontendProgram; the legacy buffer is zero.
-// Program version 75 uses the same framing for void-target operation-105 nodes,
-// permitted only as roots of kind-37 expression statements.
-// Program version 76 admits void-only DoesNotReturn declarations and tracks
-// their target contracts when proving call-statement continuation.
-// Program version 77 carries existing scalar out-parameter modes through
-// complete declaration snapshots and direct operation-105 call arguments.
-// Program v78 and single-function v79 use word 17 for init-ref modes, separate
-// from the out mask in word 16. Operations 107/108 encode existing and declared targets.
-// Program v80 adds non-Boolean scalar out calls with existing destinations.
-// Single-function v79 shares its mode masks with recursive non-Boolean out calls.
-// Single-function v80 adds operation 109 for named-local/parameter `is init`.
-// Program v81 admits the same node after auditing its owning named read.
-// Projection v85 marks source-order calls with a packed formal-parameter map.
-bool HasScalarFrontendStatement(int32 kind)
-{
-    for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
-    {
-        if (Host.Frontend[332 + statement * 5] == kind)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
+// V85 is the only published projection tag. The 392-word buffer retains both
+// compact expression records and postorder tree/statement records; publication
+// chooses the layout already populated by the bounded source parser.
+// Tree words 37..41 hold node count, condition/true/false roots (-1 when absent),
+// and expression-body flag. Each of 32 nodes uses eight words: opcode, type,
+// span start/length, child/parameter, right child, and magnitude low/high.
+// Words 298/299 count statements/locals; 300..331 hold eight local declarations
+// (type, flags, name start/length); 332..391 hold twelve ordered statements
+// (kind, slot, root, span start/length). Header flags in word 2 are public,
+// NoThrow, DoesNotReturn, and caller-unsafe; words 16/17 hold out/init-ref masks
+// in the tree layout. Calls retain source-order roots and packed formal maps.
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
     Host.Frontend[offset] = expression.Type;
@@ -117,46 +19,6 @@ void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expres
     Host.Frontend[offset + 3] = expression.RightParameter;
     Host.Frontend[offset + 4] = expression.Span.Start;
     Host.Frontend[offset + 5] = expression.Span.Length;
-}
-
-int32 GetScalarFrontendStatementVersion()
-{
-    mut int32 version = 0;
-    mut int32 maximumKind = 0;
-    for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
-    {
-        int32 kind = Host.Frontend[332 + statement * 5];
-        if (kind > maximumKind) { maximumKind = kind; }
-        if (kind == 8) { if (version < 48) { version = 48; } }
-        if (kind != 1) { continue; }
-        if (HasScalarFrontendEnclosingHeader(statement)) { version = 50; }
-    }
-    if (maximumKind >= 35) { return 68; }
-    if (maximumKind >= 34) { return 67; }
-    if (maximumKind >= 31) { return 66; }
-    if (maximumKind >= 29) { return 65; }
-    if (maximumKind == 28) { return 64; }
-    if (maximumKind == 27) { return 63; }
-    if (maximumKind == 26) { return 62; }
-    if (maximumKind == 25) { return 61; }
-    if (maximumKind == 24) { return 60; }
-    if (maximumKind == 23) { return 58; }
-    if (maximumKind == 21) { return 55; }
-    if (maximumKind >= 16) { return 54; }
-    if (maximumKind >= 14) { return maximumKind + 38; }
-    if (maximumKind >= 11) { return 51; }
-    return version;
-}
-
-bool HasScalarFrontendEnclosingHeader(int32 statement)
-{
-    for (mut int32 header = 0; header < statement; header = header + 1)
-    {
-        int32 kind = Host.Frontend[332 + header * 5];
-        if (kind < 3 || kind > 5) { continue; }
-        if (Host.Frontend[332 + header * 5 + 1] > statement) { return true; }
-    }
-    return false;
 }
 
 bool TryPublishScalarFrontend()
@@ -169,7 +31,7 @@ bool TryPublishScalarFrontend()
         return false;
     }
 
-    Host.Frontend[0] = 3;
+    Host.Frontend[0] = 85;
     if (!result.IsValid)
     {
         Host.Frontend[2] = result.ErrorCode;
@@ -183,36 +45,6 @@ bool TryPublishScalarFrontend()
     Host.Frontend[5] = result.ReturnType;
     if (result.ReturnType == 0 || Host.Frontend[37] != 0 || Host.Frontend[298] != 0)
     {
-        Host.Frontend[0] = result.ReturnType == 0
-            ? (Host.Frontend[41] == 1 ? 57 : 56) : GetScalarFrontendTreeVersion();
-        if (HasScalarFrontendStatement(23)) { Host.Frontend[0] = 58; }
-        if ((Host.Frontend[2] & 6) != 0) { Host.Frontend[0] = 59; }
-        if (HasScalarFrontendStatement(24)) { Host.Frontend[0] = 60; }
-        if (HasScalarFrontendStatement(25)) { Host.Frontend[0] = 61; }
-        if (HasScalarFrontendStatement(26)) { Host.Frontend[0] = 62; }
-        if (HasScalarFrontendStatement(27)) { Host.Frontend[0] = 63; }
-        if (HasScalarFrontendStatement(28)) { Host.Frontend[0] = 64; }
-        if (HasScalarFrontendStatement(29)) { Host.Frontend[0] = 65; }
-        if (HasScalarFrontendStatement(31)) { Host.Frontend[0] = 66; }
-        if (HasScalarFrontendStatement(34)) { Host.Frontend[0] = 67; }
-        if (HasScalarFrontendStatement(35) || HasScalarFrontendStatement(36)) { Host.Frontend[0] = 68; }
-        if (result.OutParameterMask != 0) { Host.Frontend[0] = 69; }
-        if (HasScalarFrontendOperation(102)) { Host.Frontend[0] = 70; }
-        if (HasScalarFrontendOperation(104)) { Host.Frontend[0] = 71; }
-        if (HasScalarFrontendStatement(37))
-        {
-            Host.Frontend[0] = result.ReturnType == 0 ? 73 : 72;
-        }
-        if ((result.OutParameterMask & 56) != 0
-            || (result.OutParameterMask & 7) != 0 && result.ReturnType != 5)
-        {
-            Host.Frontend[0] = 79;
-        }
-        if (HasScalarFrontendOperation(109)) { Host.Frontend[0] = 80; }
-        if (Host.Frontend[17] != 0 && result.ReturnType != 5) { Host.Frontend[0] = 81; }
-        if (HasScalarFrontendOperation(110)) { Host.Frontend[0] = 82; }
-        if ((Host.Frontend[2] & 8) != 0) { Host.Frontend[0] = 83; }
-        if (HasScalarFrontendNamedCall()) { Host.Frontend[0] = 85; }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {
@@ -224,81 +56,13 @@ bool TryPublishScalarFrontend()
     }
     if (result.HasCondition)
     {
-        if (result.HasFallthrough)
-        {
-            Host.Frontend[0] = 4;
-            Host.Frontend[15] = 2;
-        }
-        else
-        {
-            Host.Frontend[15] = 1;
-        }
+        Host.Frontend[15] = result.HasFallthrough ? 2 : 1;
         WriteScalarFrontendExpression(16, result.Condition);
         WriteScalarFrontendExpression(28, result.WhenFalse);
     }
     WriteScalarFrontendExpression(22, result.WhenTrue);
-    Host.Frontend[0] = GetScalarFrontendLegacyVersion(result);
     Host.Frontend[1] = 1;
     return true;
-}
-
-int32 GetScalarFrontendTreeVersion()
-{
-    mut int32 version = Host.Frontend[298] == 0 ? 20 : 21;
-    bool conversion = HasScalarFrontendOperation(83);
-    bool conditional = HasScalarFrontendOperation(84);
-    if (conversion) { version = version + 2; }
-    if (conditional) { version = version + 4; }
-    bool hasWhile = HasScalarFrontendStatement(3);
-    bool hasBranch = HasScalarFrontendStatement(4);
-    bool hasTransfer = HasScalarFrontendStatement(6) || HasScalarFrontendStatement(7);
-    if (hasWhile || hasBranch || hasTransfer)
-    {
-        version = GetScalarFrontendControlVersion(hasWhile, hasBranch, hasTransfer);
-        if (conversion) { version = version + 1; }
-        if (conditional) { version = version + 2; }
-    }
-    for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
-    {
-        int32 operation = Host.Frontend[42 + node * 8];
-        if (operation >= 86 && operation <= 101)
-        {
-            version = 49;
-            break;
-        }
-    }
-    int32 statementVersion = GetScalarFrontendStatementVersion();
-    return statementVersion > version ? statementVersion : version;
-}
-
-int32 GetScalarFrontendLegacyVersion(ScalarFrontendResult result)
-{
-    if (result.ParameterCount == 3) { return 19; }
-    int32 maximum = GetScalarFrontendMaximumOperation(result);
-    if (maximum >= 4000) { return GetScalarFrontendExtendedVersion(maximum); }
-    if (HasScalarFrontendNumericUnary(result)) { return 10; }
-    if (maximum >= 2700) { return 9; }
-    if (maximum >= 2000) { return 8; }
-    if (HasScalarFrontendLegacyOperation(result, 658)) { return 7; }
-    if (maximum >= 1600) { return 6; }
-    if (maximum >= 1200) { return 5; }
-    return result.HasCondition && result.HasFallthrough ? 4 : 3;
-}
-
-bool HasScalarFrontendNumericUnary(ScalarFrontendResult result)
-{
-    if (IsScalarFrontendNumericUnary(result.WhenTrue.Operation)) { return true; }
-    if (!result.HasCondition) { return false; }
-    if (IsScalarFrontendNumericUnary(result.Condition.Operation)) { return true; }
-    return IsScalarFrontendNumericUnary(result.WhenFalse.Operation);
-}
-
-bool HasScalarFrontendLegacyOperation(ScalarFrontendResult result, int32 operation)
-{
-    if (result.WhenTrue.Operation == operation) { return true; }
-    if (!result.HasCondition) { return false; }
-    if (result.Condition.Operation == operation) { return true; }
-    return result.WhenFalse.Operation == operation;
 }
 
 void WriteScalarFrontendHeader(ScalarFrontendResult result)
@@ -318,69 +82,4 @@ void WriteScalarFrontendHeader(ScalarFrontendResult result)
     Host.Frontend[34] = result.ThirdType;
     Host.Frontend[35] = result.ThirdName.Start;
     Host.Frontend[36] = result.ThirdName.Length;
-}
-
-int32 GetScalarFrontendControlVersion(bool hasWhile, bool hasBranch, bool hasTransfer)
-{
-    if (hasTransfer) { return hasBranch ? 44 : 40; }
-    if (hasBranch) { return hasWhile ? 36 : 32; }
-    return 28;
-}
-
-// Factor threshold classification to keep publication within the shared
-// whole-program verification work bound without changing legacy identities.
-int32 GetScalarFrontendExtendedVersion(int32 maximum)
-{
-    if (maximum >= 38000) { return 18; }
-    if (maximum >= 30000) { return 17; }
-    if (maximum >= 22000) { return 16; }
-    if (maximum >= 16000) { return 15; }
-    if (maximum >= 12000) { return 14; }
-    if (maximum >= 10000) { return 13; }
-    if (maximum >= 6000) { return 12; }
-    return 11;
-}
-
-int32 GetScalarFrontendMaximumOperation(ScalarFrontendResult result)
-{
-    mut int32 maximum = result.WhenTrue.Operation;
-    if (result.HasCondition)
-    {
-        if (result.Condition.Operation > maximum) { maximum = result.Condition.Operation; }
-        if (result.WhenFalse.Operation > maximum) { maximum = result.WhenFalse.Operation; }
-    }
-    return maximum;
-}
-
-bool IsScalarFrontendNumericUnary(int32 operation)
-{
-    if (operation >= 3200) { return true; }
-    if (operation < 2100) { return false; }
-    return operation < 2700;
-}
-
-bool HasScalarFrontendOperation(int32 operation)
-{
-    for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
-    {
-        if (Host.Frontend[42 + node * 8] == operation)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool HasScalarFrontendNamedCall()
-{
-    for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
-    {
-        int32 offset = 42 + node * 8;
-        if (Host.Frontend[offset] == 102
-            && (Host.Frontend[offset + 7] & 256) != 0)
-        {
-            return true;
-        }
-    }
-    return false;
 }

@@ -303,7 +303,7 @@ public sealed class ContextualPunctuationTests
     [Theory]
     [InlineData(24)]
     [InlineData(51)]
-    public void IndependentHistoricalAndLatestConditionalRecordsRequireCurrentSpacing(int version)
+    public void IndependentConditionalBodyLayoutsRequireCurrentSpacing(int version)
     {
         foreach (var gap in Gaps.Skip(1))
         {
@@ -319,7 +319,7 @@ public sealed class ContextualPunctuationTests
                     ? "public int32 Value(bool b) => " + expression + ";"
                     : "public int32 Value(bool b) { do { return " + expression + "; } while (false); }";
                 var words = new int[ScalarFrontendHost.WordCount];
-                words[0] = version; words[1] = 1; words[2] = 1; words[5] = 1; words[6] = 1; words[7] = 5;
+                words[0] = 85; words[1] = 1; words[2] = 1; words[5] = 1; words[6] = 1; words[7] = 5;
                 words[9] = text.IndexOf("Value", StringComparison.Ordinal); words[10] = 5;
                 words[11] = text.IndexOf("b)", StringComparison.Ordinal); words[12] = 1;
                 words[37] = version == 24 ? 4 : 5;

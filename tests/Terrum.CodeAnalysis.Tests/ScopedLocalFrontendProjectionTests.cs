@@ -17,7 +17,7 @@ public sealed class ScopedLocalFrontendProjectionTests
         const string text = "public int32 Value() { if (false) { mut int32 x = 1; } mut int32 x = 41; x++; return x; }";
         var source = SourceText.From(text);
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 50;
+        words[0] = 85;
         words[1] = words[2] = words[5] = 1;
         words[9] = text.IndexOf("Value", StringComparison.Ordinal);
         words[10] = 5;
@@ -100,11 +100,11 @@ public sealed class ScopedLocalFrontendProjectionTests
     }
 
     [Fact]
-    public void VersionFiftyCannotBeClaimedWithoutScopedDeclaration()
+    public void ReaderRejectsObsoleteScopedLocalTagForOrdinaryReturn()
     {
         const string text = "public int32 Value() { return 42; }";
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 48;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;
@@ -145,7 +145,7 @@ public sealed class ScopedLocalFrontendProjectionTests
         const string text = "public int32 Value(bool flag) { if (flag) { int32 x = 1; } else { int32 x = 2; return x; } return 0; }";
         var source = SourceText.From(text);
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 50;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;
@@ -243,7 +243,7 @@ public sealed class ScopedLocalFrontendProjectionTests
         const string text = "public int32 Value() { if (true) { int32 x = 42; return x; } return 0; }";
         var source = SourceText.From(text);
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 50;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;

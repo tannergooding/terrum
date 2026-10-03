@@ -233,7 +233,7 @@ public sealed class RequireFrontendProjectionTests
     private static int[] Projection(string text)
     {
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 55;
+        words[0] = 85;
         words[1] = words[2] = words[5] = 1;
         words[9] = text.IndexOf("Value", StringComparison.Ordinal);
         words[10] = 5;

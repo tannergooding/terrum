@@ -72,7 +72,7 @@ public sealed partial class CliTests
                     "frontend-component", frontend, "-", "--runtime", policy, "--json");
                 Assert.True(projectionExit == 0, $"{policy}: {source}: {projectionOutput}{projectionError}");
                 using var projection = JsonDocument.Parse(projectionOutput);
-                Assert.Equal(51, projection.RootElement.GetProperty("result")
+                Assert.Equal(85, projection.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
                     "frontend-build", frontend, "-", "-o", nativePath, "--runtime", policy, "--json");
@@ -161,7 +161,6 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { for (var x = 1;;) { break; } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; for (;; (x++)) { break; } return 42; }")]
     [InlineData("int32 Main() { do { int32 x = 0; } while (false); return x; }")]
-    [InlineData("int32 Main() { for (init var x; false;) { } return 42; }")]
     [InlineData("int32 Main() { do { break label; } while (false); return 42; }")]
     [InlineData("int32 Main() { do { } while (false); }")]
     [InlineData("int32 Main() { for (; false;) { } }")]
@@ -188,6 +187,39 @@ public sealed partial class CliTests
                 using var diagnostic = JsonDocument.Parse(output);
                 Assert.InRange(diagnostic.RootElement.GetProperty("result")
                     .GetProperty("errorCode").GetInt32(), 1, 4);
+                Assert.Equal(original, await File.ReadAllBytesAsync(path));
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task NativeLoopRejectsUnresolvedInferredLocalRecordsWithoutReplacingOutputAsync()
+    {
+        var root = RepositoryRoot();
+        var path = Path.Combine(root, $"do-for-{Guid.NewGuid():N}.exe");
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var (initial, _, _) = await RunAsync(
+                    Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
+                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path,
+                    "--runtime", policy, "--json");
+                Assert.Equal(0, initial);
+                var original = await File.ReadAllBytesAsync(path);
+                var (exit, output, error) = await RunAsync(
+                    Encoding.UTF8.GetBytes("int32 Main() { for (init var x; false;) { } return 42; }"),
+                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path,
+                    "--runtime", policy, "--json");
+                Assert.True(exit == 1, $"{policy}: {exit}: {output}{error}");
+                using var diagnostic = JsonDocument.Parse(output);
+                Assert.False(diagnostic.RootElement.GetProperty("success").GetBoolean());
+                Assert.Equal("TRM5001", Assert.Single(diagnostic.RootElement
+                    .GetProperty("diagnostics").EnumerateArray()).GetProperty("code").GetString());
                 Assert.Equal(original, await File.ReadAllBytesAsync(path));
             }
         }
@@ -273,7 +305,7 @@ public sealed partial class CliTests
                 Assert.True(exit == 0, $"{policy}: {output}{error}");
                 using var projection = JsonDocument.Parse(output);
                 var result = projection.RootElement.GetProperty("result");
-                Assert.Equal(51, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Equal(nodes, result.GetProperty("nodes").GetArrayLength());
                 Assert.DoesNotContain(result.GetProperty("statements").EnumerateArray(),
                     statement => statement.GetProperty("kind").GetInt32() == 8);

@@ -93,7 +93,7 @@ public sealed class ScalarFrontendMutationAuditTests
         const string text = "public int32 Value() { mut int32 x = 4; ((x)) += x++; return x; }";
         var source = SourceText.From(text);
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 49;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;
@@ -128,7 +128,7 @@ public sealed class ScalarFrontendMutationAuditTests
             Assert.IsType<BoundExpressionStatement>(program.Functions[0].Body.Statements[1]).Expression);
         Assert.IsType<BoundRead>(operation.Place);
         Assert.IsType<BoundUpdate>(operation.Right);
-        for (var version = 1; version <= 48; version++)
+        for (var version = 1; version <= 84; version++)
         {
             Reject(0, version);
         }
@@ -189,7 +189,7 @@ public sealed class ScalarFrontendMutationAuditTests
         var localType = inferred ? "var" : "int32";
         var text = $"public int32 Value(int32 count) {{ {localType} x = {initial} {operation} count; return x; }}";
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 49;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;

@@ -50,7 +50,7 @@ public sealed partial class CliTests
                 Assert.True(componentExit == 0,
                     $"{policy}: {componentExit}: {componentOutput}{componentError}");
                 using var document = JsonDocument.Parse(componentOutput);
-                Assert.Equal(50, document.RootElement.GetProperty("result")
+                Assert.Equal(85, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
                     "frontend-build", frontend, "-", "-o", nativePath, "--runtime", policy, "--json");
@@ -156,7 +156,9 @@ public sealed partial class CliTests
                 Assert.True(componentExit == 0,
                     $"{policy}: {componentExit}: {componentOutput}{componentError}");
                 using var document = JsonDocument.Parse(componentOutput);
-                Assert.Equal(projectionVersion, document.RootElement.GetProperty("result")
+                Assert.NotEqual(projectionVersion, document.RootElement.GetProperty("result")
+                    .GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
 
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
@@ -165,7 +167,8 @@ public sealed partial class CliTests
                     "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
                 Assert.True(nativeExit == 0, $"{policy}: {nativeOutput}{nativeError}");
                 Assert.True(hostedExit == 0, $"{policy}: {hostedOutput}{hostedError}");
-                if (projectionVersion < 63)
+                if (!source.Contains("const ", StringComparison.Ordinal)
+                    && !source.Contains("try ", StringComparison.Ordinal))
                 {
                     Assert.Equal(await File.ReadAllBytesAsync(hostedPath), await File.ReadAllBytesAsync(nativePath));
                 }
@@ -206,7 +209,9 @@ public sealed partial class CliTests
                 "frontend-component", frontend, "-", "--runtime", "checked-exceptions", "--json");
             Assert.True(componentExit == 0, $"checked-exceptions: {componentExit}: {componentOutput}{componentError}");
             using var document = JsonDocument.Parse(componentOutput);
-            Assert.Equal(projectionVersion, document.RootElement.GetProperty("result")
+            Assert.NotEqual(projectionVersion, document.RootElement.GetProperty("result")
+                .GetProperty("projectionVersion").GetInt32());
+            Assert.Equal(85, document.RootElement.GetProperty("result")
                 .GetProperty("projectionVersion").GetInt32());
 
             var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
@@ -348,7 +353,7 @@ public sealed partial class CliTests
                 if (expected != -1)
                 {
                     var result = document.RootElement.GetProperty("result");
-                    Assert.Equal(50, result.GetProperty("projectionVersion").GetInt32());
+                    Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                     Assert.Equal(expected, result.GetProperty("locals").GetArrayLength());
                 }
             }

@@ -51,7 +51,7 @@ public sealed partial class CliTests
                 Assert.True(exit == 0, $"{policy}: {output}{error}");
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(57, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.True(result.GetProperty("expressionBody").GetBoolean());
                 var (hostExit, hostOutput, hostError) = await RunAsync(source, "build",
                     "-", "-o", hosted, "--runtime", policy, "--json");
@@ -93,7 +93,6 @@ public sealed partial class CliTests
     [InlineData("void Main() => require true, 1;")]
     [InlineData("void Main() => require true; require true;")]
     [InlineData("void Main() => _ = true; return;")]
-    [InlineData("void Main() => require true; void Other() {}")]
     [InlineData("void Main() => require true")]
     [InlineData("void Main() => { require true; }")]
     [InlineData("void Main() => _ += int32(1);")]
@@ -257,7 +256,7 @@ public sealed partial class CliTests
             {
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(57, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Single(result.GetProperty("statements").EnumerateArray());
                 if (resource == "nodes") { Assert.Equal(count, result.GetProperty("nodes").GetArrayLength()); }
             }

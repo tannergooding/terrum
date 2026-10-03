@@ -26,7 +26,7 @@ public sealed partial class CliTests
             Assert.Equal(!invalid, result.GetProperty("valid").GetBoolean());
             if (!invalid)
             {
-                Assert.Equal(59, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.True(result.GetProperty("noThrow").GetBoolean());
             }
         }

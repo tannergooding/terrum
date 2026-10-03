@@ -38,7 +38,9 @@ public sealed partial class CliTests
                 Assert.Equal(0, projectionExit);
                 Assert.Empty(projectionError);
                 using var document = JsonDocument.Parse(projectionOutput);
-                Assert.Equal(version, document.RootElement.GetProperty("result")
+                Assert.NotEqual(version, document.RootElement.GetProperty("result")
+                    .GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
                 var statements = document.RootElement.GetProperty("result").GetProperty("statements");
                 Assert.Contains(statements.EnumerateArray(), entry => entry.GetProperty("kind").GetInt32() == 3);

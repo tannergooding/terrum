@@ -44,7 +44,8 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(componentOutput))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(projectionVersion, result.GetProperty("projectionVersion").GetInt32());
+                Assert.NotEqual(projectionVersion, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 var initializationTestCount = 0;
                 if (result.TryGetProperty("functions", out var functions))
                 {

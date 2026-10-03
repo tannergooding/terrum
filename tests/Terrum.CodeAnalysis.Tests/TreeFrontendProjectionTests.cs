@@ -15,7 +15,7 @@ public sealed class TreeFrontendProjectionTests
     {
         const string text = "public bool Value() => 1 < 2;";
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 20;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 5;
@@ -49,7 +49,7 @@ public sealed class TreeFrontendProjectionTests
         const string text = "public int32 Value(int32 x) => x + (x * 2);";
         var source = SourceText.From(text);
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 20;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;

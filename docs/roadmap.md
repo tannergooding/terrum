@@ -29,11 +29,11 @@ verification, native lowering and semantic-module persistence. The mapping
 preserves source-order evaluation; overload selection and named output
 arguments remain outside current support.
 
-The bounded Terrum-authored scalar source frontend supports v74 complete
+The bounded Terrum-authored scalar source frontend supports v85 complete
 global-function snapshots and source-order scalar call targets, including
 forward and recursive calls with up to three by-value scalar arguments.
-Projection v75 additionally permits calls to void functions only as direct
-expression-statement roots. Projection v76 admits the existing void-only
+It permits calls to void functions only as direct
+expression-statement roots and admits the existing void-only
 `[DoesNotReturn]` contract in complete snapshots and carries its verified
 continuation effect across those calls. Independent source auditing precedes
 the existing hosted verifier/emitter. General binding/imports, broader
@@ -48,26 +48,25 @@ self-calls; complete-program v85 covers direct self/global calls. Named output
 arguments, overload selection and the hosted verifier/emitter boundary remain
 unchanged.
 
-Projection v77 extends complete snapshots with the existing scalar `out`
+V85 complete snapshots carry the existing scalar `out`
 parameter modes, explicit destinations and `out var` call destinations.
-Projection v78 adds the existing scalar `init ref<T>` mode and matching
+They also carry the existing scalar `init ref<T>` mode and matching
 `init`/`init var` destinations to complete snapshots. Hosted
 definite-publication verification remains authoritative; general
 `init ref<T>` migration and bootstrap compilation remain pending. Single-
-function projection v79 adds the existing scalar `init ref<T>` mode and
+function v85 carries the existing scalar `init ref<T>` mode and
 non-Boolean scalar `out` mode to the bounded self-call frontend, including
 matching `out var` destinations in recursive self-calls.
-Complete-program projection v80 adds existing-destination calls to scalar `out` parameters on
+Complete-program v85 supports existing-destination calls to scalar `out` parameters on
 non-Boolean/void-returning functions; the hosted verifier requires publication
 on every normal return, and the hosted emitter publishes them without using
 the result as a success flag. It also supports matching `out var` destinations
 for these calls, with the destination available after normal return. This
 remains a hosted-verifier/emitter-backed projection; it does not broaden
 non-scalar non-Boolean outputs. Projection tags are alpha implementation/validation
-details, not roadmap or product versions: older layouts may be retired or
-reshaped, and only a small selected set should remain for comparison or
-validation. Single-function projection v80 and complete-program projection
-v81 now also project the accepted `is init` test for named scalar locals and
+details, not roadmap or product versions. Only v85 is current for both families,
+all function frames and diagnostics; every obsolete v1–v84 tag is rejected.
+Both v85 projections also project the accepted `is init` test for named scalar locals and
 parameters; hosted definite-initialization verification and native emission
 remain authoritative.
 
@@ -77,12 +76,12 @@ and withholding publication on exceptions. Unique outputs transfer on normal
 completion independently of the non-Boolean result bits. Managed graph exports
 remain limited to handle-free Copy outputs; the bounded scalar projections
 project scalar non-Boolean/void init-ref declarations to the hosted verifier
-and emitter through separately audited v81/v82 shapes.
+and emitter through the current v85 layouts.
 
-Single-function projections v82/v83 now extend the same bounded self-call
+Single-function v85 extends the same bounded self-call
 frontend with source-audited `unsafe(expr)` scopes and caller-unsafe callable
-declarations, respectively. These single-function tags are distinct from the
-complete-program v82/v83 meanings; verification and emission remain hosted.
+declarations. Both projection families use only v85; verification and emission
+remain hosted.
 
 ## Planned work (priority order)
 
@@ -289,6 +288,11 @@ semantics apply only where the accepted language contract explicitly requires
 them. Roadmap progress is toward the approved metadata design's v1.0; do not
 version each internal increment. If a preview is shipped, its versioning is an
 explicit part of that release decision. No pre-v1 stability promise is made.
+Language major/minor versions define language evolution and its compatibility
+story. Internal projection `v#` tags identify the current implementation
+layout; they are not language versions or implicit compatibility promises.
+Compatibility is an explicit design choice with a deliberately scoped version
+boundary, never an automatic consequence of retaining an old reader.
 Work may proceed against approved grammar while remaining decisions stay in
 the proposal queue; using a provisional design for an increment does not
 approve other proposals.

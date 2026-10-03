@@ -9,24 +9,18 @@ namespace Terrum.CodeAnalysis;
 // true/false literal (with no parameter slots). For a numeric literal,
 // the parameter slots carry the low/high 32-bit words of its contextual
 // magnitude; a leading minus is included in the expression span.
-// Version-3 binary parameter/literal expressions add 100/200 to the operator
+// Compact v85 binary parameter/literal expressions add 100/200 to the operator
 // for a parameter on the left, or 300/400 for one on the right (parameter 1/2).
 // The two slots hold the literal's low/high magnitude words.
-// Version-5 unary minus on that literal adds another 1200 to the operation.
-// Version-6 unary plus on that literal adds another 1600.
-// Version-7 grouped unary minus on a standalone literal uses operation 658.
-// Version-8 unary not on a grouped two-parameter Boolean binary adds 2000.
-// Version-9 also admits a grouped Boolean binary with literal operands.
-// Version-10 admits grouped numeric comparisons with literal operands.
-// Version-11 admits grouped integer binaries under unary complement.
-// Version-12 admits grouped integer binaries under unary plus or minus.
-// Version-13 admits unary complement over grouped unary-signed parameters or literals.
-// Version-14 admits unary plus or minus over grouped complemented parameters or literals.
-// Version-15 admits unary not over grouped unary-not or negated Boolean binaries.
-// Version-16 admits unary complement over grouped signed integer binaries.
-// Version-17 admits unary signs over grouped complemented integer binaries.
-// Version-18 admits unary complement over grouped complemented integer binaries.
-// Version-19 adds a third named parameter; its parameter/literal operation family
+// Unary minus on that literal adds another 1200 to the operation.
+// Unary plus on that literal adds another 1600.
+// Grouped unary minus on a standalone literal uses operation 658.
+// Unary not on a grouped two-parameter Boolean binary adds 2000.
+// Grouped Boolean binaries and numeric comparisons also admit literal operands.
+// Grouped integer binaries admit unary complement and unary plus/minus.
+// Nested unary encodings compose complement, signs and Boolean negation;
+// the source-bound reader checks their exact grouping and operand types.
+// A third named parameter's parameter/literal operation family
 // adds 40000 to the first-parameter code, including any enclosing unary operation.
 // Boolean parameter/literal pairs add 700 for a parameter on the left or
 // 900 for a literal on the left; slots hold the parameter index and literal kind.
@@ -270,7 +264,7 @@ mut class ScalarFrontendState
     private mut bool TryReadMagnitude(Token token, int32 tokenIndex, int32 type,
         bool negative, SourceRange errorSpan, out int32 low, out int32 high)
     {
-        int32 lookupIndex = tokenIndex + (Host.FrontendProgram[0] >= 74
+        int32 lookupIndex = tokenIndex + (Host.FrontendProgram[0] == 85
             ? Host.FrontendProgram[4 + Host.FrontendProgram[3] * 428] : 0);
         mut int32 first = 0;
         mut int32 end = Host.IntegerValues[0];
@@ -2372,8 +2366,9 @@ mut class ScalarFrontendState
                     hasTerminatingStatement = true;
                 }
             }
-            // The host rechecks v76 completion with the complete call-target table.
-            if (_error == 0 && Host.FrontendProgram[0] != 76
+            // The host rechecks non-returning call completion with the complete
+            // target table; output/caller-unsafe inventories keep the producer audit.
+            if (_error == 0 && !ScalarProgramDefersCompletion()
                 && !HasStructuredCompletion(returnType, hasTerminatingStatement))
             {
                 Fail(1);
@@ -2894,7 +2889,7 @@ mut class ScalarFrontendState
 
     private mut bool ParseTreeSelfCall(Token functionName, int32 depth, out int32 node)
     {
-        bool program = Host.FrontendProgram[0] >= 74;
+        bool program = Host.FrontendProgram[0] == 85;
         mut int32 callee = -1;
         mut int32 argumentCount = _parameterCount;
         mut int32 returnType = _functionReturnType;
@@ -2905,11 +2900,6 @@ mut class ScalarFrontendState
             int32 header = 4 + callee * 428 + 4;
             argumentCount = Host.FrontendProgram[header + 6];
             returnType = Host.FrontendProgram[header + 5];
-            if (returnType == 0 && Host.FrontendProgram[0] < 75)
-            {
-                FailAt(1, functionName.Range);
-                return false;
-            }
         }
         if ((!program && !SameTokenSpelling(_function, functionName))
             || IsParameterName(functionName))
@@ -3251,7 +3241,7 @@ mut class ScalarFrontendState
                 FailAt(1, opening.Range);
                 return false;
             }
-            if (Host.FrontendProgram[0] >= 74 && FindScalarProgramFunction(token) >= 0)
+            if (Host.FrontendProgram[0] == 85 && FindScalarProgramFunction(token) >= 0)
             {
                 return ParseTreeSelfCall(token, depth, out node);
             }

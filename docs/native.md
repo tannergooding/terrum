@@ -54,7 +54,7 @@ encode checked-exception dispatch, even though the native backend supports
 that policy for the existing source and development-module paths. Loading
 does not rebind producer source, bypass verification or introduce a new ABI.
 
-Separately, native scalar projection v54 admits named nearest and non-nearest
+Separately, current native scalar projection v85 admits named nearest and non-nearest
 loop transfers under both runtime policies. It does not change the fail-fast
 indexed-TRRM routing protocol or reader.
 
@@ -147,12 +147,13 @@ Scanner-8/schema-8 appends diagnostic identities 11/12 for invalid and
 defined-but-unsupported maximal runs; see the
 [scanner contract](scanner.md) for spans and record compatibility. Hosted
 role-specific punctuation rules are in the
-[implementation reference](implementation.md). The bounded frontend accepts
-projection versions 1–61 with their declared shapes in a 392-word buffer and
-fixed source/token/local/statement/node/parameter/depth/work limits. Independent
-source audits check current syntax for compatible older shapes. Scanner,
-projection, semantic and native-profile versions are separate compatibility
-gates.
+[implementation reference](implementation.md). The bounded frontend produces
+and accepts only v85: a 392-word single-function buffer or a separate 4,284-word
+complete-program buffer, with fixed source/token/local/statement/node/parameter/
+depth/work limits. Independent source audits check the current supported syntax
+and layouts; older tags are rejected. Scanner, projection, semantic and
+native-profile contracts remain separate; frontend projection tags are internal
+implementation details, not product versions.
 Conditional expressions evaluate one Boolean condition and only
 the selected target-checked arm, with existing cleanup and rooting behavior.
 The v41 feature milestone added retained conditional nodes, not a new native ABI.
@@ -202,7 +203,7 @@ admitted only in statement position).
 This adds no native ABI or profile version.
 
 The executable native scalar frontend adopts these primitive operations in
-projection v49: ordinary integer shifts, all eleven compound assignments and
+current projection v85: ordinary integer shifts, all eleven compound assignments and
 prefix/postfix updates of initialized writable named locals, including grouped
 names. It retains the hosted `int32` count and checked count-range policy,
 not the separate TRRM instruction contract. Shared update/compound nodes save
@@ -213,6 +214,17 @@ forged places, types, source spans and older projection headers carrying new
 operations. Actual DLL calls, JIT/EXE execution, byte parity and unchanged
 persisted consumers cover the bounded component; no ABI/profile change,
 general call syntax, field mutation or nominal operation is added.
+
+Only v85 is produced or accepted for single-function and complete-program
+scalar frontend projections, every function frame and diagnostic records.
+V1–v84 tags reject before body auditing. Compact expression and tree/statement
+layouts, source mapping, type/mode/unsafe/named-call audits and the hosted
+verifier/emitter boundary are unchanged; no version is bumped for this cleanup.
+The following older projection labels document retired feature milestones and
+their former restrictions, not supported input tags or compatibility readers.
+The current reader has no historical-version selectors or feature-version
+gates. Compact and tree layouts are both actively produced; no older layout is
+kept merely for comparison.
 
 Projection v50 additionally admits initialized scalar declarations inside the
 component's existing braced branch/loop bodies. Lexical visibility, sequential
@@ -475,8 +487,8 @@ Complete-program projection v80 adds scalar `out` parameters on
 non-Boolean/void-returning functions with matching existing or `out var`
 destinations. The hosted verifier requires initialization on every normal
 return, and the emitter publishes the output after successful completion
-without treating the function's result as a success flag. Current V74–v78
-readers reject these records; that boundary is not a compatibility commitment.
+without treating the function's result as a success flag. V85 is the only
+current reader boundary; V74–v78 tags themselves are rejected.
 Non-scalar outputs and standalone compilation remain unsupported. This does
 not widen the separate managed-module export shape for output parameters.
 

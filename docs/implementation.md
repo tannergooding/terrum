@@ -56,8 +56,8 @@ an explicit unsafe scope; accessor-local support is currently limited to
 getters. These obligations cannot cross persisted semantic-module or
 executable-TRRM boundaries; both writers reject programs containing them
 until the source-to-metadata contract is adopted. Complete-program scalar
-projection v83 additionally source-audits caller-unsafe top-level declarations
-and calls enclosed by explicit `unsafe { ... }` blocks; v84 also audits
+projection v85 additionally source-audits caller-unsafe top-level declarations
+and calls enclosed by explicit `unsafe { ... }` blocks; it also audits
 `unsafe(expr)` call-site scopes. Both remain backed by the hosted
 verifier/emitter and do not add persisted-module support.
 
@@ -161,24 +161,31 @@ The current scanner is version 8/schema 8; it appends diagnostic kinds 11/12
 for invalid/unsupported maximal punctuation runs to the prior diagnostic
 catalog. Earlier raw records remain readable where compatible, while current
 snapshot adapters reject forged framing, invalid escapes and conflicting
-classification. The bounded scalar frontend's projections through v73 share a
+classification. The bounded scalar frontend's current v85 single-function projection uses a
 392-word buffer and enforce the documented limits: 16,384 UTF-16 source units, 64 tokens,
 eight total local identities including hidden discards, 12 statement records,
 32 expression nodes, three parameters, 16 expression-recursion levels, six
 structural levels and a shared 100,000-visit budget. Source-bound audits
-require current syntax even when reading compatible older projection shapes.
-V74 appends a separate complete-program buffer; the source/token limits remain
+require current syntax and reject every obsolete projection tag (v1–v84).
+V85 also uses a separate complete-program buffer; the source/token limits remain
 per snapshot, and the local/statement/expression/parameter limits apply per
-function. Complete-program v83 carries the caller-unsafe declaration bit and
-source-audits calls against explicit unsafe-block spans; v84 carries explicit
+function. Both v85 projections carry the caller-unsafe declaration bit and
+source-audit calls against explicit unsafe-block spans and explicit
 `unsafe(expr)` wrappers and audits their contained call scopes. Projection
 v85 adds named by-value arguments to bounded direct scalar calls in both the
 single-function and complete-program buffers. Call children remain in source
 evaluation order while the packed formal-position map is checked against
 source parameter names; named output/init-ref arguments and overload selection
 remain unsupported. Semantic verification and emission remain hosted.
-Predicate factoring keeps the authored producer within the unchanged shared
-verification budget.
+Single-function compact expression records and tree/statement records retain
+their existing layouts. Complete-program headers and every function frame
+carry v85, as do single-function diagnostic records. No obsolete tag is accepted
+at any reader boundary, and no product, semantic-module or native ABI version
+changes for this cleanup.
+V85 is the baseline for every implemented source shape, not a feature tier.
+Readers do not reinterpret it as a historical version or use version numbers
+to select capabilities. Both layouts remain because current publication uses
+them; neither is retained for historical comparison.
 These syntax and
 scanner contracts do not change semantic-module, ISA, Contract, TRRM or native
 ABI formats.
@@ -361,6 +368,17 @@ compound-assignment nodes were added at feature milestone v45, and compound
 statements use expression tag 26 within an expression statement. Current
 module revision 50 serializes them without changing the native ABI or profile.
 
+### Scalar frontend projection milestones (retired tags)
+
+Only v85 is produced or accepted for either projection family, including
+complete-program function frames. The following notes preserve implementation
+history and record encodings; their older version selections, restrictions and
+reader servicing describe retired implementations, not compatibility support.
+Current v85 composes all implemented subsets described below, including compact
+expressions, tree/statement bodies, direct self/global calls, scalar out/init-ref,
+initialization tests, unsafe scopes/caller requirements and named by-value calls.
+The source-bound audits, verifier/emitter boundary and buffer layouts are unchanged.
+
 The executable Terrum scalar frontend additionally supports bounded nested
 expression trees and expression-bodied scalar functions through provisional
 projection v20, plus initialized scalar locals and assignments in v21.
@@ -368,8 +386,7 @@ Up to eight typed or inferred locals and twelve ordered declaration/assignment
 statements may precede the return envelope used by projections through v47.
 Only `mut` locals can be reassigned; names bind sequentially, and inferred
 numeric literals have no fallback type. Ordinary calls and vacant locals remain
-outside this native component. It retains existing v1–20 projections for their supported
-shapes. Its own parser and scalar binder produce up to 32 postorder nodes
+outside that early native component. Its own parser and scalar binder produce up to 32 postorder nodes
 with bounded recursive descent; the host validates source anchors, types,
 node order, roots and precedence before lowering to the existing verified
 native backend. This is real native compiler-component execution, not a
@@ -932,27 +949,26 @@ unsafe block or wrapper. These tags belong to the single-function buffer and
 do not change complete-program v82/v83. The hosted verifier and emitter remain
 authoritative.
 
-The appended `Host.FrontendProgram` buffer at index 11 has 4,284 `int32`
-words. Its four-word header is `(version, 1, function count, 0)`, with version
-74–78 or 80–84. Version 75 is selected only when a void-target call
-uses the new statement position; version 76 is selected when any declaration
-uses `[DoesNotReturn]`; version 77 is selected when any declaration has a
-scalar `out` parameter; version 83 is selected when any declaration is
-caller-unsafe, and version 84 when any body contains `unsafe(expr)`. Header bit 3 records that requirement in the existing
+### Current v85 complete-program layout
+
+The current `Host.FrontendProgram` buffer at index 11 has 4,284 `int32`
+words. Its four-word header is `(85, 1, function count, 0)` for every supported
+source shape. Header bit 3 records the caller-unsafe requirement in the existing
 per-function payload. Ten source-order frames of 428 words follow:
 
 | Frame words | Contents |
 |---|---|
 | 0–3 | Inclusive token start, exclusive token end, declaration source start/length |
-| 4–395 | Existing 392-word per-function header/body layout, with version 74 |
+| 4–395 | Existing 392-word per-function header/body layout, with version 85 |
 | 396–427 | One zero-based callee function index per operation-105 node; `-1` for every other or unused node |
 
 Unused frames are all zero. Operation 105 uses the existing eight-word node
 shape: scalar result type, exact call span, first/second/third argument roots
 (`-1` when absent), and argument count in the high word. Its target identity is
 in the dedicated table, not operation 102's occupied fields. Single-function
-success and rejection keep the old buffer and a zero program buffer; v74
-success has a zero old buffer. No partial program is published on rejection.
+success and rejection use the single-function buffer and a zero program buffer;
+complete-program success has a zero single-function buffer. No partial program
+is published on rejection. Diagnostic records also carry v85.
 
 The independent host reader lexes/parses the entire source to inventory names,
 signatures, declaration order, token boundaries and full body spans. It
@@ -969,18 +985,19 @@ function zero, and library builds export the public declarations.
 The source bound remains 16,384 UTF-16 units and 64 tokens including EOF.
 Ten frames derive from `floor((64 - 1) / 6)`: even an empty void declaration
 needs six tokens. The existing 32-node, 12-statement and eight-local capacities
-apply to each function; no verifier/emitter budgets change. V74 excludes
-non-self void-call support, and v74/v75 exclude `[DoesNotReturn]` declarations.
-V74–v76 exclude output parameters; v77 adds bool-returning scalar `out`
-parameters and matching destinations; v78 adds existing scalar `init ref<T>`
-parameters and matching `init`/`init var` destinations. V80 adds scalar `out`
-parameters on non-Boolean/void-returning functions, but only with existing
-destinations and normal-return initialization. It does not alter the
-true-publishes/false-vacant contract for Boolean outputs. All versions exclude general reference parameters,
-named/default/params arguments, overload/conversion search, namespaces/imports,
-templates/members, external bindings and callable values. This adds source
+apply to each function; no verifier/emitter budgets change. V85 admits scalar
+out/init-ref parameters with matching existing or declared destinations and
+requires normal-return publication for non-Boolean/void results. It preserves
+the true-publishes/false-vacant contract for Boolean outputs. General reference
+parameters, default/params arguments, overload/conversion search, namespaces/imports,
+templates/members, external bindings and callable values remain unsupported. This adds source
 frontend support, not
 source-free TRRM checked-exception Bodies or a bootstrap-gate claim.
+
+### Retired complete-program feature milestones
+
+The version selections below are historical; current headers and frames
+always carry v85 and reject all obsolete tags.
 
 Program projection v75 retains the same framing and scalar-call target table,
 and selects header version 75 only when an operation-105 call targets a void
@@ -1066,13 +1083,10 @@ authority through the existing cleanup path without undoing outer mutations;
 returns and nearest or named loop transfers retain their audited targets. Failed
 validation publishes no partial projection.
 
-Standalone blocks use kind 14 beginning in v52; non-void scalar discard uses
-kind 15 beginning in v53; named-loop kinds begin in v54; require uses kind 21
-in v55. Versions 1–51 retain their block restrictions, versions 1–52 their
-discard restrictions, versions 1–53 their named-transfer restrictions,
-versions 1–54 their require restrictions, versions 1–55 their void-function
-restrictions, and versions 1–56 their void-arrow restrictions and prior source
-audits. The
+The current v85 projection uses kind 14 for standalone blocks, kind 15 for
+non-void scalar discards, kinds 16–20 for named loops/transfers and kind 21 for
+requirements. Both scalar/void braced and supported arrow bodies use v85.
+Obsolete tags reject rather than selecting earlier feature restrictions. The
 392-`int32` buffer and all record widths remain fixed:
 16,384 UTF-16 source units, 64 tokens, eight total named/hidden local
 identities, 12 statement records, 32 expression nodes, three parameters,
@@ -1080,6 +1094,8 @@ identities, 12 statement records, 32 expression nodes, three parameters,
 100,000-visit limit. Compiler-generated discard blocks do not consume source
 depth. Scanner-8/schema-8, diagnostic kinds 1–12, token IDs,
 semantic/ISA/Contract/TRRM formats and native ABI remain unchanged.
+
+### Compiler library boundary
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain

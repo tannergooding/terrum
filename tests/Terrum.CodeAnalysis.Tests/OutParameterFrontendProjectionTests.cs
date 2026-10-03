@@ -91,7 +91,7 @@ public sealed class OutParameterFrontendProjectionTests
     private static int[] Projection(string text)
     {
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 69;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 5;

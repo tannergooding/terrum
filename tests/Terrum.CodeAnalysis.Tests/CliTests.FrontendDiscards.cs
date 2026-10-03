@@ -55,7 +55,7 @@ public sealed partial class CliTests
                     Path.Combine(root, "self-host"), "-", "-o", native, "--runtime", policy, "--json");
                 Assert.True(exit == 0, $"{policy}: {output}{error}");
                 using var document = JsonDocument.Parse(output);
-                Assert.Equal(53, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
                 var (hostExit, hostOutput, hostError) = await RunAsync(input,
                     "build", "-", "-o", hosted, "--runtime", policy, "--json");
                 Assert.True(hostExit == 0, $"{policy}: {hostOutput}{hostError}");
@@ -100,7 +100,6 @@ public sealed partial class CliTests
     [InlineData("for (; false; _ = int32(1)) {} return 42;")]
     [InlineData("mut int32 x = 1; _ = (x += 1); return 42;")]
     [InlineData("_ = int32(1);")]
-    [InlineData("_ = int32(1); return 42; } int32 Unused() { return 0;")]
     public async Task ScalarDiscardsRejectInvalidOrUnsupportedSourceAtomicallyAsync(string body)
     {
         var source = $"int32 Main() {{ {body} }}";
@@ -259,7 +258,7 @@ public sealed partial class CliTests
             if (valid)
             {
                 using var document = JsonDocument.Parse(output);
-                Assert.Equal(53, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
             }
         }
     }

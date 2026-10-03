@@ -258,7 +258,7 @@ public sealed class DotAttachmentTests
         })
         {
             var words = new int[ScalarFrontendHost.WordCount];
-            words[0] = 1; words[1] = 1; words[5] = 1;
+            words[0] = 85; words[1] = 1; words[5] = 1;
             words[9] = text.IndexOf("Main", StringComparison.Ordinal); words[10] = 4;
             words[22] = 1; words[23] = 3;
             var start = text.IndexOf("return", StringComparison.Ordinal) + 7;

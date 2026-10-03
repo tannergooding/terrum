@@ -24,22 +24,20 @@ branches and loops, named loop transfers, standalone requirements/discards,
 and selected function-effect contracts. Projection v85 adds named by-value
 arguments to bounded scalar self/global calls while preserving source
 evaluation order; named output arguments and overload selection remain
-unsupported. Exact projection shapes and version gates are in the
+unsupported. V85 is the only produced and accepted tag for both projection
+families, every complete-program frame and diagnostic records. Exact layouts and audits are in the
 [native profile](../docs/native.md) and
 [implementation reference](../docs/implementation.md). General attributes,
 binding and broader call forms remain outside the frontend's subset.
-Single-function projection v81 and complete-program projection v82 also carry
+Both current v85 projections carry
 scalar non-Boolean/void `init ref<T>` declarations; definite-publication
-verification and emission remain hosted. Complete-program projection v83 adds
+verification and emission remain hosted. V85 includes
 source-audited caller-unsafe callable declarations and explicit unsafe-block
-call authorization; v84 adds source-audited `unsafe(expr)` call-site scopes;
+call authorization and source-audited `unsafe(expr)` call-site scopes;
 v85 maps named by-value call arguments to formal parameters without changing
 source-order evaluation. Their verifier and emitter also remain hosted.
-Single-function projection v82 adds source-audited `unsafe(expr)` wrappers;
-v83 also carries caller-unsafe declarations and audits self-call authorization
-against enclosing unsafe scopes. These version numbers refer to the separate
-single-function buffer and do not change complete-program v82/v83.
-Single-function projection v80 and complete-program projection v81 also
+The single-function buffer also audits self-call authorization against enclosing
+unsafe scopes. Both current projections
 source-audit `is init` tests for named scalar locals and parameters. Verification
 and emission remain hosted; this projection does not make the frontend a
 standalone compiler.
@@ -66,37 +64,37 @@ scalar spacing permits only the `init ref<T>` parameter delimiters, not
 general generic type contexts. Historical raw records remain
 readable, while current adapters enforce current framing and syntax. Scanner,
 projection and ABI formats are distinct. Projection tags are alpha
-implementation/validation details, not roadmap or product versions: older
-layouts may be retired or reshaped, and only a small selected set should remain
-for comparison or validation. Progress does not require a version bump per
+implementation/validation details, not roadmap or product versions. Both scalar
+frontend readers reject every v1–v84 tag; no obsolete reader support is retained.
+V85 covers the existing compact expression and tree/statement layouts without
+changing either buffer layout. Current producers use both layouts, so neither
+is a historical comparison format. Every rebuild uses v85, independent of source
+features; readers have no historical selectors or per-feature version gates.
+Progress does not require a version bump per
 increment; a preview version, if any, is decided explicitly when shipping.
-V74 introduces a separate 4,284-word
-multi-function buffer; its framing does not promise preservation of the
-single-function buffer or historical payloads. Program projection v75 admits
+V85 uses a separate 4,284-word
+multi-function buffer alongside the 392-word single-function buffer. It admits
 void-target calls as direct expression-statement roots.
 
 The native scalar frontend remains a bounded projection, not a standalone
 compiler: it shares the hosted verifier/emitter and is limited to 16K source
 units and 64 tokens per snapshot, with 8 total named/hidden local identities,
 12 statement records, 32 expression nodes and 3 parameters per function.
-V74 inventories top-level global declarations before parsing bodies, resolves
+V85 inventories top-level global declarations before parsing bodies, resolves
 direct scalar-returning calls in declaration order regardless of source order,
 and rejects duplicate normalized names, local/parameter shadowing at call sites,
 and mismatched argument counts/types. Its ten-function capacity follows from
 the existing token bound: even an empty void function needs six tokens, and
 one token is reserved for EOF. Functions may have zero through three scalar
-parameters; v74–v76 multi-function snapshots support by-value parameters only,
-and v74/v75 exclude `[DoesNotReturn]`. V77 adds the existing bool-returning
-scalar `out` parameter modes and explicit/`out var` destinations. Void callers
-may invoke scalar callees, but non-self void calls are excluded from v74. V75
-adds calls to void functions only as direct expression-statement roots,
+parameters, including the existing scalar `out` and `init ref<T>` modes with
+matching explicit or declared destinations. Void callers may invoke scalar
+callees. Calls to void functions are admitted only as direct expression-statement roots,
 including supported `for` clauses;
-void calls remain invalid in value contexts. V76 admits the existing void-only
+void calls remain invalid in value contexts. V85 admits the existing void-only
 `[DoesNotReturn]` contract and accounts for its continuation effect at direct
-call-statement roots. The current reader still recognizes some earlier single-function tags,
-including v72/v73 self-call forms, as validation references; those tags are not
-long-term compatibility requirements and may be pruned as checks move to
-current projections.
+call-statement roots. Older tags are rejected even when their payloads would
+otherwise describe an accepted source shape; tests use current-tag fixtures
+and explicit obsolete-tag rejection.
 The bounded generic, ownership, initialization
 and constant-evaluation contracts are detailed in the
 [implementation reference](../docs/implementation.md);
@@ -173,28 +171,16 @@ the hosted and Terrum-authored frontend paths under both runtime policies;
 both paths still use the hosted native emitter.
 The bounded parameter/literal operands accept grouping inside or outside
 unary `+`/`-`; decimal signed minima still require the sign directly
-on the contextual literal. Standalone grouped signed-minus literals use
-provisional projection version 7; grouped `!` around a two-parameter
-Boolean binary operation uses version 8, and grouped `!` around a
-Boolean binary operation with Boolean literal operands uses version 9;
-numeric comparisons with literal operands use version 10; version 11
-admits grouped integer binaries under unary `~`; version 12 admits the same
-bounded integer binaries under unary `+` or checked `-`; version 13
-admits unary `~` over a grouped unary `+` or checked `-` parameter
-or contextual integer literal.
-Version 14 admits unary `+` or checked `-` over a grouped `~` parameter
-or contextual integer literal.
-Version 15 admits unary `!` over a grouped `!` parameter/literal or a
-grouped `!` Boolean binary.
-Version 16 admits unary `~` over a grouped unary `+` or checked `-`
-integer binary.
-Version 17 admits unary `+` or checked `-` over a grouped complemented
-integer binary.
-Version 18 admits unary `~` over a grouped complemented integer binary.
-Version 19 admits a third named parameter and encodes its parameter/literal
-expressions with a disjoint operation offset.
-This does not extend
-the provisional projection to arbitrary nested expressions.
+on the contextual literal. The compact expression layout retained by v85
+supports grouped signed-minus literals, grouped Boolean negation of
+parameter/literal binaries and numeric comparisons with literal operands.
+Grouped integer binaries support unary `~`, unary `+` and checked `-`.
+Nested encodings support complement over signed parameters/literals or
+binaries, signs over complemented parameters/literals or binaries, Boolean
+double negation and complement over complemented integer binaries.
+A third named parameter uses a disjoint operation offset for its
+parameter/literal expressions. These compact encodings do not represent
+arbitrary nested expressions; bounded tree records cover the broader subset.
 Thirty-one bounded `int32 Main()` fixtures likewise emit byte-identical Windows
 executables and run under both policies; this does not establish an independent
 native emitter or compiler self-build.
@@ -229,8 +215,8 @@ native emitter or compiler self-build.
 | [TokenIntegerSnapshot](TokenIntegerSnapshot.terrum) | Separately owned scanner-6 numeric-token indices and raw unsigned magnitude words, published with tokens and trivia by `TryScanCompilerInput` | AOT/JIT full-`uint64`, radix and overflow fixtures, indexed token lookup, invalid index/status/tag/owner rejection and atomic failure; shape checks do not prove a producer's arithmetic, and general binding remains hosted |
 | [TokenDiagnosticSnapshot](TokenDiagnosticSnapshot.terrum) | Independently owned lexical diagnostic codes and source ranges, available after a scan with errors even when token snapshots cannot publish | AOT/JIT host diagnostic parity under both policies, invalid buffer rejection, stable reads after host mutation and no success-shaped empty token stream on lexical failure |
 | [ScalarParserTypes](ScalarParserTypes.terrum) | Shared scalar type recognition, token-name equality, scalar comparison and scanner-integer decoding for separately compiled bounded parser probes | Scanner-owned source ranges, UTF-16 spelling and integer records, with no independent syntax or semantic ABI |
-| [ScalarFrontend](ScalarFrontend.terrum), [ScalarFrontendProgram](ScalarFrontendProgram.terrum) | Bounded frontend over a successful scanner snapshot: source-bound scalar or void functions, up to three named scalar parameters, supported expressions and structured control flow, visible-local lifetime ending, explicit/inferred vacant locals, scalar constants, nested cleanup/recovery, and foldable-true static proofs. V74 adds a complete global declaration inventory and direct scalar-returning calls with positional by-value arguments, including forward, self and mutual calls; v75 adds direct calls to void functions only as expression statements; v76 admits void-only `[DoesNotReturn]` declarations and accounts for their effect at supported call statements; v77 adds the existing bool-returning scalar `out` parameters and matching explicit/`out var` destinations; v78 adds existing scalar `init ref<T>` parameters and matching `init`/`init var` destinations. Single-function projection v79 carries the existing scalar `init ref<T>` mode and non-Boolean scalar `out` mode through bounded self-calls, including matching explicit/`out var` destinations; complete-program v80 adds scalar `out` calls for non-Boolean/void returns with explicit or `out var` destinations; single-function v81 and complete-program v82 add scalar non-Boolean/void `init ref<T>` completion, requiring publication on every normal return; complete-program v83 adds source-audited caller-unsafe top-level callables whose calls must be enclosed by explicit unsafe blocks; v84 adds source-audited `unsafe(expr)` wrappers around bounded expressions; v85 adds named by-value arguments to direct scalar calls while preserving source-order evaluation. The shared verifier/emitter remain hosted. Prior tags are experimental validation shapes, not compatibility guarantees; named output arguments, non-scalar non-Boolean outputs, namespaces/imports, overload search, callable values, general reference arguments, typed catches, filters and unproven proofs remain outside this subset. General `init ref<T>` migration remains scheduled. See the [native profile](../docs/native.md). | Produces independently audited source-bound projections for the shared host verifier/emitter; scanner integer records supply constants without rescanning digits. Uses `Host.Source` and managed tokens; the persisted primitives DLL and `build-component` do not consume its typed result. |
-| [ScalarFrontendProjection](ScalarFrontendProjection.terrum) | Provisional host-owned buffers with completion status written last: 392-word single-function and 4,284-word complete-program buffers; current tags include v1–v73/v79–v85 and v74–v78/v80–v85 respectively. Older tags are temporary validation aids only and may be pruned. Malformed/unsupported records reject; unused extensions are zero, and absent call targets are `-1`. | `ScalarFrontendHost` independently checks source anchors, types, literals, node order, precedence, roots, parameter modes, local binding/initialization, lifetime targets, control flow, cleanup/recovery/proof scopes, transfers, returns, mutability, conversions and exact declaration effects. Complete-program readers audit declaration sets, duplicate names, source-order frame coverage, callee identities, argument ownership and caller-unsafe declarations before lowering to a verified multi-function `BoundProgram`; v75 additionally requires void-call nodes to be kind-37 roots, v76 audits void-only `[DoesNotReturn]` declarations and their call continuation effects, v77 audits bool-returning scalar `out` modes and call destinations, v78 audits init-ref modes and destinations, v80 audits non-Boolean scalar `out` modes and explicit/`out var` destinations, v82 audits non-Boolean/void scalar init-ref modes, v83 checks unsafe-block call scope against the source, v84 audits `unsafe(expr)` wrappers and call containment, and v85 checks named argument mappings against parameter names and source-order children. V79 audits single-function init-ref and non-Boolean output modes and explicit/`out var` self-call destinations; v81 also audits non-Boolean/void init-ref declarations; single-function v82/v83 audit `unsafe(expr)` wrappers and caller-unsafe self-call scopes; v85 audits named self-call mappings. Shared verification checks effects, definite liveness and reachable completion under the selected runtime policy. Limits remain 64 tokens per snapshot, and per function 8 total named/hidden locals, 12 statements, 32 nodes, 16 expression-recursion levels and 6 structural levels; see the [implementation reference](../docs/implementation.md). This is not a standalone compiler or machine-code encoder. |
+| [ScalarFrontend](ScalarFrontend.terrum), [ScalarFrontendProgram](ScalarFrontendProgram.terrum) | Bounded v85 frontend over a successful scanner snapshot: source-bound scalar/void functions, up to three scalar parameters, supported expressions and structured control flow, visible-local lifetime ending, explicit/inferred vacant locals, scalar constants, nested cleanup/recovery and foldable-true static proofs. Complete snapshots inventory global declarations and direct forward/self/mutual calls. Scalar out/init-ref modes support matching explicit/declared destinations and normal-return publication for non-Boolean/void results. Caller-unsafe declarations and explicit unsafe blocks/wrappers are source-audited. Named by-value calls preserve source-order evaluation. Named output arguments, non-scalar non-Boolean outputs, namespaces/imports, overload search, callable values, general references, typed catches, filters and unproven proofs remain unsupported. See the [native profile](../docs/native.md). | Produces independently audited source-bound projections for the shared hosted verifier/emitter; scanner integer records supply constants without rescanning digits. Uses `Host.Source` and managed tokens; the persisted primitives DLL and `build-component` do not consume its typed result. |
+| [ScalarFrontendProjection](ScalarFrontendProjection.terrum) | Host-owned buffers with completion status written last: 392-word single-function and 4,284-word complete-program buffers. Only v85 is produced and accepted, including diagnostics and every function frame; all v1–v84 tags reject. Existing compact-expression and tree/statement layouts remain fixed. Unused extensions are zero; absent call targets are `-1`. | `ScalarFrontendHost` independently checks source anchors, types, literals, node order/ownership, precedence, roots, modes, local binding/initialization/liveness, scopes, control flow, returns, mutability, conversions and exact declaration effects. Complete-program audits also check declaration sets, duplicate names, frame coverage, callees and argument ownership. Void-call statement roots, DoesNotReturn continuation, scalar out/init-ref destinations, unsafe call scopes and named argument mappings retain their exact validations. Shared verification checks effects, definite liveness/publication and reachable completion under the selected policy. Limits remain 64 tokens per snapshot; per function 8 total named/hidden locals, 12 statements, 32 nodes, 16 expression-recursion levels and 6 structural levels. See the [implementation reference](../docs/implementation.md). This is not a standalone compiler or machine-code encoder. |
 | [ScalarFunctionParser](ScalarFunctionParser.terrum) | Provisional scalar function probe: grouped/unary literals, two-literal checked arithmetic and bitwise operations, typed integer/`char16` comparisons, and one named scalar parameter in comparisons or integer checked addition | Hosted-span and executed-value parity with AOT/JIT at decimal/based boundaries across all four integer widths and `char16` comparisons; names bind to declarations, invalid magnitudes and checked addition overflow reject; requires `ScalarParserTypes`; other declarations still require the host parser |
 | [ScalarParameterPairParser](ScalarParameterPairParser.terrum) | Separate bounded probe of two named scalar parameters returned through checked integer addition/subtraction, `x + y + literal` with both checked steps, or a Boolean comparison (including `char16`) | AOT/JIT under both policies across signed/unsigned 32-/64-bit extrema, code-unit comparisons and decimal/based literal boundaries; both identifiers bind to distinct declarations, either overflow or unsigned subtraction underflow rejects; requires `ScalarParserTypes`, not a bootstrap compiler |
 | [ScalarConditionalParser](ScalarConditionalParser.terrum) | Separately compiled probe of a `bool` parameter selecting between two named, same-typed scalar parameters with explicit `if`/`else` returns | AOT/JIT under both policies check both reachable arms across six scalar types and reject swapped/unbound names and missing branches; uses scanner-owned tokens and `ScalarParserTypes`, not the general hosted parser or a bootstrap compiler |
@@ -239,6 +225,13 @@ native emitter or compiler self-build.
 | [Scanner](Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, exact token kinds, lossless trivia, lexical diagnostics and bounded integer magnitudes | Executed through fixed checked host buffers with overflow-safe record-capacity checks for tokens, trivia, integers and diagnostics; see the [precise subset](../docs/scanner.md) |
 | [ManagedScanner](ManagedScanner.terrum) | Copy a completed compiled scanner token stream into newly published managed storage or a sequential cursor | AOT/JIT parity with host token kinds/ranges under both policies; lexical failure, malformed host records and more than 64 tokens leave the output vacant; independent copies survive clear and collection |
 | [Host APIs](host.api.terrum) | Explicit source acquisition, cancellation, digest and output boundary | Interfaces, immutable publication, operation failures; host adapters |
+
+### Scalar frontend implementation history (retired tags)
+
+The v1–v84 labels below identify former feature milestones only. Their feature
+selection and servicing statements describe retired implementations: none of
+those tags is produced or accepted now. V85 includes all currently implemented
+source subsets, with the existing layouts, limits and independent source audits.
 
 The scalar frontend now also parses and binds bounded expression trees in
 Terrum, including `=>` scalar functions and nested arithmetic, bitwise,
@@ -285,13 +278,14 @@ declared init destinations. Complete-program v78 uses the same mode word in
 each function frame. Complete-program v80 currently uses the v78 frame
 arrangement and admits non-Boolean scalar `out` declarations. Single-function
 v79 uses the same 392-word buffer as earlier single-function tags and admits
-those declarations for bounded recursive self-calls. These are current
-validation shapes, not format compatibility requirements.
+those declarations for bounded recursive self-calls. Those tags are retired;
+the same supported source shapes now publish v85.
 The host buffer has 392 words: the original 37-word header,
 five tree-header words, at most 32 eight-word postorder nodes, two counts,
 eight four-word local records and twelve five-word statement records. Recursive
 descent is limited to 16 levels and input still uses the bounded token chain.
-Older shapes retain their tags/payloads with zero unused extensions.
+V85 retains both compact expression records and tree/statement records with
+zero unused extensions, but no earlier tag is accepted.
 The host validates the native nodes against source tokens and types without
 running the hosted parser/binder, then uses the shared verifier/emitter.
 Projection v22 adds checked numeric type-calls without local records; v23
@@ -537,6 +531,8 @@ in the [implementation reference](../docs/implementation.md). The scalar
 frontend supports named loop transfers, vacant initialization and local
 lifetime ending, but excludes optional types and managed handles; its accepted
 operations and projection gates are in the [native profile](../docs/native.md).
+
+### Source and managed component contracts
 
 `SourceRange` deliberately mirrors the current host's signed 32-bit UTF-16
 coordinates, including the checked end bound. This is an interchange limit for

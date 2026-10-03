@@ -102,14 +102,14 @@ public sealed class BlockFrontendProjectionTests
     }
 
     [Fact]
-    public void VersionFiftyTwoCannotBeClaimedWithoutAnActualBlock()
+    public void ReaderRejectsObsoleteBlockTagForOrdinaryReturn()
     {
         const string text = "public int32 Value() { return 42; }";
         var words = Header(text, 1, 1, 0);
         var returnAt = text.IndexOf("return", StringComparison.Ordinal);
         Node(words, 0, 3, returnAt + 7, 2, -1, 42);
         Statement(words, 0, 8, 0, 0, returnAt, returnAt + 10);
-        words[0] = 48;
+        words[0] = 85;
         Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
         words[0] = 52;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
@@ -176,7 +176,7 @@ public sealed class BlockFrontendProjectionTests
     private static int[] Header(string text, int nodes, int statements, int locals)
     {
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 52;
+        words[0] = 85;
         words[1] = words[2] = words[5] = 1;
         words[9] = text.IndexOf("Value", StringComparison.Ordinal);
         words[10] = 5;

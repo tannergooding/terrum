@@ -137,7 +137,7 @@ public sealed class ElseIfFrontendProjectionTests
     }
 
     [Fact]
-    public void NewVersionRequiresAnActualElseIfAndRejectsMixedArrowOrScalarNullReturns()
+    public void CurrentVersionCoversOrdinaryReturnsAndRejectsMixedArrowOrScalarNullReturns()
     {
         const string scalar = "public int32 @await() { return 42; }";
         var words = new int[ScalarFrontendHost.WordCount];
@@ -145,6 +145,8 @@ public sealed class ElseIfFrontendProjectionTests
         words[37] = words[298] = 1;
         Node(words, 0, 3, 1, scalar.IndexOf("42", StringComparison.Ordinal), 2, 42);
         Statement(words, 0, 8, 0, 0, scalar.IndexOf("return", StringComparison.Ordinal), scalar.IndexOf(';') + 1);
+        Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(scalar), Bytes(words)).IsValid);
+        words[0] = 58;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(scalar), Bytes(words)));
         var text = Text(false);
         words = Projection(text, false);
@@ -266,7 +268,7 @@ public sealed class ElseIfFrontendProjectionTests
 
     private static void Header(int[] words, string text, int type)
     {
-        words[0] = 58;
+        words[0] = 85;
         words[1] = words[2] = 1;
         words[5] = type;
         words[9] = text.IndexOf("@await", StringComparison.Ordinal);

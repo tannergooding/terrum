@@ -157,7 +157,7 @@ public sealed class KeywordEscapeTests
             : "public int32 @await(int32 @some) { mut var @const = some; return const; }";
         var source = SourceText.From(text);
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 21; words[1] = 1; words[2] = 1; words[5] = 1;
+        words[0] = 85; words[1] = 1; words[2] = 1; words[5] = 1;
         words[6] = 1; words[7] = 1;
         words[9] = text.IndexOf("@await", StringComparison.Ordinal); words[10] = 6;
         words[11] = text.IndexOf(duplicate ? "const)" : "@some)", StringComparison.Ordinal);
@@ -202,13 +202,13 @@ public sealed class KeywordEscapeTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void HistoricalFrontendProjectionRetainsUseSiteEscapeExtents(bool binary)
+    public void CompactFrontendProjectionRetainsUseSiteEscapeExtents(bool binary)
     {
         var text = binary
             ? "int32 @await(int32 @const, int32 some) { return const + @some; }"
             : "int32 @await(int32 @const) { return const; }";
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 1; words[1] = 1; words[5] = 1;
+        words[0] = 85; words[1] = 1; words[5] = 1;
         words[6] = binary ? 2 : 1; words[7] = 1; words[8] = binary ? 1 : 0;
         words[9] = text.IndexOf("@await", StringComparison.Ordinal); words[10] = 6;
         words[11] = text.IndexOf("@const", StringComparison.Ordinal); words[12] = 6;

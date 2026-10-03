@@ -41,7 +41,7 @@ public sealed partial class CliTests
                 Assert.Empty(projectionError);
                 using var document = JsonDocument.Parse(projectionOutput);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(48, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Equal(3, result.GetProperty("statements").EnumerateArray()
                     .Count(statement => statement.GetProperty("kind").GetInt32() == 8));
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,

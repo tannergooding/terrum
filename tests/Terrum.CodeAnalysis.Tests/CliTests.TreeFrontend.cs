@@ -168,7 +168,7 @@ public sealed partial class CliTests
         Assert.Empty(error);
         using var document = JsonDocument.Parse(output);
         var result = document.RootElement.GetProperty("result");
-        Assert.Equal(20, result.GetProperty("projectionVersion").GetInt32());
+        Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
         Assert.True(result.GetProperty("expressionBody").GetBoolean());
         Assert.Equal(-1, result.GetProperty("conditionRoot").GetInt32());
         var nodes = result.GetProperty("nodes");

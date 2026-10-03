@@ -143,7 +143,7 @@ public sealed class NativeDoForAuditTests
         internal Projection(string text, int nodes, int statements)
         {
             _source = SourceText.From(text);
-            Words[0] = 51;
+            Words[0] = 85;
             Words[1] = Words[2] = Words[5] = 1;
             Words[9] = text.IndexOf("Value", StringComparison.Ordinal);
             Words[10] = 5;

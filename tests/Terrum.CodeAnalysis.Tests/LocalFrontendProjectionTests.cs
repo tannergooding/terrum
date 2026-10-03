@@ -109,7 +109,7 @@ public sealed class LocalFrontendProjectionTests
         var source = SourceText.From(text);
         var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
         Assert.True(result.IsValid);
-        Assert.Equal(62, words[0]);
+        Assert.Equal(85, words[0]);
         Assert.True(Assert.Single(result.Locals).IsInitialization);
 
         Reject(0, 61);
@@ -135,7 +135,7 @@ public sealed class LocalFrontendProjectionTests
         var source = SourceText.From(text);
         var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
         Assert.True(result.IsValid);
-        Assert.Equal(63, words[0]);
+        Assert.Equal(85, words[0]);
         Assert.True(Assert.Single(result.Locals).IsConstant);
 
         Reject(0, 62);
@@ -164,7 +164,7 @@ public sealed class LocalFrontendProjectionTests
         var source = SourceText.From(text);
         var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
         Assert.True(result.IsValid);
-        Assert.Equal(65, words[0]);
+        Assert.Equal(85, words[0]);
         Assert.Equal(3, result.Statements.Length);
 
         Reject(0, 64);
@@ -268,7 +268,7 @@ public sealed class LocalFrontendProjectionTests
     private static int[] Projection(string text, bool assignment)
     {
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 21;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;
@@ -327,7 +327,7 @@ public sealed class LocalFrontendProjectionTests
     private static int[] InitializationProjection(string text, bool inferred = false)
     {
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = inferred ? 62 : 61;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;
@@ -385,7 +385,7 @@ public sealed class LocalFrontendProjectionTests
     private static int[] ConstantProjection(string text)
     {
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 63;
+        words[0] = 85;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;
@@ -436,7 +436,7 @@ public sealed class LocalFrontendProjectionTests
     private static int[] TryFinallyProjection(string text)
     {
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 65;
+        words[0] = 85;
         words[1] = 1;
         words[5] = 1;
         words[9] = text.IndexOf("Main", StringComparison.Ordinal);
@@ -478,7 +478,7 @@ public sealed class LocalFrontendProjectionTests
     private static int[] CheckedCatchProjection(string text, bool includeFinally = false)
     {
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = includeFinally ? 67 : 66;
+        words[0] = 85;
         words[1] = 1;
         words[5] = 1;
         words[9] = text.IndexOf("Main", StringComparison.Ordinal);
@@ -551,7 +551,7 @@ public sealed class LocalFrontendProjectionTests
     private static int[] StaticProofProjection(string text)
     {
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 68;
+        words[0] = 85;
         words[1] = words[2] = words[5] = 1;
         words[9] = text.IndexOf("Value", StringComparison.Ordinal);
         words[10] = 5;

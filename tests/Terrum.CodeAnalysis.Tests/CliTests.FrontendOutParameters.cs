@@ -29,7 +29,7 @@ public sealed partial class CliTests
             Assert.True(exit == 0, $"{policy}: {exit}: {output}{error}");
             using (var document = JsonDocument.Parse(output))
             {
-                Assert.Equal(69, document.RootElement.GetProperty("result")
+                Assert.Equal(85, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
             }
 
@@ -53,7 +53,7 @@ public sealed partial class CliTests
             Assert.True(exit == 0, $"{runtimeName}: {exit}: {output}{error}");
             using var document = JsonDocument.Parse(output);
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(70, result.GetProperty("projectionVersion").GetInt32());
+            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
             Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
                 node => node.GetProperty("operation").GetInt32() == 102);
             Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
@@ -112,7 +112,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(71, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
                     node => node.GetProperty("operation").GetInt32() == 104);
             }
@@ -174,7 +174,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(70, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
                     node => node.GetProperty("operation").GetInt32() == 102);
             }
@@ -225,7 +225,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(72, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
                     node => node.GetProperty("operation").GetInt32() == 102);
                 Assert.Contains(result.GetProperty("statements").EnumerateArray(),
@@ -291,7 +291,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(73, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
                     node => node.GetProperty("operation").GetInt32() == 102
                         && node.GetProperty("type").GetInt32() == 0);
@@ -346,7 +346,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(72, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
                     node => node.GetProperty("operation").GetInt32() == 104);
                 Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
@@ -411,7 +411,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(72, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Equal(2, System.Linq.Enumerable.Count(result.GetProperty("nodes").EnumerateArray(),
                     node => node.GetProperty("operation").GetInt32() == 104));
                 Assert.Contains(result.GetProperty("statements").EnumerateArray(),
