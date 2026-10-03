@@ -193,6 +193,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `6921e19` | Support hosted named by-value calls with source-order evaluation and persisted formal-parameter mapping |
 | `fa82131` | Project source-audited unsafe expression scopes and caller-unsafe self-calls through single-function v82/v83 |
 | `fefd3e4` | Project caller-unsafe call scopes from explicit `unsafe(expr)` expressions through complete-program v84 |
 | `e6277c7` | Project caller-unsafe callable obligations through bounded complete-program v83 while keeping verification hosted |
