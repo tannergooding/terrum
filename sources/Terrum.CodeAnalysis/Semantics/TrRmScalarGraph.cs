@@ -84,6 +84,22 @@ internal sealed class TrRmScalarGraph
                 {
                     continue;
                 }
+                var hasNonPositionalArguments = false;
+                if (!call.ArgumentParameterIndices.IsDefault)
+                {
+                    for (var index = 0; index < call.ArgumentParameterIndices.Length; index++)
+                    {
+                        if (call.ArgumentParameterIndices[index] != index)
+                        {
+                            hasNonPositionalArguments = true;
+                            break;
+                        }
+                    }
+                }
+                if (hasNonPositionalArguments)
+                {
+                    throw new ArgumentException("Indexed calls require source-order and parameter-order arguments to match.");
+                }
                 if ((uint)call.Function >= (uint)program.Functions.Length)
                 {
                     throw new ArgumentException("Indexed call target is outside the module.");

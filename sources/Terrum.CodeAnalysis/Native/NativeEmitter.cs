@@ -3037,32 +3037,34 @@ internal sealed partial class PeCompiler
                 var hidden = IsIndirect(call.Type) ? 1 : 0;
                 for (var i = Math.Max(0, 4 - hidden); i < call.Arguments.Length; i++)
                 {
-                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
+                    var argumentIndex = call.ArgumentIndex(i);
+                    if (call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
                         or BoundFieldLoan or BoundMutableFieldLoan)
                     {
-                        _code.Load64(Spill(argumentsBase + i));
+                        _code.Load64(Spill(argumentsBase + argumentIndex));
                     }
                     else
                     {
-                        LoadValue(Spill(argumentsBase + i), call.Arguments[i].Type);
+                        LoadValue(Spill(argumentsBase + argumentIndex), call.Arguments[argumentIndex].Type);
                     }
                     _code.StoreOutgoing64(32 + (8 * (i + hidden - 4)));
                 }
                 for (var i = 0; i < Math.Min(4 - hidden, call.Arguments.Length); i++)
                 {
-                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
+                    var argumentIndex = call.ArgumentIndex(i);
+                    if (call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
                         or BoundFieldLoan or BoundMutableFieldLoan)
                     {
-                        _code.Load64(Spill(argumentsBase + i));
+                        _code.Load64(Spill(argumentsBase + argumentIndex));
                     }
                     else
                     {
-                        LoadValue(Spill(argumentsBase + i), call.Arguments[i].Type);
+                        LoadValue(Spill(argumentsBase + argumentIndex), call.Arguments[argumentIndex].Type);
                     }
                     _code.MoveArgument(i + hidden,
-                        call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
+                        call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
                             or BoundFieldLoan or BoundMutableFieldLoan
-                            || IsStruct(call.Arguments[i].Type) || IsWide(call.Arguments[i].Type));
+                            || IsStruct(call.Arguments[argumentIndex].Type) || IsWide(call.Arguments[argumentIndex].Type));
                 }
                 if (hidden != 0)
                 {

@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static partial class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 49;
+    private const int Version = 50;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -2460,6 +2460,19 @@ public static partial class ModuleCompiler
                 }
                 PutString(writer, names[call.Function]);
                 writer.Write(call.Arguments.Length);
+                writer.Write(!call.ArgumentParameterIndices.IsDefault);
+                if (!call.ArgumentParameterIndices.IsDefault)
+                {
+                    if (call.ArgumentParameterIndices.Length != call.Arguments.Length)
+                    {
+                        throw new ModuleFormatException("Invalid call parameter mapping.");
+                    }
+                    foreach (var parameter in call.ArgumentParameterIndices)
+                    {
+                        Step(ref remaining, depth + 1);
+                        writer.Write(parameter);
+                    }
+                }
                 foreach (var argument in call.Arguments)
                 {
                     PutExpression(writer, argument, names, ref remaining, depth + 1);
@@ -2517,12 +2530,26 @@ public static partial class ModuleCompiler
                 // Names are resolved after the complete module graph is read.
                 var name = GetString(reader);
                 var count = Count(reader, 64);
+                var hasParameterMapping = GetBool(reader);
+                var parameterIndices = ImmutableArray<int>.Empty;
+                if (hasParameterMapping)
+                {
+                    var indices = ImmutableArray.CreateBuilder<int>(count);
+                    for (var i = 0; i < count; i++)
+                    {
+                        Step(ref remaining, depth + 1);
+                        indices.Add(reader.ReadInt32());
+                    }
+                    parameterIndices = indices.MoveToImmutable();
+                }
                 var args = ImmutableArray.CreateBuilder<BoundExpression>(count);
                 for (var i = 0; i < count; i++)
                 {
                     args.Add(GetExpression(reader, ref remaining, depth + 1));
                 }
-                return new SymbolicCall(name, args.ToImmutable(), type, span);
+                return new SymbolicCall(name, args.ToImmutable(), type, span) {
+                    ArgumentParameterIndices = hasParameterMapping ? parameterIndices : default,
+                };
             case 6:
                 return new BoundCast(GetExpression(reader, ref remaining, depth + 1), type, span);
             case 7:
@@ -2636,7 +2663,9 @@ public static partial class ModuleCompiler
 
     private static BoundExpression ResolveExpression(BoundExpression expression, IReadOnlyDictionary<string, int> names) => expression switch {
         SymbolicCall call => names.TryGetValue(call.Name, out var index)
-            ? new BoundCall(index, [.. call.Arguments.Select(argument => ResolveExpression(argument, names))], call.Type, call.Span)
+            ? new BoundCall(index, [.. call.Arguments.Select(argument => ResolveExpression(argument, names))], call.Type, call.Span) {
+                ArgumentParameterIndices = call.ArgumentParameterIndices,
+            }
             : throw new ModuleContractException($"Unresolved call target '{call.Name}'."),
         BoundUnary unary => unary with { Operand = ResolveExpression(unary.Operand, names) },
         BoundUpdate update => update with { Place = ResolveExpression(update.Place, names) },
@@ -2738,7 +2767,10 @@ public static partial class ModuleCompiler
     {
         public bool HasOwnershipTransfer { get; init; }
     }
-    private sealed record SymbolicCall(string Name, ImmutableArray<BoundExpression> Arguments, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+    private sealed record SymbolicCall(string Name, ImmutableArray<BoundExpression> Arguments, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+    {
+        public ImmutableArray<int> ArgumentParameterIndices { get; init; }
+    }
     private sealed record SymbolicLifetimeEnd(int Variable, string? Name, TextSpan Span) : BoundStatement(Span);
     private sealed record SymbolicNominalUpdate(TokenKind Operator, BoundExpression Place, bool IsPrefix,
         string Name, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);

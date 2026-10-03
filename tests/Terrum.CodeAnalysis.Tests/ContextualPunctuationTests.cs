@@ -167,16 +167,80 @@ public sealed class ContextualPunctuationTests
     [InlineData("int32 Take(int32 @await) => @await; int32 Main() { return Take(@await:42); }")]
     [InlineData("int32 Take(int32 @await) => @await; int32 Main() { return Take(@await:/* gap */42); }")]
     [InlineData("int32 Take(int32 \U00010400) => \U00010400; int32 Main() { return Take(\U00010400:42); }")]
-    public void AttachedNamedArgumentsRetainSyntaxWithoutAddingBindingSupport(string source)
+    public void NamedArgumentsBindByNormalizedParameterName(string source)
     {
         var tree = SyntaxTree.Parse(source);
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
         Assert.Equal(source, tree.Root.ToFullString());
         var argument = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.Argument);
         Assert.Equal(TokenKind.Colon, Assert.IsType<SyntaxTokenElement>(argument.Children[1]).Token.Kind);
-        var compilation = Compilation.Create(tree);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011"
-            && diagnostic.Span == argument.Span);
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var compilation = Compilation.Create(tree, (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+        }
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void NamedCallsEvaluateInSourceOrderAndAllowInPositionContinuation(NativeRuntimePolicy policy)
+    {
+        const string source = """
+            int32 Record(int32 value) {
+                Host.Trace[0] = Host.Trace[0] * 10 + value;
+                return value;
+            }
+            int32 Combine(int32 first, int32 second, int32 third) {
+                return first * 100 + second * 10 + third;
+            }
+            int32 Main() {
+                int32 reordered = Combine(third: Record(3), first: Record(1), second: Record(2));
+                if (reordered != 123 || Host.Trace[0] != 312) { return 1; }
+                Host.Trace[0] = 0;
+                int32 continued = Combine(first: Record(1), Record(2), third: Record(3));
+                if (continued != 123 || Host.Trace[0] != 123) { return 2; }
+                return 42;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            [new HostBuffer("Trace", PrimitiveType.Int32, [0], true)], (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void NamedInstanceArgumentsKeepTheReceiverInItsFormalSlot(NativeRuntimePolicy policy)
+    {
+        const string source = """
+            struct Accumulator {
+                public int32 Value;
+                public Accumulator(int32 first, int32 second) { Value = first * 10 + second; }
+                public int32 Combine(int32 first, int32 second) { return Value + first * 10 + second; }
+            }
+            int32 Main() {
+                Accumulator value = new Accumulator(second: 2, first: 4);
+                return value.Combine(second: 0, first: 0);
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+    }
+
+    [Theory]
+    [InlineData("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(unknown: 1, second: 2); }")]
+    [InlineData("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(first: 1, first: 2); }")]
+    [InlineData("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(second: 2, 1); }")]
+    [InlineData("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(first: 1); }")]
+    [InlineData("bool Fill(out int32 value, int32 other) { value = other; return true; } int32 Main() { Fill(other: 1, value: out var result); return result; }")]
+    public void InvalidNamedArgumentBindingsAreRejected(string source)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
     }
 
     [Theory]

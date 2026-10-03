@@ -587,6 +587,28 @@ public sealed record BoundConditional(BoundExpression Condition, BoundExpression
 public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arguments,
     PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
 {
+    /// <summary>Maps source-order arguments to formal argument positions when binding is non-positional.</summary>
+    internal ImmutableArray<int> ArgumentParameterIndices { get; init; }
+
+    internal int ParameterIndex(int argumentIndex) =>
+        ArgumentParameterIndices.IsDefault ? argumentIndex : ArgumentParameterIndices[argumentIndex];
+
+    internal int ArgumentIndex(int parameterIndex)
+    {
+        if (ArgumentParameterIndices.IsDefault)
+        {
+            return parameterIndex;
+        }
+        for (var index = 0; index < ArgumentParameterIndices.Length; index++)
+        {
+            if (ArgumentParameterIndices[index] == parameterIndex)
+            {
+                return index;
+            }
+        }
+        throw new InvalidOperationException("Call parameter has no bound argument.");
+    }
+
     internal bool IsUnsafeAuthorized { get; init; }
 }
 

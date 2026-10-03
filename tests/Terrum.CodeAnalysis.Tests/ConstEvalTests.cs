@@ -11,6 +11,21 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class ConstEvalTests
 {
     [Fact]
+    public void NamedConstEvalArgumentsBindToFormalSlots()
+    {
+        const string source = """
+            int32 Main() { const int32 answer = Combine(second: 2, first: 4); return answer; }
+            [ConstEval] int32 Combine(int32 first, int32 second) { return first * 10 + second; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var main = Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions,
+            function => function.Name == "Main");
+        Assert.Equal(42, Assert.IsType<BoundConstant>(
+            Assert.IsType<BoundLocal>(main.Body.Statements[0]).Initializer).Value);
+    }
+
+    [Fact]
     public void PostTestedConstEvalTransfersToNamedOuterLoop()
     {
         const string source = """

@@ -3026,6 +3026,15 @@ internal sealed partial class Binder
     private BoundCall BindArguments(SyntaxNode node, SyntaxNode arguments, int function, SyntaxNode? receiver)
     {
         var signature = function < 0 ? null : _signatures[function];
+        var hasNamedArguments = HasNamedArguments(arguments);
+        var namedArgumentsSupported = hasNamedArguments && signature is not null
+            && !signature.Parameters.Any(static parameter => parameter.IsOut)
+            && (signature.External is null || signature.External.Intrinsic == BoundIntrinsic.None);
+        var validNamedBinding = namedArgumentsSupported;
+        if (hasNamedArguments && !namedArgumentsSupported)
+        {
+            Report("TRM3011", "Named arguments are supported only for uniquely resolved by-value calls.", arguments.Span);
+        }
         var ownerName = signature?.StructName is null ? null
             : signature.Name[..signature.Name.LastIndexOf('.', StringComparison.Ordinal)];
         if (signature is not null && signature.IsPrivate
@@ -3038,6 +3047,8 @@ internal sealed partial class Binder
             Report("TRM3011", "A static method has no receiver.", node.Span);
         }
         var bound = ImmutableArray.CreateBuilder<BoundExpression>();
+        ImmutableArray<int>.Builder? argumentParameterIndices = hasNamedArguments
+            ? ImmutableArray.CreateBuilder<int>() : null;
         var receiverCount = 0;
         if (receiver is not null && signature is not null)
         {
@@ -3054,6 +3065,7 @@ internal sealed partial class Binder
                     ? BindReceiverLoan(receiver, receiverType)
                     : BindExpression(receiver, receiverType));
             receiverCount = 1;
+            argumentParameterIndices?.Add(0);
         }
         else if (signature is { StructName: not null, IsStatic: false, IsConstructor: false })
         {
@@ -3071,12 +3083,17 @@ internal sealed partial class Binder
                     ? new BoundReceiverLoan(0, receiverType, node.Span)
                     : BindImplicitReceiver(receiverType, node.Span));
                 receiverCount = 1;
+                argumentParameterIndices?.Add(0);
             }
             else
             {
                 Report("TRM3011", "Instance methods require a receiver.", node.Span);
             }
         }
+        var assignedParameters = signature is not null && namedArgumentsSupported
+            ? new bool[signature.Parameters.Length] : null;
+        var nextPositionalParameter = 0;
+        var hasOutOfPositionNamedArgument = false;
         foreach (var child in arguments.Children)
         {
             if (child is not SyntaxNode argument)
@@ -3084,9 +3101,68 @@ internal sealed partial class Binder
                 continue;
             }
 
-            var position = bound.Count - receiverCount;
+            var sourcePosition = bound.Count - receiverCount;
+            var position = sourcePosition;
+            var argumentName = GetArgumentName(argument);
+            if (argumentName is not null)
+            {
+                if (!namedArgumentsSupported || signature is null)
+                {
+                    validNamedBinding = false;
+                    position = sourcePosition;
+                }
+                else
+                {
+                    position = -1;
+                    for (var index = 0; index < signature.Parameters.Length; index++)
+                    {
+                        if (signature.Parameters[index].Name == argumentName.Token.Name)
+                        {
+                            position = index;
+                            break;
+                        }
+                    }
+                    if (position < 0)
+                    {
+                        Report("TRM3011", $"'{argumentName.Token.Name}' is not a parameter of '{signature.Name}'.", argument.Span);
+                        validNamedBinding = false;
+                        position = sourcePosition;
+                    }
+                    else if (assignedParameters is not null && assignedParameters[position])
+                    {
+                        Report("TRM3011", $"Parameter '{argumentName.Token.Name}' is supplied more than once.", argument.Span);
+                        validNamedBinding = false;
+                    }
+                    else if (position == nextPositionalParameter)
+                    {
+                        nextPositionalParameter++;
+                    }
+                    else
+                    {
+                        hasOutOfPositionNamedArgument = true;
+                    }
+                }
+            }
+            else
+            {
+                if (hasOutOfPositionNamedArgument)
+                {
+                    Report("TRM3011", "A positional argument cannot follow an out-of-position named argument.", argument.Span);
+                    validNamedBinding = false;
+                }
+                position = nextPositionalParameter++;
+            }
             var expectedParameter = signature is not null && position < signature.Parameters.Length
                 ? signature.Parameters[position] : null;
+            if (expectedParameter is not null && position >= 0 && assignedParameters is not null)
+            {
+                if (assignedParameters[position] && argumentName is null)
+                {
+                    Report("TRM3011", $"Parameter '{expectedParameter.Name}' is supplied more than once.", argument.Span);
+                    validNamedBinding = false;
+                }
+                assignedParameters[position] = true;
+            }
             if (argument.Children[0] is SyntaxTokenElement passing
                 && (passing.Token.Kind == TokenKind.OutKeyword
                     || (passing.Token.Kind == TokenKind.Identifier && passing.Token.Text == "init")))
@@ -3131,22 +3207,27 @@ internal sealed partial class Binder
                 bound.Add(new BoundOutArgument(slot, declares, expectedParameter.Type, argument.Span) {
                     IsInit = isInit,
                 });
+                argumentParameterIndices?.Add(position + receiverCount);
                 continue;
             }
             if (expectedParameter?.IsOut == true)
             {
                 Report("TRM3011", "An output parameter requires the matching out or init argument.", argument.Span);
             }
-            if (argument.Children.Length != 1 || argument.Children[0] is not SyntaxNode value)
+            var valueIndex = argumentName is null ? 0 : 2;
+            if (argument.Children.Length != valueIndex + 1
+                || argument.Children[valueIndex] is not SyntaxNode value)
             {
-                Report("TRM3011", "Only positional value arguments are supported.", argument.Span);
+                Report("TRM3011", "A by-value argument requires one expression.", argument.Span);
                 // The malformed argument cannot become a valid program; retain no executable value.
                 bound.Add(ErrorExpression(argument.Span));
+                argumentParameterIndices?.Add(position + receiverCount);
                 continue;
             }
 
             var expected = expectedParameter?.Type;
             bound.Add(BindExpression(value, expected));
+            argumentParameterIndices?.Add(position + receiverCount);
         }
 
         if (signature is not null)
@@ -3161,13 +3242,47 @@ internal sealed partial class Binder
             {
                 Report("TRM3011", $"Function '{signature.Name}' expects {signature.Parameters.Length} arguments, got {supplied}.", arguments.Span);
             }
+            if (hasNamedArguments && namedArgumentsSupported && signature is not null
+                && assignedParameters is { } suppliedParameters)
+            {
+                for (var index = 0; index < suppliedParameters.Length; index++)
+                {
+                    if (!suppliedParameters[index])
+                    {
+                        Report("TRM3011", $"Required parameter '{signature.Parameters[index].Name}' was not supplied.", arguments.Span);
+                        validNamedBinding = false;
+                    }
+                }
+            }
         }
 
         return new BoundCall(Math.Max(0, function), bound.ToImmutable(),
             signature?.ReturnType ?? PrimitiveType.Int32, node.Span) {
+            ArgumentParameterIndices = validNamedBinding && argumentParameterIndices is { } parameterIndices
+                ? parameterIndices.ToImmutable() : default,
             IsUnsafeAuthorized = signature is { RequiresUnsafeCaller: true } && _unsafeDepth != 0,
         };
     }
+
+    private static bool HasArgumentName(SyntaxNode argument) =>
+        argument.Children.Length >= 3
+        && argument.Children[0] is SyntaxTokenElement { Token.Kind: TokenKind.Identifier }
+        && argument.Children[1] is SyntaxTokenElement { Token.Kind: TokenKind.Colon };
+
+    private static bool HasNamedArguments(SyntaxNode arguments)
+    {
+        foreach (var child in arguments.Children)
+        {
+            if (child is SyntaxNode argument && HasArgumentName(argument))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static SyntaxTokenElement? GetArgumentName(SyntaxNode argument) =>
+        HasArgumentName(argument) ? (SyntaxTokenElement)argument.Children[0] : null;
 
     private bool CheckUnsafeCaller(Signature signature, TextSpan span)
     {

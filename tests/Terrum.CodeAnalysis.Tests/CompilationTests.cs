@@ -60,7 +60,6 @@ public sealed class CompilationTests
     [InlineData("int32 Main() { return; }")]
     [InlineData("int32 Main() { return F(); } int32 F(int32 x) { return x; }")]
     [InlineData("int32 Main() { return F(true); } int32 F(int32 x) { return x; }")]
-    [InlineData("int32 Main() { return F(value: 1); } int32 F(int32 value) { return value; }")]
     [InlineData("int32 Main() { return F(out var x); } int32 F(int32 value) { return value; }")]
     [InlineData("int32 Main() { int32? x = 1; return 0; }")]
     [InlineData("int32 Main() { int128 x = 1; return 0; }")]

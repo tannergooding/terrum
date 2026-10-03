@@ -3248,6 +3248,11 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                if (!call.ArgumentParameterIndices.IsDefault
+                    && call.ArgumentParameterIndices.Length != call.Arguments.Length)
+                {
+                    throw Invalid();
+                }
                 if (call.Arguments.Length > MaximumArguments)
                 {
                     throw Limit();
@@ -3276,6 +3281,11 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                if (target.DeclaringStruct is not null && !target.IsStatic && !target.IsConstructor
+                    && (call.Arguments.IsEmpty || call.ParameterIndex(0) != 0))
+                {
+                    throw Invalid();
+                }
                 if (target.IsPrivate)
                 {
                     if (function.DeclaringStruct != target.DeclaringStruct)
@@ -3284,12 +3294,25 @@ public static class SemanticVerifier
                     }
                 }
                 var outTargets = new HashSet<int>();
+                var argumentParameters = call.ArgumentParameterIndices.IsDefault
+                    ? null : new bool[call.Arguments.Length];
                 var loanRoot = -1;
                 var loanOfInitializedField = false;
                 var reservedReceiver = -1;
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
                     var argument = call.Arguments[i];
+                    var parameterIndex = call.ParameterIndex(i);
+                    if (argumentParameters is not null)
+                    {
+                        if ((uint)parameterIndex >= (uint)call.Arguments.Length
+                            || argumentParameters[parameterIndex])
+                        {
+                            throw Invalid();
+                        }
+                        argumentParameters[parameterIndex] = true;
+                    }
+                    var parameterSlot = parameterIndex + (target.IsConstructor ? 1 : 0);
                     if (reservedReceiver >= 0 && InvalidatesReservedOwner(argument, reservedReceiver,
                         ref remaining, depth + 1))
                     {
@@ -3310,7 +3333,7 @@ public static class SemanticVerifier
                                 && !function.Variables[output.Variable].IsMutable
                                 && !function.Variables[output.Variable].IsInitializationLocal
                                 && initialized.HasRetiredValue(output.Variable))
-                            || output.IsInit != target.Variables[i + (target.IsConstructor ? 1 : 0)].IsInit)
+                            || output.IsInit != target.Variables[parameterSlot].IsInit)
                         {
                             throw Invalid();
                         }
@@ -3332,7 +3355,7 @@ public static class SemanticVerifier
                                 && !target.IsConstructor && target.Variables[0].IsMutable
                                 && HasFields(program, mutableLoan.Type)
                                 && !ManagedClassTypes.IsClass(mutableLoan.Type);
-                            if (i != 0 || (!bufferMutation && !structMutation)
+                            if (parameterIndex != 0 || (!bufferMutation && !structMutation)
                                 || mutableLoan.Variable < 0 || mutableLoan.Variable >= initialized.Length
                                 || (bufferMutation && mutableLoan.Type != PrimitiveType.OwnedInt32Buffer)
                                 || mutableLoan.Type != target.Variables[0].Type
@@ -3348,7 +3371,7 @@ public static class SemanticVerifier
                         {
                             var bufferMutation = target.Intrinsic is BoundIntrinsic.BufferSet
                                 or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear;
-                            if (i != 0 || (target.Intrinsic != BoundIntrinsic.None && !bufferMutation)
+                            if (parameterIndex != 0 || (target.Intrinsic != BoundIntrinsic.None && !bufferMutation)
                                 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
                                 || !target.Variables[0].IsMutable || mutableField.Place is null
                                 || mutableField.Type != target.Variables[0].Type
@@ -3362,7 +3385,7 @@ public static class SemanticVerifier
                         }
                         else if (argument is BoundReceiverLoan loan)
                         {
-                            if (i != 0 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
+                            if (parameterIndex != 0 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
                                 || loan.Variable < 0 || loan.Variable >= initialized.Length
                                 || loan.Type != target.Variables[0].Type || !IsUnique(program, loan.Type)
                                 || target.Variables[0].IsMutable
@@ -3375,7 +3398,7 @@ public static class SemanticVerifier
                         }
                         else if (argument is BoundFieldLoan fieldLoan)
                         {
-                            if (i != 0 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
+                            if (parameterIndex != 0 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
                                 || fieldLoan.Place is null
                                 || fieldLoan.Type != target.Variables[0].Type
                                 || target.Variables[0].IsMutable
@@ -3397,16 +3420,16 @@ public static class SemanticVerifier
                             Expression(argument, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                         }
                     }
-                    if (i == 0 && loanRoot >= 0)
+                    if (parameterIndex == 0 && loanRoot >= 0)
                     {
                         reservedReceiver = loanRoot;
                     }
-                    if (argument.Type != target.Variables[i + (target.IsConstructor ? 1 : 0)].Type)
+                    if (argument.Type != target.Variables[parameterSlot].Type)
                     {
                         throw Invalid();
                     }
                     if ((argument is BoundOutArgument)
-                        != target.Variables[i + (target.IsConstructor ? 1 : 0)].IsOut)
+                        != target.Variables[parameterSlot].IsOut)
                     {
                         throw Invalid();
                     }

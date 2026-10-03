@@ -1020,6 +1020,16 @@ public static partial class TrRmExecutableCompiler
                     return Merge(condition, () => Expression(conditional.WhenTrue),
                         () => Expression(conditional.WhenFalse), conditional.Type);
                 case BoundCall call:
+                    if (!call.ArgumentParameterIndices.IsDefault)
+                    {
+                        for (var index = 0; index < call.ArgumentParameterIndices.Length; index++)
+                        {
+                            if (call.ArgumentParameterIndices[index] != index)
+                            {
+                                throw Unsupported("Indexed TRRM calls require arguments in formal parameter order.");
+                            }
+                        }
+                    }
                     var arguments = ImmutableArray.CreateBuilder<BoundExpression>(call.Arguments.Length);
                     foreach (var argument in call.Arguments)
                     {

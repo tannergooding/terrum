@@ -246,6 +246,17 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Fact]
+    public void SourceFreeIndexedCallsRejectNonPositionalArgumentMappings()
+    {
+        const string source = """
+            int32 Sum(int32 first, int32 second) { return first * 10 + second; }
+            int32 Main() { return Sum(second: 2, first: 4); }
+            """;
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.Emit(Compile(source), "named-arguments"));
+    }
+
+    [Fact]
     public void MaterializedValueLimitRejectsWithoutDroppingOperations()
     {
         var source = "int32 Main() { mut int32 x = 0; "

@@ -24,6 +24,11 @@ The source-free TRRM scalar path remains fail-fast; checked-exception Bodies
 and richer contracts are not implemented. See
 [implementation](implementation.md) for the current support boundary.
 
+Hosted source binding now carries grammar-defined named by-value calls through
+verification, native lowering and semantic-module persistence. The mapping
+preserves source-order evaluation; overload selection and named output
+arguments remain outside current support.
+
 The bounded Terrum-authored scalar source frontend supports v74 complete
 global-function snapshots and source-order scalar call targets, including
 forward and recursive calls with up to three by-value scalar arguments.

@@ -447,7 +447,8 @@ internal sealed partial class Binder
                 var arguments = new BoundConstant?[callee.Variables.Length];
                 for (var index = 0; index < call.Arguments.Length; index++)
                 {
-                    arguments[index] = EvaluateConstExpression(call.Arguments[index], slots, functions, depth, state);
+                    arguments[call.ParameterIndex(index)] =
+                        EvaluateConstExpression(call.Arguments[index], slots, functions, depth, state);
                 }
                 var result = EvaluateConstStatement(callee.Body, arguments, functions, depth + 1, state);
                 return result.Flow == ConstFlow.Return && result.Value is BoundConstant returned
