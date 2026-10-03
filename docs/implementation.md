@@ -378,7 +378,8 @@ history and record encodings; their older version selections, restrictions and
 reader servicing describe retired implementations, not compatibility support.
 Current v85 composes all implemented subsets described below, including compact
 expressions, tree/statement bodies, direct self/global calls, scalar out/init-ref,
-initialization tests, unsafe scopes/caller requirements and named by-value calls.
+initialization tests, unsafe scopes/caller requirements and named by-value/output
+calls.
 The source-bound audits, verifier/emitter boundary and buffer layouts are unchanged.
 
 The executable Terrum scalar frontend additionally supports bounded nested

@@ -200,6 +200,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `ba2e36e` | Project named scalar `out`/`init ref<T>` arguments through bounded v85 calls |
 | `f93fbfd` | Preserve source-order evaluation and formal binding for named calls in indexed TRRM |
 | `d9a94f0` | Project named by-value calls with source-order evaluation through the bounded scalar frontend |
 | `6921e19` | Support hosted named by-value calls with source-order evaluation and persisted formal-parameter mapping |
