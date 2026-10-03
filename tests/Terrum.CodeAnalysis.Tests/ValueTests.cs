@@ -356,7 +356,7 @@ public sealed class ValueTests
     }
 
     [Fact]
-    public async Task CliAnalyzeBoundsAlternatingShortCircuitFlowWorkAsync()
+    public async Task CliAnalyzeCompletesAlternatingShortCircuitFlowWorkAsync()
     {
         var expression = "value";
         for (var depth = 0; depth < 40; depth++)
@@ -364,14 +364,12 @@ public sealed class ValueTests
             expression = $"({expression} {(depth % 2 == 0 ? "&&" : "||")} value)";
         }
         var source = $"int32 Main() {{ bool value = true; if ({expression}) {{ return 1; }} return 0; }}";
-        using var json = await AnalyzeSourceAsync(source).ConfigureAwait(true);
-        Assert.False(json.RootElement.GetProperty("success").GetBoolean());
-        var diagnostic = json.RootElement.GetProperty("diagnostics")[0];
-        Assert.Equal("TRM3016", diagnostic.GetProperty("code").GetString());
-        Assert.Equal("Source exceeds the semantic verification work limit.", diagnostic.GetProperty("message").GetString());
+        using var json = await AnalyzeSourceAsync(source, expectedExitCode: 0).ConfigureAwait(true);
+        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.Empty(json.RootElement.GetProperty("diagnostics").EnumerateArray());
     }
 
-    private static async Task<JsonDocument> AnalyzeSourceAsync(string source)
+    private static async Task<JsonDocument> AnalyzeSourceAsync(string source, int expectedExitCode = 1)
     {
         var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = frameworkDirectory.Parent?.Name ?? throw new InvalidOperationException("Missing configuration directory.");
@@ -407,7 +405,7 @@ public sealed class ValueTests
             }
             throw;
         }
-        Assert.Equal(1, process.ExitCode);
+        Assert.Equal(expectedExitCode, process.ExitCode);
         Assert.Equal("", await error.ConfigureAwait(true));
         return JsonDocument.Parse(await output.ConfigureAwait(true));
     }

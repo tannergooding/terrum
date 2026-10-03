@@ -2506,7 +2506,7 @@ public static class SemanticVerifier
         // call, but an inline output may still retry before its first publication.
         private readonly byte[] _possibilities;
         private readonly Dictionary<BoundExpression, byte> _canBeFacts;
-        private readonly Dictionary<BoundExpression, bool> _vacateEffectFacts;
+        private readonly Dictionary<BoundExpression, bool> _outcomeEffectFacts;
         internal Dictionary<BoundStatement, InitializationState>? StatementInputs { get; init; }
 
         internal InitializationState(int length)
@@ -2516,17 +2516,17 @@ public static class SemanticVerifier
         }
 
         private InitializationState(int length, Dictionary<BoundExpression, byte> canBeFacts,
-            Dictionary<BoundExpression, bool> vacateEffectFacts)
+            Dictionary<BoundExpression, bool> outcomeEffectFacts)
         {
             _possibilities = new byte[length];
             _canBeFacts = canBeFacts;
-            _vacateEffectFacts = vacateEffectFacts;
+            _outcomeEffectFacts = outcomeEffectFacts;
             Array.Fill(_possibilities, (byte)1);
         }
 
         internal int Length => _possibilities.Length;
         internal Dictionary<BoundExpression, byte> CanBeFacts => _canBeFacts;
-        internal Dictionary<BoundExpression, bool> VacateEffectFacts => _vacateEffectFacts;
+        internal Dictionary<BoundExpression, bool> OutcomeEffectFacts => _outcomeEffectFacts;
 
         internal void Fill(bool value, int start, int count) =>
             Array.Fill(_possibilities, value ? (byte)2 : (byte)1, start, count);
@@ -2560,7 +2560,7 @@ public static class SemanticVerifier
 
         internal InitializationState Clone()
         {
-            var result = new InitializationState(Length, _canBeFacts, _vacateEffectFacts) {
+            var result = new InitializationState(Length, _canBeFacts, _outcomeEffectFacts) {
                 StatementInputs = StatementInputs,
             };
             CopyTo(result);
@@ -3656,6 +3656,10 @@ public static class SemanticVerifier
 
     private static InitializationState Outcome(BoundExpression expression, InitializationState initialized, bool result, ref int remaining)
     {
+        if (!HasOutcomeEffects(expression, initialized.OutcomeEffectFacts, ref remaining))
+        {
+            return initialized.Clone();
+        }
         Count(ref remaining, 0);
         if (expression is BoundUnary { Operator: TokenKind.Bang } unary)
         {
@@ -3756,7 +3760,8 @@ public static class SemanticVerifier
 
     private static void VacateNestedOutputs(BoundExpression expression, InitializationState state, ref int remaining)
     {
-        if (!HasVacateEffects(expression, state.VacateEffectFacts, ref remaining))
+        if (expression is BoundIsInitialized
+            || !HasOutcomeEffects(expression, state.OutcomeEffectFacts, ref remaining))
         {
             return;
         }
@@ -3883,56 +3888,57 @@ public static class SemanticVerifier
         }
     }
 
-    private static bool HasVacateEffects(BoundExpression expression,
-        Dictionary<BoundExpression, bool> vacateEffectFacts, ref int remaining)
+    // Unknown forms stay conservative; only expressions without flow-state effects may skip outcome traversal.
+    private static bool HasOutcomeEffects(BoundExpression expression,
+        Dictionary<BoundExpression, bool> outcomeEffectFacts, ref int remaining)
     {
         Count(ref remaining, 0);
         if (expression is null)
         {
             return true;
         }
-        if (vacateEffectFacts.TryGetValue(expression, out var hasEffects))
+        if (outcomeEffectFacts.TryGetValue(expression, out var hasEffects))
         {
             return hasEffects;
         }
 
         hasEffects = expression switch {
-            BoundCall call => HasVacateEffects(call.Arguments, vacateEffectFacts, ref remaining),
-            BoundBinary binary => HasVacateEffects(binary.Left, vacateEffectFacts, ref remaining)
-                || HasVacateEffects(binary.Right, vacateEffectFacts, ref remaining),
-            BoundConditional conditional => HasVacateEffects(conditional.Condition, vacateEffectFacts, ref remaining)
-                || HasVacateEffects(conditional.WhenTrue, vacateEffectFacts, ref remaining)
-                || HasVacateEffects(conditional.WhenFalse, vacateEffectFacts, ref remaining),
-            BoundCoalesce coalesce => HasVacateEffects(coalesce.Optional, vacateEffectFacts, ref remaining)
-                || HasVacateEffects(coalesce.Fallback, vacateEffectFacts, ref remaining),
-            BoundUnary unary => HasVacateEffects(unary.Operand, vacateEffectFacts, ref remaining),
-            BoundUpdate update => HasVacateEffects(update.Place, vacateEffectFacts, ref remaining),
-            BoundCompoundAssignment compound => HasVacateEffects(compound.Place, vacateEffectFacts, ref remaining)
-                || HasVacateEffects(compound.Right, vacateEffectFacts, ref remaining),
-            BoundNominalUpdate update => HasVacateEffects(update.Place, vacateEffectFacts, ref remaining),
-            BoundCast cast => HasVacateEffects(cast.Operand, vacateEffectFacts, ref remaining),
-            BoundOptionalLift lift => HasVacateEffects(lift.Value, vacateEffectFacts, ref remaining),
-            BoundReadonlyProjection projection => HasVacateEffects(projection.Value, vacateEffectFacts, ref remaining),
-            BoundIsNull test => HasVacateEffects(test.Value, vacateEffectFacts, ref remaining),
-            BoundIsInitialized => false,
+            BoundCall call => HasOutcomeEffects(call.Arguments, outcomeEffectFacts, ref remaining),
+            BoundBinary binary => HasOutcomeEffects(binary.Left, outcomeEffectFacts, ref remaining)
+                || HasOutcomeEffects(binary.Right, outcomeEffectFacts, ref remaining),
+            BoundConditional conditional => HasOutcomeEffects(conditional.Condition, outcomeEffectFacts, ref remaining)
+                || HasOutcomeEffects(conditional.WhenTrue, outcomeEffectFacts, ref remaining)
+                || HasOutcomeEffects(conditional.WhenFalse, outcomeEffectFacts, ref remaining),
+            BoundCoalesce coalesce => HasOutcomeEffects(coalesce.Optional, outcomeEffectFacts, ref remaining)
+                || HasOutcomeEffects(coalesce.Fallback, outcomeEffectFacts, ref remaining),
+            BoundUnary unary => HasOutcomeEffects(unary.Operand, outcomeEffectFacts, ref remaining),
+            BoundUpdate update => HasOutcomeEffects(update.Place, outcomeEffectFacts, ref remaining),
+            BoundCompoundAssignment compound => HasOutcomeEffects(compound.Place, outcomeEffectFacts, ref remaining)
+                || HasOutcomeEffects(compound.Right, outcomeEffectFacts, ref remaining),
+            BoundNominalUpdate update => HasOutcomeEffects(update.Place, outcomeEffectFacts, ref remaining),
+            BoundCast cast => HasOutcomeEffects(cast.Operand, outcomeEffectFacts, ref remaining),
+            BoundOptionalLift lift => HasOutcomeEffects(lift.Value, outcomeEffectFacts, ref remaining),
+            BoundReadonlyProjection projection => HasOutcomeEffects(projection.Value, outcomeEffectFacts, ref remaining),
+            BoundIsNull test => HasOutcomeEffects(test.Value, outcomeEffectFacts, ref remaining),
             BoundIsSome or BoundIsVariablePattern or BoundMove => true,
-            BoundFieldRead field => HasVacateEffects(field.Receiver, vacateEffectFacts, ref remaining),
-            BoundBufferRead buffer => HasVacateEffects(buffer.Index, vacateEffectFacts, ref remaining),
-            BoundViewRead view => HasVacateEffects(view.Index, vacateEffectFacts, ref remaining),
+            BoundFieldRead field => HasOutcomeEffects(field.Receiver, outcomeEffectFacts, ref remaining),
+            BoundBufferRead buffer => HasOutcomeEffects(buffer.Index, outcomeEffectFacts, ref remaining),
+            BoundViewRead view => HasOutcomeEffects(view.Index, outcomeEffectFacts, ref remaining),
+            BoundIsInitialized => true,
             BoundViewLength or BoundConstant or BoundNull or BoundRead or BoundReceiverLoan
                 or BoundMutableReceiverLoan or BoundMutableFieldLoan or BoundFieldLoan => false,
             _ => true,
         };
-        vacateEffectFacts.Add(expression, hasEffects);
+        outcomeEffectFacts.Add(expression, hasEffects);
         return hasEffects;
     }
 
-    private static bool HasVacateEffects(ImmutableArray<BoundExpression> expressions,
-        Dictionary<BoundExpression, bool> vacateEffectFacts, ref int remaining)
+    private static bool HasOutcomeEffects(ImmutableArray<BoundExpression> expressions,
+        Dictionary<BoundExpression, bool> outcomeEffectFacts, ref int remaining)
     {
         foreach (var expression in expressions)
         {
-            if (expression is BoundOutArgument || HasVacateEffects(expression, vacateEffectFacts, ref remaining))
+            if (expression is BoundOutArgument || HasOutcomeEffects(expression, outcomeEffectFacts, ref remaining))
             {
                 return true;
             }

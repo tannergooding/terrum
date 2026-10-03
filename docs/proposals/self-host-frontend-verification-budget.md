@@ -39,6 +39,14 @@ publication checks. For the bundled frontend and the same
 Each reduction is 4,689 visits (about 5.9%). The temporary counter is
 removed; these counts measure verifier work, not wall-time.
 
+Outcome-state computation now classifies and caches whether an expression can
+change initialization facts. Pure expressions reuse a clone of the input state
+instead of recursively reconstructing the same state for each Boolean outcome.
+Initialization tests, pattern bindings, output calls, moves and unknown
+expression forms retain full traversal. The 40-level alternating `&&`/`||`
+analysis fixture now completes successfully instead of exceeding the unchanged
+100,000-visit limit.
+
 During the v78 budget investigation, temporary visit counters measured 100,001
 semantic-analysis visits across 210 functions before the limit failure. In the
 largest function, `ParseExpressionCore`, output-vacating traversal accounted
