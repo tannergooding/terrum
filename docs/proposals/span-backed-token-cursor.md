@@ -1,10 +1,11 @@
 # Span-backed token cursor proposal
 
-**Status: unapproved.** This proposal identifies the smallest runtime and
-source-binding contracts needed to execute the existing
-[`TokenCursor`](../../self-host/TokenCursor.terrum) candidate without copying
-its `Span<Token>` backing or claiming ownership of it. It does not change the
-approved grammar, current lifetime rules, metadata design or compiler support.
+**Status: initial direction accepted; implementation not yet supported.**
+This proposal identifies the smallest runtime and source-binding contracts
+needed to execute the existing [`TokenCursor`](../../self-host/TokenCursor.terrum)
+candidate without copying its `Span<Token>` backing or claiming ownership of
+it. The accepted slice is limited to this readonly Copy-indexed cursor; it
+does not approve general stored views or imply current compiler support.
 
 ## Current boundary
 
@@ -18,56 +19,73 @@ the [lifetime specification](../lifetimes.md). The candidate currently requires
 Span indexing, matched access, stored backing dependencies, a capture contract
 and constructor initialization before it can be executed.
 
-## Questions for direction
+## Accepted initial slice
 
-### 1. What is the initial stored-view representation?
+For the first `TokenCursor` implementation, use a fixed-size runtime descriptor
+containing the data address and element count. Keep backing and guard
+provenance as compiler-checked dependency facts; these facts are forwarded by
+capture, but are not runtime roots, owners or leases and do not extend their
+lifetimes. The first slice accepts readonly `Span<T>` access only when `T` is
+`Copy`, checks `nuint` indexes before reading, and returns elements by value.
+`[Captures(nameof(tokens))]` forwards the complete dependency set to the
+cursor field; construction is rejected if any dependency cannot be proven to
+outlive the cursor's uses. Validate all fields and captures before publishing
+the cursor.
+
+This direction does not add writable views, ref-returning element loans,
+arbitrary view construction or slicing, owner/guard retention, persisted
+cross-module capture metadata, or a parser integration contract. Broader
+`Span<T>` construction and escape rules remain open; this initial slice must
+not be described as general stored-view support.
+
+## Decisions and rationale
+
+### 1. Stored-view representation
 
 **Summary:** A stored `Span<T>` needs enough information to address its range
 and carry its backing, access and guard dependencies. A pointer and length
 alone do not prove that the backing remains valid, while an owner generic
 argument or per-slice allocation would change the accepted family contract.
 
-**Recommendation:** Start with a fixed-size descriptor and opaque dependency
-anchors whose provenance is checked by the compiler. Forward the existing
-backing and guard obligations without retaining or extending their lifetimes.
-Do not introduce per-slice allocations, a global pointer-to-owner registry or
-an owner type parameter.
+**Selected:** Use a fixed-size descriptor with compiler-checked opaque
+dependency provenance. Forward the existing backing and guard obligations
+without retaining or extending their lifetimes. Do not introduce per-slice
+allocations, a global pointer-to-owner registry or an owner type parameter.
 
-### 2. What does `[Captures]` authorize?
+### 2. Capture relationship
 
 **Summary:** `TokenCursor` stores the constructor's `Span<Token>` argument in
 its `_tokens` field. The capture must preserve the view's validity and access
 without turning the cursor into an owner or making a temporary backing live
 longer.
 
-**Recommendation:** Define `[Captures(nameof(tokens))]` as a checked
-forwarding relationship from the named input's complete backing dependency
-set to the stored field. It may not acquire ownership, prolong an allocation
-lease, weaken access, or omit a guard dependency. Reject construction or
-escape when the compiler cannot prove that every dependency outlives the
-cursor's uses.
+**Selected:** Define `[Captures(nameof(tokens))]` as a checked forwarding
+relationship from the named input's complete backing dependency set to the
+stored field. It may not acquire ownership, prolong an allocation lease,
+weaken access, or omit a guard dependency. Reject construction or escape when
+the compiler cannot prove that every dependency outlives the cursor's uses.
 
-### 3. What access does the first indexer slice expose?
+### 3. Initial indexer access
 
 **Summary:** The candidate reads `Token` values from a readonly
 `Span<Token>`. The general Span family also distinguishes mutable descriptor
 rebinding, writable slots, and writable contained handles.
 
-**Recommendation:** Begin with checked `nuint` indexing on readonly spans
-whose elements are `Copy`, returning the element by value. Match the indexer
+**Selected:** Begin with checked `nuint` indexing on readonly spans whose
+elements are `Copy`, returning the element by value. Match the indexer
 receiver's access to the view capability: readonly spans cannot write slots,
 `mut Span<T>` only rebinds the descriptor, and `write Span<T>` is required to
 mutate storage. Keep ref-returning element loans and writable-view retention
 outside the cursor slice.
 
-### 4. When may a capturing constructor publish its value?
+### 4. Constructor publication
 
 **Summary:** The constructor must initialize the span field and validate its
 capture before the cursor can be used. A partially initialized unique value
 must not expose a descriptor whose dependencies were not checked.
 
-**Recommendation:** Apply ordinary definite-initialization checks to every
-field, then validate and attach the declared capture dependencies before the
+**Selected:** Apply ordinary definite-initialization checks to every field,
+then validate and attach the declared capture dependencies before the
 constructed value becomes observable. Failure leaves no published cursor;
 the operation does not transfer or duplicate cleanup responsibility for the
 backing.
