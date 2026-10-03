@@ -50,8 +50,6 @@ public sealed class TrRmMutationAuditTests
     [InlineData(35, 42)] // terminator offset
     [InlineData(39, 3)]  // false last-use ordinal
     [InlineData(62, 0)]  // unassigned conversion policy
-    [InlineData(62, 1)]  // wrapping is assigned but not executable here
-    [InlineData(62, 2)]  // saturation is assigned but not executable here
     [InlineData(62, 4)]  // unassigned conversion policy
     [InlineData(63, 3)]  // self-dependent conversion definition
     [InlineData(71, 8)]  // no logical-right kind exists
@@ -63,6 +61,17 @@ public sealed class TrRmMutationAuditTests
         body[offset] = value;
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
+    }
+
+    [Theory]
+    [InlineData(1, int.MaxValue)]
+    [InlineData(2, 0)]
+    public void HandwrittenIndexedIntegerConvertPolicyExecutes(byte policy, int expected)
+    {
+        var body = ShiftBody();
+        body[62] = policy;
+        var program = TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body));
+        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
     }
 
     [Fact]

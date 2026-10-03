@@ -1103,6 +1103,8 @@ internal sealed partial class PeCompiler
                     ? ExpressionSpills(nominalField.Receiver, ref maximumArguments) : 0);
             case BoundCast cast:
                 return ExpressionSpills(cast.Operand, ref maximumArguments);
+            case TrRmScalarConvert conversion:
+                return ExpressionSpills(conversion.Operand, ref maximumArguments);
             case BoundOptionalLift lift:
                 return ExpressionSpills(lift.Value, ref maximumArguments);
             case BoundCoalesce coalesce:
@@ -1268,6 +1270,9 @@ internal sealed partial class PeCompiler
                     break;
                 case BoundCast cast:
                     VisitExpression(cast.Operand);
+                    break;
+                case TrRmScalarConvert conversion:
+                    VisitExpression(conversion.Operand);
                     break;
                 case BoundOptionalLift lift:
                     VisitExpression(lift.Value);
@@ -2896,6 +2901,10 @@ internal sealed partial class PeCompiler
                 Expression(cast.Operand, spill);
                 Cast(cast.Operand.Type, cast.Type);
                 break;
+            case TrRmScalarConvert conversion:
+                Expression(conversion.Operand, spill);
+                ConvertInteger(conversion.Operand.Type, conversion.Type, conversion.Policy);
+                break;
             case TrRmScalarReinterpret reinterpret:
                 Expression(reinterpret.Operand, spill);
                 break;
@@ -3238,6 +3247,130 @@ internal sealed partial class PeCompiler
             _code.Bytes(0x48, 0x39, 0xC8); // cmp rax,rcx
             RuntimeBranch(0x85, 0);
         }
+    }
+
+    private void ConvertInteger(PrimitiveType source, PrimitiveType target, byte policy)
+    {
+        if (policy == 1)
+        {
+            if (source == PrimitiveType.Int32 && IsWide(target))
+            {
+                _code.Bytes(0x48, 0x63, 0xC0); // Sign-extend the source value before widening.
+            }
+            return;
+        }
+        if (policy != 2)
+        {
+            throw new InvalidOperationException("TRRM integer conversion policy was not verified.");
+        }
+        if (source == target)
+        {
+            return;
+        }
+        if (source == PrimitiveType.Int32)
+        {
+            if (target == PrimitiveType.Int64)
+            {
+                _code.Bytes(0x48, 0x63, 0xC0);
+            }
+            else if (target is PrimitiveType.UInt32 or PrimitiveType.UInt64)
+            {
+                _code.Bytes(0x85, 0xC0);
+                var nonnegative = _code.JumpIf(0x89);
+                _code.Bytes(0x31, 0xC0);
+                _code.PatchRelative(nonnegative, _code.Position);
+            }
+            return;
+        }
+        if (source == PrimitiveType.UInt32)
+        {
+            if (target == PrimitiveType.Int32)
+            {
+                _code.Bytes(0x85, 0xC0);
+                var inRange = _code.JumpIf(0x89);
+                _code.Byte(0xB8);
+                _code.Int32(int.MaxValue);
+                _code.PatchRelative(inRange, _code.Position);
+            }
+            return;
+        }
+        if (source == PrimitiveType.Int64)
+        {
+            if (target == PrimitiveType.UInt64)
+            {
+                _code.Bytes(0x48, 0x85, 0xC0);
+                var nonnegative = _code.JumpIf(0x89);
+                _code.Bytes(0x31, 0xC0);
+                _code.PatchRelative(nonnegative, _code.Position);
+            }
+            else if (target == PrimitiveType.Int32)
+            {
+                _code.Bytes(0x48, 0x3D);
+                _code.Int32(int.MinValue);
+                var aboveMinimum = _code.JumpIf(0x8D);
+                _code.Byte(0xB8);
+                _code.Int32(int.MinValue);
+                var belowRange = _code.Jump();
+                _code.PatchRelative(aboveMinimum, _code.Position);
+                _code.Bytes(0x48, 0x3D);
+                _code.Int32(int.MaxValue);
+                var belowMaximum = _code.JumpIf(0x8E);
+                _code.Byte(0xB8);
+                _code.Int32(int.MaxValue);
+                _code.PatchRelative(belowMaximum, _code.Position);
+                _code.PatchRelative(belowRange, _code.Position);
+            }
+            else if (target == PrimitiveType.UInt32)
+            {
+                _code.Bytes(0x48, 0x85, 0xC0);
+                var nonnegative = _code.JumpIf(0x89);
+                _code.Bytes(0x31, 0xC0);
+                var negative = _code.Jump();
+                _code.PatchRelative(nonnegative, _code.Position);
+                _code.Byte(0xB9);
+                _code.Int32(-1);
+                _code.Bytes(0x48, 0x39, 0xC8);
+                var inRange = _code.JumpIf(0x86);
+                _code.Byte(0xB8);
+                _code.Int32(-1);
+                _code.PatchRelative(inRange, _code.Position);
+                _code.PatchRelative(negative, _code.Position);
+            }
+            return;
+        }
+        if (source == PrimitiveType.UInt64)
+        {
+            if (target == PrimitiveType.Int64)
+            {
+                _code.Bytes(0x48, 0x85, 0xC0);
+                var inRange = _code.JumpIf(0x89);
+                _code.Bytes(0x48, 0xB8);
+                _code.Int64(long.MaxValue);
+                _code.PatchRelative(inRange, _code.Position);
+            }
+            else if (target == PrimitiveType.Int32)
+            {
+                _code.Byte(0xB9);
+                _code.Int32(int.MaxValue);
+                _code.Bytes(0x48, 0x39, 0xC8);
+                var inRange = _code.JumpIf(0x86);
+                _code.Byte(0xB8);
+                _code.Int32(int.MaxValue);
+                _code.PatchRelative(inRange, _code.Position);
+            }
+            else if (target == PrimitiveType.UInt32)
+            {
+                _code.Byte(0xB9);
+                _code.Int32(-1);
+                _code.Bytes(0x48, 0x39, 0xC8);
+                var inRange = _code.JumpIf(0x86);
+                _code.Byte(0xB8);
+                _code.Int32(-1);
+                _code.PatchRelative(inRange, _code.Position);
+            }
+            return;
+        }
+        throw new InvalidOperationException("TRRM integer conversion types were not verified.");
     }
 
     private bool TryEmitUnsignedPowerOfTwoBinary(BoundBinary binary)

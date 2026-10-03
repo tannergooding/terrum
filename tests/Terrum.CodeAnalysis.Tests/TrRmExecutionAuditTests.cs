@@ -38,6 +38,43 @@ public sealed class TrRmExecutionAuditTests
         Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
     }
 
+    [Theory]
+    [InlineData(PrimitiveType.Int32, PrimitiveType.UInt64, 1, 0xFFFF_FFFFUL, 0xFFFF_FFFF_FFFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 1, 0xFFFF_FFFF_7FFF_FFFFUL, 0x7FFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt64, PrimitiveType.UInt32, 1, 0x1_0000_0001UL, 1UL)]
+    [InlineData(PrimitiveType.UInt32, PrimitiveType.Int32, 1, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt32, 1, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt32, PrimitiveType.Int64, 2, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int32, PrimitiveType.Int64, 2, 0xFFFF_FFFFUL, 0xFFFF_FFFF_FFFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int32, PrimitiveType.UInt64, 2, 0xFFFF_FFFFUL, 0UL)]
+    [InlineData(PrimitiveType.Int32, PrimitiveType.UInt32, 2, 0xFFFF_FFFFUL, 0UL)]
+    [InlineData(PrimitiveType.UInt32, PrimitiveType.Int32, 2, 0xFFFF_FFFFUL, 0x7FFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt32, PrimitiveType.Int32, 2, 0x7FFF_FFFFUL, 0x7FFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 2, 0x8000_0000_0000_0000UL, 0x8000_0000UL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 2, 0xFFFF_FFFF_7FFF_FFFFUL, 0x8000_0000UL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 2, 0x0000_0000_8000_0000UL, 0x7FFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt32, 2, 0xFFFF_FFFF_FFFF_FFFFUL, 0UL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt32, 2, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt32, 2, 0x0000_0001_0000_0000UL, 0xFFFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt64, 2, 1UL, 1UL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt64, 2, 0xFFFF_FFFF_FFFF_FFFFUL, 0UL)]
+    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int64, 2, 0x7FFF_FFFF_FFFF_FFFFUL, 0x7FFF_FFFF_FFFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int64, 2, 0xFFFF_FFFF_FFFF_FFFFUL, 0x7FFF_FFFF_FFFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int32, 2, 0x0000_0000_8000_0000UL, 0x7FFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int32, 2, 0x7FFF_FFFFUL, 0x7FFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt64, PrimitiveType.UInt32, 2, 0x0000_0001_0000_0000UL, 0xFFFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt64, PrimitiveType.UInt32, 2, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
+    public void IndependentIntegerConvertExecutesWrapAndSaturation(PrimitiveType sourceType,
+        PrimitiveType destinationType, byte policy, ulong sourceBits, ulong expectedBits)
+    {
+        var artifact = Artifact(IntegerConvertBody(sourceType, destinationType, policy,
+            sourceBits, expectedBits));
+        TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(1, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+    }
+
     [Fact]
     public void IndependentBytesExecuteWithoutCompilerOrTableWriter()
     {
@@ -351,6 +388,70 @@ public sealed class TrRmExecutionAuditTests
         }
         sections.Add((0x20, 2, Rows([caller, callee])));
         return Assemble(sections);
+    }
+
+    private static byte[] IntegerConvertBody(PrimitiveType sourceType,
+        PrimitiveType destinationType, byte policy, ulong sourceBits, ulong expectedBits)
+    {
+        var typeRows = new List<int>();
+        int TypeId(PrimitiveType type)
+        {
+            var row = type switch
+            {
+                PrimitiveType.Int32 => 1,
+                PrimitiveType.Bool => 2,
+                PrimitiveType.UInt32 => 4,
+                PrimitiveType.Int64 => 5,
+                PrimitiveType.UInt64 => 6,
+                _ => throw new ArgumentOutOfRangeException(nameof(type)),
+            };
+            var existing = typeRows.IndexOf(row);
+            if (existing >= 0)
+            {
+                return existing + 1;
+            }
+            typeRows.Add(row);
+            return typeRows.Count;
+        }
+
+        var sourceTypeId = TypeId(sourceType);
+        var destinationTypeId = TypeId(destinationType);
+        _ = TypeId(PrimitiveType.Bool);
+        var int32TypeId = TypeId(PrimitiveType.Int32);
+        var body = new List<byte> { 4, (byte)typeRows.Count };
+        foreach (var row in typeRows)
+        {
+            body.AddRange(Words((uint)row));
+        }
+        body.Add(7);
+        AddConstant(1, sourceTypeId, sourceBits);
+        body.AddRange([6, 2, (byte)destinationTypeId, policy, 1]);
+        AddConstant(3, destinationTypeId, expectedBits);
+        body.AddRange([5, 4, 4, 2, 3]);
+        AddConstant(5, int32TypeId, 1);
+        AddConstant(6, int32TypeId, 0);
+        body.AddRange([7, 7, 4, 5, 6, 0x83, 7]);
+        return body.ToArray();
+
+        void AddConstant(int result, int typeId, ulong bits)
+        {
+            var dataWidth = bits <= byte.MaxValue ? 1
+                : bits <= ushort.MaxValue ? 2
+                : bits <= uint.MaxValue ? 4 : 8;
+            if (dataWidth == 1)
+            {
+                body.AddRange([1, (byte)result, (byte)typeId, (byte)bits]);
+            }
+            else
+            {
+                body.AddRange([0xF0, (byte)(dataWidth switch { 2 => 0x10, 4 => 0x20, _ => 0x30 }),
+                    1, (byte)result, (byte)typeId]);
+                for (var index = 0; index < dataWidth; index++)
+                {
+                    body.Add((byte)(bits >> (index * 8)));
+                }
+            }
+        }
     }
 
     [Fact]

@@ -2376,7 +2376,8 @@ conversions use the same internal graph; other linear Bodies retain their
 existing structured lowering. The internal representation-conversion node
 does not change checked source casts or add a development-module wire tag.
 The loader accepts `ConstBits`,
-`ConstSigned`, `Copy`, eager `Select` from already-defined Copy values,
+`ConstSigned`, `Copy`, integer `Convert` (wrapping, saturating and equal-width
+bit reinterpretation), eager `Select` from already-defined Copy values,
 Boolean NOT, integer bitwise NOT/unary plus,
 scalar equality/inequality, integer ordering/bitwise operations, checked
 integer arithmetic/negation/count shifts, checked numeric conversion,
@@ -2387,11 +2388,10 @@ to `0xE0540003`, overflow and invalid shift count to `0xE0540001`, and
 division by zero to `0xE0540002`.
 Integer division/remainder retain their distinct signed-minimum behavior.
 `char16` has conversion/equality semantics, not integer arithmetic or ordering.
-Wrapping/saturating conversion, optional values, and combined
-division/remainder remain outside this bounded executable implementation even
-where the approved ISA assigns them. `Select` consumes only already-defined
-values; its alternatives are never conditionally evaluated or transferred as
-owners.
+Optional values and combined division/remainder remain outside this bounded
+executable implementation even where the approved ISA assigns them. `Select`
+consumes only already-defined values; its alternatives are never conditionally
+evaluated or transferred as owners.
 
 Body and instruction widths are emitted minimally; loading performs a strict
 minimal-width audit. Source binding may fold an expression to a constant

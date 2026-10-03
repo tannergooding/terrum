@@ -321,7 +321,7 @@ public static partial class TrRmExecutableCompiler
                 _ = new TrRmCompactLinearBodyReader(bodies, row, modules, defs, sigs, parameters, types);
                 statements = DecodeBody(body, count, variables, noThrow, types, functions);
                 if (statements.Any(static statement => statement is BoundLocal
-                    { Initializer: TrRmScalarReinterpret or BoundBinary
+                    { Initializer: TrRmScalarReinterpret or TrRmScalarConvert or BoundBinary
                         { Operator: TokenKind.ShiftLeft or TokenKind.ShiftRight } }
                     or BoundLocal { Initializer: BoundCall }
                     or BoundExpressionStatement { Expression: BoundCall }))
@@ -387,6 +387,10 @@ public static partial class TrRmExecutableCompiler
                 && destination is PrimitiveType.Int32 or PrimitiveType.UInt32)
             || (source is PrimitiveType.Int64 or PrimitiveType.UInt64
                 && destination is PrimitiveType.Int64 or PrimitiveType.UInt64);
+
+    private static bool IsInteger(PrimitiveType type)
+        => type is PrimitiveType.Int32 or PrimitiveType.UInt32
+            or PrimitiveType.Int64 or PrimitiveType.UInt64;
 
     private static bool ContainsIndexedFlow(BoundStatement statement, bool nested = false)
     {

@@ -13,6 +13,9 @@ internal sealed record TrRmScalarEdge(int Target, ImmutableArray<int> Arguments)
 internal sealed record TrRmScalarReinterpret(BoundExpression Operand, PrimitiveType Type)
     : BoundExpression(Type, default);
 
+internal sealed record TrRmScalarConvert(BoundExpression Operand, PrimitiveType Type, byte Policy)
+    : BoundExpression(Type, default);
+
 internal sealed record TrRmScalarBlock(ImmutableArray<int> Parameters,
     ImmutableArray<BoundStatement> Operations, int Condition, TrRmScalarEdge? True,
     TrRmScalarEdge? False, int ReturnValue, int FailureReason);

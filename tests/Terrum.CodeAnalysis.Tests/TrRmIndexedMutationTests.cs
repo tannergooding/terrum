@@ -35,6 +35,12 @@ public sealed class TrRmIndexedMutationTests
         Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
     }
 
+    private static byte[] IndependentConvertBody(byte policy) =>
+    [
+        4, 2, 1, 0, 0, 0, 4, 0, 0, 0, 2,
+        1, 1, 1, 42, 6, 2, 2, policy, 1, 0x83, 1,
+    ];
+
     [Theory]
     [InlineData("int32")]
     [InlineData("uint32")]
@@ -153,15 +159,21 @@ public sealed class TrRmIndexedMutationTests
 
     [Theory]
     [InlineData(0)]
+    [InlineData(4)]
+    public void IndependentInvalidConvertPoliciesAreRejected(byte policy)
+    {
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+            TrRmExecutionAuditTests.Artifact(IndependentConvertBody(policy))));
+    }
+
+    [Theory]
     [InlineData(1)]
     [InlineData(2)]
-    [InlineData(4)]
-    public void IndependentInvalidReinterpretPoliciesAreRejected(byte policy)
+    public void IndependentConvertPoliciesExecute(byte policy)
     {
-        byte[] body = [4, 2, 1, 0, 0, 0, 4, 0, 0, 0, 2,
-            1, 1, 1, 42, 6, 2, 2, policy, 1, 0x83, 1];
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
-            TrRmExecutionAuditTests.Artifact(body)));
+        var program = TrRmExecutableCompiler.Load(
+            TrRmExecutionAuditTests.Artifact(IndependentConvertBody(policy)));
+        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
     }
 
     [Fact]

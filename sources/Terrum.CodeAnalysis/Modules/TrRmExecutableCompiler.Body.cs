@@ -346,12 +346,24 @@ public static partial class TrRmExecutableCompiler
             }
             else if (opcode == 6)
             {
-                if (typeId <= 0 || typeId > typeCount || policy != 3
-                    || !CanReinterpret(Operand(left).Type, mappedTypes[typeId]))
+                if (typeId <= 0 || typeId > typeCount)
                 {
                     throw Invalid("Unsupported scalar representation conversion.");
                 }
-                expression = new TrRmScalarReinterpret(Operand(left), mappedTypes[typeId]);
+                var operand = Operand(left);
+                var destination = mappedTypes[typeId];
+                if (policy == 3 && CanReinterpret(operand.Type, destination))
+                {
+                    expression = new TrRmScalarReinterpret(operand, destination);
+                }
+                else if (policy is 1 or 2 && IsInteger(operand.Type) && IsInteger(destination))
+                {
+                    expression = new TrRmScalarConvert(operand, destination, policy);
+                }
+                else
+                {
+                    throw Invalid("Unsupported scalar conversion policy or type.");
+                }
             }
             else if (opcode == 0x16)
             {
