@@ -96,6 +96,7 @@ namespace Terrum.CodeAnalysis;
 // Single-function v79 shares its mode masks with recursive non-Boolean out calls.
 // Single-function v80 adds operation 109 for named-local/parameter `is init`.
 // Program v81 admits the same node after auditing its owning named read.
+// Projection v85 marks source-order calls with a packed formal-parameter map.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -211,6 +212,7 @@ bool TryPublishScalarFrontend()
         if (Host.Frontend[17] != 0 && result.ReturnType != 5) { Host.Frontend[0] = 81; }
         if (HasScalarFrontendOperation(110)) { Host.Frontend[0] = 82; }
         if ((Host.Frontend[2] & 8) != 0) { Host.Frontend[0] = 83; }
+        if (HasScalarFrontendNamedCall()) { Host.Frontend[0] = 85; }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {
@@ -362,6 +364,20 @@ bool HasScalarFrontendOperation(int32 operation)
     for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
     {
         if (Host.Frontend[42 + node * 8] == operation)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool HasScalarFrontendNamedCall()
+{
+    for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
+    {
+        int32 offset = 42 + node * 8;
+        if (Host.Frontend[offset] == 102
+            && (Host.Frontend[offset + 7] & 256) != 0)
         {
             return true;
         }

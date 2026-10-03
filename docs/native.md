@@ -131,10 +131,14 @@ frontend is a separate source subset: its raw checks and source-bound audits
 enforce supported spacing and attachment rules before projection selection.
 It supports named loop transfers, but not optional types or managed handles;
 those belong to the hosted compiler's broader native profiles. The scalar
-frontend also excludes named arguments, attribute targets, general calls,
-indexing, generics and dot-bearing forms. Its `?`/`:` spellings are conditional
-connectors only. Supported function headers and scalar type calls require
-attached delimiters. String and format interiors retain their lexical rules.
+frontend adds a bounded direct scalar-call subset: complete-program projection
+supports self/global calls, single-function projection supports self-calls,
+and v85 maps named by-value arguments while preserving source evaluation order.
+Named output arguments, overload selection, attribute targets, general
+binding, indexing, generics and dot-bearing forms remain excluded. Its `?`/`:`
+spellings are conditional connectors only. Supported function headers and
+scalar type calls require attached delimiters. String and format interiors
+retain their lexical rules.
 The compiled scanner and native input path support generalized comment fences
 and closed-catalog `@keyword` names, preserving raw source ranges and name
 identity.
@@ -1238,7 +1242,7 @@ read before declaration/initialization, immutable bindings cannot be assigned,
 conditions must be boolean and non-void functions must return on every normally
 completing path. Constant-true loops and declared nonreturning calls can remove
 that continuation; other loop conditions remain conservative. Function
-overloading, active-scope local shadowing, named arguments, `ref`/`mut ref`
+overloading, active-scope local shadowing, named output arguments, `ref`/`mut ref`
 passing and mutating instance methods are not supported.
 
 For loops accept an optional initializer, boolean condition and iterator,

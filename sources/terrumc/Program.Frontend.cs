@@ -481,7 +481,16 @@ internal static partial class Program
                         {
                             projectionVersion = 81;
                         }
+                        var hasNamedArguments = frontend.Functions.IsDefault
+                            ? frontend.Nodes.Any(static node => !node.ArgumentParameterIndices.IsDefault)
+                            : frontend.Functions.Any(static function => function.Nodes.Any(
+                                static node => !node.ArgumentParameterIndices.IsDefault));
+                        if (hasNamedArguments)
+                        {
+                            projectionVersion = 85;
+                        }
                         var programProjectionVersion = frontend.Functions.IsDefault ? projectionVersion
+                            : hasNamedArguments ? 85
                             : frontend.Functions.Any(static function => function.InitRefParameterMask != 0
                                 && function.ReturnType != 5) ? 82
                             : frontend.Functions.Any(static function => function.Nodes.Any(

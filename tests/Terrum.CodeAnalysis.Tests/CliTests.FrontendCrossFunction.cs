@@ -522,4 +522,109 @@ public sealed partial class CliTests
             }
         }
     }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast, "fail-fast")]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions, "checked-exceptions")]
+    public async Task ScalarFrontendNamedCallsPreserveSourceOrderAndFormalMappingAsync(
+        BoundRuntimePolicy policy, string runtime)
+    {
+        const string text = """
+            int32 Set(out int32 trace, int32 value) { trace = value; return value; }
+            int32 Pair(int32 first, int32 second) => first + second;
+            int32 Main() {
+                mut int32 trace = 0;
+                return Pair(second: Set(out trace, 3), first: trace);
+            }
+            """;
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var outputDirectory = Path.Combine(RepositoryRoot(), "artifacts", "scanner-tests");
+        Directory.CreateDirectory(outputDirectory);
+        var input = Encoding.UTF8.GetBytes(text);
+        var (componentExit, componentOutput, componentError) = await RunAsync(input, "frontend-component",
+            directory, "-", "--runtime", runtime, "--json");
+        Assert.True(componentExit == 0, $"{componentExit}: {componentOutput}{componentError}");
+        using (var document = JsonDocument.Parse(componentOutput))
+        {
+            var result = document.RootElement.GetProperty("result");
+            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+            Assert.Contains(result.GetProperty("functions")[2].GetProperty("nodes").EnumerateArray(),
+                static node => node.GetProperty("operation").GetInt32() == 105);
+        }
+        var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
+            directory, "-", "--runtime", runtime, "--json");
+        Assert.Equal(6, runExit);
+        Assert.Empty(runOutput);
+        Assert.Empty(runError);
+
+        var hosted = Compilation.Create(SyntaxTree.Parse(text), policy);
+        Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+        var executablePath = Path.Combine(outputDirectory, $"named-calls-{Guid.NewGuid():N}.exe");
+        try
+        {
+            var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build",
+                directory, "-", "-o", executablePath, "--runtime", runtime, "--json");
+            Assert.True(buildExit == 0, $"{buildExit}: {buildOutput}{buildError}");
+            Assert.Equal(NativeEmitter.Emit(Assert.IsType<BoundProgram>(hosted.Program), (NativeRuntimePolicy)policy),
+                await File.ReadAllBytesAsync(executablePath));
+        }
+        finally
+        {
+            File.Delete(executablePath);
+        }
+    }
+
+    [Fact]
+    public async Task ScalarFrontendNamedValueCallPreservesPositionalOutputParameterAsync()
+    {
+        const string text = "bool Fill(out int32 value, int32 other) { value = other; return true; } int32 Main() { if (Fill(out var result, other: 3)) { return result; } return 0; }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var input = Encoding.UTF8.GetBytes(text);
+        var (componentExit, componentOutput, componentError) = await RunAsync(input, "frontend-component",
+            directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.True(componentExit == 0, $"{componentExit}: {componentOutput}{componentError}");
+        using (var document = JsonDocument.Parse(componentOutput))
+        {
+            var result = document.RootElement.GetProperty("result");
+            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+        }
+        var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
+            directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(3, runExit);
+        Assert.Empty(runOutput);
+        Assert.Empty(runError);
+    }
+
+    [Theory]
+    [InlineData("int32 Main() { return Sum(unknown: 1, second: 2); } int32 Sum(int32 first, int32 second) { return first + second; }", 3)]
+    [InlineData("int32 Main() { return Sum(first: 1, first: 2); } int32 Sum(int32 first, int32 second) { return first + second; }", 1)]
+    [InlineData("int32 Main() { return Sum(second: 2, 1); } int32 Sum(int32 first, int32 second) { return first + second; }", 1)]
+    [InlineData("bool Fill(out int32 value, int32 other) { value = other; return true; } int32 Main() { Fill(other: 1, value: out var result); return result; }", 1)]
+    public async Task ScalarFrontendRejectsInvalidNamedCallBindingsAsync(string text, int errorCode)
+    {
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(text), "frontend-component",
+            directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(errorCode, document.RootElement.GetProperty("result")
+            .GetProperty("errorCode").GetInt32());
+    }
+
+    [Fact]
+    public async Task ScalarFrontendNamedSelfCallsUseProjection85Async()
+    {
+        const string text = "int32 Recurse(int32 first, int32 second, int32 third) => Recurse(first: second, second: first, third);";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(text), "frontend-component",
+            directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.True(exit == 0, $"{exit}: {output}{error}");
+        using var document = JsonDocument.Parse(output);
+        var result = document.RootElement.GetProperty("result");
+        Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+        Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
+            static node => node.GetProperty("operation").GetInt32() == 102);
+    }
 }

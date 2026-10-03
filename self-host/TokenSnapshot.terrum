@@ -73,6 +73,13 @@ public unique struct TokenSnapshot
             }
             if (kind >= 59 && kind <= 61) { separated = true; }
             if (kind == 55 || kind == 56) { separated = true; }
+            if (kind == 55 && previous.Kind == 2
+                && previous.Range.End == op.Range.Start && index >= 2
+                && TryGet(index - 2, out var argumentStart)
+                && (argumentStart.Kind == 46 || argumentStart.Kind == 53))
+            {
+                separated = false;
+            }
             if (kind >= 64 && kind <= 75 && !IsInitRefAngleDelimiter(index, previous, op))
             {
                 separated = true;

@@ -79,16 +79,17 @@ public static partial class ScalarFrontendHost
         }
 
         var projectionVersion = words[0];
-        var isExtendedSingleProjection = projectionVersion is >= 79 and <= 83;
-        var allowCallerUnsafe = projectionVersion == 83 || context?.AllowCallerUnsafe == true;
-        var allowUnsafeExpressions = projectionVersion is 82 or 83
+        var isExtendedSingleProjection = projectionVersion is >= 79 and <= 83 or 85;
+        var allowCallerUnsafe = projectionVersion is 83 or 85 || context?.AllowCallerUnsafe == true;
+        var allowUnsafeExpressions = projectionVersion is 82 or 83 or 85
             || context?.AllowUnsafeExpressions == true;
-        var allowInitializationTests = projectionVersion is >= 80 and <= 83
+        var allowInitializationTests = projectionVersion is >= 80 and <= 83 or 85
             || context?.AllowInitializationTests == true;
         var isNonBooleanOutProjection = isExtendedSingleProjection
             && words[5] != BooleanTypeCode && words[16] != 0;
-        var isNonBooleanInitRefProjection = projectionVersion is >= 81 and <= 83
+        var isNonBooleanInitRefProjection = projectionVersion is >= 81 and <= 83 or 85
             && words[5] != BooleanTypeCode && words[17] != 0;
+        var allowNamedArguments = projectionVersion == 85 || context?.AllowNamedArguments == true;
         if (isExtendedSingleProjection)
         {
             if (context is not null
@@ -327,11 +328,35 @@ public static partial class ScalarFrontendHost
                 var node = new ScalarFrontendNode(words[offset], words[offset + 1],
                     Span(offset + 2), words[offset + 4], words[offset + 5],
                     words[offset + 6], words[offset + 7]);
-                var unary = node.Operation is 46 or 62 or 63 or 83 or 86 or 87 or 109 or 110
-                    || node.Operation is 57 or 58 && node.Right == -1;
                 var call = node.Operation == 102 || node.Operation == 105 && context is not null;
                 var callee = node.Operation == 105 ? context?.Callee(i) : null;
                 var callCount = callee?.ParameterTypes.Length ?? count;
+                if (call && (node.High & 0x100) != 0)
+                {
+                    if (!allowNamedArguments || (node.High & ~0x1FF) != 0
+                        || (node.High & 3) != callCount || callCount == 0)
+                    {
+                        throw InvalidResult();
+                    }
+                    var mappedParameters = ImmutableArray.CreateBuilder<int>(callCount);
+                    var assignedParameters = new bool[callCount];
+                    for (var ordinal = 0; ordinal < callCount; ordinal++)
+                    {
+                        var parameter = (node.High >> (2 + (ordinal * 2))) & 3;
+                        if (parameter >= callCount || assignedParameters[parameter])
+                        {
+                            throw InvalidResult();
+                        }
+                        assignedParameters[parameter] = true;
+                        mappedParameters.Add(parameter);
+                    }
+                    node = node with {
+                        High = callCount,
+                        ArgumentParameterIndices = mappedParameters.MoveToImmutable(),
+                    };
+                }
+                var unary = node.Operation is 46 or 62 or 63 or 83 or 86 or 87 or 109 or 110
+                    || node.Operation is 57 or 58 && node.Right == -1;
                 var output = node.Operation is 103 or 104 or 107 or 108;
                 var outputDeclaration = node.Operation is 104 or 108;
                 var initOutput = node.Operation is 107 or 108;
@@ -402,14 +427,16 @@ public static partial class ScalarFrontendHost
                     var arguments = new[] { node.Left, node.Right, node.Low };
                     for (var ordinal = 0; ordinal < callCount; ordinal++)
                     {
+                        var parameter = node.ArgumentParameterIndices.IsDefault
+                            ? ordinal : node.ArgumentParameterIndices[ordinal];
                         var argument = nodes[arguments[ordinal]];
                         var expectsOut = callee is not null
-                            ? (callee.OutParameterMask & (1 << ordinal)) != 0
-                            : (words[16] & (1 << ordinal)) != 0;
+                            ? (callee.OutParameterMask & (1 << parameter)) != 0
+                            : (words[16] & (1 << parameter)) != 0;
                         var expectsInitRef = callee is not null
-                            ? (callee.InitRefParameterMask & (1 << ordinal)) != 0
-                            : (words[17] & (1 << ordinal)) != 0;
-                        if (argument.Type != (callee?.ParameterTypes[ordinal] ?? ParameterType(ordinal + 1))
+                            ? (callee.InitRefParameterMask & (1 << parameter)) != 0
+                            : (words[17] & (1 << parameter)) != 0;
+                        if (argument.Type != (callee?.ParameterTypes[parameter] ?? ParameterType(parameter + 1))
                             || expectsOut != (argument.Operation is 103 or 104)
                             || expectsInitRef != (argument.Operation is 107 or 108))
                         {
@@ -1422,23 +1449,64 @@ public static partial class ScalarFrontendHost
                     {
                         return false;
                     }
+                    var hasOutOfPositionNamedArgument = false;
+                    var hasNamedArgument = false;
+                    var nextPositionalParameter = 0;
                     for (var ordinal = 0; ordinal < callCount; ordinal++)
                     {
+                        if (ordinal != 0 && !Take(TokenKind.Comma))
+                        {
+                            return false;
+                        }
+                        var parameter = node.ArgumentParameterIndices.IsDefault
+                            ? ordinal : node.ArgumentParameterIndices[ordinal];
+                        if (at + 1 < tokens.Length && tokens[at].Kind == TokenKind.Identifier
+                            && tokens[at + 1].Kind == TokenKind.Colon)
+                        {
+                            var isOutputParameter = node.Operation == 105 && context is not null
+                                ? ((context.Callee(index).OutParameterMask
+                                    | context.Callee(index).InitRefParameterMask) & (1 << parameter)) != 0
+                                : ((words[16] | words[17]) & (1 << parameter)) != 0;
+                            if (!allowNamedArguments || node.ArgumentParameterIndices.IsDefault
+                                || isOutputParameter || !Take(TokenKind.Identifier)
+                                || tokens[at - 1].Name != CallParameterName(index, parameter)
+                                || !Take(TokenKind.Colon))
+                            {
+                                return false;
+                            }
+                            hasNamedArgument = true;
+                            if (parameter == nextPositionalParameter)
+                            {
+                                nextPositionalParameter++;
+                            }
+                            else
+                            {
+                                hasOutOfPositionNamedArgument = true;
+                            }
+                        }
+                        else
+                        {
+                            if (hasOutOfPositionNamedArgument || parameter != nextPositionalParameter)
+                            {
+                                return false;
+                            }
+                            nextPositionalParameter++;
+                        }
                         var expectsOut = node.Operation == 105 && context is not null
-                            ? (context.Callee(index).OutParameterMask & (1 << ordinal)) != 0
-                            : (words[16] & (1 << ordinal)) != 0;
+                            ? (context.Callee(index).OutParameterMask & (1 << parameter)) != 0
+                            : (words[16] & (1 << parameter)) != 0;
                         var expectsInitRef = node.Operation == 105 && context is not null
-                            ? (context.Callee(index).InitRefParameterMask & (1 << ordinal)) != 0
-                            : (words[17] & (1 << ordinal)) != 0;
-                        if (ordinal != 0 && !Take(TokenKind.Comma)
-                            || expectsOut != (tree[arguments[ordinal]].Operation is 103 or 104)
+                            ? (context.Callee(index).InitRefParameterMask & (1 << parameter)) != 0
+                            : (words[17] & (1 << parameter)) != 0;
+                        if (expectsOut != (tree[arguments[ordinal]].Operation is 103 or 104)
                             || expectsInitRef != (tree[arguments[ordinal]].Operation is 107 or 108)
                             || !TakeTree(arguments[ordinal], parseDepth + 1))
                         {
                             return false;
                         }
                     }
-                    if (!Take(TokenKind.CloseParen))
+                    if (hasNamedArgument != !node.ArgumentParameterIndices.IsDefault
+                        || !Take(TokenKind.CloseParen))
                     {
                         return false;
                     }
@@ -2156,6 +2224,11 @@ public static partial class ScalarFrontendHost
             1 => firstName, 2 => secondName, 3 => thirdName, _ => default,
         };
 
+        string CallParameterName(int nodeIndex, int parameterIndex) =>
+            context is not null
+                ? context.Callee(nodeIndex).ParameterNames[parameterIndex]
+                : SourceName(source, ParameterName(parameterIndex + 1));
+
         bool MatchesSource(ScalarFrontendExpression expression, int left, int right)
         {
             var leftName = ParameterName(left);
@@ -2703,6 +2776,7 @@ public static partial class ScalarFrontendHost
                             && node.Span.End <= scope.Span.End);
                     bound = new BoundCall(node.Operation == 105 ? result.CallTargets[i] : 0,
                         arguments.ToImmutable(), type, node.Span) {
+                        ArgumentParameterIndices = node.ArgumentParameterIndices,
                         IsUnsafeAuthorized = isUnsafeAuthorized,
                     };
                 }
@@ -3471,7 +3545,10 @@ public readonly record struct ScalarFrontendExpression(
     int Type, int Operation, int LeftParameter, int RightParameter, TextSpan Span);
 
 public readonly record struct ScalarFrontendNode(
-    int Operation, int Type, TextSpan Span, int Left, int Right, int Low, int High);
+    int Operation, int Type, TextSpan Span, int Left, int Right, int Low, int High)
+{
+    public ImmutableArray<int> ArgumentParameterIndices { get; init; }
+}
 
 public readonly record struct ScalarFrontendLocal(int Type, bool IsMutable, TextSpan Name)
 {

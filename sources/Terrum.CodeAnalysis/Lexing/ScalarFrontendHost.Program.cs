@@ -22,14 +22,14 @@ public static partial class ScalarFrontendHost
     public const int MaximumFunctions = 10;
 
     private sealed record ProgramDeclaration(string Name, int ReturnType, int Effects, int OutParameterMask,
-        int InitRefParameterMask, ImmutableArray<int> ParameterTypes, int TokenStart, int TokenEnd,
-        TextSpan Span, TextSpan BodySpan);
+        int InitRefParameterMask, ImmutableArray<int> ParameterTypes, ImmutableArray<string> ParameterNames,
+        int TokenStart, int TokenEnd, TextSpan Span, TextSpan BodySpan);
 
     private sealed record ProgramReadContext(ImmutableArray<ProgramDeclaration> Declarations, int[] Targets,
         bool AllowVoidCalls, bool AllowDoesNotReturn, bool AllowOutputArguments,
         bool AllowInitRefArguments, bool AllowNonBooleanOutputParameters,
         bool AllowNonBooleanInitRefParameters, bool AllowInitializationTests, bool AllowCallerUnsafe,
-        bool AllowUnsafeExpressions)
+        bool AllowUnsafeExpressions, bool AllowNamedArguments)
     {
         public ProgramDeclaration Callee(int node)
         {
@@ -42,7 +42,7 @@ public static partial class ScalarFrontendHost
         }
     }
 
-    /// <summary>Reads complete v74–v84 snapshots and the v1–v73/v79–v81 single-function projections.</summary>
+    /// <summary>Reads complete v74–v85 snapshots and the v1–v73/v79–v83/v85 single-function projections.</summary>
     public static ScalarFrontendResult ReadResult(SourceText source, ReadOnlySpan<byte> bytes,
         ReadOnlySpan<byte> programBytes, BoundRuntimePolicy policy)
         => ReadProgram(source, bytes, programBytes, policy).Projection;
@@ -69,7 +69,7 @@ public static partial class ScalarFrontendHost
         {
             words[i] = BinaryPrimitives.ReadInt32LittleEndian(programBytes.Slice(i * sizeof(int), sizeof(int)));
         }
-        if (words[0] is not (74 or 75 or 76 or 77 or 78 or 80 or 81 or 82 or 83 or 84)
+        if (words[0] is not (74 or 75 or 76 or 77 or 78 or 80 or 81 or 82 or 83 or 84 or 85)
             || words[1] != 1 || words[2] is < 2 or > MaximumFunctions
             || words[3] != 0 || source.Length > 16_384
             || words.AsSpan(4 + words[2] * ProgramFrameWordCount).IndexOfAnyExcept(0) >= 0)
@@ -115,7 +115,7 @@ public static partial class ScalarFrontendHost
             }
             var context = new ProgramReadContext(declarations, targets, words[0] >= 75,
                 words[0] >= 76, words[0] >= 77, words[0] >= 78, words[0] >= 80,
-                words[0] >= 82, words[0] >= 81, words[0] >= 83, words[0] >= 84);
+                words[0] >= 82, words[0] >= 81, words[0] >= 83, words[0] >= 84, words[0] >= 85);
             var function = ReadResultCore(FunctionSource(source, declaration.Span), payload, policy, context);
             if (!function.IsValid || function.ReturnType != declaration.ReturnType
                 || function.ParameterCount != declaration.ParameterTypes.Length
@@ -166,7 +166,16 @@ public static partial class ScalarFrontendHost
                 hasUnsafeExpression |= node.Operation == 110;
             }
         }
-        var expectedVersion = hasUnsafeExpression ? 84
+        var hasNamedArguments = false;
+        foreach (var function in results)
+        {
+            foreach (var node in function.Nodes)
+            {
+                hasNamedArguments |= !node.ArgumentParameterIndices.IsDefault;
+            }
+        }
+        var expectedVersion = hasNamedArguments ? 85
+            : hasUnsafeExpression ? 84
             : hasCallerUnsafeDeclaration ? 83
             : hasNonBooleanInitRefParameter ? 82
             : hasInitializationTest ? 81
@@ -304,6 +313,7 @@ public static partial class ScalarFrontendHost
             }
             var parameterTypes = ImmutableArray.CreateBuilder<int>();
             var parameterNames = new HashSet<string>(StringComparer.Ordinal);
+            var parameterNameList = ImmutableArray.CreateBuilder<string>();
             var outParameterMask = 0;
             var initRefParameterMask = 0;
             while (at < tokens.Length && tokens[at].Kind != TokenKind.CloseParen)
@@ -330,6 +340,7 @@ public static partial class ScalarFrontendHost
                 {
                     throw InvalidResult();
                 }
+                parameterNameList.Add(tokens[at].Name);
                 at++;
                 if (isOut) { outParameterMask |= 1 << parameterTypes.Count; }
                 if (isInitRef)
@@ -377,7 +388,7 @@ public static partial class ScalarFrontendHost
             }
             if (declarations.Count == MaximumFunctions) { throw InvalidResult(); }
             declarations.Add(new ProgramDeclaration(name.Name, returnType, effects, outParameterMask,
-                initRefParameterMask, parameterTypes.ToImmutable(),
+                initRefParameterMask, parameterTypes.ToImmutable(), parameterNameList.ToImmutable(),
                 start, at, new TextSpan(tokens[start].Span.Start,
                     tokens[at - 1].Span.End - tokens[start].Span.Start), bodySpan));
         }

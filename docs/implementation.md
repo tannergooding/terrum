@@ -127,11 +127,13 @@ last tokens, before spacing checks and modern/legacy selection; it has no
 type-context exemptions. Maintained scalar probes use it too. Its independent
 source audit rejects records that contradict the source.
 
-Named arguments parse but remain a binding error (`TRM3011`). The bounded
-native scalar frontend supports its documented named loop transfers, but
-excludes optional and managed-handle forms, general calls, indexing, qualified
-types, namespaces and imports. This differs from the hosted compiler's
-`native-20` profile, which supports optional managed-handle patterns; see the
+Named by-value arguments bind for uniquely resolved, non-intrinsic calls.
+Named output arguments and overload selection remain outside current support.
+The bounded native scalar frontend supports its documented named loop
+transfers and direct scalar calls, but excludes optional and managed-handle
+forms, general binding/imports, indexing, qualified types, namespaces and
+imports. This differs from the hosted compiler's `native-20` profile, which
+supports optional managed-handle patterns; see the
 [native profile](native.md). String and format interiors are not reclassified.
 The complete approved source grammar and unsupported forms remain in the
 [grammar specification](grammar-spec.md).
@@ -168,9 +170,14 @@ V74 appends a separate complete-program buffer; the source/token limits remain
 per snapshot, and the local/statement/expression/parameter limits apply per
 function. Complete-program v83 carries the caller-unsafe declaration bit and
 source-audits calls against explicit unsafe-block spans; v84 carries explicit
-`unsafe(expr)` wrappers and audits their contained call scopes. Semantic
-verification and emission remain hosted. Predicate factoring keeps the
-authored producer within the unchanged shared verification budget.
+`unsafe(expr)` wrappers and audits their contained call scopes. Projection
+v85 adds named by-value arguments to bounded direct scalar calls in both the
+single-function and complete-program buffers. Call children remain in source
+evaluation order while the packed formal-position map is checked against
+source parameter names; named output/init-ref arguments and overload selection
+remain unsupported. Semantic verification and emission remain hosted.
+Predicate factoring keeps the authored producer within the unchanged shared
+verification budget.
 These syntax and
 scanner contracts do not change semantic-module, ISA, Contract, TRRM or native
 ABI formats.
@@ -908,6 +915,14 @@ wrapper. The hosted verifier remains authoritative for call obligations; an
 unsafe declaration does not authorize its own body, and a safe wrapper can
 discharge the obligation internally. Neither version persists caller-safety
 metadata or makes the frontend standalone.
+
+Projection v85 encodes the source-argument-to-formal-position map in each
+direct scalar call node while retaining argument children in source order.
+The independent reader rechecks each label against the callee declaration and
+the complete map before lowering. It applies to by-value calls only; named
+`out`/`init ref` arguments and overload selection remain unsupported.
+Single-function v85 applies the same contract to self-calls; complete-program
+v85 applies it to direct self/global calls.
 
 Single-function projection v82 adds kind 110 with the same source-bound
 `unsafe(expr)` audit; v83 additionally carries the caller-unsafe declaration

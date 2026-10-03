@@ -5,6 +5,7 @@ namespace Terrum.CodeAnalysis;
 // Each frame contains token bounds, a source span, 392 body words, and 32
 // zero-based target identities (-1 for nodes other than operation 105).
 // Program v83 adds a source-audited caller-unsafe callable flag.
+// Program v85 packs source-order call argument mappings into operation 105.
 int32 FindScalarProgramFunction(Token name)
 {
     for (mut int32 index = 0; index < Host.FrontendProgram[2]; index = index + 1)
@@ -64,6 +65,25 @@ bool ScalarProgramHasUnsafeExpression()
         {
             int32 nodeOffset = frame + 4 + 42 + node * 8;
             if (Host.FrontendProgram[nodeOffset] == 110) { return true; }
+        }
+    }
+    return false;
+}
+
+bool ScalarProgramHasNamedCall()
+{
+    for (mut int32 index = 0; index < Host.FrontendProgram[2]; index = index + 1)
+    {
+        int32 frame = 4 + index * 428;
+        int32 nodeCount = Host.FrontendProgram[frame + 4 + 37];
+        for (mut int32 node = 0; node < nodeCount; node = node + 1)
+        {
+            int32 nodeOffset = frame + 4 + 42 + node * 8;
+            if (Host.FrontendProgram[nodeOffset] == 105
+                && (Host.FrontendProgram[nodeOffset + 7] & 256) != 0)
+            {
+                return true;
+            }
         }
     }
     return false;
@@ -302,7 +322,8 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         }
     }
     for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
-    Host.FrontendProgram[0] = ScalarProgramHasUnsafeExpression() ? 84
+    Host.FrontendProgram[0] = ScalarProgramHasNamedCall() ? 85
+        : ScalarProgramHasUnsafeExpression() ? 84
         : Host.FrontendProgram[0] >= 83 ? 83
         : Host.FrontendProgram[0] >= 82 ? 82
         : ScalarProgramHasInitializationTest() ? 81
