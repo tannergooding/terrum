@@ -176,12 +176,14 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Theory]
-    [InlineData("public int32 Main() => unsafe(42);", 82, "Main")]
-    [InlineData("public unsafe int32 Recur() { if (false) { return unsafe(Recur()); } return 42; }", 83, "Recur")]
-    [InlineData("public unsafe int32 Recur() { if (false) { unsafe { return Recur(); } } return 42; }", 83, "Recur")]
-    [InlineData("public unsafe void Recur() { if (false) { unsafe { Recur(); } } }", 83, "Recur")]
+    [InlineData("public int32 Main() => unsafe(42);", 82, "Main", 42)]
+    [InlineData("public int32 Main() { init int32 value; return unsafe(value is init) ? 42 : 0; }", 82, "Main", 0)]
+    [InlineData("bool Init(init ref<int32> value) { if (unsafe(value is init)) { value = 42; return true; } return false; }", 82, "Init", 0)]
+    [InlineData("public unsafe int32 Recur() { if (false) { return unsafe(Recur()); } return 42; }", 83, "Recur", 42)]
+    [InlineData("public unsafe int32 Recur() { if (false) { unsafe { return Recur(); } } return 42; }", 83, "Recur", 42)]
+    [InlineData("public unsafe void Recur() { if (false) { unsafe { Recur(); } } }", 83, "Recur", 0)]
     public async Task ScalarFrontendSingleFunctionProjectsUnsafeScopesAsync(
-        string text, int projectionVersion, string functionName)
+        string text, int projectionVersion, string functionName, int expected)
     {
         var source = SourceText.From(text);
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
@@ -202,11 +204,11 @@ public sealed partial class ManagedScannerComponentTests
             var hosted = Assert.IsType<BoundProgram>(compilation.Program);
             Assert.Equal(hosted.Functions.Single().RequiresUnsafeCaller,
                 actual.Functions.Single().RequiresUnsafeCaller);
-            if (projectionVersion == 82)
+            if (projectionVersion == 82 && functionName == "Main")
             {
                 Assert.Equal(NativeEmitter.EmitLibrary(hosted, [functionName], policy),
                     NativeEmitter.EmitLibrary(actual, [functionName], policy));
-                Assert.Equal(42, NativeJit.Execute(actual with { EntryPoint = 0 }, policy));
+                Assert.Equal(expected, NativeJit.Execute(actual with { EntryPoint = 0 }, policy));
             }
 
             var forgedScope = projection.Nodes.Any(static node => node.Operation == 110)
