@@ -183,6 +183,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `03ef008` | Enforce same-compilation unsafe field access scopes while persisted writers fail closed |
 | `f714926` | Add same-compilation caller-unsafe checks while persisted writers fail closed |
 | `84d2564` | Project scalar non-Boolean/void `init ref<T>` completion through v81/v82 source-audited projections |
 | `63699aa` | Support hosted non-Boolean/void `init ref<T>` completion without widening scalar projections |
