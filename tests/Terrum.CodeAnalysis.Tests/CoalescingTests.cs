@@ -211,6 +211,42 @@ public sealed class CoalescingTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void KnownPresentCoalesceMakesNullArmInfeasible(NativeRuntimePolicy policy)
+    {
+            const string source = """
+                [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+                    value = 42;
+                    return null;
+                }
+                [NoThrow] bool Identity(bool input, init ref<int32> result) {
+                    if (!input) { return false; }
+                    result = 42;
+                    return true;
+                }
+                [NoThrow] bool Fill(bool publish, init ref<int32> value) {
+                    if (!publish) { return false; }
+                    value = 42;
+                    return true;
+                }
+                int32 Main() {
+                    require ManagedNode.TryCreate(42, out var leaf);
+                    init int32 vacant;
+                    init int32 dead;
+                    if (Identity(((leaf ?? OptionalFallback(init vacant)) is null)
+                        && Fill(true, init dead), init var live)) {
+                        return 1;
+                    }
+                    require Fill(true, init vacant);
+                    require Fill(true, init dead);
+                    return vacant + dead;
+                }
+                """;
+            Assert.Equal(84, NativeJit.Execute(Compile(source, policy), policy));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public void ComputedFieldReceiverRunsOnceAndPresentValueSkipsFallback(NativeRuntimePolicy policy)
     {
         const string source = """

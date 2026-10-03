@@ -106,8 +106,10 @@ operand is a `BoundOptionalLift`. A short-circuit regression with a
 syntactically known-present coalescing result and an output-effectful RHS
 reproduced `TRM3016` before the change and passes under both runtime policies
 now. The presence fact is structural; unknown optional values retain
-conservative feasibility. This is correctness evidence only and does not
-change optional semantics.
+conservative feasibility. A complementary `is null` case confirms that the
+same known-present fact prunes the impossible `&&` operand without changing
+later vacancy. This is correctness evidence only and does not change optional
+semantics.
 
 During the v78 budget investigation, temporary visit counters measured 100,001
 semantic-analysis visits across 210 functions before the limit failure. In the
