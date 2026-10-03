@@ -477,6 +477,11 @@ not widen the separate managed-module export shape for output parameters.
 Single-function v79 uses the same non-Boolean/void output contract as v80 for
 bounded recursive self-calls. It supports explicit and `out var` destinations
 and requires normal-return initialization.
+Single-function projection v80 and complete-program projection v81 also admit
+operation 109 for `is init` on named scalar locals and parameters. The reader
+audits the named storage source, while the shared hosted verifier and emitter
+continue to own flow narrowing and runtime-state tracking; this remains a
+bounded hosted-backed projection, not standalone compiler support.
 
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.

@@ -92,6 +92,8 @@ namespace Terrum.CodeAnalysis;
 // from the out mask in word 16. Operations 107/108 encode existing and declared targets.
 // Program v80 adds non-Boolean scalar out calls with existing destinations.
 // Single-function v79 shares its mode masks with recursive non-Boolean out calls.
+// Single-function v80 adds operation 109 for named-local/parameter `is init`.
+// Program v81 admits the same node after auditing its owning named read.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -203,6 +205,7 @@ bool TryPublishScalarFrontend()
         {
             Host.Frontend[0] = 79;
         }
+        if (HasScalarFrontendOperation(109)) { Host.Frontend[0] = 80; }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {

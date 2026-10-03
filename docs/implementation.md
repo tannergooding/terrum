@@ -989,6 +989,12 @@ complete-program v80 for bounded recursive self-calls, with explicit and
 `out var` destinations. These projection tags are alpha implementation
 details, not product-version increments or compatibility commitments; a
 preview version, if any, is chosen explicitly when it is shipped.
+Single-function projection v80 and complete-program projection v81 additionally
+project `is init` tests on named scalar locals and parameters as operation 109.
+The source-bound reader requires a direct named-storage read; hosted definite-
+initialization verification and native emission remain authoritative. This
+does not make the scalar frontend standalone or broaden the hosted form beyond
+its existing named-storage contract.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

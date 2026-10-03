@@ -54,7 +54,10 @@ remains a hosted-verifier/emitter-backed projection; it does not broaden
 non-scalar non-Boolean outputs. Projection tags are alpha implementation/validation
 details, not roadmap or product versions: older layouts may be retired or
 reshaped, and only a small selected set should remain for comparison or
-validation.
+validation. Single-function projection v80 and complete-program projection
+v81 now also project the accepted `is init` test for named scalar locals and
+parameters; hosted definite-initialization verification and native emission
+remain authoritative.
 
 ## Planned work (priority order)
 

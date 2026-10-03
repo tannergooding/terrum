@@ -25,6 +25,10 @@ and selected function-effect contracts. Exact projection shapes and version
 gates are in the [native profile](../docs/native.md) and
 [implementation reference](../docs/implementation.md). General attributes and
 calls remain outside the frontend's subset.
+Single-function projection v80 and complete-program projection v81 also
+source-audit `is init` tests for named scalar locals and parameters. Verification
+and emission remain hosted; this projection does not make the frontend a
+standalone compiler.
 Initialized six-primitive locals in lexical blocks, branches and loops preserve
 scope visibility, outer mutations and per-iteration initialization through
 existing indexed values, without adding executable lexical regions or places.

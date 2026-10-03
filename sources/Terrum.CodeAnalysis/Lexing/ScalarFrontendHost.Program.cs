@@ -27,7 +27,8 @@ public static partial class ScalarFrontendHost
 
     private sealed record ProgramReadContext(ImmutableArray<ProgramDeclaration> Declarations, int[] Targets,
         bool AllowVoidCalls, bool AllowDoesNotReturn, bool AllowOutputArguments,
-        bool AllowInitRefArguments, bool AllowNonBooleanOutputParameters)
+        bool AllowInitRefArguments, bool AllowNonBooleanOutputParameters,
+        bool AllowInitializationTests)
     {
         public ProgramDeclaration Callee(int node)
         {
@@ -40,7 +41,7 @@ public static partial class ScalarFrontendHost
         }
     }
 
-    /// <summary>Reads complete v74–v78/v80 snapshots and the v1–v73/v79 single-function projections.</summary>
+    /// <summary>Reads complete v74–v81 snapshots and the v1–v73/v79–v80 single-function projections.</summary>
     public static ScalarFrontendResult ReadResult(SourceText source, ReadOnlySpan<byte> bytes,
         ReadOnlySpan<byte> programBytes, BoundRuntimePolicy policy)
         => ReadProgram(source, bytes, programBytes, policy).Projection;
@@ -67,7 +68,7 @@ public static partial class ScalarFrontendHost
         {
             words[i] = BinaryPrimitives.ReadInt32LittleEndian(programBytes.Slice(i * sizeof(int), sizeof(int)));
         }
-        if (words[0] is not (74 or 75 or 76 or 77 or 78 or 80)
+        if (words[0] is not (74 or 75 or 76 or 77 or 78 or 80 or 81)
             || words[1] != 1 || words[2] is < 2 or > MaximumFunctions
             || words[3] != 0 || source.Length > 16_384
             || words.AsSpan(4 + words[2] * ProgramFrameWordCount).IndexOfAnyExcept(0) >= 0)
@@ -107,7 +108,8 @@ public static partial class ScalarFrontendHost
                 }
             }
             var context = new ProgramReadContext(declarations, targets, words[0] >= 75,
-                words[0] >= 76, words[0] >= 77, words[0] >= 78, words[0] >= 80);
+                words[0] >= 76, words[0] >= 77, words[0] >= 78, words[0] >= 80,
+                words[0] >= 81);
             var function = ReadResultCore(FunctionSource(source, declaration.Span), payload, policy, context);
             if (!function.IsValid || function.ReturnType != declaration.ReturnType
                 || function.ParameterCount != declaration.ParameterTypes.Length
@@ -134,6 +136,7 @@ public static partial class ScalarFrontendHost
         var hasOutputParameter = false;
         var hasNonBooleanOutputParameter = false;
         var hasInitRefParameter = false;
+        var hasInitializationTest = false;
         foreach (var declaration in declarations)
         {
             hasDoesNotReturn |= (declaration.Effects & 4) != 0;
@@ -142,7 +145,15 @@ public static partial class ScalarFrontendHost
                 && declaration.ReturnType != BooleanTypeCode;
             hasInitRefParameter |= declaration.InitRefParameterMask != 0;
         }
-        var expectedVersion = hasNonBooleanOutputParameter ? 80
+        foreach (var function in results)
+        {
+            foreach (var node in function.Nodes)
+            {
+                hasInitializationTest |= node.Operation == 109;
+            }
+        }
+        var expectedVersion = hasInitializationTest ? 81
+            : hasNonBooleanOutputParameter ? 80
             : hasInitRefParameter ? 78
             : hasOutputParameter ? 77
             : hasDoesNotReturn ? 76 : hasVoidCall ? 75 : 74;

@@ -471,7 +471,14 @@ internal static partial class Program
                         {
                             projectionVersion = 79;
                         }
+                        if (frontend.Functions.IsDefault
+                            && frontend.Nodes.Any(static node => node.Operation == 109))
+                        {
+                            projectionVersion = 80;
+                        }
                         var programProjectionVersion = frontend.Functions.IsDefault ? projectionVersion
+                            : frontend.Functions.Any(static function => function.Nodes.Any(
+                                static node => node.Operation == 109)) ? 81
                             : frontend.Functions.Any(static function => function.OutParameterMask != 0
                                 && function.ReturnType != 5) ? 80
                             : frontend.Functions.Any(static function => function.InitRefParameterMask != 0) ? 78

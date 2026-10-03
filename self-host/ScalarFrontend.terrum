@@ -3301,12 +3301,28 @@ mut class ScalarFrontendState
         {
             return false;
         }
-        while (_tokens.TryGet(_at, out var operation)
-            && TreePrecedence(operation.Kind) >= precedence
-            && TreePrecedence(operation.Kind) != 0)
+        while (_tokens.TryGet(_at, out var operation))
         {
-            int32 rank = TreePrecedence(operation.Kind);
+            bool initializationTest = IsInitializationTestOperator(operation)
+                && _tokens.TryGet(_at + 1, out var initialization)
+                && IsInitKeyword(initialization);
+            mut int32 rank = TreePrecedence(operation.Kind);
+            if (initializationTest) { rank = 6; }
+            if (rank < precedence || rank == 0) { break; }
             _at = _at + 1;
+            if (initializationTest)
+            {
+                if (TreeWord(left, 0) != 0
+                    || !Take(2, out var initKeyword)
+                    || !IsInitKeyword(initKeyword)
+                    || !AddTreeNode(109, 5, TreeWord(left, 2), initKeyword.Range.End,
+                        left, -1, 0, 0, out var test))
+                {
+                    return false;
+                }
+                left = test;
+                continue;
+            }
             mut int32 leftType = TreeWord(left, 1);
             bool shift = operation.Kind >= 88 && operation.Kind <= 90;
             mut int32 rightContext = shift ? 1 : leftType;
@@ -3424,6 +3440,16 @@ mut class ScalarFrontendState
         }
         node = left;
         return true;
+    }
+
+    private bool IsInitializationTestOperator(Token token)
+    {
+        if (token.Kind != 2 || token.Range.Length != 2)
+        {
+            return false;
+        }
+        int32 start = token.Range.Start;
+        return Host.Source[start] == char16(105) && Host.Source[start + 1] == char16(115);
     }
 
     private int32 UngroupTree(int32 node)

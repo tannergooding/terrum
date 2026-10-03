@@ -75,13 +75,16 @@ public static partial class ScalarFrontendHost
             words[0] = 68;
         }
 
-        var isExtendedSingleProjection = words[0] == 79;
+        var projectionVersion = words[0];
+        var isExtendedSingleProjection = projectionVersion is 79 or 80;
+        var allowInitializationTests = projectionVersion == 80
+            || context?.AllowInitializationTests == true;
         var isNonBooleanOutProjection = isExtendedSingleProjection
             && words[5] != BooleanTypeCode && words[16] != 0;
         if (isExtendedSingleProjection)
         {
             if (context is not null
-                || words[17] == 0 && !isNonBooleanOutProjection
+                || words[17] == 0 && !isNonBooleanOutProjection && !allowInitializationTests
                 || words[17] != 0 && words[5] != BooleanTypeCode)
             {
                 throw InvalidResult();
@@ -128,7 +131,7 @@ public static partial class ScalarFrontendHost
                 : words[0] == 59 ? words[2] is < 2 or > 7
                 : words[0] >= 60 ? words[2] is < 0 or > 7 : words[2] is not (0 or 1))
             || !AllZero(3, 5)
-            || (words[5] == 0 ? words[0] is not (56 or 57 or 58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71 or 72 or 73)
+            || (words[5] == 0 ? words[0] is not (56 or 57 or 58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71 or 72 or 73 or 80)
                 : !ScalarType(words[5]) || words[0] is 56 or 57)
             || (effects & 4) != 0 && words[5] != 0
             || (context is not null || words[0] >= 69) && words[16] != 0
@@ -313,7 +316,7 @@ public static partial class ScalarFrontendHost
                 var node = new ScalarFrontendNode(words[offset], words[offset + 1],
                     Span(offset + 2), words[offset + 4], words[offset + 5],
                     words[offset + 6], words[offset + 7]);
-                var unary = node.Operation is 46 or 62 or 63 or 83 or 86 or 87
+                var unary = node.Operation is 46 or 62 or 63 or 83 or 86 or 87 or 109
                     || node.Operation is 57 or 58 && node.Right == -1;
                 var call = node.Operation == 102 || node.Operation == 105 && context is not null;
                 var callee = node.Operation == 105 ? context?.Callee(i) : null;
@@ -330,6 +333,8 @@ public static partial class ScalarFrontendHost
                         or >= 65 and <= 75 or 84 or >= 88 and <= 101))
                     || (node.Operation is >= 86 and <= 101 && words[0] is not (>= 49 and <= 73))
                     || (node.Operation == 102 && context is not null)
+                    || (node.Operation == 109
+                        && (!allowInitializationTests || node.Type != BooleanTypeCode))
                     || (call && (context is null && words[0] < 70
                         || node.Type != (callee?.ReturnType ?? words[5])
                         || callee is { ReturnType: 0 }
@@ -411,7 +416,9 @@ public static partial class ScalarFrontendHost
                     depths[i] = depths[node.Left] + 1;
                     if (unary)
                     {
-                        if ((node.Operation != 83 && node.Type != operand.Type)
+                        if ((node.Operation is not (83 or 109) && node.Type != operand.Type)
+                            || node.Operation == 109
+                                && (node.Type != BooleanTypeCode || operand.Operation != 0)
                             || node.Operation == 83 && (node.Type is not (1 or 2 or 3 or 4 or 6)
                                 || operand.Type is not (1 or 2 or 3 or 4 or 6)
                                 || intrinsicTypes[node.Left] == 0 && node.Type != operand.Type)
@@ -477,7 +484,7 @@ public static partial class ScalarFrontendHost
                 // Comparison results and conditional predicates cannot establish numeric operand context.
                 intrinsicTypes[i] = node.Operation switch {
                     0 or 20 or 21 or 62 or 83 or 86 or 87 or 102 or 103 or 104
-                        or 105 or 107 or 108
+                        or 105 or 107 or 108 or 109
                         or >= 65 and <= 70 or 72 or 74 => node.Type,
                     3 => 0,
                     >= 88 and <= 90 => intrinsicTypes[node.Left],
@@ -1341,6 +1348,18 @@ public static partial class ScalarFrontendHost
                         return false;
                     }
                 }
+                else if (node.Operation == 109)
+                {
+                    if (tree[node.Left].Operation != 0
+                        || !TakeTree(node.Left, parseDepth + 1)
+                        || !Take(TokenKind.Identifier) || tokens[at - 1].Name != "is"
+                        || tokens[at - 1].Span.Length != 2
+                        || !Take(TokenKind.Identifier) || tokens[at - 1].Name != "init"
+                        || tokens[at - 1].Span.Length != 4)
+                    {
+                        return false;
+                    }
+                }
                 else if (node.Operation == 83)
                 {
                     if (!Take(TokenKind.Identifier)
@@ -1531,6 +1550,7 @@ public static partial class ScalarFrontendHost
 
             int Precedence(ScalarFrontendNode node)
             {
+                if (node.Operation == 109) { return 6; }
                 if (node.Right == -1 || node.Operation == 46)
                 {
                     return 12;
@@ -2634,6 +2654,10 @@ public static partial class ScalarFrontendHost
                 {
                     bound = new BoundOutArgument(node.Left - 1,
                         node.Operation == 108, type, node.Span) { IsInit = true };
+                }
+                else if (node.Operation == 109)
+                {
+                    bound = new BoundIsInitialized(result.Nodes[node.Left].Left - 1, node.Span);
                 }
                 else if (node.Operation is 102 or 105)
                 {

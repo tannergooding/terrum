@@ -38,6 +38,21 @@ bool ScalarProgramHasVoidCall()
     return false;
 }
 
+bool ScalarProgramHasInitializationTest()
+{
+    for (mut int32 index = 0; index < Host.FrontendProgram[2]; index = index + 1)
+    {
+        int32 frame = 4 + index * 428;
+        int32 nodeCount = Host.FrontendProgram[frame + 4 + 37];
+        for (mut int32 node = 0; node < nodeCount; node = node + 1)
+        {
+            int32 nodeOffset = frame + 4 + 42 + node * 8;
+            if (Host.FrontendProgram[nodeOffset] == 109) { return true; }
+        }
+    }
+    return false;
+}
+
 bool ScalarProgramError(int32 code, SourceRange span, out bool handled)
 {
     for (mut int32 index = 0; index < Host.FrontendProgram.Length; index = index + 1)
@@ -257,7 +272,8 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         }
     }
     for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
-    Host.FrontendProgram[0] = Host.FrontendProgram[0] >= 76 ? Host.FrontendProgram[0]
+    Host.FrontendProgram[0] = ScalarProgramHasInitializationTest() ? 81
+        : Host.FrontendProgram[0] >= 76 ? Host.FrontendProgram[0]
         : ScalarProgramHasVoidCall() ? 75 : 74;
     Host.FrontendProgram[1] = 1;
     Host.FrontendProgram[3] = 0;
