@@ -84,6 +84,10 @@ public static partial class ScalarFrontendHost
         for (var i = 0; i < declarations.Length; i++)
         {
             var declaration = declarations[i];
+            if (declaration.InitRefParameterMask != 0 && declaration.ReturnType != BooleanTypeCode)
+            {
+                throw InvalidResult();
+            }
             var frame = 4 + i * ProgramFrameWordCount;
             if (words[frame] != declaration.TokenStart || words[frame + 1] != declaration.TokenEnd
                 || words[frame + 2] != declaration.Span.Start || words[frame + 3] != declaration.Span.Length)

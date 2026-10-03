@@ -44,6 +44,35 @@ public sealed partial class JitTests
         return AssertCheckedExecutionAsync(Source, 42);
     }
 
+    [Fact]
+    public Task CheckedNonBooleanUniqueInitFailureDoesNotPublishAsync()
+    {
+        const string Source = """
+            unique struct Owner {
+                public int32 Value;
+                public Owner(int32 value) { Value = value; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            int32 Fail(init ref<Owner> value) {
+                value = new Owner(42);
+                require false;
+                return 0;
+            }
+            int32 Main() {
+                init Owner value;
+                unsafe {
+                    try {
+                        int32 status = Fail(init value);
+                        return status;
+                    } catch {
+                        return value is init ? 42 : 43;
+                    }
+                }
+            }
+            """;
+        return AssertCheckedExecutionAsync(Source, 43);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

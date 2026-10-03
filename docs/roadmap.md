@@ -59,6 +59,13 @@ v81 now also project the accepted `is init` test for named scalar locals and
 parameters; hosted definite-initialization verification and native emission
 remain authoritative.
 
+The hosted compiler now accepts non-Boolean and void `init ref<T>` completion
+for supported output types, requiring full publication on every normal return
+and withholding publication on exceptions. Unique outputs transfer on normal
+completion independently of the non-Boolean result bits. Managed graph exports
+remain limited to handle-free Copy outputs; the bounded scalar projections
+retain their Boolean-only `init ref<T>` completion boundary.
+
 ## Planned work (priority order)
 
 The roadmap has four current areas, in area priority order. The sequence below

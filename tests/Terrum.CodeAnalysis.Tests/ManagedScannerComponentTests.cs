@@ -3130,7 +3130,7 @@ public sealed partial class ManagedScannerComponentTests
             Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy),
                 NativeEmitter.EmitLibrary(actual, ["Fill"], policy));
 
-            foreach (var version in new[] { 73, 80 })
+            foreach (var version in new[] { 73, 81 })
             {
                 BinaryPrimitives.WriteInt32LittleEndian(bytes, version);
                 Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,

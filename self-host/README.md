@@ -25,6 +25,9 @@ and selected function-effect contracts. Exact projection shapes and version
 gates are in the [native profile](../docs/native.md) and
 [implementation reference](../docs/implementation.md). General attributes and
 calls remain outside the frontend's subset.
+The bounded scalar projections retain Boolean-returning `init ref<T>` calls;
+the hosted compiler's non-Boolean/void initialization-on-normal-return mode is
+not projected here.
 Single-function projection v80 and complete-program projection v81 also
 source-audit `is init` tests for named scalar locals and parameters. Verification
 and emission remain hosted; this projection does not make the frontend a

@@ -26,7 +26,7 @@ internal static class ManagedExportShape
         {
             var parameter = function.Variables[index];
             if (!Value(parameter.Type, structures, 0)
-                || (parameter.IsOut && function.ReturnType != PrimitiveType.Bool))
+                || (parameter.IsOut && !parameter.IsInit && function.ReturnType != PrimitiveType.Bool))
             {
                 return false;
             }

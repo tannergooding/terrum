@@ -313,7 +313,7 @@ public static class SemanticVerifier
                             && !function.IsPrivate && !function.IsInternal)))
                         || (variable.IsOut && (variableIndex >= function.ParameterCount + (function.IsConstructor ? 1 : 0)
                             || (function.ReturnType != PrimitiveType.Bool
-                                && (variable.IsInit || variable.Type is not (PrimitiveType.Bool
+                                && (!variable.IsInit && variable.Type is not (PrimitiveType.Bool
                                     or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
                                     or PrimitiveType.Int64 or PrimitiveType.UInt64))))))
                     {
@@ -1630,7 +1630,7 @@ public static class SemanticVerifier
                         && !declarations.Contains(drop.Variable))
                     || !IsUnique(program, function.Variables[drop.Variable].Type)
                     || (drop.IsOutput && (!function.Variables[drop.Variable].IsOut
-                        || function.ReturnType != PrimitiveType.Bool)))
+                        || function.ReturnType != PrimitiveType.Bool && !function.Variables[drop.Variable].IsInit)))
                 {
                     throw Invalid(drop.Span);
                 }
@@ -2269,7 +2269,8 @@ public static class SemanticVerifier
                         for (var index = cleanups.Count - 1; index >= 0; index--)
                         {
                             VerifyCleanup(cleanups[index].Body, returnState, returnMasks, returnDeclarations,
-                                function, program, ref remaining, depth + 1, reachable, inUnsafe, cleanups[index].Visible);
+                                function, program, ref remaining, depth + 1, reachable, inUnsafe,
+                                cleanups[index].Visible, successfulReturn: true);
                         }
                         for (var i = parameterOffset; i < function.ParameterCount + parameterOffset; i++)
                         {

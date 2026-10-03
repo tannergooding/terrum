@@ -89,6 +89,16 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Fact]
+    public async Task ScalarFrontendProgramKeepsInitRefBooleanCompletionBoundaryAsync()
+    {
+        const string text = "public int32 Main() { int32 status = Fill(init var value); return value + status; } int32 Fill(init ref<int32> value) { value = 40; return 2; }";
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
+        Assert.Equal(78, BinaryPrimitives.ReadInt32LittleEndian(programBytes.AsSpan(0, sizeof(int))));
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(SourceText.From(text),
+            bytes, programBytes, BoundRuntimePolicy.FailFast));
+    }
+
+    [Fact]
     public async Task ScalarFrontendProgramAcceptsNonBooleanOutVarDestinationsAsync()
     {
         const string text = "public int32 Main() { int32 status = Set(out var value); return value + status; } int32 Set(out int32 value) { value = 40; return 2; }";

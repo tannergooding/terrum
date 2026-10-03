@@ -85,6 +85,70 @@ public sealed class PublicInitReferenceTests
         Assert.Contains(mismatchedInit.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ExportedNonBooleanInitPublishesOnNormalReturnAsync(NativeRuntimePolicy policy)
+    {
+        const string Library = """
+            public struct Pair {
+                public int32 First;
+                public int32 Second;
+                public Pair(int32 first, int32 second) { First = first; Second = second; }
+            }
+            public unique struct Ticket {
+                public int32 Value;
+                public Ticket(int32 value) { Value = value; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            public int32 Make(init ref<int32> result) { result = 40; return 2; }
+            public void Fill(init ref<int32> result) { result = 41; }
+            public int32 MakePair(init ref<Pair> result) { result = new Pair(40, 2); return 0; }
+            public int32 MakeTicket(init ref<Ticket> result) { result = new Ticket(3); return 0; }
+            public int32 Consume(Ticket ticket) { return ticket.Value; }
+            """;
+        const string Consumer = """
+            int32 Main() {
+                init int32 first;
+                init int32 second;
+                init Pair pair;
+                init Ticket ticket;
+                int32 status = Make(init first);
+                Fill(init second);
+                int32 pairStatus = MakePair(init pair);
+                int32 ticketStatus = MakeTicket(init ticket);
+                int32 ticketValue = Consume(move ticket);
+                return first + status + second + pair.First + pair.Second + pairStatus
+                    + ticketStatus + ticketValue;
+            }
+            """;
+        var program = CompileLibrary(Library, policy);
+        var exports = new[] { "Make", "Fill", "MakePair", "MakeTicket", "Consume", "Ticket.Close" };
+        var producer = ModuleCompiler.CreateProducer(program, exports);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var checkedInitFunctions = 0;
+        foreach (var function in reference.Functions)
+        {
+            if (function.Name is "Make" or "Fill" or "MakePair" or "MakeTicket")
+            {
+                Assert.True(function.Variables[0].IsInit);
+                checkedInitFunctions++;
+            }
+        }
+        Assert.Equal(4, checkedInitFunctions);
+        var consumerProgram = CompileConsumer(Consumer, reference, policy);
+        var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
+        Assert.Equal(128, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+
+        var nativeProducer = NativeModuleCompiler.CreateProducer(program, exports, "NodeB", policy);
+        var nativeConsumerProgram = CompileConsumer(Consumer,
+            NativeModuleCompiler.CreateGraphReference([nativeProducer]), policy);
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(nativeConsumerProgram,
+            [nativeProducer], policy);
+        Assert.Equal(128, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+    }
+
     [Fact]
     public void CorruptPublicInitModeCannotMasqueradeAsOut()
     {
@@ -157,31 +221,37 @@ public sealed class PublicInitReferenceTests
                 result = box.Data;
                 return true;
             }
+            public int32 Read(init ref<Pair> result) {
+                require Box.TryCreate(new Pair(int64(Bias()), 2), out var box);
+                result = box.Data;
+                return 0;
+            }
             """;
         const string Root = """
             int32 Main() {
                 if (TryRead(false, init var value)) { return 1; }
                 require TryRead(true, init value);
-                return int32(value.First + value.Second);
+                int32 status = Read(init var copy);
+                return int32(value.First + value.Second + copy.First + copy.Second) + status;
             }
             """;
         var leaf = NativeModuleCompiler.CreateProducer(CompileLibrary(Leaf, policy),
             ["Source.Bias"], "NodeB", policy);
         var middle = NativeModuleCompiler.CreateGraphProducer(CompileLibrary(Middle, policy,
-            NativeModuleCompiler.CreateGraphReference([leaf])), ["TryRead"], "NodeA", [leaf], policy);
+            NativeModuleCompiler.CreateGraphReference([leaf])), ["TryRead", "Read"], "NodeA", [leaf], policy);
         var root = NativeModuleCompiler.CreateGraphConsumer(CompileConsumer(Root,
             NativeModuleCompiler.CreateGraphReference([middle, leaf]), policy),
             [middle, leaf], policy);
         var originalRootHash = SHA256.HashData(root);
         var originalMiddleHash = SHA256.HashData(middle);
         NativeModuleCompiler.ValidateGraph(root, [leaf, middle]);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [middle, leaf],
+        Assert.Equal(84, await NativeModuleCompiler.RunGraphAsync(root, [middle, leaf],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
         var replacement = NativeModuleCompiler.CreateProducer(CompileLibrary(
             Leaf.Replace("return 40", "return 41", StringComparison.Ordinal), policy),
             ["Source.Bias"], "NodeB", policy);
         NativeModuleCompiler.ValidateGraph(root, [middle, replacement]);
-        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
+        Assert.Equal(86, await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
         Assert.Equal(originalRootHash, SHA256.HashData(root));
         Assert.Equal(originalMiddleHash, SHA256.HashData(middle));

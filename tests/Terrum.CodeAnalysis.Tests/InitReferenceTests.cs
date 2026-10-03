@@ -242,15 +242,82 @@ public sealed class InitReferenceTests
     }
 
     [Theory]
-    [InlineData("void Fill(init ref<int32> value) { value = 42; }", "TRM3011")]
     [InlineData("bool Fill(init ref<int32> value) { return true; }", "TRM3016")]
     [InlineData("bool Fill(out int32 value) { value = 42; return true; } int32 Main() { require Fill(init var item); return item; }", "TRM3011")]
-    public void InitModeRequiresBooleanCompletionAndMatchingCall(string source, string code)
+    public void InitModeRequiresNormalReturnPublicationAndMatchingCall(string source, string code)
     {
         ArgumentNullException.ThrowIfNull(source);
         var compilation = Compilation.Create(SyntaxTree.Parse(source.Contains("int32 Main()", StringComparison.Ordinal)
             ? source : source + "int32 Main() { return 42; }"));
         Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void InitReferencePublishesOnEveryNonBooleanCompletion(NativeRuntimePolicy policy)
+    {
+        foreach (var (source, expected) in new (string Source, int Expected)[] {
+            ("""
+             int32 Fill(init ref<int32> value) { value = 42; return 7; }
+             int32 Main() {
+                 init int32 value;
+                 int32 status = Fill(init value);
+                 return status + value;
+             }
+             """, 49),
+            ("""
+             void Fill(init ref<int32> value) { value = 42; }
+             int32 Main() {
+                 init int32 value;
+                 Fill(init value);
+                 return value;
+             }
+             """, 42),
+        })
+        {
+            var compilation = Compilation.Create(SyntaxTree.Parse(source),
+                runtimePolicy: (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.Equal(expected, NativeJit.Execute(program, policy));
+            Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 Fill(init ref<int32> value) { return 42; } int32 Main() { init int32 value; return Fill(init value); }")]
+    [InlineData("void Fill(init ref<int32> value) { } int32 Main() { init int32 value; Fill(init value); return 42; }")]
+    public void NonBooleanInitReferenceStillRequiresPublicationOnEveryNormalReturn(string source)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.Contains(compilation.Diagnostics, item => item.Code == "TRM3016");
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void PrivateManagedInitReferencePublishesOnNonBooleanCompletion(NativeRuntimePolicy policy)
+    {
+        const string source = """
+            int32 Create(init ref<write ManagedNode> value) {
+                require ManagedNode.TryCreate(42, out var created);
+                value = created;
+                return 7;
+            }
+            int32 Main() {
+                if (ManagedHeap.Collect() != 0) { return 1; }
+                int32 status = Create(init var node);
+                if (ManagedHeap.Collect() != 0) { return 2; }
+                return status + node.Value;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            runtimePolicy: (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(49, NativeJit.Execute(program, policy));
+        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
     }
 
     [Theory]

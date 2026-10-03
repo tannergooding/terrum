@@ -2045,12 +2045,22 @@ internal sealed partial class PeCompiler
                 {
                     _code.Bytes(0x48, 0x85, 0xC9); // the unwind funclet receives an exception record
                     var unwind = _code.JumpIf(0x85);
-                    _code.Load(PendingReturnSlot());
-                    _code.Bytes(0x85, 0xC0);
-                    var transferred = _code.JumpIf(0x85);
-                    _code.PatchRelative(unwind, _code.Position);
-                    DropOwner(drop.Variable);
-                    _code.PatchRelative(transferred, _code.Position);
+                    if (_program.Functions[_currentFunction].ReturnType == PrimitiveType.Bool)
+                    {
+                        _code.Load(PendingReturnSlot());
+                        _code.Bytes(0x85, 0xC0);
+                        var transferred = _code.JumpIf(0x85);
+                        _code.PatchRelative(unwind, _code.Position);
+                        DropOwner(drop.Variable);
+                        _code.PatchRelative(transferred, _code.Position);
+                    }
+                    else
+                    {
+                        var transferred = _code.JumpIf(0x84);
+                        _code.PatchRelative(unwind, _code.Position);
+                        DropOwner(drop.Variable);
+                        _code.PatchRelative(transferred, _code.Position);
+                    }
                 }
                 else
                 {

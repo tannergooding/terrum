@@ -1512,12 +1512,15 @@ General borrowed references and stored loans remain unsupported. The accepted
 `ref<T>`/`ptr<T>`/`box<T>`/`val<T>` forms, general `write` views, `own<T>` and
 general `init ref<T>` invocation still requires its representation,
 lifetime, cleanup and ABI implementation; it is scheduled implementation
-work. The current compiler admits the bounded `bool`/`init ref<T>` parameter
-and `init name`
-call mode for supported output values, with `init var name` introducing a
-vacant destination in the call. A named destination must still be vacant;
-an initialized value cannot be overwritten by `init`. A true result requires
-complete initialization; false and exceptional paths do not publish.
+work. The current compiler admits the bounded `init ref<T>` parameter and
+`init name` call mode for supported output values, with `init var name`
+introducing a vacant destination in the call. A named destination must still
+be vacant; an initialized value cannot be overwritten by `init`. A Boolean
+result publishes only on true and leaves the destination vacant on false;
+non-Boolean and void results require complete initialization on every normal
+return. Exceptional paths do not publish. This hosted result contract does not
+broaden the Boolean-only `init ref<T>` declarations in the bounded scalar
+source projections, which continue to use the hosted verifier and emitter.
 Compilation-private `init ref<T>` also supports qualified managed handles.
 The call's checked scratch and exact temporary roots retain the handle until
 successful publication; false and exceptional completion retire the scratch

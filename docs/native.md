@@ -452,7 +452,9 @@ Program projection v78 adds a separate mask for the existing scalar
 `init ref<T>` parameter mode and matching `init name`/`init var name`
 destinations. It is limited to the six scalar types and complete multi-function
 snapshots; the independent reader audits each mode and the hosted verifier
-retains the true-publishes/false-vacant contract. V74–v77 reject init-ref
+retains the true-publishes/false-vacant contract. These bounded projections
+remain limited to Boolean-returning init-ref declarations; hosted non-Boolean
+and void completions are not part of this projection. V74–v77 reject init-ref
 modes. This does not add general reference arguments, source-free TRRM support
 or standalone compiler support.
 
@@ -540,12 +542,14 @@ constructors and explicit by-value getters reuse checked return, statement and
 cleanup paths. Their source, proof and specialization boundaries are detailed
 in the [implementation reference](implementation.md).
 
-The hosted `bool`/`init ref<T>` contract publishes vacant storage only on true.
-Semantic v33 persists the distinct parameter/call mode; exported contracts use
-`init:`, while older private declarations retain their legacy `out` spelling.
-Public scalar, handle-free Copy and eligible unique outputs reuse checked
-scratch, cleanup and the existing native ABI. Managed graph boundaries admit
-Copy outputs only; generic contracts remain compilation-local.
+The hosted `init ref<T>` contract publishes vacant storage only on true for a
+Boolean result; a non-Boolean or void result requires complete initialization
+on every normal return. Semantic v33 persists the distinct parameter/call mode;
+exported contracts use `init:`, while older private declarations retain their
+legacy `out` spelling. Public scalar, handle-free Copy and eligible unique
+outputs reuse checked scratch, cleanup and the existing native ABI. Managed
+graph boundaries admit Copy outputs only; generic contracts remain
+compilation-local.
 
 Explicit by-value getters use readonly receiver calls. Semantic v34 persists
 property identity and accessor effects; Core primitive getters require v38.
