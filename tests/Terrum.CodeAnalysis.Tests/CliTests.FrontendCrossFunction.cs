@@ -595,6 +595,27 @@ public sealed partial class CliTests
         Assert.Empty(runError);
     }
 
+    [Fact]
+    public async Task ScalarFrontendNamedVoidCallPreservesPositionalOutputParameterAsync()
+    {
+        const string text = "void Fill(out int32 value, int32 other) { value = other; } int32 Main() { Fill(out var result, other: 3); return result; }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var input = Encoding.UTF8.GetBytes(text);
+        var (componentExit, componentOutput, componentError) = await RunAsync(input, "frontend-component",
+            directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.True(componentExit == 0, $"{componentExit}: {componentOutput}{componentError}");
+        using (var document = JsonDocument.Parse(componentOutput))
+        {
+            var result = document.RootElement.GetProperty("result");
+            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+        }
+        var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
+            directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(3, runExit);
+        Assert.Empty(runOutput);
+        Assert.Empty(runError);
+    }
+
     [Theory]
     [InlineData("int32 Main() { return Sum(unknown: 1, second: 2); } int32 Sum(int32 first, int32 second) { return first + second; }", 3)]
     [InlineData("int32 Main() { return Sum(first: 1, first: 2); } int32 Sum(int32 first, int32 second) { return first + second; }", 1)]
