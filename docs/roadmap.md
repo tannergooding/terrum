@@ -64,7 +64,8 @@ for supported output types, requiring full publication on every normal return
 and withholding publication on exceptions. Unique outputs transfer on normal
 completion independently of the non-Boolean result bits. Managed graph exports
 remain limited to handle-free Copy outputs; the bounded scalar projections
-retain their Boolean-only `init ref<T>` completion boundary.
+project scalar non-Boolean/void init-ref declarations to the hosted verifier
+and emitter through separately audited v81/v82 shapes.
 
 ## Planned work (priority order)
 

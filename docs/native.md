@@ -452,11 +452,11 @@ Program projection v78 adds a separate mask for the existing scalar
 `init ref<T>` parameter mode and matching `init name`/`init var name`
 destinations. It is limited to the six scalar types and complete multi-function
 snapshots; the independent reader audits each mode and the hosted verifier
-retains the true-publishes/false-vacant contract. These bounded projections
-remain limited to Boolean-returning init-ref declarations; hosted non-Boolean
-and void completions are not part of this projection. V74–v77 reject init-ref
-modes. This does not add general reference arguments, source-free TRRM support
-or standalone compiler support.
+retains the true-publishes/false-vacant contract. V74–v77 reject init-ref
+modes. Single-function v81 and complete-program v82 additionally admit scalar
+init-ref declarations with non-Boolean or void results, requiring publication
+on every normal return. This does not add general reference arguments,
+source-free TRRM support or standalone compiler support.
 
 Single-function projection v79 carries the existing scalar `init ref<T>` and
 non-Boolean scalar `out` modes through bounded self-calls. Header word 17
@@ -484,6 +484,9 @@ operation 109 for `is init` on named scalar locals and parameters. The reader
 audits the named storage source, while the shared hosted verifier and emitter
 continue to own flow narrowing and runtime-state tracking; this remains a
 bounded hosted-backed projection, not standalone compiler support.
+Single-function v81 and complete-program v82 also project non-Boolean/void
+scalar `init ref<T>` completion through the same hosted definite-publication
+verification and result-independent publication path.
 
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.

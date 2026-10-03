@@ -89,13 +89,46 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Fact]
-    public async Task ScalarFrontendProgramKeepsInitRefBooleanCompletionBoundaryAsync()
+    public async Task ScalarFrontendProgramProjectsNonBooleanAndVoidInitReferenceCompletionAsync()
     {
-        const string text = "public int32 Main() { int32 status = Fill(init var value); return value + status; } int32 Fill(init ref<int32> value) { value = 40; return 2; }";
-        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
-        Assert.Equal(78, BinaryPrimitives.ReadInt32LittleEndian(programBytes.AsSpan(0, sizeof(int))));
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(SourceText.From(text),
-            bytes, programBytes, BoundRuntimePolicy.FailFast));
+        const string text = "public int32 Main() { Fill(init var value); SetVoid(init var other); return value + other; } int32 Fill(init ref<int32> value) { value = 40; return 0; } void SetVoid(init ref<int32> value) { value = 2; }";
+        var source = SourceText.From(text);
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var (bytes, programBytes, stage) = await ProduceScalarProgramAsync(text, policy);
+            Assert.True(BinaryPrimitives.ReadInt32LittleEndian(programBytes.AsSpan(sizeof(int))) == 1,
+                $"Error {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(2 * sizeof(int)))} at "
+                    + $"{BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(3 * sizeof(int)))}:"
+                    + $"{BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(4 * sizeof(int)))}; "
+                    + $"single status {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(sizeof(int)))}");
+            Assert.Equal(82, BinaryPrimitives.ReadInt32LittleEndian(programBytes.AsSpan(0, sizeof(int))));
+            var result = ScalarFrontendHost.ReadResult(source, bytes, programBytes, (BoundRuntimePolicy)policy);
+            Assert.True(result.IsValid, $"Error {result.ErrorCode} at {result.ErrorSpan}");
+            Assert.Equal(1, result.Functions[1].InitRefParameterMask);
+            Assert.Equal(1, result.Functions[2].InitRefParameterMask);
+            Assert.Contains(result.Functions[0].Nodes, static node => node.Operation == 108);
+
+            var actual = ScalarFrontendHost.BindLibrary(source, bytes, programBytes, (BoundRuntimePolicy)policy);
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Main"], policy),
+                NativeEmitter.EmitLibrary(actual, ["Main"], policy));
+            Assert.Equal(42, NativeJit.Execute(actual with { EntryPoint = 0 }, policy));
+            await ExecuteAotAsync(stage, policy);
+
+            BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(0, sizeof(int)), 81);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source,
+                bytes, programBytes, (BoundRuntimePolicy)policy));
+        }
+
+        const string incompleteText =
+            "public int32 Main() { return Fill(init var value); } int32 Fill(init ref<int32> value) { return 0; }";
+        var (incompleteBytes, incompleteProgramBytes, _) = await ProduceScalarProgramAsync(
+            incompleteText, NativeRuntimePolicy.FailFast);
+        Assert.Equal(82, BinaryPrimitives.ReadInt32LittleEndian(incompleteProgramBytes));
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(SourceText.From(incompleteText),
+            incompleteBytes, incompleteProgramBytes, BoundRuntimePolicy.FailFast));
     }
 
     [Fact]

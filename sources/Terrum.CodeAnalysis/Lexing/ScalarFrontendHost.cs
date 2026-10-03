@@ -66,30 +66,34 @@ public static partial class ScalarFrontendHost
                 || (words[17] != 0 && !context.AllowInitRefArguments)
                 || (words[16] != 0 && words[5] != BooleanTypeCode
                     && !context.AllowNonBooleanOutputParameters)
+                || (words[17] != 0 && words[5] != BooleanTypeCode
+                    && !context.AllowNonBooleanInitRefParameters)
                 || (words[2] & 4) != 0 && !context.AllowDoesNotReturn)
             {
                 throw InvalidResult();
             }
-            // Reuse the existing per-body grammar. v74-v78 target identities
+            // Reuse the existing per-body grammar. Complete-projection target identities
             // are independently audited against the complete declaration inventory.
             words[0] = 68;
         }
 
         var projectionVersion = words[0];
-        var isExtendedSingleProjection = projectionVersion is 79 or 80;
-        var allowInitializationTests = projectionVersion == 80
+        var isExtendedSingleProjection = projectionVersion is 79 or 80 or 81;
+        var allowInitializationTests = projectionVersion is 80 or 81
             || context?.AllowInitializationTests == true;
         var isNonBooleanOutProjection = isExtendedSingleProjection
             && words[5] != BooleanTypeCode && words[16] != 0;
+        var isNonBooleanInitRefProjection = projectionVersion == 81
+            && words[5] != BooleanTypeCode && words[17] != 0;
         if (isExtendedSingleProjection)
         {
             if (context is not null
                 || words[17] == 0 && !isNonBooleanOutProjection && !allowInitializationTests
-                || words[17] != 0 && words[5] != BooleanTypeCode)
+                || words[17] != 0 && words[5] != BooleanTypeCode && !isNonBooleanInitRefProjection)
             {
                 throw InvalidResult();
             }
-            // Reuse the v73 self-call grammar while retaining v79's mode checks.
+            // Reuse the v73 self-call grammar while retaining the extended mode checks.
             words[0] = 73;
         }
 

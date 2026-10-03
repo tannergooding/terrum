@@ -215,6 +215,10 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         {
             Host.FrontendProgram[0] = 78;
         }
+        if (Host.FrontendProgram[header + 17] != 0 && Host.FrontendProgram[header + 5] != 5)
+        {
+            Host.FrontendProgram[0] = 82;
+        }
         if ((Host.FrontendProgram[header + 2] & 4) != 0
             && Host.FrontendProgram[0] < 76)
         {
@@ -272,7 +276,8 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         }
     }
     for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
-    Host.FrontendProgram[0] = ScalarProgramHasInitializationTest() ? 81
+    Host.FrontendProgram[0] = Host.FrontendProgram[0] >= 82 ? 82
+        : ScalarProgramHasInitializationTest() ? 81
         : Host.FrontendProgram[0] >= 76 ? Host.FrontendProgram[0]
         : ScalarProgramHasVoidCall() ? 75 : 74;
     Host.FrontendProgram[1] = 1;

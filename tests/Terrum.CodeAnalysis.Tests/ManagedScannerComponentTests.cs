@@ -3130,7 +3130,46 @@ public sealed partial class ManagedScannerComponentTests
             Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy),
                 NativeEmitter.EmitLibrary(actual, ["Fill"], policy));
 
-            foreach (var version in new[] { 73, 81 })
+            foreach (var version in new[] { 73, 82 })
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(bytes, version);
+                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
+                    bytes, (BoundRuntimePolicy)policy));
+            }
+        }
+    }
+
+    [Fact]
+    public async Task NativeScalarFrontendSingleNonBooleanInitRefUsesProjection81Async()
+    {
+        const string text = "public int32 Fill(int32 seed, init ref<int32> value) { if (seed == 0) { value = 40; return 0; } return Fill(seed - 1, init value); }";
+        var source = SourceText.From(text);
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var stage = await CompileAsync(text,
+                "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+                (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+            var native = NativeJit.ExecuteWithData(stage, policy);
+            Assert.Equal(42, native.ExitCode);
+            var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+                ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+            Assert.Equal(81, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+            Assert.Equal(2, BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(17 * sizeof(int))));
+
+            var result = ScalarFrontendHost.ReadResult(source, bytes, (BoundRuntimePolicy)policy);
+            Assert.True(result.IsValid, $"Error {result.ErrorCode} at {result.ErrorSpan}");
+            Assert.Equal(2, result.InitRefParameterMask);
+            Assert.Contains(result.Nodes, static node => node.Operation == 102);
+            Assert.Contains(result.Nodes, static node => node.Operation == 107);
+
+            var actual = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy),
+                NativeEmitter.EmitLibrary(actual, ["Fill"], policy));
+
+            foreach (var version in new[] { 73, 79, 80, 82 })
             {
                 BinaryPrimitives.WriteInt32LittleEndian(bytes, version);
                 Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,

@@ -1519,8 +1519,9 @@ be vacant; an initialized value cannot be overwritten by `init`. A Boolean
 result publishes only on true and leaves the destination vacant on false;
 non-Boolean and void results require complete initialization on every normal
 return. Exceptional paths do not publish. This hosted result contract does not
-broaden the Boolean-only `init ref<T>` declarations in the bounded scalar
-source projections, which continue to use the hosted verifier and emitter.
+make the bounded scalar source projections standalone: single-function v81
+and complete-program v82 now carry this contract for scalar `init ref<T>`
+declarations through the same hosted verifier and emitter.
 Compilation-private `init ref<T>` also supports qualified managed handles.
 The call's checked scratch and exact temporary roots retain the handle until
 successful publication; false and exceptional completion retire the scratch

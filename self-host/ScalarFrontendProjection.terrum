@@ -206,6 +206,7 @@ bool TryPublishScalarFrontend()
             Host.Frontend[0] = 79;
         }
         if (HasScalarFrontendOperation(109)) { Host.Frontend[0] = 80; }
+        if (Host.Frontend[17] != 0 && result.ReturnType != 5) { Host.Frontend[0] = 81; }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {
