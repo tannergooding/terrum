@@ -631,8 +631,15 @@ ends only the loan, not the allocation's lifetime. A mutable view cannot be
 copied, passed, stored or returned.
 These two bounded slice intrinsics have their own lexical verifier rules;
 they are not a general `Span<T>` implementation or evidence that all
-reference/view access uses the accepted `mut`/`write` contract. Their access
-alignment is scheduled separately from the current class/`ManagedNode` batch.
+reference/view access uses the accepted `mut`/`write` contract. On the current
+Windows x64 profile, `HeapAlloc` returns `MEMORY_ALLOCATION_ALIGNMENT`-aligned
+storage (16 bytes); the eight-byte owner header and four-byte element stride
+therefore keep every `int32` element naturally aligned. Slices add a
+four-byte-scaled start offset and retain that alignment for both readonly and
+mutable accesses. This guarantee applies only to compiler-created owned
+buffers; no arbitrary external or unaligned view can be constructed.
+[`HeapAlloc` alignment](https://learn.microsoft.com/en-us/windows/win32/api/heapapi/nf-heapapi-heapalloc)
+is part of the target-specific implementation basis.
 
 The separate `native-18` proof exposes an opaque aliasable `ManagedNode`
 handle, not a pointer or a native owner. `ManagedNode.TryCreate(value, out

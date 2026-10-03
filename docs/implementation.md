@@ -1216,8 +1216,9 @@ and field identities; the verifier rechecks access, types, initialization
 and mutability rather than trusting serialized byte offsets. Whole-local
 non-owning receiver loans were introduced at milestone v25. Current module
 revision 49 serializes supported receiver contracts; older revisions are
-rejected wholesale. Primitive
-buffer-view alignment and general `out`-to-`init ref<T>` migration remain scheduled.
+rejected wholesale. The bounded owned-`int32` buffer and lexical-view path
+preserves natural element alignment on Windows x64; general
+`out`-to-`init ref<T>` migration remains scheduled.
 Current semantic-module revision 49 records private managed access authority
 directly. Artifacts from retired semantic-module revisions are rejected rather
 than normalized or upgraded while reading.

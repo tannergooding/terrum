@@ -89,6 +89,50 @@ public sealed class NativeOwnedBufferTests
         Assert.Equal(7, intrinsicCount);
     }
 
+    [Fact]
+    public void BufferAndViewElementAddressesPreserveInt32Alignment()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                mut OwnedInt32Buffer buffer = move raw;
+                require buffer.TryAppend(40);
+                {
+                    ReadonlyInt32BufferView readView = buffer.Slice(0, 1);
+                    if (readView.Read(0) != 40) { return 0; }
+                }
+                {
+                    mut MutableInt32BufferView writeView = buffer.SliceMutable(0, 1);
+                    writeView.Set(0, writeView.Read(0));
+                }
+                buffer.Set(0, buffer.Read(0));
+                return 42;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
+
+        var allocation = code.Functions[6 + program.Functions.IndexOf(Assert.Single(program.Functions,
+            static function => function.Intrinsic == BoundIntrinsic.BufferTryCreate))];
+        Assert.True(code.Code.AsSpan(allocation.Start, allocation.End - allocation.Start)
+            .IndexOf(new byte[] { 0x4C, 0x8D, 0x04, 0x85, 0x08, 0x00, 0x00, 0x00 }) >= 0);
+        var read = code.Functions[6 + program.Functions.IndexOf(Assert.Single(program.Functions,
+            static function => function.Intrinsic == BoundIntrinsic.BufferRead))];
+        Assert.True(code.Code.AsSpan(read.Start, read.End - read.Start)
+            .IndexOf(new byte[] { 0x8B, 0x44, 0x82, 0x08 }) >= 0);
+        var set = code.Functions[6 + program.Functions.IndexOf(Assert.Single(program.Functions,
+            static function => function.Intrinsic == BoundIntrinsic.BufferSet))];
+        Assert.True(code.Code.AsSpan(set.Start, set.End - set.Start)
+            .IndexOf(new byte[] { 0x89, 0x44, 0x8A, 0x08 }) >= 0);
+        var main = code.Functions[6 + program.Functions.IndexOf(Assert.Single(program.Functions,
+            static function => function.Name == "Main"))];
+        var mainBytes = code.Code.AsSpan(main.Start, main.End - main.Start);
+        Assert.True(mainBytes.IndexOf(new byte[] { 0x48, 0x8D, 0x44, 0x8A, 0x08 }) >= 0);
+        Assert.True(mainBytes.IndexOf(new byte[] { 0x8B, 0x04, 0x8A }) >= 0);
+        Assert.True(mainBytes.IndexOf(new byte[] { 0x89, 0x04, 0x8A }) >= 0);
+    }
+
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]

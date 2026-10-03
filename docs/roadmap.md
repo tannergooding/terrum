@@ -326,13 +326,13 @@ Do not translate every design sample at once or build a plugin loader first.
 Extend the verified executable corpus and semantic checks in coherent slices;
 keep diagnostics and source mappings useful on incomplete input. Bounded
 managed access, unique-owner mutation and field-view contracts are implemented;
-primitive buffer/view alignment and general `out` to `init ref<T>` migration
-remain scheduled. The existing conditional-init subset is not general
-reference support. Bounded static exports do not imply `func`, general
-`fnptr`, tuples, callable witnesses or contextual lambdas. Fixed-signature
-callables precede generic scalar/SIMD functors, which precede contextual
-generic lambdas; type packs, polymorphic erasure and arbitrary callback
-vectorization are excluded from these stages.
+the bounded owned-`int32` buffer/view path preserves natural element alignment.
+General `out` to `init ref<T>` migration remains scheduled. The existing
+conditional-init subset is not general reference support. Bounded static
+exports do not imply `func`, general `fnptr`, tuples, callable witnesses or
+contextual lambdas. Fixed-signature callables precede generic scalar/SIMD
+functors, which precede contextual generic lambdas; type packs, polymorphic
+erasure and arbitrary callback vectorization are excluded from these stages.
 
 ## Memory-model implementation sequence
 
