@@ -4,6 +4,7 @@ using System;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -367,6 +368,18 @@ public sealed class ValueTests
         using var json = await AnalyzeSourceAsync(source, expectedExitCode: 0).ConfigureAwait(true);
         Assert.True(json.RootElement.GetProperty("success").GetBoolean());
         Assert.Empty(json.RootElement.GetProperty("diagnostics").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task CliAnalyzeStillBoundsAggregateFlowWorkAsync()
+    {
+        var statements = string.Concat(Enumerable.Repeat("if (flag) { } ", 20_000));
+        var source = $"int32 Main() {{ bool flag = true; {statements} return 0; }}";
+        using var json = await AnalyzeSourceAsync(source).ConfigureAwait(true);
+        Assert.False(json.RootElement.GetProperty("success").GetBoolean());
+        var diagnostic = json.RootElement.GetProperty("diagnostics")[0];
+        Assert.Equal("TRM3016", diagnostic.GetProperty("code").GetString());
+        Assert.Equal("Source exceeds the semantic verification work limit.", diagnostic.GetProperty("message").GetString());
     }
 
     private static async Task<JsonDocument> AnalyzeSourceAsync(string source, int expectedExitCode = 1)

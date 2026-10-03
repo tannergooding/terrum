@@ -45,7 +45,9 @@ instead of recursively reconstructing the same state for each Boolean outcome.
 Initialization tests, pattern bindings, output calls, moves and unknown
 expression forms retain full traversal. The 40-level alternating `&&`/`||`
 analysis fixture now completes successfully instead of exceeding the unchanged
-100,000-visit limit.
+100,000-visit limit. A separate source with 20,000 sequential conditional
+statements still reports `TRM3016`, confirming aggregate analysis remains
+bounded by that same limit.
 
 During the v78 budget investigation, temporary visit counters measured 100,001
 semantic-analysis visits across 210 functions before the limit failure. In the
