@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
@@ -15,6 +16,9 @@ internal sealed record TrRmScalarReinterpret(BoundExpression Operand, PrimitiveT
 
 internal sealed record TrRmScalarConvert(BoundExpression Operand, PrimitiveType Type, byte Policy)
     : BoundExpression(Type, default);
+
+internal sealed record TrRmScalarDivRem(int QuotientVariable, int RemainderVariable,
+    BoundRead Dividend, BoundRead Divisor, PrimitiveType Type) : BoundStatement(default(TextSpan));
 
 internal sealed record TrRmScalarBlock(ImmutableArray<int> Parameters,
     ImmutableArray<BoundStatement> Operations, int Condition, TrRmScalarEdge? True,
@@ -88,6 +92,20 @@ internal sealed class TrRmScalarGraph
                     BoundExpressionStatement { Expression: BoundCall value } => value,
                     _ => null,
                 };
+                if (operation is TrRmScalarDivRem divRem
+                    && (NoThrow || !IsInteger(divRem.Type)
+                        || divRem.QuotientVariable < 0 || divRem.QuotientVariable >= Types.Length
+                        || divRem.RemainderVariable < 0 || divRem.RemainderVariable >= Types.Length
+                        || divRem.QuotientVariable == divRem.RemainderVariable
+                        || Types[divRem.QuotientVariable] != divRem.Type
+                        || Types[divRem.RemainderVariable] != divRem.Type
+                        || (uint)divRem.Dividend.Variable >= (uint)Types.Length
+                        || (uint)divRem.Divisor.Variable >= (uint)Types.Length
+                        || Types[divRem.Dividend.Variable] != divRem.Type
+                        || Types[divRem.Divisor.Variable] != divRem.Type))
+                {
+                    throw new ArgumentException("Indexed CheckedDivRem result or operand contract does not match.");
+                }
                 if (call is null)
                 {
                     continue;
@@ -321,6 +339,10 @@ internal sealed class TrRmScalarGraph
                 return null;
         }
     }
+
+    private static bool IsInteger(PrimitiveType type)
+        => type is PrimitiveType.Int32 or PrimitiveType.UInt32
+            or PrimitiveType.Int64 or PrimitiveType.UInt64;
 
     private static void Visit(ref int remaining)
     {

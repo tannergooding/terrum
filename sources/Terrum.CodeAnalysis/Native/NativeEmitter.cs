@@ -1914,6 +1914,39 @@ internal sealed partial class PeCompiler
                     _normalExits.RemoveAt(_normalExits.Count - 1);
                 }
                 break;
+            case TrRmScalarDivRem division:
+                Expression(division.Dividend, 0);
+                if (IsWide(division.Type))
+                {
+                    _code.Bytes(0x49, 0x89, 0xC0); // Preserve the dividend in volatile r8.
+                }
+                else
+                {
+                    _code.Bytes(0x41, 0x89, 0xC0);
+                }
+                Expression(division.Divisor, 1);
+                if (IsWide(division.Type))
+                {
+                    _code.Bytes(0x48, 0x89, 0xC1, 0x4C, 0x89, 0xC0);
+                }
+                else
+                {
+                    _code.Bytes(0x89, 0xC1, 0x44, 0x89, 0xC0);
+                }
+                CheckedDivRem(division.Type);
+                StoreValue(Slot(division.QuotientVariable), division.Type);
+                SetInitializationFlag(division.QuotientVariable, initialized: true);
+                if (IsWide(division.Type))
+                {
+                    _code.Bytes(0x48, 0x89, 0xD0);
+                }
+                else
+                {
+                    _code.Bytes(0x89, 0xD0);
+                }
+                StoreValue(Slot(division.RemainderVariable), division.Type);
+                SetInitializationFlag(division.RemainderVariable, initialized: true);
+                break;
             case BoundLocal local:
                 Expression(local.Initializer, 0);
                 StoreValue(Slot(local.Variable), local.Initializer.Type);
@@ -3247,6 +3280,50 @@ internal sealed partial class PeCompiler
             _code.Bytes(0x48, 0x39, 0xC8); // cmp rax,rcx
             RuntimeBranch(0x85, 0);
         }
+    }
+
+    private void CheckedDivRem(PrimitiveType type)
+    {
+        var isWide = IsWide(type);
+        var isUnsigned = type is PrimitiveType.UInt32 or PrimitiveType.UInt64;
+        if (isWide)
+        {
+            _code.Bytes(0x48, 0x85, 0xC9);
+            RuntimeBranch(0x84, 1);
+            if (isUnsigned)
+            {
+                _code.Bytes(0x31, 0xD2, 0x48, 0xF7, 0xF1);
+                return;
+            }
+            _code.Bytes(0x48, 0xBA);
+            _code.Int64(long.MinValue);
+            _code.Bytes(0x48, 0x39, 0xD0);
+            var normal = _code.JumpIf(0x85);
+            _code.Bytes(0x48, 0x83, 0xF9, 0xFF);
+            var normalAgain = _code.JumpIf(0x85);
+            _runtimeCalls.Add((_code.RelativeCall(), 0));
+            _code.PatchRelative(normal, _code.Position);
+            _code.PatchRelative(normalAgain, _code.Position);
+            _code.Bytes(0x48, 0x99, 0x48, 0xF7, 0xF9);
+            return;
+        }
+
+        _code.Bytes(0x85, 0xC9);
+        RuntimeBranch(0x84, 1);
+        if (isUnsigned)
+        {
+            _code.Bytes(0x31, 0xD2, 0xF7, 0xF1);
+            return;
+        }
+        _code.Byte(0x3D);
+        _code.Int32(int.MinValue);
+        var normal32 = _code.JumpIf(0x85);
+        _code.Bytes(0x83, 0xF9, 0xFF);
+        var normalAgain32 = _code.JumpIf(0x85);
+        _runtimeCalls.Add((_code.RelativeCall(), 0));
+        _code.PatchRelative(normal32, _code.Position);
+        _code.PatchRelative(normalAgain32, _code.Position);
+        _code.Bytes(0x99, 0xF7, 0xF9);
     }
 
     private void ConvertInteger(PrimitiveType source, PrimitiveType target, byte policy)

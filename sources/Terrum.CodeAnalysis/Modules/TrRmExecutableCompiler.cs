@@ -324,7 +324,8 @@ public static partial class TrRmExecutableCompiler
                     { Initializer: TrRmScalarReinterpret or TrRmScalarConvert or BoundBinary
                         { Operator: TokenKind.ShiftLeft or TokenKind.ShiftRight } }
                     or BoundLocal { Initializer: BoundCall }
-                    or BoundExpressionStatement { Expression: BoundCall }))
+                    or BoundExpressionStatement { Expression: BoundCall }
+                    or TrRmScalarDivRem))
                 {
                     var operations = statements[..^1];
                     var returned = (BoundReturn)statements[^1];

@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
@@ -36,6 +37,38 @@ public sealed class TrRmExecutionAuditTests
         var program = TrRmExecutableCompiler.Load(artifact);
         Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
         Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData(PrimitiveType.Int32, 0xFFFF_FFF9UL, 3UL, 0xFFFF_FFFEUL, 0xFFFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt32, 0xFFFF_FFFFUL, 3UL, 0x5555_5555UL, 0UL)]
+    [InlineData(PrimitiveType.Int64, 0xFFFF_FFFF_FFFF_FFF9UL, 3UL,
+        0xFFFF_FFFF_FFFF_FFFEUL, 0xFFFF_FFFF_FFFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt64, 0xFFFF_FFFF_FFFF_FFFFUL, 10UL,
+        0x1999_9999_9999_9999UL, 5UL)]
+    public void IndependentCheckedDivRemDefinesAndExecutesBothResults(PrimitiveType type,
+        ulong dividend, ulong divisor, ulong quotient, ulong remainder)
+    {
+        var artifact = Artifact(CheckedDivRemBody(type, dividend, divisor, quotient, remainder));
+        TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData(PrimitiveType.Int32, 7UL, 0UL, unchecked((int)0xE0540002))]
+    [InlineData(PrimitiveType.Int32, 0x8000_0000UL, 0xFFFF_FFFFUL, unchecked((int)0xE0540001))]
+    [InlineData(PrimitiveType.Int64, 0x8000_0000_0000_0000UL, 0xFFFF_FFFF_FFFF_FFFFUL,
+        unchecked((int)0xE0540001))]
+    public async Task IndependentCheckedDivRemPreservesFailureStatuses(PrimitiveType type,
+        ulong dividend, ulong divisor, int expectedStatus)
+    {
+        var artifact = Artifact(CheckedDivRemBody(type, dividend, divisor, 0, 0));
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(expectedStatus,
+            await StaticProtocolTests.RunAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast))
+                .ConfigureAwait(true));
     }
 
     [Theory]
@@ -184,6 +217,24 @@ public sealed class TrRmExecutionAuditTests
         var artifact = Artifact(body, effect: 1);
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+    }
+
+    [Fact]
+    public void NoThrowAuditRejectsCheckedDivRem()
+    {
+        var artifact = Artifact(CheckedDivRemBody(PrimitiveType.Int32, 7, 3, 2, 1), effect: 1);
+        TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+    }
+
+    [Fact]
+    public void CheckedDivRemResultsMustBeConsecutiveAndDistinct()
+    {
+        var body = CheckedDivRemBody(PrimitiveType.Int32, 7, 3, 2, 1);
+        var operation = Array.IndexOf(body, (byte)0x18);
+        body[operation + 2] = 3;
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(Artifact(body)));
     }
 
     [Fact]
@@ -431,6 +482,73 @@ public sealed class TrRmExecutionAuditTests
         AddConstant(5, int32TypeId, 1);
         AddConstant(6, int32TypeId, 0);
         body.AddRange([7, 7, 4, 5, 6, 0x83, 7]);
+        return body.ToArray();
+
+        void AddConstant(int result, int typeId, ulong bits)
+        {
+            var dataWidth = bits <= byte.MaxValue ? 1
+                : bits <= ushort.MaxValue ? 2
+                : bits <= uint.MaxValue ? 4 : 8;
+            if (dataWidth == 1)
+            {
+                body.AddRange([1, (byte)result, (byte)typeId, (byte)bits]);
+            }
+            else
+            {
+                body.AddRange([0xF0, (byte)(dataWidth switch { 2 => 0x10, 4 => 0x20, _ => 0x30 }),
+                    1, (byte)result, (byte)typeId]);
+                for (var index = 0; index < dataWidth; index++)
+                {
+                    body.Add((byte)(bits >> (index * 8)));
+                }
+            }
+        }
+    }
+
+    private static byte[] CheckedDivRemBody(PrimitiveType type,
+        ulong dividend, ulong divisor, ulong quotient, ulong remainder)
+    {
+        var typeRows = new List<int>();
+        int TypeId(PrimitiveType value)
+        {
+            var row = value switch
+            {
+                PrimitiveType.Int32 => 1,
+                PrimitiveType.Bool => 2,
+                PrimitiveType.UInt32 => 4,
+                PrimitiveType.Int64 => 5,
+                PrimitiveType.UInt64 => 6,
+                _ => throw new ArgumentOutOfRangeException(nameof(value)),
+            };
+            var existing = typeRows.IndexOf(row);
+            if (existing >= 0)
+            {
+                return existing + 1;
+            }
+            typeRows.Add(row);
+            return typeRows.Count;
+        }
+
+        var valueType = TypeId(type);
+        var boolType = TypeId(PrimitiveType.Bool);
+        var int32Type = TypeId(PrimitiveType.Int32);
+        var body = new List<byte> { 4, (byte)typeRows.Count };
+        foreach (var row in typeRows)
+        {
+            body.AddRange(Words((uint)row));
+        }
+        body.Add(12);
+        AddConstant(1, valueType, dividend);
+        AddConstant(2, valueType, divisor);
+        body.AddRange([0x18, 3, 4, 1, 2]);
+        AddConstant(5, valueType, quotient);
+        AddConstant(6, valueType, remainder);
+        body.AddRange([5, 7, 4, 3, 5, 5, 8, 4, 4, 6]);
+        AddConstant(9, boolType, 0);
+        body.AddRange([7, 10, 7, 8, 9]);
+        AddConstant(11, int32Type, 42);
+        AddConstant(12, int32Type, 0);
+        body.AddRange([7, 13, 10, 11, 12, 0x83, 13]);
         return body.ToArray();
 
         void AddConstant(int result, int typeId, ulong bits)

@@ -134,7 +134,7 @@ public static partial class TrRmExecutableCompiler
                 Write(instructions, (ulong)left, referenceWidth);
                 Write(instructions, (ulong)right, referenceWidth);
             }
-            if (function.IsNoThrow && opcode is 0x15 or 0x16 or 0x17)
+            if (function.IsNoThrow && opcode is 0x15 or 0x16 or 0x17 or 0x18)
             {
                 throw Unsupported("NoThrow requires a total Body, not a source-only constant proof.");
             }
@@ -232,7 +232,7 @@ public static partial class TrRmExecutableCompiler
         for (var ordinal = 0; ordinal < count; ordinal++)
         {
             var (opcode, width, countWidth, dataWidth) = ReadInstruction(body, ref position);
-            if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 0x12 or 0x15 or 0x16 or 0x17))
+            if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 0x12 or 0x15 or 0x16 or 0x17 or 0x18))
             {
                 throw Invalid($"Operation 0x{opcode:X2} is not executable.");
             }
@@ -242,13 +242,22 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Invalid("Noncontiguous value definitions.");
             }
+            var secondResult = 0;
+            if (opcode == 0x18)
+            {
+                secondResult = ReadInt(body, ref position, width);
+                if (secondResult != ++nextValue || nextValue > SemanticVerifier.MaximumVariables)
+                {
+                    throw Invalid("Noncontiguous CheckedDivRem value definitions.");
+                }
+            }
             var typeId = opcode is 1 or 2 or 6 or 0x16 ? ReadInt(body, ref position, width) : 0;
             var policy = opcode == 6 ? ReadByte(body, ref position) : (byte)0;
             var kind = opcode is 4 or 5 or 0x15 ? ReadByte(body, ref position) : (byte)0;
             var bits = opcode is 1 or 2 ? ReadBits(body, ref position, dataWidth) : 0;
-            var left = opcode is 3 or 4 or 6 or 7 or 0x16 or 0x17 or 5 or 0x15
+            var left = opcode is 3 or 4 or 6 or 7 or 0x16 or 0x17 or 5 or 0x15 or 0x18
                 ? ReadInt(body, ref position, width) : 0;
-            var right = opcode is 5 or 7 or 0x15 ? ReadInt(body, ref position, width) : 0;
+            var right = opcode is 5 or 7 or 0x15 or 0x18 ? ReadInt(body, ref position, width) : 0;
             var third = opcode == 7 ? ReadInt(body, ref position, width) : 0;
             var method = opcode == 0x12 ? ReadInt(body, ref position, width) : 0;
             if (opcode == 0x12 && (method == 0 || method > functions.Count))
@@ -267,7 +276,7 @@ public static partial class TrRmExecutableCompiler
                 arguments.Add(new BoundRead(id - 1, variables[id - 1].Type, default));
             }
             var maximum = Math.Max(Math.Max(Math.Max(result, typeId), method),
-                Math.Max(Math.Max(left, right), third));
+                Math.Max(Math.Max(Math.Max(left, right), third), secondResult));
             foreach (var argument in arguments)
             {
                 maximum = Math.Max(maximum, ((BoundRead)argument).Variable + 1);
@@ -280,7 +289,7 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Invalid("Nonminimal instruction width.");
             }
-            if (noThrow && opcode is 0x15 or 0x16 or 0x17)
+            if (noThrow && opcode is 0x15 or 0x16 or 0x17 or 0x18)
             {
                 throw Invalid("NoThrow cannot rely on source-only constant proofs for checked operations.");
             }
@@ -291,6 +300,21 @@ public static partial class TrRmExecutableCompiler
                     throw Invalid("Undefined operation operand.");
                 }
                 return new BoundRead(id - 1, variables[id - 1].Type, default);
+            }
+            if (opcode == 0x18)
+            {
+                var dividend = Operand(left);
+                var divisor = Operand(right);
+                if (!IsInteger(dividend.Type) || divisor.Type != dividend.Type
+                    || result - 1 != variables.Count || secondResult - 1 != variables.Count + 1)
+                {
+                    throw Invalid("CheckedDivRem requires equal integer operands and distinct consecutive results.");
+                }
+                statements.Add(new TrRmScalarDivRem(result - 1, secondResult - 1,
+                    dividend, divisor, dividend.Type));
+                variables.Add(new BoundVariable($"value{result}", dividend.Type, false, default));
+                variables.Add(new BoundVariable($"value{secondResult}", dividend.Type, false, default));
+                continue;
             }
             BoundExpression expression;
             if (opcode is 1 or 2)

@@ -722,6 +722,15 @@ public static partial class TrRmExecutableCompiler
                     {
                         operations.Add(discarded);
                     }
+                    else if (statement is TrRmScalarDivRem divRem)
+                    {
+                        if (valueTypes[divRem.QuotientVariable] != divRem.Type
+                            || valueTypes[divRem.RemainderVariable] != divRem.Type)
+                        {
+                            throw Invalid("Indexed CheckedDivRem result type mismatch.");
+                        }
+                        operations.Add(divRem);
+                    }
                 }
                 if (operations.Count != countOperations)
                 {

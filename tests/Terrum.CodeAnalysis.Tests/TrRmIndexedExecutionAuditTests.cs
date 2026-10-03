@@ -27,6 +27,32 @@ public sealed class TrRmIndexedExecutionAuditTests
         0x83, 4,
     ];
 
+    private static byte[] CheckedDivRemBody =>
+    [
+        8, 1, 13, 0, 2, 1, 0, 0, 0, 2, 0, 0, 0,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 2, 1, 2, 1, 2, 1, 1, 1, 1, 1, 1, 1,
+        0, 13,
+        29, 33, 37, 37, 42, 46, 50, 55, 60, 64, 69, 73, 77,
+        0, 84,
+        82,
+        16, 13,
+        1, 2, 2, 2, 3, 5, 4, 6, 5, 5, 6, 6, 7, 8, 8, 8, 9, 8, 10, 11, 11, 11, 12, 11, 13, 12,
+        12,
+        1, 1, 1, 7,
+        1, 2, 1, 3,
+        0x18, 3, 4, 1, 2,
+        1, 5, 1, 2,
+        1, 6, 1, 1,
+        5, 7, 4, 3, 5,
+        5, 8, 4, 4, 6,
+        1, 9, 2, 0,
+        7, 10, 7, 8, 9,
+        1, 11, 1, 42,
+        1, 12, 1, 0,
+        7, 13, 10, 11, 12,
+        0x83, 13,
+    ];
+
     // Four blocks: compute flag/x/y, branch through two arms, merge with one int32 parameter.
     private static byte[] MergeBody(bool chooseFirst) =>
     [
@@ -88,6 +114,24 @@ public sealed class TrRmIndexedExecutionAuditTests
         var program = TrRmExecutableCompiler.Load(artifact);
         Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
         Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void HandwrittenCheckedDivRemDefinesTwoIndexedResultsTogether()
+    {
+        var artifact = TrRmExecutionAuditTests.Artifact(CheckedDivRemBody);
+        TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void IndexedNoThrowAuditRejectsCheckedDivRem()
+    {
+        var artifact = TrRmExecutionAuditTests.Artifact(CheckedDivRemBody, effect: 1);
+        TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
 
     [Theory]
