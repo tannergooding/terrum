@@ -49,6 +49,37 @@ public sealed class ModuleTests
     }
 
     [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task NamedOutputArgumentsRetainParameterMappingAcrossModuleArtifactsAsync(
+        BoundRuntimePolicy policy)
+    {
+        var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public bool Populate(int32 seed, out int32 value) {
+                value = seed;
+                return true;
+            }
+            """), policy);
+        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Populate"]);
+
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                if (!Populate(value: out var output, seed: 42)) {
+                    return 1;
+                }
+                return output;
+            }
+            """), ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        var nativePolicy = policy == BoundRuntimePolicy.FailFast
+            ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, producer), nativePolicy)).ConfigureAwait(true));
+    }
+
+    [Theory]
     [InlineData(BoundRuntimePolicy.FailFast, @"samples\native\graph\managed-class-leaf.terrum", "Leaf")]
     [InlineData(BoundRuntimePolicy.CheckedExceptions, @"samples\native\graph\managed-class-leaf.terrum", "Leaf")]
     [InlineData(BoundRuntimePolicy.FailFast, @"samples\native\graph\managed-copy-class-leaf.terrum", "Leaf")]

@@ -3028,12 +3028,11 @@ internal sealed partial class Binder
         var signature = function < 0 ? null : _signatures[function];
         var hasNamedArguments = HasNamedArguments(arguments);
         var namedArgumentsSupported = hasNamedArguments && signature is not null
-            && !signature.Parameters.Any(static parameter => parameter.IsOut)
             && (signature.External is null || signature.External.Intrinsic == BoundIntrinsic.None);
         var validNamedBinding = namedArgumentsSupported;
         if (hasNamedArguments && !namedArgumentsSupported)
         {
-            Report("TRM3011", "Named arguments are supported only for uniquely resolved by-value calls.", arguments.Span);
+            Report("TRM3011", "Named arguments are supported only for uniquely resolved non-intrinsic calls.", arguments.Span);
         }
         var ownerName = signature?.StructName is null ? null
             : signature.Name[..signature.Name.LastIndexOf('.', StringComparison.Ordinal)];
@@ -3163,7 +3162,8 @@ internal sealed partial class Binder
                 }
                 assignedParameters[position] = true;
             }
-            if (argument.Children[0] is SyntaxTokenElement passing
+            var passingIndex = argumentName is null ? 0 : 2;
+            if (argument.Children[passingIndex] is SyntaxTokenElement passing
                 && (passing.Token.Kind == TokenKind.OutKeyword
                     || (passing.Token.Kind == TokenKind.Identifier && passing.Token.Text == "init")))
             {
@@ -3175,12 +3175,14 @@ internal sealed partial class Binder
                     bound.Add(ErrorExpression(argument.Span));
                     continue;
                 }
-                var declares = argument.Children.Length == 3
-                    && argument.Children[1] is SyntaxTokenElement variableKeyword
+                var outputTargetIndex = passingIndex + 1;
+                var declares = argument.Children.Length == outputTargetIndex + 2
+                    && argument.Children[outputTargetIndex] is SyntaxTokenElement variableKeyword
                     && variableKeyword.Token.Kind == TokenKind.VarKeyword;
                 var outName = declares
-                    ? ((SyntaxTokenElement)argument.Children[2]).Token
-                    : argument.Children.Length == 2 && argument.Children[1] is SyntaxNode outExpression
+                    ? ((SyntaxTokenElement)argument.Children[outputTargetIndex + 1]).Token
+                    : argument.Children.Length == outputTargetIndex + 1
+                        && argument.Children[outputTargetIndex] is SyntaxNode outExpression
                         && outExpression.Kind == SyntaxKind.NameExpression
                         ? ((SyntaxTokenElement)outExpression.Children[0]).Token : null;
                 if (outName is null)

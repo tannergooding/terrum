@@ -217,6 +217,42 @@ public sealed class ContextualPunctuationTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void NamedOutputArgumentsKeepSourceOrderAndFormalModes(NativeRuntimePolicy policy)
+    {
+        const string source = """
+            int32 Record(int32 value) {
+                Host.Trace[0] = Host.Trace[0] * 10 + value;
+                return value;
+            }
+            bool Fill(int32 first, out int32 result, int32 second) {
+                result = first * 10 + second;
+                return true;
+            }
+            bool Initialize(int32 value, init ref<int32> result) {
+                result = value;
+                return true;
+            }
+            int32 Main() {
+                init int32 initialized;
+                mut int32 filled = 0;
+                if (!Fill(second: Record(2), result: out filled, first: Record(1))) {
+                    return 1;
+                }
+                if (!Initialize(result: init initialized, value: filled)) {
+                    return 2;
+                }
+                return filled + initialized + Host.Trace[0] - 3;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            [new HostBuffer("Trace", PrimitiveType.Int32, [0], true)], (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public void NamedInstanceArgumentsKeepTheReceiverInItsFormalSlot(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -240,7 +276,7 @@ public sealed class ContextualPunctuationTests
     [InlineData("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(first: 1, first: 2); }")]
     [InlineData("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(second: 2, 1); }")]
     [InlineData("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(first: 1); }")]
-    [InlineData("bool Fill(out int32 value, int32 other) { value = other; return true; } int32 Main() { Fill(other: 1, value: out var result); return result; }")]
+    [InlineData("bool Fill(out int32 value) { value = 1; return true; } int32 Main() { mut int32 result = 0; Fill(value: init result); return result; }")]
     public void InvalidNamedArgumentBindingsAreRejected(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));

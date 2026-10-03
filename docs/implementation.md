@@ -6,13 +6,13 @@ Semantic body feature numbers are milestone labels, not persisted format
 versions. Structured semantic-module writers and readers use revision 50 only;
 older revisions are rejected, not normalized or upgraded.
 
-Hosted binding accepts named by-value arguments for uniquely resolved,
-non-intrinsic calls. Arguments retain source evaluation order while each
-records its formal parameter position for verification and native lowering.
-Semantic-module revision 50 persists that mapping. Source-free indexed TRRM
-evaluates mapped arguments in source order and materializes them in formal
-order before emitting its positional call. Overload selection and named output
-arguments remain outside this support.
+Hosted binding accepts named arguments, including `out` and `init ref<T>`
+destinations, for uniquely resolved non-intrinsic calls. Arguments retain
+source evaluation order while each records its formal parameter position for
+verification and native lowering. Semantic-module revision 50 persists that
+mapping. Source-free indexed TRRM evaluates mapped arguments in source order
+and materializes supported by-value arguments in formal order before emitting
+its positional call. Overload selection remains outside this support.
 
 The normative declaration grammar additionally requires explicit primary
 visibility, fixed role-specific ordering, primary/secondary partial contract
