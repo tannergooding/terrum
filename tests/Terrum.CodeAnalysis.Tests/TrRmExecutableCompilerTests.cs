@@ -391,6 +391,21 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    public async Task IndexedOptionalChar16SelectChoosesPayloadThroughNativeGraph(
+        bool selectFirst, int expected)
+    {
+        var loaded = TrRmExecutableCompiler.Load(OptionalScalarArtifact(
+            IndexedOptionalChar16SelectionBody(selectFirst),
+            optionalChar16: true, optionalInt32: false));
+
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.Equal(expected, await StaticProtocolTests.RunAsync(
+            NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+    }
+
+    [Theory]
     [InlineData(2, false, 0)]
     [InlineData(2, true, 42)]
     [InlineData(3, false, 0)]
@@ -552,7 +567,7 @@ public sealed class TrRmExecutableCompilerTests
         ];
         byte[] lastUseOrdinals =
         [
-            3, 4, 22, 5, 6, 12, 13, 20, 14, 15,
+            3, 4, 22, 5, 20, 12, 13, 9, 14, 15,
             15, 15, 16, 16, 17, 18, 17, 18, 26, 20,
             21, 22, 25, 25, 25, 26, 27,
         ];
@@ -578,7 +593,7 @@ public sealed class TrRmExecutableCompilerTests
             [0x15, 18, 1, 17, 15],
             [0x15, 19, 1, 18, 16],
             [1, 20, 1, (byte)(selectPresent ? 1 : 0)],
-            [7, 21, 20, 3, 8],
+            [7, 21, 20, 3, 5],
             [3, 22, 21],
             [5, 23, 4, 22, 3],
             [1, 24, 2, 1],
@@ -602,6 +617,59 @@ public sealed class TrRmExecutableCompilerTests
         var terminatorOffset = (byte)block.Count;
         block.Add(0x83);
         block.Add(27);
+
+        var body = new List<byte> { 0x08, 1, (byte)valueTypeIds.Length, 0, 4 };
+        foreach (var row in new[] { 2, 4, 3, 8 })
+        {
+            var bytes = new byte[sizeof(uint)];
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes, (uint)row);
+            body.AddRange(bytes);
+        }
+        foreach (var typeId in valueTypeIds)
+        {
+            body.Add(typeId);
+            body.Add(1);
+        }
+        body.AddRange([0, (byte)valueTypeIds.Length]);
+        body.AddRange(operationOffsets);
+        body.AddRange([0, (byte)block.Count, terminatorOffset]);
+        body.AddRange(block);
+        return body.ToArray();
+    }
+
+    private static byte[] IndexedOptionalChar16SelectionBody(bool selectFirst)
+    {
+        byte[] valueTypeIds = [3, 3, 4, 4, 1, 4, 1, 2, 2, 2];
+        byte[] lastUseOrdinals = [2, 3, 6, 5, 5, 6, 9, 9, 9, 10];
+        byte[][] operations =
+        [
+            [1, 1, 3, 65],
+            [1, 2, 3, 66],
+            [8, 3, 4, 1],
+            [8, 4, 4, 2],
+            [1, 5, 1, (byte)(selectFirst ? 1 : 0)],
+            [7, 6, 5, 3, 4],
+            [5, 7, 4, 6, 3],
+            [1, 8, 2, 1],
+            [1, 9, 2, 0],
+            [7, 10, 7, 8, 9],
+        ];
+        var block = new List<byte> { 16, (byte)valueTypeIds.Length };
+        for (var value = 0; value < valueTypeIds.Length; value++)
+        {
+            block.Add((byte)(value + 1));
+            block.Add(lastUseOrdinals[value]);
+        }
+        block.Add((byte)operations.Length);
+        var operationOffsets = new byte[operations.Length];
+        for (var operation = 0; operation < operations.Length; operation++)
+        {
+            operationOffsets[operation] = (byte)block.Count;
+            block.AddRange(operations[operation]);
+        }
+        var terminatorOffset = (byte)block.Count;
+        block.Add(0x83);
+        block.Add(10);
 
         var body = new List<byte> { 0x08, 1, (byte)valueTypeIds.Length, 0, 4 };
         foreach (var row in new[] { 2, 4, 3, 8 })

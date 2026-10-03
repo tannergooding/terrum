@@ -1752,6 +1752,7 @@ internal sealed partial class PeCompiler
             _code.Bytes(0x39, 0xC8);
         }
         _code.Bytes(0x0F, equality.Negated ? (byte)0x95 : (byte)0x94, 0xC0);
+        _code.Bytes(0x0F, 0xB6, 0xC0);
         var compared = _code.Jump();
 
         _code.PatchRelative(leftAbsent, _code.Position);
