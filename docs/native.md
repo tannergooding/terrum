@@ -491,10 +491,11 @@ verification and result-independent publication path.
 Complete-program projection v83 adds source-audited caller-unsafe top-level
 callable declarations. Its existing header flags record the declaration
 requirement, and only calls enclosed by an explicit `unsafe { ... }` block are
-authorized in the projected body. The hosted verifier and emitter remain
-authoritative; unsafe declarations do not implicitly authorize their own
-bodies, and `unsafe(expr)`, persisted caller-safety metadata and standalone
-compilation remain unsupported by this bounded projection.
+authorized in the projected body. Version 84 adds a source-audited kind-110
+wrapper for `unsafe(expr)` and authorizes calls contained by that expression.
+The hosted verifier and emitter remain authoritative; unsafe declarations do
+not implicitly authorize their own bodies, and persisted caller-safety metadata
+and standalone compilation remain unsupported by this bounded projection.
 
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.

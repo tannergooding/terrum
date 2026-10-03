@@ -323,7 +323,7 @@ public static partial class ScalarFrontendHost
                 var node = new ScalarFrontendNode(words[offset], words[offset + 1],
                     Span(offset + 2), words[offset + 4], words[offset + 5],
                     words[offset + 6], words[offset + 7]);
-                var unary = node.Operation is 46 or 62 or 63 or 83 or 86 or 87 or 109
+                var unary = node.Operation is 46 or 62 or 63 or 83 or 86 or 87 or 109 or 110
                     || node.Operation is 57 or 58 && node.Right == -1;
                 var call = node.Operation == 102 || node.Operation == 105 && context is not null;
                 var callee = node.Operation == 105 ? context?.Callee(i) : null;
@@ -342,6 +342,7 @@ public static partial class ScalarFrontendHost
                     || (node.Operation == 102 && context is not null)
                     || (node.Operation == 109
                         && (!allowInitializationTests || node.Type != BooleanTypeCode))
+                    || (node.Operation == 110 && context?.AllowUnsafeExpressions != true)
                     || (call && (context is null && words[0] < 70
                         || node.Type != (callee?.ReturnType ?? words[5])
                         || callee is { ReturnType: 0 }
@@ -429,7 +430,7 @@ public static partial class ScalarFrontendHost
                             || node.Operation == 83 && (node.Type is not (1 or 2 or 3 or 4 or 6)
                                 || operand.Type is not (1 or 2 or 3 or 4 or 6)
                                 || intrinsicTypes[node.Left] == 0 && node.Type != operand.Type)
-                            || node.Operation != 46 && node.Operation != 83
+                            || node.Operation is not (46 or 83 or 110)
                                 && node.Operation is not (86 or 87)
                                 && operand.Operation is not (102 or 105) && operand.Right != -1
                             || node.Operation is 86 or 87 && (node.Type is < 1 or > 4
@@ -490,7 +491,7 @@ public static partial class ScalarFrontendHost
                 }
                 // Comparison results and conditional predicates cannot establish numeric operand context.
                 intrinsicTypes[i] = node.Operation switch {
-                    0 or 20 or 21 or 62 or 83 or 86 or 87 or 102 or 103 or 104
+                    0 or 20 or 21 or 62 or 83 or 86 or 87 or 102 or 103 or 104 or 110
                         or 105 or 107 or 108 or 109
                         or >= 65 and <= 70 or 72 or 74 => node.Type,
                     3 => 0,
@@ -1347,7 +1348,16 @@ public static partial class ScalarFrontendHost
                     return false;
                 }
                 used[index] = true;
-                if (node.Operation == 46)
+                if (node.Operation == 110)
+                {
+                    if (context?.AllowUnsafeExpressions != true
+                        || !Take(TokenKind.UnsafeKeyword) || !Take(TokenKind.OpenParen)
+                        || !TakeTree(node.Left, parseDepth + 1) || !Take(TokenKind.CloseParen))
+                    {
+                        return false;
+                    }
+                }
+                else if (node.Operation == 46)
                 {
                     if (!Take(TokenKind.OpenParen) || !TakeTree(node.Left, parseDepth + 1)
                         || !Take(TokenKind.CloseParen))
@@ -2665,6 +2675,10 @@ public static partial class ScalarFrontendHost
                 {
                     bound = new BoundIsInitialized(result.Nodes[node.Left].Left - 1, node.Span);
                 }
+                else if (node.Operation == 110)
+                {
+                    bound = treeExpressions[node.Left];
+                }
                 else if (node.Operation is 102 or 105)
                 {
                     var argumentCount = node.Operation == 105 ? node.High : result.ParameterCount;
@@ -2677,7 +2691,10 @@ public static partial class ScalarFrontendHost
                     var isUnsafeAuthorized = !result.Statements.IsDefault
                         && result.Statements.Any(statement => statement.Kind == 31
                             && statement.BodySpan.Start <= node.Span.Start
-                            && node.Span.End <= statement.BodySpan.End);
+                            && node.Span.End <= statement.BodySpan.End)
+                        || result.Nodes.Any(scope => scope.Operation == 110
+                            && scope.Span.Start <= node.Span.Start
+                            && node.Span.End <= scope.Span.End);
                     bound = new BoundCall(node.Operation == 105 ? result.CallTargets[i] : 0,
                         arguments.ToImmutable(), type, node.Span) {
                         IsUnsafeAuthorized = isUnsafeAuthorized,

@@ -28,7 +28,8 @@ public static partial class ScalarFrontendHost
     private sealed record ProgramReadContext(ImmutableArray<ProgramDeclaration> Declarations, int[] Targets,
         bool AllowVoidCalls, bool AllowDoesNotReturn, bool AllowOutputArguments,
         bool AllowInitRefArguments, bool AllowNonBooleanOutputParameters,
-        bool AllowNonBooleanInitRefParameters, bool AllowInitializationTests, bool AllowCallerUnsafe)
+        bool AllowNonBooleanInitRefParameters, bool AllowInitializationTests, bool AllowCallerUnsafe,
+        bool AllowUnsafeExpressions)
     {
         public ProgramDeclaration Callee(int node)
         {
@@ -41,7 +42,7 @@ public static partial class ScalarFrontendHost
         }
     }
 
-    /// <summary>Reads complete v74–v83 snapshots and the v1–v73/v79–v81 single-function projections.</summary>
+    /// <summary>Reads complete v74–v84 snapshots and the v1–v73/v79–v81 single-function projections.</summary>
     public static ScalarFrontendResult ReadResult(SourceText source, ReadOnlySpan<byte> bytes,
         ReadOnlySpan<byte> programBytes, BoundRuntimePolicy policy)
         => ReadProgram(source, bytes, programBytes, policy).Projection;
@@ -68,7 +69,7 @@ public static partial class ScalarFrontendHost
         {
             words[i] = BinaryPrimitives.ReadInt32LittleEndian(programBytes.Slice(i * sizeof(int), sizeof(int)));
         }
-        if (words[0] is not (74 or 75 or 76 or 77 or 78 or 80 or 81 or 82 or 83)
+        if (words[0] is not (74 or 75 or 76 or 77 or 78 or 80 or 81 or 82 or 83 or 84)
             || words[1] != 1 || words[2] is < 2 or > MaximumFunctions
             || words[3] != 0 || source.Length > 16_384
             || words.AsSpan(4 + words[2] * ProgramFrameWordCount).IndexOfAnyExcept(0) >= 0)
@@ -114,7 +115,7 @@ public static partial class ScalarFrontendHost
             }
             var context = new ProgramReadContext(declarations, targets, words[0] >= 75,
                 words[0] >= 76, words[0] >= 77, words[0] >= 78, words[0] >= 80,
-                words[0] >= 82, words[0] >= 81, words[0] >= 83);
+                words[0] >= 82, words[0] >= 81, words[0] >= 83, words[0] >= 84);
             var function = ReadResultCore(FunctionSource(source, declaration.Span), payload, policy, context);
             if (!function.IsValid || function.ReturnType != declaration.ReturnType
                 || function.ParameterCount != declaration.ParameterTypes.Length
@@ -145,6 +146,7 @@ public static partial class ScalarFrontendHost
         var hasNonBooleanInitRefParameter = false;
         var hasInitializationTest = false;
         var hasCallerUnsafeDeclaration = false;
+        var hasUnsafeExpression = false;
         foreach (var declaration in declarations)
         {
             hasDoesNotReturn |= (declaration.Effects & 4) != 0;
@@ -161,9 +163,11 @@ public static partial class ScalarFrontendHost
             foreach (var node in function.Nodes)
             {
                 hasInitializationTest |= node.Operation == 109;
+                hasUnsafeExpression |= node.Operation == 110;
             }
         }
-        var expectedVersion = hasCallerUnsafeDeclaration ? 83
+        var expectedVersion = hasUnsafeExpression ? 84
+            : hasCallerUnsafeDeclaration ? 83
             : hasNonBooleanInitRefParameter ? 82
             : hasInitializationTest ? 81
             : hasNonBooleanOutputParameter ? 80

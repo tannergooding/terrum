@@ -2245,7 +2245,7 @@ mut class ScalarFrontendState
     {
         mut int32 selected = root;
         mut int32 operation = TreeWord(selected, 0);
-        while (operation == 46)
+        while (operation == 46 || operation == 110)
         {
             selected = TreeWord(selected, 4);
             operation = TreeWord(selected, 0);
@@ -2833,7 +2833,7 @@ mut class ScalarFrontendState
             Host.Frontend[offset + 7] = high;
             return true;
         }
-        if (operation == 46 && TreeWord(node, 1) == 0)
+        if ((operation == 46 || operation == 110) && TreeWord(node, 1) == 0)
         {
             if (!ResolveTreeLiteral(TreeWord(node, 4), type, false))
             {
@@ -3119,6 +3119,24 @@ mut class ScalarFrontendState
             return false;
         }
         require _tokens.TryGet(_at, out var token);
+        if (token.Kind == 76
+            && _tokens.TryGet(_at + 1, out var unsafeOpening)
+            && unsafeOpening.Kind == 46)
+        {
+            if (Host.FrontendProgram[0] < 74)
+            {
+                FailAt(1, token.Range);
+                return false;
+            }
+            _at = _at + 2;
+            if (!ParseTreeExpression(expected, 1, depth + 1, out var operand)
+                || !Take(47, out var unsafeClose))
+            {
+                return false;
+            }
+            return AddTreeNode(110, TreeWord(operand, 1), token.Range.Start,
+                unsafeClose.Range.End, operand, -1, 0, 0, out node);
+        }
         if (token.Kind == 2
             && _tokens.TryGet(_at + 1, out var opening)
             && opening.Kind == 46)

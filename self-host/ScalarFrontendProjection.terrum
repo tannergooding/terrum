@@ -63,6 +63,7 @@ namespace Terrum.CodeAnalysis;
 // Version 59 adds exact parameterless declaration effects in header word2:
 // Header flags: bit0 public, bit1 NoThrow, bit2 DoesNotReturn, bit3 caller-unsafe.
 // Program v83 adds caller-unsafe callable declarations; existing body layouts remain.
+// Program v84 adds kind 110 for a source-audited unsafe(expr) wrapper.
 // Version 60 adds kind 24 for ending a visible named local; slot is its identity,
 // root is -1, and the span includes the semicolon outside for-clause records.
 // Version 61 adds kind 25 for an explicitly typed vacant local; local flag bit 1

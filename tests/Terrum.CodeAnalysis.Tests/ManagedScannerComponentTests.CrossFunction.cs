@@ -128,13 +128,51 @@ public sealed partial class ManagedScannerComponentTests
             bytes, programBytes, BoundRuntimePolicy.FailFast));
     }
 
-    [Fact]
-    public async Task ScalarFrontendProgramKeepsUnsafeExpressionScopesOutsideItsProjectionAsync()
+    [Theory]
+    [InlineData("public unsafe int32 Danger(int32 value) => value + 1; public int32 Main() => unsafe(Danger(41));", 42)]
+    [InlineData("public unsafe int32 Danger(int32 value) => value + 1; public int32 Main() => unsafe(Danger(40) + 2);", 43)]
+    [InlineData("public unsafe int32 Danger(int32 value) => value + 1; public int32 Main() => 1 + unsafe(Danger(40));", 42)]
+    [InlineData("public int32 Main() { if (unsafe(true)) { return 42; } return 0; } int32 Other() => 0;", 42)]
+    public async Task ScalarFrontendProgramProjectsUnsafeExpressionScopesAsync(string text, int expected)
     {
-        const string text = "public unsafe int32 Danger() => 42; public int32 Main() => unsafe(Danger());";
-        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
-        Assert.False(ScalarFrontendHost.ReadResult(SourceText.From(text), bytes, programBytes,
-            BoundRuntimePolicy.FailFast).IsValid);
+        var source = SourceText.From(text);
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var (bytes, programBytes, stage) = await ProduceScalarProgramAsync(text, policy);
+            Assert.Equal(84, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
+            var result = ScalarFrontendHost.ReadProgram(source, bytes, programBytes,
+                (BoundRuntimePolicy)policy);
+            Assert.True(result.Projection.IsValid);
+            var wrapperFunctionIndex = Enumerable.Range(0, result.Projection.Functions.Length)
+                .Single(index => result.Projection.Functions[index].Nodes
+                    .Any(static node => node.Operation == 110));
+            var wrapperNodes = result.Projection.Functions[wrapperFunctionIndex].Nodes;
+            var wrapper = Assert.Single(wrapperNodes,
+                static node => node.Operation == 110);
+
+            var actual = Assert.IsType<BoundProgram>(result.Program);
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Main"], policy),
+                NativeEmitter.EmitLibrary(actual, ["Main"], policy));
+            var entry = actual.Functions.IndexOf(actual.Functions.Single(static function => function.Name == "Main"));
+            Assert.Equal(expected, NativeJit.Execute(actual with { EntryPoint = entry }, policy));
+            Assert.Equal(expected, NativeJit.Execute(hosted with { EntryPoint = entry }, policy));
+            await ExecuteAotAsync(stage, policy);
+
+            var wrapperIndex = wrapperNodes.IndexOf(wrapper);
+            var wrapperOperationOffset = (4 + wrapperFunctionIndex * ScalarFrontendHost.ProgramFrameWordCount + 4
+                + 42 + wrapperIndex * 8) * sizeof(int);
+            BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(wrapperOperationOffset), 46);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source,
+                bytes, programBytes, (BoundRuntimePolicy)policy));
+            BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(wrapperOperationOffset), 110);
+
+            BinaryPrimitives.WriteInt32LittleEndian(programBytes, 83);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source,
+                bytes, programBytes, (BoundRuntimePolicy)policy));
+        }
     }
 
     [Theory]
