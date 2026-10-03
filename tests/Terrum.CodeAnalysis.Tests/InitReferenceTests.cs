@@ -127,14 +127,17 @@ public sealed class InitReferenceTests
     }
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, false, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, true, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, true, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, false, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, true, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, true, true)]
+    [InlineData(NativeRuntimePolicy.FailFast, false, false, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true, false, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true, true, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true, false, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false, false, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true, false, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true, true, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true, false, true)]
     public void InfeasibleNestedOutputsRemainVacant(
-        NativeRuntimePolicy policy, bool negateInitializationTest, bool compoundInitializationTest)
+        NativeRuntimePolicy policy, bool negateInitializationTest, bool compoundInitializationTest,
+        bool conditionalInitializationTest)
     {
         var source = new StringBuilder("""
             [NoThrow] bool Fill(bool publish, init ref<int32> value) {
@@ -162,6 +165,10 @@ public sealed class InitReferenceTests
         if (compoundInitializationTest)
         {
             initializationTest = "(" + initializationTest + " && true)";
+        }
+        if (conditionalInitializationTest)
+        {
+            initializationTest = "(" + initializationTest + " ? true : false)";
         }
         source.Append("    if (Identity(").Append(initializationTest).Append(" || (");
         for (var index = 0; index < 24; index++)
