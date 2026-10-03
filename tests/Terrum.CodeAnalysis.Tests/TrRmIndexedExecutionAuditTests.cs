@@ -354,6 +354,55 @@ public sealed class TrRmIndexedExecutionAuditTests
         Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
     }
 
+    [Theory]
+    [InlineData((byte)0, (byte)0, (byte)0, (byte)0)]
+    [InlineData((byte)1, (byte)1, (byte)0, (byte)0)]
+    public void IndexedSwitchRejectsDuplicateAndDescendingPatterns(
+        byte firstLow, byte firstHigh, byte secondLow, byte secondHigh)
+    {
+        var body = SwitchBody(0);
+        body[49] = firstLow;
+        body[50] = firstHigh;
+        body[53] = secondLow;
+        body[54] = secondHigh;
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
+    }
+
+    [Fact]
+    public void IndexedSwitchRejectsNonminimalPatternDataWidth()
+    {
+        var body = SwitchBody(0);
+        body[53] = 1;
+        body[54] = 0;
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
+    }
+
+    [Fact]
+    public void BooleanSwitchRejectsPatternsOutsideItsValueDomain()
+    {
+        var body = SmallScalarSwitchBody(selectorTypeRow: 2, selector: 0);
+        body[54] = 2;
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
+    }
+
+    [Fact]
+    public void TruncatingAnIndexedSwitchTerminatorNeverLoads()
+    {
+        var body = SwitchBody(0);
+        for (var length = 44; length < 59; length++)
+        {
+            var truncated = body[..length];
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(truncated)));
+        }
+    }
+
     [Fact]
     public void IndexedNoThrowAuditRejectsCheckedDivRem()
     {
