@@ -2371,16 +2371,17 @@ declaration and every call target's current signature, mode and effect.
 A declaration prepass resolves forward targets; all declared Bodies, even
 uncalled ones, are audited before native execution. Resultless operations and
 their argument checks still consume the shared analysis-visit budget.
-Independently supplied linear Bodies with integer conversions, shifts, calls
-or combined division/remainder use the same internal graph; other linear Bodies
-retain their existing structured lowering. The internal
+Independently supplied linear Bodies with integer conversions, wrapping
+operations, shifts, calls or combined division/remainder use the same internal
+graph; other linear Bodies retain their existing structured lowering. The internal
 representation-conversion node does not change checked source casts or add a
 development-module wire tag.
 The loader accepts `ConstBits`,
 `ConstSigned`, `Copy`, integer `Convert` (wrapping, saturating and equal-width
 bit reinterpretation), eager `Select` from already-defined Copy values,
 Boolean NOT, integer bitwise NOT/unary plus,
-scalar equality/inequality, integer ordering/bitwise operations, checked
+scalar equality/inequality, integer ordering/bitwise operations and explicitly
+wrapping integer add/subtract/multiply, checked
 integer arithmetic/negation/count shifts and dual-result `CheckedDivRem`,
 checked numeric conversion,
 equal-width integer bit reinterpretation, module-local scalar `Call`, `Branch`,
@@ -2392,6 +2393,8 @@ Integer division/remainder retain their distinct signed-minimum behavior.
 `CheckedDivRem` checks zero and signed-minimum divided by `-1`, then defines
 the quotient and remainder together; the quotient truncates toward zero and
 the remainder follows the dividend.
+Wrapping Body `Binary` operations use low-width modular bits without overflow
+failure; they do not change the checked semantics of source arithmetic.
 `char16` has conversion/equality semantics, not integer arithmetic or ordering.
 Optional values remain outside this bounded executable implementation even
 where the approved ISA assigns them. `Select`

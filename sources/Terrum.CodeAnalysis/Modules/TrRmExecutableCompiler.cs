@@ -321,7 +321,8 @@ public static partial class TrRmExecutableCompiler
                 _ = new TrRmCompactLinearBodyReader(bodies, row, modules, defs, sigs, parameters, types);
                 statements = DecodeBody(body, count, variables, noThrow, types, functions);
                 if (statements.Any(static statement => statement is BoundLocal
-                    { Initializer: TrRmScalarReinterpret or TrRmScalarConvert or BoundBinary
+                    { Initializer: TrRmScalarReinterpret or TrRmScalarConvert
+                        or TrRmScalarWrappingBinary or BoundBinary
                         { Operator: TokenKind.ShiftLeft or TokenKind.ShiftRight } }
                     or BoundLocal { Initializer: BoundCall }
                     or BoundExpressionStatement { Expression: BoundCall }

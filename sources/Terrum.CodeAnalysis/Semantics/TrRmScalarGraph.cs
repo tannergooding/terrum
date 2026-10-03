@@ -17,6 +17,9 @@ internal sealed record TrRmScalarReinterpret(BoundExpression Operand, PrimitiveT
 internal sealed record TrRmScalarConvert(BoundExpression Operand, PrimitiveType Type, byte Policy)
     : BoundExpression(Type, default);
 
+internal sealed record TrRmScalarWrappingBinary(TokenKind Operator, BoundRead Left,
+    BoundRead Right, PrimitiveType Type) : BoundExpression(Type, default);
+
 internal sealed record TrRmScalarDivRem(int QuotientVariable, int RemainderVariable,
     BoundRead Dividend, BoundRead Divisor, PrimitiveType Type) : BoundStatement(default(TextSpan));
 
@@ -92,6 +95,19 @@ internal sealed class TrRmScalarGraph
                     BoundExpressionStatement { Expression: BoundCall value } => value,
                     _ => null,
                 };
+                if (operation is BoundLocal
+                    { Initializer: TrRmScalarWrappingBinary wrapping } local
+                    && (!IsInteger(wrapping.Type)
+                        || wrapping.Operator is not (TokenKind.Plus or TokenKind.Minus or TokenKind.Star)
+                        || local.Variable < ParameterCount || local.Variable >= Types.Length
+                        || Types[local.Variable] != wrapping.Type
+                        || (uint)wrapping.Left.Variable >= (uint)Types.Length
+                        || (uint)wrapping.Right.Variable >= (uint)Types.Length
+                        || Types[wrapping.Left.Variable] != wrapping.Type
+                        || Types[wrapping.Right.Variable] != wrapping.Type))
+                {
+                    throw new ArgumentException("Indexed wrapping Binary result or operand contract does not match.");
+                }
                 if (operation is TrRmScalarDivRem divRem
                     && (NoThrow || !IsInteger(divRem.Type)
                         || divRem.QuotientVariable < 0 || divRem.QuotientVariable >= Types.Length

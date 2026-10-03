@@ -53,6 +53,27 @@ public sealed class TrRmIndexedExecutionAuditTests
         0x83, 13,
     ];
 
+    private static byte[] WrappingBinaryBody =>
+    [
+        8, 1, 8, 0, 3, 1, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0,
+        3, 1, 3, 1, 3, 1, 3, 1, 2, 1, 1, 1, 1, 1, 1, 1,
+        0, 8,
+        19, 28, 32, 37, 41, 46, 50, 54,
+        0, 61,
+        59,
+        16, 8, 1, 2, 2, 2, 3, 4, 4, 4, 5, 7, 6, 7, 7, 7, 8, 8,
+        8,
+        0xF0, 0x20, 1, 1, 3, 0xFF, 0xFF, 0xFF, 0xFF,
+        1, 2, 3, 1,
+        5, 3, 10, 1, 2,
+        1, 4, 3, 0,
+        5, 5, 4, 3, 4,
+        1, 6, 1, 42,
+        1, 7, 1, 0,
+        7, 8, 5, 6, 7,
+        0x83, 8,
+    ];
+
     // Four blocks: compute flag/x/y, branch through two arms, merge with one int32 parameter.
     private static byte[] MergeBody(bool chooseFirst) =>
     [
@@ -124,6 +145,15 @@ public sealed class TrRmIndexedExecutionAuditTests
         var program = TrRmExecutableCompiler.Load(artifact);
         Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
         Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void HandwrittenWrappingBinaryUsesModularIntegerArithmetic()
+    {
+        var artifact = TrRmExecutionAuditTests.Artifact(WrappingBinaryBody);
+        TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
+        Assert.Equal(42, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast));
     }
 
     [Fact]

@@ -72,6 +72,28 @@ public sealed class TrRmExecutionAuditTests
     }
 
     [Theory]
+    [InlineData(PrimitiveType.Int32, 10, 0x7FFF_FFFFUL, 1UL, 0x8000_0000UL)]
+    [InlineData(PrimitiveType.UInt32, 10, 0xFFFF_FFFFUL, 1UL, 0UL)]
+    [InlineData(PrimitiveType.Int64, 10, 0x7FFF_FFFF_FFFF_FFFFUL, 1UL, 0x8000_0000_0000_0000UL)]
+    [InlineData(PrimitiveType.UInt64, 10, 0xFFFF_FFFF_FFFF_FFFFUL, 1UL, 0UL)]
+    [InlineData(PrimitiveType.Int32, 11, 0x8000_0000UL, 1UL, 0x7FFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt32, 11, 0UL, 1UL, 0xFFFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int64, 11, 0x8000_0000_0000_0000UL, 1UL, 0x7FFF_FFFF_FFFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt64, 11, 0UL, 1UL, 0xFFFF_FFFF_FFFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int32, 12, 0x4000_0000UL, 4UL, 0UL)]
+    [InlineData(PrimitiveType.UInt32, 12, 0x8000_0000UL, 2UL, 0UL)]
+    [InlineData(PrimitiveType.Int64, 12, 0x4000_0000_0000_0000UL, 4UL, 0UL)]
+    [InlineData(PrimitiveType.UInt64, 12, 0x8000_0000_0000_0000UL, 2UL, 0UL)]
+    public void IndependentWrappingBinaryExecutesAtTheOperandWidth(PrimitiveType type,
+        byte kind, ulong left, ulong right, ulong expected)
+    {
+        var artifact = Artifact(WrappingBinaryBody(type, kind, left, right, expected));
+        TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
+        Assert.Equal(42, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
     [InlineData(PrimitiveType.Int32, PrimitiveType.UInt64, 1, 0xFFFF_FFFFUL, 0xFFFF_FFFF_FFFF_FFFFUL)]
     [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 1, 0xFFFF_FFFF_7FFF_FFFFUL, 0x7FFF_FFFFUL)]
     [InlineData(PrimitiveType.UInt64, PrimitiveType.UInt32, 1, 0x1_0000_0001UL, 1UL)]
@@ -225,6 +247,15 @@ public sealed class TrRmExecutionAuditTests
         var artifact = Artifact(CheckedDivRemBody(PrimitiveType.Int32, 7, 3, 2, 1), effect: 1);
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+    }
+
+    [Fact]
+    public void NoThrowAllowsTotalWrappingBinary()
+    {
+        var artifact = Artifact(WrappingBinaryBody(PrimitiveType.Int32, 10,
+            0x7FFF_FFFF, 1, 0x8000_0000), effect: 1);
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
     }
 
     [Fact]
@@ -549,6 +580,70 @@ public sealed class TrRmExecutionAuditTests
         AddConstant(11, int32Type, 42);
         AddConstant(12, int32Type, 0);
         body.AddRange([7, 13, 10, 11, 12, 0x83, 13]);
+        return body.ToArray();
+
+        void AddConstant(int result, int typeId, ulong bits)
+        {
+            var dataWidth = bits <= byte.MaxValue ? 1
+                : bits <= ushort.MaxValue ? 2
+                : bits <= uint.MaxValue ? 4 : 8;
+            if (dataWidth == 1)
+            {
+                body.AddRange([1, (byte)result, (byte)typeId, (byte)bits]);
+            }
+            else
+            {
+                body.AddRange([0xF0, (byte)(dataWidth switch { 2 => 0x10, 4 => 0x20, _ => 0x30 }),
+                    1, (byte)result, (byte)typeId]);
+                for (var index = 0; index < dataWidth; index++)
+                {
+                    body.Add((byte)(bits >> (index * 8)));
+                }
+            }
+        }
+    }
+
+    private static byte[] WrappingBinaryBody(PrimitiveType type,
+        byte kind, ulong left, ulong right, ulong expected)
+    {
+        var typeRows = new List<int>();
+        int TypeId(PrimitiveType value)
+        {
+            var row = value switch
+            {
+                PrimitiveType.Int32 => 1,
+                PrimitiveType.Bool => 2,
+                PrimitiveType.UInt32 => 4,
+                PrimitiveType.Int64 => 5,
+                PrimitiveType.UInt64 => 6,
+                _ => throw new ArgumentOutOfRangeException(nameof(value)),
+            };
+            var existing = typeRows.IndexOf(row);
+            if (existing >= 0)
+            {
+                return existing + 1;
+            }
+            typeRows.Add(row);
+            return typeRows.Count;
+        }
+
+        var valueType = TypeId(type);
+        var boolType = TypeId(PrimitiveType.Bool);
+        var int32Type = TypeId(PrimitiveType.Int32);
+        var body = new List<byte> { 4, (byte)typeRows.Count };
+        foreach (var row in typeRows)
+        {
+            body.AddRange(Words((uint)row));
+        }
+        body.Add(8);
+        AddConstant(1, valueType, left);
+        AddConstant(2, valueType, right);
+        body.AddRange([5, 3, kind, 1, 2]);
+        AddConstant(4, valueType, expected);
+        body.AddRange([5, 5, 4, 3, 4]);
+        AddConstant(6, int32Type, 42);
+        AddConstant(7, int32Type, 0);
+        body.AddRange([7, 8, 5, 6, 7, 0x83, 8]);
         return body.ToArray();
 
         void AddConstant(int result, int typeId, ulong bits)

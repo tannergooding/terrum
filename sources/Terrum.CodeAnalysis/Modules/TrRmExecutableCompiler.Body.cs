@@ -412,6 +412,23 @@ public static partial class TrRmExecutableCompiler
                 };
                 expression = new BoundUnary(token, operand, operand.Type, default);
             }
+            else if (opcode == 5 && kind is >= 10 and <= 12)
+            {
+                var first = Operand(left);
+                var second = Operand(right);
+                if (!IsInteger(first.Type) || second.Type != first.Type)
+                {
+                    throw Invalid("Wrapping Binary requires equal integer operands.");
+                }
+                var token = kind switch
+                {
+                    10 => TokenKind.Plus,
+                    11 => TokenKind.Minus,
+                    12 => TokenKind.Star,
+                    _ => throw Invalid("Unsupported wrapping Binary kind."),
+                };
+                expression = new TrRmScalarWrappingBinary(token, first, second, first.Type);
+            }
             else
             {
                 var first = Operand(left);
