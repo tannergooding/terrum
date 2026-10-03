@@ -183,6 +183,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e6277c7` | Project caller-unsafe callable obligations through bounded complete-program v83 while keeping verification hosted |
 | `2562118` | Propagate caller-unsafe static operator requirements through generic proof bodies |
 | `03ef008` | Enforce same-compilation unsafe field access scopes while persisted writers fail closed |
 | `f714926` | Add same-compilation caller-unsafe checks while persisted writers fail closed |
