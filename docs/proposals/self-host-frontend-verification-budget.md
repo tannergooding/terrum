@@ -133,9 +133,11 @@ carries its existing outcome transfer forward. A selected present arm
 previously reproduced `TRM3016`; the regression now passes under both runtime
 policies. Constant-true and selected-absent cases confirm that the infeasible
 arm is skipped and the fallback's initialization effects are retained.
-Nested coalesces use the same state-aware presence check. All additional
-analysis remains within the shared visit budget and changes no language or
-optional semantics.
+Nested coalesces use the same state-aware presence check. `is some` and
+`is null` feasibility also consume that fact through short-circuit operators;
+output-effectful impossible Boolean arms pass regression coverage under both
+runtime policies. All additional analysis remains within the shared visit
+budget and changes no language or optional semantics.
 
 During the v78 budget investigation, temporary visit counters measured 100,001
 semantic-analysis visits across 210 functions before the limit failure. In the

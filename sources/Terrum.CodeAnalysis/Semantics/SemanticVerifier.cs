@@ -4078,6 +4078,18 @@ public static class SemanticVerifier
     private static bool CanBe(BoundExpression expression, bool result, ref int remaining,
         InitializationState initialized)
     {
+        if (expression is BoundIsNull nullTest
+            && KnownOptionalPresence(nullTest.Value, initialized, ref remaining) is bool nullPresence)
+        {
+            Count(ref remaining, 0);
+            return result != nullPresence;
+        }
+        if (expression is BoundIsSome someTest
+            && KnownOptionalPresence(someTest.Value, initialized, ref remaining) is bool somePresence)
+        {
+            Count(ref remaining, 0);
+            return result == somePresence;
+        }
         if (expression is BoundIsInitialized initializationTest)
         {
             Count(ref remaining, 0);
