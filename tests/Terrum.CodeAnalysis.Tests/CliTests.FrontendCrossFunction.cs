@@ -621,6 +621,44 @@ public sealed partial class CliTests
     }
 
     [Theory]
+    [InlineData("int32 Set(out int32 trace, int32 value) { trace = value; return value; } int32 Main() { mut int32 trace = 0; return Set(value: 3, trace: out trace); }", 3)]
+    [InlineData("int32 Initialize(int32 value, init ref<int32> result) { result = value; return 0; } int32 Main() { init int32 result; int32 status = Initialize(result: init result, value: 7); return result + status; }", 7)]
+    public async Task ScalarFrontendNamedOutputCallsMatchHostedAsync(string text, int expected)
+    {
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var input = Encoding.UTF8.GetBytes(text);
+        foreach (var (policy, runtime) in new[]
+        {
+            (BoundRuntimePolicy.FailFast, "fail-fast"),
+            (BoundRuntimePolicy.CheckedExceptions, "checked-exceptions"),
+        })
+        {
+            var (componentExit, componentOutput, componentError) = await RunAsync(input,
+                "frontend-component", directory, "-", "--runtime", runtime, "--json");
+            Assert.True(componentExit == 0, $"{componentExit}: {componentOutput}{componentError}");
+            Assert.Empty(componentError);
+            using (var document = JsonDocument.Parse(componentOutput))
+            {
+                var result = document.RootElement.GetProperty("result");
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Contains(result.GetProperty("functions")[1].GetProperty("nodes").EnumerateArray(),
+                    static node => node.GetProperty("operation").GetInt32() == 105);
+            }
+
+            var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
+                directory, "-", "--runtime", runtime, "--json");
+            Assert.Equal(expected, runExit);
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+
+            var hosted = Compilation.Create(SyntaxTree.Parse(text), policy);
+            Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+            Assert.Equal(expected, NativeJit.Execute(
+                Assert.IsType<BoundProgram>(hosted.Program), (NativeRuntimePolicy)policy));
+        }
+    }
+
+    [Theory]
     [InlineData(BoundRuntimePolicy.FailFast, "fail-fast")]
     [InlineData(BoundRuntimePolicy.CheckedExceptions, "checked-exceptions")]
     public async Task ScalarFrontendNamedCallsBuildHostedParityLibraryAsync(
@@ -705,7 +743,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return Sum(unknown: 1, second: 2); } int32 Sum(int32 first, int32 second) { return first + second; }", 3)]
     [InlineData("int32 Main() { return Sum(first: 1, first: 2); } int32 Sum(int32 first, int32 second) { return first + second; }", 1)]
     [InlineData("int32 Main() { return Sum(second: 2, 1); } int32 Sum(int32 first, int32 second) { return first + second; }", 1)]
-    [InlineData("bool Fill(out int32 value, int32 other) { value = other; return true; } int32 Main() { Fill(other: 1, value: out var result); return result; }", 1)]
+    [InlineData("bool Fill(out int32 value, int32 other) { value = other; return true; } int32 Main() { Fill(other: 1, value: init var result); return 0; }", 1)]
     public async Task ScalarFrontendRejectsInvalidNamedCallBindingsAsync(string text, int errorCode)
     {
         var directory = Path.Combine(RepositoryRoot(), "self-host");

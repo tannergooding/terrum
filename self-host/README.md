@@ -21,11 +21,13 @@ use scalar routing codes and designated single-exit indexed regions. This
 source-free path remains fail-fast-only. The separate native scalar frontend
 currently supports scalar/void functions, initialized scalar locals, structured
 branches and loops, named loop transfers, standalone requirements/discards,
-and selected function-effect contracts. Projection v85 adds named by-value
-arguments to bounded scalar self/global calls while preserving source
-evaluation order; named output arguments and overload selection remain
-unsupported. V85 is the only produced and accepted tag for both projection
-families, every complete-program frame and diagnostic records. Exact layouts and audits are in the
+and selected function-effect contracts. Projection v85 carries named by-value
+and scalar `out`/`init ref<T>` arguments through bounded scalar self/global
+calls while preserving source evaluation order. A call with named output
+arguments cannot yet be nested inside another call's named argument; overload
+selection remains unsupported. V85 is the only produced and accepted tag for
+both projection families, every complete-program frame and diagnostic records.
+Exact layouts and audits are in the
 [native profile](../docs/native.md) and
 [implementation reference](../docs/implementation.md). General attributes,
 binding and broader call forms remain outside the frontend's subset.
@@ -34,8 +36,10 @@ scalar non-Boolean/void `init ref<T>` declarations; definite-publication
 verification and emission remain hosted. V85 includes
 source-audited caller-unsafe callable declarations and explicit unsafe-block
 call authorization and source-audited `unsafe(expr)` call-site scopes;
-v85 maps named by-value call arguments to formal parameters without changing
-source-order evaluation. Their verifier and emitter also remain hosted.
+v85 maps named by-value and scalar output call arguments to formal parameters
+without changing source-order evaluation, except for named output calls nested
+inside another named call argument. Their verifier and emitter also remain
+hosted.
 The single-function buffer also audits self-call authorization against enclosing
 unsafe scopes. Both current projections
 source-audit `is init` tests for named scalar locals and parameters. Verification

@@ -1313,12 +1313,8 @@ public static partial class ScalarFrontendHost
                         if (at + 1 < tokens.Length && tokens[at].Kind == TokenKind.Identifier
                             && tokens[at + 1].Kind == TokenKind.Colon)
                         {
-                            var isOutputParameter = node.Operation == 105 && context is not null
-                                ? ((context.Callee(index).OutParameterMask
-                                    | context.Callee(index).InitRefParameterMask) & (1 << parameter)) != 0
-                                : ((words[16] | words[17]) & (1 << parameter)) != 0;
                             if (node.ArgumentParameterIndices.IsDefault
-                                || isOutputParameter || !Take(TokenKind.Identifier)
+                                || !Take(TokenKind.Identifier)
                                 || tokens[at - 1].Name != CallParameterName(index, parameter)
                                 || !Take(TokenKind.Colon))
                             {

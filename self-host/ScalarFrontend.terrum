@@ -2956,15 +2956,6 @@ mut class ScalarFrontendState
                     FailAt(3, argumentName.Range);
                     return false;
                 }
-                if (program
-                    ? ((Host.FrontendProgram[4 + callee * 428 + 4 + 16]
-                        | Host.FrontendProgram[4 + callee * 428 + 4 + 17])
-                        & (1 << parameter)) != 0
-                    : IsOutParameter(parameter + 1) || IsInitRefParameter(parameter + 1))
-                {
-                    FailAt(1, argumentName.Range);
-                    return false;
-                }
                 if ((assignedParameters & (1 << parameter)) != 0)
                 {
                     FailAt(1, argumentName.Range);
