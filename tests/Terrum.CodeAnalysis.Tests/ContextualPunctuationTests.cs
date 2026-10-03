@@ -272,6 +272,31 @@ public sealed class ContextualPunctuationTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void NamedInstanceOutputArgumentsKeepTheReceiverInItsFormalSlot(NativeRuntimePolicy policy)
+    {
+        const string source = """
+            struct Accumulator {
+                public int32 Value;
+                public Accumulator(int32 first, int32 second) { Value = first * 10 + second; }
+                public int32 Combine(out int32 result, int32 first, int32 second) {
+                    result = Value + first * 10 + second;
+                    return 0;
+                }
+            }
+            int32 Main() {
+                Accumulator value = new Accumulator(second: 2, first: 4);
+                int32 status = value.Combine(second: 0, result: out var result, first: 0);
+                return result + status;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+    }
+
+    [Theory]
     [InlineData("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(unknown: 1, second: 2); }")]
     [InlineData("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(first: 1, first: 2); }")]
     [InlineData("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(second: 2, 1); }")]
