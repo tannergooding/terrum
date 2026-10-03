@@ -139,4 +139,6 @@ public enum SyntaxKind
     CompoundAssignmentStatement,
     /// <summary>Ends the current value of a named local without ending its declaration.</summary>
     LifetimeEndStatement,
+    /// <summary>A nullable inferred-binding pattern, including initialized null.</summary>
+    IsVarNullableExpression,
 }

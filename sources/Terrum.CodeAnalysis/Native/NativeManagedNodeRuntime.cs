@@ -213,6 +213,9 @@ internal sealed partial class PeCompiler
                 case BoundIsSome pattern:
                     CollectExpression(pattern.Value, spill);
                     break;
+                case BoundIsVariablePattern pattern:
+                    CollectExpression(pattern.Value, spill);
+                    break;
                 case BoundFieldRead field:
                     CollectExpression(field.Receiver, spill);
                     break;

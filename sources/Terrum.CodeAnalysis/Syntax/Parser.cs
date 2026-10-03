@@ -1015,7 +1015,16 @@ internal sealed class Parser
                 }
                 else if (Current.Kind == TokenKind.VarKeyword)
                 {
-                    left = Node(SyntaxKind.IsSomeExpression, [left, keyword, Take(), Expect(TokenKind.Identifier)]);
+                    var variable = Take();
+                    if (Current.Kind == TokenKind.Question && IsAttachedToPrevious())
+                    {
+                        left = Node(SyntaxKind.IsVarNullableExpression,
+                            [left, keyword, variable, Take(), Expect(TokenKind.Identifier)]);
+                    }
+                    else
+                    {
+                        left = Node(SyntaxKind.IsSomeExpression, [left, keyword, variable, Expect(TokenKind.Identifier)]);
+                    }
                 }
                 else
                 {

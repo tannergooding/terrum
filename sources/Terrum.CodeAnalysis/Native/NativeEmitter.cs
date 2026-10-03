@@ -1086,6 +1086,8 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(test.Value, ref maximumArguments);
             case BoundIsSome pattern:
                 return ExpressionSpills(pattern.Value, ref maximumArguments);
+            case BoundIsVariablePattern pattern:
+                return ExpressionSpills(pattern.Value, ref maximumArguments);
             case BoundFieldRead field:
                 return ExpressionSpills(field.Receiver, ref maximumArguments);
             case BoundBufferRead buffer:
@@ -2304,6 +2306,46 @@ internal sealed partial class PeCompiler
                 SetManagedRoot(Slot(pattern.Variable), active: false);
                 _code.Bytes(0x31, 0xC0);
                 _code.PatchRelative(patternDone, _code.Position);
+                break;
+            case BoundIsVariablePattern pattern:
+                if (pattern.Value is not BoundRead source)
+                {
+                    Expression(pattern.Value, spill);
+                    _code.Store64(Slot(pattern.Variable));
+                    SetManagedRoot(Slot(pattern.Variable), active: true);
+                    _code.Bytes(0xB8, 0x01, 0x00, 0x00, 0x00);
+                    break;
+                }
+
+                var sourceSlot = OwnerPlace(source.Variable);
+                if (!_managedRootFlags[_currentFunction].TryGetValue(sourceSlot, out var initializedFlag))
+                {
+                    throw new InvalidOperationException("Managed pattern source has no runtime initialization flag.");
+                }
+
+                // The active root bit tracks publication separately from pointer bits, including initialized null.
+                _code.Load(initializedFlag);
+                _code.Bytes(0x85, 0xC0);
+                var vacant = _code.JumpIf(0x84);
+                _code.Load64(sourceSlot);
+                var absent = -1;
+                if (!pattern.IncludeNull)
+                {
+                    _code.Bytes(0x48, 0x85, 0xC0);
+                    absent = _code.JumpIf(0x84);
+                }
+                _code.Store64(Slot(pattern.Variable));
+                SetManagedRoot(Slot(pattern.Variable), active: true);
+                _code.Bytes(0xB8, 0x01, 0x00, 0x00, 0x00);
+                var variablePatternDone = _code.Jump();
+                _code.PatchRelative(vacant, _code.Position);
+                if (absent >= 0)
+                {
+                    _code.PatchRelative(absent, _code.Position);
+                }
+                SetManagedRoot(Slot(pattern.Variable), active: false);
+                _code.Bytes(0x31, 0xC0);
+                _code.PatchRelative(variablePatternDone, _code.Position);
                 break;
             case BoundRead read:
                 if (read.Variable == 0 && IsBorrowedReceiver() && !IsUnique(read.Type))

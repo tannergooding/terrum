@@ -425,26 +425,63 @@ public sealed class CoalescingTests
     {
         const string library = """
             mut class Leaf { public int32 Value; public Leaf(int32 value) { Value = value; } }
+            bool Fill(bool publish, init ref<Leaf?> output) {
+                if (publish) {
+                    require Leaf.TryCreate(42, out var leaf);
+                    output = leaf;
+                    return true;
+                }
+                return false;
+            }
+            bool FillNull(init ref<Leaf?> output) {
+                output = null;
+                return true;
+            }
+            Leaf? Identity(Leaf? value) { return value; }
+            Leaf? NullValue() { return null; }
             public int32 Select() {
-                require Leaf.TryCreate(42, out var value);
-                Leaf? optional = value;
-                return (optional ?? value).Value;
+                init Leaf? vacant;
+                if (vacant is var absentPayload) { return 10; }
+                if (vacant is var? vacantValue) { return 1; }
+                if (Fill(false, init var value)) { return 2; }
+                if (value is var failedPayload) { return 11; }
+                if (value is var? failedValue) { return 3; }
+                require Fill(true, init value);
+                if (!(value is var? nullable)) { return 4; }
+                if (nullable is null) { return 5; }
+                if (!(value is var present)) { return 6; }
+                require FillNull(init var initializedNull);
+                if (!(initializedNull is var? capturedNull)) { return 7; }
+                if (!(capturedNull is null)) { return 8; }
+                if (!(capturedNull is var? repeatedNull)) { return 16; }
+                if (!(repeatedNull is null)) { return 17; }
+                if (initializedNull is var nonNull) { return 9; }
+                if (!(Identity(present) is var? expressionValue)) { return 12; }
+                if (!(expressionValue is var expressionPayload)) { return 13; }
+                if (expressionPayload.Value != 42) { return 20; }
+                if (!(NullValue() is var? expressionNull)) { return 14; }
+                if (!(expressionNull is null)) { return 15; }
+                if (!(expressionNull is var? repeatedExpressionNull)) { return 18; }
+                if (!(repeatedExpressionNull is null)) { return 19; }
+                return present.Value;
             }
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(library), (BoundRuntimePolicy)policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), ["Select"]);
-        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(48, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var old = (byte[])producer.Clone();
-        BinaryPrimitives.WriteInt32LittleEndian(old.AsSpan(4, 4), 41);
+        BinaryPrimitives.WriteInt32LittleEndian(old.AsSpan(4, 4), 47);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(old));
         var reference = ModuleCompiler.CreateReference(producer);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Select(); }"),
             reference, runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.False(consumerCompilation.HasErrors, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
-        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.Equal(48, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.NotEmpty(NativeEmitter.Emit(linked, policy));
+        Assert.Equal(42, NativeJit.Execute(linked, policy));
     }
 
     [Theory]

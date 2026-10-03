@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static partial class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 47;
+    private const int Version = 48;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -982,6 +982,9 @@ public static partial class ModuleCompiler
                 case BoundIsSome pattern:
                     VisitExpression(pattern.Value);
                     break;
+                case BoundIsVariablePattern pattern:
+                    VisitExpression(pattern.Value);
+                    break;
                 case BoundFieldRead field:
                     VisitExpression(field.Receiver);
                     break;
@@ -1440,6 +1443,9 @@ public static partial class ModuleCompiler
             },
             BoundIsNull test => test with { Value = RemapExpression(test.Value, source, destination, classOffset) },
             BoundIsSome pattern => pattern with { Value = RemapExpression(pattern.Value, source, destination, classOffset) },
+            BoundIsVariablePattern pattern => pattern with {
+                Value = RemapExpression(pattern.Value, source, destination, classOffset),
+            },
             BoundFieldRead field => field with {
                 Type = RemapType(field.Type, source, destination, classOffset),
                 Receiver = RemapExpression(field.Receiver, source, destination, classOffset),
@@ -2318,6 +2324,7 @@ public static partial class ModuleCompiler
             BoundReadonlyProjection => (byte)19,
             BoundIsNull => (byte)17,
             BoundIsSome => (byte)18,
+            BoundIsVariablePattern => (byte)27,
             _ => throw new ModuleFormatException("Unknown expression kind."),
         });
         writer.Write((int)expression.Type);
@@ -2365,6 +2372,11 @@ public static partial class ModuleCompiler
                 break;
             case BoundIsSome pattern:
                 writer.Write(pattern.Variable);
+                PutExpression(writer, pattern.Value, names, ref remaining, depth + 1);
+                break;
+            case BoundIsVariablePattern pattern:
+                writer.Write(pattern.Variable);
+                writer.Write(pattern.IncludeNull);
                 PutExpression(writer, pattern.Value, names, ref remaining, depth + 1);
                 break;
             case BoundUnary unary:
@@ -2523,6 +2535,11 @@ public static partial class ModuleCompiler
             case 20:
                 return new BoundMutableFieldLoan(GetExpression(reader, ref remaining, depth + 1)
                     as BoundFieldRead ?? throw new ModuleFormatException("Expected mutable field place."), type, span);
+            case 27 when type == PrimitiveType.Bool:
+                var variablePatternSlot = reader.ReadInt32();
+                var includeNull = GetBool(reader);
+                return new BoundIsVariablePattern(GetExpression(reader, ref remaining, depth + 1),
+                    variablePatternSlot, includeNull, span);
             default:
                 throw new ModuleFormatException("Unknown expression kind.");
         }
@@ -2619,6 +2636,7 @@ public static partial class ModuleCompiler
         BoundReadonlyProjection projection => projection with { Value = ResolveExpression(projection.Value, names) },
         BoundIsNull test => test with { Value = ResolveExpression(test.Value, names) },
         BoundIsSome pattern => pattern with { Value = ResolveExpression(pattern.Value, names) },
+        BoundIsVariablePattern pattern => pattern with { Value = ResolveExpression(pattern.Value, names) },
         BoundFieldRead field => field with { Receiver = ResolveExpression(field.Receiver, names) },
         BoundFieldLoan loan => loan with { Place = (BoundFieldRead)ResolveExpression(loan.Place, names) },
         BoundMutableFieldLoan loan => loan with { Place = (BoundFieldRead)ResolveExpression(loan.Place, names) },

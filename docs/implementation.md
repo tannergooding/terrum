@@ -1,9 +1,9 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax language version 44, semantic body features v43–v47, semantic-module revision 47, native-10 through native-20
+## Current boundary: syntax language version 44, semantic body features v43–v48, semantic-module revision 48, native-10 through native-20
 
 Semantic body feature numbers are milestone labels, not persisted format
-versions. Structured semantic-module writers and readers use revision 47 only;
+versions. Structured semantic-module writers and readers use revision 48 only;
 older revisions are rejected, not normalized or upgraded.
 
 The normative declaration grammar additionally requires explicit primary
@@ -183,7 +183,7 @@ The [source attachment rule](grammar-spec.md#33-statements-and-local-declaration
 requires one label on the loop introducer's source line; the current parser
 and native source audits enforce that additional restriction.
 The v39 feature milestone added retained post-tested loops and non-nearest
-transfers. Current modules serialize them under revision 47, with no native
+transfers. Current modules serialize them under revision 48, with no native
 ABI, scanner-5 record or syntax-protocol schema change.
 
 The parser and binder support standalone `init T name;` and `init var name;` vacant locals,
@@ -192,7 +192,7 @@ checked `init` completion publishes them, while false or failure leaves them
 vacant. Inferred declarations require a type established by a checked
 initialization. Existing definite-assignment, owner cleanup and managed-root
 rules apply. The v40 feature milestone added persisted vacant declarations;
-current modules serialize them under revision 47, with no native ABI change.
+current modules serialize them under revision 48, with no native ABI change.
 The bounded constant evaluator does not support vacant declarations.
 Hosted `=` assignment can also initialize a definitely vacant `init` local.
 The first supported assignment fixes an inferred local's type; later
@@ -210,7 +210,7 @@ their joined state.
 Never-published inline initialization outputs may still retry after failure;
 vacancy after retiring an immutable value does not grant the same authority.
 The v46 feature milestone added persisted assignments to initialization locals.
-Current revision 47 records the assignment and vacant declaration together;
+Current revision 48 records the assignment and vacant declaration together;
 the native ABI is unchanged.
 Hosted `name = _;` is a distinct lifetime-end statement, not assignment of a
 discard/default value. It requires a definitely live, resolved named local
@@ -225,10 +225,10 @@ Bounded buffer-view locals end their loan, not the backing owner. Possible
 live loans at control-flow joins still prevent ending or replacing their
 actual named owner, including buffer fields reached through an owner.
 The v47 feature milestone added retained lifetime-end nodes. Current semantic
-module revision 47 records these nodes where present; cleanup targets,
+module revision 48 records these nodes where present; cleanup targets,
 local-only destinations, definite liveness and initialization authority are
 reverified on import and before native PE/JIT lowering under both policies.
-Modules without an end node also use revision 47. This changes no scanner
+Modules without an end node also use revision 48. This changes no scanner
 record, native ABI/profile or TRRM encoding. Source-free executable TRRM still rejects this statement; the
 bounded scalar frontend represents visible scalar local endings in projection
 v60. Enums, general references/pins, arbitrary guards/ARC and view rebinding
@@ -247,7 +247,7 @@ managed result contracts apply, including conditional output publication,
 moves, cleanup and exact roots. Inactive arms remain type/effect checked.
 Required constant evaluation evaluates only the selected arm, while retaining
 its declaration checks. Retained conditional nodes were added at feature
-milestone v41 and serialize under current module revision 47. Conditional
+milestone v41 and serialize under current module revision 48. Conditional
 access, throw expressions and target-typed lambdas remain unsupported.
 
 The parser and binder support right-associative `??` below `||` and above `?:`, and
@@ -265,7 +265,7 @@ contract, including null or another optional value. Computed field receivers
 remain rooted across fallback calls and checked unwinding. Conditional
 publication, cleanup and private semantic/native module servicing retain their
 existing rules. Coalescing nodes were added at feature milestone v42 and
-serialize under current module revision 47. Scalar/unique optionals,
+serialize under current module revision 48. Scalar/unique optionals,
 conditional access and managed ConstEval are not added, and the native ABI is
 unchanged.
 
@@ -281,7 +281,7 @@ remain rooted through the operation and retire their staged root on checked
 failure. Updates are valid expression statements and `for` iterators;
 scalar-slot updates also execute in bounded ConstEval.
 Primitive update nodes were added at feature milestone v43 and serialize
-under current module revision 47, without changing semantic/native consumer
+under current module revision 48, without changing semantic/native consumer
 contracts. `NoThrow` cannot promise an unproven checked update. Getters, temporaries, readonly/vacant
 places, `char16`, nested owning-child paths and nominal static update
 operators are outside this primitive-update contract; this does not defer the
@@ -327,7 +327,7 @@ Nominal compounds are rejected even where a binary operator witness exists;
 `char16` and unique-value update destinations remain unsupported. Shift and
 compound-assignment nodes were added at feature milestone v45, and compound
 statements use expression tag 26 within an expression statement. Current
-module revision 47 serializes them without changing the native ABI or profile.
+module revision 48 serializes them without changing the native ABI or profile.
 
 The executable Terrum scalar frontend additionally supports bounded nested
 expression trees and expression-bodied scalar functions through provisional
@@ -1172,10 +1172,10 @@ Semantic v26 persists the nested mutable-field loan path, including its root
 and field identities; the verifier rechecks access, types, initialization
 and mutability rather than trusting serialized byte offsets. Whole-local
 non-owning receiver loans were introduced at milestone v25. Current module
-revision 47 serializes supported receiver contracts; older revisions are
+revision 48 serializes supported receiver contracts; older revisions are
 rejected wholesale. Primitive
 buffer-view alignment and general `out`-to-`init ref<T>` migration remain scheduled.
-Current semantic-module revision 47 records private managed access authority
+Current semantic-module revision 48 records private managed access authority
 directly. Artifacts from retired semantic-module revisions are rejected rather
 than normalized or upgraded while reading.
 Semantic v27 permits ordinary `mut` methods on unique structs through
@@ -1185,7 +1185,7 @@ move `this`, or widen the readonly NoThrow cleanup contract. Receiver
 reservation rejects argument-side invalidation before invocation, and
 mutation neither transfers ownership nor adds a cleanup obligation.
 Readonly unique loans cannot invoke these methods. The v27 feature milestone
-added these methods; current module revision 47 serializes them when present.
+added these methods; current module revision 48 serializes them when present.
 Semantic v28 extends nested mutable-field loans through fully initialized
 unique owners and unique child structs. The same writable-path checks and
 whole-root reservation apply; a borrowed child is not staged as an owning
@@ -1199,7 +1199,7 @@ arguments run once before activation and cannot invalidate the reserved root;
 the active view excludes all other root access, including sibling fields.
 Ending the scope or unwinding releases only the loan, not the buffer.
 Partial-constructor mutation and owning-field replacement remain unsupported.
-Current module revision 47 serializes supported loan contracts when present;
+Current module revision 48 serializes supported loan contracts when present;
 retired artifact revisions are rejected even though the field-path encoding
 remains unchanged.
 Semantic v31 permits managed-backed leaf producers to export existing public,
@@ -1214,7 +1214,7 @@ owner does not transfer that owner. Snapshots are independent values, not
 references into private managed storage. Managed handles, unique values,
 nested managed-containing values, views and mutating-receiver ABI
 remain excluded, as does importing another producer from a managed leaf.
-The expanded export contracts use current semantic-module revision 47; the
+The expanded export contracts use current semantic-module revision 48; the
 v31 milestone adds no syntax or scanner change and does not change the native
 physical ABI or profile versions. The persisted-graph contract added at
 milestone v32 permits managed roots and
@@ -1225,7 +1225,7 @@ by-value/result and
 mutating-receiver ABI still cannot cross a managed participant boundary.
 Each persisted native image retains its own heap and root chain, and calls
 preserve the caller's roots while another image runs. `ManagedHeap.Collect()`
-remains image-local. Current semantic-module revision 47 supports private
+remains image-local. Current semantic-module revision 48 supports private
 managed consumers through the existing single-provider semantic `CreateConsumer`/`Link` path and native
 single-provider and module-set entry points. Semantic modules statically link
 into one image, remap private class identities, and use one heap/root domain.
@@ -1423,21 +1423,30 @@ snapshot; clearing the original edge does not invalidate it.
 Patterns participate in conditional flow, including short-circuit conditions,
 `while` and `require`. The payload name belongs to the enclosing lexical scope;
 reads additionally require proof that extraction succeeded on the current path.
-The pattern does not narrow the original variable or an aliased field.
+For the named-place `is var` and `is var?` forms below, a successful test also
+proves that the source storage is initialized on that path. It does not change
+the source's nullable value or narrow an aliased field.
 An initialized absent value is not an uninitialized
 variable or an output from a failed call. Constructors must explicitly initialize
 optional fields, and direct optional dereference is rejected. Optional scalar
 types and generic normalization remain unsupported.
-The accepted `is var? item` pattern, non-null `var` versus nullable `var?`
-declaration inference, and contextual multiple-output matching are not
-implemented. Ordinary `var` infers the complete initializer type, including
-optional handles. Source approval does not change that support or existing
-artifacts.
+`is var item` is initialization-aware for a named optional-handle local or
+parameter: it binds the non-null payload only when that storage is initialized.
+`is var? item` is supported for the same named places and binds the complete
+optional value, including initialized null; vacant storage returns false
+without reading its payload. The `is var` alias on other supported
+optional-handle expressions retains the existing `is some` behavior. On a
+non-name optional-handle expression, `is var?` evaluates the expression once,
+captures its initialized optional value, and succeeds when evaluation returns.
+Inferred nullable `var?` declarations and contextual multiple-output matching
+remain unimplemented. Ordinary `var` infers the complete initializer type,
+including optional handles. Source approval does not change that support or
+existing artifacts.
 ### Retired semantic-module revision history
 
 The following feature notes record implementation milestones; they do not
 describe current writer selection or reader compatibility. Current writers
-always emit semantic-module revision 47, and readers accept only revision 47.
+always emit semantic-module revision 48, and readers accept only revision 48.
 
 Revision 18 admitted private `ManagedNode` code in a leaf producer whose
 exported declarations were scalar and by-value only. Revision 19 extended that
@@ -1457,7 +1466,7 @@ normalization. The v25-v30 milestones successively added the distinct
 `MutReceiver` contract, nested mutable-field loans, unique receivers and roots,
 mutable buffer-field loans, and mutable buffer-field views. Their revision-
 specific header gates and writer selection are retired; current modules encode
-supported contracts under revision 47.
+supported contracts under revision 48.
 The private managed-state boundary and absence of a public managed-handle ABI
 are unchanged. The v31 milestone expanded leaf exports to managed-backed
 compact handle-free `Copy` values by value. The v32 milestone added private managed

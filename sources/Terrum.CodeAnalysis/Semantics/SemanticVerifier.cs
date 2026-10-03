@@ -671,6 +671,10 @@ public static class SemanticVerifier
                     Expression(pattern.Value, scope, depth + 1);
                     Declare(pattern.Variable, scope, pattern.Span);
                     break;
+                case BoundIsVariablePattern pattern:
+                    Expression(pattern.Value, scope, depth + 1);
+                    Declare(pattern.Variable, scope, pattern.Span);
+                    break;
                 case BoundUnary unary:
                     Expression(unary.Operand, scope, depth + 1);
                     break;
@@ -1172,6 +1176,9 @@ public static class SemanticVerifier
                     Expression(test.Value, depth + 1, acquiringRoot);
                     break;
                 case BoundIsSome pattern:
+                    Expression(pattern.Value, depth + 1, acquiringRoot);
+                    break;
+                case BoundIsVariablePattern pattern:
                     Expression(pattern.Value, depth + 1, acquiringRoot);
                     break;
                 case BoundBinary binary:
@@ -2810,6 +2817,37 @@ public static class SemanticVerifier
                     ref remaining, depth + 1, failures);
                 _ = declarations.Add(pattern.Variable);
                 break;
+            case BoundIsVariablePattern pattern:
+                if (pattern.Value is null || !ManagedClassTypes.IsOptional(pattern.Value.Type)
+                    || (!pattern.IncludeNull && pattern.Value is not BoundRead)
+                    || pattern.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                    || pattern.Variable < 0 || pattern.Variable >= initialized.Length
+                    || function.Variables[pattern.Variable].Type != (pattern.IncludeNull
+                        ? pattern.Value.Type : ManagedClassTypes.Required(pattern.Value.Type))
+                    || function.Variables[pattern.Variable].IsOut
+                    || function.Variables[pattern.Variable].IsMutable
+                    || function.Variables[pattern.Variable].IsInitializationLocal
+                    || declarations.Contains(pattern.Variable))
+                {
+                    throw Invalid(pattern.Span);
+                }
+                if (pattern.Value is BoundRead sourceRead)
+                {
+                    if (sourceRead.Variable < 0 || sourceRead.Variable >= initialized.Length
+                        || (sourceRead.Variable >= function.ParameterCount
+                            + (function.IsConstructor ? 1 : 0) && !declarations.Contains(sourceRead.Variable))
+                        || function.Variables[sourceRead.Variable].Type != sourceRead.Type)
+                    {
+                        throw Invalid(pattern.Span);
+                    }
+                }
+                else
+                {
+                    Expression(pattern.Value, initialized, fieldMasks, declarations, function, program,
+                        ref remaining, depth + 1, failures);
+                }
+                _ = declarations.Add(pattern.Variable);
+                break;
             case BoundCast cast:
                 Expression(cast.Operand, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 if (cast.Operand.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16)
@@ -3474,6 +3512,7 @@ public static class SemanticVerifier
             BoundCoalesce coalesce => InvalidatesReservedOwner(coalesce.Optional, variable, ref remaining, depth + 1)
                 || InvalidatesReservedOwner(coalesce.Fallback, variable, ref remaining, depth + 1),
             BoundIsSome pattern => InvalidatesReservedOwner(pattern.Value, variable, ref remaining, depth + 1),
+            BoundIsVariablePattern pattern => InvalidatesReservedOwner(pattern.Value, variable, ref remaining, depth + 1),
             BoundBinary binary => InvalidatesReservedOwner(binary.Left, variable, ref remaining, depth + 1)
                 || InvalidatesReservedOwner(binary.Right, variable, ref remaining, depth + 1),
             BoundConditional conditional => InvalidatesReservedOwner(conditional.Condition, variable, ref remaining, depth + 1)
@@ -3600,6 +3639,27 @@ public static class SemanticVerifier
                     && CanBe(conditional.WhenFalse, result, ref remaining, initialized));
         }
         var state = initialized.Clone();
+        if (expression is BoundIsVariablePattern variablePattern)
+        {
+            if (variablePattern.Value is BoundRead sourceRead)
+            {
+                if (result)
+                {
+                    state[sourceRead.Variable] = true;
+                }
+                else if (variablePattern.IncludeNull)
+                {
+                    state.SetPossibilities(sourceRead.Variable,
+                        (byte)(state.Possibilities(sourceRead.Variable) & 5));
+                }
+            }
+            else
+            {
+                VacateNestedOutputs(variablePattern.Value, state, ref remaining);
+            }
+            state[variablePattern.Variable] = result;
+            return state;
+        }
         if (expression is BoundIsSome pattern)
         {
             VacateNestedOutputs(pattern.Value, state, ref remaining);
@@ -3717,6 +3777,13 @@ public static class SemanticVerifier
                 VacateNestedOutputs(pattern.Value, state, ref remaining);
                 state[pattern.Variable] = false;
                 break;
+            case BoundIsVariablePattern pattern:
+                if (pattern.Value is not BoundRead)
+                {
+                    VacateNestedOutputs(pattern.Value, state, ref remaining);
+                }
+                state[pattern.Variable] = false;
+                break;
             case BoundFieldRead field:
                 VacateNestedOutputs(field.Receiver, state, ref remaining);
                 break;
@@ -3778,7 +3845,7 @@ public static class SemanticVerifier
             BoundOptionalLift lift => HasVacateEffects(lift.Value, vacateEffectFacts, ref remaining),
             BoundReadonlyProjection projection => HasVacateEffects(projection.Value, vacateEffectFacts, ref remaining),
             BoundIsNull test => HasVacateEffects(test.Value, vacateEffectFacts, ref remaining),
-            BoundIsSome or BoundMove => true,
+            BoundIsSome or BoundIsVariablePattern or BoundMove => true,
             BoundFieldRead field => HasVacateEffects(field.Receiver, vacateEffectFacts, ref remaining),
             BoundBufferRead buffer => HasVacateEffects(buffer.Index, vacateEffectFacts, ref remaining),
             BoundViewRead view => HasVacateEffects(view.Index, vacateEffectFacts, ref remaining),
@@ -3803,11 +3870,24 @@ public static class SemanticVerifier
         return false;
     }
 
-    // Feasibility is independent of initialization state. Share both outcomes across
-    // flow-state clones, while still charging every cache lookup to the visit budget.
+    // Ordinary expression feasibility is shared across flow-state clones; initialization-aware patterns
+    // are handled above. Charge every lookup to the existing visit budget.
     private static bool CanBe(BoundExpression expression, bool result, ref int remaining,
-        InitializationState initialized) =>
-        CanBe(expression, result, ref remaining, initialized.CanBeFacts);
+        InitializationState initialized)
+    {
+        if (expression is BoundIsVariablePattern pattern)
+        {
+            Count(ref remaining, 0);
+            if (pattern.Value is BoundRead sourceRead)
+            {
+                var possibilities = initialized.Possibilities(sourceRead.Variable);
+                return result ? (possibilities & 2) != 0
+                    : !pattern.IncludeNull || (possibilities & 5) != 0;
+            }
+            return result;
+        }
+        return CanBe(expression, result, ref remaining, initialized.CanBeFacts);
+    }
 
     private static bool CanBe(BoundExpression expression, bool result, ref int remaining,
         Dictionary<BoundExpression, byte> remainingCanBeFacts)

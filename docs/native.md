@@ -84,7 +84,7 @@ are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
-Persisted semantic modules currently write and accept only revision 47. The
+Persisted semantic modules currently write and accept only revision 48. The
 semantic v24-v32 labels below are historical module revisions and implementation
 milestones, not reader-compatibility promises; those revisions are retired and
 rejected instead of normalized.
@@ -102,7 +102,7 @@ Source visibility may be public or private. Named mutable locals, their
 writable nested fields, and forwarding through an existing writable `this`
 and its writable fields are supported receiver places. Current artifacts
 record the validated access and receiver contracts directly; all use semantic
-module revision 47 regardless of which supported constructs they contain.
+module revision 48 regardless of which supported constructs they contain.
 Older revisions are not upgraded while reading.
 The `native-18` through `native-20` labels below identify bounded runtime
 features; they do not imply that general references/views, ownership forms, or
@@ -523,7 +523,7 @@ existing initialization authority; ordinary immutable locals cannot. Failed
 initialization leaves vacancy and does not reactivate a root or cleanup bit.
 Retained end nodes were added at the v47 feature milestone and are audited through
 producer/reference/consumer linking and private native graphs. Both PE and
-JIT policies use the same lowering under current semantic-module revision 47,
+JIT policies use the same lowering under current semantic-module revision 48,
 with no native ABI/profile or scanner change. Parameter/receiver aliases, fields, indexers, const aliases and
 unresolved/vacant locals reject. General ref/pin types, enums, arbitrary
 guards/ARC, view rebinding, source-free TRRM and the compiled scalar frontend
@@ -817,10 +817,15 @@ Version 19 and 20 semantic modules retain optional IR and types only inside a pr
 source-class leaf. Neither this nor the version 18 private-node module exposes
 an optional or managed-reference ABI. An optional-node-only module remains
 unsupported.
-The `is var item` spelling aliases the supported `is some item` non-null
-optional-handle test. `is var? item` and contextual multiple-output matching
-remain unimplemented. See the
-[current support boundary](implementation.md).
+For a named optional-handle local or parameter, `is var item` and `is var? item`
+first test whether its storage is initialized. The former snapshots only a
+non-null handle; the latter snapshots the complete optional value, including
+initialized null. Both return false for vacant storage without reading its
+payload. The `is var` spelling remains an alias for `is some` on other supported
+optional-handle expressions. `is var?` on a non-name optional-handle expression
+evaluates it once, captures the initialized optional value and succeeds when
+evaluation returns. Contextual multiple-output matching remains unimplemented.
+See the [current support boundary](implementation.md).
 The independent C probe additionally fills a 4,096-object source-class cycle,
 checks that capacity refusal makes no extra allocation, then accounts for every
 release and repeats full-capacity reuse. AOT/JIT fixtures exercise the same
@@ -1222,7 +1227,7 @@ cleanup. Labels may identify enclosing `while`, `for` and `do` loops.
 The bounded implementation rejects duplicate enclosing labels and permits
 reuse in disjoint scopes; the general source collision policy remains
 unspecified. The v39 feature milestone added post-tested loops and non-nearest
-transfer depths; current semantic-module revision 47 serializes these nodes
+transfer depths; current semantic-module revision 48 serializes these nodes
 when present. Native calling conventions, cleanup funclets and public ABI do
 not change.
 

@@ -459,7 +459,7 @@ public sealed class NominalUpdateTests
         }
         string[] exports = exportOperator ? ["Next", "Value.op_Increment"] : ["Next"];
         var original = ModuleCompiler.CreateProducer(CompileLibrary(library, policy), exports);
-        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)));
+        Assert.Equal(48, BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)));
         var stale = (byte[])original.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(stale.AsSpan(4, 4), 43);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(stale));

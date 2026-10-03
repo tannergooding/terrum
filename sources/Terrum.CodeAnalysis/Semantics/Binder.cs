@@ -2251,7 +2251,22 @@ internal sealed partial class Binder
                 var payload = ManagedClassTypes.IsOptional(source.Type)
                     ? ManagedClassTypes.Required(source.Type) : PrimitiveType.Int32;
                 var patternSlot = AddVariable(name.Name, payload, false, name.Span);
-                expression = new BoundIsSome(source, patternSlot, node.Span);
+                expression = ((SyntaxTokenElement)node.Children[2]).Token.Text == "var"
+                    && source is BoundRead read
+                    ? new BoundIsVariablePattern(source, patternSlot, false, node.Span)
+                    : new BoundIsSome(source, patternSlot, node.Span);
+                break;
+
+            case SyntaxKind.IsVarNullableExpression:
+                var nullableSource = BindExpression((SyntaxNode)node.Children[0], null);
+                if (!ManagedClassTypes.IsOptional(nullableSource.Type))
+                {
+                    Report("TRM3007", "'is var?' requires an optional managed handle.", node.Span);
+                }
+                var nullableName = ((SyntaxTokenElement)node.Children[4]).Token;
+                var nullableType = ManagedClassTypes.IsOptional(nullableSource.Type) ? nullableSource.Type : PrimitiveType.Int32;
+                var nullableSlot = AddVariable(nullableName.Name, nullableType, false, nullableName.Span);
+                expression = new BoundIsVariablePattern(nullableSource, nullableSlot, true, node.Span);
                 break;
 
             case SyntaxKind.NameExpression:
@@ -3277,7 +3292,7 @@ internal sealed partial class Binder
                     _ => null,
                 };
             }
-            case SyntaxKind.IsNullExpression or SyntaxKind.IsSomeExpression:
+            case SyntaxKind.IsNullExpression or SyntaxKind.IsSomeExpression or SyntaxKind.IsVarNullableExpression:
                 return PrimitiveType.Bool;
             case SyntaxKind.InvocationExpression:
             {

@@ -46,12 +46,15 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 47. Writers use it for every producer,
-consumer and graph library; readers accept only revision 47. Older revisions
-are retired and must be recreated from source. This revision is independent of
-native profile labels, native package and graph container formats, and scalar
-frontend projection revisions. See [implementation](implementation.md) for the
-compiler support boundary and [roadmap](roadmap.md) for scheduled format work.
+The current semantic-module revision is 48. Writers use it for every producer,
+consumer and graph library; readers accept only revision 48. Revision 48 adds
+the initialization-aware optional-handle pattern expression, recording its
+source expression, capture slot and whether initialized null is accepted.
+Revision 47 and older revisions are retired and must be recreated from source.
+This revision is independent of native profile labels, native package and graph
+container formats, and scalar frontend projection revisions. See
+[implementation](implementation.md) for the compiler support boundary and
+[roadmap](roadmap.md) for scheduled format work.
 
 ## Current artifact and loading rules
 
@@ -317,7 +320,7 @@ unsupported.
 
 The following feature notes document implementation milestones only. They do
 not describe current writer selection or reader compatibility: current
-artifacts always use revision 47, and older semantic-module revisions are
+artifacts always use revision 48, and older semantic-module revisions are
 rejected.
 
 Version 12 stored the unique layout flag, declared cleanup method, cleanup

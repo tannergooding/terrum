@@ -502,6 +502,10 @@ public sealed record BoundIsNull(BoundExpression Value, TextSpan Span) : BoundEx
 /// <summary>Tests an optional handle and snapshots its non-null value into a scoped variable on success.</summary>
 public sealed record BoundIsSome(BoundExpression Value, int Variable, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span);
 
+/// <summary>Tests optional-handle presence, including named-storage initialization, and captures the match.</summary>
+public sealed record BoundIsVariablePattern(BoundExpression Value, int Variable, bool IncludeNull, TextSpan Span)
+    : BoundExpression(PrimitiveType.Bool, Span);
+
 /// <summary>A read of an initialized slot.</summary>
 /// <param name="Variable">The slot index.</param>
 /// <param name="Type">The slot type.</param>
