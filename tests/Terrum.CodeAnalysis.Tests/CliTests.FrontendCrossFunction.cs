@@ -625,6 +625,8 @@ public sealed partial class CliTests
     [InlineData("int32 Set(out int32 result, int32 value) { result = value; return value; } int32 Main() { return Set(value: 3, result: out var result) + result; }", 6)]
     [InlineData("int32 Initialize(int32 value, init ref<int32> result) { result = value; return 0; } int32 Main() { init int32 result; int32 status = Initialize(result: init result, value: 7); return result + status; }", 7)]
     [InlineData("int32 Initialize(int32 value, init ref<int32> result) { result = value; return 0; } int32 Main() { int32 status = Initialize(result: init var result, value: 7); return result + status; }", 7)]
+    [InlineData("void Set(out int32 result, int32 value) { result = value; } int32 Main() { Set(value: 6, result: out var result); return result; }", 6)]
+    [InlineData("void Initialize(int32 value, init ref<int32> result) { result = value; } int32 Main() { Initialize(result: init var result, value: 7); return result; }", 7)]
     [InlineData("int32 Set(out int32 t, int32 v) { t = v; return v; } int32 Identity(int32 r) => r; int32 Main() { mut int32 t = 0; return Identity(r: Set(v: 3, t: out t)); }", 3)]
     [InlineData("int32 Initialize(int32 v, init ref<int32> r) { r = v; return 0; } int32 Identity(int32 x) => x; int32 Main() { init int32 r; return Identity(x: Initialize(r: init r, v: 7)) + r; }", 7)]
     public async Task ScalarFrontendNamedOutputCallsMatchHostedAsync(string text, int expected)
