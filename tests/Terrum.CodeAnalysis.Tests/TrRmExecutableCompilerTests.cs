@@ -293,6 +293,53 @@ public sealed class TrRmExecutableCompilerTests
             NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
     }
 
+    [Theory]
+    [InlineData(2, true, 42)]
+    [InlineData(2, false, 0)]
+    [InlineData(4, true, 42)]
+    [InlineData(4, false, 0)]
+    [InlineData(5, true, 42)]
+    [InlineData(5, false, 0)]
+    [InlineData(7, true, 42)]
+    [InlineData(7, false, 0)]
+    public async Task SourceFreeOptionalScalarPayloadTypesPreservePresenceInAotAndJit(
+        byte payloadTypeCode, bool present, int expected)
+    {
+        var typeRows = new[] { 2, 4, (int)payloadTypeCode, 8 }
+            .Distinct().ToArray();
+        var payloadTypeId = Array.IndexOf(typeRows, payloadTypeCode) + 1;
+        var int32TypeId = Array.IndexOf(typeRows, 4) + 1;
+        var optionalTypeId = Array.IndexOf(typeRows, 8) + 1;
+        var operations = new List<byte> { 1, 1, (byte)payloadTypeId, 0 };
+        if (present)
+        {
+            operations.AddRange([8, 2, (byte)optionalTypeId, 1]);
+        }
+        else
+        {
+            operations.AddRange([9, 2, (byte)optionalTypeId]);
+        }
+        operations.AddRange([
+            3, 3, 2,
+            0x0A, 4, 3,
+            1, 5, (byte)int32TypeId, 42,
+            1, 6, (byte)int32TypeId, 0,
+            7, 7, 4, 5, 6,
+        ]);
+        var body = OptionalLinearBody(typeRows, [.. operations], 7, 7);
+        var loaded = TrRmExecutableCompiler.Load(OptionalScalarArtifact(body,
+            optionalChar16: false,
+            optionalInt32: payloadTypeCode == 4,
+            optionalInt64: false,
+            optionalBool: payloadTypeCode == 2,
+            optionalUInt32: payloadTypeCode == 5,
+            optionalUInt64: payloadTypeCode == 7));
+
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.Equal(expected, await StaticProtocolTests.RunAsync(
+            NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+    }
+
     [Fact]
     public async Task SourceFreeOptionalChar16EqualityDistinguishesPresenceAndPayload()
     {
@@ -443,7 +490,8 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     private static byte[] OptionalScalarArtifact(byte[] body, bool optionalChar16,
-        bool optionalInt32, bool optionalInt64 = false)
+        bool optionalInt32, bool optionalInt64 = false, bool optionalBool = false,
+        bool optionalUInt32 = false, bool optionalUInt64 = false)
     {
         var original = TrRmExecutableCompiler.Emit(
             Compile("int32 Main() { return 0; }"), "optional-body");
@@ -466,6 +514,18 @@ public sealed class TrRmExecutableCompilerTests
         if (optionalInt64)
         {
             rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, 6));
+        }
+        if (optionalBool)
+        {
+            rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, 2));
+        }
+        if (optionalUInt32)
+        {
+            rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, 5));
+        }
+        if (optionalUInt64)
+        {
+            rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, 7));
         }
         var rewrittenTypes = TrRmTypeSpecTableWriter.Encode(rows, 0, 0, 0, 0);
         var rewrittenBody = TrRmVariableTableWriter.EncodeBodies([body]);
