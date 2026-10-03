@@ -209,4 +209,6 @@ public enum TokenKind
     ShiftRightEquals,
     /// <summary>Checked-count zero-filling right shift assignment.</summary>
     ShiftRightUnsignedEquals,
+    /// <summary>The <c>alias</c> keyword.</summary>
+    AliasKeyword,
 }

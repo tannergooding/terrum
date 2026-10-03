@@ -30,6 +30,8 @@ internal sealed partial class Binder
     private readonly HashSet<int> _layingOut = [];
     private readonly HashSet<int> _laidOut = [];
     private readonly Dictionary<string, PrimitiveType> _structNames = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, AliasDefinition> _aliases = new(StringComparer.Ordinal);
+    private readonly List<AliasDefinition> _aliasResolutionStack = [];
     private readonly ImmutableArray<HostBuffer> _buffers;
     private readonly Dictionary<string, int> _functions = new(StringComparer.Ordinal);
     private readonly HashSet<string> _usings = new(StringComparer.Ordinal);
@@ -61,6 +63,20 @@ internal sealed partial class Binder
     {
         internal string? Name { get; init; }
         internal bool HasContinue { get; set; }
+    }
+
+    private sealed class AliasDefinition(SyntaxTree tree, SyntaxNode declaration, SyntaxNode target,
+        string qualifiedName, bool isPublic)
+    {
+        internal SyntaxTree Tree { get; } = tree;
+        internal SyntaxNode Declaration { get; } = declaration;
+        internal SyntaxNode Target { get; } = target;
+        internal string QualifiedName { get; } = qualifiedName;
+        internal bool IsPublic { get; } = isPublic;
+        internal bool IsResolving { get; set; }
+        internal bool IsResolved { get; set; }
+        internal bool IsInvalid { get; set; }
+        internal PrimitiveType Type { get; set; }
     }
 
     internal Binder(SyntaxTree tree, CancellationToken cancellationToken)
@@ -180,7 +196,8 @@ internal sealed partial class Binder
                 _usesNativeBuffer = true;
             }
             if ((item.Node.Kind == SyntaxKind.TypeName
-                    && NameText(item.Node) is NativeManagedNodeIntrinsics.TypeName or "ManagedNode?")
+                    && NameText(item.Node) is NativeManagedNodeIntrinsics.TypeName or "ManagedNode?"
+                        or "writeManagedNode" or "writeManagedNode?")
                 || (item.Node.Kind == SyntaxKind.MemberAccessExpression
                     && item.Node.Children[0] is SyntaxNode managedReceiver
                     && managedReceiver.Kind == SyntaxKind.NameExpression
@@ -283,6 +300,7 @@ internal sealed partial class Binder
         {
             _ = _structNames.TryAdd(NativeManagedNodeIntrinsics.TypeName, PrimitiveType.ManagedNode);
         }
+        DeclareAliases();
         foreach (var index in _structDeclarations.Keys)
         {
             DeclareStruct(index);
@@ -331,6 +349,10 @@ internal sealed partial class Binder
                     continue;
                 }
                 if (node.Kind == SyntaxKind.InterfaceDeclaration)
+                {
+                    continue;
+                }
+                if (node.Kind == SyntaxKind.AliasDeclaration)
                 {
                     continue;
                 }
@@ -847,6 +869,158 @@ internal sealed partial class Binder
         throw new InvalidOperationException();
     }
 
+    private void DeclareAliases()
+    {
+        foreach (var tree in _trees)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            SetContext(tree);
+            foreach (var declaration in tree.Root.Children.OfType<SyntaxNode>()
+                .Where(static node => node.Kind == SyntaxKind.AliasDeclaration))
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                var nameToken = declaration.Children.OfType<SyntaxTokenElement>()
+                    .FirstOrDefault(static element => element.Token.Kind == TokenKind.Identifier)?.Token;
+                var target = declaration.Children.OfType<SyntaxNode>()
+                    .FirstOrDefault(static node => node.Kind == SyntaxKind.TypeName);
+                if (nameToken is not SyntaxToken name || target is null)
+                {
+                    continue;
+                }
+                if (declaration.Children.OfType<SyntaxNode>()
+                    .Any(static node => node.Kind == SyntaxKind.TypeParameterList))
+                {
+                    Report("TRM3001", "Generic type aliases are not supported.", declaration.Span);
+                    continue;
+                }
+                var visibility = declaration.Children.OfType<SyntaxTokenElement>()
+                    .Where(static element => element.Token.Kind is TokenKind.PublicKeyword
+                        or TokenKind.InternalKeyword or TokenKind.PrivateKeyword)
+                    .Select(static element => element.Token.Kind).ToArray();
+                var isPublic = visibility.Contains(TokenKind.PublicKeyword);
+                if (visibility.Length > 1 || visibility.Contains(TokenKind.PrivateKeyword)
+                    || declaration.Children.OfType<SyntaxTokenElement>().Any(static element =>
+                        element.Token.Kind is TokenKind.StaticKeyword or TokenKind.MutKeyword
+                            or TokenKind.UniqueKeyword or TokenKind.UnsafeKeyword)
+                    || declaration.Children.OfType<SyntaxNode>()
+                        .Any(static node => node.Kind == SyntaxKind.Attribute))
+                {
+                    Report("TRM3001", "Type aliases permit at most one public or internal modifier and no attributes.",
+                        declaration.Span);
+                }
+                if (_isLibrary && isPublic)
+                {
+                    Report("TRM3001", "Public type aliases cannot be emitted until alias metadata is defined.",
+                        declaration.Span);
+                }
+                var qualifiedName = Qualify(name.Name);
+                if (TryPrimitiveType(name.Name, out _)
+                    || qualifiedName is NativeBufferIntrinsics.TypeName
+                        or "ReadonlyInt32BufferView" or "MutableInt32BufferView"
+                    || name.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
+                    || _structNames.ContainsKey(qualifiedName)
+                    || _classNames.ContainsKey(qualifiedName)
+                    || _protocols.ContainsKey(qualifiedName)
+                    || !_aliases.TryAdd(qualifiedName,
+                        new AliasDefinition(tree, declaration, target, qualifiedName, isPublic)))
+                {
+                    Report("TRM3003", $"Duplicate or reserved type alias '{qualifiedName}'.", declaration.Span);
+                }
+            }
+        }
+        foreach (var alias in _aliases.Values)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            _ = ResolveAlias(alias, out _);
+        }
+    }
+
+    private DeclaredTypeResolution ResolveAlias(AliasDefinition alias, out PrimitiveType type)
+    {
+        if (alias.IsResolved)
+        {
+            type = alias.Type;
+            return DeclaredTypeResolution.Unique;
+        }
+        if (alias.IsInvalid)
+        {
+            type = default;
+            return DeclaredTypeResolution.Invalid;
+        }
+        if (alias.IsResolving)
+        {
+            var first = _aliasResolutionStack.IndexOf(alias);
+            var cycle = _aliasResolutionStack.Skip(Math.Max(first, 0))
+                .Select(static item => item.QualifiedName).Append(alias.QualifiedName);
+            Report("TRM3005", $"Recursive type alias cycle: {string.Join(" -> ", cycle)}.",
+                alias.Declaration.Span);
+            alias.IsInvalid = true;
+            type = default;
+            return DeclaredTypeResolution.Invalid;
+        }
+        if (_aliasResolutionStack.Count >= MaximumSemanticDepth)
+        {
+            Report("TRM3015", $"Type alias expansion exceeds {MaximumSemanticDepth} declarations.",
+                alias.Declaration.Span);
+            alias.IsInvalid = true;
+            type = default;
+            return DeclaredTypeResolution.Invalid;
+        }
+
+        var previousTree = _tree;
+        SetContext(alias.Tree);
+        var diagnosticCount = _diagnostics.Count;
+        alias.IsResolving = true;
+        _aliasResolutionStack.Add(alias);
+        try
+        {
+            var resolved = BindType(alias.Target, allowVoid: false);
+            if (_diagnostics.Count != diagnosticCount)
+            {
+                alias.IsInvalid = true;
+                type = default;
+                return DeclaredTypeResolution.Invalid;
+            }
+            if (alias.IsPublic && !IsPublicType(resolved))
+            {
+                Report("TRM3005", $"Public type alias '{alias.QualifiedName}' exposes a non-public target.",
+                    alias.Target.Span);
+                alias.IsInvalid = true;
+                type = default;
+                return DeclaredTypeResolution.Invalid;
+            }
+            alias.Type = resolved;
+            alias.IsResolved = true;
+            type = resolved;
+            return DeclaredTypeResolution.Unique;
+        }
+        finally
+        {
+            _aliasResolutionStack.RemoveAt(_aliasResolutionStack.Count - 1);
+            alias.IsResolving = false;
+            SetContext(previousTree);
+        }
+    }
+
+    private bool IsPublicType(PrimitiveType type)
+    {
+        if (IsStruct(type))
+        {
+            var index = (int)type - 100;
+            return !_structDeclarations.TryGetValue(index, out var declaration)
+                || declaration.Declaration.Children.OfType<SyntaxTokenElement>()
+                    .Any(static element => element.Token.Kind == TokenKind.PublicKeyword);
+        }
+        if (IsClass(type) || (ManagedClassTypes.IsOptional(type) && (int)type >= ManagedClassTypes.First))
+        {
+            var index = ManagedClassTypes.ClassIndex(type);
+            return !_classDeclarations.TryGetValue(index, out var declaration)
+                || declaration.Declaration.Children.OfType<SyntaxTokenElement>()
+                    .Any(static element => element.Token.Kind == TokenKind.PublicKeyword);
+        }
+        return true;
+    }
+
     private void Declare(SyntaxNode declaration, string? containingType)
     {
         var constructor = declaration.Kind == SyntaxKind.ConstructorDeclaration;
@@ -1169,11 +1343,16 @@ internal sealed partial class Binder
             _ => resolution == DeclaredTypeResolution.Unique ? resolved : (PrimitiveType?)null,
         };
 
-        if (type is null)
+        if (type is null && resolution != DeclaredTypeResolution.Invalid)
         {
             Report("TRM3005", resolution == DeclaredTypeResolution.Ambiguous
                 ? $"Type '{name}' is ambiguous across declared and imported types."
                 : $"Type '{name}' is not supported here.", node.Span);
+        }
+        if (type == PrimitiveType.Void && !allowVoid)
+        {
+            Report("TRM3005", $"Type alias '{name}' cannot be used as a value type.", node.Span);
+            return PrimitiveType.Int32;
         }
         if (writable && type is PrimitiveType resolvedType)
         {

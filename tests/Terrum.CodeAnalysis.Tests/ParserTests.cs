@@ -18,12 +18,35 @@ public sealed class ParserTests
         const string Source = "int32 Main() { _ /* destination */ = int32(42); return 42; }";
         var tree = SyntaxTree.Parse(Source);
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal("syntax-44", SyntaxTree.LanguageVersion);
+        Assert.Equal("syntax-45", SyntaxTree.LanguageVersion);
         var discard = Assert.Single(tree.Root.DescendantNodes(), static node => node.Kind == SyntaxKind.DiscardStatement);
         Assert.Equal(TokenKind.Underscore, Assert.IsType<SyntaxTokenElement>(discard.Children[0]).Token.Kind);
         Assert.Equal(TokenKind.Equals, Assert.IsType<SyntaxTokenElement>(discard.Children[1]).Token.Kind);
         Assert.Equal(SyntaxKind.InvocationExpression, Assert.IsType<SyntaxNode>(discard.Children[2]).Kind);
         AssertLossless(tree);
+    }
+
+    [Fact]
+    public void ParsesOnlyNamespaceLevelTypeAliases()
+    {
+        const string Source = "public alias Count = int32;";
+        var tree = SyntaxTree.Parse(Source);
+        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.Equal("syntax-45", SyntaxTree.LanguageVersion);
+        var alias = Assert.Single(tree.Root.Children.OfType<SyntaxNode>(),
+            static node => node.Kind == SyntaxKind.AliasDeclaration);
+        Assert.Equal("Count", Assert.IsType<SyntaxTokenElement>(alias.Children[2]).Token.Name);
+        Assert.Equal(SyntaxKind.TypeName, Assert.IsType<SyntaxNode>(alias.Children[4]).Kind);
+        AssertLossless(tree);
+
+        var spacing = SyntaxTree.Parse("alias Count=int32;");
+        Assert.Contains(spacing.Diagnostics, static diagnostic => diagnostic.Code == "TRM1008");
+
+        var nested = SyntaxTree.Parse("struct S { alias Count = int32; }");
+        Assert.True(nested.HasErrors);
+        Assert.DoesNotContain(nested.Root.DescendantNodes(),
+            static node => node.Kind == SyntaxKind.AliasDeclaration);
+        AssertLossless(nested);
     }
 
     [Theory]

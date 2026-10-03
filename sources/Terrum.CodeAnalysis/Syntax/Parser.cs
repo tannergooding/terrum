@@ -236,7 +236,7 @@ internal sealed class Parser
                 else
                 {
                     seenDeclaration = true;
-                    children.Add(ParseDeclaration(null));
+                    children.Add(ParseDeclaration(null, isFileScope: true));
                 }
 
                 EnsureProgress(start, children);
@@ -280,7 +280,7 @@ internal sealed class Parser
         return Node(isNamespace ? SyntaxKind.NamespaceDeclaration : SyntaxKind.UsingDirective, children);
     }
 
-    private SyntaxNode ParseDeclaration(string? containingType)
+    private SyntaxNode ParseDeclaration(string? containingType, bool isFileScope = false)
     {
         Enter();
         var children = new List<SyntaxElement>();
@@ -305,7 +305,20 @@ internal sealed class Parser
 
         SyntaxKind kind;
 
-        if (Current.Kind is TokenKind.StructKeyword or TokenKind.ClassKeyword)
+        if (isFileScope && Current.Kind == TokenKind.AliasKeyword)
+        {
+            children.Add(Take());
+            children.Add(Expect(TokenKind.Identifier));
+            if (Current.Kind == TokenKind.Less)
+            {
+                children.Add(ParseTypeParameters());
+            }
+            children.Add(Current.Kind == TokenKind.Equals ? TakeSeparated() : Expect(TokenKind.Equals));
+            children.Add(ParseType());
+            children.Add(Expect(TokenKind.Semicolon));
+            kind = SyntaxKind.AliasDeclaration;
+        }
+        else if (Current.Kind is TokenKind.StructKeyword or TokenKind.ClassKeyword)
         {
             var isClass = Current.Kind == TokenKind.ClassKeyword;
             children.Add(Take());

@@ -176,6 +176,7 @@ public sealed class LexerTests
     [InlineData("where", TokenKind.WhereKeyword)]
     [InlineData("enum", TokenKind.EnumKeyword)]
     [InlineData("union", TokenKind.UnionKeyword)]
+    [InlineData("alias", TokenKind.AliasKeyword)]
     [InlineData("unique", TokenKind.UniqueKeyword)]
     [InlineData("own", TokenKind.OwnKeyword)]
     [InlineData("move", TokenKind.MoveKeyword)]

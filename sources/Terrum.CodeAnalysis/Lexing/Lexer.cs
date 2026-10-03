@@ -548,6 +548,7 @@ public sealed class Lexer
         "interface" => TokenKind.InterfaceKeyword,
         "enum" => TokenKind.EnumKeyword,
         "union" => TokenKind.UnionKeyword,
+        "alias" => TokenKind.AliasKeyword,
         "unique" => TokenKind.UniqueKeyword,
         "own" => TokenKind.OwnKeyword,
         "move" => TokenKind.MoveKeyword,

@@ -131,6 +131,7 @@ public sealed class ScannerTests
         Assert.Equal(77, (int)TokenKind.AbstractKeyword);
         Assert.Equal(78, (int)TokenKind.OperatorKeyword);
         Assert.Equal(79, (int)TokenKind.WhereKeyword);
+        Assert.Equal(102, (int)TokenKind.AliasKeyword);
     }
 
     [Fact]

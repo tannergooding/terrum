@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax language version 44, semantic body features v43–v49, semantic-module revision 50, native-10 through native-20
+## Current boundary: syntax language version 45, semantic body features v43–v49, semantic-module revision 50, native-10 through native-20
 
 Semantic body feature numbers are milestone labels, not persisted format
 versions. Structured semantic-module writers and readers use revision 50 only;
@@ -72,6 +72,17 @@ filters and their post-unwind phase still need binding, persistence, lifetime
 verification and native integration.
 
 ### Current syntax and scanner profile
+
+Hosted source compilation supports transparent, non-generic aliases declared
+at file scope, including under the existing file-scoped namespace form, across
+source snapshots, with forward references and cycle diagnostics; expansion is
+bounded by the existing 128-declaration semantic nesting limit. Generic aliases
+remain unsupported. A public alias may be used in ordinary source compilation
+only when its resolved target is public; library emission rejects public
+aliases because their metadata encoding remains open. Internal aliases can be
+erased during library compilation. This support does not extend the bounded
+scalar frontend or add alias declarations to source-free TRRM; Terrum-authored
+scalar frontend components still use the hosted verifier/emitter.
 
 A single loop label and its `while`, `do` or `for` introducer must occupy the
 same physical source line (`TRM1012`). The colon attaches to the label; trivia

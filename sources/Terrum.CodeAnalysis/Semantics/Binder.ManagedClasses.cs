@@ -48,6 +48,7 @@ internal sealed partial class Binder
         Missing,
         Unique,
         Ambiguous,
+        Invalid,
     }
 
     private DeclaredTypeResolution ResolveTypeName(string name, out PrimitiveType type)
@@ -61,19 +62,31 @@ internal sealed partial class Binder
         if (_genericProofSource is Binder source)
         {
             var resolution = source.ResolveTypeName(name, out var sourceType);
-            if (resolution == DeclaredTypeResolution.Ambiguous)
+            if (resolution is DeclaredTypeResolution.Ambiguous or DeclaredTypeResolution.Invalid)
             {
                 type = default;
                 return resolution;
             }
-            if (resolution == DeclaredTypeResolution.Unique
-                && (source.IsStruct(sourceType) || source.IsClass(sourceType))
-                && HydrateProofType(sourceType) is PrimitiveType mapped)
+            if (resolution == DeclaredTypeResolution.Unique)
             {
-                type = mapped;
+                if (source.IsStruct(sourceType)
+                    || (ManagedClassTypes.IsManaged(sourceType) && (int)sourceType >= ManagedClassTypes.First))
+                {
+                    if (HydrateProofType(sourceType) is not PrimitiveType mapped)
+                    {
+                        type = default;
+                        return DeclaredTypeResolution.Invalid;
+                    }
+                    type = mapped;
+                }
+                else
+                {
+                    type = sourceType;
+                }
                 return DeclaredTypeResolution.Unique;
             }
         }
+        var invalidAlias = false;
         var candidates = new HashSet<PrimitiveType>();
         if (name.Contains('.', StringComparison.Ordinal))
         {
@@ -95,6 +108,11 @@ internal sealed partial class Binder
             }
         }
         type = candidates.Count == 1 ? candidates.Single() : default;
+        if (invalidAlias)
+        {
+            type = default;
+            return DeclaredTypeResolution.Invalid;
+        }
         return candidates.Count switch {
             0 => DeclaredTypeResolution.Missing,
             1 => DeclaredTypeResolution.Unique,
@@ -110,6 +128,18 @@ internal sealed partial class Binder
             if (_classNames.TryGetValue(qualified, out var @class))
             {
                 _ = candidates.Add(@class);
+            }
+            if (_aliases.TryGetValue(qualified, out var alias))
+            {
+                var aliasResolution = ResolveAlias(alias, out var aliasType);
+                if (aliasResolution == DeclaredTypeResolution.Unique)
+                {
+                    _ = candidates.Add(aliasType);
+                }
+                else if (aliasResolution == DeclaredTypeResolution.Invalid)
+                {
+                    invalidAlias = true;
+                }
             }
         }
     }

@@ -34,6 +34,114 @@ public sealed class CompilationTests
         SemanticVerifier.Verify(compilation.Program);
     }
 
+    [Fact]
+    public void ResolvesForwardAliasesAcrossSourceFiles()
+    {
+        var entry = SyntaxTree.Parse("using Demo; int32 Main() { Count value = 42; return value; }");
+        var aliases = SyntaxTree.Parse("namespace Demo; alias Count = Scalar; alias Scalar = int32;");
+        var compilation = Compilation.Create([entry, aliases]);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.NotNull(compilation.Program);
+        SemanticVerifier.Verify(compilation.Program);
+    }
+
+    [Fact]
+    public void PublicAliasesPreserveTheResolvedTypeInExecutableSource()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "public alias Count = int32; int32 Main() { Count value = 42; return value; }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.NotNull(compilation.Program);
+        SemanticVerifier.Verify(compilation.Program);
+    }
+
+    [Fact]
+    public void AliasesPreserveNominalTypeIdentity()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            public struct Number {
+                public int32 Value;
+                public Number(int32 value) { Value = value; }
+            }
+            public alias NumberAlias = Number;
+            int32 Main() {
+                var value = new NumberAlias(42);
+                return value.Value;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.NotNull(compilation.Program);
+        SemanticVerifier.Verify(compilation.Program);
+    }
+
+    [Fact]
+    public void AliasesHydrateOptionalManagedTypesInGenericProofs()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class Node {
+                public int32 Value;
+                public Node(int32 value) { Value = value; }
+            }
+            alias MaybeNode = Node?;
+            T Identity<T>(T value) where T : [Copy] { return value; }
+            int32 Main() {
+                MaybeNode absent = null;
+                MaybeNode result = Identity<MaybeNode>(absent);
+                if (result is some present) { return present.Value; }
+                return 0;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.NotNull(compilation.Program);
+        SemanticVerifier.Verify(compilation.Program);
+    }
+
+    [Fact]
+    public void AliasTargetsRetainManagedWriteCapabilities()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "alias WritableNode = write ManagedNode; void Set(WritableNode node) { node.SetValue(42); }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.NotNull(compilation.Program);
+        SemanticVerifier.VerifyLibrary(compilation.Program);
+    }
+
+    [Fact]
+    public void RejectsRecursiveAndGenericAliases()
+    {
+        var recursive = Compilation.Create(SyntaxTree.Parse(
+            "alias First = Second; alias Second = First; int32 Main() { return 0; }"));
+        Assert.True(recursive.HasErrors);
+        Assert.Contains(recursive.Diagnostics, static diagnostic =>
+            diagnostic.Code == "TRM3005" && diagnostic.Message.Contains("First -> Second -> First", StringComparison.Ordinal));
+
+        var generic = Compilation.Create(SyntaxTree.Parse(
+            "alias Identity<T> = T; int32 Main() { return 0; }"));
+        Assert.True(generic.HasErrors);
+        Assert.Contains(generic.Diagnostics, static diagnostic =>
+            diagnostic.Code == "TRM3001" && diagnostic.Message.Contains("Generic type aliases", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void KeepsAliasVisibilityAndModuleMetadataBoundariesExplicit()
+    {
+        var inaccessible = Compilation.Create(SyntaxTree.Parse(
+            "struct Hidden { int32 Value; } public alias PublicHidden = Hidden; int32 Main() { return 0; }"));
+        Assert.True(inaccessible.HasErrors);
+        Assert.Contains(inaccessible.Diagnostics, static diagnostic =>
+            diagnostic.Code == "TRM3005" && diagnostic.Message.Contains("non-public target", StringComparison.Ordinal));
+
+        var library = Compilation.CreateLibrary(SyntaxTree.Parse("public alias Count = int32;"));
+        Assert.True(library.HasErrors);
+        Assert.Contains(library.Diagnostics, static diagnostic =>
+            diagnostic.Code == "TRM3001" && diagnostic.Message.Contains("alias metadata", StringComparison.Ordinal));
+
+        var internalLibrary = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "alias Count = int32; public Count Get() { return 42; }"));
+        Assert.False(internalLibrary.HasErrors, string.Join(Environment.NewLine, internalLibrary.Diagnostics));
+        Assert.NotNull(internalLibrary.Program);
+    }
+
     [Theory]
     [InlineData("int32 F() { return 1; }")]
     [InlineData("int32 Main(int32 value) { return value; }")]

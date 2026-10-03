@@ -145,4 +145,6 @@ public enum SyntaxKind
     IsVarNullableExpression,
     /// <summary>A direct initialization-state test.</summary>
     IsInitializedExpression,
+    /// <summary>A transparent namespace-level type alias declaration.</summary>
+    AliasDeclaration,
 }
