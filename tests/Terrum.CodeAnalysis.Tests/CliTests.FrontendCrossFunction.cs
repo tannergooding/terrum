@@ -669,4 +669,26 @@ public sealed partial class CliTests
         Assert.Empty(runOutput);
         Assert.Empty(runError);
     }
+
+    [Theory]
+    [InlineData("int32 Take(int32 @await) => @await; int32 Main() { return Take(@await: 42); }")]
+    [InlineData("int32 Take(int32 \U00010400) => \U00010400; int32 Main() { return Take(\U00010400: 42); }")]
+    public async Task ScalarFrontendNamedCallsMatchEscapedAndSupplementaryNamesAsync(string text)
+    {
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var input = Encoding.UTF8.GetBytes(text);
+        var (componentExit, componentOutput, componentError) = await RunAsync(input, "frontend-component",
+            directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.True(componentExit == 0, $"{componentExit}: {componentOutput}{componentError}");
+        using (var document = JsonDocument.Parse(componentOutput))
+        {
+            var result = document.RootElement.GetProperty("result");
+            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+        }
+        var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
+            directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(42, runExit);
+        Assert.Empty(runOutput);
+        Assert.Empty(runError);
+    }
 }
