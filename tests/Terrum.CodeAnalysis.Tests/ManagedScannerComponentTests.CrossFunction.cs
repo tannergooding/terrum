@@ -122,13 +122,22 @@ public sealed partial class ManagedScannerComponentTests
                 bytes, programBytes, (BoundRuntimePolicy)policy));
         }
 
-        const string incompleteText =
-            "public int32 Main() { return Fill(init var value); } int32 Fill(init ref<int32> value) { return 0; }";
-        var (incompleteBytes, incompleteProgramBytes, _) = await ProduceScalarProgramAsync(
-            incompleteText, NativeRuntimePolicy.FailFast);
-        Assert.Equal(82, BinaryPrimitives.ReadInt32LittleEndian(incompleteProgramBytes));
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(SourceText.From(incompleteText),
-            incompleteBytes, incompleteProgramBytes, BoundRuntimePolicy.FailFast));
+        string[] incompleteTexts = [
+            "public int32 Main() { return Fill(init var value); } int32 Fill(init ref<int32> value) { return 0; }",
+            "public int32 Main() { Fill(init var value); return 42; } void Fill(init ref<int32> value) { }",
+        ];
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            foreach (var incompleteText in incompleteTexts)
+            {
+                var (incompleteBytes, incompleteProgramBytes, _) = await ProduceScalarProgramAsync(
+                    incompleteText, policy);
+                Assert.Equal(82, BinaryPrimitives.ReadInt32LittleEndian(incompleteProgramBytes));
+                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(
+                    SourceText.From(incompleteText), incompleteBytes, incompleteProgramBytes,
+                    (BoundRuntimePolicy)policy));
+            }
+        }
     }
 
     [Fact]
