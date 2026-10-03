@@ -175,6 +175,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `63016a8` | Project named-storage `is init` tests in bounded single-function v80 and complete-program v81 scalar frontend |
 | `7d8f117` | Support named-storage `is init` tests in hosted native-20 and semantic v49 |
 | `8681e1f` | Support vacant-safe optional-handle `is var` and expression-capable `is var?` patterns in hosted native-20 and semantic v48 |
 | `a519f22` | Accept the existing initialized/non-null optional-handle presence pattern as `is var item` |
