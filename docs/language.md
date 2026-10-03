@@ -564,10 +564,10 @@ an ordinary immutable `var` cannot be assigned again, and an `init var` local
 can be initialized again when vacant without changing its established type.
 Ending a borrow releases that loan, not its referent; retiring a GC handle
 does not destroy a shared object. Dependent loans/pointers constrain early end.
-See [lifetime ending](lifetimes.md#explicit-local-lifetime-end). This accepted
-target form and assignment initialization of vacant locals are not implemented.
-Wildcard patterns, lambda placeholders and generic type holes are
-separate features; see the [implementation boundary](implementation.md).
+See [lifetime ending](lifetimes.md#explicit-local-lifetime-end). Both forms
+have bounded source-compilation support; local lifetime ending is not accepted
+in source-free executable TRRM. Wildcard patterns, lambda placeholders and
+generic type holes are separate features; see the [implementation boundary](implementation.md).
 
 Adding an interface member compatibly for existing implementations requires a
 default implementation that satisfies
