@@ -376,6 +376,17 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Fact]
+    public async Task IndexedOptionalChar16EqualityExecutesThroughNativeGraph()
+    {
+        var loaded = TrRmExecutableCompiler.Load(OptionalScalarArtifact(
+            IndexedOptionalChar16EqualityBody(), optionalChar16: true, optionalInt32: false));
+
+        Assert.Equal(168, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.Equal(168, await StaticProtocolTests.RunAsync(
+            NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+    }
+
+    [Fact]
     public async Task IndexedOptionalEdgePreservesIndirectPayloadAndPresence()
     {
         var loaded = TrRmExecutableCompiler.Load(OptionalScalarArtifact(
@@ -486,6 +497,76 @@ public sealed class TrRmExecutableCompilerTests
         body.AddRange([17, 31]);
         body.AddRange(firstBlock);
         body.AddRange(secondBlock);
+        return body.ToArray();
+    }
+
+    private static byte[] IndexedOptionalChar16EqualityBody()
+    {
+        byte[] valueTypeIds =
+        [
+            3, 3, 4, 4, 4, 1, 1, 4, 1, 1,
+            2, 2, 2, 2, 2, 2, 2, 2, 2,
+        ];
+        byte[] lastUseOrdinals =
+        [
+            3, 4, 9, 5, 6, 12, 13, 9, 14, 15,
+            15, 15, 16, 16, 17, 18, 17, 18, 19,
+        ];
+        byte[][] operations =
+        [
+            [1, 1, 3, 65],
+            [1, 2, 3, 66],
+            [8, 3, 4, 1],
+            [8, 4, 4, 1],
+            [8, 5, 4, 2],
+            [5, 6, 4, 3, 4],
+            [5, 7, 5, 3, 5],
+            [9, 8, 4],
+            [5, 9, 4, 8, 8],
+            [5, 10, 5, 3, 8],
+            [1, 11, 2, 42],
+            [1, 12, 2, 0],
+            [7, 13, 6, 11, 12],
+            [7, 14, 7, 11, 12],
+            [7, 15, 9, 11, 12],
+            [7, 16, 10, 11, 12],
+            [0x15, 17, 1, 13, 14],
+            [0x15, 18, 1, 17, 15],
+            [0x15, 19, 1, 18, 16],
+        ];
+        var block = new List<byte> { 16, (byte)valueTypeIds.Length };
+        for (var value = 0; value < valueTypeIds.Length; value++)
+        {
+            block.Add((byte)(value + 1));
+            block.Add(lastUseOrdinals[value]);
+        }
+        block.Add((byte)operations.Length);
+        var operationOffsets = new byte[operations.Length];
+        for (var operation = 0; operation < operations.Length; operation++)
+        {
+            operationOffsets[operation] = (byte)block.Count;
+            block.AddRange(operations[operation]);
+        }
+        var terminatorOffset = (byte)block.Count;
+        block.Add(0x83);
+        block.Add(19);
+
+        var body = new List<byte> { 0x08, 1, 19, 0, 4 };
+        foreach (var row in new[] { 2, 4, 3, 8 })
+        {
+            var bytes = new byte[sizeof(uint)];
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes, (uint)row);
+            body.AddRange(bytes);
+        }
+        foreach (var typeId in valueTypeIds)
+        {
+            body.Add(typeId);
+            body.Add(1);
+        }
+        body.AddRange([0, 19]);
+        body.AddRange(operationOffsets);
+        body.AddRange([0, (byte)block.Count, terminatorOffset]);
+        body.AddRange(block);
         return body.ToArray();
     }
 
