@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Linq;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -205,6 +206,57 @@ public sealed class CallerUnsafeTests
         var authorizedCall = Compilation.Create(SyntaxTree.Parse(declaration
             + " int32 Main() { return unsafe(Identity<int32>(42)); }"));
         Assert.False(authorizedCall.HasErrors, string.Join(Environment.NewLine, authorizedCall.Diagnostics));
+    }
+
+    [Fact]
+    public void UnsafeStaticOperatorsRequireAuthorizationForBinaryUnaryAndUpdateSyntax()
+    {
+        const string declaration = """
+            public struct Number {
+                public int32 Value;
+                public Number(int32 value) { Value = value; }
+                public static unsafe Number operator +(Number left, Number right) {
+                    return new Number(left.Value + right.Value);
+                }
+                public static unsafe Number operator +(Number value) {
+                    return new Number(value.Value);
+                }
+                public static unsafe Number operator ++(Number value) {
+                    return new Number(value.Value + 1);
+                }
+            }
+            """;
+
+        const string body = """
+            int32 Main() {
+                Number left = new Number(2);
+                Number right = new Number(3);
+                Number combined = left + right;
+                Number unary = +left;
+                mut Number updated = left;
+                ++updated;
+                return combined.Value + unary.Value + updated.Value;
+            }
+            """;
+
+        var safeUse = Compilation.Create(SyntaxTree.Parse(declaration + body));
+        Assert.Null(safeUse.Program);
+        Assert.Equal(3, safeUse.Diagnostics.Count(static diagnostic => diagnostic.Code == "TRM3028"));
+
+        var authorizedUse = Compilation.Create(SyntaxTree.Parse(declaration + """
+            int32 Main() {
+                Number left = new Number(2);
+                Number right = new Number(3);
+                unsafe {
+                    Number combined = left + right;
+                    Number unary = +left;
+                    mut Number updated = left;
+                    ++updated;
+                    return combined.Value + unary.Value + updated.Value;
+                }
+            }
+            """));
+        Assert.False(authorizedUse.HasErrors, string.Join(Environment.NewLine, authorizedUse.Diagnostics));
     }
 
     [Fact]
