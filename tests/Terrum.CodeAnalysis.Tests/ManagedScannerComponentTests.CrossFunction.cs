@@ -179,6 +179,7 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("public int32 Main() => unsafe(42);", 82, "Main")]
     [InlineData("public unsafe int32 Recur() { if (false) { return unsafe(Recur()); } return 42; }", 83, "Recur")]
     [InlineData("public unsafe int32 Recur() { if (false) { unsafe { return Recur(); } } return 42; }", 83, "Recur")]
+    [InlineData("public unsafe void Recur() { if (false) { unsafe { Recur(); } } }", 83, "Recur")]
     public async Task ScalarFrontendSingleFunctionProjectsUnsafeScopesAsync(
         string text, int projectionVersion, string functionName)
     {
