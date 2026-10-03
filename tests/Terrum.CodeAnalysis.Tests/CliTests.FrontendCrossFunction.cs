@@ -574,6 +574,45 @@ public sealed partial class CliTests
         }
     }
 
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast, "fail-fast")]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions, "checked-exceptions")]
+    public async Task ScalarFrontendNamedCallsBuildHostedParityLibraryAsync(
+        BoundRuntimePolicy policy, string runtime)
+    {
+        const string text = """
+            int32 Pair(int32 first, int32 second) => first + second;
+            public int32 Value() => Pair(second: 3, first: 2);
+            """;
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var input = Encoding.UTF8.GetBytes(text);
+        var (componentExit, componentOutput, componentError) = await RunAsync(input, "frontend-component",
+            directory, "-", "--runtime", runtime, "--json");
+        Assert.True(componentExit == 0, $"{componentExit}: {componentOutput}{componentError}");
+        using (var document = JsonDocument.Parse(componentOutput))
+        {
+            Assert.Equal(85, document.RootElement.GetProperty("result")
+                .GetProperty("projectionVersion").GetInt32());
+        }
+
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+        var path = Path.Combine(Path.GetTempPath(), $"named-calls-{Guid.NewGuid():N}.dll");
+        try
+        {
+            var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
+                directory, "-", "-o", path, "--runtime", runtime, "--json");
+            Assert.True(buildExit == 0, $"{buildExit}: {buildOutput}{buildError}");
+            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Value"], (NativeRuntimePolicy)policy),
+                await File.ReadAllBytesAsync(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public async Task ScalarFrontendNamedValueCallPreservesPositionalOutputParameterAsync()
     {
