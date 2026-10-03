@@ -68,7 +68,8 @@ public static partial class ScalarFrontendHost
                     && !context.AllowNonBooleanOutputParameters)
                 || (words[17] != 0 && words[5] != BooleanTypeCode
                     && !context.AllowNonBooleanInitRefParameters)
-                || (words[2] & 4) != 0 && !context.AllowDoesNotReturn)
+                || (words[2] & 4) != 0 && !context.AllowDoesNotReturn
+                || (words[2] & 8) != 0 && !context.AllowCallerUnsafe)
             {
                 throw InvalidResult();
             }
@@ -133,7 +134,9 @@ public static partial class ScalarFrontendHost
         var isPublic = words[0] >= 2 && (words[2] & 1) != 0;
         if ((words[0] == 1 ? words[2] != 0
                 : words[0] == 59 ? words[2] is < 2 or > 7
-                : words[0] >= 60 ? words[2] is < 0 or > 7 : words[2] is not (0 or 1))
+                : words[0] >= 60 ? words[2] < 0
+                    || words[2] > (context?.AllowCallerUnsafe == true ? 15 : 7)
+                    : words[2] is not (0 or 1))
             || !AllZero(3, 5)
             || (words[5] == 0 ? words[0] is not (56 or 57 or 58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71 or 72 or 73 or 80)
                 : !ScalarType(words[5]) || words[0] is 56 or 57)
@@ -592,14 +595,13 @@ public static partial class ScalarFrontendHost
             var statementCursor = 0;
             var activeLoops = new System.Collections.Generic.List<(int Header, string? Label)>();
             var seenNames = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
-            if (!TakeDeclarationEffects(tokens, ref at, effects))
+            if (!TakeDeclarationEffects(tokens, ref at, effects)
+                || !TakeCallableModifiers(tokens, ref at, isPublic, words[0] >= 3,
+                    (words[2] & 8) != 0))
             {
                 throw InvalidResult();
             }
             if (!lexical.Diagnostics.IsEmpty
-                || (isPublic && !Take(TokenKind.PublicKeyword))
-                || (!isPublic && tokens[at].Kind == TokenKind.InternalKeyword
-                    && !Take(TokenKind.InternalKeyword))
                 || !Take(words[5] == 0 ? TokenKind.VoidKeyword : TokenKind.Identifier)
                 || !Take(TokenKind.Identifier)
                 || !Take(TokenKind.OpenParen))
@@ -708,6 +710,7 @@ public static partial class ScalarFrontendHost
             projection = projection with { Nodes = tree, ConditionRoot = conditionRoot,
                 TrueRoot = trueRoot, FalseRoot = falseRoot, IsExpressionBody = words[41] == 1,
                 IsNoThrow = (effects & 2) != 0, DoesNotReturn = (effects & 4) != 0,
+                RequiresUnsafeCaller = (words[2] & 8) != 0,
                 OutParameterMask = words[16],
                 InitRefParameterMask = words[17],
                 CallTargets = context?.Targets.ToImmutableArray() ?? default,
@@ -1613,15 +1616,14 @@ public static partial class ScalarFrontendHost
             var lexical = Lexer.Lex(SourceText.From(source.Text[..end]));
             var tokens = lexical.Tokens;
             var attributeEnd = 0;
-            if (!TakeDeclarationEffects(tokens, ref attributeEnd, effects))
+            if (!TakeDeclarationEffects(tokens, ref attributeEnd, effects)
+                || !TakeCallableModifiers(tokens, ref attributeEnd, isPublic,
+                    words[0] >= 3, (words[2] & 8) != 0))
             {
                 return false;
             }
-            var isInternal = !isPublic && words[0] >= 3
-                && tokens[attributeEnd].Kind == TokenKind.InternalKeyword;
-            var offset = attributeEnd + (isPublic || isInternal ? 1 : 0);
+            var offset = attributeEnd;
             if (!lexical.Diagnostics.IsEmpty || tokens.Length <= offset + 1
-                || (isPublic && tokens[attributeEnd].Kind != TokenKind.PublicKeyword)
                 || tokens[offset].Kind != (words[5] == 0 ? TokenKind.VoidKeyword : TokenKind.Identifier)
                 || tokens[offset].Text != TypeName(words[5])
                 || tokens[offset + 1].Kind != TokenKind.Identifier
@@ -2672,8 +2674,14 @@ public static partial class ScalarFrontendHost
                     {
                         arguments.Add(treeExpressions[argumentNodes[ordinal]]);
                     }
+                    var isUnsafeAuthorized = !result.Statements.IsDefault
+                        && result.Statements.Any(statement => statement.Kind == 31
+                            && statement.BodySpan.Start <= node.Span.Start
+                            && node.Span.End <= statement.BodySpan.End);
                     bound = new BoundCall(node.Operation == 105 ? result.CallTargets[i] : 0,
-                        arguments.ToImmutable(), type, node.Span);
+                        arguments.ToImmutable(), type, node.Span) {
+                        IsUnsafeAuthorized = isUnsafeAuthorized,
+                    };
                 }
                 else if (node.Operation == 83)
                 {
@@ -2984,7 +2992,8 @@ public static partial class ScalarFrontendHost
             new BoundBlock(body.ToImmutable(), callableBodySpan) {
                 IsManagedLexicalScope = hostedScopes || returnType == PrimitiveType.Void && result.IsExpressionBody,
             }, methodSpan) {
-                IsInternal = !result.IsPublic, IsNoThrow = result.IsNoThrow, DoesNotReturn = result.DoesNotReturn,
+                IsInternal = !result.IsPublic, IsNoThrow = result.IsNoThrow,
+                RequiresUnsafeCaller = result.RequiresUnsafeCaller, DoesNotReturn = result.DoesNotReturn,
             };
         var program = new BoundProgram([function], -1) { RuntimePolicy = policy };
         if (verify)
@@ -3395,6 +3404,42 @@ public static partial class ScalarFrontendHost
         return effects == expected;
     }
 
+    private static bool TakeCallableModifiers(ImmutableArray<SyntaxToken> tokens, ref int at,
+        bool expectedPublic, bool allowInternal, bool expectedCallerUnsafe)
+    {
+        var hasVisibility = false;
+        var isPublic = false;
+        var callerUnsafe = false;
+        while (at < tokens.Length)
+        {
+            var kind = tokens[at].Kind;
+            if (kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword)
+            {
+                if (hasVisibility || kind == TokenKind.InternalKeyword && !allowInternal)
+                {
+                    return false;
+                }
+                hasVisibility = true;
+                isPublic = kind == TokenKind.PublicKeyword;
+                at++;
+            }
+            else if (kind == TokenKind.UnsafeKeyword)
+            {
+                if (callerUnsafe)
+                {
+                    return false;
+                }
+                callerUnsafe = true;
+                at++;
+            }
+            else
+            {
+                break;
+            }
+        }
+        return isPublic == expectedPublic && callerUnsafe == expectedCallerUnsafe;
+    }
+
     private static ArgumentException InvalidResult()
         => new("Invalid scalar frontend projection.");
 }
@@ -3426,6 +3471,8 @@ public readonly record struct ScalarFrontendResult(
 {
     public bool IsNoThrow { get; init; }
     public bool DoesNotReturn { get; init; }
+    /// <summary>Whether calling this declaration requires an explicit unsafe caller scope.</summary>
+    public bool RequiresUnsafeCaller { get; init; }
     public ImmutableArray<ScalarFrontendNode> Nodes { get; init; }
     public int ConditionRoot { get; init; }
     public int TrueRoot { get; init; }

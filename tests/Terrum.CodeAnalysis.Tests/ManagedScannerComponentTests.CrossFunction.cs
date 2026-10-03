@@ -76,6 +76,67 @@ public sealed partial class ManagedScannerComponentTests
         }
     }
 
+    [Fact]
+    public async Task ScalarFrontendProgramProjectsCallerUnsafeCallsInsideExplicitScopesAsync()
+    {
+        const string text = "public unsafe int32 Danger(int32 value) => value + 1; public int32 Main() { return Safe(41); } int32 Safe(int32 value) { unsafe { return Danger(value); } } int32 Fill(init ref<int32> value) { value = 40; return 0; }";
+        var source = SourceText.From(text);
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var (bytes, programBytes, stage) = await ProduceScalarProgramAsync(text, policy);
+            Assert.Equal(83, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
+
+            var result = ScalarFrontendHost.ReadProgram(source, bytes, programBytes,
+                (BoundRuntimePolicy)policy);
+            Assert.True(result.Projection.IsValid);
+            Assert.True(result.Projection.Functions[0].RequiresUnsafeCaller);
+            Assert.False(result.Projection.Functions[1].RequiresUnsafeCaller);
+            Assert.Equal(4, result.Projection.Functions.Length);
+
+            var actual = Assert.IsType<BoundProgram>(result.Program);
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Main"], policy),
+                NativeEmitter.EmitLibrary(actual, ["Main"], policy));
+            var entry = actual.Functions.IndexOf(actual.Functions.Single(static function => function.Name == "Main"));
+            Assert.Equal(42, NativeJit.Execute(actual with { EntryPoint = entry }, policy));
+            Assert.Equal(42, NativeJit.Execute(hosted with { EntryPoint = entry }, policy));
+            await ExecuteAotAsync(stage, policy);
+
+            var unsafeEffectOffset = (4 + 4 + 2) * sizeof(int);
+            var unsafeEffects = BinaryPrimitives.ReadInt32LittleEndian(programBytes.AsSpan(unsafeEffectOffset));
+            BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(unsafeEffectOffset), unsafeEffects & ~8);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source,
+                bytes, programBytes, (BoundRuntimePolicy)policy));
+            BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(unsafeEffectOffset), unsafeEffects);
+
+            BinaryPrimitives.WriteInt32LittleEndian(programBytes, 82);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source,
+                bytes, programBytes, (BoundRuntimePolicy)policy));
+        }
+    }
+
+    [Theory]
+    [InlineData("public unsafe int32 Danger() => 42; public int32 Main() => Danger();")]
+    [InlineData("public unsafe int32 Danger() => 42; public unsafe int32 Main() => Danger();")]
+    public async Task ScalarFrontendProgramRejectsCallerUnsafeCallsWithoutExplicitScopeAsync(string text)
+    {
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
+        Assert.Equal(83, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(SourceText.From(text),
+            bytes, programBytes, BoundRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public async Task ScalarFrontendProgramKeepsUnsafeExpressionScopesOutsideItsProjectionAsync()
+    {
+        const string text = "public unsafe int32 Danger() => 42; public int32 Main() => unsafe(Danger());";
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
+        Assert.False(ScalarFrontendHost.ReadResult(SourceText.From(text), bytes, programBytes,
+            BoundRuntimePolicy.FailFast).IsValid);
+    }
+
     [Theory]
     [InlineData(77)]
     [InlineData(78)]

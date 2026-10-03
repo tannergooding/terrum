@@ -47,7 +47,10 @@ Field reads and writes, including constructor writes and nested paths, require
 an explicit unsafe scope; accessor-local support is currently limited to
 getters. These obligations cannot cross persisted semantic-module or
 executable-TRRM boundaries; both writers reject programs containing them
-until the source-to-metadata contract is adopted.
+until the source-to-metadata contract is adopted. Complete-program scalar
+projection v83 additionally source-audits caller-unsafe top-level declarations
+and calls enclosed by explicit `unsafe { ... }` blocks. It remains backed by
+the hosted verifier/emitter and does not add persisted-module support.
 
 Target type matching also preserves generic/concrete consistency, including
 reference/pointer forms, without pattern-driven reference formation. Checked
@@ -155,7 +158,9 @@ structural levels and a shared 100,000-visit budget. Source-bound audits
 require current syntax even when reading compatible older projection shapes.
 V74 appends a separate complete-program buffer; the source/token limits remain
 per snapshot, and the local/statement/expression/parameter limits apply per
-function. Predicate factoring keeps the authored producer within the unchanged
+function. Complete-program v83 carries the caller-unsafe declaration bit and
+source-audits calls against explicit unsafe-block spans; semantic verification
+and emission remain hosted. Predicate factoring keeps the authored producer within the unchanged
 shared verification budget.
 These syntax and
 scanner contracts do not change semantic-module, ISA, Contract, TRRM or native
@@ -884,12 +889,23 @@ v74 callees must return a scalar. Single-function projections, including
 v72/v73 output and void self-call statements, retain their existing shapes
 and behavior.
 
+Complete-program v83 adds the existing caller-unsafe top-level callable
+modifier. The independent reader matches the declaration flag to source,
+derives call authorization only from an enclosing explicit `unsafe { ... }`
+statement, and propagates the declaration requirement into the bound function.
+The hosted verifier remains authoritative for call obligations; an unsafe
+declaration does not authorize its own body, and a safe wrapper can discharge
+the obligation internally. This projection does not include `unsafe(expr)`,
+persist caller-safety metadata, or make the frontend standalone.
+
 The appended `Host.FrontendProgram` buffer at index 11 has 4,284 `int32`
 words. Its four-word header is `(version, 1, function count, 0)`, with version
-74–78 or 80. Version 75 is selected only when a void-target call
+74–78 or 80–83. Version 75 is selected only when a void-target call
 uses the new statement position; version 76 is selected when any declaration
 uses `[DoesNotReturn]`; version 77 is selected when any declaration has a
-scalar `out` parameter. Ten source-order frames of 428 words follow:
+scalar `out` parameter; version 83 is selected when any declaration is
+caller-unsafe. Header bit 3 records that requirement in the existing
+per-function payload. Ten source-order frames of 428 words follow:
 
 | Frame words | Contents |
 |---|---|

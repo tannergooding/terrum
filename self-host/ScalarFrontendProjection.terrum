@@ -61,7 +61,8 @@ namespace Terrum.CodeAnalysis;
 // Version 58 adds kind-23 else-if markers: root -1, slot exclusive nested-if end,
 // and raw span from else through the direct nested if, without a lexical block.
 // Version 59 adds exact parameterless declaration effects in header word2:
-// bit0 public, bit1 NoThrow, bit2 DoesNotReturn. Existing body layouts are retained.
+// Header flags: bit0 public, bit1 NoThrow, bit2 DoesNotReturn, bit3 caller-unsafe.
+// Program v83 adds caller-unsafe callable declarations; existing body layouts remain.
 // Version 60 adds kind 24 for ending a visible named local; slot is its identity,
 // root is -1, and the span includes the semicolon outside for-clause records.
 // Version 61 adds kind 25 for an explicitly typed vacant local; local flag bit 1

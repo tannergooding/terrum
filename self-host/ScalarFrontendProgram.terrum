@@ -4,6 +4,7 @@ namespace Terrum.CodeAnalysis;
 // declaration needs six tokens, so ten frames cover the existing source bound.
 // Each frame contains token bounds, a source span, 392 body words, and 32
 // zero-based target identities (-1 for nodes other than operation 105).
+// Program v83 adds a source-audited caller-unsafe callable flag.
 int32 FindScalarProgramFunction(Token name)
 {
     for (mut int32 index = 0; index < Host.FrontendProgram[2]; index = index + 1)
@@ -204,7 +205,10 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         {
             if (Host.FrontendProgram[header + 5] != 5)
             {
-                Host.FrontendProgram[0] = 80;
+                if (Host.FrontendProgram[0] < 80)
+                {
+                    Host.FrontendProgram[0] = 80;
+                }
             }
             else if (Host.FrontendProgram[0] < 77)
             {
@@ -217,12 +221,19 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         }
         if (Host.FrontendProgram[header + 17] != 0 && Host.FrontendProgram[header + 5] != 5)
         {
-            Host.FrontendProgram[0] = 82;
+            if (Host.FrontendProgram[0] < 82)
+            {
+                Host.FrontendProgram[0] = 82;
+            }
         }
         if ((Host.FrontendProgram[header + 2] & 4) != 0
             && Host.FrontendProgram[0] < 76)
         {
             Host.FrontendProgram[0] = 76;
+        }
+        if ((Host.FrontendProgram[header + 2] & 8) != 0)
+        {
+            Host.FrontendProgram[0] = 83;
         }
         if (FindScalarProgramFunction(new Token(2, name)) != index)
         {
@@ -276,7 +287,8 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         }
     }
     for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
-    Host.FrontendProgram[0] = Host.FrontendProgram[0] >= 82 ? 82
+    Host.FrontendProgram[0] = Host.FrontendProgram[0] >= 83 ? 83
+        : Host.FrontendProgram[0] >= 82 ? 82
         : ScalarProgramHasInitializationTest() ? 81
         : Host.FrontendProgram[0] >= 76 ? Host.FrontendProgram[0]
         : ScalarProgramHasVoidCall() ? 75 : 74;

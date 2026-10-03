@@ -1422,16 +1422,38 @@ mut class ScalarFrontendState
         {
             return false;
         }
-        require _tokens.TryGet(_at, out var visibility);
-        if (visibility.Kind == 7)
+        mut bool sawVisibility = false;
+        mut bool sawUnsafe = false;
+        while (_tokens.TryGet(_at, out var modifier))
         {
-            _isPublic = true;
-            _at = _at + 1;
+            if (modifier.Kind == 7 || modifier.Kind == 8)
+            {
+                if (sawVisibility)
+                {
+                    FailAt(1, modifier.Range);
+                    return false;
+                }
+                sawVisibility = true;
+                _isPublic = modifier.Kind == 7;
+                _at = _at + 1;
+            }
+            // TokenKind.UnsafeKeyword has scanner ordinal 76.
+            else if (modifier.Kind == 76)
+            {
+                if (sawUnsafe)
+                {
+                    FailAt(1, modifier.Range);
+                    return false;
+                }
+                sawUnsafe = true;
+                _at = _at + 1;
+            }
+            else
+            {
+                break;
+            }
         }
-        else if (visibility.Kind == 8)
-        {
-            _at = _at + 1;
-        }
+        if (sawUnsafe) { Host.Frontend[2] = Host.Frontend[2] | 8; }
         require _tokens.TryGet(_at, out var returnToken);
         if (!Take(returnToken.Kind == 11 ? 11 : 2, out var typeToken))
         {
