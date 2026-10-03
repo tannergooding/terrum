@@ -3824,12 +3824,23 @@ public static class SemanticVerifier
                 break;
             case BoundBinary { Operator: TokenKind.AmpersandAmpersand or TokenKind.PipePipe } logical:
                 var evaluateWhenTrue = logical.Operator == TokenKind.AmpersandAmpersand;
+                var evaluatedPossible = CanBe(logical.Left, evaluateWhenTrue, ref remaining, state);
+                var skippedPossible = CanBe(logical.Left, !evaluateWhenTrue, ref remaining, state);
+                if (evaluatedPossible != skippedPossible)
+                {
+                    var feasible = Outcome(logical.Left, state, evaluatedPossible
+                        ? evaluateWhenTrue : !evaluateWhenTrue, ref remaining);
+                    if (evaluatedPossible)
+                    {
+                        VacateNestedOutputs(logical.Right, feasible, ref remaining);
+                    }
+                    feasible.CopyTo(state);
+                    break;
+                }
                 var evaluated = Outcome(logical.Left, state, evaluateWhenTrue, ref remaining);
                 VacateNestedOutputs(logical.Right, evaluated, ref remaining);
                 var skipped = Outcome(logical.Left, state, !evaluateWhenTrue, ref remaining);
-                var combined = Combine(evaluated,
-                    CanBe(logical.Left, evaluateWhenTrue, ref remaining, state),
-                    skipped, CanBe(logical.Left, !evaluateWhenTrue, ref remaining, state));
+                var combined = Combine(evaluated, evaluatedPossible, skipped, skippedPossible);
                 combined.CopyTo(state);
                 break;
             case BoundBinary binary:
