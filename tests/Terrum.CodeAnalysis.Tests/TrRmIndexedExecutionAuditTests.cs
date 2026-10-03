@@ -167,6 +167,50 @@ public sealed class TrRmIndexedExecutionAuditTests
         return body.ToArray();
     }
 
+    private static byte[] SmallScalarSwitchBody(byte selectorTypeRow, byte selector)
+    {
+        var firstPattern = selectorTypeRow == 2 ? (byte)0 : (byte)65;
+        var secondPattern = selectorTypeRow == 2 ? (byte)1 : (byte)66;
+        var blocks = new[]
+        {
+            new List<byte> { 16, 1, 1, 1, 1, 1, 1, 2, selector },
+            new List<byte> { 16, 1, 2, 1, 1, 1, 2, 1, 20, 0x83, 2 },
+            new List<byte> { 16, 1, 3, 1, 1, 1, 3, 1, 42, 0x83, 3 },
+            new List<byte> { 16, 1, 4, 1, 1, 1, 4, 1, 99, 0x83, 4 },
+        };
+        blocks[0].AddRange([0x82, 1, 2, firstPattern, 2, 0, secondPattern, 3, 0, 4, 0]);
+        var bodyData = new List<byte>();
+        var offsets = new List<byte> { 0 };
+        foreach (var block in blocks)
+        {
+            bodyData.AddRange(block);
+            offsets.Add((byte)bodyData.Count);
+        }
+
+        var body = new List<byte> { 8, 4, 4, 0, 2, 1, 0, 0, 0, selectorTypeRow, 0, 0, 0 };
+        body.AddRange([2, 1, 1, 1, 1, 1, 1, 1]);
+        body.AddRange([0, 1, 2, 3, 4]);
+        body.AddRange([5, 5, 5, 5]);
+        body.AddRange(offsets);
+        body.AddRange([9, 9, 9, 9]);
+        body.AddRange(bodyData);
+        return body.ToArray();
+    }
+
+    private static byte[] EmptySwitchBody =>
+    [
+        8, 2, 2, 0, 2,
+        1, 0, 0, 0, 2, 0, 0, 0,
+        2, 1, 1, 1,
+        0, 1, 2,
+        5, 5,
+        0, 14, 25,
+        9, 9,
+        16, 1, 1, 1, 1, 1, 1, 2, 1,
+        0x82, 1, 0, 2, 0,
+        16, 1, 2, 1, 1, 1, 2, 1, 42, 0x83, 2,
+    ];
+
     // Four blocks: compute flag/x/y, branch through two arms, merge with one int32 parameter.
     private static byte[] MergeBody(bool chooseFirst) =>
     [
@@ -273,6 +317,32 @@ public sealed class TrRmIndexedExecutionAuditTests
         var program = TrRmExecutableCompiler.Load(artifact);
         Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
         Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData((byte)2, (byte)0, 20)]
+    [InlineData((byte)2, (byte)1, 42)]
+    [InlineData((byte)3, (byte)65, 20)]
+    [InlineData((byte)3, (byte)66, 42)]
+    [InlineData((byte)3, (byte)67, 99)]
+    public void HandwrittenBooleanAndChar16SwitchesCompareTheirExactValues(
+        byte selectorTypeRow, byte selector, int expected)
+    {
+        var artifact = TrRmExecutionAuditTests.Artifact(
+            SmallScalarSwitchBody(selectorTypeRow, selector));
+        TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void HandwrittenSwitchWithoutCasesAlwaysTakesDefault()
+    {
+        var artifact = TrRmExecutionAuditTests.Artifact(
+            EmptySwitchBody);
+        TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
+        Assert.Equal(42, NativeJit.Execute(
+            TrRmExecutableCompiler.Load(artifact), NativeRuntimePolicy.FailFast));
     }
 
     [Fact]
