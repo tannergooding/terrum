@@ -183,6 +183,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `2562118` | Propagate caller-unsafe static operator requirements through generic proof bodies |
 | `03ef008` | Enforce same-compilation unsafe field access scopes while persisted writers fail closed |
 | `f714926` | Add same-compilation caller-unsafe checks while persisted writers fail closed |
 | `84d2564` | Project scalar non-Boolean/void `init ref<T>` completion through v81/v82 source-audited projections |
