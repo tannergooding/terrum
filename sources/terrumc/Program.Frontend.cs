@@ -465,11 +465,15 @@ internal static partial class Program
                         {
                             projectionVersion = frontend.ReturnType == 0 ? 73 : 72;
                         }
-                        if (frontend.Functions.IsDefault && frontend.InitRefParameterMask != 0)
+                        if (frontend.Functions.IsDefault
+                            && (frontend.InitRefParameterMask != 0
+                                || frontend.OutParameterMask != 0 && frontend.ReturnType != 5))
                         {
                             projectionVersion = 79;
                         }
                         var programProjectionVersion = frontend.Functions.IsDefault ? projectionVersion
+                            : frontend.Functions.Any(static function => function.OutParameterMask != 0
+                                && function.ReturnType != 5) ? 80
                             : frontend.Functions.Any(static function => function.InitRefParameterMask != 0) ? 78
                             : frontend.Functions.Any(static function => function.OutParameterMask != 0) ? 77
                             : frontend.Functions.Any(static function => function.DoesNotReturn) ? 76

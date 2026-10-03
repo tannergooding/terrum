@@ -31,6 +31,9 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("public int32 Main() { mut int32 n = 0; Sink(n++, n++, n++); return n; } void Sink(int32 a, int32 b, int32 c) { }", 3)]
     [InlineData("public int32 Main() { mut int32 result = 0; if (Set(out result)) { return result; } return 0; } bool Set(out int32 value) { value = 42; return true; }", 42)]
     [InlineData("public int32 Main() { if (Set(40, out var value, out var extra)) { return value + extra; } return 0; } bool Set(int32 seed, out int32 value, out int32 extra) { value = seed + 1; extra = 1; return true; }", 42)]
+    [InlineData("public int32 Main() { mut int32 value = 0; int32 status = Set(out value); return value + status; } int32 Set(out int32 value) { value = 40; return 2; }", 42)]
+    [InlineData("public int32 Main() { mut int32 value = 0; return Set(out value) == 2 && value == 40 ? value : 0; } int32 Set(out int32 value) { value = 40; return 2; }", 40)]
+    [InlineData("public int32 Main() { mut int32 value = 0; Fill(out value); return value; } void Fill(out int32 value) { value = 42; }", 42)]
     [InlineData("public int32 Main() { require !Fill(false, init var value); return Fill(true, init value) ? value : 0; } bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return false; }", 42)]
     [InlineData("public int32 Main() { for (Sink(1); false; Sink(2)) { } return 42; } void Sink(int32 value) { }", 42)]
     [InlineData("[DoesNotReturn] void Halt() { require false; } public int32 Main() { if (false) { Halt(); } return 42; }", 42)]
@@ -71,6 +74,27 @@ public sealed partial class ManagedScannerComponentTests
             Assert.Equal(expected, NativeJit.Execute(hosted with { EntryPoint = entry }, policy));
             await ExecuteAotAsync(stage, policy);
         }
+    }
+
+    [Theory]
+    [InlineData(77)]
+    [InlineData(78)]
+    public async Task ScalarFrontendProgramRejectsNonBooleanOutputsBeforeV80Async(int version)
+    {
+        const string text = "public int32 Main() { mut int32 value = 0; int32 status = Set(out value); return value + status; } int32 Set(out int32 value) { value = 40; return 2; }";
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
+        BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(0, sizeof(int)), version);
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(SourceText.From(text),
+            bytes, programBytes, BoundRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public async Task ScalarFrontendProgramRejectsNonBooleanOutVarDestinationsAsync()
+    {
+        const string text = "public int32 Main() { int32 status = Set(out var value); return value + status; } int32 Set(out int32 value) { value = 40; return 2; }";
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(SourceText.From(text),
+            bytes, programBytes, BoundRuntimePolicy.FailFast));
     }
 
     [Theory]

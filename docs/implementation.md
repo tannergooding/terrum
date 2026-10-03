@@ -405,7 +405,8 @@ declarations, early returns in v40–47, general calls and native update express
 remain unsupported in v40–47. The 392-word buffer, eight locals, twelve statement
 records (including transfers, headers and else markers), thirty-two
 expression nodes, sixteen expression-recursion levels and six shared
-structural nesting levels remain fixed; v1–39 payloads remain unchanged.
+structural nesting levels remain fixed. Prior projection tags are not
+compatibility targets; keep only selected examples where useful for validation.
 
 Projection v48 carries structured scalar returns in these branch/loop bodies.
 Return statement kind 8 has slot 0, the typed result root and the
@@ -684,8 +685,8 @@ subtree end, Boolean roots, source spans, node ownership, local visibility and
 loop ancestry. It rejects an end that consumes a sibling statement. Lowering
 uses a direct nested `BoundIf` as the false arm, not a synthetic lexical block.
 Actual source blocks retain hosted lexical flags, and v58 preserves hosted
-function, body, branch and completion spans; older representations remain
-unchanged. Each selected condition evaluates once, with existing lazy effects
+function, body, branch and completion spans. Older representations are not
+compatibility targets. Each selected condition evaluates once, with existing lazy effects
 and checked-failure order under both policies. Unselected conditions and
 bodies do not execute, but unsupported inactive or following source still
 rejects before publication.
@@ -860,15 +861,19 @@ Top-level global function names must be ordinal-unique after identifier
 normalization, even when signatures differ. Zero through three positional
 scalar parameters and scalar return values use the existing six scalar types.
 V74–v76 use by-value parameters; v77 adds the existing `bool`-returning scalar
-`out` parameter modes and destinations. Forward, self and mutual calls are
-permitted; visible locals/parameters shadow function names. Void callers are
-supported, but v74 callees must return a scalar. Single-function projections,
-including v72/v73 output and void self-call statements, retain their existing
-shapes and behavior.
+`out` parameter modes and destinations. V80 additionally supports scalar
+`out` parameters on non-Boolean/void-returning functions, with existing
+destinations only; the hosted verifier requires those outputs initialized on
+every normal return. Non-scalar outputs on non-Boolean/void functions remain
+unsupported. Forward, self and mutual calls are permitted; visible
+locals/parameters shadow function names. Void callers are supported, but
+v74 callees must return a scalar. Single-function projections, including
+v72/v73 output and void self-call statements, retain their existing shapes
+and behavior.
 
 The appended `Host.FrontendProgram` buffer at index 11 has 4,284 `int32`
 words. Its four-word header is `(version, 1, function count, 0)`, with version
-74, 75, 76 or 77. Version 75 is selected only when a void-target call
+74–78 or 80. Version 75 is selected only when a void-target call
 uses the new statement position; version 76 is selected when any declaration
 uses `[DoesNotReturn]`; version 77 is selected when any declaration has a
 scalar `out` parameter. Ten source-order frames of 428 words follow:
@@ -903,11 +908,12 @@ Ten frames derive from `floor((64 - 1) / 6)`: even an empty void declaration
 needs six tokens. The existing 32-node, 12-statement and eight-local capacities
 apply to each function; no verifier/emitter budgets change. V74 excludes
 non-self void-call support, and v74/v75 exclude `[DoesNotReturn]` declarations.
-V74–v76 exclude output parameters; v77 adds the existing scalar `out` mode to
-multi-function call resolution, and v78 adds existing scalar `init ref<T>`
-parameters and matching `init`/`init var` destinations. This retains the
-hosted contract: true publishes initialized values and false leaves
-destinations vacant. All versions exclude general reference parameters,
+V74–v76 exclude output parameters; v77 adds bool-returning scalar `out`
+parameters and matching destinations; v78 adds existing scalar `init ref<T>`
+parameters and matching `init`/`init var` destinations. V80 adds scalar `out`
+parameters on non-Boolean/void-returning functions, but only with existing
+destinations and normal-return initialization. It does not alter the
+true-publishes/false-vacant contract for Boolean outputs. All versions exclude general reference parameters,
 named/default/params arguments, overload/conversion search, namespaces/imports,
 templates/members, external bindings and callable values. This adds source
 frontend support, not
@@ -919,8 +925,9 @@ function. Such a call is admitted only as the direct root of a kind-37
 expression statement, including supported `for` clauses; void calls remain
 invalid as values, arguments or nested expressions. The independent reader
 checks the target return type and statement-root ownership before lowering.
-Version 74 continues to admit scalar-returning callees only, and single-body
-v1–v73 shapes are unchanged.
+Version 74 continues to admit scalar-returning callees only. Earlier
+single-function projection tags are implementation/validation details, not
+compatibility guarantees.
 
 Program projection v76 retains the same framing and admits the existing
 `[DoesNotReturn]` contract on void declarations, including its
@@ -955,15 +962,30 @@ modes. These projections do not add general reference arguments, external
 output targets or new publication semantics; single-function v1–v73 layouts
 remain unchanged.
 
-Single-function projection v79 adds the existing scalar `init ref<T>`
-parameter mode and matching `init name`/`init var name` destinations to
-recursive self-calls. Header word 17 stores its init-ref mask separately from
-the `out` mask in word 16; operations 107/108 encode existing and declared
-destinations. The version preserves the single-function v1–v73 and
-complete-program v74–v78 layouts.
-The reader audits parameter and destination modes before lowering; the hosted
-verifier remains authoritative for vacancy and conditional publication. This
-does not expand general reference migration or make the frontend standalone.
+Single-function projection v79 carries the existing scalar `init ref<T>` and
+non-Boolean scalar `out` modes through recursive self-calls. Header word 17
+stores its init-ref mask separately from the `out` mask in word 16; operations
+107/108 encode existing and declared init destinations. Non-Boolean `out`
+requires explicit existing destinations. The reader audits modes and
+destinations before lowering; the hosted verifier remains authoritative for
+vacancy, conditional publication and normal-return initialization. This does
+not expand general reference migration or make the frontend standalone.
+
+Program projection v80 carries the existing scalar `out` parameter mask for
+non-Boolean/void-returning declarations and admits matching explicit
+destinations in direct calls. Its host reader rejects the same records under
+v74–v78, and the hosted verifier/emitter require normal-return initialization
+and publish outputs after a successful call regardless of its result value.
+`out var` remains limited to the Boolean-returning contract in this bounded
+projection; non-scalar non-Boolean outputs and standalone compilation remain
+outside its support. Managed-module output exports retain their separate
+existing shape restriction.
+
+Single-function v79 uses the same non-Boolean/void scalar `out` contract as
+complete-program v80 for bounded recursive self-calls. These projection tags
+are alpha implementation details, not product-version increments or
+compatibility commitments; a preview version, if any, is chosen explicitly
+when it is shipped.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed

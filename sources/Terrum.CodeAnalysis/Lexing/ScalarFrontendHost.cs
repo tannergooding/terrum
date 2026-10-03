@@ -64,6 +64,8 @@ public static partial class ScalarFrontendHost
             if (words[0] != 74
                 || (words[16] != 0 && !context.AllowOutputArguments)
                 || (words[17] != 0 && !context.AllowInitRefArguments)
+                || (words[16] != 0 && words[5] != BooleanTypeCode
+                    && !context.AllowNonBooleanOutputParameters)
                 || (words[2] & 4) != 0 && !context.AllowDoesNotReturn)
             {
                 throw InvalidResult();
@@ -73,17 +75,23 @@ public static partial class ScalarFrontendHost
             words[0] = 68;
         }
 
-        var isInitRefProjection = words[0] == 79;
-        var allowInitRefArguments = context?.AllowInitRefArguments == true || isInitRefProjection;
-        if (isInitRefProjection)
+        var isExtendedSingleProjection = words[0] == 79;
+        var isNonBooleanOutProjection = isExtendedSingleProjection
+            && words[5] != BooleanTypeCode && words[16] != 0;
+        if (isExtendedSingleProjection)
         {
-            if (context is not null || words[17] == 0)
+            if (context is not null
+                || words[17] == 0 && !isNonBooleanOutProjection
+                || words[17] != 0 && words[5] != BooleanTypeCode)
             {
                 throw InvalidResult();
             }
-            // Reuse the v73 tree grammar while retaining v79's distinct source-mode checks.
+            // Reuse the v73 self-call grammar while retaining v79's mode checks.
             words[0] = 73;
         }
+
+        var allowInitRefArguments = context?.AllowInitRefArguments == true
+            || isExtendedSingleProjection && words[17] != 0;
 
         if (words[0] is < 1 or > 73
             || words[0] >= 53 && source.Length > 16_384
@@ -123,6 +131,9 @@ public static partial class ScalarFrontendHost
             || (words[5] == 0 ? words[0] is not (56 or 57 or 58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71 or 72 or 73)
                 : !ScalarType(words[5]) || words[0] is 56 or 57)
             || (effects & 4) != 0 && words[5] != 0
+            || (context is not null || words[0] >= 69) && words[16] != 0
+                && words[5] != BooleanTypeCode && context?.AllowNonBooleanOutputParameters != true
+                && !isNonBooleanOutProjection
             || count is < 0 or > 3
             || (words[0] < 19 && (!AllZero(34, WordCount) || count == 3))
             || (words[0] == 19 && count != 3)
@@ -383,6 +394,10 @@ public static partial class ScalarFrontendHost
                             : (words[17] & (1 << ordinal)) != 0;
                         if (argument.Type != (callee?.ParameterTypes[ordinal] ?? ParameterType(ordinal + 1))
                             || expectsOut != (argument.Operation is 103 or 104)
+                            || isNonBooleanOutProjection && argument.Operation == 104
+                            || context?.AllowNonBooleanOutputParameters == true
+                                && callee is { ReturnType: not BooleanTypeCode }
+                                && argument.Operation == 104
                             || expectsInitRef != (argument.Operation is 107 or 108))
                         {
                             throw InvalidResult();
@@ -517,7 +532,7 @@ public static partial class ScalarFrontendHost
                 || words[0] == 71 && (!nodes.Any(static node => node.Operation == 102)
                     || !nodes.Any(static node => node.Operation == 104))
                 || words[0] == 72 && !orderedStatements.Any(static entry => entry.Kind == 37)
-                || words[0] == 73 && !isInitRefProjection && (words[5] != 0
+                || words[0] == 73 && !isExtendedSingleProjection && (words[5] != 0
                     || !orderedStatements.Any(static entry => entry.Kind == 37)
                     || !nodes.Any(static node => node.Operation == 102 && node.Type == 0)))
             {

@@ -47,11 +47,15 @@ generic closers and optional suffixes require parser consumption; native
 scalar spacing permits only the `init ref<T>` parameter delimiters, not
 general generic type contexts. Historical raw records remain
 readable, while current adapters enforce current framing and syntax. Scanner,
-projection and ABI compatibility are distinct: the frontend accepts its
-declared single-function projection shapes through v73 in a 392-word buffer.
-V74 adds a separate 4,284-word multi-function buffer, leaving the 392-word
-buffer and all historical payloads unchanged. Program projection v75 retains
-that framing and admits void-target calls as direct expression-statement roots.
+projection and ABI formats are distinct. Projection tags are alpha
+implementation/validation details, not roadmap or product versions: older
+layouts may be retired or reshaped, and only a small selected set should remain
+for comparison or validation. Progress does not require a version bump per
+increment; a preview version, if any, is decided explicitly when shipping.
+V74 introduces a separate 4,284-word
+multi-function buffer; its framing does not promise preservation of the
+single-function buffer or historical payloads. Program projection v75 admits
+void-target calls as direct expression-statement roots.
 
 The native scalar frontend remains a bounded projection, not a standalone
 compiler: it shares the hosted verifier/emitter and is limited to 16K source
@@ -71,9 +75,10 @@ adds calls to void functions only as direct expression-statement roots,
 including supported `for` clauses;
 void calls remain invalid in value contexts. V76 admits the existing void-only
 `[DoesNotReturn]` contract and accounts for its continuation effect at direct
-call-statement roots. Single-function v72/v73 self-call behavior, including
-`out`, `out var` and void statement calls, is unchanged.
-Projection versions 1–73 remain readable within their declared shapes.
+call-statement roots. The current reader still recognizes some earlier single-function tags,
+including v72/v73 self-call forms, as validation references; those tags are not
+long-term compatibility requirements and may be pruned as checks move to
+current projections.
 The bounded generic, ownership, initialization
 and constant-evaluation contracts are detailed in the
 [implementation reference](../docs/implementation.md);
@@ -206,8 +211,8 @@ native emitter or compiler self-build.
 | [TokenIntegerSnapshot](TokenIntegerSnapshot.terrum) | Separately owned scanner-6 numeric-token indices and raw unsigned magnitude words, published with tokens and trivia by `TryScanCompilerInput` | AOT/JIT full-`uint64`, radix and overflow fixtures, indexed token lookup, invalid index/status/tag/owner rejection and atomic failure; shape checks do not prove a producer's arithmetic, and general binding remains hosted |
 | [TokenDiagnosticSnapshot](TokenDiagnosticSnapshot.terrum) | Independently owned lexical diagnostic codes and source ranges, available after a scan with errors even when token snapshots cannot publish | AOT/JIT host diagnostic parity under both policies, invalid buffer rejection, stable reads after host mutation and no success-shaped empty token stream on lexical failure |
 | [ScalarParserTypes](ScalarParserTypes.terrum) | Shared scalar type recognition, token-name equality, scalar comparison and scanner-integer decoding for separately compiled bounded parser probes | Scanner-owned source ranges, UTF-16 spelling and integer records, with no independent syntax or semantic ABI |
-| [ScalarFrontend](ScalarFrontend.terrum), [ScalarFrontendProgram](ScalarFrontendProgram.terrum) | Bounded frontend over a successful scanner snapshot: source-bound scalar or void functions, up to three named scalar parameters, supported expressions and structured control flow, visible-local lifetime ending, explicit/inferred vacant locals, scalar constants, nested cleanup/recovery, and foldable-true static proofs. V74 adds a complete global declaration inventory and direct scalar-returning calls with positional by-value arguments, including forward, self and mutual calls; v75 adds direct calls to void functions only as expression statements; v76 admits void-only `[DoesNotReturn]` declarations and accounts for their effect at supported call statements; v77 adds the existing bool-returning scalar `out` parameters and matching explicit/`out var` destinations; v78 adds existing scalar `init ref<T>` parameters and matching `init`/`init var` destinations. Single-function projection v79 adds the existing scalar `init ref<T>` mode and matching destinations to self-calls, without changing v1–v73 shapes. Namespaces/imports, overload search, callable values, general reference arguments, typed catches, filters and unproven proofs remain outside this subset. General `init ref<T>` migration remains scheduled. See the [native profile](../docs/native.md). | Produces independently audited source-bound projections for the shared host verifier/emitter; scanner integer records supply constants without rescanning digits. Uses `Host.Source` and managed tokens; the persisted primitives DLL and `build-component` do not consume its typed result. |
-| [ScalarFrontendProjection](ScalarFrontendProjection.terrum) | Provisional host-owned buffers with completion status written last: unchanged 392-word v1–v73 shapes, a 392-word v79 single-function shape, and separate 4,284-word v74–v78 complete-program shapes. Malformed/unsupported records reject; unused legacy extensions and program frames are zero, and absent call targets are `-1`. | `ScalarFrontendHost` independently checks source anchors, types, literals, node order, precedence, roots, parameter modes, local binding/initialization, lifetime targets, control flow, cleanup/recovery/proof scopes, transfers, returns, mutability, conversions and exact declaration effects. V74–v78 audit the entire declaration set, duplicate names, source-order frame coverage, callee identities and argument ownership before lowering to a verified multi-function `BoundProgram`; v75 additionally requires void-call nodes to be kind-37 roots, v76 audits void-only `[DoesNotReturn]` declarations and their call continuation effects, v77 audits scalar `out` modes and call destinations, and v78 audits init-ref modes and destinations. V79 audits single-function init-ref modes and self-call destinations. Shared verification checks effects, definite liveness and reachable completion under the selected runtime policy. Limits remain 64 tokens per snapshot, and per function 8 total named/hidden locals, 12 statements, 32 nodes, 16 expression-recursion levels and 6 structural levels; see the [implementation reference](../docs/implementation.md). This is not a standalone compiler or machine-code encoder. |
+| [ScalarFrontend](ScalarFrontend.terrum), [ScalarFrontendProgram](ScalarFrontendProgram.terrum) | Bounded frontend over a successful scanner snapshot: source-bound scalar or void functions, up to three named scalar parameters, supported expressions and structured control flow, visible-local lifetime ending, explicit/inferred vacant locals, scalar constants, nested cleanup/recovery, and foldable-true static proofs. V74 adds a complete global declaration inventory and direct scalar-returning calls with positional by-value arguments, including forward, self and mutual calls; v75 adds direct calls to void functions only as expression statements; v76 admits void-only `[DoesNotReturn]` declarations and accounts for their effect at supported call statements; v77 adds the existing bool-returning scalar `out` parameters and matching explicit/`out var` destinations; v78 adds existing scalar `init ref<T>` parameters and matching `init`/`init var` destinations. Single-function projection v79 carries the existing scalar `init ref<T>` mode and non-Boolean scalar `out` mode through bounded self-calls; complete-program v80 adds existing-destination scalar `out` calls for non-Boolean/void returns, requiring publication on every normal return. Prior tags are experimental validation shapes, not compatibility guarantees; non-scalar non-Boolean outputs, non-Boolean `out var`, namespaces/imports, overload search, callable values, general reference arguments, typed catches, filters and unproven proofs remain outside this subset. General `init ref<T>` migration remains scheduled. See the [native profile](../docs/native.md). | Produces independently audited source-bound projections for the shared host verifier/emitter; scanner integer records supply constants without rescanning digits. Uses `Host.Source` and managed tokens; the persisted primitives DLL and `build-component` do not consume its typed result. |
+| [ScalarFrontendProjection](ScalarFrontendProjection.terrum) | Provisional host-owned buffers with completion status written last: 392-word single-function and 4,284-word complete-program buffers; current tags include v1–v73/v79 and v74–v78/v80 respectively. Older tags are temporary validation aids only and may be pruned. Malformed/unsupported records reject; unused extensions are zero, and absent call targets are `-1`. | `ScalarFrontendHost` independently checks source anchors, types, literals, node order, precedence, roots, parameter modes, local binding/initialization, lifetime targets, control flow, cleanup/recovery/proof scopes, transfers, returns, mutability, conversions and exact declaration effects. Complete-program readers audit declaration sets, duplicate names, source-order frame coverage, callee identities and argument ownership before lowering to a verified multi-function `BoundProgram`; v75 additionally requires void-call nodes to be kind-37 roots, v76 audits void-only `[DoesNotReturn]` declarations and their call continuation effects, v77 audits bool-returning scalar `out` modes and call destinations, v78 audits init-ref modes and destinations, and v80 audits non-Boolean scalar `out` modes and existing destinations. V79 audits single-function init-ref and non-Boolean output modes and self-call destinations. Shared verification checks effects, definite liveness and reachable completion under the selected runtime policy. Limits remain 64 tokens per snapshot, and per function 8 total named/hidden locals, 12 statements, 32 nodes, 16 expression-recursion levels and 6 structural levels; see the [implementation reference](../docs/implementation.md). This is not a standalone compiler or machine-code encoder. |
 | [ScalarFunctionParser](ScalarFunctionParser.terrum) | Provisional scalar function probe: grouped/unary literals, two-literal checked arithmetic and bitwise operations, typed integer/`char16` comparisons, and one named scalar parameter in comparisons or integer checked addition | Hosted-span and executed-value parity with AOT/JIT at decimal/based boundaries across all four integer widths and `char16` comparisons; names bind to declarations, invalid magnitudes and checked addition overflow reject; requires `ScalarParserTypes`; other declarations still require the host parser |
 | [ScalarParameterPairParser](ScalarParameterPairParser.terrum) | Separate bounded probe of two named scalar parameters returned through checked integer addition/subtraction, `x + y + literal` with both checked steps, or a Boolean comparison (including `char16`) | AOT/JIT under both policies across signed/unsigned 32-/64-bit extrema, code-unit comparisons and decimal/based literal boundaries; both identifiers bind to distinct declarations, either overflow or unsigned subtraction underflow rejects; requires `ScalarParserTypes`, not a bootstrap compiler |
 | [ScalarConditionalParser](ScalarConditionalParser.terrum) | Separately compiled probe of a `bool` parameter selecting between two named, same-typed scalar parameters with explicit `if`/`else` returns | AOT/JIT under both policies check both reachable arms across six scalar types and reject swapped/unbound names and missing branches; uses scanner-owned tokens and `ScalarParserTypes`, not the general hosted parser or a bootstrap compiler |
@@ -259,8 +264,11 @@ general output call migration.
 Single-function projection v79 stores scalar `init ref<T>` modes in header
 word 17, distinct from the `out` mask; operations 107/108 encode existing and
 declared init destinations. Complete-program v78 uses the same mode word in
-each function frame, while earlier single-function and complete-program
-layouts remain unchanged.
+each function frame. Complete-program v80 currently uses the v78 frame
+arrangement and admits non-Boolean scalar `out` declarations. Single-function
+v79 uses the same 392-word buffer as earlier single-function tags and admits
+those declarations for bounded recursive self-calls. These are current
+validation shapes, not format compatibility requirements.
 The host buffer has 392 words: the original 37-word header,
 five tree-header words, at most 32 eight-word postorder nodes, two counts,
 eight four-word local records and twelve five-word statement records. Recursive
@@ -278,8 +286,8 @@ unchanged; Boolean conversions and ordinary calls remain unsupported.
 Projections v24/v25 add right-associative target-checked `?:` trees without/with
 locals; v26/v27 combine them with numeric conversions. Operation 84 uses its
 left/right children for the condition/true arm and its low word for the false
-arm, with a zero high word. Only the new versions admit this operation; v1–23
-payloads remain unchanged. Literal-only arms require a real result context,
+arm, with a zero high word. Only the new versions admit this operation; older
+tags may be retired once they no longer serve validation. Literal-only arms require a real result context,
 not a predicate's numeric type, and only the selected arm executes.
 DLL byte-parity, JIT results, invalid expression/projection cases and atomic
 output retention and actual EXE execution are tested under both runtime policies. This does not add
@@ -334,8 +342,8 @@ Projection v48 adds structured scalar returns to branch and loop bodies.
 Statement kind 8 carries slot 0, a typed result root and the
 keyword-through-semicolon span; header words 38–40 are `-1`. The independent
 reader consumes every expression root and applies the verifier's continuation
-rules to reject reachable non-void fallthrough. Earlier projections keep their
-existing return shapes. There is no hosted-parser fallback or synthesized
+rules to reject reachable non-void fallthrough. Older return shapes may be
+retired or revised; selected prior tags are validation aids only. There is no hosted-parser fallback or synthesized
 terminal return. The input bound is 64 tokens; the 392-word buffer, 32 nodes,
 12 statements, eight locals, 16 expression-recursion levels and six
 structural levels remain fixed. Branch/loop-local declarations, general calls
@@ -391,8 +399,9 @@ All records share the twelve-record budget. Only new loop headers select v51.
 The source-bound reader validates roles/scopes/spans before existing verified
 lowering under both policies. Terminal-return envelopes remain serviced;
 proven non-fallthrough loops need no synthetic return, and v51 permits zero
-nodes for an empty infinite for. All existing upper bounds, scanner IDs,
-ABI/persistence and v1–50 shapes remain unchanged. Named transfers, calls,
+nodes for an empty infinite for. Current upper bounds and ABI/persistence
+contracts remain; earlier projection tags are not compatibility targets.
+Named transfers, calls,
 standalone blocks and vacant/richer locals are not added.
 
 Projection v52 adds standalone lexical blocks as kind 14 with an exclusive

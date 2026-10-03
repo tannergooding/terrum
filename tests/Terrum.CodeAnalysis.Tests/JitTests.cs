@@ -61,6 +61,10 @@ public sealed partial class JitTests
     [InlineData("int32 Main() { mut int32 y = 9; bool result = true || Try(out y); return y; } bool Try(out int32 y) { return false; }", 9)]
     [InlineData("int32 Main() { require Fill(out var old); require Take(out var flag); if (flag == true) { return 0; } return 1; } bool Fill(out int32 value) { value = 2147483647; return true; } bool Take(out bool value) { value = true; return true; }", 0)]
     [InlineData("int32 Main() { require Fill(out var old); require Take(out var unit); return int32(unit); } bool Fill(out int32 value) { value = 2147483647; return true; } bool Take(out char16 value) { value = char16(42); return true; }", 42)]
+    [InlineData("int32 Main() { mut int32 value = 0; int32 status = Set(out value); return value + status; } int32 Set(out int32 value) { value = 40; return 2; }", 42)]
+    [InlineData("int32 Main() { mut int32 value = 0; Fill(out value); return value; } void Fill(out int32 value) { value = 42; }", 42)]
+    [InlineData("struct Pair { public int32 Value; public Pair(int32 value) { Value = value; } } Pair Create(out int32 value) { value = 40; return new Pair(2); } int32 Main() { mut int32 output = 0; Pair result = Create(out output); return output + result.Value; }", 42)]
+    [InlineData("struct Pair { public int32 Value; public Pair(int32 value, out int32 output) { Value = value; output = 40; } } int32 Main() { mut int32 output = 0; Pair result = new Pair(2, out output); return output + result.Value; }", 42)]
     [InlineData("int32 Main() { return Factorial(6); } int32 Factorial(int32 n) { if (n <= 1) { return 1; } return n * Factorial(n - 1); }", 720)]
     [InlineData("int32 Main() { return Mix(1, 2, 3, 4, 5, 6); } int32 Mix(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return a + b * 2 + c * 3 + d * 4 + e * 5 + f * 6; }", 91)]
     [InlineData("int32 Main() { return 2147483647 + 1; }", unchecked((int)0xE0540001))]
@@ -320,6 +324,9 @@ public sealed partial class JitTests
     [InlineData("int32 Main() { mut int32 y = 9; bool result = false || Try(out y); return y; } bool Try(out int32 y) { return false; }", "TRM")]
     [InlineData("int32 Main() { mut int32 y = 9; Try(out y); return y; } bool Try(out int32 y) { return false; }", "TRM")]
     [InlineData("int32 Main() { mut int32 y = 9; while (y > 0) { Try(out y); } return 0; } bool Try(out int32 y) { return false; }", "TRM")]
+    [InlineData("int32 Main() { return 0; } int32 Set(bool publish, out int32 value) { if (publish) { value = 42; return 2; } return 0; }", "TRM3016")]
+    [InlineData("int32 Main() { return 0; } void Fill(out int32 value) { }", "TRM3016")]
+    [InlineData("struct Pair { public int32 Value; public Pair(int32 value) { Value = value; } } int32 Main() { return 0; } int32 Make(out Pair value) { value = new Pair(42); return 2; }", "TRM3011")]
     [InlineData("int32 Main() { return 1", "TRM")]
     public async Task InvalidSourceDoesNotExecuteAsync(string source, string diagnosticPrefix)
     {

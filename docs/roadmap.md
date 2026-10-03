@@ -42,8 +42,17 @@ Projection v78 adds the existing scalar `init ref<T>` mode and matching
 `init`/`init var` destinations to complete snapshots. Hosted
 definite-publication verification remains authoritative; general
 `init ref<T>` migration and bootstrap compilation remain pending. Single-
-function projection v79 adds the same existing scalar mode to the bounded
-self-call frontend without changing earlier layouts.
+function projection v79 adds the existing scalar `init ref<T>` mode and
+non-Boolean scalar `out` mode to the bounded self-call frontend.
+Complete-program projection v80 adds existing-destination calls to scalar `out` parameters on
+non-Boolean/void-returning functions; the hosted verifier requires publication
+on every normal return, and the hosted emitter publishes them without using
+the result as a success flag. This remains a hosted-verifier/emitter-backed
+projection; it does not broaden non-scalar non-Boolean outputs. Projection tags
+are alpha implementation/validation
+details, not roadmap or product versions: older layouts may be retired or
+reshaped, and only a small selected set should remain for comparison or
+validation.
 
 ## Planned work (priority order)
 
@@ -223,10 +232,16 @@ inventory.
 Maintain one evolving language specification organized around syntax, types,
 static semantics and execution. Distinguish intended rules, implementation
 coverage and unresolved proposals; do not version chapters independently.
-Breaking changes remain possible before v1, with existing compatibility
-behavior and explicit migrations preserved. No pre-v1 stability promise is
-made. Work may proceed against approved grammar while remaining decisions stay
-in the proposal queue; using a provisional design for an increment does not
+Breaking changes are expected before v1. Prior alpha formats are not
+compatibility targets and should not be preserved merely because they were
+implemented; retain only selected versions as comparison/validation fixtures,
+and remove or reshape the rest as the current contracts advance. Migration
+semantics apply only where the accepted language contract explicitly requires
+them. Roadmap progress is toward the approved metadata design's v1.0; do not
+version each internal increment. If a preview is shipped, its versioning is an
+explicit part of that release decision. No pre-v1 stability promise is made.
+Work may proceed against approved grammar while remaining decisions stay in
+the proposal queue; using a provisional design for an increment does not
 approve other proposals.
 
 TRRM is a compact binary representation of the language and ecosystem: an
@@ -243,13 +258,14 @@ without re-proving their bodies. Malformed data is never trusted.
 
 Pre-v1 changes, including breaking format changes, remain possible; no frozen
 versioning scheme, published managed-machine ABI, or pre-v1 stability level is
-promised. Preserve explicit migration requirements and existing compatibility
-behavior. Validate independently authored readers, writers and verifier cases,
-not only same-version round trips. Dynamically composed code must be checked
-against dependency, compiler and runtime assumptions before execution; an
-implementation may adapt, rebuild, discard or reject it. No JIT fallback or
-IR retention is required. Declared FFI exports remain fixed to their target
-profile.
+promised. Do not preserve prior formats or require migrations solely for
+backward compatibility; keep at most a small selected set for independent
+comparison and validation, then retire obsolete shapes. Validate independently
+authored readers, writers and verifier cases, not only same-version round
+trips. Dynamically composed code must be checked against dependency, compiler
+and runtime assumptions before execution; an implementation may adapt,
+rebuild, discard or reject it. No JIT fallback or IR retention is required.
+Declared FFI exports remain fixed to their target profile.
 
 Keep minimal language conformance separate from the application-library and
 runtime surface. Core requirements stay small; richer features retain their

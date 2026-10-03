@@ -1032,9 +1032,15 @@ internal sealed partial class Binder
             {
                 Report("TRM3001", "Passing modes are not supported.", parameter.Span);
             }
-            if ((isOut || isInit) && returnType != PrimitiveType.Bool)
+            if (isInit && returnType != PrimitiveType.Bool)
             {
-                Report("TRM3011", "An output parameter requires a bool return type.", parameter.Span);
+                Report("TRM3011", "An init ref parameter requires a bool return type.", parameter.Span);
+            }
+            if (isOut && returnType != PrimitiveType.Bool
+                && type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
+                    or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64))
+            {
+                Report("TRM3011", "A non-boolean output parameter requires a scalar type.", parameter.Span);
             }
             if (isInit && type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
                 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)

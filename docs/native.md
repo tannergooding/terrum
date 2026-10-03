@@ -60,10 +60,15 @@ indexed-TRRM routing protocol or reader.
 
 ## Implemented profiles and versioned contracts
 
-The version identifiers below state current support and persisted compatibility
-requirements, not a release chronology or external compatibility promise.
-Compiler evolution is summarized in [implementation](implementation.md);
-scheduled changes are in [roadmap](roadmap.md).
+The version identifiers below state current implementation and validation
+boundaries, not persisted compatibility requirements. Terrum is pre-1.0 and
+alpha projection/profile formats may be retired or reshaped; retain only a
+small selected set of older versions for comparison or validation, not as
+compatibility commitments or roadmap milestones. Progress toward metadata
+v1.0 does not require a version bump per increment; preview versioning, if any,
+is decided explicitly when shipping a preview. Compiler evolution is summarized in
+[implementation](implementation.md); scheduled changes are in
+[roadmap](roadmap.md).
 
 `native-10` (explicit fail-fast), `native-11` (explicit checked exceptions),
 `native-12` (compact unique locals/returns), `native-13` (owned
@@ -305,8 +310,8 @@ source-bound reader rejects parameters, unknown or inactive names and
 non-local targets. Shared semantic verification still enforces definite
 liveness and hosted cleanup/reinitialization rules; mutable locals retain
 their existing reassignment authority. Version 60 composes with v59 effects.
-Earlier projection layouts and gates remain unchanged; no ABI or native
-profile operation is added.
+It adds no ABI or native profile operation; older projection tags are
+validation details, not compatibility requirements.
 
 Projection v61 adds explicit `init T name;` for six scalar types. Kind 25
 declares a vacant local with root `-1`, and local flag `0x2` records its
@@ -404,7 +409,8 @@ take precedence over function names. A distinct operation 105 and target table
 carry each call's zero-based source-order function identity and callee-specific
 argument roots/count/types. The independent reader audits every declaration,
 body and call against the complete source before constructing a multi-function
-`BoundProgram`. Existing single-function v1–v73 payloads remain unchanged.
+`BoundProgram`. The single-function buffer is a separate projection surface;
+its historical tags are not compatibility targets.
 The existing 16K-source-unit/64-token snapshot bound is retained; body limits
 apply per function. Ten function frames cover even the six-token empty void
 declaration under that bound.
@@ -423,7 +429,8 @@ version 75 only when an operation-105 target returns void. Void calls are
 allowed only as direct kind-37 expression-statement roots, including supported
 `for` clauses; they are still rejected in value contexts. The reader checks
 the callee return type and statement-root ownership before lowering. Version
-74 and single-function v1–v73 behavior remain unchanged.
+74 continues to admit scalar-returning callees only. Earlier single-function
+tags are implementation/validation details, not compatibility guarantees.
 
 Program projection v76 admits the existing void-only `[DoesNotReturn]`
 contract in complete snapshots. Its exact declaration effect is source-audited,
@@ -448,13 +455,27 @@ retains the true-publishes/false-vacant contract. V74–v77 reject init-ref
 modes. This does not add general reference arguments, source-free TRRM support
 or standalone compiler support.
 
-Single-function projection v79 adds the existing scalar `init ref<T>` mode to
-the bounded self-call frontend. Header word 17 stores its parameter mask
-separately from the `out` mask in word 16; operations 107/108 encode matching
-existing and declared `init`/`init var` destinations. It preserves the
-single-function v1–v73 and complete-program v74–v78 layouts; source auditing
-and hosted definite-publication verification remain in force.
-This is not general reference migration or standalone compiler support.
+Single-function projection v79 carries the existing scalar `init ref<T>` and
+non-Boolean scalar `out` modes through bounded self-calls. Header word 17
+stores the init-ref mask separately from the `out` mask in word 16;
+operations 107/108 encode matching existing and declared `init`/`init var`
+destinations. Non-Boolean `out` uses explicit existing destinations only.
+Source auditing and hosted definite-publication verification remain in force;
+this is not general reference migration or standalone compiler support.
+
+Complete-program projection v80 adds scalar `out` parameters on
+non-Boolean/void-returning functions, but admits only matching existing
+destinations. The hosted verifier requires initialization on every normal
+return, and the emitter publishes the output after successful completion
+without treating the function's result as a success flag. Current V74–v78
+readers reject these records; that boundary is not a compatibility commitment.
+`out var` under this non-Boolean contract, non-scalar
+outputs and standalone compilation remain unsupported. This does not widen
+the separate managed-module export shape for output parameters.
+
+Single-function v79 uses the same non-Boolean/void output contract as v80 for
+bounded recursive self-calls. It requires explicit existing destinations and
+normal-return initialization; `out var` remains limited to Boolean outputs.
 
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.

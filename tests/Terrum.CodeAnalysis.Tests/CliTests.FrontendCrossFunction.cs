@@ -97,6 +97,76 @@ public sealed partial class CliTests
     }
 
     [Fact]
+    public async Task ScalarFrontendCrossFunctionNonBooleanOutputCliUsesProjection80Async()
+    {
+        const string text = "public int32 Main() { mut int32 value = 0; int32 status = Set(out value); return value + status; } int32 Set(out int32 value) { value = 40; return 2; }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var input = Encoding.UTF8.GetBytes(text);
+        foreach (var runtime in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(input, "frontend-component",
+                directory, "-", "--runtime", runtime, "--json");
+            Assert.True(exit == 0, $"{runtime}: {exit}: {output}{error}");
+            using (var document = JsonDocument.Parse(output))
+            {
+                var result = document.RootElement.GetProperty("result");
+                Assert.Equal(80, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(1, result.GetProperty("functions")[1]
+                    .GetProperty("outParameterMask").GetInt32());
+            }
+            var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
+                directory, "-", "--runtime", runtime, "--json");
+            Assert.Equal(42, runExit);
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+        }
+    }
+
+    [Fact]
+    public async Task ScalarFrontendSingleFunctionNonBooleanOutputCliUsesProjection79Async()
+    {
+        const string text = "public int32 Fill(int32 seed, out int32 value) { if (seed == 0) { value = 40; return 2; } return Fill(seed - 1, out value); }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var input = Encoding.UTF8.GetBytes(text);
+        var outputDirectory = Path.Combine(RepositoryRoot(), "artifacts", "scanner-tests");
+        Directory.CreateDirectory(outputDirectory);
+        foreach (var runtime in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(input, "frontend-component",
+                directory, "-", "--runtime", runtime, "--json");
+            Assert.True(exit == 0, $"{runtime}: {exit}: {output}{error}");
+            using var document = JsonDocument.Parse(output);
+            var result = document.RootElement.GetProperty("result");
+            Assert.Equal(79, result.GetProperty("projectionVersion").GetInt32());
+            Assert.Equal(2, result.GetProperty("outParameterMask").GetInt32());
+            Assert.Equal(0, result.GetProperty("initRefParameterMask").GetInt32());
+            Assert.Contains(result.GetProperty("nodes").EnumerateArray(), static node =>
+                node.GetProperty("operation").GetInt32() == 102);
+            Assert.Contains(result.GetProperty("nodes").EnumerateArray(), static node =>
+                node.GetProperty("operation").GetInt32() == 103);
+
+            var path = Path.Combine(outputDirectory, $"v79-library-{Guid.NewGuid():N}.dll");
+            try
+            {
+                var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
+                    directory, "-", "-o", path, "--runtime", runtime, "--json");
+                Assert.True(buildExit == 0, $"{runtime}: {buildExit}: {buildOutput}{buildError}");
+                var policy = runtime == "fail-fast"
+                    ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions;
+                var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
+                Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+                var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+                Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Fill"], (NativeRuntimePolicy)policy),
+                    await File.ReadAllBytesAsync(path));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    [Fact]
     public async Task ScalarFrontendCrossFunctionInitReferencesCliUsesProjection78Async()
     {
         const string text = "public int32 Main() { require !Fill(false, init var value); return Fill(true, init value) ? value : 0; } bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return false; }";

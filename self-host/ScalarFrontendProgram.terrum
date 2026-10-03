@@ -187,9 +187,16 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         }
         if (Host.FrontendProgram[header + 16] != 0)
         {
-            Host.FrontendProgram[0] = 77;
+            if (Host.FrontendProgram[header + 5] != 5)
+            {
+                Host.FrontendProgram[0] = 80;
+            }
+            else if (Host.FrontendProgram[0] < 77)
+            {
+                Host.FrontendProgram[0] = 77;
+            }
         }
-        if (Host.FrontendProgram[header + 17] != 0)
+        if (Host.FrontendProgram[header + 17] != 0 && Host.FrontendProgram[0] < 78)
         {
             Host.FrontendProgram[0] = 78;
         }

@@ -605,7 +605,17 @@ internal sealed partial class PeCompiler
                 }
             }
             _returnSlots[i] = _edgeCopyBases[i] + (8 * edgeParameters);
-            var required = _returnSlots[i] + (IsIndirect(function.ReturnType) ? 8L : 0L);
+            var hasOutputParameters = false;
+            var parameterOffset = function.IsConstructor ? 1 : 0;
+            for (var parameter = parameterOffset;
+                parameter < function.ParameterCount + parameterOffset; parameter++)
+            {
+                hasOutputParameters |= function.Variables[parameter].IsOut;
+            }
+            var snapshotsOutputReturn = hasOutputParameters
+                && function.ReturnType is not (PrimitiveType.Bool or PrimitiveType.Void);
+            // Publishing outputs uses the return registers, so preserve non-Boolean results first.
+            var required = _returnSlots[i] + (IsIndirect(function.ReturnType) || snapshotsOutputReturn ? 8L : 0L);
             var needsReturnSnapshot = ContainsCleanup(function.Body, _checkedExceptions && _managedNodes);
             if (needsReturnSnapshot)
             {
@@ -1992,9 +2002,34 @@ internal sealed partial class PeCompiler
                         _code.Load64(_returnSlot);
                     }
                 }
-                if (_program.Functions[_currentFunction].ReturnType == PrimitiveType.Bool)
+                var hasOutParameter = false;
+                var currentFunction = _program.Functions[_currentFunction];
+                var parameterOffset = currentFunction.IsConstructor ? 1 : 0;
+                for (var i = parameterOffset;
+                    i < currentFunction.ParameterCount + parameterOffset; i++)
                 {
+                    hasOutParameter |= currentFunction.Variables[i].IsOut;
+                }
+                if (currentFunction.ReturnType == PrimitiveType.Bool || hasOutParameter)
+                {
+                    var returnType = currentFunction.ReturnType;
+                    if (returnType != PrimitiveType.Bool && returnType != PrimitiveType.Void
+                        && !IsIndirect(returnType))
+                    {
+                        StoreValue(PendingReturnSlot(), returnType);
+                    }
                     CommitOutParameters();
+                    if (returnType != PrimitiveType.Bool && returnType != PrimitiveType.Void)
+                    {
+                        if (IsIndirect(returnType))
+                        {
+                            _code.Load64(_returnSlot);
+                        }
+                        else
+                        {
+                            LoadValue(PendingReturnSlot(), returnType);
+                        }
+                    }
                 }
                 if (_checkedExceptions)
                 {
@@ -2150,7 +2185,7 @@ internal sealed partial class PeCompiler
         }
     }
 
-    [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "The verifier rejects void output parameters; struct types use the layout fallback.")]
+    [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "The verified scalar layouts and eight-byte fallback cover all output slots.")]
     private void CommitOutParameters()
     {
         var variables = _program.Functions[_currentFunction].Variables;
@@ -2164,8 +2199,13 @@ internal sealed partial class PeCompiler
         {
             return;
         }
-        _code.Bytes(0x85, 0xC0);
-        var skip = _code.JumpIf(0x84);
+        var conditional = _program.Functions[_currentFunction].ReturnType == PrimitiveType.Bool;
+        var skip = -1;
+        if (conditional)
+        {
+            _code.Bytes(0x85, 0xC0);
+            skip = _code.JumpIf(0x84);
+        }
         for (var i = 0; i < variables.Length; i++)
         {
             if (!variables[i].IsOut)
@@ -2200,8 +2240,11 @@ internal sealed partial class PeCompiler
                 _code.Bytes(0x48, 0x89, 0x02);
             }
         }
-        _code.Bytes(0xB8, 0x01, 0x00, 0x00, 0x00);
-        _code.PatchRelative(skip, _code.Position);
+        if (conditional)
+        {
+            _code.Bytes(0xB8, 0x01, 0x00, 0x00, 0x00);
+            _code.PatchRelative(skip, _code.Position);
+        }
     }
 
     private void CheckBufferIndex(int buffer)
@@ -2725,53 +2768,62 @@ internal sealed partial class PeCompiler
                 {
                     _code.Address(Spill(spill));
                 }
-                if (call.Type == PrimitiveType.Bool)
+                var hasOut = false;
+                foreach (var argument in call.Arguments)
                 {
-                    var hasOut = false;
-                    foreach (var argument in call.Arguments)
-                    {
-                        hasOut |= argument is BoundOutArgument;
-                    }
-                    if (hasOut)
+                    hasOut |= argument is BoundOutArgument;
+                }
+                if (hasOut)
+                {
+                    var conditionalOutputs = call.Type == PrimitiveType.Bool;
+                    var skip = -1;
+                    if (conditionalOutputs)
                     {
                         _code.Bytes(0x85, 0xC0);
-                        var skip = _code.JumpIf(0x84);
-                        for (var i = 0; i < call.Arguments.Length; i++)
+                        skip = _code.JumpIf(0x84);
+                    }
+                    else if (call.Type != PrimitiveType.Void && !IsIndirect(call.Type))
+                    {
+                        StoreValue(Spill(spill), call.Type);
+                    }
+                    for (var i = 0; i < call.Arguments.Length; i++)
+                    {
+                        if (call.Arguments[i] is BoundOutArgument output)
                         {
-                            if (call.Arguments[i] is BoundOutArgument output)
+                            var scratch = Spill(argumentsBase + call.Arguments.Length + i);
+                            var destination = _program.Functions[_currentFunction].Variables[output.Variable].IsOut
+                                ? OutSlot(output.Variable) : Slot(output.Variable);
+                            if (IsIndirect(output.Type))
                             {
-                                var scratch = Spill(argumentsBase + call.Arguments.Length + i);
-                                var destination = _program.Functions[_currentFunction].Variables[output.Variable].IsOut
-                                    ? OutSlot(output.Variable) : Slot(output.Variable);
-                                if (IsIndirect(output.Type))
-                                {
-                                    _code.Address(scratch);
-                                    CopyToFrame(destination, Size(output.Type));
-                                    if (IsUnique(output.Type))
-                                    {
-                                        _code.Set(_liveSlots[_currentFunction][output.Variable]);
-                                    }
-                                    continue;
-                                }
-                                if (output.Type is PrimitiveType.Bool or PrimitiveType.Char16)
-                                {
-                                    _code.LoadUnsigned(scratch, output.Type == PrimitiveType.Bool ? 1 : 2);
-                                }
-                                else
-                                {
-                                    LoadValue(scratch, output.Type);
-                                }
-                                StoreValue(destination, output.Type);
-                                if (ManagedClassTypes.IsManaged(output.Type))
-                                {
-                                    SetManagedRoot(destination, active: true);
-                                }
+                                _code.Address(scratch);
+                                CopyToFrame(destination, Size(output.Type));
                                 if (IsUnique(output.Type))
                                 {
                                     _code.Set(_liveSlots[_currentFunction][output.Variable]);
                                 }
+                                continue;
+                            }
+                            if (output.Type is PrimitiveType.Bool or PrimitiveType.Char16)
+                            {
+                                _code.LoadUnsigned(scratch, output.Type == PrimitiveType.Bool ? 1 : 2);
+                            }
+                            else
+                            {
+                                LoadValue(scratch, output.Type);
+                            }
+                            StoreValue(destination, output.Type);
+                            if (ManagedClassTypes.IsManaged(output.Type))
+                            {
+                                SetManagedRoot(destination, active: true);
+                            }
+                            if (IsUnique(output.Type))
+                            {
+                                _code.Set(_liveSlots[_currentFunction][output.Variable]);
                             }
                         }
+                    }
+                    if (conditionalOutputs)
+                    {
                         _code.Bytes([0xB8, 0x01, 0x00, 0x00, 0x00]);
                         var done = _code.Jump();
                         _code.PatchRelative(skip, _code.Position);
@@ -2783,6 +2835,17 @@ internal sealed partial class PeCompiler
                             }
                         }
                         _code.PatchRelative(done, _code.Position);
+                    }
+                    else if (call.Type != PrimitiveType.Void)
+                    {
+                        if (IsIndirect(call.Type))
+                        {
+                            _code.Address(Spill(spill));
+                        }
+                        else
+                        {
+                            LoadValue(Spill(spill), call.Type);
+                        }
                     }
                 }
                 for (var i = 0; i < call.Arguments.Length; i++)

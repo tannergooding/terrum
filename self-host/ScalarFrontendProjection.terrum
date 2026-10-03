@@ -90,6 +90,8 @@ namespace Terrum.CodeAnalysis;
 // complete declaration snapshots and direct operation-105 call arguments.
 // Program v78 and single-function v79 use word 17 for init-ref modes, separate
 // from the out mask in word 16. Operations 107/108 encode existing and declared targets.
+// Program v80 adds non-Boolean scalar out calls with existing destinations.
+// Single-function v79 shares its mode masks with recursive non-Boolean out calls.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -196,7 +198,11 @@ bool TryPublishScalarFrontend()
         {
             Host.Frontend[0] = result.ReturnType == 0 ? 73 : 72;
         }
-        if ((result.OutParameterMask & 56) != 0) { Host.Frontend[0] = 79; }
+        if ((result.OutParameterMask & 56) != 0
+            || (result.OutParameterMask & 7) != 0 && result.ReturnType != 5)
+        {
+            Host.Frontend[0] = 79;
+        }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {

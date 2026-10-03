@@ -312,7 +312,10 @@ public static class SemanticVerifier
                         || (ManagedClassTypes.IsManaged(variable.Type)
                             && !function.IsPrivate && !function.IsInternal)))
                         || (variable.IsOut && (variableIndex >= function.ParameterCount + (function.IsConstructor ? 1 : 0)
-                            || function.ReturnType != PrimitiveType.Bool)))
+                            || (function.ReturnType != PrimitiveType.Bool
+                                && (variable.IsInit || variable.Type is not (PrimitiveType.Bool
+                                    or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
+                                    or PrimitiveType.Int64 or PrimitiveType.UInt64))))))
                     {
                         throw Invalid();
                     }
@@ -2227,7 +2230,9 @@ public static class SemanticVerifier
                         }
                         if (predicate)
                         {
-                            for (var i = 0; i < function.ParameterCount; i++)
+                            var parameterOffset = function.IsConstructor ? 1 : 0;
+                            for (var i = parameterOffset;
+                                i < function.ParameterCount + parameterOffset; i++)
                             {
                                 if (function.Variables[i].IsOut && !returnState[i])
                                 {
@@ -2237,15 +2242,31 @@ public static class SemanticVerifier
                         }
                     }
                 }
-                else if (cleanups.Count != 0)
+                else
                 {
-                    var returnState = initialized.Clone();
-                    var returnMasks = (uint[])fieldMasks.Clone();
-                    var returnDeclarations = new HashSet<int>(declarations);
-                    for (var index = cleanups.Count - 1; index >= 0; index--)
+                    var hasOutParameter = false;
+                    var parameterOffset = function.IsConstructor ? 1 : 0;
+                    for (var i = parameterOffset; i < function.ParameterCount + parameterOffset; i++)
                     {
-                        VerifyCleanup(cleanups[index].Body, returnState, returnMasks, returnDeclarations,
-                            function, program, ref remaining, depth + 1, reachable, inUnsafe, cleanups[index].Visible);
+                        hasOutParameter |= function.Variables[i].IsOut;
+                    }
+                    if (cleanups.Count != 0 || hasOutParameter)
+                    {
+                        var returnState = initialized.Clone();
+                        var returnMasks = (uint[])fieldMasks.Clone();
+                        var returnDeclarations = new HashSet<int>(declarations);
+                        for (var index = cleanups.Count - 1; index >= 0; index--)
+                        {
+                            VerifyCleanup(cleanups[index].Body, returnState, returnMasks, returnDeclarations,
+                                function, program, ref remaining, depth + 1, reachable, inUnsafe, cleanups[index].Visible);
+                        }
+                        for (var i = parameterOffset; i < function.ParameterCount + parameterOffset; i++)
+                        {
+                            if (function.Variables[i].IsOut && !returnState[i])
+                            {
+                                throw Invalid(result.Span);
+                            }
+                        }
                     }
                 }
                 return true;
@@ -3330,7 +3351,14 @@ public static class SemanticVerifier
                 }
                 foreach (var output in outTargets)
                 {
-                    initialized.MarkConditional(output);
+                    if (target.ReturnType == PrimitiveType.Bool)
+                    {
+                        initialized.MarkConditional(output);
+                    }
+                    else
+                    {
+                        initialized[output] = true;
+                    }
                 }
                 break;
             default:
@@ -3584,7 +3612,7 @@ public static class SemanticVerifier
             {
                 if (argument is BoundOutArgument output)
                 {
-                    state[output.Variable] = result;
+                    state[output.Variable] = call.Type == PrimitiveType.Bool ? result : true;
                 }
                 else
                 {
@@ -3613,7 +3641,14 @@ public static class SemanticVerifier
                 {
                     if (argument is BoundOutArgument output)
                     {
-                        state.MarkConditional(output.Variable);
+                        if (call.Type == PrimitiveType.Bool)
+                        {
+                            state.MarkConditional(output.Variable);
+                        }
+                        else
+                        {
+                            state[output.Variable] = true;
+                        }
                     }
                     else
                     {
