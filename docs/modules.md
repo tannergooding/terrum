@@ -533,16 +533,17 @@ match exactly when both use native-12. Compilation and module JSON responses
 report `runtimePolicy` independently of `profile`, including analysis and
 validation responses without an output artifact.
 
-Native package validation checks both allocation-only and saved-RBP unwind
-records, their ordered `.pdata` ranges, `.xdata` bounds and corresponding
-machine-code prologs before accepting a replacement image. Checked native-11
-images additionally validate bounded scope records and handler references.
-Source functions precede cleanup funclets; exports must point to source-function
-entries, never to funclets or runtime helpers. Earlier native-10/package-1 fail-fast images with
-allocation-only source frames remain valid: the four failure helpers (plus
-two consumer entry wrappers) precede the source functions in both layouts.
-Validation still rejects exports to helpers or funclets and unwind ranges
-shorter than their described prolog.
+Native package validation checks allocation-only records for the fixed runtime
+prelude, saved-RBP records for current source functions and cleanup funclets,
+their ordered `.pdata` ranges, `.xdata` bounds and corresponding machine-code
+prologs before accepting an image. The four failure helpers (plus two consumer
+entry wrappers) precede source functions; an image-private collector, when
+present, is the final allocation-only function. Retired allocation-only source
+frames are rejected. Checked native-11 images additionally validate bounded
+scope records and handler references. Source functions precede cleanup
+funclets; exports must point to source-function entries, never to funclets or
+runtime helpers. Validation also rejects unwind ranges shorter than their
+described prolog.
 
 `NativeEmitter.EmitLibrary` can instead emit a Windows x64 PE32+ DLL directly
 from a verified `Compilation.CreateLibrary` program and an explicit list of

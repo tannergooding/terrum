@@ -320,8 +320,8 @@ internal static class NativeModuleImageValidator
                 {
                     throw Invalid();
                 }
-                // Both the original allocation-only images and the saved-frame images
-                // place four failure helpers (and two consumer entry wrappers) first.
+                // The fixed runtime prelude is allocation-only; current source
+                // functions and cleanup funclets use saved-frame layouts.
                 var sourceStart = isConsumer ? 6 : 4;
                 if (table.Size / NativeUnwind.RuntimeFunctionSize <= sourceStart)
                 {
@@ -331,7 +331,6 @@ internal static class NativeModuleImageValidator
                 var previousEnd = sections.Single(static section => section.Name == ".text").VirtualAddress;
                 var sawSourceFrame = false;
                 var sawCleanupFrame = false;
-                var sawLegacySource = false;
                 var sawManagedCollector = false;
                 var cleanupStarts = new HashSet<int>();
                 var exceptionalCleanups = new List<int>();
@@ -426,48 +425,44 @@ internal static class NativeModuleImageValidator
                     {
                         throw Invalid();
                     }
-                    if (savedFrame)
+                    if (index < sourceStart)
                     {
-                        if (index < sourceStart || sawLegacySource)
+                        if (savedFrame)
                         {
                             throw Invalid();
                         }
-                        if (image[code + 10] == 0xD5)
-                        {
-                            if (!sawSourceFrame)
-                            {
-                                throw Invalid();
-                            }
-                            sawCleanupFrame = true;
-                            _ = cleanupStarts.Add(begin);
-                        }
-                        else
-                        {
-                            if (sawCleanupFrame)
-                            {
-                                throw Invalid();
-                            }
-                            sawSourceFrame = true;
-                            _ = sourceFunctionStarts.Add(begin);
-                        }
                     }
-                    else if (index >= sourceStart)
+                    else if (!savedFrame)
                     {
-                        // The image-private collector is emitted last with a 120-byte frame.
+                        // The optional image-private collector is the only
+                        // allocation-only function after the current prelude.
                         if (managedData && index == (table.Size / 12) - 1
                             && (sawSourceFrame || sawCleanupFrame) && allocation == 120)
                         {
                             sawManagedCollector = true;
                         }
-                        else if (sawSourceFrame || sawCleanupFrame)
+                        else
                         {
                             throw Invalid();
                         }
-                        else
+                    }
+                    else if (image[code + 10] == 0xD5)
+                    {
+                        if (!sawSourceFrame)
                         {
-                            sawLegacySource = true;
-                            _ = sourceFunctionStarts.Add(begin);
+                            throw Invalid();
                         }
+                        sawCleanupFrame = true;
+                        _ = cleanupStarts.Add(begin);
+                    }
+                    else
+                    {
+                        if (sawCleanupFrame)
+                        {
+                            throw Invalid();
+                        }
+                        sawSourceFrame = true;
+                        _ = sourceFunctionStarts.Add(begin);
                     }
                     previousEnd = end;
                     nextInfo = checked(nextInfo + size);
