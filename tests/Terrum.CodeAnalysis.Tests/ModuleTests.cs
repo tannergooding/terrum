@@ -59,16 +59,23 @@ public sealed class ModuleTests
                 value = seed;
                 return true;
             }
+            public int32 Initialize(int32 value, init ref<int32> result) {
+                result = value;
+                return 0;
+            }
             """), policy);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Populate"]);
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program),
+            ["Populate", "Initialize"]);
 
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 if (!Populate(value: out var output, seed: 42)) {
                     return 1;
                 }
-                return output;
+                init int32 initialized;
+                int32 status = Initialize(result: init initialized, value: output);
+                return initialized + status;
             }
             """), ModuleCompiler.CreateReference(producer), policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
