@@ -391,9 +391,9 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Theory]
-    [InlineData(false, 0)]
+    [InlineData(false, 1)]
     [InlineData(true, 1)]
-    public async Task IndexedOptionalChar16SelectChoosesPayloadThroughNativeGraph(
+    public async Task IndexedOptionalChar16ComparisonResultsAreCanonicalInSelect(
         bool selectFirst, int expected)
     {
         var loaded = TrRmExecutableCompiler.Load(OptionalScalarArtifact(
@@ -639,8 +639,8 @@ public sealed class TrRmExecutableCompilerTests
 
     private static byte[] IndexedOptionalChar16SelectionBody(bool selectFirst)
     {
-        byte[] valueTypeIds = [3, 3, 4, 4, 1, 4, 1, 2, 2, 2];
-        byte[] lastUseOrdinals = [2, 3, 6, 5, 5, 6, 9, 9, 9, 10];
+        byte[] valueTypeIds = [3, 3, 4, 4, 1, 4, 1, 1, 2, 2, 2, 2, 2];
+        byte[] lastUseOrdinals = [2, 3, 7, 5, 5, 7, 10, 11, 11, 11, 12, 12, 13];
         byte[][] operations =
         [
             [1, 1, 3, 65],
@@ -650,9 +650,12 @@ public sealed class TrRmExecutableCompilerTests
             [1, 5, 1, (byte)(selectFirst ? 1 : 0)],
             [7, 6, 5, 3, 4],
             [5, 7, 4, 6, 3],
-            [1, 8, 2, 1],
-            [1, 9, 2, 0],
-            [7, 10, 7, 8, 9],
+            [5, 8, 5, 6, 3],
+            [1, 9, 2, 1],
+            [1, 10, 2, 0],
+            [7, 11, 7, 9, 10],
+            [7, 12, 8, 9, 10],
+            [0x15, 13, 1, 11, 12],
         ];
         var block = new List<byte> { 16, (byte)valueTypeIds.Length };
         for (var value = 0; value < valueTypeIds.Length; value++)
@@ -669,7 +672,7 @@ public sealed class TrRmExecutableCompilerTests
         }
         var terminatorOffset = (byte)block.Count;
         block.Add(0x83);
-        block.Add(10);
+        block.Add(13);
 
         var body = new List<byte> { 0x08, 1, (byte)valueTypeIds.Length, 0, 4 };
         foreach (var row in new[] { 2, 4, 3, 8 })
