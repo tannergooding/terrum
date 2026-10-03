@@ -84,6 +84,10 @@ are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
+Persisted semantic modules currently write and accept only revision 47. The
+semantic v24-v32 labels below are historical module revisions and implementation
+milestones, not reader-compatibility promises; those revisions are retired and
+rejected instead of normalized.
 Semantic version 24 carries the validated class/`ManagedNode` access
 capability contract. Semantic version 25 adds the distinct `MutReceiver`
 contract for persisted, non-exported mutating methods on non-owning compact
@@ -96,13 +100,10 @@ Semantic version 29 admits writable owning-buffer field loans for `Set`,
 Semantic version 30 extends lexical `SliceMutable` acquisition to those fields.
 Source visibility may be public or private. Named mutable locals, their
 writable nested fields, and forwarding through an existing writable `this`
-and its writable fields are supported receiver places. Older headers reject
-the respective contracts. Whole-local non-owning loans retain v25; programs needing
-neither retain their existing versions and bytes regardless of managedness.
-Readers normalize private managed artifacts
-from versions 18 through 23 into qualified internal IR, translating prior
-class/`ManagedNode` mutation authority to explicit `write` exactly where
-granted. A legacy header cannot contain v24 write identifiers.
+and its writable fields are supported receiver places. Current artifacts
+record the validated access and receiver contracts directly; all use semantic
+module revision 47 regardless of which supported constructs they contain.
+Older revisions are not upgraded while reading.
 The `native-18` through `native-20` labels below identify bounded runtime
 features; they do not imply that general references/views, ownership forms, or
 managed public ABI are implemented.
@@ -150,19 +151,19 @@ projection, semantic and native-profile versions are separate compatibility
 gates.
 Conditional expressions evaluate one Boolean condition and only
 the selected target-checked arm, with existing cleanup and rooting behavior.
-Retained conditional nodes select semantic v41, not a new native ABI.
+The v41 feature milestone added retained conditional nodes, not a new native ABI.
 Managed-handle `??` and statement-form `??=` use a single value/place evaluation
 and lazy fallback. Optional assignment requires an initialized mutable local
 or writable mutable class field; computed receivers remain rooted through
 fallback calls and checked failure. Results retain existing nullability and
-readonly/write contracts. Retained nodes select semantic v42, with no native
+readonly/write contracts. The v42 feature milestone added retained nodes, with no native
 ABI change or scalar/unique optional representation.
 Prefix/postfix integer updates save the old value and commit a checked
 replacement only on success. Supported mutable local, compact-field,
 writable class-field and host-buffer places retain receiver/index
 single evaluation, access checks and managed-root cleanup. Prefix returns
 the replacement; postfix returns the saved value. Primitive update nodes
-select semantic v43 without changing the native ABI.
+were added at the v43 feature milestone without changing the native ABI.
 The hosted compiler also supports nominal static `++`/`--` calls for the
 eligible writable `Copy`-struct place envelope. These preserve the same
 single-evaluation and checked-writeback behavior: operator failure prevents
@@ -171,8 +172,8 @@ equal the operand type, unlike other unary operators. Existing static
 requirements, self/no-self protocols, constrained generic definition proofs
 and witness identity apply; there is no C# instance mutation, owning-value
 update, arbitrary `char16` arithmetic, equality/default protocol or witness
-ABI. Retained nominal calls select semantic v44 while primitive updates
-retain v43. Private operator bodies and closed generic specializations can
+ABI. Nominal calls were added at the v44 feature milestone after primitive
+updates at v43. Private operator bodies and closed generic specializations can
 be replaced behind unchanged semantic/native consumers. Cross-module
 source-operator discovery and public generic witnesses are not added.
 Nominal updates diagnose in required constant work: the ConstEval interpreter
@@ -192,7 +193,7 @@ update-place/root machinery; they introduce no destination-loan form.
 Primitive scalar-slot compound assignments are available in bounded ConstEval.
 Nominal compounds are rejected despite binary operator support; `char16` and
 unique-value update destinations remain unsupported. Shift and
-compound-assignment nodes select semantic v45 (compound expression tag 26,
+compound-assignment nodes were added at the v45 feature milestone (compound expression tag 26,
 admitted only in statement position).
 This adds no native ABI or profile version.
 
@@ -503,7 +504,7 @@ persists these declarations when retained; they add no native ABI operation.
 Hosted assignment to a definitely vacant `init` local uses the same checked
 AOT/JIT publication, cleanup and rooting paths. It fixes inferred storage type
 without granting live-value replacement authority; failed evaluation leaves
-vacancy. Retained initialization assignments select semantic v46, with local
+vacancy. Retained initialization assignments were added at the v46 feature milestone, with local
 authority reconstructed from the vacant declaration. Conditional publication
 must be resolved before another initialization, including across loop and
 exception joins. The native scalar frontend separately supports explicit
@@ -520,10 +521,10 @@ Scalar and Copy values require no fabricated cleanup or default-value store.
 Standalone `init` and mutable locals can publish a new lifetime under their
 existing initialization authority; ordinary immutable locals cannot. Failed
 initialization leaves vacancy and does not reactivate a root or cleanup bit.
-Retained end nodes select private semantic v47 and are audited through
+Retained end nodes were added at the v47 feature milestone and are audited through
 producer/reference/consumer linking and private native graphs. Both PE and
-JIT policies use the same lowering, with no native ABI/profile or scanner
-change. Parameter/receiver aliases, fields, indexers, const aliases and
+JIT policies use the same lowering under current semantic-module revision 47,
+with no native ABI/profile or scanner change. Parameter/receiver aliases, fields, indexers, const aliases and
 unresolved/vacant locals reject. General ref/pin types, enums, arbitrary
 guards/ARC, view rebinding, source-free TRRM and the compiled scalar frontend
 are not adopted by this operation.
@@ -641,8 +642,8 @@ This is a single-threaded, image-private AOT/JIT proof with no
 inheritance, managed user-struct
 fields, public managed-handle ABI, finalizers,
 interior pointers, pinning or generational/concurrent collection. Native DLL
-emission for semantic v18-v30 admits only scalar by-value parameters and scalar
-or `void` results, with no `out` parameters; semantic v31 adds the bounded
+emission supports scalar by-value parameters and scalar or `void` results,
+with no `out` parameters; the v31 feature milestone adds the bounded
 handle-free `Copy` value contracts described below. Managed state is private,
 and calls must be serialized. An export does **not** collect merely because it
 returns, so a caller must explicitly invoke the image's collection proof to
@@ -724,10 +725,10 @@ Earlier semantic versions continue rejecting aggregate factory arguments.
 Version 23 admits constructor signatures with more than three inputs; earlier
 versions continue rejecting that arity. These remain private implementation
 details behind unchanged scalar exports.
-Semantic version 24 carries the managed class/`ManagedNode` access contract;
-its readers normalize private managed artifacts from versions 18 through 23
-into explicitly qualified IR without adding authority, and reject v24 write
-identifiers under older headers. Semantic version 25 adds a separate
+The current semantic-module revision carries the managed class/`ManagedNode`
+access contract. It records that authority directly and rejects retired
+semantic-module revisions rather than normalizing them. The semantic version 25
+milestone adds a separate
 `MutReceiver` contract for persisted, non-exported mutating methods on
 non-owning compact structs. Methods may be source-public or private, but source
 visibility does not expose a public mutating-receiver ABI. A receiver borrows a
@@ -762,9 +763,9 @@ by-value parameter/result and `bool`/`out` forms, including scalar outputs.
 Those snapshots use the existing native value ABI and do not expose private
 managed storage or handles; exported managed handles, unique values, nested
 managed-containing values, views, reference modes and mutating-receiver ABI
-remain unsupported. Under v31, a managed leaf could not import another
-producer. Native physical ABI/profile versions are unchanged. Semantic v32
-supports private managed consumers through ordinary single-provider semantic
+remain unsupported. The v31 milestone kept managed leaves from importing
+another producer. Native physical ABI/profile versions are unchanged. The v32
+milestone added private managed consumers through ordinary single-provider semantic
 consumers and native single-provider/module-set entry points. Persisted acyclic
 native graphs additionally permit managed intermediate and root producers.
 These boundaries communicate only through the established scalar and handle-free public
@@ -1220,10 +1221,10 @@ before the first test, and `continue` reaches that test after exited-scope
 cleanup. Labels may identify enclosing `while`, `for` and `do` loops.
 The bounded implementation rejects duplicate enclosing labels and permits
 reuse in disjoint scopes; the general source collision policy remains
-unspecified. Semantic v39 records post-tested loops and non-nearest transfer
-depths, while programs without those retained operations continue to select
-their earlier formats. Older headers reject the new nodes. Native calling
-conventions, cleanup funclets and public ABI do not change.
+unspecified. The v39 feature milestone added post-tested loops and non-nearest
+transfer depths; current semantic-module revision 47 serializes these nodes
+when present. Native calling conventions, cleanup funclets and public ABI do
+not change.
 
 Other integer widths, floating point, character/text literals, classes,
 optional/generic/family binding, general borrowed references, ownership/cleanup,

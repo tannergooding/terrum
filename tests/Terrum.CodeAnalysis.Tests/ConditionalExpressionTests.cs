@@ -256,7 +256,7 @@ public sealed class ConditionalExpressionTests
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producerProgram = Assert.IsType<BoundProgram>(library.Program);
         var producer = ModuleCompiler.CreateProducer(producerProgram, ["Choose"]);
-        Assert.Equal(41, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var forgedOldReader = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(forgedOldReader.AsSpan(4, 4), 40);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedOldReader));
@@ -266,7 +266,7 @@ public sealed class ConditionalExpressionTests
         Assert.False(consumerCompilation.HasErrors, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumerProgram = Assert.IsType<BoundProgram>(consumerCompilation.Program);
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        Assert.NotEqual(41, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
         Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
 
         var nativeProducer = NativeModuleCompiler.CreateProducer(producerProgram, ["Choose"], "Conditional", policy);

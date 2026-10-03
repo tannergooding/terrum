@@ -105,48 +105,6 @@ public sealed class ModuleTests
     }
 
     [Fact]
-    public async Task ReadsVersion15SevenScalarArgumentsWithHistoricalProfileAsync()
-    {
-        // Independently encoded version-15 scalar bodies, including the old arity-derived native-15 profile.
-        const string Producer = "VFJSTQ8AAAAJAAAAbmF0aXZlLTE1AAD/////AAAAAAAAAAABAAAAAwAAAFN1bUcAAABTdW18MnxGfEV8SXwtfC18N3xpbjoyfGluOjJ8aW46MnxpbjoyfGluOjJ8aW46MnxpbjoyfE1heVRocm93fE1heVJldHVybgEBAAMAAABTdW0CAAAAAAAAAAAAAAAABwAAAAcAAAAAAAAAAAAAAAQAAABhcmcwAgAAAAAAAAAAAAAAAAAEAAAAYXJnMQIAAAAAAAAAAAAAAAAABAAAAGFyZzICAAAAAAAAAAAAAAAAAAQAAABhcmczAgAAAAAAAAAAAAAAAAAEAAAAYXJnNAIAAAAAAAAAAAAAAAAABAAAAGFyZzUCAAAAAAAAAAAAAAAAAAQAAABhcmc2AgAAAAAAAAAAAAAAAAABAAAAAAAAAAABAAAACAAAAAAAAAAAAQICAAAAAAAAAAAAAAAAAAAA";
-        const string Consumer = "VFJSTQ8AAAAJAAAAbmF0aXZlLTE1AQAAAAAAAAAAAAAAAAACAAAABAAAAE1haW4lAAAATWFpbnwyfEZ8TnxJfC18LXwwfE1heVRocm93fE1heVJldHVybgABAAQAAABNYWluAgAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAABAAAACAAAAAAAAAAAAQUCAAAAAAAAAAAAAAADAAAAU3VtBwAAAAECAAAAAAAAAAAAAAAqAAAAAAAAAAECAAAAAAAAAAAAAAAAAAAAAAAAAAECAAAAAAAAAAAAAAAAAAAAAAAAAAECAAAAAAAAAAAAAAAAAAAAAAAAAAECAAAAAAAAAAAAAAAAAAAAAAAAAAECAAAAAAAAAAAAAAAAAAAAAAAAAAECAAAAAAAAAAAAAAAAAAAAAAAAAAMAAABTdW1HAAAAU3VtfDJ8RnxFfEl8LXwtfDd8aW46MnxpbjoyfGluOjJ8aW46MnxpbjoyfGluOjJ8aW46MnxNYXlUaHJvd3xNYXlSZXR1cm4BAAA=";
-        var producer = Convert.FromBase64String(Producer);
-        var consumer = Convert.FromBase64String(Consumer);
-        Assert.Equal("native-15", ModuleCompiler.GetNativeProfileVersion(producer, isConsumer: false));
-        Assert.Equal("native-15", ModuleCompiler.GetNativeProfileVersion(consumer, isConsumer: true));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(
-            ModuleCompiler.Link(consumer, producer), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
-    }
-
-    [Theory]
-    [InlineData(13, false)]
-    [InlineData(14, false)]
-    [InlineData(13, true)]
-    [InlineData(14, true)]
-    public async Task EarlierSevenScalarArgumentsKeepScalarProfileAsync(int version, bool checkedFailures)
-    {
-        // Version-13 and version-14 scalar bodies share this independently encoded version-14 layout.
-        const string Producer = "VFJSTQ4AAAAJAAAAbmF0aXZlLTEwAAD/////AAAAAAAAAAABAAAAAwAAAFN1bUcAAABTdW18MnxGfEV8SXwtfC18N3xpbjoyfGluOjJ8aW46MnxpbjoyfGluOjJ8aW46MnxpbjoyfE1heVRocm93fE1heVJldHVybgEBAAMAAABTdW0CAAAAAAAAAAAAAAAHAAAABwAAAAAAAAAAAAAABAAAAGFyZzACAAAAAAAAAAAAAAAAAAQAAABhcmcxAgAAAAAAAAAAAAAAAAAEAAAAYXJnMgIAAAAAAAAAAAAAAAAABAAAAGFyZzMCAAAAAAAAAAAAAAAAAAQAAABhcmc0AgAAAAAAAAAAAAAAAAAEAAAAYXJnNQIAAAAAAAAAAAAAAAAABAAAAGFyZzYCAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAEAAAAIAAAAAAAAAAABAgIAAAAAAAAAAAAAAAAAAAA=";
-        const string Consumer = "VFJSTQ4AAAAJAAAAbmF0aXZlLTEwAQAAAAAAAAAAAAAAAAACAAAABAAAAE1haW4lAAAATWFpbnwyfEZ8TnxJfC18LXwwfE1heVRocm93fE1heVJldHVybgABAAQAAABNYWluAgAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAEAAAAIAAAAAAAAAAABBQIAAAAAAAAAAAAAAAMAAABTdW0HAAAAAQIAAAAAAAAAAAAAACoAAAAAAAAAAQIAAAAAAAAAAAAAAAAAAAAAAAAAAQIAAAAAAAAAAAAAAAAAAAAAAAAAAQIAAAAAAAAAAAAAAAAAAAAAAAAAAQIAAAAAAAAAAAAAAAAAAAAAAAAAAQIAAAAAAAAAAAAAAAAAAAAAAAAAAQIAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAFN1bUcAAABTdW18MnxGfEV8SXwtfC18N3xpbjoyfGluOjJ8aW46MnxpbjoyfGluOjJ8aW46MnxpbjoyfE1heVRocm93fE1heVJldHVybgEAAA==";
-        var producer = Convert.FromBase64String(Producer);
-        var consumer = Convert.FromBase64String(Consumer);
-        foreach (var artifact in new[] { producer, consumer })
-        {
-            BinaryPrimitives.WriteInt32LittleEndian(artifact.AsSpan(4, 4), version);
-            if (checkedFailures)
-            {
-                artifact[12 + "native-10".Length - 1] = (byte)'1';
-                artifact[12 + "native-10".Length + 1] = (byte)BoundRuntimePolicy.CheckedExceptions;
-            }
-        }
-        var profile = checkedFailures ? "native-11" : "native-10";
-        Assert.Equal(profile, ModuleCompiler.GetNativeProfileVersion(producer, isConsumer: false));
-        Assert.Equal(profile, ModuleCompiler.GetNativeProfileVersion(consumer, isConsumer: true));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, producer),
-            checkedFailures ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
-    }
-
-    [Fact]
     public async Task SelfHostRangeTestsExecuteAgainstAnIndependentMultiSourceLibraryAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -773,15 +731,23 @@ public sealed class ModuleTests
         var name = Encoding.UTF8.GetBytes("Box.#ctor");
         var functionName = modified.AsSpan().LastIndexOf(name);
         Assert.True(functionName >= sizeof(int));
-        Assert.Equal(name.Length, BinaryPrimitives.ReadInt32LittleEndian(
-            modified.AsSpan(functionName - sizeof(int), sizeof(int))));
-        var intrinsicOffset = functionName + name.Length + sizeof(int) + 7;
-        Assert.Equal((byte)BoundIntrinsic.None, modified[intrinsicOffset]);
-        Assert.Equal(1, modified[intrinsicOffset + 1]);
-        var ownerLengthOffset = intrinsicOffset + 2;
-        var ownerLength = BinaryPrimitives.ReadInt32LittleEndian(modified.AsSpan(ownerLengthOffset, sizeof(int)));
-        Assert.Equal("Box", Encoding.UTF8.GetString(modified, ownerLengthOffset + sizeof(int), ownerLength));
-        var parameterOffset = ownerLengthOffset + sizeof(int) + ownerLength;
+        using var reader = new BinaryReader(new MemoryStream(modified));
+        reader.BaseStream.Position = functionName + name.Length;
+        _ = reader.ReadInt32();
+        Assert.True(reader.ReadBoolean());
+        for (var flag = 0; flag < 6; flag++)
+        {
+            _ = reader.ReadBoolean();
+        }
+        Assert.False(reader.ReadBoolean());
+        Assert.Equal((byte)BoundIntrinsic.None, reader.ReadByte());
+        Assert.False(reader.ReadBoolean());
+        _ = reader.ReadInt32();
+        Assert.True(reader.ReadBoolean());
+        var ownerLength = reader.ReadInt32();
+        Assert.Equal("Box", Encoding.UTF8.GetString(reader.ReadBytes(ownerLength)));
+        var parameterOffset = (int)reader.BaseStream.Position;
+        Assert.Equal(1, reader.ReadInt32());
         BinaryPrimitives.WriteInt32LittleEndian(modified.AsSpan(parameterOffset, sizeof(int)), parameterCount);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer, modified));
     }
@@ -1038,39 +1004,8 @@ public sealed class ModuleTests
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link([.. consumer, 0], producer));
     }
 
-    [Theory]
-    [InlineData(13, 13)]
-    [InlineData(13, 14)]
-    [InlineData(14, 13)]
-    [InlineData(14, 14)]
-    [InlineData(null, 13)]
-    [InlineData(null, 14)]
-    [InlineData(13, null)]
-    [InlineData(14, null)]
-    public async Task LinksLegacyScalarModulesWithoutRewritingTheirBodiesAsync(int? consumerVersion, int? producerVersion)
-    {
-        // Captured version-14 scalar artifacts also have the version-13 body encoding.
-        const string LegacyProducer = "VFJSTQ4AAAAJAAAAbmF0aXZlLTEwAAD/////AAAAAAAAAAABAAAABgAAAEhlbHBlcicAAABIZWxwZXJ8MnxGfEV8SXwtfC18MHxNYXlUaHJvd3xNYXlSZXR1cm4BAQAGAAAASGVscGVyAgAAAAAAAAAAAAAAAAAAAAAAAAAiAAAAJAAAAAE4AAAADgAAAAEAAAAIOgAAAAoAAAABAQIAAABBAAAAAgAAAAsAAAAAAAAA";
-        const string LegacyConsumer = "VFJSTQ4AAAAJAAAAbmF0aXZlLTEwAQAAAAAAAAAAAAAAAAACAAAABAAAAE1haW4lAAAATWFpbnwyfEZ8TnxJfC18LXwwfE1heVRocm93fE1heVJldHVybgABAAQAAABNYWluAgAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAIQAAAAENAAAAFAAAAAEAAAAIDwAAABAAAAABBQIAAAAWAAAACAAAAAYAAABIZWxwZXIAAAAABgAAAEhlbHBlcicAAABIZWxwZXJ8MnxGfEV8SXwtfC18MHxNYXlUaHJvd3xNYXlSZXR1cm4BAAA=";
-        var program = Compile("int32 Main() { return Helper(); } public int32 Helper() { return 11; }");
-        var producer = ModuleCompiler.CreateProducer(program, ["Helper"]);
-        var consumer = ModuleCompiler.CreateConsumer(program, producer);
-        if (consumerVersion is int legacyConsumerVersion)
-        {
-            consumer = Convert.FromBase64String(LegacyConsumer);
-            BinaryPrimitives.WriteInt32LittleEndian(consumer.AsSpan(4, 4), legacyConsumerVersion);
-        }
-        if (producerVersion is int legacyProducerVersion)
-        {
-            producer = Convert.FromBase64String(LegacyProducer);
-            BinaryPrimitives.WriteInt32LittleEndian(producer.AsSpan(4, 4), legacyProducerVersion);
-        }
-        var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.Equal(11, await ExecuteAsync(NativeEmitter.Emit(linked, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
-    }
-
     [Fact]
-    public void RejectsCompositeContractsDowngradedToTransferVersion()
+    public void RejectsCompositeContractsInRetiredSemanticRevision()
     {
         var program = Compile("""
             public unique struct Child {

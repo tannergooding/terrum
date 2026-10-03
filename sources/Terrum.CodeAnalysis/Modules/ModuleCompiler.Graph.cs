@@ -319,20 +319,7 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Graph library cannot have an entry point.");
             }
             var (structures, names) = ReadStructures(reader, version);
-            if (version is >= ManagedClassVersion and not
-                (LoopTransferVersion or ManagedGraphParticipantVersion or PrivateInitReferenceVersion
-                    or ExplicitGetterVersion or TransparentLayoutVersion or WideClassFieldsVersion
-                    or StructuredLoopVersion or VacantLocalVersion or ConditionalVersion or CoalescingVersion
-                    or UpdateVersion or NominalUpdateVersion or CompoundAssignmentVersion
-                    or InitializationAssignmentVersion or LifetimeEndVersion))
-            {
-                throw new ModuleFormatException("Graph libraries cannot use the private class module version.");
-            }
-            var classes = version >= ManagedClassVersion ? ReadClasses(reader, names, version) : [];
-            if (version < ManagedGraphParticipantVersion && !classes.IsEmpty)
-            {
-                throw new ModuleFormatException("Graph libraries cannot retain private classes.");
-            }
+            var classes = ReadClasses(reader, names, version);
             var imported = ReadImportedTypes(reader, structures.Length, names, expectedConsumer: true);
             var count = Count(reader, MaximumFunctions);
             if (count == 0)
@@ -340,26 +327,12 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Graph library has no functions.");
             }
             var functions = ReadFunctions(reader, count, expectedConsumer: true, version, structures, classes);
-            if ((version < LifetimeEndVersion && functions.Any(item => item.Function is BoundFunction function
-                && HasLifetimeEnd(function.Body)))
-                || (version == LifetimeEndVersion && !functions.Any(item => item.Function is BoundFunction function
-                    && HasLifetimeEnd(function.Body))))
-            {
-                throw new ModuleFormatException("Local lifetime ends require semantic module version 47.");
-            }
             var module = new Module(true, -1, structures, functions) {
                 Classes = classes,
                 ImportedStructures = imported,
                 RuntimePolicy = policy,
-                SerializedVersion = version,
-                SerializedProfile = profile,
             };
-            if ((version == ManagedGraphParticipantVersion && !HasPrivateManagedState(module))
-                || (version == PrivateInitReferenceVersion && !HasInitReference(module))
-                || (version == ExplicitGetterVersion && !HasExplicitGetter(module))
-                || (version == TransparentLayoutVersion && !HasTransparentLayout(module))
-                || (version == WideClassFieldsVersion && !HasWideClassFields(module))
-                || (profile == "native-20" && classes.IsEmpty)
+            if ((profile == "native-20" && classes.IsEmpty)
                 || stream.Position != stream.Length || profile != RetainedNativeProfile(module))
             {
                 throw new ModuleFormatException("Graph semantic profile or payload is invalid.");

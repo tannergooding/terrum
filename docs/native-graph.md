@@ -27,14 +27,15 @@ Implementation hashes are not pinned: a compatible leaf implementation can
 replace an independently compiled package without changing the intermediate
 DLL or root EXE.
 For managed roots and intermediate producers in persisted acyclic native DLL
-graphs, semantic v32 is the minimum participant revision. This is a feature
-requirement, not the highest implemented semantic revision. Participants
+graphs, each participant uses current semantic-module revision 47, the sole
+accepted revision. This serialization revision is distinct from the graph
+container and native package formats. Participants
 communicate only through the established scalar and handle-free public `Copy`
 value contracts. Each persisted image has its own heap and root chain; an
 imported call preserves the caller's roots, and `ManagedHeap.Collect()` remains
-local to the image where it runs. Semantic v32 also supports private managed
-consumers through ordinary single-provider semantic linking and native
-single-provider or module-set entry points. Semantic linking places producer
+local to the image where it runs. The same current semantic-module revision
+supports private managed consumers through ordinary single-provider semantic
+linking and native single-provider or module-set entry points. Semantic linking places producer
 and consumer code in one image/heap domain and remaps private class identities;
 the persisted native graph continues to keep each image's heap separate.
 Managed handles never cross image boundaries, and graph cycles remain
@@ -195,7 +196,7 @@ $LASTEXITCODE # 44
 The same unchanged root and intermediate can instead load a class-backed leaf.
 Its private `Cycle` objects have optional edges; the leaf snapshots across edge
 clearing, restores the cycle, then collects it after its roots retire. The replacement carries a
-version 19 semantic class table and verified `native-20` profile. A class leaf
+current semantic-module class table and verified `native-20` profile. A class leaf
 without optional handles selects `native-19`. Neither class layout nor handle
 is part of the imported `Leaf()` declaration, and no other DLL can share the
 leaf's managed roots.
@@ -203,10 +204,10 @@ leaf's managed roots.
 The [Copy-field variant](../samples/native/graph/managed-copy-class-leaf.terrum)
 can replace that same leaf with nested inline Copy values alongside its optional
 edges. Use it in place of `managed-class-leaf.terrum` in the producer command
-below. It writes semantic version 20 while retaining `native-20`, returns the
-same result and collects its private cycle. The unchanged root and intermediate
-do not import its nested struct layouts; older semantic versions continue to
-reject inline class fields.
+below. It writes current semantic-module revision 47 while retaining the
+`native-20` profile, returns the same result and collects its private cycle.
+The unchanged root and intermediate do not import its nested struct layouts;
+retired semantic-module revisions are rejected and must be rebuilt from source.
 
 ```powershell
 & $c compile-native producer samples\native\graph\managed-class-leaf-original.terrum NodeB --export Leaf -o class-original.trmn --runtime fail-fast

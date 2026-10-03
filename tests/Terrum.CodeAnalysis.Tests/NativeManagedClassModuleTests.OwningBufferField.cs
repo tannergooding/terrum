@@ -16,7 +16,7 @@ public sealed partial class NativeManagedClassModuleTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task MutableBufferFieldUsesVersion29WithPrivateProducerReplacementAsync(
+    public async Task MutableBufferFieldUsesPrivateProducerReplacementAsync(
         NativeRuntimePolicy policy)
     {
         const string Original = """
@@ -56,7 +56,7 @@ public sealed partial class NativeManagedClassModuleTests
             ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var producer = ModuleCompiler.CreateProducer(replacementProgram, ["LeafValue"]);
-        Assert.Equal(29, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         Assert.Empty(ModuleCompiler.CreateReference(producer).Structures);
         var downgraded = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 28);

@@ -432,7 +432,7 @@ public sealed class CoalescingTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(library), (BoundRuntimePolicy)policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), ["Select"]);
-        Assert.Equal(42, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var old = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(old.AsSpan(4, 4), 41);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(old));
@@ -441,7 +441,7 @@ public sealed class CoalescingTests
             reference, runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.False(consumerCompilation.HasErrors, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
-        Assert.NotEqual(42, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
         Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
     }
 

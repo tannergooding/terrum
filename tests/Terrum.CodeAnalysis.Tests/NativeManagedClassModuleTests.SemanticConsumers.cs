@@ -86,11 +86,11 @@ public sealed partial class NativeManagedClassModuleTests
             "box.Data.First + 1", StringComparison.Ordinal), policy);
         var original = ModuleCompiler.CreateProducer(originalProgram, exports);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, exports);
-        Assert.Equal(31, BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)));
         var source = ManagedConsumerSource(policy, linked: true, bias: false);
         var consumer = ModuleCompiler.CreateConsumer(Compile(source, policy,
             ModuleCompiler.CreateReference(original), library: false), original);
-        Assert.Equal(32, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
         var consumerHash = SHA256.HashData(consumer);
         var linked = ModuleCompiler.Link(consumer, replacement);
         Assert.Equal(["Cell", "$producer.Cell"],
@@ -131,7 +131,7 @@ public sealed partial class NativeManagedClassModuleTests
         var replacement = ModuleCompiler.CreateProducer(Compile(replacementSource, policy), exports);
         var consumer = ModuleCompiler.CreateConsumer(Compile(consumerSource, policy,
             ModuleCompiler.CreateReference(original), library: false), original);
-        Assert.Equal(32, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
         var hash = SHA256.HashData(consumer);
         var linkedOriginal = ModuleCompiler.Link(consumer, original);
         var linkedReplacement = ModuleCompiler.Link(consumer, replacement);
@@ -198,7 +198,7 @@ public sealed partial class NativeManagedClassModuleTests
             ["Value"]);
         var consumer = ModuleCompiler.CreateConsumer(Compile(ConsumerSource, policy,
             ModuleCompiler.CreateReference(original), library: false), original);
-        Assert.Equal(32, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
         Assert.Empty(ModuleCompiler.Link(consumer, replacement).Classes);
         Assert.Equal(40, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original), policy))
             .ConfigureAwait(true));
@@ -209,7 +209,7 @@ public sealed partial class NativeManagedClassModuleTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public void ManagedSemanticConsumerRetainsVersionAndCopyOnlyBoundary(NativeRuntimePolicy policy)
+    public void CurrentSemanticConsumerRetainsCopyOnlyBoundary(NativeRuntimePolicy policy)
     {
         var producer = ModuleCompiler.CreateProducer(Compile(ConsumerProducerSource, policy),
             ["Read", "TryRead", "Fail", "CollectProvider"]);
@@ -221,25 +221,34 @@ public sealed partial class NativeManagedClassModuleTests
         using (var reader = new BinaryReader(new MemoryStream(consumer)))
         {
             reader.BaseStream.Position = 8;
-            var profileLength = reader.ReadInt32();
-            reader.BaseStream.Position += profileLength + 1 + 1 + 4;
+            SkipString(reader);
+            _ = reader.ReadByte();
+            _ = reader.ReadByte();
+            _ = reader.ReadInt32();
             Assert.Equal(1, reader.ReadInt32());
-            var structureNameLength = reader.ReadInt32();
-            reader.BaseStream.Position += structureNameLength + 4 + 4;
+            SkipString(reader);
+            _ = reader.ReadInt32();
+            _ = reader.ReadBoolean();
+            _ = reader.ReadBoolean();
+            _ = reader.ReadBoolean();
+            _ = reader.ReadBoolean();
+            if (reader.ReadBoolean())
+            {
+                SkipString(reader);
+            }
             var structureFields = reader.ReadInt32();
             for (var i = 0; i < structureFields; i++)
             {
-                var nameLength = reader.ReadInt32();
-                reader.BaseStream.Position += nameLength + 4 + 4 + 4 + 3;
+                SkipString(reader);
+                reader.BaseStream.Position += 4 + 4 + 4 + 3;
             }
             Assert.Equal(1, reader.ReadInt32());
-            var classNameLength = reader.ReadInt32();
-            reader.BaseStream.Position += classNameLength + 4 + 2;
+            SkipString(reader);
+            reader.BaseStream.Position += 4 + 2;
             Assert.Equal(2, reader.ReadInt32());
-            var firstFieldNameLength = reader.ReadInt32();
-            reader.BaseStream.Position += firstFieldNameLength + 4 + 4 + 4 + 3;
-            var nextFieldNameLength = reader.ReadInt32();
-            reader.BaseStream.Position += nextFieldNameLength;
+            SkipString(reader);
+            reader.BaseStream.Position += 4 + 4 + 4 + 3;
+            SkipString(reader);
             var classTypeOffset = (int)reader.BaseStream.Position;
             Assert.True(ManagedClassTypes.IsManaged((PrimitiveType)reader.ReadInt32()));
             var invalidClass = (byte[])consumer.Clone();
@@ -247,17 +256,17 @@ public sealed partial class NativeManagedClassModuleTests
             _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(invalidClass, producer));
         }
 
-        var oldProducer = ModuleCompiler.CreateProducer(Compile(
+        var scalarProducer = ModuleCompiler.CreateProducer(Compile(
             "public int32 Value() { return 42; }", policy), ["Value"]);
-        Assert.True(BinaryPrimitives.ReadInt32LittleEndian(oldProducer.AsSpan(4, 4)) < 31);
-        var legacyConsumer = ModuleCompiler.CreateConsumer(Compile(
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(scalarProducer.AsSpan(4, 4)));
+        var scalarConsumer = ModuleCompiler.CreateConsumer(Compile(
             "int32 Main() { return Value(); }", policy,
-            ModuleCompiler.CreateReference(oldProducer), library: false), oldProducer);
-        Assert.True(BinaryPrimitives.ReadInt32LittleEndian(legacyConsumer.AsSpan(4, 4)) < 32);
-        _ = ModuleCompiler.Link(legacyConsumer, oldProducer);
-        var forged = (byte[])legacyConsumer.Clone();
+            ModuleCompiler.CreateReference(scalarProducer), library: false), scalarProducer);
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(scalarConsumer.AsSpan(4, 4)));
+        _ = ModuleCompiler.Link(scalarConsumer, scalarProducer);
+        var forged = (byte[])scalarConsumer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(4, 4), 32);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, oldProducer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, scalarProducer));
 
         const string OwningProducer = """
             public unique struct Token {
@@ -284,6 +293,12 @@ public sealed partial class NativeManagedClassModuleTests
         var invalidSet = Compilation.Create(SyntaxTree.Parse(ManagedConsumer),
             NativeModuleCompiler.CreateReferenceSet([nativeUnique, nativeBias]), (BoundRuntimePolicy)policy);
         Assert.Contains(invalidSet.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
+    }
+
+    private static void SkipString(BinaryReader reader)
+    {
+        var length = reader.ReadInt32();
+        reader.BaseStream.Position += length;
     }
 
     private static async Task<int> RunSemanticModuleJitAsync(byte[] consumer, byte[] producer,

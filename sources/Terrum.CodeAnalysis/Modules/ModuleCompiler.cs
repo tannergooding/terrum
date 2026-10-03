@@ -13,10 +13,11 @@ using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Modules;
 
-/// <summary>A bounded, versioned semantic module artifact; linking never reads source text.</summary>
+/// <summary>A bounded semantic module artifact; linking never reads source text.</summary>
 public static partial class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
+    private const int InlineClassFieldVersion = 20;
     private const int OwnershipVersion = 12;
     private const int TransferVersion = 13;
     private const int CompositeVersion = 14;
@@ -25,7 +26,7 @@ public static partial class ModuleCompiler
     private const int WritableViewVersion = 17;
     private const int ManagedNodeVersion = 18;
     private const int ManagedClassVersion = 19;
-    private const int Version = 20;
+    private const int Version = 47;
     private const int LoopTransferVersion = 21;
     private const int AggregateClassFactoryVersion = 22;
     private const int StackClassFactoryVersion = 23;
@@ -186,11 +187,7 @@ public static partial class ModuleCompiler
             Compilation.HasCompositeUnique(module.Structures),
             HasOwnedNativeBuffer(module.Structures, module.Functions),
             HasReadonlyNativeView(module.Functions), HasMutableNativeViewOrClear(module.Functions));
-        // Version 15 mistook a seven-parameter count for the owned-buffer type ID.
-        return module.SerializedVersion == BufferVersion && module.SerializedProfile == "native-15"
-            && profile is not ("native-15" or "native-16" or "native-17")
-            && module.Functions.Any(static item => ContractParameterCount(item.Contract) == 7)
-                ? "native-15" : profile;
+        return profile;
     }
 
     private static void RejectManagedNodes(BoundProgram program)
@@ -1606,90 +1603,7 @@ public static partial class ModuleCompiler
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = HasCorePrimitiveMembers(module, gettersOnly: true)
-            ? CorePrimitiveGetterVersion
-            : HasCorePrimitiveMembers(module)
-            ? CorePrimitiveVersion
-            : HasWideClassFields(module)
-            ? WideClassFieldsVersion
-            : HasTransparentLayout(module)
-            ? TransparentLayoutVersion
-            : HasExplicitGetter(module)
-            ? ExplicitGetterVersion
-            : HasInitReference(module)
-            ? PrivateInitReferenceVersion
-            : module.Consumer && HasPrivateManagedState(module)
-            ? ManagedGraphParticipantVersion
-            : HasPrivateManagedState(module) && module.Functions.Any(static item =>
-                item.Import && item.Function is BoundFunction function && !ManagedExportShape.ScalarOnly(function))
-                ? ManagedValueExportVersion
-            : module.Functions.Any(static item => item.Function is BoundFunction function
-                && HasMutableBufferFieldView(function)) ? MutableBufferFieldViewVersion
-            : module.Functions.Any(static item => item.Function is BoundFunction function
-                && HasMutableBufferFieldLoan(function)) ? MutableBufferFieldReceiverVersion
-            : module.Functions.Any(item => item.Function is BoundFunction function
-                && HasUniqueMutableFieldLoan(function, module.Structures)) ? UniqueMutableFieldReceiverVersion
-            : module.Functions.Any(item => item.Function is BoundFunction function
-                && HasUniqueMutableReceiver(function, module.Structures)) ? UniqueMutableReceiverVersion
-            : module.Functions.Any(static item => item.Function is BoundFunction function
-                && HasMutableFieldLoan(function)) ? MutableFieldReceiverVersion
-            : module.Functions.Any(static item => item.Function is BoundFunction function
-                && HasMutableStructReceiver(function)) ? MutableStructReceiverVersion
-            : !module.Classes.IsEmpty || HasManagedNodes(module.Functions)
-            ? ManagedAccessVersion
-            : module.Functions.Any(static item => item.Function is BoundFunction function
-                && HasStackClassArguments(function)) ? StackClassFactoryVersion
-            : module.Functions.Any(static item => item.Function is BoundFunction function
-                && HasAggregateClassArguments(function)) ? AggregateClassFactoryVersion
-            : HasLoopTransfer(module.Functions) ? LoopTransferVersion
-            : module.Classes.IsEmpty ? ManagedNodeVersion
-            : module.Classes.Any(static @class => @class.Fields.Any(
-                static field => IsInlineClassField(field.Type))) ? Version : ManagedClassVersion;
-        if (module.Functions.Any(item => item.Function is BoundFunction function
-            && HasStructuredLoops(function.Body)))
-        {
-            version = Math.Max(version, StructuredLoopVersion);
-        }
-        if (module.Functions.Any(item => item.Function is BoundFunction function
-            && HasVacantLocal(function.Body)))
-        {
-            version = Math.Max(version, VacantLocalVersion);
-        }
-        if (module.Functions.Any(item => item.Function is BoundFunction function
-            && HasConditional(function.Body)))
-        {
-            version = Math.Max(version, ConditionalVersion);
-        }
-        if (module.Functions.Any(item => item.Function is BoundFunction function
-            && HasCoalescing(function.Body)))
-        {
-            version = Math.Max(version, CoalescingVersion);
-        }
-        if (module.Functions.Any(item => item.Function is BoundFunction function
-            && HasUpdate(function.Body)))
-        {
-            version = Math.Max(version, UpdateVersion);
-        }
-        if (module.Functions.Any(item => item.Function is BoundFunction function
-            && HasNominalUpdate(function.Body)))
-        {
-            version = Math.Max(version, NominalUpdateVersion);
-        }
-        if (module.Functions.Any(item => item.Function is BoundFunction function
-            && HasCompoundAssignment(function.Body)))
-        {
-            version = Math.Max(version, CompoundAssignmentVersion);
-        }
-        if (module.Functions.Any(item => item.Function is BoundFunction function
-            && HasInitializationAssignment(function)))
-        {
-            version = Math.Max(version, InitializationAssignmentVersion);
-        }
-        if (module.Functions.Any(item => item.Function is BoundFunction function
-            && HasLifetimeEnd(function.Body)))
-        {
-            version = Math.Max(version, LifetimeEndVersion);
-        }
+        var version = Version;
         writer.Write(Magic);
         writer.Write(version);
         PutString(writer, RetainedNativeProfile(module));
@@ -1792,17 +1706,7 @@ public static partial class ModuleCompiler
             var (version, policy, profile) = ReadModuleHeader(reader, expectedConsumer);
             var entry = reader.ReadInt32();
             var (structures, structureNames) = ReadStructures(reader, version);
-            var classes = version >= ManagedClassVersion ? ReadClasses(reader, structureNames, version) : [];
-            if (version is ManagedClassVersion or Version or AggregateClassFactoryVersion
-                or StackClassFactoryVersion && classes.IsEmpty)
-            {
-                throw new ModuleFormatException("Class module version requires private managed layouts.");
-            }
-            if (version == Version && !classes.Any(static @class => @class.Fields.Any(
-                    static field => IsInlineClassField(field.Type))))
-            {
-                throw new ModuleFormatException("Class module version 20 requires inline struct fields.");
-            }
+            var classes = ReadClasses(reader, structureNames, version);
             var importedTypes = ReadImportedTypes(reader, structures.Length, structureNames, expectedConsumer);
             var count = Count(reader, MaximumFunctions);
             if (count == 0 || (expectedConsumer ? entry < 0 || entry >= count : entry != -1))
@@ -1810,149 +1714,11 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Module entry point is invalid.");
             }
             var items = ReadFunctions(reader, count, expectedConsumer, version, structures, classes);
-            if (version < MutableStructReceiverVersion && items.Any(static item =>
-                    item.Function is BoundFunction function && HasMutableStructReceiver(function)))
-            {
-                throw new ModuleFormatException("Mutable struct receivers require semantic module version 25.");
-            }
-            if (version < UniqueMutableReceiverVersion && items.Any(item =>
-                    item.Function is BoundFunction function && HasUniqueMutableReceiver(function, structures)))
-            {
-                throw new ModuleFormatException("Mutable unique receivers require semantic module version 27.");
-            }
-            if (version < UniqueMutableFieldReceiverVersion && items.Any(item =>
-                    item.Function is BoundFunction function && HasUniqueMutableFieldLoan(function, structures)))
-            {
-                throw new ModuleFormatException("Mutable fields of unique owners require semantic module version 28.");
-            }
-            if (version < MutableBufferFieldReceiverVersion && items.Any(static item =>
-                    item.Function is BoundFunction function && HasMutableBufferFieldLoan(function)))
-            {
-                throw new ModuleFormatException("Mutable owning buffer fields require semantic module version 29.");
-            }
-            if (version < MutableBufferFieldViewVersion && items.Any(static item =>
-                    item.Function is BoundFunction function && HasMutableBufferFieldView(function)))
-            {
-                throw new ModuleFormatException("Mutable owning buffer field views require semantic module version 30.");
-            }
-            if (version == AggregateClassFactoryVersion && !items.Any(static item =>
-                    item.Function is BoundFunction function && HasAggregateClassArguments(function)))
-            {
-                throw new ModuleFormatException("Class factory module version requires aggregate arguments.");
-            }
-            if (version == StackClassFactoryVersion && !items.Any(static item =>
-                    item.Function is BoundFunction function && HasStackClassArguments(function)))
-            {
-                throw new ModuleFormatException("Class factory module version requires stack arguments.");
-            }
-            if (version < ManagedAccessVersion && (HasManagedNodes(items) || !classes.IsEmpty))
-            {
-                (classes, items) = NormalizeLegacyManagedAccess(classes, items, structures);
-            }
             var module = new Module(expectedConsumer, entry, structures, items) {
                 Classes = classes,
                 ImportedStructures = importedTypes,
                 RuntimePolicy = policy,
-                SerializedVersion = version,
-                SerializedProfile = profile,
             };
-            if (version == ManagedGraphParticipantVersion && (!expectedConsumer || !HasPrivateManagedState(module)))
-            {
-                throw new ModuleFormatException("Managed graph participant version requires private managed state.");
-            }
-            if (version == PrivateInitReferenceVersion && !HasInitReference(module))
-            {
-                throw new ModuleFormatException("Initialization version requires an init parameter.");
-            }
-            if (version == ExplicitGetterVersion && !HasExplicitGetter(module))
-            {
-                throw new ModuleFormatException("Explicit getter version requires a property.");
-            }
-            if ((version == TransparentLayoutVersion && !HasTransparentLayout(module))
-                || (version == WideClassFieldsVersion && !HasWideClassFields(module)))
-            {
-                throw new ModuleFormatException("Module version requires its declared layout feature.");
-            }
-            if (version < CorePrimitiveVersion && HasCorePrimitiveMembers(module)
-                || version == CorePrimitiveVersion && !HasCorePrimitiveMembers(module))
-            {
-                throw new ModuleFormatException("Primitive-owned methods require the Core primitive module version.");
-            }
-            if (version < CorePrimitiveGetterVersion && HasCorePrimitiveMembers(module, gettersOnly: true)
-                || version == CorePrimitiveGetterVersion
-                    && !HasCorePrimitiveMembers(module, gettersOnly: true))
-            {
-                throw new ModuleFormatException("Primitive-owned properties require semantic module version 38.");
-            }
-            if (version < StructuredLoopVersion && items.Any(item => item.Function is BoundFunction function
-                && HasStructuredLoops(function.Body))
-                || version == StructuredLoopVersion && !items.Any(item => item.Function is BoundFunction function
-                    && HasStructuredLoops(function.Body)))
-            {
-                throw new ModuleFormatException("Post-tested or named loop transfers require semantic module version 39.");
-            }
-            if (version < VacantLocalVersion && items.Any(item => item.Function is BoundFunction function
-                && HasVacantLocal(function.Body))
-                || version == VacantLocalVersion && !items.Any(item => item.Function is BoundFunction function
-                    && HasVacantLocal(function.Body)))
-            {
-                throw new ModuleFormatException("Vacant locals require semantic module version 40.");
-            }
-            if (version < ConditionalVersion && items.Any(item => item.Function is BoundFunction function
-                && HasConditional(function.Body))
-                || version == ConditionalVersion && !items.Any(item => item.Function is BoundFunction function
-                    && HasConditional(function.Body)))
-            {
-                throw new ModuleFormatException("Conditional expressions require semantic module version 41.");
-            }
-            if (version < CoalescingVersion && items.Any(item => item.Function is BoundFunction function
-                && HasCoalescing(function.Body))
-                || version == CoalescingVersion && !items.Any(item => item.Function is BoundFunction function
-                    && HasCoalescing(function.Body)))
-            {
-                throw new ModuleFormatException("Coalescing requires semantic module version 42.");
-            }
-            if (version < UpdateVersion && items.Any(item => item.Function is BoundFunction function
-                && HasUpdate(function.Body))
-                || version == UpdateVersion && !items.Any(item => item.Function is BoundFunction function
-                    && HasUpdate(function.Body)))
-            {
-                throw new ModuleFormatException("Update expressions require semantic module version 43.");
-            }
-            if (version < NominalUpdateVersion && items.Any(item => item.Function is BoundFunction function
-                && HasNominalUpdate(function.Body))
-                || version == NominalUpdateVersion && !items.Any(item => item.Function is BoundFunction function
-                    && HasNominalUpdate(function.Body)))
-            {
-                throw new ModuleFormatException("Nominal update expressions require semantic module version 44.");
-            }
-            if (version < CompoundAssignmentVersion && items.Any(item => item.Function is BoundFunction function
-                && HasCompoundAssignment(function.Body))
-                || version == CompoundAssignmentVersion && !items.Any(item => item.Function is BoundFunction function
-                    && HasCompoundAssignment(function.Body)))
-            {
-                throw new ModuleFormatException("Compound assignments and shifts require semantic module version 45.");
-            }
-            if ((version < InitializationAssignmentVersion && items.Any(item => item.Function is BoundFunction function
-                && HasInitializationAssignment(function)))
-                || (version == InitializationAssignmentVersion && !items.Any(item => item.Function is BoundFunction function
-                    && HasInitializationAssignment(function))))
-            {
-                throw new ModuleFormatException("Vacant-local assignments require semantic module version 46.");
-            }
-            if ((version < LifetimeEndVersion && items.Any(item => item.Function is BoundFunction function
-                && HasLifetimeEnd(function.Body)))
-                || (version == LifetimeEndVersion && !items.Any(item => item.Function is BoundFunction function
-                    && HasLifetimeEnd(function.Body))))
-            {
-                throw new ModuleFormatException("Local lifetime ends require semantic module version 47.");
-            }
-            if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
-                || !items.Any(static item => item.Import && item.Function is BoundFunction function
-                    && !ManagedExportShape.ScalarOnly(function))))
-            {
-                throw new ModuleFormatException("Managed value export version requires an expanded managed declaration.");
-            }
             if (profile != RetainedNativeProfile(module))
             {
                 throw new ModuleFormatException("Module semantic profile does not match its retained contracts.");
@@ -1961,19 +1727,19 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Optional managed nodes require a private source-class leaf.");
             }
-            if (HasPrivateManagedState(module) && ((expectedConsumer && version < ManagedGraphParticipantVersion)
-                || (!expectedConsumer && module.Functions.Any(item =>
+            if (HasPrivateManagedState(module) && !expectedConsumer
+                && module.Functions.Any(item =>
                     item.Import && (item.Function is not BoundFunction function
                         || !ManagedExportShape.Supported(function, structures)
-                        || (version < ManagedValueExportVersion && !ManagedExportShape.ScalarOnly(function)))))))
+                    )))
             {
-                throw new ModuleFormatException("Managed leaf references require versioned public Copy-value exports.");
+                throw new ModuleFormatException("Managed leaf references require supported public Copy-value exports.");
             }
             if (stream.Position != stream.Length || (expectedConsumer && items[entry].Import))
             {
                 throw new ModuleFormatException("Module has trailing data or an imported entry point.");
             }
-            if (!expectedConsumer && version >= ManagedNodeVersion && HasPrivateManagedState(module))
+            if (!expectedConsumer && HasPrivateManagedState(module))
             {
                 ValidateProducer(module);
             }
@@ -1992,17 +1758,7 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Unknown module format or version.");
         }
         var version = reader.ReadInt32();
-        if (version is not (10 or 11 or OwnershipVersion or TransferVersion or CompositeVersion
-            or BufferVersion or ReadonlyViewVersion or WritableViewVersion or ManagedNodeVersion
-            or ManagedClassVersion or Version or LoopTransferVersion or AggregateClassFactoryVersion
-            or StackClassFactoryVersion or ManagedAccessVersion or MutableStructReceiverVersion
-            or MutableFieldReceiverVersion or UniqueMutableReceiverVersion or UniqueMutableFieldReceiverVersion
-            or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion or ManagedValueExportVersion
-            or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion
-            or TransparentLayoutVersion or WideClassFieldsVersion or CorePrimitiveVersion
-            or CorePrimitiveGetterVersion or StructuredLoopVersion or VacantLocalVersion or ConditionalVersion
-            or CoalescingVersion or UpdateVersion or NominalUpdateVersion or CompoundAssignmentVersion
-            or InitializationAssignmentVersion or LifetimeEndVersion))
+        if (version != Version)
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -2011,17 +1767,10 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("Unexpected module kind.");
         }
-        var policy = version == 10 ? BoundRuntimePolicy.FailFast : (BoundRuntimePolicy)reader.ReadByte();
+        var policy = (BoundRuntimePolicy)reader.ReadByte();
         if (policy is not (BoundRuntimePolicy.FailFast or BoundRuntimePolicy.CheckedExceptions)
-            || (profile != Compilation.GetNativeProfileVersion(policy, uniqueValues: false)
-                && (version < OwnershipVersion || profile != "native-12")
-                && (version < TransferVersion || profile != "native-13")
-                && (version < CompositeVersion || profile != "native-14")
-                && (version < BufferVersion || profile != "native-15")
-                && (version < ReadonlyViewVersion || profile != "native-16")
-                && (version < WritableViewVersion || profile != "native-17")
-                && (version < ManagedNodeVersion || profile != "native-18")
-                && (version < ManagedClassVersion || profile is not ("native-19" or "native-20"))))
+            || profile is not ("native-10" or "native-11" or "native-12" or "native-13" or "native-14"
+                or "native-15" or "native-16" or "native-17" or "native-18" or "native-19" or "native-20"))
         {
             throw new ModuleFormatException("Unsupported module semantic profile or checked-failure policy.");
         }
@@ -2043,9 +1792,9 @@ public static partial class ModuleCompiler
             var size = reader.ReadInt32();
             var isPrivate = GetBool(reader);
             var isInternal = GetBool(reader);
-            var isUnique = version >= OwnershipVersion && GetBool(reader);
-            var isTransparent = version >= TransparentLayoutVersion && GetBool(reader);
-            var cleanup = version >= OwnershipVersion && GetBool(reader) ? GetString(reader) : null;
+            var isUnique = GetBool(reader);
+            var isTransparent = GetBool(reader);
+            var cleanup = GetBool(reader) ? GetString(reader) : null;
             var fieldCount = Count(reader, MaximumSlots);
             var fields = ImmutableArray.CreateBuilder<BoundStructField>(fieldCount);
             for (var field = 0; field < fieldCount; field++)
@@ -2114,7 +1863,7 @@ public static partial class ModuleCompiler
             {
                 var fieldName = GetString(reader);
                 var fieldType = GetType(reader, version);
-                if (version < Version && IsInlineClassField(fieldType))
+                if (version < InlineClassFieldVersion && IsInlineClassField(fieldType))
                 {
                     throw new ModuleFormatException("Inline struct class fields require a newer semantic module version.");
                 }
@@ -3092,8 +2841,6 @@ public static partial class ModuleCompiler
         public ImmutableArray<BoundClass> Classes { get; init; } = [];
         public ImmutableArray<string> ImportedStructures { get; init; } = [];
         public BoundRuntimePolicy RuntimePolicy { get; init; }
-        public int SerializedVersion { get; init; }
-        public string? SerializedProfile { get; init; }
     }
     private sealed record ModuleFunction(string Name, string Contract, BoundFunction? Function, bool Import)
     {

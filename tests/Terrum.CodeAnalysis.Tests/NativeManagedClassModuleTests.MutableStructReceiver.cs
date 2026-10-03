@@ -16,7 +16,7 @@ public sealed partial class NativeManagedClassModuleTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task MutableStructReceiverUsesVersion25AndLinksThroughScalarExportAsync(
+    public async Task MutableStructReceiverLinksThroughScalarExportAsync(
         NativeRuntimePolicy policy)
     {
         var program = Compile("""
@@ -34,7 +34,7 @@ public sealed partial class NativeManagedClassModuleTests
         _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(program, ["Counter.Increment"]));
         var producer = ModuleCompiler.CreateProducer(program, ["Leaf"]);
-        Assert.Equal(25, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.Equal("Leaf", Assert.Single(reference.Functions).Name);
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Leaf(); }",
@@ -42,14 +42,14 @@ public sealed partial class NativeManagedClassModuleTests
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
         var downgraded = (byte[])producer.Clone();
-        BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 24);
+        BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 46);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));
     }
 
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task NestedReceiverUsesVersion26WithUnchangedConsumerAndPrivateProducerReplacementAsync(
+    public async Task NestedReceiverUsesUnchangedConsumerAndPrivateProducerReplacementAsync(
         NativeRuntimePolicy policy)
     {
         const string Replacement = """
@@ -77,7 +77,7 @@ public sealed partial class NativeManagedClassModuleTests
             ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var producer = ModuleCompiler.CreateProducer(Compile(Replacement, policy), ["Leaf"]);
-        Assert.Equal(26, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         Assert.Empty(ModuleCompiler.CreateReference(producer).Structures);
         var downgraded = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 25);
@@ -108,7 +108,7 @@ public sealed partial class NativeManagedClassModuleTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task UniqueMutableReceiverUsesVersion27WithPrivateProducerReplacementAsync(
+    public async Task UniqueMutableReceiverUsesPrivateProducerReplacementAsync(
         NativeRuntimePolicy policy)
     {
         const string Replacement = """
@@ -134,7 +134,7 @@ public sealed partial class NativeManagedClassModuleTests
             ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var producer = ModuleCompiler.CreateProducer(replacementProgram, ["Leaf"]);
-        Assert.Equal(27, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         Assert.Empty(ModuleCompiler.CreateReference(producer).Structures);
         var downgraded = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 26);
@@ -164,7 +164,7 @@ public sealed partial class NativeManagedClassModuleTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task NestedUniqueFieldReceiverUsesVersion28WithPrivateProducerReplacementAsync(
+    public async Task NestedUniqueFieldReceiverUsesPrivateProducerReplacementAsync(
         NativeRuntimePolicy policy)
     {
         const string Replacement = """
@@ -197,7 +197,7 @@ public sealed partial class NativeManagedClassModuleTests
             ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var producer = ModuleCompiler.CreateProducer(replacementProgram, ["LeafValue"]);
-        Assert.Equal(28, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         Assert.Empty(ModuleCompiler.CreateReference(producer).Structures);
         var downgraded = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 27);
@@ -227,9 +227,9 @@ public sealed partial class NativeManagedClassModuleTests
     }
 
     [Theory]
-    [InlineData(false, 27)]
-    [InlineData(true, 28)]
-    public void PrivateUniqueReceiverVersionsUseRemappedStructureIndexes(bool nestedField, int version)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PrivateUniqueReceiversUseRemappedStructureIndexes(bool nestedField)
     {
         const string Unused = """
             struct Unused {
@@ -271,12 +271,12 @@ public sealed partial class NativeManagedClassModuleTests
             NativeRuntimePolicy.CheckedExceptions);
         Assert.Equal("Unused", program.Structures[0].Name);
         var producer = ModuleCompiler.CreateProducer(program, ["LeafValue"]);
-        Assert.Equal(version, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.Equal("LeafValue", Assert.Single(reference.Functions).Name);
         Assert.Empty(reference.Structures);
         var downgraded = (byte[])producer.Clone();
-        BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), version - 1);
+        BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 46);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));
     }
 }

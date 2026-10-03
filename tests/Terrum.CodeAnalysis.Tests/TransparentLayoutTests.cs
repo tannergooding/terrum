@@ -35,7 +35,7 @@ public sealed class TransparentLayoutTests
         Assert.True(structure.IsTransparent);
         Assert.Equal(4, structure.Size);
         var producer = ModuleCompiler.CreateProducer(program, ["Wrap", "Unwrap"]);
-        Assert.Equal(35, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.True(Assert.Single(reference.Structures).IsTransparent);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer(Consumer, reference, policy), producer);
@@ -69,7 +69,7 @@ public sealed class TransparentLayoutTests
 
         var autoProgram = CompileLibrary(Library.Replace("[Layout(Transparent)] ", "", StringComparison.Ordinal), policy);
         var autoProducer = ModuleCompiler.CreateProducer(autoProgram, ["Wrap", "Unwrap"]);
-        Assert.NotEqual(35, BinaryPrimitives.ReadInt32LittleEndian(autoProducer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(autoProducer.AsSpan(4, 4)));
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, autoProducer));
         var nativeAuto = NativeModuleCompiler.CreateProducer(autoProgram, ["Wrap", "Unwrap"], "NodeB", policy);
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(nativeConsumer, [nativeAuto]));
@@ -106,12 +106,14 @@ public sealed class TransparentLayoutTests
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program with {
             Structures = [structure with { Fields = [] }],
         }));
-        var producer = ModuleCompiler.CreateProducer(program, ["Wrap", "Unwrap"]);
-        var flag = new byte[] { 6, 0, 0, 0, (byte)'N', (byte)'u', (byte)'m', (byte)'b',
-            (byte)'e', (byte)'r', 4, 0, 0, 0, 0, 0, 0, 1 };
+        var producer = ModuleCompiler.CreateProducer(CompileLibrary(
+            "public struct Pair { public int32 Left; public int32 Right; }"
+            + " public int32 Read(Pair value) { return value.Left; }", NativeRuntimePolicy.FailFast), ["Read"]);
+        var flag = new byte[] { 4, 0, 0, 0, (byte)'P', (byte)'a', (byte)'i', (byte)'r',
+            8, 0, 0, 0, 0, 0, 0, 0 };
         var location = producer.AsSpan().IndexOf(flag);
         Assert.True(location >= 0);
-        producer[location + flag.Length - 1] = 0;
+        producer[location + flag.Length - 1] = 1;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(producer));
     }
 
@@ -127,7 +129,7 @@ public sealed class TransparentLayoutTests
             public int32 Read() { Hidden value = new Hidden(42); return value.Read(); }
             """;
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(Source, NativeRuntimePolicy.FailFast), ["Read"]);
-        Assert.Equal(35, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         Assert.Empty(ModuleCompiler.CreateReference(producer).Structures);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer("int32 Main() { return Read(); }",
             ModuleCompiler.CreateReference(producer), NativeRuntimePolicy.FailFast), producer);

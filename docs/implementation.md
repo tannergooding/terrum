@@ -1,6 +1,10 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax language version 44, semantic v43–v47 body features, native-10 through native-20
+## Current boundary: syntax language version 44, semantic body features v43–v47, semantic-module revision 47, native-10 through native-20
+
+Semantic body feature numbers are milestone labels, not persisted format
+versions. Structured semantic-module writers and readers use revision 47 only;
+older revisions are rejected, not normalized or upgraded.
 
 The normative declaration grammar additionally requires explicit primary
 visibility, fixed role-specific ordering, primary/secondary partial contract
@@ -178,18 +182,17 @@ and permits disjoint reuse, matching the approved separate label namespace.
 The [source attachment rule](grammar-spec.md#33-statements-and-local-declarations)
 requires one label on the loop introducer's source line; the current parser
 and native source audits enforce that additional restriction.
-Semantic v39 is selected only for retained post-tested loops or non-nearest
-transfers; older headers reject those nodes. Ordinary pre-tested loops and
-nearest transfers retain their earlier feature-selected formats. No native
-ABI, scanner-5 record or syntax-protocol schema change is introduced.
+The v39 feature milestone added retained post-tested loops and non-nearest
+transfers. Current modules serialize them under revision 47, with no native
+ABI, scanner-5 record or syntax-protocol schema change.
 
 The parser and binder support standalone `init T name;` and `init var name;` vacant locals,
 including a `for` initializer. These readonly slots have no default value;
 checked `init` completion publishes them, while false or failure leaves them
 vacant. Inferred declarations require a type established by a checked
 initialization. Existing definite-assignment, owner cleanup and managed-root
-rules apply. Semantic v40 is selected only when a retained body contains such
-a declaration; older feature-selected modules and the native ABI are unchanged.
+rules apply. The v40 feature milestone added persisted vacant declarations;
+current modules serialize them under revision 47, with no native ABI change.
 The bounded constant evaluator does not support vacant declarations.
 Hosted `=` assignment can also initialize a definitely vacant `init` local.
 The first supported assignment fixes an inferred local's type; later
@@ -206,10 +209,9 @@ begin a fresh dynamic lifetime on each iteration, while outer slots retain
 their joined state.
 Never-published inline initialization outputs may still retry after failure;
 vacancy after retiring an immutable value does not grant the same authority.
-Semantic v46 is selected when a retained assignment targets an initialization
-local. Declaration-only/checked-call bodies retain their existing formats;
-the reader reconstructs local authority from vacant declarations and rejects
-initialization assignments under older headers. The native ABI is unchanged.
+The v46 feature milestone added persisted assignments to initialization locals.
+Current revision 47 records the assignment and vacant declaration together;
+the native ABI is unchanged.
 Hosted `name = _;` is a distinct lifetime-end statement, not assignment of a
 discard/default value. It requires a definitely live, resolved named local
 (not a parameter, receiver, const alias, field or indexed place), performs the
@@ -222,12 +224,12 @@ root; other handles and the shared object survive until ordinary collection.
 Bounded buffer-view locals end their loan, not the backing owner. Possible
 live loans at control-flow joins still prevent ending or replacing their
 actual named owner, including buffer fields reached through an owner.
-Semantic v47 is selected only for retained lifetime-end nodes; cleanup targets,
+The v47 feature milestone added retained lifetime-end nodes. Current semantic
+module revision 47 records these nodes where present; cleanup targets,
 local-only destinations, definite liveness and initialization authority are
 reverified on import and before native PE/JIT lowering under both policies.
-Older headers cannot encode this operation and a v47 header without an end
-node is rejected. This changes no scanner record, native ABI/profile or TRRM
-encoding. Source-free executable TRRM still rejects this statement; the
+Modules without an end node also use revision 47. This changes no scanner
+record, native ABI/profile or TRRM encoding. Source-free executable TRRM still rejects this statement; the
 bounded scalar frontend represents visible scalar local endings in projection
 v60. Enums, general references/pins, arbitrary guards/ARC and view rebinding
 remain outside the existing bounded compiler. The bounded constant evaluator
@@ -244,9 +246,9 @@ introduced. Existing scalar, Copy, unique and
 managed result contracts apply, including conditional output publication,
 moves, cleanup and exact roots. Inactive arms remain type/effect checked.
 Required constant evaluation evaluates only the selected arm, while retaining
-its declaration checks. Semantic v41 is selected for retained conditional
-nodes; older module versions reject them. Conditional access, throw
-expressions and target-typed lambdas remain unsupported.
+its declaration checks. Retained conditional nodes were added at feature
+milestone v41 and serialize under current module revision 47. Conditional
+access, throw expressions and target-typed lambdas remain unsupported.
 
 The parser and binder support right-associative `??` below `||` and above `?:`, and
 statement-form `??=` for existing managed-handle optionals. The left value or
@@ -262,9 +264,10 @@ general reference place. Its fallback satisfies the optional destination
 contract, including null or another optional value. Computed field receivers
 remain rooted across fallback calls and checked unwinding. Conditional
 publication, cleanup and private semantic/native module servicing retain their
-existing rules. Retained coalescing nodes select semantic v42; older headers
-reject them. Scalar/unique optionals, conditional access and managed ConstEval
-are not added, and the native ABI is unchanged.
+existing rules. Coalescing nodes were added at feature milestone v42 and
+serialize under current module revision 47. Scalar/unique optionals,
+conditional access and managed ConstEval are not added, and the native ABI is
+unchanged.
 
 The parser and binder support prefix/postfix `++` and `--` for initialized writable
 `int32`, `uint32`, `int64` and `uint64` places. Supported places include
@@ -277,9 +280,9 @@ value. Failure does not undo earlier receiver/index effects. Managed receivers
 remain rooted through the operation and retire their staged root on checked
 failure. Updates are valid expression statements and `for` iterators;
 scalar-slot updates also execute in bounded ConstEval.
-Semantic v43 is selected only for retained update nodes, with old-header
-rejection and unchanged semantic/native consumer contracts. `NoThrow` cannot
-promise an unproven checked update. Getters, temporaries, readonly/vacant
+Primitive update nodes were added at feature milestone v43 and serialize
+under current module revision 47, without changing semantic/native consumer
+contracts. `NoThrow` cannot promise an unproven checked update. Getters, temporaries, readonly/vacant
 places, `char16`, nested owning-child paths and nominal static update
 operators are outside this primitive-update contract; this does not defer the
 approved static operator grammar or authorize updating a unique value itself.
@@ -293,9 +296,9 @@ unary operators that may return a distinct type. Existing bodyless static
 operator requirements, self/no-self protocols, constrained generic
 definition-site proofs, and nominal witness identity apply. This does not add
 C#-style instance mutation, owning-value updates, arbitrary `char16`
-arithmetic, new equality/default protocols or a witness ABI. Retained nominal
-update calls select semantic v44 (expression tag 25, with a named operator
-target) while primitive update nodes retain v43/tag 24. Supported places
+arithmetic, new equality/default protocols or a witness ABI. Nominal update
+calls were added at feature milestone v44 (expression tag 25, with a named
+operator target) after primitive update nodes at v43/tag 24. Supported places
 include mutable locals, nested writable compact fields, writable class fields
 with computed receivers, and eligible Copy fields on initialized unique roots.
 The receiver root and saved Copy value survive the operator call; checked
@@ -322,9 +325,9 @@ existing update-place/root machinery and add no destination-loan form.
 Primitive scalar-slot compound assignments are supported in bounded ConstEval.
 Nominal compounds are rejected even where a binary operator witness exists;
 `char16` and unique-value update destinations remain unsupported. Shift and
-compound-assignment nodes select semantic v45, and compound statements
-use expression tag 26 within an expression statement. This does not change
-the native ABI or profile.
+compound-assignment nodes were added at feature milestone v45, and compound
+statements use expression tag 26 within an expression statement. Current
+module revision 47 serializes them without changing the native ABI or profile.
 
 The executable Terrum scalar frontend additionally supports bounded nested
 expression trees and expression-bodied scalar functions through provisional
@@ -1168,21 +1171,21 @@ mutating-receiver ABI and general references remain unsupported.
 Semantic v26 persists the nested mutable-field loan path, including its root
 and field identities; the verifier rechecks access, types, initialization
 and mutability rather than trusting serialized byte offsets. Whole-local
-non-owning receiver loans still use v25. Older module headers reject the respective
-contracts; programs needing neither retain their existing semantic versions
-and bytes. Primitive
+non-owning receiver loans were introduced at milestone v25. Current module
+revision 47 serializes supported receiver contracts; older revisions are
+rejected wholesale. Primitive
 buffer-view alignment and general `out`-to-`init ref<T>` migration remain scheduled.
-Readers still normalize private managed artifacts from versions 18 through 23
-without granting more authority than their original contract. Writer version
-selection follows the required receiver contracts, not managedness.
+Current semantic-module revision 47 records private managed access authority
+directly. Artifacts from retired semantic-module revisions are rejected rather
+than normalized or upgraded while reading.
 Semantic v27 permits ordinary `mut` methods on unique structs through
 initialized named mutable owners or forwarded writable `this`. The methods
 may update mutable scalar/Copy fields; they cannot replace owning fields,
 move `this`, or widen the readonly NoThrow cleanup contract. Receiver
 reservation rejects argument-side invalidation before invocation, and
 mutation neither transfers ownership nor adds a cleanup obligation.
-Readonly unique loans cannot invoke these methods. Writers select v27 when
-such methods are present; earlier headers reject them.
+Readonly unique loans cannot invoke these methods. The v27 feature milestone
+added these methods; current module revision 47 serializes them when present.
 Semantic v28 extends nested mutable-field loans through fully initialized
 unique owners and unique child structs. The same writable-path checks and
 whole-root reservation apply; a borrowed child is not staged as an owning
@@ -1196,9 +1199,9 @@ arguments run once before activation and cannot invalidate the reserved root;
 the active view excludes all other root access, including sibling fields.
 Ending the scope or unwinding releases only the loan, not the buffer.
 Partial-constructor mutation and owning-field replacement remain unsupported.
-Earlier artifacts retain their existing bytes when they do not
-require a newer loan contract; older headers reject the respective broadened
-contract even though the field-path encoding is unchanged.
+Current module revision 47 serializes supported loan contracts when present;
+retired artifact revisions are rejected even though the field-path encoding
+remains unchanged.
 Semantic v31 permits managed-backed leaf producers to export existing public,
 handle-free compact `Copy` structs of at most 16 bytes by value as parameters
 and results, and through the existing `bool`/`out` conditional-output contract,
@@ -1211,11 +1214,10 @@ owner does not transfer that owner. Snapshots are independent values, not
 references into private managed storage. Managed handles, unique values,
 nested managed-containing values, views and mutating-receiver ABI
 remain excluded, as does importing another producer from a managed leaf.
-Writers require semantic v31 for these expanded export contracts; scalar-only
-managed producers retain their prior required version, and older headers reject
-the expanded contracts. This adds no syntax or scanner change and does not
-change the native physical ABI or profile versions.
-The semantic v32 persisted-graph contract permits managed roots and
+The expanded export contracts use current semantic-module revision 47; the
+v31 milestone adds no syntax or scanner change and does not change the native
+physical ABI or profile versions. The persisted-graph contract added at
+milestone v32 permits managed roots and
 intermediate producers in acyclic native graphs. Their imports and exports
 communicate only through the established scalar and handle-free public `Copy`
 by-value/result and
@@ -1223,8 +1225,8 @@ by-value/result and
 mutating-receiver ABI still cannot cross a managed participant boundary.
 Each persisted native image retains its own heap and root chain, and calls
 preserve the caller's roots while another image runs. `ManagedHeap.Collect()`
-remains image-local. Semantic v32 supports private managed consumers through
-the existing single-provider semantic `CreateConsumer`/`Link` path and native
+remains image-local. Current semantic-module revision 47 supports private
+managed consumers through the existing single-provider semantic `CreateConsumer`/`Link` path and native
 single-provider and module-set entry points. Semantic modules statically link
 into one image, remap private class identities, and use one heap/root domain.
 Persisted native EXE/DLL sets retain separate image heaps and root chains;
@@ -1368,8 +1370,8 @@ reference counts, stack word scanning or hidden allocation-triggered GC.
 Managed handles cannot be placed in user structs or passed across external
 calls, DLL exports or public persisted module contracts. Both runtime
 policies admit closed executables/JIT and isolated native DLLs with scalar
-exports and, under semantic v31, managed-backed compact handle-free `Copy`
-exports; managed state remains private. DLL callers must serialize calls and
+exports and the managed-backed compact handle-free `Copy` export contract
+added at milestone v31; managed state remains private. DLL callers must serialize calls and
 explicitly collect abandoned nodes before unload.
 Checked unwind retires departed lexical roots after their nested user cleanup,
 clears argument and unpublished output staging, and unlinks a root frame only
@@ -1430,39 +1432,34 @@ versus nullable `var?` declaration inference, and contextual multiple-output
 matching are not implemented. Current source still uses `is some item`, and
 ordinary `var` infers the complete initializer type, including optional
 handles. Source approval does not change that support or existing artifacts.
-Version 18 semantic modules separately admit private `ManagedNode` code in a
-leaf producer whose exported declarations are scalar and by-value only.
-Version 19 extends that private-leaf contract to source classes and their
-optional handles, serializing checked layouts, construction and root metadata.
-Class-free modules retain the version 18 format. Classes with inline Copy fields
-use version 20, retaining their private nested layouts and remapping type IDs
-during semantic linking. Version 19 still rejects those fields and remains the writer format for
-scalar/reference-only classes with at most 16 fields when no later feature
-requires a higher revision.
-Classes whose constructors accept Copy structs require version 22, including
-constructors that retain only scalar portions of those arguments. Older
-versions reject aggregate constructor parameters. The native profile, scalar
-export boundary and private-leaf dependency restriction remain unchanged.
-Constructor signatures with more than three inputs require version 23; older
-versions retain their original arity limit. High-arity functions retain the
-existing page-safe frame bound and exact roots for potentially managed spills.
-Semantic version 24 records managed class/`ManagedNode` access capabilities.
-Managed artifacts requiring only this contract use v24; readers normalize
-private managed artifacts from versions 18 through 23 into explicitly
-qualified internal IR, translating legacy class/`ManagedNode` mutation
-authority into `write` exactly where each older contract granted it. A v18-v23
-header cannot contain v24 write identifiers. Methods requiring the distinct
-v25 `MutReceiver` contract use v25 unless their bodies require v26 nested
-mutable-field loan expressions, they mutate a unique receiver (v27), or
-their field loans traverse unique roots (v28), or their mutable field loans
-target the supported buffer intrinsics (v29), or they acquire mutable
-buffer-field views (v30).
-Older headers reject the respective contract
-or expression. Programs needing neither retain their historical versions and
-bytes regardless of managedness.
+### Retired semantic-module revision history
+
+The following feature notes record implementation milestones; they do not
+describe current writer selection or reader compatibility. Current writers
+always emit semantic-module revision 47, and readers accept only revision 47.
+
+Revision 18 admitted private `ManagedNode` code in a leaf producer whose
+exported declarations were scalar and by-value only. Revision 19 extended that
+private-leaf contract to source classes and optional handles, serializing
+checked layouts, construction and root metadata. Revision 20 added inline Copy
+fields, retaining private nested layouts and remapping type IDs during semantic
+linking. At the time, writers selected the smallest revision that represented
+the artifact; that selection behavior is retired.
+Revision 22 added Copy-struct constructor arguments, including arguments that
+retain only scalar portions. Revision 23 lifted the three-parameter constructor
+limit. High-arity functions retain the existing page-safe frame bound and exact
+roots for potentially managed spills. These revisions did not change the
+native profile, scalar export boundary or private-leaf dependency restriction.
+The current semantic-module revision records managed class/`ManagedNode`
+access capabilities directly; retired revisions are rejected without
+normalization. The v25-v30 milestones successively added the distinct
+`MutReceiver` contract, nested mutable-field loans, unique receivers and roots,
+mutable buffer-field loans, and mutable buffer-field views. Their revision-
+specific header gates and writer selection are retired; current modules encode
+supported contracts under revision 47.
 The private managed-state boundary and absence of a public managed-handle ABI
-are unchanged. Semantic v31 expands leaf exports to managed-backed compact
-handle-free `Copy` values by value. Semantic v32 supports private managed
+are unchanged. The v31 milestone expanded leaf exports to managed-backed
+compact handle-free `Copy` values by value. The v32 milestone added private managed
 consumers through the existing single-provider semantic `CreateConsumer`/
 `Link` path and native single-provider/module-set entry points; persisted native graphs also
 permit managed roots and intermediate producers through the same scalar and

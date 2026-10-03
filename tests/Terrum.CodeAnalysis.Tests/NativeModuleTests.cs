@@ -134,16 +134,16 @@ public sealed class NativeModuleTests
     }
 
     [Fact]
-    public async Task OriginalNativeProfileConsumerRunsOriginalAndSavedFrameProducerAsync()
+    public async Task CurrentNativeConsumerRunsSavedFrameProducerAsync()
     {
-        // These native-10/package-1 artifacts were produced by f6f410c before saved-RBP lowering.
-        var directory = Path.Combine(AppContext.BaseDirectory, "Fixtures", "Native");
-        var consumer = await File.ReadAllBytesAsync(Path.Combine(directory, "cleanup-consumer.trmn"));
-        var original = await File.ReadAllBytesAsync(Path.Combine(directory, "cleanup-provider-v1.trmn"));
-        Assert.Equal("AE7DC18A017D27D97E6022A0139294FA98CB0810AFA470FD5CD3B8E031A88C0B",
-            Convert.ToHexString(SHA256.HashData(consumer)));
-        Assert.Equal("236BFF61904E3C18DE5632B38E8D340539859A634B2B634C67185D4FCD6ECF80",
-            Convert.ToHexString(SHA256.HashData(original)));
+        const string Original = """
+            [NoThrow] void Disturb() { }
+            public int32 Read() {
+                mut int32 value = 42;
+                try { return value; }
+                finally { value = 0; Disturb(); }
+            }
+            """;
         const string Replacement = """
             [NoThrow] void Disturb() { }
             public int32 Read() {
@@ -152,11 +152,15 @@ public sealed class NativeModuleTests
                 finally { value = 0; Disturb(); }
             }
             """;
+        var original = Producer(Original, identity: "Cleanup", exports: ["Read"]);
+        var consumer = ConsumerPackage(original, "int32 Main() { return Read(); }");
         var updated = Producer(Replacement, identity: "Cleanup", exports: ["Read"]);
         NativeModuleCompiler.Validate(consumer, original);
         NativeModuleCompiler.Validate(consumer, updated);
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10)));
-        Assert.Equal(43, await NativeModuleCompiler.RunAsync(consumer, updated, TimeSpan.FromSeconds(10)));
+        Assert.Equal(42, await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10))
+            .ConfigureAwait(true));
+        Assert.Equal(43, await NativeModuleCompiler.RunAsync(consumer, updated, TimeSpan.FromSeconds(10))
+            .ConfigureAwait(true));
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(
             RedirectFirstExport(original, lastRange: false)));
         var shortSource = (byte[])original.Clone();
@@ -165,7 +169,7 @@ public sealed class NativeModuleTests
         using var reader = new PEReader(new MemoryStream(shortSource, image,
             BinaryPrimitives.ReadInt32LittleEndian(shortSource.AsSpan(14, 4))));
         var pdata = Assert.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".pdata");
-        var entry = image + pdata.PointerToRawData + (4 * 12);
+        var entry = image + pdata.PointerToRawData;
         var begin = BinaryPrimitives.ReadInt32LittleEndian(shortSource.AsSpan(entry, 4));
         BinaryPrimitives.WriteInt32LittleEndian(shortSource.AsSpan(entry + 4, 4), begin + 6);
         SHA256.HashData(shortSource.AsSpan(0, shortSource.Length - 32)).CopyTo(shortSource, shortSource.Length - 32);

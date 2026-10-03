@@ -226,12 +226,9 @@ public sealed class LifetimeEndTests
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
         Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
-        foreach (var version in Enumerable.Range(40, 7))
-        {
-            var historical = (byte[])producer.Clone();
-            BinaryPrimitives.WriteInt32LittleEndian(historical.AsSpan(4, 4), version);
-            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(historical));
-        }
+        var retiredRevision = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(retiredRevision.AsSpan(4, 4), 46);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(retiredRevision));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             ModuleCompiler.CreateReference(producer), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.False(consumerCompilation.HasErrors, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
@@ -259,16 +256,15 @@ public sealed class LifetimeEndTests
     }
 
     [Fact]
-    public void Version47IsSelectedOnlyForRetainedLifetimeEndNodes()
+    public void CurrentSemanticRevisionDoesNotDependOnLifetimeEndNodes()
     {
         var scalar = Compilation.CreateLibrary(SyntaxTree.Parse("""
             int32 Unused() { int32 value = 1; value = _; return 1; }
             public int32 Read() { int32 value = 1; return 42; }
             """));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(scalar.Program), ["Read"]);
-        Assert.NotEqual(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
-        BinaryPrimitives.WriteInt32LittleEndian(producer.AsSpan(4, 4), 47);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(producer));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        _ = ModuleCompiler.CreateReference(producer);
     }
 
     [Theory]

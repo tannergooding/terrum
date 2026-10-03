@@ -39,7 +39,7 @@ public sealed class PublicInitReferenceTests
         var boundPolicy = (BoundRuntimePolicy)policy;
         var program = CompileLibrary(ScalarLibrary, policy);
         var producer = ModuleCompiler.CreateProducer(program, ["TryFill"]);
-        Assert.Equal(33, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.True(Assert.Single(reference.Functions).Variables[1].IsInit);
         var consumerProgram = CompileConsumer(ScalarConsumer, reference, policy);
@@ -106,10 +106,10 @@ public sealed class PublicInitReferenceTests
             CompileLibrary(ScalarLibrary, NativeRuntimePolicy.FailFast), ["TryFill"]);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer(ScalarConsumer,
             ModuleCompiler.CreateReference(producer), NativeRuntimePolicy.FailFast), producer);
-        Assert.Equal(33, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.Equal(47, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
         BinaryPrimitives.WriteInt32LittleEndian(consumer.AsSpan(4, 4), 32);
         var error = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer, producer));
-        Assert.Contains("Init contracts require semantic module version 33", error.Message, StringComparison.Ordinal);
+        Assert.Equal("Unknown module format or version.", error.Message);
     }
 
     [Fact]

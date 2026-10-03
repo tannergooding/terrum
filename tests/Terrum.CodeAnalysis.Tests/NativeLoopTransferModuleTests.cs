@@ -33,13 +33,13 @@ public sealed class NativeLoopTransferModuleTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task Version39RoundTripsAndServicesPostTestedNamedLoopsAsync(NativeRuntimePolicy policy)
+    public async Task CurrentSemanticFormatRoundTripsPostTestedNamedLoopsAsync(NativeRuntimePolicy policy)
     {
         var previous = NativeModuleCompiler.CreateProducer(Compile("public int32 Leaf() { return 1; }", policy),
             ["Leaf"], "NodeB", policy);
         var replacementProgram = Compile(StructuredLeaf, policy);
         var semantic = ModuleCompiler.CreateProducer(replacementProgram, ["Leaf"]);
-        Assert.Equal(39, VersionOf(semantic));
+        Assert.Equal(47, VersionOf(semantic));
         var reference = ModuleCompiler.CreateReference(semantic);
         var consumer = ModuleCompiler.CreateConsumer(Compile("""
             int32 Main() {
@@ -48,10 +48,10 @@ public sealed class NativeLoopTransferModuleTests
                 return answer;
             }
             """, policy, reference, library: false), semantic);
-        Assert.Equal(39, VersionOf(consumer));
+        Assert.Equal(47, VersionOf(consumer));
         SemanticVerifier.Verify(ModuleCompiler.Link(consumer, semantic));
         var downgraded = (byte[])semantic.Clone();
-        BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 21);
+        BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 46);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));
         var replacement = NativeModuleCompiler.CreateProducer(replacementProgram, ["Leaf"], "NodeB", policy);
         var middle = NativeModuleCompiler.CreateGraphProducer(Compile(
@@ -104,10 +104,10 @@ public sealed class NativeLoopTransferModuleTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public void Version21RoundTripsNearestLoopAndForIterator(NativeRuntimePolicy policy)
+    public void CurrentSemanticFormatRoundTripsNearestLoopAndForIterator(NativeRuntimePolicy policy)
     {
         var producer = ModuleCompiler.CreateProducer(Compile(Leaf, policy), ["Leaf"]);
-        Assert.Equal(21, VersionOf(producer));
+        Assert.Equal(47, VersionOf(producer));
         Assert.Equal(policy == NativeRuntimePolicy.FailFast ? "native-10" : "native-11",
             ModuleCompiler.GetNativeProfileVersion(producer, false));
         _ = Assert.Single(ModuleCompiler.CreateReference(producer).Functions);
@@ -118,7 +118,7 @@ public sealed class NativeLoopTransferModuleTests
                 return result;
             }
             """, policy, ModuleCompiler.CreateReference(producer), library: false), producer);
-        Assert.Equal(21, VersionOf(consumer));
+        Assert.Equal(47, VersionOf(consumer));
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.Contains(linked.Functions, static function => function.Name == "Leaf" && !function.IsExternal);
         Assert.Contains(linked.Functions, static function => function.Name == "$producer.Advance");
@@ -129,14 +129,14 @@ public sealed class NativeLoopTransferModuleTests
                 return sum;
             }
             """, policy), ["Leaf"]);
-        Assert.Equal(18, VersionOf(old));
+        Assert.Equal(47, VersionOf(old));
         _ = ModuleCompiler.CreateReference(old);
     }
 
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task Version21LeafReplacesUnchangedNativeGraphAsync(NativeRuntimePolicy policy)
+    public async Task CurrentSemanticFormatLeafReplacesUnchangedNativeGraphAsync(NativeRuntimePolicy policy)
     {
         var original = NativeModuleCompiler.CreateProducer(Compile("public int32 Leaf() { return 20; }", policy),
             ["Leaf"], "NodeB", policy);
@@ -164,7 +164,8 @@ public sealed class NativeLoopTransferModuleTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task Version21ClassLeafAndClassFreeGraphMembersRetainTheirShapesAsync(NativeRuntimePolicy policy)
+    public async Task CurrentSemanticFormatClassLeafAndClassFreeGraphMembersRetainTheirShapesAsync(
+        NativeRuntimePolicy policy)
     {
         var original = NativeModuleCompiler.CreateProducer(Compile("public int32 Leaf() { return 40; }", policy),
             ["Leaf"], "NodeB", policy);
@@ -202,7 +203,7 @@ public sealed class NativeLoopTransferModuleTests
     }
 
     [Fact]
-    public async Task Version21ModuleSetKeepsBothLeafImportsIndependentAsync()
+    public async Task CurrentSemanticFormatModuleSetKeepsBothLeafImportsIndependentAsync()
     {
         var alpha = NativeModuleCompiler.CreateProducer(Compile(Leaf.Replace("Leaf()", "Alpha()",
             StringComparison.Ordinal), NativeRuntimePolicy.FailFast), ["Alpha"], "First",
@@ -223,12 +224,12 @@ public sealed class NativeLoopTransferModuleTests
     }
 
     [Fact]
-    public void ClassAccessVersionsRejectForgedTagsAndPreserveScalarWriters()
+    public void CurrentSemanticFormatRejectsForgedTags()
     {
         var policy = NativeRuntimePolicy.FailFast;
         var oldProgram = Compile("public int32 Leaf() { return 42; }", policy);
         var old = ModuleCompiler.CreateProducer(oldProgram, ["Leaf"]);
-        Assert.Equal(18, VersionOf(old));
+        Assert.Equal(47, VersionOf(old));
         var classProgram = Compile("""
             class Box {
                 public int32 Value;
@@ -237,12 +238,12 @@ public sealed class NativeLoopTransferModuleTests
             public int32 Leaf() { require Box.TryCreate(out var box); return box.Value; }
             """, policy);
         var classOnly = ModuleCompiler.CreateProducer(classProgram, ["Leaf"]);
-        Assert.Equal(24, VersionOf(classOnly));
+        Assert.Equal(47, VersionOf(classOnly));
         _ = ModuleCompiler.CreateReference(classOnly);
         var copyProgram = Compile(File.ReadAllText(Path.Combine(RepositoryRoot(),
             "samples", "native", "graph", "managed-copy-class-leaf.terrum")), policy);
         var copy = ModuleCompiler.CreateProducer(copyProgram, ["Leaf"]);
-        Assert.Equal(24, VersionOf(copy));
+        Assert.Equal(47, VersionOf(copy));
         _ = ModuleCompiler.CreateReference(copy);
         foreach (var (legacy, program) in new[] {
             (old, oldProgram), (classOnly, classProgram), (copy, copyProgram),
@@ -254,7 +255,7 @@ public sealed class NativeLoopTransferModuleTests
             _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(invalid));
         }
         var transferred = ModuleCompiler.CreateProducer(Compile(ClassLeaf, policy), ["Leaf"]);
-        Assert.Equal(24, VersionOf(transferred));
+        Assert.Equal(47, VersionOf(transferred));
         var downgraded = (byte[])transferred.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 19);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));

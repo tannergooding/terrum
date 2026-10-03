@@ -46,16 +46,12 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The highest implemented semantic revision is 47. It is selected only when a
-retained function contains an explicit local lifetime end, encoded as statement
-tag 26. Both semantic-module and native-graph readers reject the operation
-under older revisions and reject revision 47 when no such operation is
-present. Other features select their own required revision; not every artifact
-uses revision 47.
-Revision-specific reader behavior and feature-dependent writer selection
-describe repository support, not an externally released binary compatibility
-matrix. See [implementation](implementation.md) for the compiler support
-boundary and [roadmap](roadmap.md) for scheduled format work.
+The current semantic-module revision is 47. Writers use it for every producer,
+consumer and graph library; readers accept only revision 47. Older revisions
+are retired and must be recreated from source. This revision is independent of
+native profile labels, native package and graph container formats, and scalar
+frontend projection revisions. See [implementation](implementation.md) for the
+compiler support boundary and [roadmap](roadmap.md) for scheduled format work.
 
 ## Current artifact and loading rules
 
@@ -167,11 +163,10 @@ or input length. The artifact limit is 4 MiB, graph limit 100,000 nodes,
 nesting limit 128, and function limit 1,024. No reflection-based serialization
 or saved-source rebind occurs. Import contracts are declaration-derived, not
 implementation hashes. These are current repository reader/verifier limits,
-not selected limits for the pre-v1 `TRRM` specification. This format is not
-authenticated: artifact
-bytes are checked for structural safety and declared-contract compatibility,
-not provenance. The historical-reader tests exercise repository fixtures and
-do not promise support for artifacts distributed in production.
+not selected limits for the pre-v1 `TRRM` specification. This format is not authenticated: artifact bytes are checked for structural
+safety and declared-contract compatibility, not provenance. Reader regressions
+exercise the current revision and rejection of retired or malformed inputs;
+they do not promise compatibility with historical artifacts.
 Linked programs additionally pass the semantic verifier's 100,000-visit work
 budget, including conditional-flow analysis.
 Host-provided buffer capabilities are outside this module format and are
@@ -314,17 +309,22 @@ public never type, general exception objects or asynchronous cleanup. Producer
 bodies claiming either promise must independently pass the verifier's
 structured-flow or conservative effect proof. NoThrow is about permitted
 operations and declared callees, not an exception handler or a claim that
-fail-fast process termination counts as NoThrow. Versions 10 (fail-fast) and 11 (checked-exceptions) remain readable; earlier
-versions, including version 9 without structured
-cleanup regions, are rejected;
-recreate them from source. A version-ordering policy and resilient public
-layouts remain undefined; cyclic dependencies remain unsupported.
+fail-fast process termination counts as NoThrow. A version-ordering policy and
+resilient public layouts remain undefined; cyclic dependencies remain
+unsupported.
 
-Version 12 stores the unique layout flag, declared cleanup method, cleanup
+### Retired semantic-module revision history
+
+The following feature notes document implementation milestones only. They do
+not describe current writer selection or reader compatibility: current
+artifacts always use revision 47, and older semantic-module revisions are
+rejected.
+
+Version 12 stored the unique layout flag, declared cleanup method, cleanup
 function contract, explicit move/receiver-loan nodes and lexical drop regions.
-Version 13 additionally stores ownership transfer markers on retained function
+Version 13 additionally stored ownership transfer markers on retained function
 declarations, conditional output drops and vacant `out var` owner declarations.
-Version 14 records partial-constructor cleanup regions with actual acquisition
+Version 14 recorded partial-constructor cleanup regions with actual acquisition
 order and readonly owning-field places. Complete owners run their own NoThrow
 cleanup before nested owning fields in reverse declaration order; constructor
 failure cleans only acquired fields in reverse acquisition order. Retained
@@ -337,7 +337,7 @@ continues to describe unique locals/returns. Versions 10 through 13 remain
 readable with their original layouts and contracts. Version 14 retains version
 13's scalar wire encoding; composite requirements cannot be downgraded to an
 older format or profile.
-Version 15 adds the compiler-owned `OwnedInt32Buffer` identity, its canonical
+Version 15 added the compiler-owned `OwnedInt32Buffer` identity, its canonical
 intrinsic operation markers and reserved mutable-receiver loans. The resource
 selects `native-15` from retained layouts, function bodies or declaration
 contracts (including imports without bodies); a consumer cannot reinterpret
@@ -345,7 +345,7 @@ an imported owning buffer as a plain eight-byte integer. Native packages keep
 their existing container version; the resource contract and selected runtime
 policy remain in the embedded semantic profile. Versions 10 through 14 remain
 readable under their original profiles.
-Version 16 adds lexical `BoundViewScope`, `BoundViewLength` and `BoundViewRead`
+Version 16 added lexical `BoundViewScope`, `BoundViewLength` and `BoundViewRead`
 nodes, retaining the owner place and range expressions through serialization,
 remapping and linking. A function with a readonly buffer-view local selects
 `native-16` even when that view does not appear in an exported declaration;
@@ -354,20 +354,21 @@ readable with their original intrinsic and mutable-loan wire tags.
 Readers also preserve v15's historical `native-15` label caused solely by
 a seven-parameter declaration; current writers classify actual value types,
 not parameter counts.
-Version 17 retains the view scope's exclusivity, its checked `BoundViewSet`
+Version 17 retained the view scope's exclusivity, its checked `BoundViewSet`
 effects, and the canonical `OwnedInt32Buffer.Clear` intrinsic. A retained
 writable view or used clear operation selects `native-17`; an unused intrinsic
 declaration does not promote an existing buffer-only program. Version 16
 readonly-view modules retain their original wire layout and profile. Neither
 view type can appear in a field or exported/imported function contract.
-Version 18 also retains lexical managed-root scope and retirement metadata.
+Version 18 also retained lexical managed-root scope and retirement metadata.
 It admits image-private `ManagedNode` operations in a leaf producer with
 scalar/void, by-value-only public exports. The DLL owns and explicitly collects
 its own unreachable graph; no managed handle crosses a module or native DLL
 boundary. The package reader verifies the retained `native-18` profile, roots
 and node operations before permitting the DLL's bounded heap imports.
-Previously stored modules remain readable under their original versions.
-The version 19 `.trm` variant is written for leaf producers with private
+At that milestone, earlier modules remained readable under their original
+versions.
+The version 19 `.trm` variant was written for leaf producers with private
 source classes whose fields are scalar or managed references. It stores their bounded field layouts, constructor/factory
 association, optional-handle expressions and exact lexical roots, and validates
 the complete retained class/function table on reload. Class leaves select
@@ -457,12 +458,11 @@ Programs requiring none of these contracts retain their existing versions and by
 regardless of managedness. The ordinary readonly/by-value receiver ABI is unchanged.
 Public scalar entry wrappers may call non-exported mutating methods; source
 `public` visibility does not expose a public mutating-receiver ABI, and private
-helpers remain private. Readers normalize private managed artifacts from
-versions 18 through 23 into explicitly qualified internal IR, translating
-legacy class/`ManagedNode` mutation authority into `write` exactly where it was
-previously granted, without widening the contract. A v18-v23 header containing
-v24 write identifiers is rejected. The native physical handle ABI and absence of a public managed-handle ABI
-remain unchanged. Semantic v32 permits managed roots and intermediate
+helpers remain private. At the v24 milestone, readers normalized private managed artifacts from
+versions 18 through 23 into explicitly qualified internal IR. That historical
+behavior is retired: current modules record access authority directly and do
+not normalize older revisions. The native physical handle ABI and absence of a
+public managed-handle ABI remain unchanged. The v32 milestone added managed roots and intermediate
 producers in persisted acyclic native graphs, subject to the scalar and
 compact `Copy` value boundary above; it does not create cross-image shared
 collection or graph cycles. Semantic v32 also supports private managed
