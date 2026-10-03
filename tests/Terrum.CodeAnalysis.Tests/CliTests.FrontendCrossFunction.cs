@@ -648,4 +648,25 @@ public sealed partial class CliTests
         Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
             static node => node.GetProperty("operation").GetInt32() == 102);
     }
+
+    [Fact]
+    public async Task ScalarFrontendNamedCallsMapAllThreeTypedParametersAsync()
+    {
+        const string text = "int32 Main() { return Select(third: char16(65), first: 1, second: true); } int32 Select(int32 first, bool second, char16 third) { if (second) { return first * 100 + int32(third); } return 0; }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var input = Encoding.UTF8.GetBytes(text);
+        var (componentExit, componentOutput, componentError) = await RunAsync(input, "frontend-component",
+            directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.True(componentExit == 0, $"{componentExit}: {componentOutput}{componentError}");
+        using (var document = JsonDocument.Parse(componentOutput))
+        {
+            var result = document.RootElement.GetProperty("result");
+            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+        }
+        var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
+            directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(165, runExit);
+        Assert.Empty(runOutput);
+        Assert.Empty(runError);
+    }
 }
