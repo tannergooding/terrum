@@ -67,6 +67,11 @@ remain limited to handle-free Copy outputs; the bounded scalar projections
 project scalar non-Boolean/void init-ref declarations to the hosted verifier
 and emitter through separately audited v81/v82 shapes.
 
+Single-function projections v82/v83 now extend the same bounded self-call
+frontend with source-audited `unsafe(expr)` scopes and caller-unsafe callable
+declarations, respectively. These single-function tags are distinct from the
+complete-program v82/v83 meanings; verification and emission remain hosted.
+
 ## Planned work (priority order)
 
 The roadmap has four current areas, in area priority order. The sequence below

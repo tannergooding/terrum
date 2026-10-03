@@ -902,6 +902,13 @@ unsafe declaration does not authorize its own body, and a safe wrapper can
 discharge the obligation internally. Neither version persists caller-safety
 metadata or makes the frontend standalone.
 
+Single-function projection v82 adds kind 110 with the same source-bound
+`unsafe(expr)` audit; v83 additionally carries the caller-unsafe declaration
+flag and permits such declarations to authorize calls only within a projected
+unsafe block or wrapper. These tags belong to the single-function buffer and
+do not change complete-program v82/v83. The hosted verifier and emitter remain
+authoritative.
+
 The appended `Host.FrontendProgram` buffer at index 11 has 4,284 `int32`
 words. Its four-word header is `(version, 1, function count, 0)`, with version
 74–78 or 80–84. Version 75 is selected only when a void-target call

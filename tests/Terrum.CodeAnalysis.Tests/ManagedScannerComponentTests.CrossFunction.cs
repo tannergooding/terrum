@@ -176,6 +176,71 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("public int32 Main() => unsafe(42);", 82, "Main")]
+    [InlineData("public unsafe int32 Recur() { if (false) { return unsafe(Recur()); } return 42; }", 83, "Recur")]
+    [InlineData("public unsafe int32 Recur() { if (false) { unsafe { return Recur(); } } return 42; }", 83, "Recur")]
+    public async Task ScalarFrontendSingleFunctionProjectsUnsafeScopesAsync(
+        string text, int projectionVersion, string functionName)
+    {
+        var source = SourceText.From(text);
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var (bytes, _, _) = await ProduceScalarProgramAsync(text, policy);
+            Assert.Equal(projectionVersion, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+            var projection = ScalarFrontendHost.ReadResult(source, bytes, (BoundRuntimePolicy)policy);
+            Assert.True(projection.IsValid);
+            if (projectionVersion == 82 || text.Contains("unsafe(", StringComparison.Ordinal))
+            {
+                Assert.Contains(projection.Nodes, static node => node.Operation == 110);
+            }
+            Assert.Equal(projectionVersion == 83, projection.RequiresUnsafeCaller);
+
+            var actual = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.Equal(hosted.Functions.Single().RequiresUnsafeCaller,
+                actual.Functions.Single().RequiresUnsafeCaller);
+            if (projectionVersion == 82)
+            {
+                Assert.Equal(NativeEmitter.EmitLibrary(hosted, [functionName], policy),
+                    NativeEmitter.EmitLibrary(actual, [functionName], policy));
+                Assert.Equal(42, NativeJit.Execute(actual with { EntryPoint = 0 }, policy));
+            }
+
+            var forgedScope = projection.Nodes.Any(static node => node.Operation == 110)
+                ? text.Replace("unsafe(", "(", StringComparison.Ordinal)
+                : text.Replace("unsafe {", "{", StringComparison.Ordinal);
+            Assert.Throws<ArgumentException>(() =>
+                ScalarFrontendHost.ReadResult(SourceText.From(forgedScope), bytes, (BoundRuntimePolicy)policy));
+
+            var downgraded = bytes.ToArray();
+            BinaryPrimitives.WriteInt32LittleEndian(downgraded, projectionVersion - 1);
+            Assert.Throws<ArgumentException>(() =>
+                ScalarFrontendHost.ReadResult(source, downgraded, (BoundRuntimePolicy)policy));
+
+            if (projectionVersion == 83)
+            {
+                var forgedModifier = SourceText.From(text.Replace("public unsafe", "public",
+                    StringComparison.Ordinal));
+                Assert.Throws<ArgumentException>(() =>
+                    ScalarFrontendHost.ReadResult(forgedModifier, bytes, (BoundRuntimePolicy)policy));
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ScalarFrontendSingleFunctionRejectsUnscopedCallerUnsafeSelfCallsAsync()
+    {
+        const string text = "public unsafe int32 Recur() { if (false) { return Recur(); } return 42; }";
+        var source = SourceText.From(text);
+        var (bytes, _, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
+        Assert.Equal(83, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Throws<ArgumentException>(() =>
+            ScalarFrontendHost.ReadResult(source, bytes, BoundRuntimePolicy.FailFast));
+    }
+
+    [Theory]
     [InlineData(77)]
     [InlineData(78)]
     public async Task ScalarFrontendProgramRejectsNonBooleanOutputsBeforeV80Async(int version)

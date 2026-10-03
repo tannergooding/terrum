@@ -488,6 +488,12 @@ Single-function v81 and complete-program v82 also project non-Boolean/void
 scalar `init ref<T>` completion through the same hosted definite-publication
 verification and result-independent publication path.
 
+Single-function v82 source-audits kind 110 for `unsafe(expr)`, while
+single-function v83 also carries the caller-unsafe callable flag and
+source-audits call authorization against enclosing explicit unsafe scopes.
+These tags are local to the single-function buffer and do not change the
+complete-program v82/v83 meanings; verification and emission remain hosted.
+
 Complete-program projection v83 adds source-audited caller-unsafe top-level
 callable declarations. Its existing header flags record the declaration
 requirement, and only calls enclosed by an explicit `unsafe { ... }` block are

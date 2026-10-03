@@ -3123,11 +3123,6 @@ mut class ScalarFrontendState
             && _tokens.TryGet(_at + 1, out var unsafeOpening)
             && unsafeOpening.Kind == 46)
         {
-            if (Host.FrontendProgram[0] < 74)
-            {
-                FailAt(1, token.Range);
-                return false;
-            }
             _at = _at + 2;
             if (!ParseTreeExpression(expected, 1, depth + 1, out var operand)
                 || !Take(47, out var unsafeClose))

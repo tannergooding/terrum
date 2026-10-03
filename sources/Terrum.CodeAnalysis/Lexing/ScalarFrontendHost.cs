@@ -79,17 +79,21 @@ public static partial class ScalarFrontendHost
         }
 
         var projectionVersion = words[0];
-        var isExtendedSingleProjection = projectionVersion is 79 or 80 or 81;
-        var allowInitializationTests = projectionVersion is 80 or 81
+        var isExtendedSingleProjection = projectionVersion is >= 79 and <= 83;
+        var allowCallerUnsafe = projectionVersion == 83 || context?.AllowCallerUnsafe == true;
+        var allowUnsafeExpressions = projectionVersion is 82 or 83
+            || context?.AllowUnsafeExpressions == true;
+        var allowInitializationTests = projectionVersion is >= 80 and <= 83
             || context?.AllowInitializationTests == true;
         var isNonBooleanOutProjection = isExtendedSingleProjection
             && words[5] != BooleanTypeCode && words[16] != 0;
-        var isNonBooleanInitRefProjection = projectionVersion == 81
+        var isNonBooleanInitRefProjection = projectionVersion is >= 81 and <= 83
             && words[5] != BooleanTypeCode && words[17] != 0;
         if (isExtendedSingleProjection)
         {
             if (context is not null
                 || words[17] == 0 && !isNonBooleanOutProjection && !allowInitializationTests
+                    && !allowUnsafeExpressions && !allowCallerUnsafe
                 || words[17] != 0 && words[5] != BooleanTypeCode && !isNonBooleanInitRefProjection)
             {
                 throw InvalidResult();
@@ -135,10 +139,10 @@ public static partial class ScalarFrontendHost
         if ((words[0] == 1 ? words[2] != 0
                 : words[0] == 59 ? words[2] is < 2 or > 7
                 : words[0] >= 60 ? words[2] < 0
-                    || words[2] > (context?.AllowCallerUnsafe == true ? 15 : 7)
+                    || words[2] > (allowCallerUnsafe ? 15 : 7)
                     : words[2] is not (0 or 1))
             || !AllZero(3, 5)
-            || (words[5] == 0 ? words[0] is not (56 or 57 or 58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71 or 72 or 73 or 80)
+            || (words[5] == 0 ? words[0] is not (56 or 57 or 58 or 59 or 60 or 61 or 62 or 63 or 64 or 65 or 66 or 67 or 68 or 69 or 70 or 71 or 72 or 73 or 80 or 82 or 83)
                 : !ScalarType(words[5]) || words[0] is 56 or 57)
             || (effects & 4) != 0 && words[5] != 0
             || (context is not null || words[0] >= 69) && words[16] != 0
@@ -342,7 +346,7 @@ public static partial class ScalarFrontendHost
                     || (node.Operation == 102 && context is not null)
                     || (node.Operation == 109
                         && (!allowInitializationTests || node.Type != BooleanTypeCode))
-                    || (node.Operation == 110 && context?.AllowUnsafeExpressions != true)
+                    || (node.Operation == 110 && !allowUnsafeExpressions)
                     || (call && (context is null && words[0] < 70
                         || node.Type != (callee?.ReturnType ?? words[5])
                         || callee is { ReturnType: 0 }
@@ -543,6 +547,8 @@ public static partial class ScalarFrontendHost
                 || words[0] == 71 && (!nodes.Any(static node => node.Operation == 102)
                     || !nodes.Any(static node => node.Operation == 104))
                 || words[0] == 72 && !orderedStatements.Any(static entry => entry.Kind == 37)
+                || projectionVersion == 82 && !nodes.Any(static node => node.Operation == 110)
+                || projectionVersion == 83 && (words[2] & 8) == 0
                 || words[0] == 73 && !isExtendedSingleProjection && (words[5] != 0
                     || !orderedStatements.Any(static entry => entry.Kind == 37)
                     || !nodes.Any(static node => node.Operation == 102 && node.Type == 0)))
@@ -1350,7 +1356,7 @@ public static partial class ScalarFrontendHost
                 used[index] = true;
                 if (node.Operation == 110)
                 {
-                    if (context?.AllowUnsafeExpressions != true
+                    if (!allowUnsafeExpressions
                         || !Take(TokenKind.UnsafeKeyword) || !Take(TokenKind.OpenParen)
                         || !TakeTree(node.Left, parseDepth + 1) || !Take(TokenKind.CloseParen))
                     {
