@@ -232,7 +232,7 @@ public static partial class TrRmExecutableCompiler
         for (var ordinal = 0; ordinal < count; ordinal++)
         {
             var (opcode, width, countWidth, dataWidth) = ReadInstruction(body, ref position);
-            if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 0x12 or 0x15 or 0x16 or 0x17))
+            if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 0x12 or 0x15 or 0x16 or 0x17))
             {
                 throw Invalid($"Operation 0x{opcode:X2} is not executable.");
             }
@@ -246,9 +246,10 @@ public static partial class TrRmExecutableCompiler
             var policy = opcode == 6 ? ReadByte(body, ref position) : (byte)0;
             var kind = opcode is 4 or 5 or 0x15 ? ReadByte(body, ref position) : (byte)0;
             var bits = opcode is 1 or 2 ? ReadBits(body, ref position, dataWidth) : 0;
-            var left = opcode is 3 or 4 or 6 or 0x16 or 0x17 or 5 or 0x15
+            var left = opcode is 3 or 4 or 6 or 7 or 0x16 or 0x17 or 5 or 0x15
                 ? ReadInt(body, ref position, width) : 0;
-            var right = opcode is 5 or 0x15 ? ReadInt(body, ref position, width) : 0;
+            var right = opcode is 5 or 7 or 0x15 ? ReadInt(body, ref position, width) : 0;
+            var third = opcode == 7 ? ReadInt(body, ref position, width) : 0;
             var method = opcode == 0x12 ? ReadInt(body, ref position, width) : 0;
             if (opcode == 0x12 && (method == 0 || method > functions.Count))
             {
@@ -265,7 +266,8 @@ public static partial class TrRmExecutableCompiler
                 }
                 arguments.Add(new BoundRead(id - 1, variables[id - 1].Type, default));
             }
-            var maximum = Math.Max(Math.Max(Math.Max(result, typeId), method), Math.Max(left, right));
+            var maximum = Math.Max(Math.Max(Math.Max(result, typeId), method),
+                Math.Max(Math.Max(left, right), third));
             foreach (var argument in arguments)
             {
                 maximum = Math.Max(maximum, ((BoundRead)argument).Variable + 1);
@@ -329,6 +331,18 @@ public static partial class TrRmExecutableCompiler
             else if (opcode == 3)
             {
                 expression = Operand(left);
+            }
+            else if (opcode == 7)
+            {
+                var condition = Operand(left);
+                var whenTrue = Operand(right);
+                var whenFalse = Operand(third);
+                if (condition.Type != PrimitiveType.Bool || whenTrue.Type != whenFalse.Type)
+                {
+                    throw Invalid("Select requires a bool condition and equal alternative types.");
+                }
+                expression = new BoundConditional(condition, whenTrue, whenFalse,
+                    whenTrue.Type, default);
             }
             else if (opcode == 6)
             {

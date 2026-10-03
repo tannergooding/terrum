@@ -17,6 +17,27 @@ public sealed class TrRmExecutionAuditTests
 {
     private static readonly byte[] s_return42 = [4, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1];
 
+    [Theory]
+    [InlineData(true, 20)]
+    [InlineData(false, 42)]
+    public void IndependentEagerSelectUsesAlreadyDefinedValues(bool chooseFirst, int expected)
+    {
+        byte[] body =
+        [
+            4, 2, 1, 0, 0, 0, 2, 0, 0, 0, 4,
+            1, 1, 2, chooseFirst ? (byte)1 : (byte)0,
+            1, 2, 1, 20,
+            1, 3, 1, 42,
+            7, 4, 1, 2, 3,
+            0x83, 4,
+        ];
+        var artifact = Artifact(body);
+        TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+    }
+
     [Fact]
     public void IndependentBytesExecuteWithoutCompilerOrTableWriter()
     {

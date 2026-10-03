@@ -10,6 +10,23 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmIndexedExecutionAuditTests
 {
+    private static byte[] SelectBody(bool chooseFirst) =>
+    [
+        8, 1, 4, 0, 2,
+        1, 0, 0, 0, 2, 0, 0, 0,
+        2, 1, 1, 1, 1, 1, 1, 1,
+        0, 4,
+        11, 15, 19, 23,
+        0, 30,
+        28,
+        16, 4, 1, 3, 2, 3, 3, 3, 4, 4, 4,
+        1, 1, 2, chooseFirst ? (byte)1 : (byte)0,
+        1, 2, 1, 20,
+        1, 3, 1, 42,
+        7, 4, 1, 2, 3,
+        0x83, 4,
+    ];
+
     // Four blocks: compute flag/x/y, branch through two arms, merge with one int32 parameter.
     private static byte[] MergeBody(bool chooseFirst) =>
     [
@@ -55,6 +72,18 @@ public sealed class TrRmIndexedExecutionAuditTests
     public void HandwrittenMergeExecutesWithoutSourceOrProductionWriters(bool chooseFirst, int expected)
     {
         var artifact = TrRmExecutionAuditTests.Artifact(MergeBody(chooseFirst));
+        TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData(true, 20)]
+    [InlineData(false, 42)]
+    public void HandwrittenSelectUsesAlreadyDefinedValues(bool chooseFirst, int expected)
+    {
+        var artifact = TrRmExecutionAuditTests.Artifact(SelectBody(chooseFirst));
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
         Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));

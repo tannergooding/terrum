@@ -283,6 +283,15 @@ internal sealed class TrRmScalarGraph
                 return constant.Value != 0;
             case BoundRead read when read.Variable >= 0 && read.Variable + 1 < known.Length:
                 return known[read.Variable + 1];
+            case BoundConditional conditional:
+                var condition = EvaluateBoolean(conditional.Condition, known);
+                if (condition is bool selected)
+                {
+                    return EvaluateBoolean(selected ? conditional.WhenTrue : conditional.WhenFalse, known);
+                }
+                var whenTrue = EvaluateBoolean(conditional.WhenTrue, known);
+                var whenFalse = EvaluateBoolean(conditional.WhenFalse, known);
+                return whenTrue == whenFalse ? whenTrue : null;
             case BoundUnary { Operator: TokenKind.Bang } unary:
                 return EvaluateBoolean(unary.Operand, known) is bool operand ? !operand : null;
             case BoundBinary { Operator: TokenKind.AmpersandAmpersand } andBinary:
