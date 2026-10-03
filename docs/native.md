@@ -460,9 +460,10 @@ Single-function projection v79 carries the existing scalar `init ref<T>` and
 non-Boolean scalar `out` modes through bounded self-calls. Header word 17
 stores the init-ref mask separately from the `out` mask in word 16;
 operations 107/108 encode matching existing and declared `init`/`init var`
-destinations. Non-Boolean `out` uses explicit existing destinations only.
-Source auditing and hosted definite-publication verification remain in force;
-this is not general reference migration or standalone compiler support.
+destinations. Non-Boolean `out` accepts matching explicit or `out var`
+destinations in recursive self-calls. Source auditing and hosted
+definite-publication verification remain in force; this is not general
+reference migration or standalone compiler support.
 
 Complete-program projection v80 adds scalar `out` parameters on
 non-Boolean/void-returning functions with matching existing or `out var`
@@ -474,8 +475,8 @@ Non-scalar outputs and standalone compilation remain unsupported. This does
 not widen the separate managed-module export shape for output parameters.
 
 Single-function v79 uses the same non-Boolean/void output contract as v80 for
-bounded recursive self-calls. It requires explicit existing destinations and
-normal-return initialization; `out var` remains limited to Boolean outputs.
+bounded recursive self-calls. It supports explicit and `out var` destinations
+and requires normal-return initialization.
 
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.

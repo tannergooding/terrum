@@ -43,7 +43,8 @@ Projection v78 adds the existing scalar `init ref<T>` mode and matching
 definite-publication verification remains authoritative; general
 `init ref<T>` migration and bootstrap compilation remain pending. Single-
 function projection v79 adds the existing scalar `init ref<T>` mode and
-non-Boolean scalar `out` mode to the bounded self-call frontend.
+non-Boolean scalar `out` mode to the bounded self-call frontend, including
+matching `out var` destinations in recursive self-calls.
 Complete-program projection v80 adds existing-destination calls to scalar `out` parameters on
 non-Boolean/void-returning functions; the hosted verifier requires publication
 on every normal return, and the hosted emitter publishes them without using

@@ -394,7 +394,6 @@ public static partial class ScalarFrontendHost
                             : (words[17] & (1 << ordinal)) != 0;
                         if (argument.Type != (callee?.ParameterTypes[ordinal] ?? ParameterType(ordinal + 1))
                             || expectsOut != (argument.Operation is 103 or 104)
-                            || isNonBooleanOutProjection && argument.Operation == 104
                             || expectsInitRef != (argument.Operation is 107 or 108))
                         {
                             throw InvalidResult();

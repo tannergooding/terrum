@@ -969,10 +969,11 @@ Single-function projection v79 carries the existing scalar `init ref<T>` and
 non-Boolean scalar `out` modes through recursive self-calls. Header word 17
 stores its init-ref mask separately from the `out` mask in word 16; operations
 107/108 encode existing and declared init destinations. Non-Boolean `out`
-requires explicit existing destinations. The reader audits modes and
-destinations before lowering; the hosted verifier remains authoritative for
-vacancy, conditional publication and normal-return initialization. This does
-not expand general reference migration or make the frontend standalone.
+accepts matching explicit or `out var` destinations in recursive self-calls.
+The reader audits modes and destinations before lowering; the hosted verifier
+remains authoritative for vacancy, conditional publication and normal-return
+initialization. This does not expand general reference migration or make the
+frontend standalone.
 
 Program projection v80 carries the existing scalar `out` parameter mask for
 non-Boolean/void-returning declarations and admits matching explicit or
@@ -984,10 +985,10 @@ outside its support. Managed-module output exports retain their separate
 existing shape restriction.
 
 Single-function v79 uses the same non-Boolean/void scalar `out` contract as
-complete-program v80 for bounded recursive self-calls. These projection tags
-are alpha implementation details, not product-version increments or
-compatibility commitments; a preview version, if any, is chosen explicitly
-when it is shipped.
+complete-program v80 for bounded recursive self-calls, with explicit and
+`out var` destinations. These projection tags are alpha implementation
+details, not product-version increments or compatibility commitments; a
+preview version, if any, is chosen explicitly when it is shipped.
 
 The independent source-bound reader validates brace spans, nested extents,
 visible names and local identities before lowering to the existing managed
