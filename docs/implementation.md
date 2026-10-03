@@ -176,10 +176,9 @@ source-audit calls against explicit unsafe-block spans and explicit
 v85 adds named by-value and scalar `out`/`init ref<T>` arguments to bounded
 direct self/global calls in both the single-function and complete-program
 buffers. Call children remain in source evaluation order while the packed
-formal-position map is checked against source parameter names. A call with
-named output arguments cannot yet be nested inside another call's named
-argument. Overload selection remains unsupported. Semantic verification and
-emission remain hosted.
+formal-position map is checked against source parameter names. Overload
+selection remains unsupported. Semantic verification and emission remain
+hosted.
 Single-function compact expression records and tree/statement records retain
 their existing layouts. Complete-program headers and every function frame
 carry v85, as do single-function diagnostic records. No obsolete tag is accepted

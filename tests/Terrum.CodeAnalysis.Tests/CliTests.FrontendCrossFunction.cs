@@ -623,6 +623,8 @@ public sealed partial class CliTests
     [Theory]
     [InlineData("int32 Set(out int32 trace, int32 value) { trace = value; return value; } int32 Main() { mut int32 trace = 0; return Set(value: 3, trace: out trace); }", 3)]
     [InlineData("int32 Initialize(int32 value, init ref<int32> result) { result = value; return 0; } int32 Main() { init int32 result; int32 status = Initialize(result: init result, value: 7); return result + status; }", 7)]
+    [InlineData("int32 Set(out int32 t, int32 v) { t = v; return v; } int32 Identity(int32 r) => r; int32 Main() { mut int32 t = 0; return Identity(r: Set(v: 3, t: out t)); }", 3)]
+    [InlineData("int32 Initialize(int32 v, init ref<int32> r) { r = v; return 0; } int32 Identity(int32 x) => x; int32 Main() { init int32 r; return Identity(x: Initialize(r: init r, v: 7)) + r; }", 7)]
     public async Task ScalarFrontendNamedOutputCallsMatchHostedAsync(string text, int expected)
     {
         var directory = Path.Combine(RepositoryRoot(), "self-host");
@@ -641,7 +643,8 @@ public sealed partial class CliTests
             {
                 var result = document.RootElement.GetProperty("result");
                 Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
-                Assert.Contains(result.GetProperty("functions")[1].GetProperty("nodes").EnumerateArray(),
+                var functions = result.GetProperty("functions");
+                Assert.Contains(functions[functions.GetArrayLength() - 1].GetProperty("nodes").EnumerateArray(),
                     static node => node.GetProperty("operation").GetInt32() == 105);
             }
 

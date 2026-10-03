@@ -45,10 +45,9 @@ checked exceptions.
 Projection v85 carries named by-value and scalar `out`/`init ref<T>`
 arguments through bounded direct scalar calls. Arguments remain source-order
 children while the independent reader verifies their formal-parameter map
-against source names. A call with named output arguments cannot yet be nested
-inside another call's named argument. Single-function v85 covers self-calls;
-complete-program v85 covers direct self/global calls. Overload selection and
-the hosted verifier/emitter boundary remain unchanged.
+against source names. Single-function v85 covers self-calls; complete-program
+v85 covers direct self/global calls. Overload selection and the hosted
+verifier/emitter boundary remain unchanged.
 
 V85 complete snapshots carry the existing scalar `out`
 parameter modes, explicit destinations and `out var` call destinations.
