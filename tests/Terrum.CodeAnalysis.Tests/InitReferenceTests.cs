@@ -93,6 +93,39 @@ public sealed class InitReferenceTests
         Assert.NotEmpty(NativeEmitter.Emit(program, policy));
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void ConstantDisjunctionKeepsLeftOutputPublication(NativeRuntimePolicy policy)
+    {
+        var source = new StringBuilder("""
+            [NoThrow] bool Fill(bool publish, out int32 value) {
+                if (publish) { value = 42; return true; }
+                return false;
+            }
+            int32 Main() {
+                mut int32 live = 0;
+            """);
+        var deadCalls = new StringBuilder("true");
+        for (var index = 0; index < 24; index++)
+        {
+            var dead = $"dead{index}";
+            source.Append("    mut int32 ").Append(dead).AppendLine(" = 0;");
+            deadCalls.Append(" || Fill(false, out ").Append(dead).Append(')');
+        }
+        source.Append("    if (Fill(true, out live) && (").Append(deadCalls)
+            .AppendLine(")) { return live; }");
+        source.AppendLine("    return 0;");
+        source.AppendLine("}");
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()),
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+    }
+
     [Fact]
     public void ManagedInitReferenceRetainsWritableHandleAndVacantPassingMode()
     {
