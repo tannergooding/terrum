@@ -296,12 +296,15 @@ public sealed class ContextualPunctuationTests
             var current = SyntaxTree.Parse(adapted);
             Assert.Equal(text, current.Root.ToFullString());
             Assert.Equal(SyntaxTree.Parse(source).Diagnostics.ToArray(), current.Diagnostics.ToArray());
-            failures += current.Diagnostics.Count(diagnostic => diagnostic.Code is "TRM1008" or "TRM1010" or "TRM1011");
+            failures += current.Diagnostics.Count(diagnostic =>
+                diagnostic.Code is "TRM1008" or "TRM1010" or "TRM1011" or "TRM1012");
 
             ReadOnlySpan<byte> Buffer(int index) =>
                 native.Data.AsSpan(native.BufferOffsets[index], buffers[index].Values.Length * sizeof(int));
         }
-        Assert.Equal(Boundaries.Count(row => ((string)row[4]).Length != 0), failures);
+        var expectedFailures = Boundaries.Sum(row =>
+            ((string)row[4]).Split('|', StringSplitOptions.RemoveEmptyEntries).Length);
+        Assert.Equal(expectedFailures, failures);
     }
 
     [Theory]
