@@ -128,8 +128,9 @@ last tokens, before spacing checks and parser selection; it has no
 type-context exemptions. Maintained scalar probes use it too. Its independent
 source audit rejects records that contradict the source.
 
-Named by-value arguments bind for uniquely resolved, non-intrinsic calls.
-Named output arguments and overload selection remain outside current support.
+Named by-value, scalar `out`, and `init ref<T>` arguments bind for uniquely
+resolved, non-intrinsic calls. Overload selection remains outside current
+support.
 The bounded native scalar frontend supports its documented named loop
 transfers and direct scalar calls, but excludes optional and managed-handle
 forms, general binding/imports, indexing, qualified types, namespaces and
