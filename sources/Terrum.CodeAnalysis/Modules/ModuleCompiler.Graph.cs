@@ -313,20 +313,20 @@ public static partial class ModuleCompiler
         {
             using var stream = new MemoryStream(bytes, writable: false);
             using var reader = new BinaryReader(stream, new UTF8Encoding(false, true), leaveOpen: true);
-            var (version, policy, profile) = ReadModuleHeader(reader, expectedConsumer: true);
+            var (policy, profile) = ReadModuleHeader(reader, expectedConsumer: true);
             if (reader.ReadInt32() != -1)
             {
                 throw new ModuleFormatException("Graph library cannot have an entry point.");
             }
-            var (structures, names) = ReadStructures(reader, version);
-            var classes = ReadClasses(reader, names, version);
+            var (structures, names) = ReadStructures(reader);
+            var classes = ReadClasses(reader, names);
             var imported = ReadImportedTypes(reader, structures.Length, names, expectedConsumer: true);
             var count = Count(reader, MaximumFunctions);
             if (count == 0)
             {
                 throw new ModuleFormatException("Graph library has no functions.");
             }
-            var functions = ReadFunctions(reader, count, expectedConsumer: true, version, structures, classes);
+            var functions = ReadFunctions(reader, count, expectedConsumer: true, structures, classes);
             var module = new Module(true, -1, structures, functions) {
                 Classes = classes,
                 ImportedStructures = imported,

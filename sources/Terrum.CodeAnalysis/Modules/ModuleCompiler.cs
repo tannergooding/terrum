@@ -17,43 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static partial class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int InlineClassFieldVersion = 20;
-    private const int OwnershipVersion = 12;
-    private const int TransferVersion = 13;
-    private const int CompositeVersion = 14;
-    private const int BufferVersion = 15;
-    private const int ReadonlyViewVersion = 16;
-    private const int WritableViewVersion = 17;
-    private const int ManagedNodeVersion = 18;
-    private const int ManagedClassVersion = 19;
     private const int Version = 47;
-    private const int LoopTransferVersion = 21;
-    private const int AggregateClassFactoryVersion = 22;
-    private const int StackClassFactoryVersion = 23;
-    private const int ManagedAccessVersion = 24;
-    private const int MutableStructReceiverVersion = 25;
-    private const int MutableFieldReceiverVersion = 26;
-    private const int UniqueMutableReceiverVersion = 27;
-    private const int UniqueMutableFieldReceiverVersion = 28;
-    private const int MutableBufferFieldReceiverVersion = 29;
-    private const int MutableBufferFieldViewVersion = 30;
-    private const int ManagedValueExportVersion = 31;
-    private const int ManagedGraphParticipantVersion = 32;
-    private const int PrivateInitReferenceVersion = 33;
-    private const int ExplicitGetterVersion = 34;
-    private const int TransparentLayoutVersion = 35;
-    private const int WideClassFieldsVersion = 36;
-    private const int CorePrimitiveVersion = 37;
-    private const int CorePrimitiveGetterVersion = 38;
-    private const int StructuredLoopVersion = 39;
-    private const int VacantLocalVersion = 40;
-    private const int ConditionalVersion = 41;
-    private const int CoalescingVersion = 42;
-    private const int UpdateVersion = 43;
-    private const int NominalUpdateVersion = 44;
-    private const int CompoundAssignmentVersion = 45;
-    private const int InitializationAssignmentVersion = 46;
-    private const int LifetimeEndVersion = 47;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -233,19 +197,6 @@ public static partial class ModuleCompiler
         || module.Functions.Any(static item => item.Function is BoundFunction function
             && (ManagedClassTypes.IsOptional(function.ReturnType)
                 || function.Variables.Any(static variable => ManagedClassTypes.IsOptional(variable.Type))));
-
-    private static bool IsInlineClassField(PrimitiveType type) =>
-        (int)type >= 100 && !ManagedClassTypes.IsManaged(type);
-
-    private static bool HasAggregateClassArguments(BoundFunction function) =>
-        (function.IsClassConstructor || function.Intrinsic == BoundIntrinsic.ClassTryCreate)
-        && function.Variables.Skip(function.IsClassConstructor ? 1 : 0)
-            .Take(function.ParameterCount - 1)
-            .Any(static variable => IsInlineClassField(variable.Type));
-
-    private static bool HasStackClassArguments(BoundFunction function) =>
-        (function.IsClassConstructor || function.Intrinsic == BoundIntrinsic.ClassTryCreate)
-        && function.ParameterCount > 4;
 
     private static bool UsesManagedNode(BoundFunction function) =>
         function.Intrinsic is >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.NodeCollect
@@ -1603,9 +1554,8 @@ public static partial class ModuleCompiler
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = Version;
         writer.Write(Magic);
-        writer.Write(version);
+        writer.Write(Version);
         PutString(writer, RetainedNativeProfile(module));
         writer.Write(module.Consumer);
         writer.Write((byte)program.RuntimePolicy);
@@ -1618,10 +1568,7 @@ public static partial class ModuleCompiler
             writer.Write(structure.IsPrivate);
             writer.Write(structure.IsInternal);
             writer.Write(structure.IsUnique);
-            if (version >= TransparentLayoutVersion)
-            {
-                writer.Write(structure.IsTransparent);
-            }
+            writer.Write(structure.IsTransparent);
             writer.Write(structure.CleanupMethod is not null);
             if (structure.CleanupMethod is string cleanup)
             {
@@ -1639,29 +1586,23 @@ public static partial class ModuleCompiler
                 writer.Write(field.IsMutable);
             }
         }
-        if (version >= ManagedClassVersion)
+        writer.Write(module.Classes.Length);
+        foreach (var @class in module.Classes)
         {
-            writer.Write(module.Classes.Length);
-            foreach (var @class in module.Classes)
+            PutString(writer, @class.Name);
+            writer.Write(@class.Size);
+            writer.Write(@class.IsInternal);
+            writer.Write(@class.IsMutable);
+            writer.Write(@class.Fields.Length);
+            foreach (var field in @class.Fields)
             {
-                PutString(writer, @class.Name);
-                writer.Write(@class.Size);
-                writer.Write(@class.IsInternal);
-                if (version >= ManagedAccessVersion)
-                {
-                    writer.Write(@class.IsMutable);
-                }
-                writer.Write(@class.Fields.Length);
-                foreach (var field in @class.Fields)
-                {
-                    PutString(writer, field.Name);
-                    writer.Write((int)field.Type);
-                    writer.Write(field.Offset);
-                    writer.Write(field.Size);
-                    writer.Write(field.IsPrivate);
-                    writer.Write(field.IsInternal);
-                    writer.Write(field.IsMutable);
-                }
+                PutString(writer, field.Name);
+                writer.Write((int)field.Type);
+                writer.Write(field.Offset);
+                writer.Write(field.Size);
+                writer.Write(field.IsPrivate);
+                writer.Write(field.IsInternal);
+                writer.Write(field.IsMutable);
             }
         }
         writer.Write(module.ImportedStructures.Length);
@@ -1681,7 +1622,7 @@ public static partial class ModuleCompiler
             writer.Write(item.HasOwnershipTransfer);
             if (item.Function is BoundFunction function)
             {
-                PutFunction(writer, function, names, ref remaining, version);
+                PutFunction(writer, function, names, ref remaining);
             }
         }
         if (stream.Length > MaximumBytes)
@@ -1703,17 +1644,17 @@ public static partial class ModuleCompiler
         {
             using var stream = new MemoryStream(bytes, writable: false);
             using var reader = new BinaryReader(stream, new UTF8Encoding(false, true), leaveOpen: true);
-            var (version, policy, profile) = ReadModuleHeader(reader, expectedConsumer);
+            var (policy, profile) = ReadModuleHeader(reader, expectedConsumer);
             var entry = reader.ReadInt32();
-            var (structures, structureNames) = ReadStructures(reader, version);
-            var classes = ReadClasses(reader, structureNames, version);
+            var (structures, structureNames) = ReadStructures(reader);
+            var classes = ReadClasses(reader, structureNames);
             var importedTypes = ReadImportedTypes(reader, structures.Length, structureNames, expectedConsumer);
             var count = Count(reader, MaximumFunctions);
             if (count == 0 || (expectedConsumer ? entry < 0 || entry >= count : entry != -1))
             {
                 throw new ModuleFormatException("Module entry point is invalid.");
             }
-            var items = ReadFunctions(reader, count, expectedConsumer, version, structures, classes);
+            var items = ReadFunctions(reader, count, expectedConsumer, structures, classes);
             var module = new Module(expectedConsumer, entry, structures, items) {
                 Classes = classes,
                 ImportedStructures = importedTypes,
@@ -1751,7 +1692,7 @@ public static partial class ModuleCompiler
         }
     }
 
-    private static (int Version, BoundRuntimePolicy Policy, string Profile) ReadModuleHeader(BinaryReader reader, bool expectedConsumer)
+    private static (BoundRuntimePolicy Policy, string Profile) ReadModuleHeader(BinaryReader reader, bool expectedConsumer)
     {
         if (reader.ReadInt32() != Magic)
         {
@@ -1774,10 +1715,10 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("Unsupported module semantic profile or checked-failure policy.");
         }
-        return (version, policy, profile);
+        return (policy, profile);
     }
 
-    private static (ImmutableArray<BoundStruct> Structures, HashSet<string> Names) ReadStructures(BinaryReader reader, int version)
+    private static (ImmutableArray<BoundStruct> Structures, HashSet<string> Names) ReadStructures(BinaryReader reader)
     {
         var structureCount = Count(reader, MaximumFunctions);
         var structures = ImmutableArray.CreateBuilder<BoundStruct>(structureCount);
@@ -1800,7 +1741,7 @@ public static partial class ModuleCompiler
             for (var field = 0; field < fieldCount; field++)
             {
                 var fieldName = GetString(reader);
-                var fieldType = GetType(reader, version);
+                var fieldType = GetType(reader);
                 if (ManagedClassTypes.IsManaged(fieldType))
                 {
                     throw new ModuleFormatException("Managed fields have no persisted inline layout.");
@@ -1841,8 +1782,7 @@ public static partial class ModuleCompiler
         return importedTypes.ToImmutable();
     }
 
-    private static ImmutableArray<BoundClass> ReadClasses(BinaryReader reader, HashSet<string> structureNames,
-        int version)
+    private static ImmutableArray<BoundClass> ReadClasses(BinaryReader reader, HashSet<string> structureNames)
     {
         var count = Count(reader, 256);
         var classes = ImmutableArray.CreateBuilder<BoundClass>(count);
@@ -1856,17 +1796,13 @@ public static partial class ModuleCompiler
             }
             var size = reader.ReadInt32();
             var isInternal = GetBool(reader);
-            var isMutable = version < ManagedAccessVersion || GetBool(reader);
-            var fieldCount = Count(reader, version >= WideClassFieldsVersion ? ManagedClassTypes.MaximumFields : 16);
+            var isMutable = GetBool(reader);
+            var fieldCount = Count(reader, ManagedClassTypes.MaximumFields);
             var fields = ImmutableArray.CreateBuilder<BoundStructField>(fieldCount);
             for (var field = 0; field < fieldCount; field++)
             {
                 var fieldName = GetString(reader);
-                var fieldType = GetType(reader, version);
-                if (version < InlineClassFieldVersion && IsInlineClassField(fieldType))
-                {
-                    throw new ModuleFormatException("Inline struct class fields require a newer semantic module version.");
-                }
+                var fieldType = GetType(reader);
                 fields.Add(new BoundStructField(fieldName, fieldType,
                     reader.ReadInt32(), reader.ReadInt32()) {
                     IsPrivate = GetBool(reader),
@@ -1883,7 +1819,7 @@ public static partial class ModuleCompiler
     }
 
     private static ImmutableArray<ModuleFunction> ReadFunctions(BinaryReader reader, int count, bool expectedConsumer,
-        int version, ImmutableArray<BoundStruct> structures, ImmutableArray<BoundClass> classes)
+        ImmutableArray<BoundStruct> structures, ImmutableArray<BoundClass> classes)
     {
         var items = ImmutableArray.CreateBuilder<ModuleFunction>(count);
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -1894,26 +1830,12 @@ public static partial class ModuleCompiler
             var contract = GetString(reader);
             var import = GetBool(reader);
             var hasBody = GetBool(reader);
-            var ownershipTransfer = version >= TransferVersion && GetBool(reader);
+            var ownershipTransfer = GetBool(reader);
             if (name.Length == 0 || !seen.Add(name) || (expectedConsumer ? import == hasBody : !hasBody))
             {
                 throw new ModuleFormatException("Invalid module declaration.");
             }
-            if (version < PrivateInitReferenceVersion && contract.Contains("|init:", StringComparison.Ordinal))
-            {
-                throw new ModuleFormatException("Init contracts require semantic module version 33.");
-            }
-            var function = hasBody ? GetFunction(reader, ref remaining, version) : null;
-            if (version < AggregateClassFactoryVersion && function is BoundFunction classFunction
-                && HasAggregateClassArguments(classFunction))
-            {
-                throw new ModuleFormatException("Aggregate class arguments require semantic module version 22.");
-            }
-            if (version < StackClassFactoryVersion && function is BoundFunction stackFunction
-                && HasStackClassArguments(stackFunction))
-            {
-                throw new ModuleFormatException("Class factory stack arguments require semantic module version 23.");
-            }
+            var function = hasBody ? GetFunction(reader, ref remaining) : null;
             if (!expectedConsumer && import && function is BoundFunction exported
                 && !Exportable(exported, structures))
             {
@@ -1925,15 +1847,9 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Managed-node handles cannot cross a module declaration.");
             }
             if (ContractContainsOptionalType(contract)
-                && (import || (expectedConsumer && version < ManagedGraphParticipantVersion)))
+                && import)
             {
                 throw new ModuleFormatException("Optional managed handles have no persisted module ABI.");
-            }
-            if (version < ManagedGraphParticipantVersion && expectedConsumer && function is BoundFunction body && (UsesManagedNode(body)
-                || ManagedClassTypes.IsManaged(body.ReturnType)
-                || body.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type))))
-            {
-                throw new ModuleFormatException("Managed bodies require an image-private leaf.");
             }
             if (expectedConsumer && import
                 && (contract.Split('|') is not { Length: > 3 } parts || parts[3] != "E"))
@@ -1949,15 +1865,10 @@ public static partial class ModuleCompiler
                 HasOwnershipTransfer = ownershipTransfer,
             });
         }
-        if (classes.Length != 0 && expectedConsumer && version < ManagedGraphParticipantVersion)
-        {
-            throw new ModuleFormatException("Managed classes cannot be imported by consumers.");
-        }
         return items.ToImmutable();
     }
 
-    private static void PutFunction(BinaryWriter writer, BoundFunction function, string[] names, ref int remaining,
-        int version)
+    private static void PutFunction(BinaryWriter writer, BoundFunction function, string[] names, ref int remaining)
     {
         PutString(writer, function.Name);
         writer.Write((int)function.ReturnType);
@@ -1968,20 +1879,14 @@ public static partial class ModuleCompiler
         writer.Write(function.IsNoThrow);
         writer.Write(function.DoesNotReturn);
         writer.Write(function.IsCleanup);
-        if (version >= ExplicitGetterVersion)
+        writer.Write(function.PropertyName is not null);
+        if (function.PropertyName is string property)
         {
-            writer.Write(function.PropertyName is not null);
-            if (function.PropertyName is string property)
-            {
-                PutString(writer, property);
-            }
+            PutString(writer, property);
         }
         writer.Write((byte)function.Intrinsic);
-        if (version >= ManagedClassVersion)
-        {
-            writer.Write(function.IsClassConstructor);
-            writer.Write(function.ClassConstructor);
-        }
+        writer.Write(function.IsClassConstructor);
+        writer.Write(function.ClassConstructor);
         writer.Write(function.DeclaringStruct is not null);
         if (function.DeclaringStruct is string declaringStruct)
         {
@@ -1996,52 +1901,30 @@ public static partial class ModuleCompiler
             writer.Write((int)variable.Type);
             writer.Write(variable.IsMutable);
             writer.Write(variable.IsOut);
-            if (version >= PrivateInitReferenceVersion)
-            {
-                writer.Write(variable.IsInit);
-            }
+            writer.Write(variable.IsInit);
             PutSpan(writer, variable.Span);
         }
-        PutStatement(writer, function.Body, names, ref remaining, 0, version);
+        PutStatement(writer, function.Body, names, ref remaining, 0);
     }
 
-    private static BoundFunction GetFunction(BinaryReader reader, ref int remaining, int version)
+    private static BoundFunction GetFunction(BinaryReader reader, ref int remaining)
     {
         var name = GetString(reader);
-        var type = GetType(reader, version);
-        if (version < ManagedClassVersion && (ManagedClassTypes.IsOptional(type) || ManagedClassTypes.IsClass(type)))
-        {
-            throw new ModuleFormatException("Optional managed handles have no persisted module ABI.");
-        }
-        if (version < ManagedNodeVersion && type == PrimitiveType.ManagedNode)
-        {
-            throw new ModuleFormatException("Managed nodes have no persisted module ABI.");
-        }
-        if ((version < ReadonlyViewVersion && type == PrimitiveType.ReadonlyInt32BufferView)
-            || (version < WritableViewVersion && type == PrimitiveType.MutableInt32BufferView))
-        {
-            throw new ModuleFormatException("Native buffer view type requires a newer semantic module version.");
-        }
+        var type = GetType(reader);
         var constructor = GetBool(reader);
         var isPrivate = GetBool(reader);
         var isInternal = GetBool(reader);
         var isStatic = GetBool(reader);
         var isNoThrow = GetBool(reader);
         var doesNotReturn = GetBool(reader);
-        var isCleanup = version >= OwnershipVersion && GetBool(reader);
-        var propertyName = version >= ExplicitGetterVersion && GetBool(reader) ? GetString(reader) : null;
-        var intrinsic = version >= BufferVersion ? (BoundIntrinsic)reader.ReadByte() : BoundIntrinsic.None;
-        var classConstructor = version >= ManagedClassVersion && GetBool(reader);
-        var classFactoryConstructor = version >= ManagedClassVersion ? reader.ReadInt32() : -1;
-        if (intrinsic >= BoundIntrinsic.NodeTryCreate
-            && (version < ManagedNodeVersion || (version < ManagedClassVersion && intrinsic > BoundIntrinsic.NodeCollect)
-                || intrinsic > BoundIntrinsic.ClassTryCreate))
+        var isCleanup = GetBool(reader);
+        var propertyName = GetBool(reader) ? GetString(reader) : null;
+        var intrinsic = (BoundIntrinsic)reader.ReadByte();
+        var classConstructor = GetBool(reader);
+        var classFactoryConstructor = reader.ReadInt32();
+        if (intrinsic >= BoundIntrinsic.NodeTryCreate && intrinsic > BoundIntrinsic.ClassTryCreate)
         {
             throw new ModuleFormatException("Managed nodes have no persisted module runtime.");
-        }
-        if (version < WritableViewVersion && intrinsic == BoundIntrinsic.BufferClear)
-        {
-            throw new ModuleFormatException("Buffer.Clear requires semantic module version 17.");
         }
         var declaringStruct = GetBool(reader) ? GetString(reader) : null;
         var parameters = reader.ReadInt32();
@@ -2055,30 +1938,16 @@ public static partial class ModuleCompiler
         for (var i = 0; i < count; i++)
         {
             var variableName = GetString(reader);
-            var variableType = GetType(reader, version);
-            if (version < ManagedClassVersion && (ManagedClassTypes.IsOptional(variableType)
-                || ManagedClassTypes.IsClass(variableType)))
-            {
-                throw new ModuleFormatException("Optional managed handles have no persisted module ABI.");
-            }
-            if (version < ManagedNodeVersion && variableType == PrimitiveType.ManagedNode)
-            {
-                throw new ModuleFormatException("Managed nodes have no persisted module ABI.");
-            }
-            if ((version < ReadonlyViewVersion && variableType == PrimitiveType.ReadonlyInt32BufferView)
-                || (version < WritableViewVersion && variableType == PrimitiveType.MutableInt32BufferView))
-            {
-                throw new ModuleFormatException("Native buffer view type requires a newer semantic module version.");
-            }
+            var variableType = GetType(reader);
             var mutable = GetBool(reader);
             var isOut = GetBool(reader);
-            var isInit = version >= PrivateInitReferenceVersion && GetBool(reader);
+            var isInit = GetBool(reader);
             variables.Add(new BoundVariable(variableName, variableType, mutable, GetSpan(reader)) {
                 IsOut = isOut,
                 IsInit = isInit,
             });
         }
-        var body = GetStatement(reader, ref remaining, 0, version) as BoundBlock
+        var body = GetStatement(reader, ref remaining, 0) as BoundBlock
             ?? throw new ModuleFormatException("Function requires a block body.");
         _ = Calls(body, visitVacantLocal: vacant => {
             if (vacant.Variable >= 0 && vacant.Variable < variables.Count)
@@ -2104,18 +1973,18 @@ public static partial class ModuleCompiler
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The preceding tag selection rejects unsupported statement kinds.")]
     private static void PutStatement(BinaryWriter writer, BoundStatement statement, string[] names,
-        ref int remaining, int depth, int version)
+        ref int remaining, int depth)
     {
         Step(ref remaining, depth);
         writer.Write(statement switch {
             BoundBlock => (byte)1,
             BoundLocal => (byte)2,
             BoundAssignment => (byte)3,
-            BoundOptionalAssignment when version >= CoalescingVersion => (byte)25,
+            BoundOptionalAssignment => (byte)25,
             BoundExpressionStatement => (byte)4,
             BoundIf => (byte)5,
-            BoundWhile { IsPostTested: true, Iterator: null } when version >= StructuredLoopVersion => (byte)21,
-            BoundWhile { Iterator: not null } when version >= LoopTransferVersion => (byte)20,
+            BoundWhile { IsPostTested: true, Iterator: null } => (byte)21,
+            BoundWhile { Iterator: not null } => (byte)20,
             BoundWhile { Iterator: null } => (byte)6,
             BoundRequire => (byte)7,
             BoundReturn => (byte)8,
@@ -2125,15 +1994,15 @@ public static partial class ModuleCompiler
             BoundTryCatch => (byte)12,
             BoundDrop => (byte)13,
             BoundOwnerDeclaration => (byte)14,
-            BoundVacantLocal when version >= VacantLocalVersion => (byte)24,
-            BoundLifetimeEnd when version >= LifetimeEndVersion => (byte)26,
+            BoundVacantLocal => (byte)24,
+            BoundLifetimeEnd => (byte)26,
             BoundDropConstructedFields => (byte)15,
             BoundViewScope => (byte)16,
             BoundViewSet => (byte)17,
-            BoundBreak { TargetDepth: not 1 } when version >= StructuredLoopVersion => (byte)22,
-            BoundContinue { TargetDepth: not 1 } when version >= StructuredLoopVersion => (byte)23,
-            BoundBreak when version >= LoopTransferVersion => (byte)18,
-            BoundContinue when version >= LoopTransferVersion => (byte)19,
+            BoundBreak { TargetDepth: not 1 } => (byte)22,
+            BoundContinue { TargetDepth: not 1 } => (byte)23,
+            BoundBreak => (byte)18,
+            BoundContinue => (byte)19,
             _ => throw new ModuleFormatException("Unknown statement kind."),
         });
         PutSpan(writer, statement.Span);
@@ -2150,7 +2019,7 @@ public static partial class ModuleCompiler
                 writer.Write(block.Statements.Length);
                 foreach (var child in block.Statements)
                 {
-                    PutStatement(writer, child, names, ref remaining, depth + 1, version);
+                    PutStatement(writer, child, names, ref remaining, depth + 1);
                 }
                 break;
             case BoundLocal local:
@@ -2163,7 +2032,7 @@ public static partial class ModuleCompiler
                 PutExpression(writer, view.Owner, names, ref remaining, depth + 1);
                 PutExpression(writer, view.Start, names, ref remaining, depth + 1);
                 PutExpression(writer, view.Length, names, ref remaining, depth + 1);
-                PutStatement(writer, view.Body, names, ref remaining, depth + 1, version);
+                PutStatement(writer, view.Body, names, ref remaining, depth + 1);
                 break;
             case BoundViewSet write:
                 writer.Write(write.Variable);
@@ -2217,19 +2086,19 @@ public static partial class ModuleCompiler
                 break;
             case BoundIf conditional:
                 PutExpression(writer, conditional.Condition, names, ref remaining, depth + 1);
-                PutStatement(writer, conditional.Then, names, ref remaining, depth + 1, version);
+                PutStatement(writer, conditional.Then, names, ref remaining, depth + 1);
                 writer.Write(conditional.Else is not null);
                 if (conditional.Else is not null)
                 {
-                    PutStatement(writer, conditional.Else, names, ref remaining, depth + 1, version);
+                    PutStatement(writer, conditional.Else, names, ref remaining, depth + 1);
                 }
                 break;
             case BoundWhile loop:
                 PutExpression(writer, loop.Condition, names, ref remaining, depth + 1);
-                PutStatement(writer, loop.Body, names, ref remaining, depth + 1, version);
+                PutStatement(writer, loop.Body, names, ref remaining, depth + 1);
                 if (loop.Iterator is not null)
                 {
-                    PutStatement(writer, loop.Iterator, names, ref remaining, depth + 1, version);
+                    PutStatement(writer, loop.Iterator, names, ref remaining, depth + 1);
                 }
                 break;
             case BoundBreak { TargetDepth: not 1 } exit:
@@ -2241,8 +2110,8 @@ public static partial class ModuleCompiler
             case BoundBreak or BoundContinue:
                 break;
             case BoundTryFinally cleanup:
-                PutStatement(writer, cleanup.Body, names, ref remaining, depth + 1, version);
-                PutStatement(writer, cleanup.Finally, names, ref remaining, depth + 1, version);
+                PutStatement(writer, cleanup.Body, names, ref remaining, depth + 1);
+                PutStatement(writer, cleanup.Finally, names, ref remaining, depth + 1);
                 break;
             case BoundDrop drop:
                 writer.Write(drop.Variable);
@@ -2258,15 +2127,15 @@ public static partial class ModuleCompiler
                 writer.Write(drop.IsOutput);
                 break;
             case BoundUnsafe unsafeBlock:
-                PutStatement(writer, unsafeBlock.Body, names, ref remaining, depth + 1, version);
+                PutStatement(writer, unsafeBlock.Body, names, ref remaining, depth + 1);
                 break;
             case BoundTryCatch recovery:
-                PutStatement(writer, recovery.Body, names, ref remaining, depth + 1, version);
-                PutStatement(writer, recovery.Catch, names, ref remaining, depth + 1, version);
+                PutStatement(writer, recovery.Body, names, ref remaining, depth + 1);
+                PutStatement(writer, recovery.Catch, names, ref remaining, depth + 1);
                 writer.Write(recovery.Finally is not null);
                 if (recovery.Finally is not null)
                 {
-                    PutStatement(writer, recovery.Finally, names, ref remaining, depth + 1, version);
+                    PutStatement(writer, recovery.Finally, names, ref remaining, depth + 1);
                 }
                 break;
             case BoundRequire requirement:
@@ -2283,63 +2152,54 @@ public static partial class ModuleCompiler
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unknown serialized node tags are rejected.")]
-    private static BoundStatement GetStatement(BinaryReader reader, ref int remaining, int depth, int version)
+    private static BoundStatement GetStatement(BinaryReader reader, ref int remaining, int depth)
     {
         Step(ref remaining, depth);
         var kind = reader.ReadByte();
-        if (version == 10 && kind > 10)
-        {
-            throw new ModuleFormatException("Unknown legacy statement kind.");
-        }
         var span = GetSpan(reader);
         switch (kind)
         {
             case 1:
-                var managedScope = version >= ManagedNodeVersion && GetBool(reader);
-                var retired = ImmutableArray<int>.Empty;
-                if (version >= ManagedNodeVersion)
+                var managedScope = GetBool(reader);
+                var retiredCount = Count(reader, MaximumSlots);
+                var slots = ImmutableArray.CreateBuilder<int>(retiredCount);
+                for (var i = 0; i < retiredCount; i++)
                 {
-                    var retiredCount = Count(reader, MaximumSlots);
-                    var slots = ImmutableArray.CreateBuilder<int>(retiredCount);
-                    for (var i = 0; i < retiredCount; i++)
-                    {
-                        Step(ref remaining, depth + 1);
-                        slots.Add(reader.ReadInt32());
-                    }
-                    retired = slots.MoveToImmutable();
+                    Step(ref remaining, depth + 1);
+                    slots.Add(reader.ReadInt32());
                 }
                 var count = Count(reader, MaximumNodes);
                 var statements = ImmutableArray.CreateBuilder<BoundStatement>(count);
                 for (var i = 0; i < count; i++)
                 {
-                    statements.Add(GetStatement(reader, ref remaining, depth + 1, version));
+                    statements.Add(GetStatement(reader, ref remaining, depth + 1));
                 }
                 return new BoundBlock(statements.ToImmutable(), span) {
                     IsManagedLexicalScope = managedScope,
-                    RetiredManagedLocals = retired,
+                    RetiredManagedLocals = slots.MoveToImmutable(),
                 };
             case 2:
-                return new BoundLocal(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1, version), span);
+                return new BoundLocal(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1), span);
             case 3:
-                return new BoundAssignment(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1, version), span);
-            case 25 when version >= CoalescingVersion:
-                var place = GetExpression(reader, ref remaining, depth + 1, version);
+                return new BoundAssignment(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1), span);
+            case 25:
+                var place = GetExpression(reader, ref remaining, depth + 1);
                 return new BoundOptionalAssignment(place,
-                    GetExpression(reader, ref remaining, depth + 1, version), span);
+                    GetExpression(reader, ref remaining, depth + 1), span);
             case 4:
-                return new BoundExpressionStatement(GetExpression(reader, ref remaining, depth + 1, version), span);
+                return new BoundExpressionStatement(GetExpression(reader, ref remaining, depth + 1), span);
             case 5:
-                var condition = GetExpression(reader, ref remaining, depth + 1, version);
-                var then = GetStatement(reader, ref remaining, depth + 1, version);
-                var otherwise = GetBool(reader) ? GetStatement(reader, ref remaining, depth + 1, version) : null;
+                var condition = GetExpression(reader, ref remaining, depth + 1);
+                var then = GetStatement(reader, ref remaining, depth + 1);
+                var otherwise = GetBool(reader) ? GetStatement(reader, ref remaining, depth + 1) : null;
                 return new BoundIf(condition, then, otherwise, span);
             case 6:
-                return new BoundWhile(GetExpression(reader, ref remaining, depth + 1, version),
-                    GetStatement(reader, ref remaining, depth + 1, version), span);
+                return new BoundWhile(GetExpression(reader, ref remaining, depth + 1),
+                    GetStatement(reader, ref remaining, depth + 1), span);
             case 7:
-                return new BoundRequire(GetExpression(reader, ref remaining, depth + 1, version), span);
+                return new BoundRequire(GetExpression(reader, ref remaining, depth + 1), span);
             case 8:
-                return new BoundReturn(GetBool(reader) ? GetExpression(reader, ref remaining, depth + 1, version) : null, span);
+                return new BoundReturn(GetBool(reader) ? GetExpression(reader, ref remaining, depth + 1) : null, span);
             case 9:
                 var variable = reader.ReadInt32();
                 var field = reader.ReadInt32();
@@ -2350,39 +2210,39 @@ public static partial class ModuleCompiler
                     Step(ref remaining, depth + index + 1);
                     fields.Add(reader.ReadInt32());
                 }
-                return new BoundFieldAssignment(variable, field, GetExpression(reader, ref remaining, depth + 1, version), span) {
+                return new BoundFieldAssignment(variable, field, GetExpression(reader, ref remaining, depth + 1), span) {
                     NestedFields = fields.ToImmutable(),
                 };
             case 10:
-                return new BoundTryFinally(GetStatement(reader, ref remaining, depth + 1, version) as BoundBlock
+                return new BoundTryFinally(GetStatement(reader, ref remaining, depth + 1) as BoundBlock
                     ?? throw new ModuleFormatException("Expected try block."),
-                    GetStatement(reader, ref remaining, depth + 1, version) as BoundBlock
+                    GetStatement(reader, ref remaining, depth + 1) as BoundBlock
                     ?? throw new ModuleFormatException("Expected finally block."), span);
             case 11:
-                return new BoundUnsafe(GetStatement(reader, ref remaining, depth + 1, version) as BoundBlock
+                return new BoundUnsafe(GetStatement(reader, ref remaining, depth + 1) as BoundBlock
                     ?? throw new ModuleFormatException("Expected unsafe block."), span);
             case 12:
-                var body = GetStatement(reader, ref remaining, depth + 1, version) as BoundBlock
+                var body = GetStatement(reader, ref remaining, depth + 1) as BoundBlock
                     ?? throw new ModuleFormatException("Expected protected block.");
-                var handler = GetStatement(reader, ref remaining, depth + 1, version) as BoundBlock
+                var handler = GetStatement(reader, ref remaining, depth + 1) as BoundBlock
                     ?? throw new ModuleFormatException("Expected recovery block.");
-                var cleanup = GetBool(reader) ? GetStatement(reader, ref remaining, depth + 1, version) as BoundBlock
+                var cleanup = GetBool(reader) ? GetStatement(reader, ref remaining, depth + 1) as BoundBlock
                     ?? throw new ModuleFormatException("Expected recovery cleanup block.") : null;
                 return new BoundTryCatch(body, handler, cleanup, span);
             case 13:
                 var owner = reader.ReadInt32();
                 var method = GetBool(reader) ? GetString(reader) : null;
                 return new SymbolicDrop(owner, method, span) {
-                    IsOutput = version >= TransferVersion && GetBool(reader),
+                    IsOutput = GetBool(reader),
                 };
-            case 14 when version >= TransferVersion:
+            case 14:
                 return new BoundOwnerDeclaration(reader.ReadInt32(), span);
-            case 24 when version >= VacantLocalVersion:
+            case 24:
                 return new BoundVacantLocal(reader.ReadInt32(), span);
-            case 26 when version >= LifetimeEndVersion:
+            case 26:
                 var ended = reader.ReadInt32();
                 return new SymbolicLifetimeEnd(ended, GetBool(reader) ? GetString(reader) : null, span);
-            case 15 when version >= CompositeVersion:
+            case 15:
                 var constructedOwner = reader.ReadInt32();
                 var acquired = Count(reader, ValueLayout.MaximumSize);
                 var order = ImmutableArray.CreateBuilder<int>(acquired);
@@ -2392,35 +2252,35 @@ public static partial class ModuleCompiler
                     order.Add(reader.ReadInt32());
                 }
                 return new BoundDropConstructedFields(constructedOwner, order.ToImmutable(), span);
-            case 16 when version >= ReadonlyViewVersion:
+            case 16:
                 var viewVariable = reader.ReadInt32();
-                var mutable = version >= WritableViewVersion && GetBool(reader);
-                var viewOwner = GetExpression(reader, ref remaining, depth + 1, version);
-                var start = GetExpression(reader, ref remaining, depth + 1, version);
-                var length = GetExpression(reader, ref remaining, depth + 1, version);
-                var viewBody = GetStatement(reader, ref remaining, depth + 1, version) as BoundBlock
+                var mutable = GetBool(reader);
+                var viewOwner = GetExpression(reader, ref remaining, depth + 1);
+                var start = GetExpression(reader, ref remaining, depth + 1);
+                var length = GetExpression(reader, ref remaining, depth + 1);
+                var viewBody = GetStatement(reader, ref remaining, depth + 1) as BoundBlock
                     ?? throw new ModuleFormatException("Expected lexical view block.");
                 return new BoundViewScope(viewVariable, viewOwner, start, length, viewBody, span) {
                     IsMutable = mutable,
                 };
-            case 17 when version >= WritableViewVersion:
-                return new BoundViewSet(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1, version),
-                    GetExpression(reader, ref remaining, depth + 1, version), span);
-            case 18 when version >= LoopTransferVersion:
+            case 17:
+                return new BoundViewSet(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1),
+                    GetExpression(reader, ref remaining, depth + 1), span);
+            case 18:
                 return new BoundBreak(span);
-            case 19 when version >= LoopTransferVersion:
+            case 19:
                 return new BoundContinue(span);
-            case 20 when version >= LoopTransferVersion:
-                var loopCondition = GetExpression(reader, ref remaining, depth + 1, version);
-                var loopBody = GetStatement(reader, ref remaining, depth + 1, version);
-                var iterator = GetStatement(reader, ref remaining, depth + 1, version);
+            case 20:
+                var loopCondition = GetExpression(reader, ref remaining, depth + 1);
+                var loopBody = GetStatement(reader, ref remaining, depth + 1);
+                var iterator = GetStatement(reader, ref remaining, depth + 1);
                 return new BoundWhile(loopCondition, loopBody, span) { Iterator = iterator };
-            case 21 when version >= StructuredLoopVersion:
-                return new BoundWhile(GetExpression(reader, ref remaining, depth + 1, version),
-                    GetStatement(reader, ref remaining, depth + 1, version), span) { IsPostTested = true };
-            case 22 when version >= StructuredLoopVersion:
+            case 21:
+                return new BoundWhile(GetExpression(reader, ref remaining, depth + 1),
+                    GetStatement(reader, ref remaining, depth + 1), span) { IsPostTested = true };
+            case 22:
                 return new BoundBreak(span) { TargetDepth = reader.ReadInt32() };
-            case 23 when version >= StructuredLoopVersion:
+            case 23:
                 return new BoundContinue(span) { TargetDepth = reader.ReadInt32() };
             default:
                 throw new ModuleFormatException("Unknown statement kind.");
@@ -2572,19 +2432,11 @@ public static partial class ModuleCompiler
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unknown serialized node tags are rejected.")]
-    private static BoundExpression GetExpression(BinaryReader reader, ref int remaining, int depth, int version)
+    private static BoundExpression GetExpression(BinaryReader reader, ref int remaining, int depth)
     {
         Step(ref remaining, depth);
         var kind = reader.ReadByte();
-        var type = GetType(reader, version);
-        if (version < ManagedClassVersion && (ManagedClassTypes.IsOptional(type) || ManagedClassTypes.IsClass(type)))
-        {
-            throw new ModuleFormatException("Optional managed handles have no persisted module ABI.");
-        }
-        if (version < ManagedNodeVersion && type == PrimitiveType.ManagedNode)
-        {
-            throw new ModuleFormatException("Managed-node expressions require semantic module version 18.");
-        }
+        var type = GetType(reader);
         var span = GetSpan(reader);
         switch (kind)
         {
@@ -2593,36 +2445,36 @@ public static partial class ModuleCompiler
             case 2:
                 return new BoundRead(reader.ReadInt32(), type, span);
             case 3:
-                return new BoundUnary((TokenKind)reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1, version), type, span);
-            case 24 when version >= UpdateVersion:
+                return new BoundUnary((TokenKind)reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1), type, span);
+            case 24:
                 var updateOperator = (TokenKind)reader.ReadInt32();
                 var prefix = reader.ReadBoolean();
-                return new BoundUpdate(updateOperator, GetExpression(reader, ref remaining, depth + 1, version),
+                return new BoundUpdate(updateOperator, GetExpression(reader, ref remaining, depth + 1),
                     prefix, type, span);
-            case 26 when version >= CompoundAssignmentVersion:
+            case 26:
                 var compoundOperator = (TokenKind)reader.ReadInt32();
-                var compoundPlace = GetExpression(reader, ref remaining, depth + 1, version);
+                var compoundPlace = GetExpression(reader, ref remaining, depth + 1);
                 return new BoundCompoundAssignment(compoundOperator, compoundPlace,
-                    GetExpression(reader, ref remaining, depth + 1, version), type, span);
-            case 25 when version >= NominalUpdateVersion:
+                    GetExpression(reader, ref remaining, depth + 1), type, span);
+            case 25:
                 var nominalOperator = (TokenKind)reader.ReadInt32();
                 var nominalPrefix = reader.ReadBoolean();
                 var nominalName = GetString(reader);
                 return new SymbolicNominalUpdate(nominalOperator,
-                    GetExpression(reader, ref remaining, depth + 1, version),
+                    GetExpression(reader, ref remaining, depth + 1),
                     nominalPrefix, nominalName, type, span);
             case 4:
                 var op = (TokenKind)reader.ReadInt32();
-                var left = GetExpression(reader, ref remaining, depth + 1, version);
-                return new BoundBinary(op, left, GetExpression(reader, ref remaining, depth + 1, version), type, span);
-            case 22 when version >= ConditionalVersion:
-                var condition = GetExpression(reader, ref remaining, depth + 1, version);
-                var whenTrue = GetExpression(reader, ref remaining, depth + 1, version);
+                var left = GetExpression(reader, ref remaining, depth + 1);
+                return new BoundBinary(op, left, GetExpression(reader, ref remaining, depth + 1), type, span);
+            case 22:
+                var condition = GetExpression(reader, ref remaining, depth + 1);
+                var whenTrue = GetExpression(reader, ref remaining, depth + 1);
                 return new BoundConditional(condition, whenTrue,
-                    GetExpression(reader, ref remaining, depth + 1, version), type, span);
-            case 23 when version >= CoalescingVersion:
-                var optional = GetExpression(reader, ref remaining, depth + 1, version);
-                return new BoundCoalesce(optional, GetExpression(reader, ref remaining, depth + 1, version),
+                    GetExpression(reader, ref remaining, depth + 1), type, span);
+            case 23:
+                var optional = GetExpression(reader, ref remaining, depth + 1);
+                return new BoundCoalesce(optional, GetExpression(reader, ref remaining, depth + 1),
                     type, span);
             case 5:
                 // Names are resolved after the complete module graph is read.
@@ -2631,45 +2483,45 @@ public static partial class ModuleCompiler
                 var args = ImmutableArray.CreateBuilder<BoundExpression>(count);
                 for (var i = 0; i < count; i++)
                 {
-                    args.Add(GetExpression(reader, ref remaining, depth + 1, version));
+                    args.Add(GetExpression(reader, ref remaining, depth + 1));
                 }
                 return new SymbolicCall(name, args.ToImmutable(), type, span);
             case 6:
-                return new BoundCast(GetExpression(reader, ref remaining, depth + 1, version), type, span);
+                return new BoundCast(GetExpression(reader, ref remaining, depth + 1), type, span);
             case 7:
                 var field = reader.ReadInt32();
-                return new BoundFieldRead(GetExpression(reader, ref remaining, depth + 1, version), field, type, span);
+                return new BoundFieldRead(GetExpression(reader, ref remaining, depth + 1), field, type, span);
             case 8:
                 return new BoundOutArgument(reader.ReadInt32(), GetBool(reader), type, span);
-            case 21 when version >= PrivateInitReferenceVersion:
+            case 21:
                 return new BoundOutArgument(reader.ReadInt32(), GetBool(reader), type, span) { IsInit = true };
             case 9:
                 return new BoundMove(reader.ReadInt32(), type, span);
             case 10:
                 return new BoundReceiverLoan(reader.ReadInt32(), type, span);
-            case 11 when version >= CompositeVersion:
-                return new BoundFieldLoan(GetExpression(reader, ref remaining, depth + 1, version)
+            case 11:
+                return new BoundFieldLoan(GetExpression(reader, ref remaining, depth + 1)
                     as BoundFieldRead ?? throw new ModuleFormatException("Expected owning field place."), type, span);
-            case 12 when version >= BufferVersion:
+            case 12:
                 return new BoundMutableReceiverLoan(reader.ReadInt32(), type, span);
-            case 13 when version >= ReadonlyViewVersion && type == PrimitiveType.Int32:
+            case 13 when type == PrimitiveType.Int32:
                 return new BoundViewLength(reader.ReadInt32(), span);
-            case 14 when version >= ReadonlyViewVersion && type == PrimitiveType.Int32:
+            case 14 when type == PrimitiveType.Int32:
                 var variable = reader.ReadInt32();
-                return new BoundViewRead(variable, GetExpression(reader, ref remaining, depth + 1, version), span);
-            case 15 when version >= ManagedClassVersion && ManagedClassTypes.IsOptional(type):
+                return new BoundViewRead(variable, GetExpression(reader, ref remaining, depth + 1), span);
+            case 15 when ManagedClassTypes.IsOptional(type):
                 return new BoundNull(type, span);
-            case 16 when version >= ManagedClassVersion && ManagedClassTypes.IsOptional(type):
-                return new BoundOptionalLift(GetExpression(reader, ref remaining, depth + 1, version), type, span);
-            case 17 when version >= ManagedClassVersion && type == PrimitiveType.Bool:
-                return new BoundIsNull(GetExpression(reader, ref remaining, depth + 1, version), span);
-            case 18 when version >= ManagedClassVersion && type == PrimitiveType.Bool:
+            case 16 when ManagedClassTypes.IsOptional(type):
+                return new BoundOptionalLift(GetExpression(reader, ref remaining, depth + 1), type, span);
+            case 17 when type == PrimitiveType.Bool:
+                return new BoundIsNull(GetExpression(reader, ref remaining, depth + 1), span);
+            case 18 when type == PrimitiveType.Bool:
                 var pattern = reader.ReadInt32();
-                return new BoundIsSome(GetExpression(reader, ref remaining, depth + 1, version), pattern, span);
-            case 19 when version >= ManagedAccessVersion:
-                return new BoundReadonlyProjection(GetExpression(reader, ref remaining, depth + 1, version), type, span);
-            case 20 when version >= MutableFieldReceiverVersion:
-                return new BoundMutableFieldLoan(GetExpression(reader, ref remaining, depth + 1, version)
+                return new BoundIsSome(GetExpression(reader, ref remaining, depth + 1), pattern, span);
+            case 19:
+                return new BoundReadonlyProjection(GetExpression(reader, ref remaining, depth + 1), type, span);
+            case 20:
+                return new BoundMutableFieldLoan(GetExpression(reader, ref remaining, depth + 1)
                     as BoundFieldRead ?? throw new ModuleFormatException("Expected mutable field place."), type, span);
             default:
                 throw new ModuleFormatException("Unknown expression kind.");
@@ -2774,14 +2626,9 @@ public static partial class ModuleCompiler
         _ => expression,
     };
 
-    private static PrimitiveType GetType(BinaryReader reader, int version)
+    private static PrimitiveType GetType(BinaryReader reader)
     {
-        var type = (PrimitiveType)reader.ReadInt32();
-        if (version < ManagedAccessVersion && ManagedClassTypes.IsWritable(type))
-        {
-            throw new ModuleFormatException("Writable managed handles require semantic module version 24.");
-        }
-        return type;
+        return (PrimitiveType)reader.ReadInt32();
     }
 
     private static void PutSpan(BinaryWriter writer, TextSpan span)
