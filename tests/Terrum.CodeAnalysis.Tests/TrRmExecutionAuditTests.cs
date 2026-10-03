@@ -130,6 +130,34 @@ public sealed class TrRmExecutionAuditTests
         Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
     }
 
+    [Theory]
+    [InlineData(false, 0xD800u, 55296)]
+    [InlineData(false, 0xFFFFu, 65535)]
+    [InlineData(true, 0u, 0)]
+    [InlineData(true, 0xD800u, 55296)]
+    [InlineData(true, 0xFFFFu, 65535)]
+    public void IndependentCheckedConvertExecutesChar16Boundaries(
+        bool narrowing, uint sourceBits, int expected)
+    {
+        var artifact = Artifact(CheckedChar16ConvertBody(narrowing, sourceBits));
+        TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData(0xFFFF_FFFFu)]
+    [InlineData(0x1_0000u)]
+    public async Task IndependentCheckedConvertRejectsOutOfRangeChar16(uint sourceBits)
+    {
+        var artifact = Artifact(CheckedChar16ConvertBody(narrowing: true, sourceBits: sourceBits));
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(unchecked((int)0xE0540001),
+            await StaticProtocolTests.RunAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast))
+                .ConfigureAwait(true));
+    }
+
     [Fact]
     public void IndependentBytesExecuteWithoutCompilerOrTableWriter()
     {
@@ -534,6 +562,40 @@ public sealed class TrRmExecutionAuditTests
                 }
             }
         }
+    }
+
+    private static byte[] CheckedChar16ConvertBody(bool narrowing, uint sourceBits)
+    {
+        var sourceTypeId = narrowing ? 1 : 2;
+        var destinationTypeId = narrowing ? 2 : 1;
+        var body = new List<byte> { 4, 2 };
+        body.AddRange(Words(1, 3));
+        body.Add(narrowing ? (byte)3 : (byte)2);
+        var dataWidth = sourceBits <= byte.MaxValue ? 1
+            : sourceBits <= ushort.MaxValue ? 2 : 4;
+        if (dataWidth == 1)
+        {
+            body.AddRange([1, 1, (byte)sourceTypeId, (byte)sourceBits]);
+        }
+        else
+        {
+            body.AddRange([0xF0, (byte)(dataWidth == 2 ? 0x10 : 0x20),
+                1, 1, (byte)sourceTypeId]);
+            for (var index = 0; index < dataWidth; index++)
+            {
+                body.Add((byte)(sourceBits >> (index * 8)));
+            }
+        }
+        if (narrowing)
+        {
+            body.AddRange([0x16, 2, (byte)destinationTypeId, 1,
+                0x16, 3, 1, 2, 0x83, 3]);
+        }
+        else
+        {
+            body.AddRange([0x16, 2, (byte)destinationTypeId, 1, 0x83, 2]);
+        }
+        return body.ToArray();
     }
 
     private static byte[] CheckedDivRemBody(PrimitiveType type,
