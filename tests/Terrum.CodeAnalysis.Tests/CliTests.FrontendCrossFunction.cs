@@ -175,6 +175,35 @@ public sealed partial class CliTests
         }
     }
 
+    [Theory]
+    [InlineData("public int32 Main() { bool success = Try(out var value); return success ? 42 : 0; } bool Try(out int32 value) { value = 42; return true; }", 77, 104)]
+    [InlineData("public int32 Main() { bool success = Fill(true, init var value); return success ? 42 : 0; } bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return false; }", 78, 108)]
+    public async Task ScalarFrontendOutputVariablesInInitializedLocalsRunAsync(
+        string text, int projectionVersion, int operation)
+    {
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var input = Encoding.UTF8.GetBytes(text);
+        foreach (var runtime in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(input, "frontend-component",
+                directory, "-", "--runtime", runtime, "--json");
+            Assert.True(exit == 0, $"{runtime}: {exit}: {output}{error}");
+            using (var document = JsonDocument.Parse(output))
+            {
+                var result = document.RootElement.GetProperty("result");
+                Assert.Equal(projectionVersion, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Contains(result.GetProperty("functions")[0].GetProperty("nodes")
+                    .EnumerateArray(), node => node.GetProperty("operation").GetInt32() == operation);
+            }
+
+            var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
+                directory, "-", "--runtime", runtime, "--json");
+            Assert.Equal(42, runExit);
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+        }
+    }
+
     [Fact]
     public async Task ScalarFrontendSingleFunctionNonBooleanOutputCliUsesProjection79Async()
     {

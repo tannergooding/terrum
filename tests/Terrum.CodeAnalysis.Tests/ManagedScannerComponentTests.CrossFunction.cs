@@ -89,12 +89,21 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Fact]
-    public async Task ScalarFrontendProgramRejectsNonBooleanOutVarDestinationsAsync()
+    public async Task ScalarFrontendProgramAcceptsNonBooleanOutVarDestinationsAsync()
     {
         const string text = "public int32 Main() { int32 status = Set(out var value); return value + status; } int32 Set(out int32 value) { value = 40; return 2; }";
-        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(SourceText.From(text),
-            bytes, programBytes, BoundRuntimePolicy.FailFast));
+        var source = SourceText.From(text);
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
+            var actual = ScalarFrontendHost.BindLibrary(source, bytes, programBytes, (BoundRuntimePolicy)policy);
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Main"], policy),
+                NativeEmitter.EmitLibrary(actual, ["Main"], policy));
+            Assert.Equal(42, NativeJit.Execute(actual with { EntryPoint = 0 }, policy));
+        }
     }
 
     [Theory]
