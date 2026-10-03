@@ -51,7 +51,6 @@ public static partial class NativeModuleCompiler
             : NativeEmitter.EmitLibraryWithImportUsage(program, exports, declarations, runtimePolicy);
         var package = new GraphPackage(false, identity, runtimePolicy,
             [.. exports.Order(StringComparer.Ordinal)], WithGraphUsage(bindings, used), contract, image) {
-            HasOrigins = true,
             Origins = CreateGraphOrigins(contract, false, identity, providers),
         };
         var result = WriteGraphPackage(package);
@@ -81,7 +80,6 @@ public static partial class NativeModuleCompiler
             : NativeEmitter.EmitWithImportUsage(program, declarations, runtimePolicy);
         var package = new GraphPackage(true, null, runtimePolicy, [],
             WithGraphUsage(bindings, used), contract, image) {
-            HasOrigins = true,
             Origins = CreateGraphOrigins(contract, true, null, providers),
         };
         var result = WriteGraphPackage(package);
@@ -263,7 +261,7 @@ public static partial class NativeModuleCompiler
         else
         {
             ModuleCompiler.ValidateGraphLibrary(package.Contract, package.Exports, reference,
-                allowImportedCleanup: package.HasOrigins);
+                allowImportedCleanup: true);
         }
         foreach (var (dependency, provider) in package.Dependencies.Zip(providers))
         {
@@ -272,13 +270,10 @@ public static partial class NativeModuleCompiler
                 throw new ModuleContractException($"Graph declaration does not belong to '{dependency.Identity}'.");
             }
         }
-        if (package.HasOrigins)
+        var expected = CreateGraphOrigins(package.Contract, package.Consumer, package.Identity, providers);
+        if (!package.Origins.SequenceEqual(expected))
         {
-            var expected = CreateGraphOrigins(package.Contract, package.Consumer, package.Identity, providers);
-            if (!package.Origins.SequenceEqual(expected))
-            {
-                throw new ModuleContractException("Graph type origin or cleanup ownership differs from selected providers.");
-            }
+            throw new ModuleContractException("Graph type origin or cleanup ownership differs from selected providers.");
         }
     }
 
@@ -286,7 +281,7 @@ public static partial class NativeModuleCompiler
     {
         var references = providers.Select(provider => provider.IsLeaf
             ? ModuleCompiler.CreateReference(provider.Contract)
-            : ModuleCompiler.CreateGraphReference(provider.Contract, provider.Exports, provider.HasOrigins)).ToArray();
+            : ModuleCompiler.CreateGraphReference(provider.Contract, provider.Exports, allowImportedCleanup: true)).ToArray();
         var provenance = providers.Select((provider, index) =>
             ProviderOrigins(provider, references[index])).ToArray();
         var origins = references.Select((reference, index) => (IReadOnlyDictionary<string, string?>)
@@ -328,27 +323,18 @@ public static partial class NativeModuleCompiler
         CompilationReference? reference = null)
     {
         reference ??= provider.IsLeaf ? ModuleCompiler.CreateReference(provider.Contract)
-            : ModuleCompiler.CreateGraphReference(provider.Contract, provider.Exports, provider.HasOrigins);
+            : ModuleCompiler.CreateGraphReference(provider.Contract, provider.Exports, allowImportedCleanup: true);
         if (provider.IsLeaf)
         {
             return reference.Structures.ToDictionary(static item => item.Name,
                 item => (GraphTypeOrigin?)new GraphTypeOrigin(item.Name, provider.Identity!,
                     item.CleanupMethod is not null ? provider.Identity : null), StringComparer.Ordinal);
         }
-        if (provider.HasOrigins)
-        {
-            var retained = provider.Origins.ToDictionary(static item => item.Name, StringComparer.Ordinal);
-            return reference.Structures.ToDictionary(static item => item.Name,
-                item => (GraphTypeOrigin?)(retained.TryGetValue(item.Name, out var origin)
-                    ? origin : throw new ModuleFormatException($"Missing graph origin for '{item.Name}'.")),
-                StringComparer.Ordinal);
-        }
-        var imported = ModuleCompiler.GetGraphImportedTypes(provider.Contract, consumer: false)
-            .ToHashSet(StringComparer.Ordinal);
+        var retained = provider.Origins.ToDictionary(static item => item.Name, StringComparer.Ordinal);
         return reference.Structures.ToDictionary(static item => item.Name,
-            item => imported.Contains(item.Name) ? null
-                : new GraphTypeOrigin(item.Name, provider.Identity!,
-                    item.CleanupMethod is not null ? provider.Identity : null), StringComparer.Ordinal);
+            item => (GraphTypeOrigin?)(retained.TryGetValue(item.Name, out var origin)
+                ? origin : throw new ModuleFormatException($"Missing graph origin for '{item.Name}'.")),
+            StringComparer.Ordinal);
     }
 
     private static GraphTypeOrigin[] CreateGraphOrigins(byte[] contract, bool consumer, string? identity,

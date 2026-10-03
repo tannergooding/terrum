@@ -227,13 +227,10 @@ public static partial class NativeModuleCompiler
                 throw new ModuleFormatException("Native set import mapping differs from provider declarations.");
             }
         }
-        if (set.HasImportUsage)
+        var used = set.Dependencies.SelectMany(static item => item.MachineImports).ToHashSet(StringComparer.Ordinal);
+        if (!ModuleCompiler.GetConsumerCallImports(set.Contract).All(used.Contains))
         {
-            var used = set.Dependencies.SelectMany(static item => item.MachineImports).ToHashSet(StringComparer.Ordinal);
-            if (!ModuleCompiler.GetConsumerCallImports(set.Contract).All(used.Contains))
-            {
-                throw new ModuleFormatException("Native set machine imports omit a retained semantic call.");
-            }
+            throw new ModuleFormatException("Native set machine imports omit a retained semantic call.");
         }
         NativeModuleImageValidator.Validate(set.Image, true, Imports(set), [], set.Policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(
@@ -243,9 +240,9 @@ public static partial class NativeModuleCompiler
     }
 
     private static Dictionary<string, IReadOnlyList<string>> Imports(SetPackage set) =>
-        set.Dependencies.Where(item => !set.HasImportUsage || item.MachineImports.Length != 0)
+        set.Dependencies.Where(static item => item.MachineImports.Length != 0)
             .ToDictionary(static item => DllName(item.Identity),
-                item => (IReadOnlyList<string>)(set.HasImportUsage ? item.MachineImports : item.Imports),
+                static item => (IReadOnlyList<string>)item.MachineImports,
                 StringComparer.Ordinal);
 
     private static byte[] WriteSet(Package[] providers, NativeRuntimePolicy policy, byte[] contract, byte[] image,
@@ -315,7 +312,7 @@ public static partial class NativeModuleCompiler
             throw new ModuleFormatException("Invalid native module set bounds.");
         }
         var bytes = (byte[])artifact.Clone();
-        if (!bytes.AsSpan(0, 4).SequenceEqual("TNSP"u8) || bytes[4] is not (1 or 2)
+        if (!bytes.AsSpan(0, 4).SequenceEqual("TNSP"u8) || bytes[4] != 2
             || bytes[5] is not ((byte)NativeRuntimePolicy.FailFast or (byte)NativeRuntimePolicy.CheckedExceptions)
             || !SHA256.HashData(bytes.AsSpan(0, bytes.Length - HashSize))
                 .AsSpan().SequenceEqual(bytes.AsSpan(bytes.Length - HashSize)))
@@ -384,21 +381,17 @@ public static partial class NativeModuleCompiler
                 }
                 imports[j] = name;
             }
-            var machineImports = imports;
-            if (bytes[4] == 2)
+            var actualCount = ReadGraphCount(bytes, ref at, 1024);
+            var machineImports = new string[actualCount];
+            for (var j = 0; j < actualCount; j++)
             {
-                var actualCount = ReadGraphCount(bytes, ref at, 1024);
-                machineImports = new string[actualCount];
-                for (var j = 0; j < actualCount; j++)
+                var name = ReadGraphString(bytes, ref at, 256);
+                if (!ValidGraphSymbol(name) || !imports.Contains(name, StringComparer.Ordinal)
+                    || (j != 0 && StringComparer.Ordinal.Compare(machineImports[j - 1], name) >= 0))
                 {
-                    var name = ReadGraphString(bytes, ref at, 256);
-                    if (!ValidGraphSymbol(name) || !imports.Contains(name, StringComparer.Ordinal)
-                        || (j != 0 && StringComparer.Ordinal.Compare(machineImports[j - 1], name) >= 0))
-                    {
-                        throw new ModuleFormatException("Invalid or unordered native set machine import.");
-                    }
-                    machineImports[j] = name;
+                    throw new ModuleFormatException("Invalid or unordered native set machine import.");
                 }
+                machineImports[j] = name;
             }
             dependencies[i] = new SetDependency(identity, imports) {
                 MachineImports = machineImports,
@@ -414,26 +407,20 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native set and semantic runtime policies differ.");
         }
-        if (bytes[4] == 2
-            && (!ModuleCompiler.GetConsumerSetDeclarations(contract).ToHashSet(StringComparer.Ordinal)
-                    .SetEquals(dependencies.SelectMany(static item => item.Imports))
-                || !ModuleCompiler.GetConsumerCallImports(contract).All(
-                    name => dependencies.Any(item => item.MachineImports.Contains(name, StringComparer.Ordinal)))))
+        if (!ModuleCompiler.GetConsumerSetDeclarations(contract).ToHashSet(StringComparer.Ordinal)
+                .SetEquals(dependencies.SelectMany(static item => item.Imports))
+            || !ModuleCompiler.GetConsumerCallImports(contract).All(
+                name => dependencies.Any(item => item.MachineImports.Contains(name, StringComparer.Ordinal))))
         {
             throw new ModuleFormatException("Native set declaration or machine imports differ from semantic contract.");
         }
         return new SetPackage((NativeRuntimePolicy)bytes[5], contract,
-            bytes.AsSpan(at + contractLength, imageLength).ToArray(), dependencies) {
-            HasImportUsage = bytes[4] == 2,
-        };
+            bytes.AsSpan(at + contractLength, imageLength).ToArray(), dependencies);
     }
 
     private sealed record SetDependency(string Identity, string[] Imports)
     {
         public string[] MachineImports { get; init; } = [];
     }
-    private sealed record SetPackage(NativeRuntimePolicy Policy, byte[] Contract, byte[] Image, SetDependency[] Dependencies)
-    {
-        public bool HasImportUsage { get; init; }
-    }
+    private sealed record SetPackage(NativeRuntimePolicy Policy, byte[] Contract, byte[] Image, SetDependency[] Dependencies);
 }

@@ -138,7 +138,7 @@ public sealed class NativeManagedNodeModuleTests
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(downgraded));
 
         var import = (byte[])package.Clone();
-        var imageOffset = 18 + import[7] + import[8]
+        var imageOffset = 18 + import[7] + import[8] + 2
             + BinaryPrimitives.ReadInt32LittleEndian(import.AsSpan(10, 4));
         var heapName = import.AsSpan(imageOffset,
             BinaryPrimitives.ReadInt32LittleEndian(import.AsSpan(14, 4))).IndexOf("HeapAlloc\0"u8);

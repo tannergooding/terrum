@@ -23,7 +23,6 @@ public static partial class NativeModuleCompiler
         string[] Exports, GraphDependency[] Dependencies, byte[] Contract, byte[] Image)
     {
         public bool IsLeaf { get; init; }
-        public bool HasOrigins { get; init; }
         public GraphTypeOrigin[] Origins { get; init; } = [];
     }
 
@@ -68,7 +67,7 @@ public static partial class NativeModuleCompiler
             throw new ModuleFormatException("Native graph package has invalid bounds.");
         }
         var bytes = (byte[])artifact.Clone();
-        if (!bytes.AsSpan(0, 4).SequenceEqual("TNGP"u8) || bytes[4] is not (1 or 2)
+        if (!bytes.AsSpan(0, 4).SequenceEqual("TNGP"u8) || bytes[4] != 2
             || bytes[5] is not (1 or 2)
             || bytes[6] is not ((byte)NativeRuntimePolicy.FailFast or (byte)NativeRuntimePolicy.CheckedExceptions)
             || !SHA256.HashData(bytes.AsSpan(0, bytes.Length - HashSize))
@@ -109,10 +108,6 @@ public static partial class NativeModuleCompiler
                 throw new ModuleFormatException("Duplicate or unordered graph dependency identity.");
             }
             var importCount = ReadGraphCount(bytes, ref at, 1024);
-            if (importCount == 0 && bytes[4] == 1)
-            {
-                throw new ModuleFormatException("Graph dependency must supply an import.");
-            }
             var declarations = new string[importCount];
             for (var j = 0; j < declarations.Length; j++)
             {
@@ -124,21 +119,17 @@ public static partial class NativeModuleCompiler
                 }
                 declarations[j] = name;
             }
-            var imports = declarations;
-            if (bytes[4] == 2)
+            var actualCount = ReadGraphCount(bytes, ref at, 1024);
+            var imports = new string[actualCount];
+            for (var j = 0; j < imports.Length; j++)
             {
-                var actualCount = ReadGraphCount(bytes, ref at, 1024);
-                imports = new string[actualCount];
-                for (var j = 0; j < imports.Length; j++)
+                var name = ReadGraphString(bytes, ref at, 256);
+                if (!ValidGraphSymbol(name) || !declarations.Contains(name, StringComparer.Ordinal)
+                    || (j != 0 && StringComparer.Ordinal.Compare(imports[j - 1], name) >= 0))
                 {
-                    var name = ReadGraphString(bytes, ref at, 256);
-                    if (!ValidGraphSymbol(name) || !declarations.Contains(name, StringComparer.Ordinal)
-                        || (j != 0 && StringComparer.Ordinal.Compare(imports[j - 1], name) >= 0))
-                    {
-                        throw new ModuleFormatException("Graph machine import is not a declared dependency.");
-                    }
-                    imports[j] = name;
+                    throw new ModuleFormatException("Graph machine import is not a declared dependency.");
                 }
+                imports[j] = name;
             }
             dependencies[i] = new GraphDependency(dependencyName, declarations, imports);
         }
@@ -157,34 +148,30 @@ public static partial class NativeModuleCompiler
             }
             exports[i] = name;
         }
-        var origins = Array.Empty<GraphTypeOrigin>();
-        if (bytes[4] == 2)
+        var origins = new GraphTypeOrigin[ReadGraphCount(bytes, ref at, 1024)];
+        for (var i = 0; i < origins.Length; i++)
         {
-            origins = new GraphTypeOrigin[ReadGraphCount(bytes, ref at, 1024)];
-            for (var i = 0; i < origins.Length; i++)
+            var name = ReadGraphString(bytes, ref at, 256);
+            var owner = ReadGraphString(bytes, ref at, 64);
+            var cleanup = ReadGraphCount(bytes, ref at, 64);
+            string? cleanupOwner = null;
+            if (cleanup != 0)
             {
-                var name = ReadGraphString(bytes, ref at, 256);
-                var owner = ReadGraphString(bytes, ref at, 64);
-                var cleanup = ReadGraphCount(bytes, ref at, 64);
-                string? cleanupOwner = null;
-                if (cleanup != 0)
+                if ((long)at + cleanup > bytes.Length - HashSize)
                 {
-                    if ((long)at + cleanup > bytes.Length - HashSize)
-                    {
-                        throw new ModuleFormatException("Truncated graph cleanup owner.");
-                    }
-                    cleanupOwner = Encoding.ASCII.GetString(bytes, at, cleanup);
-                    at += cleanup;
+                    throw new ModuleFormatException("Truncated graph cleanup owner.");
                 }
-                if (!ValidGraphSymbol(name)
-                    || (owner != "@" && !ValidIdentity(owner))
-                    || (cleanupOwner is not null && cleanupOwner != "@" && !ValidIdentity(cleanupOwner))
-                    || (i != 0 && StringComparer.Ordinal.Compare(origins[i - 1].Name, name) >= 0))
-                {
-                    throw new ModuleFormatException("Invalid graph type origin metadata.");
-                }
-                origins[i] = new GraphTypeOrigin(name, owner, cleanupOwner);
+                cleanupOwner = Encoding.ASCII.GetString(bytes, at, cleanup);
+                at += cleanup;
             }
+            if (!ValidGraphSymbol(name)
+                || (owner != "@" && !ValidIdentity(owner))
+                || (cleanupOwner is not null && cleanupOwner != "@" && !ValidIdentity(cleanupOwner))
+                || (i != 0 && StringComparer.Ordinal.Compare(origins[i - 1].Name, name) >= 0))
+            {
+                throw new ModuleFormatException("Invalid graph type origin metadata.");
+            }
+            origins[i] = new GraphTypeOrigin(name, owner, cleanupOwner);
         }
         if ((long)at + contractLength + imageLength + HashSize != bytes.Length)
         {
@@ -193,14 +180,13 @@ public static partial class NativeModuleCompiler
         var contract = bytes.AsSpan(at, contractLength).ToArray();
         var policy = (NativeRuntimePolicy)bytes[6];
         var contractPolicy = consumer ? ModuleCompiler.ReadNativeProfile(contract, true).RuntimePolicy
-            : ModuleCompiler.CreateGraphReference(contract, exports, allowImportedCleanup: bytes[4] == 2).RuntimePolicy;
+            : ModuleCompiler.CreateGraphReference(contract, exports, allowImportedCleanup: true).RuntimePolicy;
         if (contractPolicy != (BoundRuntimePolicy)policy)
         {
             throw new ModuleFormatException("Graph package and semantic runtime policies differ.");
         }
         var image = bytes.AsSpan(at + contractLength, imageLength).ToArray();
         var package = new GraphPackage(consumer, identity, policy, exports, dependencies, contract, image) {
-            HasOrigins = bytes[4] == 2,
             Origins = origins,
         };
         var imported = consumer ? ModuleCompiler.GetConsumerSetDeclarations(contract)
@@ -210,39 +196,36 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Graph declaration mapping differs from semantic declarations.");
         }
-        if (package.HasOrigins)
+        var structures = ModuleCompiler.GetGraphRetainedTypes(contract, consumer);
+        if (structures.Length != origins.Length
+            || structures.Any(item => {
+                var origin = Array.Find(origins, candidate => candidate.Name == item.Name);
+                return origin is null || (item.CleanupMethod is not null ? origin.CleanupIdentity is null
+                    : origin.CleanupIdentity is not null);
+            }))
         {
-            var structures = ModuleCompiler.GetGraphRetainedTypes(contract, consumer);
-            if (structures.Length != origins.Length
-                || structures.Any(item => {
-                    var origin = Array.Find(origins, candidate => candidate.Name == item.Name);
-                    return origin is null || (item.CleanupMethod is not null ? origin.CleanupIdentity is null
-                        : origin.CleanupIdentity is not null);
-                }))
+            throw new ModuleFormatException("Graph origin table differs from retained semantic types.");
+        }
+        var importedTypes = ModuleCompiler.GetGraphImportedTypes(contract, consumer)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var origin in origins)
+        {
+            var local = consumer ? "@" : identity;
+            if (importedTypes.Contains(origin.Name)
+                ? !dependencies.Any(item => item.Identity == origin.Identity)
+                : origin.Identity != local)
             {
-                throw new ModuleFormatException("Graph origin table differs from retained semantic types.");
+                throw new ModuleFormatException("Graph type origin has no declared owner.");
             }
-            var importedTypes = ModuleCompiler.GetGraphImportedTypes(contract, consumer)
-                .ToHashSet(StringComparer.Ordinal);
-            foreach (var origin in origins)
+            if (origin.CleanupIdentity is not null && origin.CleanupIdentity != origin.Identity)
             {
-                var local = consumer ? "@" : identity;
-                if (importedTypes.Contains(origin.Name)
-                    ? !dependencies.Any(item => item.Identity == origin.Identity)
-                    : origin.Identity != local)
-                {
-                    throw new ModuleFormatException("Graph type origin has no declared owner.");
-                }
-                if (origin.CleanupIdentity is not null && origin.CleanupIdentity != origin.Identity)
-                {
-                    throw new ModuleFormatException("Graph cleanup owner differs from type origin.");
-                }
+                throw new ModuleFormatException("Graph cleanup owner differs from type origin.");
             }
-            if (dependencies.Any(item => item.Declarations.Length == 0
-                && !origins.Any(origin => origin.Identity == item.Identity)))
-            {
-                throw new ModuleFormatException("Graph dependency supplies neither declarations nor types.");
-            }
+        }
+        if (dependencies.Any(item => item.Declarations.Length == 0
+            && !origins.Any(origin => origin.Identity == item.Identity)))
+        {
+            throw new ModuleFormatException("Graph dependency supplies neither declarations nor types.");
         }
         NativeModuleImageValidator.Validate(image, consumer, GraphImports(package), exports, policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(consumer

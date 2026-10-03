@@ -65,6 +65,25 @@ public sealed class NativeGraphTests
         return result;
     }
 
+    [Fact]
+    public void GraphPackagesUseCurrentVersionAndRejectPreviousVersion()
+    {
+        var leaf = Leaf("[NoThrow] public int32 Leaf() { return 40; }");
+        var middle = Middle("public int32 Middle() { return Leaf() + 1; }", leaf);
+        var root = Consumer(middle);
+        Assert.Equal(2, middle[4]);
+        Assert.Equal(2, root[4]);
+
+        foreach (var artifact in new[] { middle, root })
+        {
+            var previousVersion = (byte[])artifact.Clone();
+            previousVersion[4] = 1;
+            SHA256.HashData(previousVersion.AsSpan(0, previousVersion.Length - 32))
+                .CopyTo(previousVersion, previousVersion.Length - 32);
+            _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(previousVersion));
+        }
+    }
+
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]

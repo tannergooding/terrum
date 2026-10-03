@@ -579,10 +579,11 @@ the package layer below adds that check. Neither provides a multi-provider
 contract linker, live patching or hot-unload protocol.
 
 `NativeModuleCompiler` packages each separately compiled native producer DLL
-or consumer EXE with its corresponding semantic `.trm` contract. Producer
-containers remain version 1; new consumer containers use version 2, and version
-1 consumers remain readable. The container records the exact native profile
-(native-10 through native-17), runtime policy,
+or consumer EXE with its corresponding semantic `.trm` contract. Producer and
+consumer containers use version 2 and include a machine-import table; producer
+tables are empty, while consumer tables record imports reported by that
+emission. The reader accepts only version 2. The container records the exact
+native profile (native-10 through native-17), runtime policy,
 single explicit provider identity and the exact PE and semantic bytes. The
 identity is 1–64 ASCII letters, digits or underscores, beginning with a
 letter; its loader basename is `terrum-<identity>.dll`. Artifacts are bounded
@@ -607,12 +608,11 @@ unchanged when a compatible producer package is selected for another
 launch. Version 2 records actual imported targets from the same encoder's
 fixups alongside the semantic contract. Validation requires those targets to
 belong to retained declarations, include semantic calls, and exactly match
-the persisted PE's IAT. Version 1 retains its original semantic-call-derived
-validation. Neither path derives imports from names in the replacement's
-linked function table; a replacement can
-add exports without changing a consumer that has an unrelated local function
-of the same name. Unused declarations retain semantic contracts but need no
-IAT cell. Bounded PE32+ structure checks require the declared exports
+the persisted PE's IAT. Validation does not derive imports from names in the
+replacement's linked function table; a replacement can add exports without
+changing a consumer that has an unrelated local function of the same name.
+Unused declarations retain semantic contracts but need no IAT cell. Bounded
+PE32+ structure checks require the declared exports
 and imports, x64 section and directory bounds, no CLR metadata, no unexpected
 initialization or dependency, and read-only executable text. `RunAsync`
 checks both packages before staging their exact persisted images under a

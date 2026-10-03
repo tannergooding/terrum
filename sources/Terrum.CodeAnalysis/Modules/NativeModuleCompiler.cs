@@ -28,7 +28,7 @@ public sealed record NativeModuleInfo(string Identity, bool IsConsumer, string I
 /// <summary>Creates and checks single-provider Windows x64 native packages; this is not an authenticated code loader.</summary>
 public static partial class NativeModuleCompiler
 {
-    private const int Version = 1;
+    private const int Version = 2;
     private const int MaximumBytes = 16 * 1024 * 1024;
     private const int MaximumContractBytes = 4 * 1024 * 1024;
     private const int HeaderSize = 18;
@@ -243,8 +243,7 @@ public static partial class NativeModuleCompiler
 
     private static void ValidateConsumerImage(Package consumer)
     {
-        IReadOnlyList<string> imports = consumer.MachineImports is string[] machine
-            ? machine : ModuleCompiler.GetConsumerCallImports(consumer.Contract);
+        IReadOnlyList<string> imports = consumer.MachineImports;
         var groups = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         if (imports.Count != 0)
         {
@@ -283,26 +282,30 @@ public static partial class NativeModuleCompiler
         CheckPolicy(policy);
         var name = Encoding.ASCII.GetBytes(identity);
         var profile = Encoding.ASCII.GetBytes(ModuleCompiler.GetNativeProfileVersion(contract, isConsumer));
-        var importTable = Array.Empty<byte>();
+        if (isConsumer != (machineImports is not null))
+        {
+            throw new ModuleFormatException("Native package kind and machine import table differ.");
+        }
+        var imports = machineImports ?? [];
         if (machineImports is not null)
         {
-            if (!isConsumer || machineImports.Length > 1024
+            if (machineImports.Length > 1024
                 || !machineImports.ToHashSet(StringComparer.Ordinal).IsSubsetOf(
                     ModuleCompiler.GetConsumerSetDeclarations(contract)))
             {
                 throw new ModuleFormatException("Native consumer machine imports differ from retained declarations.");
             }
-            using var stream = new MemoryStream();
-            using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
-            {
-                writer.Write(checked((ushort)machineImports.Length));
-                foreach (var imported in machineImports.Order(StringComparer.Ordinal))
-                {
-                    PutGraphString(writer, imported);
-                }
-            }
-            importTable = stream.ToArray();
         }
+        using var importStream = new MemoryStream();
+        using (var importWriter = new BinaryWriter(importStream, Encoding.UTF8, leaveOpen: true))
+        {
+            importWriter.Write(checked((ushort)imports.Length));
+            foreach (var imported in imports.Order(StringComparer.Ordinal))
+            {
+                PutGraphString(importWriter, imported);
+            }
+        }
+        var importTable = importStream.ToArray();
         var length = checked(HeaderSize + name.Length + profile.Length + importTable.Length
             + contract.Length + image.Length + HashSize);
         if (contract.Length is < 1 or > MaximumContractBytes || image.Length == 0 || length > MaximumBytes)
@@ -311,7 +314,7 @@ public static partial class NativeModuleCompiler
         }
         var result = new byte[length];
         "TNPK"u8.CopyTo(result);
-        result[4] = (byte)(machineImports is null ? Version : 2);
+        result[4] = Version;
         result[5] = isConsumer ? (byte)2 : (byte)1;
         result[6] = (byte)policy;
         result[7] = (byte)name.Length;
@@ -336,7 +339,7 @@ public static partial class NativeModuleCompiler
         }
         var bytes = (byte[])artifact.Clone();
         if (!bytes.AsSpan(0, 4).SequenceEqual("TNPK"u8)
-            || bytes[4] is not (Version or 2) || (bytes[4] == 2 && bytes[5] != 2)
+            || bytes[4] != Version
             || bytes[5] is not (1 or 2)
             || bytes[6] is not ((byte)NativeRuntimePolicy.FailFast or (byte)NativeRuntimePolicy.CheckedExceptions)
             || bytes[9] != 0)
@@ -350,7 +353,7 @@ public static partial class NativeModuleCompiler
         var required = (long)HeaderSize + nameLength + profileLength + contractLength + imageLength + HashSize;
         if (nameLength is < 1 or > 64 || profileLength is < 1 or > 32
             || contractLength is < 1 or > MaximumContractBytes || imageLength < 1
-            || (bytes[4] == Version ? required != bytes.Length : required + 2 > bytes.Length)
+            || required + 2 > bytes.Length
             || !SHA256.HashData(bytes.AsSpan(0, bytes.Length - HashSize))
                 .AsSpan().SequenceEqual(bytes.AsSpan(bytes.Length - HashSize)))
         {
@@ -363,25 +366,22 @@ public static partial class NativeModuleCompiler
             throw new ModuleFormatException("Invalid provider identity.");
         }
         var at = HeaderSize + nameLength + profileLength;
-        string[]? machineImports = null;
-        if (bytes[4] == 2)
+        var importCount = ReadGraphCount(bytes, ref at, 1024);
+        var machineImports = new string[importCount];
+        for (var index = 0; index < importCount; index++)
         {
-            var count = ReadGraphCount(bytes, ref at, 1024);
-            machineImports = new string[count];
-            for (var index = 0; index < count; index++)
+            var imported = ReadGraphString(bytes, ref at, 256);
+            if (!ValidGraphSymbol(imported)
+                || (index != 0 && StringComparer.Ordinal.Compare(machineImports[index - 1], imported) >= 0))
             {
-                var imported = ReadGraphString(bytes, ref at, 256);
-                if (!ValidGraphSymbol(imported)
-                    || (index != 0 && StringComparer.Ordinal.Compare(machineImports[index - 1], imported) >= 0))
-                {
-                    throw new ModuleFormatException("Duplicate, unordered or invalid native machine import.");
-                }
-                machineImports[index] = imported;
+                throw new ModuleFormatException("Duplicate, unordered or invalid native machine import.");
             }
-            if ((long)at + contractLength + imageLength + HashSize != bytes.Length)
-            {
-                throw new ModuleFormatException("Invalid native machine import table bounds.");
-            }
+            machineImports[index] = imported;
+        }
+        if ((bytes[5] == 1 && machineImports.Length != 0)
+            || (long)at + contractLength + imageLength + HashSize != bytes.Length)
+        {
+            throw new ModuleFormatException("Invalid native machine import table bounds.");
         }
         var contract = bytes.AsSpan(at, contractLength).ToArray();
         var (contractProfile, contractPolicy) = ModuleCompiler.ReadNativeProfile(contract, bytes[5] == 2);
@@ -389,7 +389,7 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native package and semantic contract profiles or runtime policies differ.");
         }
-        if (machineImports is not null
+        if (bytes[5] == 2
             && (!machineImports.ToHashSet(StringComparer.Ordinal).IsSubsetOf(
                     ModuleCompiler.GetConsumerSetDeclarations(contract))
                 || !ModuleCompiler.GetConsumerCallImports(contract).All(
@@ -429,6 +429,6 @@ public static partial class NativeModuleCompiler
 
     private sealed record Package(bool IsConsumer, string Identity, NativeRuntimePolicy Policy, byte[] Contract, byte[] Image, string Profile)
     {
-        public string[]? MachineImports { get; init; }
+        public string[] MachineImports { get; init; } = [];
     }
 }

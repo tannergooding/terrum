@@ -74,10 +74,6 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleContractException("Selected graph JIT runtime policy differs from persisted consumer.");
         }
-        if (!root.HasOrigins)
-        {
-            throw new ModuleContractException("Native graph JIT requires a v2 root with recorded machine imports.");
-        }
         _ = CheckGraph(root, providers);
         var indexed = selected.Select(bytes => (Bytes: bytes, Package: ReadGraphPackage(bytes)))
             .ToDictionary(static item => item.Package.Identity!, StringComparer.Ordinal);
@@ -209,10 +205,6 @@ public static partial class NativeModuleCompiler
         if (root.Policy != runtimePolicy)
         {
             throw new ModuleContractException("Native graph JIT runtime policy differs from persisted consumer.");
-        }
-        if (!root.HasOrigins)
-        {
-            throw new ModuleContractException("Native graph JIT requires a v2 root with recorded machine imports.");
         }
         var order = CheckGraph(root, providers);
         var direct = ResolveDirect(root, providers.ToDictionary(static item => item.Identity!,

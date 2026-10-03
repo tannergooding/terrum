@@ -95,8 +95,8 @@ Selected leaf and intermediate DLL images remain byte-for-byte unchanged.
 The JIT worker uses its application directory as its current directory and
 absolute paths for staged inputs, so a retained worker-directory handle cannot
 prevent removal of the transient staging directory after execution.
-JIT requires a v2 root with explicit machine-import metadata; older graph
-packages remain readable and executable by the AOT runner.
+The graph reader accepts only version 2, and both JIT and AOT execution require
+its explicit machine-import metadata.
 The worker loads DLLs by full staged path in dependency order, registers
 unwind information for root code, and unloads DLLs after root code and unwind
 memory are released. This requires Windows x64. On CET-enforcing Windows, the
@@ -114,10 +114,9 @@ in-process replacement of live code or a native-code sandbox.
 This graph is acyclic and explicitly bounded. It does not claim transitive
 version roll-forward, hot servicing, resilient layouts, the future general
 `TRRM` semantic-IL format, or replacement of already-emitted machine code by
-the semantic JIT. Existing
-single-provider and independent leaf-set APIs still accept their v1 packages;
-new consumer packages use v2 metadata to record emitted imports separately
-from retained declarations. Existing leaf producer packages remain v1.
+the semantic JIT. Single-provider, leaf-set and graph package readers accept
+only version 2; version 2 metadata records emitted imports separately from
+retained declarations.
 
 An implementation may use lexical readonly views over an owned native buffer
 without changing its exported declaration. Such a producer carries the
@@ -277,7 +276,7 @@ foreach ($policy in $policies) {
 }
 ```
 
-Graph v2 packages carry the declared origin and cleanup owner of every
+Graph version 2 packages carry the declared origin and cleanup owner of every
 retained type, separately from the actual PE imports reported by the same
 native emission. A graph DLL may return or bool/out-publish a dependency-owned
 Copy or unique value without exporting its cleanup from the wrong DLL. Select
@@ -285,9 +284,7 @@ the origin provider explicitly alongside the intermediate when compiling a
 caller that uses the shared type; duplicate declarations merge only with the
 same origin, compatible fixed layout and cleanup. Unrelated equal-named
 types remain ambiguous. A dependency with no PE calls still needs a retained
-declaration or imported type to justify its selection. Legacy v1 graphs remain
-readable, but their imported Copy type origins cannot be inferred from names;
-they cannot participate in a same-origin merge without v2 provenance.
+declaration or imported type to justify its selection.
 
 The following source-to-DLL-to-EXE example owns two leaf-created values in
 the root and drops them using the leaf's cleanup. Its middle DLL and root EXE

@@ -262,7 +262,7 @@ public sealed partial class NativeManagedClassModuleTests
         var native = NativeModuleCompiler.CreateProducer(Compile(Sample("managed-copy-class-leaf"),
             NativeRuntimePolicy.FailFast), ["Leaf"], "NodeB", NativeRuntimePolicy.FailFast);
         var invalidPackage = (byte[])native.Clone();
-        var contractOffset = 18 + invalidPackage[7] + invalidPackage[8];
+        var contractOffset = 18 + invalidPackage[7] + invalidPackage[8] + 2;
         Assert.Equal(contract.Length, BinaryPrimitives.ReadInt32LittleEndian(invalidPackage.AsSpan(10, 4)));
         malformed = (byte[])contract.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(offset, 4), 4);
@@ -389,7 +389,7 @@ public sealed partial class NativeManagedClassModuleTests
         Rehash(downgraded);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(downgraded));
 
-        var imageStart = 18 + package[7] + package[8]
+        var imageStart = 18 + package[7] + package[8] + 2
             + BinaryPrimitives.ReadInt32LittleEndian(package.AsSpan(10, 4));
         var invalidData = (byte[])package.Clone();
         var pe = imageStart + BinaryPrimitives.ReadInt32LittleEndian(invalidData.AsSpan(imageStart + 0x3C, 4));

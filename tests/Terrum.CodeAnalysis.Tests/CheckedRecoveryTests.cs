@@ -323,7 +323,8 @@ public sealed class CheckedRecoveryTests
         var original = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program),
             ["Divide"], "Scoped", NativeRuntimePolicy.CheckedExceptions);
         var changed = (byte[])original.Clone();
-        var peImage = 18 + changed[7] + changed[8] + BinaryPrimitives.ReadInt32LittleEndian(changed.AsSpan(10, 4));
+        var peImage = 18 + changed[7] + changed[8] + 2
+            + BinaryPrimitives.ReadInt32LittleEndian(changed.AsSpan(10, 4));
         var pe = BinaryPrimitives.ReadInt32LittleEndian(changed.AsSpan(peImage + 0x3C, 4));
         var xdata = -1;
         for (var index = 0; index < 5; index++)

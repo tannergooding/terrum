@@ -41,8 +41,8 @@ to inspect the child status in PowerShell. Compilation never runs the consumer.
 Output artifacts are atomically replaced only after successful compilation.
 
 The `TNSP` version 2 container records retained declaration ownership separately
-from actual machine imports; version 1 remains readable. Actual imports come
-from the same emission's fixups, including implicit recursive cleanup calls.
+from actual machine imports; the reader accepts only version 2. Actual imports
+come from the same emission's fixups, including implicit recursive cleanup calls.
 They must belong to the selected provider's retained declarations, cover
 semantic calls, and exactly match the persisted PE's import table. Keeping a
 declaration for type or cleanup contracts does not itself create an IAT entry.

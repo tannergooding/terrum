@@ -85,6 +85,7 @@ public sealed class NativeModuleSetsTests
         var alpha = Producer(Alpha, "Alpha", "First");
         var beta = Producer(Beta, "Beta", "Second");
         var consumer = MakeConsumer(alpha, beta);
+        Assert.Equal(2, consumer[4]);
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(consumer, [alpha]));
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(consumer, [alpha, alpha]));
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateReferenceSet([
@@ -107,6 +108,8 @@ public sealed class NativeModuleSetsTests
         var tampered = consumer.ToArray();
         tampered[^1] ^= 1;
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateConsumerSet(tampered, [alpha, beta]));
+        var previousVersion = WithUpdatedSetChecksum(consumer, bytes => bytes[4] = 1);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectConsumerSet(previousVersion));
         var version = WithUpdatedSetChecksum(consumer, bytes => bytes[4] = 3);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectConsumerSet(version));
         var mapping = WithUpdatedSetChecksum(consumer, bytes => {

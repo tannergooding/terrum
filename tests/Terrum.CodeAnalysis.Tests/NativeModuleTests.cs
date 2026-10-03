@@ -81,6 +81,40 @@ public sealed class NativeModuleTests
     private static byte[] ConsumerPackage(byte[] producer, string source = Consumer) =>
         NativeModuleCompiler.CreateConsumer(CompileConsumer(source, producer), producer, NativeRuntimePolicy.FailFast);
 
+    private static int PackageContractOffset(byte[] artifact)
+    {
+        var at = 18 + artifact[7] + artifact[8];
+        var count = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+        at += 2;
+        for (var index = 0; index < count; index++)
+        {
+            var length = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2 + length;
+        }
+        return at;
+    }
+
+    private static int PackageImageOffset(byte[] artifact) => PackageContractOffset(artifact)
+        + BinaryPrimitives.ReadInt32LittleEndian(artifact.AsSpan(10, 4));
+
+    [Fact]
+    public void NativePackagesUseCurrentVersionAndRejectPreviousVersion()
+    {
+        var producer = Producer();
+        var consumer = ConsumerPackage(producer);
+        Assert.Equal(2, producer[4]);
+        Assert.Equal(2, consumer[4]);
+
+        foreach (var artifact in new[] { producer, consumer })
+        {
+            var previousVersion = (byte[])artifact.Clone();
+            previousVersion[4] = 1;
+            SHA256.HashData(previousVersion.AsSpan(0, previousVersion.Length - 32))
+                .CopyTo(previousVersion, previousVersion.Length - 32);
+            _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(previousVersion));
+        }
+    }
+
     [Fact]
     public async Task SamePersistedConsumerExecutesCompatibleProvidersWithoutReemissionAsync()
     {
@@ -164,8 +198,7 @@ public sealed class NativeModuleTests
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(
             RedirectFirstExport(original, lastRange: false)));
         var shortSource = (byte[])original.Clone();
-        var image = 18 + shortSource[7] + shortSource[8]
-            + BinaryPrimitives.ReadInt32LittleEndian(shortSource.AsSpan(10, 4));
+        var image = PackageImageOffset(shortSource);
         using var reader = new PEReader(new MemoryStream(shortSource, image,
             BinaryPrimitives.ReadInt32LittleEndian(shortSource.AsSpan(14, 4))));
         var pdata = Assert.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".pdata");
@@ -179,8 +212,7 @@ public sealed class NativeModuleTests
     private static byte[] RedirectFirstExport(byte[] original, bool lastRange)
     {
         var changed = (byte[])original.Clone();
-        var image = 18 + changed[7] + changed[8]
-            + BinaryPrimitives.ReadInt32LittleEndian(changed.AsSpan(10, 4));
+        var image = PackageImageOffset(changed);
         using var reader = new PEReader(new MemoryStream(changed, image,
             BinaryPrimitives.ReadInt32LittleEndian(changed.AsSpan(14, 4))));
         var header = Assert.IsType<PEHeader>(reader.PEHeaders.PEHeader);
@@ -281,12 +313,11 @@ public sealed class NativeModuleTests
         Rehash(wrongProfile);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongProfile));
         var wrongContract = (byte[])original.Clone();
-        wrongContract[18 + wrongContract[7] + wrongContract[8]] ^= 1;
+        wrongContract[PackageContractOffset(wrongContract)] ^= 1;
         Rehash(wrongContract);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(consumer, wrongContract));
         var wrongImage = (byte[])original.Clone();
-        var image = 18 + wrongImage[7] + wrongImage[8]
-            + BinaryPrimitives.ReadInt32LittleEndian(wrongImage.AsSpan(10, 4));
+        var image = PackageImageOffset(wrongImage);
         var pe = BinaryPrimitives.ReadInt32LittleEndian(wrongImage.AsSpan(image + 0x3C, 4));
         wrongImage[image + pe + 24 + 16] = 1; // DLL must have no entry point
         Rehash(wrongImage);
@@ -299,8 +330,7 @@ public sealed class NativeModuleTests
         Rehash(wrongExport);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(consumer, wrongExport));
         var wrongImport = (byte[])consumer.Clone();
-        var importImage = 18 + wrongImport[7] + wrongImport[8]
-            + BinaryPrimitives.ReadInt32LittleEndian(wrongImport.AsSpan(10, 4));
+        var importImage = PackageImageOffset(wrongImport);
         var importName = wrongImport.AsSpan(importImage,
             BinaryPrimitives.ReadInt32LittleEndian(wrongImport.AsSpan(14, 4))).IndexOf("terrum-Example.dll\0"u8);
         Assert.True(importName >= 0);
