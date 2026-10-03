@@ -16,6 +16,11 @@ public sealed partial class CliTests
 {
     [Theory]
     [InlineData("public int32 Main() { init int32 value; if (value is init) { return 0; } value = 42; return value is init ? value : 0; }", 80, 42, 2)]
+    [InlineData("public int32 Main() { init uint32 value; return value is init ? 42 : 0; }", 80, 0, 1)]
+    [InlineData("public int32 Main() { init int64 value; return value is init ? 42 : 0; }", 80, 0, 1)]
+    [InlineData("public int32 Main() { init uint64 value; return value is init ? 42 : 0; }", 80, 0, 1)]
+    [InlineData("public int32 Main() { init bool value; return value is init ? 42 : 0; }", 80, 0, 1)]
+    [InlineData("public int32 Main() { init char16 value; return value is init ? 42 : 0; }", 80, 0, 1)]
     [InlineData("""
         public int32 Main() => Ready(42) ? 42 : 0;
         bool Ready(int32 value)
