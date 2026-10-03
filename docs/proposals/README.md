@@ -23,6 +23,9 @@ approved.
 - [Reference-call metadata](reference-call-metadata.md) records the proposed
   first dependency and caller-safety metadata slice for general cross-call
   references; it does not change the accepted source contracts.
+- [Span-backed token cursor](span-backed-token-cursor.md) records the open
+  backing, capture, indexing and construction contracts needed for the
+  existing zero-copy self-host cursor candidate.
 - [Checked-exception TRRM](checked-exception-trrm.md) records the unapproved
   exceptional-control-flow contract needed before source-free checked-exception
   Bodies can be considered.
