@@ -2227,33 +2227,40 @@ public static class SemanticVerifier
                         throw Invalid();
                     }
                 }
+                var parameterOffset = function.IsConstructor ? 1 : 0;
+                var hasOutParameter = false;
+                for (var i = parameterOffset; i < function.ParameterCount + parameterOffset; i++)
+                {
+                    hasOutParameter |= function.Variables[i].IsOut;
+                }
                 if (function.ReturnType == PrimitiveType.Bool && result.Value is BoundExpression boolResult)
                 {
-                    foreach (var predicate in new[] { true, false })
+                    if (cleanups.Count != 0 || hasOutParameter)
                     {
-                        if (!CanBe(boolResult, predicate, ref remaining, initialized))
+                        foreach (var predicate in new[] { true, false })
                         {
-                            continue;
-                        }
-                        var returnState = Outcome(boolResult, beforeReturn, predicate, ref remaining);
-                        var returnMasks = (uint[])fieldMasks.Clone();
-                        MarkOutMasks(returnState, returnMasks, function, program);
-                        var returnDeclarations = new HashSet<int>(declarations);
-                        for (var index = cleanups.Count - 1; index >= 0; index--)
-                        {
-                            VerifyCleanup(cleanups[index].Body, returnState, returnMasks, returnDeclarations,
-                                function, program, ref remaining, depth + 1, reachable, inUnsafe,
-                                cleanups[index].Visible, successfulReturn: predicate);
-                        }
-                        if (predicate)
-                        {
-                            var parameterOffset = function.IsConstructor ? 1 : 0;
-                            for (var i = parameterOffset;
-                                i < function.ParameterCount + parameterOffset; i++)
+                            if (!CanBe(boolResult, predicate, ref remaining, initialized))
                             {
-                                if (function.Variables[i].IsOut && !returnState[i])
+                                continue;
+                            }
+                            var returnState = Outcome(boolResult, beforeReturn, predicate, ref remaining);
+                            var returnMasks = (uint[])fieldMasks.Clone();
+                            MarkOutMasks(returnState, returnMasks, function, program);
+                            var returnDeclarations = new HashSet<int>(declarations);
+                            for (var index = cleanups.Count - 1; index >= 0; index--)
+                            {
+                                VerifyCleanup(cleanups[index].Body, returnState, returnMasks, returnDeclarations,
+                                    function, program, ref remaining, depth + 1, reachable, inUnsafe,
+                                    cleanups[index].Visible, successfulReturn: predicate);
+                            }
+                            if (predicate)
+                            {
+                                for (var i = parameterOffset; i < function.ParameterCount + parameterOffset; i++)
                                 {
-                                    throw Invalid(result.Span);
+                                    if (function.Variables[i].IsOut && !returnState[i])
+                                    {
+                                        throw Invalid(result.Span);
+                                    }
                                 }
                             }
                         }
@@ -2261,12 +2268,6 @@ public static class SemanticVerifier
                 }
                 else
                 {
-                    var hasOutParameter = false;
-                    var parameterOffset = function.IsConstructor ? 1 : 0;
-                    for (var i = parameterOffset; i < function.ParameterCount + parameterOffset; i++)
-                    {
-                        hasOutParameter |= function.Variables[i].IsOut;
-                    }
                     if (cleanups.Count != 0 || hasOutParameter)
                     {
                         var returnState = initialized.Clone();
