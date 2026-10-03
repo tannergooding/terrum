@@ -101,6 +101,36 @@ public sealed class CallerUnsafeTests
     }
 
     [Fact]
+    public void UnsafeInstanceAndStaticMethodsRequireAuthorizationWithoutTaintingSafeWrappers()
+    {
+        const string source = """
+            class Box {
+                public int32 Value;
+                public Box(int32 value) { Value = value; }
+                public unsafe int32 Read() { return Value; }
+                public int32 SafeRead() { unsafe { return Read(); } }
+                public static unsafe int32 Twice(int32 value) { return value * 2; }
+            }
+            """;
+
+        var safeCalls = Compilation.Create(SyntaxTree.Parse(source
+            + " int32 Main() { require Box.TryCreate(21, out var box); return box.Read() + Box.Twice(1); }"));
+        Assert.Null(safeCalls.Program);
+        Assert.Equal(2, safeCalls.Diagnostics.Count(static diagnostic => diagnostic.Code == "TRM3028"));
+
+        var authorizedCalls = Compilation.Create(SyntaxTree.Parse(source
+            + " int32 Main() { require Box.TryCreate(21, out var box);"
+            + " unsafe { return box.Read() + Box.Twice(1); } }"));
+        Assert.False(authorizedCalls.HasErrors, string.Join(Environment.NewLine, authorizedCalls.Diagnostics));
+
+        var safeWrapper = Compilation.Create(SyntaxTree.Parse(source
+            + " int32 Main() { require Box.TryCreate(21, out var box); return box.SafeRead(); }"));
+        Assert.False(safeWrapper.HasErrors, string.Join(Environment.NewLine, safeWrapper.Diagnostics));
+        Assert.False(Assert.Single(Assert.IsType<BoundProgram>(safeWrapper.Program).Functions,
+            static function => function.Name == "Box.SafeRead").RequiresUnsafeCaller);
+    }
+
+    [Fact]
     public void UnsafeFieldsRequireAuthorizationForReadsAndWrites()
     {
         const string declaration = """
