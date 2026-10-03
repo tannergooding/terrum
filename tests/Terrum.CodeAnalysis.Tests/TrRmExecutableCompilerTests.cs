@@ -390,6 +390,44 @@ public sealed class TrRmExecutableCompilerTests
             NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
     }
 
+    [Theory]
+    [InlineData(2, false, 0)]
+    [InlineData(2, true, 42)]
+    [InlineData(3, false, 0)]
+    [InlineData(3, true, 42)]
+    [InlineData(4, false, 0)]
+    [InlineData(4, true, 42)]
+    [InlineData(5, false, 0)]
+    [InlineData(5, true, 42)]
+    [InlineData(6, false, 0)]
+    [InlineData(6, true, 42)]
+    [InlineData(7, false, 0)]
+    [InlineData(7, true, 42)]
+    public async Task IndexedOptionalSelectionPreservesPresenceForEveryPayload(
+        int payloadTypeSpecRow, bool selectPresent, int expected)
+    {
+        var body = IndexedOptionalPresenceBody(payloadTypeSpecRow, selectPresent);
+        var artifact = payloadTypeSpecRow switch
+        {
+            2 => OptionalScalarArtifact(body, optionalChar16: false, optionalInt32: false,
+                optionalBool: true),
+            3 => OptionalScalarArtifact(body, optionalChar16: true, optionalInt32: false),
+            4 => OptionalScalarArtifact(body, optionalChar16: false, optionalInt32: true),
+            5 => OptionalScalarArtifact(body, optionalChar16: false, optionalInt32: false,
+                optionalUInt32: true),
+            6 => OptionalScalarArtifact(body, optionalChar16: false, optionalInt32: false,
+                optionalInt64: true),
+            7 => OptionalScalarArtifact(body, optionalChar16: false, optionalInt32: false,
+                optionalUInt64: true),
+            _ => throw new ArgumentOutOfRangeException(nameof(payloadTypeSpecRow)),
+        };
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.Equal(expected, await StaticProtocolTests.RunAsync(
+            NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+    }
+
     [Fact]
     public async Task IndexedOptionalEdgePreservesIndirectPayloadAndPresence()
     {
@@ -567,6 +605,69 @@ public sealed class TrRmExecutableCompilerTests
 
         var body = new List<byte> { 0x08, 1, (byte)valueTypeIds.Length, 0, 4 };
         foreach (var row in new[] { 2, 4, 3, 8 })
+        {
+            var bytes = new byte[sizeof(uint)];
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes, (uint)row);
+            body.AddRange(bytes);
+        }
+        foreach (var typeId in valueTypeIds)
+        {
+            body.Add(typeId);
+            body.Add(1);
+        }
+        body.AddRange([0, (byte)valueTypeIds.Length]);
+        body.AddRange(operationOffsets);
+        body.AddRange([0, (byte)block.Count, terminatorOffset]);
+        body.AddRange(block);
+        return body.ToArray();
+    }
+
+    private static byte[] IndexedOptionalPresenceBody(int payloadTypeSpecRow,
+        bool selectPresent)
+    {
+        var typeRows = new SortedSet<int> { 2, 4, payloadTypeSpecRow, 8 }.ToArray();
+        var booleanTypeId = (byte)(Array.IndexOf(typeRows, 2) + 1);
+        var integerTypeId = (byte)(Array.IndexOf(typeRows, 4) + 1);
+        var payloadTypeId = (byte)(Array.IndexOf(typeRows, payloadTypeSpecRow) + 1);
+        var optionalTypeId = (byte)(Array.IndexOf(typeRows, 8) + 1);
+        byte[] valueTypeIds =
+        [
+            payloadTypeId, optionalTypeId, optionalTypeId, booleanTypeId, optionalTypeId,
+            optionalTypeId, booleanTypeId, integerTypeId, integerTypeId, integerTypeId,
+        ];
+        byte[] lastUseOrdinals = [1, 4, 4, 4, 5, 6, 9, 9, 9, 10];
+        byte[][] operations =
+        [
+            [1, 1, payloadTypeId, 0],
+            [8, 2, optionalTypeId, 1],
+            [9, 3, optionalTypeId],
+            [1, 4, booleanTypeId, (byte)(selectPresent ? 1 : 0)],
+            [7, 5, 4, 2, 3],
+            [3, 6, 5],
+            [0x0A, 7, 6],
+            [1, 8, integerTypeId, 42],
+            [1, 9, integerTypeId, 0],
+            [7, 10, 7, 8, 9],
+        ];
+        var block = new List<byte> { 16, (byte)valueTypeIds.Length };
+        for (var value = 0; value < valueTypeIds.Length; value++)
+        {
+            block.Add((byte)(value + 1));
+            block.Add(lastUseOrdinals[value]);
+        }
+        block.Add((byte)operations.Length);
+        var operationOffsets = new byte[operations.Length];
+        for (var operation = 0; operation < operations.Length; operation++)
+        {
+            operationOffsets[operation] = (byte)block.Count;
+            block.AddRange(operations[operation]);
+        }
+        var terminatorOffset = (byte)block.Count;
+        block.Add(0x83);
+        block.Add(10);
+
+        var body = new List<byte> { 0x08, 1, (byte)valueTypeIds.Length, 0, (byte)typeRows.Length };
+        foreach (var row in typeRows)
         {
             var bytes = new byte[sizeof(uint)];
             BinaryPrimitives.WriteUInt32LittleEndian(bytes, (uint)row);
