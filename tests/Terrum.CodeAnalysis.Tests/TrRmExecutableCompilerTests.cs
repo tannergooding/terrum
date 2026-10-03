@@ -375,14 +375,18 @@ public sealed class TrRmExecutableCompilerTests
             NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
     }
 
-    [Fact]
-    public async Task IndexedOptionalChar16EqualityExecutesThroughNativeGraph()
+    [Theory]
+    [InlineData(false, 168)]
+    [InlineData(true, 169)]
+    public async Task IndexedOptionalChar16EqualityAndSelectExecuteThroughNativeGraph(
+        bool selectPresent, int expected)
     {
         var loaded = TrRmExecutableCompiler.Load(OptionalScalarArtifact(
-            IndexedOptionalChar16EqualityBody(), optionalChar16: true, optionalInt32: false));
+            IndexedOptionalChar16Body(selectPresent),
+            optionalChar16: true, optionalInt32: false));
 
-        Assert.Equal(168, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
-        Assert.Equal(168, await StaticProtocolTests.RunAsync(
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.Equal(expected, await StaticProtocolTests.RunAsync(
             NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
     }
 
@@ -500,17 +504,19 @@ public sealed class TrRmExecutableCompilerTests
         return body.ToArray();
     }
 
-    private static byte[] IndexedOptionalChar16EqualityBody()
+    private static byte[] IndexedOptionalChar16Body(bool selectPresent)
     {
         byte[] valueTypeIds =
         [
             3, 3, 4, 4, 4, 1, 1, 4, 1, 1,
-            2, 2, 2, 2, 2, 2, 2, 2, 2,
+            2, 2, 2, 2, 2, 2, 2, 2, 2, 1,
+            4, 4, 1, 2, 2, 2, 2,
         ];
         byte[] lastUseOrdinals =
         [
-            3, 4, 9, 5, 6, 12, 13, 9, 14, 15,
-            15, 15, 16, 16, 17, 18, 17, 18, 19,
+            3, 4, 22, 5, 6, 12, 13, 20, 14, 15,
+            15, 15, 16, 16, 17, 18, 17, 18, 26, 20,
+            21, 22, 25, 25, 25, 26, 27,
         ];
         byte[][] operations =
         [
@@ -533,6 +539,14 @@ public sealed class TrRmExecutableCompilerTests
             [0x15, 17, 1, 13, 14],
             [0x15, 18, 1, 17, 15],
             [0x15, 19, 1, 18, 16],
+            [1, 20, 1, (byte)(selectPresent ? 1 : 0)],
+            [7, 21, 20, 3, 8],
+            [3, 22, 21],
+            [5, 23, 4, 22, 3],
+            [1, 24, 2, 1],
+            [1, 25, 2, 0],
+            [7, 26, 23, 24, 25],
+            [0x15, 27, 1, 19, 26],
         ];
         var block = new List<byte> { 16, (byte)valueTypeIds.Length };
         for (var value = 0; value < valueTypeIds.Length; value++)
@@ -549,9 +563,9 @@ public sealed class TrRmExecutableCompilerTests
         }
         var terminatorOffset = (byte)block.Count;
         block.Add(0x83);
-        block.Add(19);
+        block.Add(27);
 
-        var body = new List<byte> { 0x08, 1, 19, 0, 4 };
+        var body = new List<byte> { 0x08, 1, (byte)valueTypeIds.Length, 0, 4 };
         foreach (var row in new[] { 2, 4, 3, 8 })
         {
             var bytes = new byte[sizeof(uint)];
@@ -563,7 +577,7 @@ public sealed class TrRmExecutableCompilerTests
             body.Add(typeId);
             body.Add(1);
         }
-        body.AddRange([0, 19]);
+        body.AddRange([0, (byte)valueTypeIds.Length]);
         body.AddRange(operationOffsets);
         body.AddRange([0, (byte)block.Count, terminatorOffset]);
         body.AddRange(block);
