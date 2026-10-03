@@ -26,6 +26,9 @@ approved.
 - [Checked-exception TRRM](checked-exception-trrm.md) records the unapproved
   exceptional-control-flow contract needed before source-free checked-exception
   Bodies can be considered.
+- [Static initialization metadata and attribute schema](static-initialization-metadata.md)
+  recommends how to persist the accepted static-storage contract without
+  changing its initialization or failure semantics.
 
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,
