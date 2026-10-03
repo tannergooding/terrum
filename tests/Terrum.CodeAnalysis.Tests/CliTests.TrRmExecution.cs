@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -86,6 +87,119 @@ public sealed partial class CliTests
             File.Delete(artifact);
             File.Delete(executable);
         }
+    }
+
+    [Fact]
+    public async Task PersistedNoThrowAndDoesNotReturnEffectsAreAuditedAsync()
+    {
+        const string source = """
+            [NoThrow] int32 Identity(int32 value) { return value; }
+            [NoThrow][DoesNotReturn] void Never() { while (true) {} }
+            [NoThrow][DoesNotReturn] void Stop() { Never(); }
+            int32 Main() { return Identity(42); }
+            """;
+        var artifact = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-effects-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            var (compiled, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                "compile-trrm", "-", "--identity", "effects", "-o", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(compiled == 0, $"{output}{Environment.NewLine}{error}");
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(ran == 42, $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+        }
+        finally
+        {
+            File.Delete(artifact);
+        }
+    }
+
+    [Fact]
+    public async Task PersistedNonReturningCallKeepsRequirementFailureStatusAsync()
+    {
+        const string source = "[DoesNotReturn] void Stop() { require false; } int32 Main() { Stop(); }";
+        var artifact = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-no-return-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            var (compiled, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                "compile-trrm", "-", "--identity", "no-return", "-o", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(compiled == 0, $"{output}{Environment.NewLine}{error}");
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.Equal(unchecked((int)0xE0540003), ran);
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+        }
+        finally
+        {
+            File.Delete(artifact);
+        }
+    }
+
+    [Fact]
+    public async Task IndexedFailureReasonsMapToTheExistingNativeStatusesAsync()
+    {
+        var artifact = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-failure-reasons-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            var (compiled, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("int32 Main() { require false; return 0; }"),
+                "compile-trrm", "-", "--identity", "failure-reasons", "-o", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(compiled == 0, $"{output}{Environment.NewLine}{error}");
+            var artifactBytes = await File.ReadAllBytesAsync(artifact);
+            var reasonOffset = IndexedFailureReasonOffset(artifactBytes);
+            foreach (var (reason, expected) in new[]
+            {
+                (1, unchecked((int)0xE0540003)),
+                (2, unchecked((int)0xE0540001)),
+                (3, unchecked((int)0xE0540002)),
+                (4, unchecked((int)0xE0540001)),
+            })
+            {
+                artifactBytes[reasonOffset] = (byte)reason;
+                await File.WriteAllBytesAsync(artifact, artifactBytes);
+                var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
+                    "--runtime", "fail-fast", "--json");
+                Assert.Equal(expected, ran);
+                Assert.Empty(runOutput);
+                Assert.Empty(runError);
+            }
+        }
+        finally
+        {
+            File.Delete(artifact);
+        }
+    }
+
+    private static int IndexedFailureReasonOffset(byte[] artifact)
+    {
+        var sectionCount = (int)BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(12));
+        for (var section = 0; section < sectionCount; section++)
+        {
+            var entry = artifact.AsSpan(32 + section * 16);
+            if (BinaryPrimitives.ReadUInt16LittleEndian(entry) != 0x20)
+            {
+                continue;
+            }
+            var rowCount = (int)BinaryPrimitives.ReadUInt32LittleEndian(entry[4..]);
+            var offset = (int)BinaryPrimitives.ReadUInt32LittleEndian(entry[8..]);
+            var rowStart = offset + (rowCount + 1) * sizeof(uint);
+            var rowLength = (int)BinaryPrimitives.ReadUInt32LittleEndian(
+                artifact.AsSpan(offset + rowCount * sizeof(uint)));
+            var rowEnd = rowStart + rowLength;
+            var marker = Array.LastIndexOf(artifact, (byte)0x87, rowEnd - 1, rowEnd - rowStart);
+            if (marker < rowStart || artifact[marker + 1] != 1)
+            {
+                throw new InvalidOperationException("Indexed failure terminator was not found.");
+            }
+            return marker + 1;
+        }
+        throw new InvalidOperationException("TRRM Body section was not found.");
     }
 
     [Fact]

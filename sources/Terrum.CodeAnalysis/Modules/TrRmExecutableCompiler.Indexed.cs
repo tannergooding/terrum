@@ -28,6 +28,7 @@ public static partial class TrRmExecutableCompiler
         internal IndexedEdge? True;
         internal IndexedEdge? False;
         internal int ReturnValue = -1;
+        internal int FailureReason;
     }
 
     private sealed class IndexedRegion(int id, int parent, IndexedBlock header, int[] visibleSlots)
@@ -395,6 +396,17 @@ public static partial class TrRmExecutableCompiler
 
         private static void WriteIndexedTerminator(List<byte> bytes, IndexedBlock block, int[] remap)
         {
+            if (block.FailureReason != 0)
+            {
+                if (block.FailureReason is < 1 or > 4 || block.Condition != 0
+                    || block.True is not null || block.False is not null)
+                {
+                    throw Unsupported("Indexed failure terminator has invalid flow.");
+                }
+                bytes.Add(0x87);
+                bytes.Add((byte)block.FailureReason);
+                return;
+            }
             var operands = Edges(block).SelectMany(static edge => edge.Arguments)
                 .Select(id => remap[id]).Append(block.Condition == 0
                     ? block.ReturnValue <= 0 ? 0 : remap[block.ReturnValue]
@@ -592,7 +604,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         internal static TrRmScalarGraph DecodeIndexedBody(ReadOnlySpan<byte> body,
-            int parameterCount, PrimitiveType resultType, bool noThrow,
+            int parameterCount, PrimitiveType resultType, bool noThrow, bool doesNotReturn,
             TrRmTypeSpecTableReader types, ImmutableArray<BoundFunction>.Builder functions)
         {
             var position = 1;
@@ -732,6 +744,7 @@ public static partial class TrRmExecutableCompiler
                 TrRmScalarEdge? whenTrue = null;
                 TrRmScalarEdge? whenFalse = null;
                 var returned = 0;
+                var failureReason = 0;
                 if (opcode is 0x80 or 0x81)
                 {
                     whenTrue = ReadIndexedEdge(extent, ref cursor, referenceWidth,
@@ -747,6 +760,14 @@ public static partial class TrRmExecutableCompiler
                     returned = ReadInt(extent, ref cursor, referenceWidth);
                     maximumReference = returned;
                 }
+                else if (opcode == 0x87)
+                {
+                    failureReason = ReadByte(extent, ref cursor);
+                    if (failureReason is < 1 or > 4)
+                    {
+                        throw Invalid("Indexed failure reason is unsupported.");
+                    }
+                }
                 else
                 {
                     throw Invalid($"Indexed terminator 0x{opcode:X2} is not executable.");
@@ -757,10 +778,10 @@ public static partial class TrRmExecutableCompiler
                     throw Invalid("Indexed scalar terminator has trailing bytes.");
                 }
                 result.Add(new TrRmScalarBlock(parameters, operations.MoveToImmutable(),
-                    condition, whenTrue, whenFalse, returned));
+                    condition, whenTrue, whenFalse, returned, failureReason));
             }
             return TrRmScalarGraph.FromAuditedBody(result.MoveToImmutable(),
-                valueTypes.MoveToImmutable(), parameterCount, resultType, noThrow);
+                valueTypes.MoveToImmutable(), parameterCount, resultType, noThrow, doesNotReturn);
         }
 
         private static ImmutableArray<int> ReadIndexedList(ReadOnlySpan<byte> body,
@@ -1068,6 +1089,23 @@ public static partial class TrRmExecutableCompiler
                     break;
                 case BoundExpressionStatement discarded:
                     _ = Expression(discarded.Expression);
+                    if (discarded.Expression is BoundCall call
+                        && _program.Functions[call.Function].DoesNotReturn)
+                    {
+                        (_current ?? throw Unsupported("Non-returning call did not reach its block."))
+                            .FailureReason = 1;
+                        _current = null;
+                    }
+                    break;
+                case BoundRequire requirement:
+                    var requirementCondition = Expression(requirement.Condition);
+                    _ = Merge(requirementCondition, () => 0, () =>
+                    {
+                        (_current ?? throw Unsupported("Requirement failure did not reach its block."))
+                            .FailureReason = 1;
+                        _current = null;
+                        return 0;
+                    }, null);
                     break;
                 case BoundReturn result:
                     var returned = result.Value is null ? 0 : Expression(result.Value);
@@ -1258,9 +1296,22 @@ public static partial class TrRmExecutableCompiler
         internal byte[] Encode()
         {
             Statement(_function.Body);
+            if (_function.IsNoThrow && _blocks.Any(block => block.FailureReason != 0
+                && (block.Operations.Count == 0
+                    || block.Operations[^1].Expression is not BoundCall call
+                    || !_program.Functions[call.Function].DoesNotReturn)))
+            {
+                throw Unsupported("NoThrow indexed Body contains an unproved failure effect.");
+            }
             if (_current is not null)
             {
-                throw Unsupported("Indexed scalar Body requires a terminal return.");
+                if (!_function.DoesNotReturn || _function.ReturnType != PrimitiveType.Void)
+                {
+                    throw Unsupported("Indexed scalar Body requires a terminal return.");
+                }
+                // The DNR audit proves this structurally required continuation unreachable.
+                _current.ReturnValue = 0;
+                _current = null;
             }
             foreach (var (region, placeholder) in _pendingBreaks)
             {

@@ -179,6 +179,13 @@ public sealed class TrRmControlFlowTests
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(checkedProgram, "policy"));
     }
 
+    [Fact]
+    public void NoThrowCannotRetainAnUnprovedIndexedFailureTerminator()
+    {
+        var program = Compile("[NoThrow] void Guard() { require true; } int32 Main() { return 42; }");
+        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "no-throw-failure"));
+    }
+
     [Theory]
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { int32 inner = x; x = inner + 1; } return x; }", 2)]
     [InlineData("int32 Main() { mut int32 x = 0; if (x == 0) { int32 inner = x; x = inner + 1; } return x; }", 1)]

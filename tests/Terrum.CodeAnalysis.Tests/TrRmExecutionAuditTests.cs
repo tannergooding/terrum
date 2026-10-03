@@ -107,12 +107,16 @@ public sealed class TrRmExecutionAuditTests
     }
 
     [Theory]
-    [InlineData(2)]
     [InlineData(4)]
     [InlineData(8)]
     public void UnsupportedEffectsNeverDisappear(uint effect)
         => Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(Artifact(s_return42, effect: effect)));
+
+    [Fact]
+    public void DoesNotReturnEffectRejectsAReachableNormalReturn()
+        => Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(Artifact(s_return42, effect: 2)));
 
     [Fact]
     public void NoThrowAuditRejectsEvenConstantSafeCheckedOperations()

@@ -1811,7 +1811,21 @@ internal sealed partial class PeCompiler
             {
                 Statement(operation);
             }
-            if (block.Condition != 0)
+            if (block.FailureReason != 0)
+            {
+                // TRRM reason IDs differ from the native fail-fast status order.
+                var target = block.FailureReason switch
+                {
+                    1 => 2,
+                    2 => 0,
+                    3 => 1,
+                    4 => 0,
+                    _ => throw new InvalidOperationException("Indexed failure reason was not verified."),
+                };
+                _runtimeCalls.Add((_code.RelativeCall(), target));
+                _code.Byte(0xCC);
+            }
+            else if (block.Condition != 0)
             {
                 _code.Load(Slot(block.Condition - 1));
                 _code.Bytes(0x85, 0xC0);

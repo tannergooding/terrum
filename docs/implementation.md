@@ -2380,11 +2380,14 @@ The loader accepts `ConstBits`,
 scalar equality/inequality, integer ordering/bitwise operations, checked
 integer arithmetic/negation/count shifts, checked numeric conversion,
 equal-width integer bit reinterpretation, module-local scalar `Call`, `Branch`,
-`BranchIf` and `Return`.
+`BranchIf`, indexed `Fail` and `Return`. `Fail` reasons retain the approved
+TRRM meaning and lower to the existing fail-fast status: requirement failure
+to `0xE0540003`, overflow and invalid shift count to `0xE0540001`, and
+division by zero to `0xE0540002`.
 Integer division/remainder retain their distinct signed-minimum behavior.
 `char16` has conversion/equality semantics, not integer arithmetic or ordering.
 Wrapping/saturating conversion, optional values, eager
-`Select`, combined division/remainder and `Fail` are outside this bounded
+`Select` and combined division/remainder remain outside this bounded
 executable implementation even where the approved ISA assigns them.
 
 Body and instruction widths are emitted minimally; loading performs a strict
@@ -2392,11 +2395,16 @@ minimal-width audit. Source binding may fold an expression to a constant
 before this boundary; only the supported retained operations are executable.
 Required constant evaluation and body static proofs are
 discharged by the binder. Compilation-local `[ConstEval]` eligibility is not a published
-TRRM contract. A retained `NoThrow` promise is encoded as an Effects clause
-and audited against every operation: the TRRM subset supplies no proof rule
-that would excuse a retained checked operation. Other effect promises and
-contract clauses reject, as do unsupported sections, parameter modes,
-generic/nominal declarations and qualified types.
+TRRM contract. The executable Effects clause supports `NoThrow` and
+`DoesNotReturn`. A retained `NoThrow` promise rejects checked operations and
+`Fail` terminators except for the unreachable fallback after a terminal call
+to a separately audited `DoesNotReturn` function. No other static proof
+excuses a checked operation or failure. A retained `DoesNotReturn` promise
+requires a void function with no reachable normal return; the graph audit
+follows indexed edges, prunes known Boolean conditions and carries constant
+block arguments. The other Effects bits and contract clauses reject, as do
+unsupported sections, parameter modes, generic/nominal declarations and
+qualified types.
 
 Calls to imported or packed cross-module targets, nominal/instance and
 generic/witness calls, and non-value/owning parameters remain unsupported.

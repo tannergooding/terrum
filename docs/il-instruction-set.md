@@ -1711,8 +1711,10 @@ void; failure uses the module's fail-fast or checked-exception policy.
 
 Failure never becomes an unchecked result or `None`. A potentially failing
 operation or `Fail` terminator is forbidden in a declared `NoThrow` method
-unless a specified static proof rules out failure; `(1, 0)` defines no
-such proof. `Call` checks the selected signature, declared effects,
+unless a specified static proof rules out failure. In `(1, 0)`, a terminal
+call to a separately audited `DoesNotReturn` method supplies that proof only
+for the otherwise unreachable `Fail` fallback after the call; it does not
+excuse any other failure. `Call` checks the selected signature, declared effects,
 argument modes and return ownership. Without a declared `NoThrow`
 guarantee, failure policy does not create a normal CFG edge or automatic
 cleanup, so a caller needing cleanup on failure is unsupported by this

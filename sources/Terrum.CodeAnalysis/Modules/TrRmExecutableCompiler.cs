@@ -74,7 +74,7 @@ public static partial class TrRmExecutableCompiler
                 || function.IsClassConstructor || function.ClassConstructor != -1
                 || function.DeclaringStruct is not null || function.PropertyName is not null
                 || function.IsStatic || function.Intrinsic != BoundIntrinsic.None || function.IsCleanup
-                || !Scalar(function.ReturnType) || function.DoesNotReturn)
+                || !Scalar(function.ReturnType))
             {
                 throw Unsupported($"Function '{function.Name}' has an unsupported declaration or effect.");
             }
@@ -103,16 +103,19 @@ public static partial class TrRmExecutableCompiler
                 first, function.ParameterCount, 0, 0));
             bodies.Add(ContainsIndexedFlow(function.Body)
                 ? new IndexedBuilder(function, program).Encode() : EncodeBody(function));
-            var contractFirst = function.IsNoThrow ? effects.Count + 1 : 0;
-            if (function.IsNoThrow)
+            var effectMask = (function.IsNoThrow ? 1u : 0u)
+                | (function.DoesNotReturn ? 2u : 0u);
+            var contractFirst = effectMask != 0 ? effects.Count + 1 : 0;
+            if (effectMask != 0)
             {
-                effects.Add(new TrRmContractRow(0x1600_0000u | (uint)(index + 1),
-                    1, new byte[] { 1, 0, 0, 0 }));
+                var payload = new byte[sizeof(uint)];
+                BinaryPrimitives.WriteUInt32LittleEndian(payload, effectMask);
+                effects.Add(new TrRmContractRow(0x1600_0000u | (uint)(index + 1), 1, payload));
             }
 
             var visibility = function.IsPrivate ? 0u : function.IsInternal ? 1u : 2u;
             methods.Add(new TrRmMethodDefRow(0, nameRows[index], index + 1, visibility,
-                contractFirst, function.IsNoThrow ? 1 : 0, index + 1));
+                contractFirst, effectMask != 0 ? 1 : 0, index + 1));
             if (visibility == 2)
             {
                 exports.Add(new TrRmExportRow(0x1600_0000u | (uint)(index + 1), nameRows[index]));
@@ -264,6 +267,7 @@ public static partial class TrRmExecutableCompiler
 
             var (contractFirst, contracts) = defs.GetContractRange(row);
             var noThrow = false;
+            var doesNotReturn = false;
             if (contracts != 0)
             {
                 if (contracts != 1 || contractBytes.IsEmpty)
@@ -272,18 +276,22 @@ public static partial class TrRmExecutableCompiler
                 }
                 var clauses = new TrRmVariableTableIndex(contractBytes, contractCount, 8, 1);
                 var clause = clauses.GetRow(contractFirst);
+                var effectMask = clause.Length == 12
+                    ? BinaryPrimitives.ReadUInt32LittleEndian(clause[8..]) : 0;
                 if (clause.Length != 12 || BinaryPrimitives.ReadUInt16LittleEndian(clause[4..]) != 1
-                    || BinaryPrimitives.ReadUInt32LittleEndian(clause[8..]) != 1)
+                    || effectMask is < 1 or > 3)
                 {
-                    throw Invalid("Only NoThrow effects are supported.");
+                    throw Invalid("Unsupported executable Effects contract.");
                 }
-                noThrow = true;
+                noThrow = (effectMask & 1) != 0;
+                doesNotReturn = (effectMask & 2) != 0;
             }
 
             functions.Add(new BoundFunction(name, FromRow(types, sigs.GetResultTypeSpec(signature)),
                 variables.ToImmutable(), count, new BoundBlock([], default), default)
             {
                 IsNoThrow = noThrow,
+                DoesNotReturn = doesNotReturn,
                 IsPrivate = flags == 0,
                 IsInternal = flags == 1,
             });
@@ -301,7 +309,7 @@ public static partial class TrRmExecutableCompiler
             {
                 _ = new TrRmCompactIndexedBodyReader(bodies, row, modules, defs, sigs, parameters, types);
                 indexed = IndexedBuilder.DecodeIndexedBody(body, count,
-                    declaration.ReturnType, noThrow, types, functions);
+                    declaration.ReturnType, noThrow, declaration.DoesNotReturn, types, functions);
                 for (var value = count; value < indexed.Types.Length; value++)
                 {
                     variables.Add(new BoundVariable($"value{value + 1}", indexed.Types[value], false, default));
@@ -323,9 +331,9 @@ public static partial class TrRmExecutableCompiler
                     indexed = TrRmScalarGraph.FromAuditedBody(
                         [new TrRmScalarBlock(Enumerable.Range(1, count).ToImmutableArray(),
                             operations, 0, null, null,
-                            returned.Value is BoundRead read ? read.Variable + 1 : 0)],
+                            returned.Value is BoundRead read ? read.Variable + 1 : 0, 0)],
                         variables.Select(static variable => variable.Type).ToImmutableArray(),
-                        count, declaration.ReturnType, noThrow);
+                        count, declaration.ReturnType, noThrow, declaration.DoesNotReturn);
                     statements = [];
                 }
             }
@@ -397,6 +405,8 @@ public static partial class TrRmExecutableCompiler
                 return ContainsIndexedFlow(value);
             case BoundExpressionStatement discarded:
                 return ContainsIndexedFlow(discarded.Expression);
+            case BoundRequire:
+                return true;
             default:
                 return false;
         }

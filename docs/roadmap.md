@@ -20,8 +20,9 @@ this roadmap for adoption sequencing and remaining work.
 2. Refine concrete library proposals. Candidate signatures and contracts do
    not imply parser, compiler, runtime or library support.
 
-The source-free TRRM scalar path remains fail-fast; checked-exception Bodies
-and richer contracts are not implemented. See
+The source-free TRRM scalar path remains fail-fast and supports the assigned
+`NoThrow` and `DoesNotReturn` Effects in its bounded Body subset.
+Checked-exception Bodies and other Effects/contracts remain unsupported. See
 [implementation](implementation.md) for the current support boundary.
 
 Hosted source binding now carries grammar-defined named by-value calls through
