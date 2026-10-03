@@ -246,14 +246,18 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Fact]
-    public void SourceFreeIndexedCallsRejectNonPositionalArgumentMappings()
+    public void SourceFreeIndexedCallsPreserveNamedEvaluationAndFormalOrder()
     {
         const string source = """
-            int32 Sum(int32 first, int32 second) { return first * 10 + second; }
-            int32 Main() { return Sum(second: 2, first: 4); }
+            int32 Pair(int32 first, int32 second) { return first * 10 + second; }
+            int32 Main() { mut int32 trace = 0; return Pair(second: trace++, first: trace); }
             """;
-        Assert.Throws<NotSupportedException>(() =>
-            TrRmExecutableCompiler.Emit(Compile(source), "named-arguments"));
+        var original = Compile(source);
+        var artifact = TrRmExecutableCompiler.Emit(original, "named-arguments");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(10, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(10, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
     }
 
     [Fact]

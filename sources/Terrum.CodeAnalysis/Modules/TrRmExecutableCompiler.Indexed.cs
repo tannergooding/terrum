@@ -1020,22 +1020,12 @@ public static partial class TrRmExecutableCompiler
                     return Merge(condition, () => Expression(conditional.WhenTrue),
                         () => Expression(conditional.WhenFalse), conditional.Type);
                 case BoundCall call:
-                    if (!call.ArgumentParameterIndices.IsDefault)
+                    var arguments = new BoundExpression[call.Arguments.Length];
+                    for (var index = 0; index < call.Arguments.Length; index++)
                     {
-                        for (var index = 0; index < call.ArgumentParameterIndices.Length; index++)
-                        {
-                            if (call.ArgumentParameterIndices[index] != index)
-                            {
-                                throw Unsupported("Indexed TRRM calls require arguments in formal parameter order.");
-                            }
-                        }
+                        arguments[call.ParameterIndex(index)] = Read(Expression(call.Arguments[index]));
                     }
-                    var arguments = ImmutableArray.CreateBuilder<BoundExpression>(call.Arguments.Length);
-                    foreach (var argument in call.Arguments)
-                    {
-                        arguments.Add(Read(Expression(argument)));
-                    }
-                    return Add(new BoundCall(call.Function, arguments.MoveToImmutable(), call.Type, default));
+                    return Add(new BoundCall(call.Function, arguments.ToImmutableArray(), call.Type, default));
                 default:
                     throw Unsupported($"Expression {expression.GetType().Name} has no executable indexed scalar encoding.");
             }

@@ -9,9 +9,10 @@ older revisions are rejected, not normalized or upgraded.
 Hosted binding accepts named by-value arguments for uniquely resolved,
 non-intrinsic calls. Arguments retain source evaluation order while each
 records its formal parameter position for verification and native lowering.
-Semantic-module revision 50 persists that mapping; the source-free indexed TRRM
-path still rejects non-positional mappings. Overload selection and named
-output arguments remain outside this support.
+Semantic-module revision 50 persists that mapping. Source-free indexed TRRM
+evaluates mapped arguments in source order and materializes them in formal
+order before emitting its positional call. Overload selection and named output
+arguments remain outside this support.
 
 The normative declaration grammar additionally requires explicit primary
 visibility, fixed role-specific ordering, primary/secondary partial contract
