@@ -147,11 +147,58 @@ public sealed class TrRmExecutionAuditTests
     }
 
     [Theory]
+    [InlineData(PrimitiveType.Int32, PrimitiveType.Int64, 0x8000_0000UL, 0xFFFF_FFFF_8000_0000UL)]
+    [InlineData(PrimitiveType.Int32, PrimitiveType.UInt64, 42UL, 42UL)]
+    [InlineData(PrimitiveType.UInt32, PrimitiveType.Int64, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt32, PrimitiveType.UInt64, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt32, PrimitiveType.Int32, 0x7FFF_FFFFUL, 0x7FFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int32, PrimitiveType.UInt32, 0x7FFF_FFFFUL, 0x7FFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 0xFFFF_FFFF_8000_0000UL, 0x8000_0000UL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt32, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int32, 0x7FFF_FFFFUL, 0x7FFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt64, PrimitiveType.UInt32, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int64, 0x7FFF_FFFF_FFFF_FFFFUL, 0x7FFF_FFFF_FFFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt64, 0x7FFF_FFFF_FFFF_FFFFUL, 0x7FFF_FFFF_FFFF_FFFFUL)]
+    public void IndependentCheckedConvertExecutesIntegerBoundaries(PrimitiveType sourceType,
+        PrimitiveType destinationType, ulong sourceBits, ulong expectedBits)
+    {
+        var artifact = Artifact(CheckedIntegerConvertBody(sourceType,
+            destinationType, sourceBits, expectedBits));
+        TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(1, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
     [InlineData(0xFFFF_FFFFu)]
     [InlineData(0x1_0000u)]
     public async Task IndependentCheckedConvertRejectsOutOfRangeChar16(uint sourceBits)
     {
         var artifact = Artifact(CheckedChar16ConvertBody(narrowing: true, sourceBits: sourceBits));
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(unchecked((int)0xE0540001),
+            await StaticProtocolTests.RunAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast))
+                .ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(PrimitiveType.Int32, PrimitiveType.UInt64, 0xFFFF_FFFFUL)]
+    [InlineData(PrimitiveType.UInt32, PrimitiveType.Int32, 0x8000_0000UL)]
+    [InlineData(PrimitiveType.Int32, PrimitiveType.UInt32, 0xFFFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 0xFFFF_FFFF_7FFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 0x0000_0000_8000_0000UL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt32, 0xFFFF_FFFF_FFFF_FFFFUL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt32, 0x0000_0001_0000_0000UL)]
+    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int32, 0x0000_0000_8000_0000UL)]
+    [InlineData(PrimitiveType.UInt64, PrimitiveType.UInt32, 0x0000_0001_0000_0000UL)]
+    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int64, 0x8000_0000_0000_0000UL)]
+    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt64, 0xFFFF_FFFF_FFFF_FFFFUL)]
+    public async Task IndependentCheckedConvertRejectsOutOfRangeIntegers(
+        PrimitiveType sourceType, PrimitiveType destinationType, ulong sourceBits)
+    {
+        var artifact = Artifact(CheckedIntegerConvertBody(sourceType,
+            destinationType, sourceBits, expectedBits: 0));
         var program = TrRmExecutableCompiler.Load(artifact);
         Assert.Equal(unchecked((int)0xE0540001),
             await StaticProtocolTests.RunAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast))
@@ -536,6 +583,70 @@ public sealed class TrRmExecutionAuditTests
         body.Add(7);
         AddConstant(1, sourceTypeId, sourceBits);
         body.AddRange([6, 2, (byte)destinationTypeId, policy, 1]);
+        AddConstant(3, destinationTypeId, expectedBits);
+        body.AddRange([5, 4, 4, 2, 3]);
+        AddConstant(5, int32TypeId, 1);
+        AddConstant(6, int32TypeId, 0);
+        body.AddRange([7, 7, 4, 5, 6, 0x83, 7]);
+        return body.ToArray();
+
+        void AddConstant(int result, int typeId, ulong bits)
+        {
+            var dataWidth = bits <= byte.MaxValue ? 1
+                : bits <= ushort.MaxValue ? 2
+                : bits <= uint.MaxValue ? 4 : 8;
+            if (dataWidth == 1)
+            {
+                body.AddRange([1, (byte)result, (byte)typeId, (byte)bits]);
+            }
+            else
+            {
+                body.AddRange([0xF0, (byte)(dataWidth switch { 2 => 0x10, 4 => 0x20, _ => 0x30 }),
+                    1, (byte)result, (byte)typeId]);
+                for (var index = 0; index < dataWidth; index++)
+                {
+                    body.Add((byte)(bits >> (index * 8)));
+                }
+            }
+        }
+    }
+
+    private static byte[] CheckedIntegerConvertBody(PrimitiveType sourceType,
+        PrimitiveType destinationType, ulong sourceBits, ulong expectedBits)
+    {
+        var typeRows = new List<int>();
+        int TypeId(PrimitiveType type)
+        {
+            var row = type switch
+            {
+                PrimitiveType.Int32 => 1,
+                PrimitiveType.Bool => 2,
+                PrimitiveType.UInt32 => 4,
+                PrimitiveType.Int64 => 5,
+                PrimitiveType.UInt64 => 6,
+                _ => throw new ArgumentOutOfRangeException(nameof(type)),
+            };
+            var existing = typeRows.IndexOf(row);
+            if (existing >= 0)
+            {
+                return existing + 1;
+            }
+            typeRows.Add(row);
+            return typeRows.Count;
+        }
+
+        var sourceTypeId = TypeId(sourceType);
+        var destinationTypeId = TypeId(destinationType);
+        _ = TypeId(PrimitiveType.Bool);
+        var int32TypeId = TypeId(PrimitiveType.Int32);
+        var body = new List<byte> { 4, (byte)typeRows.Count };
+        foreach (var row in typeRows)
+        {
+            body.AddRange(Words((uint)row));
+        }
+        body.Add(7);
+        AddConstant(1, sourceTypeId, sourceBits);
+        body.AddRange([0x16, 2, (byte)destinationTypeId, 1]);
         AddConstant(3, destinationTypeId, expectedBits);
         body.AddRange([5, 4, 4, 2, 3]);
         AddConstant(5, int32TypeId, 1);
