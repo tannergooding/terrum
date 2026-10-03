@@ -3872,11 +3872,12 @@ public static class SemanticVerifier
                 break;
             case BoundCoalesce coalesce:
                 VacateNestedOutputs(coalesce.Optional, state, ref remaining);
-                if (coalesce.Optional is BoundNull)
+                var optionalPresence = KnownOptionalPresence(coalesce.Optional);
+                if (optionalPresence == false)
                 {
                     VacateNestedOutputs(coalesce.Fallback, state, ref remaining);
                 }
-                else if (coalesce.Optional is not BoundOptionalLift)
+                else if (optionalPresence is null)
                 {
                     var absentState = state.Clone();
                     VacateNestedOutputs(coalesce.Fallback, absentState, ref remaining);
