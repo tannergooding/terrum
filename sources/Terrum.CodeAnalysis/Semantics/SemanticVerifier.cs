@@ -4221,7 +4221,11 @@ public static class SemanticVerifier
         return expression switch {
             BoundNull => false,
             BoundOptionalLift => true,
-            BoundCoalesce { Optional: BoundOptionalLift } => true,
+            BoundCoalesce coalesce => KnownOptionalPresence(coalesce.Optional) switch {
+                true => true,
+                false => KnownOptionalPresence(coalesce.Fallback),
+                null => null,
+            },
             _ => null,
         };
     }

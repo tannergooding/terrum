@@ -114,6 +114,9 @@ semantics.
 Nested-output vacating now uses the same structural optional-presence fact.
 A nested known-present coalesce whose fallback carried an `init ref` output
 reproduced `TRM3016` before the change and passes under both runtime policies.
+The presence check follows nested coalesce operands and fallback values while
+remaining conservative for unknown values. A three-level known-present chain
+also reproduced `TRM3016` before the change and passes under both policies.
 The fallback remains unevaluated in the verifier's initialization state; the
 shared visit budget and optional semantics are unchanged.
 
