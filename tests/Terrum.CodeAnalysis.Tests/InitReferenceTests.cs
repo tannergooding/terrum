@@ -127,9 +127,11 @@ public sealed class InitReferenceTests
     }
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public void InfeasibleNestedOutputsRemainVacant(NativeRuntimePolicy policy)
+    [InlineData(NativeRuntimePolicy.FailFast, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    public void InfeasibleNestedOutputsRemainVacant(NativeRuntimePolicy policy, bool negateInitializationTest)
     {
         var source = new StringBuilder("""
             [NoThrow] bool Fill(bool publish, init ref<int32> value) {
@@ -145,12 +147,17 @@ public sealed class InitReferenceTests
             int32 Main() {
                 init int32 ready;
             """);
-        source.AppendLine("    require Fill(true, init ready);");
+        if (!negateInitializationTest)
+        {
+            source.AppendLine("    require Fill(true, init ready);");
+        }
         for (var index = 0; index < 24; index++)
         {
             source.Append("    init int32 dead").Append(index).AppendLine(";");
         }
-        source.Append("    if (Identity((ready is init) || (");
+        source.Append("    if (Identity(")
+            .Append(negateInitializationTest ? "!(ready is init)" : "(ready is init)")
+            .Append(" || (");
         for (var index = 0; index < 24; index++)
         {
             if (index != 0)

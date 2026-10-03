@@ -81,6 +81,12 @@ of 3,046 visits (about 18.1%) under both runtime policies. The temporary counter
 was removed; this is work-count evidence, not a timing benchmark, and the
 shared limit remains unchanged.
 
+State-aware feasibility now propagates through Boolean negation to direct
+initialization tests. A grouped-right-operand regression with a known-vacant
+local reproduced `TRM3016` before this fix and passes under both runtime
+policies now. This is correctness evidence, not a reason to change the visit
+budget.
+
 During the v78 budget investigation, temporary visit counters measured 100,001
 semantic-analysis visits across 210 functions before the limit failure. In the
 largest function, `ParseExpressionCore`, output-vacating traversal accounted

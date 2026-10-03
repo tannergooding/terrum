@@ -4018,6 +4018,11 @@ public static class SemanticVerifier
             var possibilities = initialized.Possibilities(initializationTest.Variable);
             return result ? (possibilities & 2) != 0 : (possibilities & 5) != 0;
         }
+        if (expression is BoundUnary { Operator: TokenKind.Bang } unary)
+        {
+            Count(ref remaining, 0);
+            return CanBe(unary.Operand, !result, ref remaining, initialized);
+        }
         if (expression is BoundIsVariablePattern pattern)
         {
             Count(ref remaining, 0);
