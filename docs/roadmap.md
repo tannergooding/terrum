@@ -172,6 +172,11 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `a519f22` | Accept the existing initialized/non-null optional-handle presence pattern as `is var item` |
+| `db573eb` | Support non-Boolean scalar `out var` recursive self-calls in single-function projection 79 |
+| `a74593b` | Support non-Boolean/void scalar `out var` calls in complete-program projection 80 |
+| `15c4f0e` | Flatten semantic-module revision 47 serialization and remove obsolete reader branches |
+| `2717561` | Retire obsolete semantic-module revisions; revision 47 only |
 | `d919c6a` | Native scalar `init ref<T>` parameters and recursive self-call destinations, single-function projection 79 |
 | `40664fb` | Native scalar `init ref<T>` parameter modes and call destinations in multi-function snapshots, projection 78 |
 | `e0cf111` | Native scalar `out` parameter modes and call destinations in multi-function snapshots, projection 77 |
