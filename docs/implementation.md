@@ -1417,8 +1417,9 @@ type, and value-level `write`-to-readonly attenuation is allowed. These rules
 also apply through nested handles subject to private/internal access and
 partial-construction checks.
 `native-20` adds `C?` and `ManagedNode?`, contextual `null`, non-null-to-optional
-lifting, `is null` and `is some value`. Successful extraction creates a non-null
-handle snapshot; clearing the original edge does not invalidate it.
+lifting, `is null`, `is some value` and the equivalent `is var value` spelling
+for optional managed handles. Successful extraction creates a non-null handle
+snapshot; clearing the original edge does not invalidate it.
 Patterns participate in conditional flow, including short-circuit conditions,
 `while` and `require`. The payload name belongs to the enclosing lexical scope;
 reads additionally require proof that extraction succeeded on the current path.
@@ -1427,11 +1428,11 @@ An initialized absent value is not an uninitialized
 variable or an output from a failed call. Constructors must explicitly initialize
 optional fields, and direct optional dereference is rejected. Optional scalar
 types and generic normalization remain unsupported.
-The accepted target `is var item` / `is var? item` patterns, non-null `var`
-versus nullable `var?` declaration inference, and contextual multiple-output
-matching are not implemented. Current source still uses `is some item`, and
-ordinary `var` infers the complete initializer type, including optional
-handles. Source approval does not change that support or existing artifacts.
+The accepted `is var? item` pattern, non-null `var` versus nullable `var?`
+declaration inference, and contextual multiple-output matching are not
+implemented. Ordinary `var` infers the complete initializer type, including
+optional handles. Source approval does not change that support or existing
+artifacts.
 ### Retired semantic-module revision history
 
 The following feature notes record implementation milestones; they do not

@@ -2242,7 +2242,10 @@ internal sealed partial class Binder
                 var source = BindExpression((SyntaxNode)node.Children[0], null);
                 if (!ManagedClassTypes.IsOptional(source.Type))
                 {
-                    Report("TRM3007", "'is some' requires an optional managed handle.", node.Span);
+                    var pattern = ((SyntaxTokenElement)node.Children[2]).Token.Text;
+                    Report("TRM3007", pattern == "var"
+                        ? "'is var' requires an optional managed handle."
+                        : "'is some' requires an optional managed handle.", node.Span);
                 }
                 var name = ((SyntaxTokenElement)node.Children[3]).Token;
                 var payload = ManagedClassTypes.IsOptional(source.Type)

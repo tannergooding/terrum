@@ -97,7 +97,9 @@ public sealed class CoalescingTests
                 if (selected.Value != 42 || holder.Item is null) { return 1; }
                 holder.Item ??= Create(1);
                 require holder.Item is some retained;
-                return retained.Value;
+                require holder.Item is var inferred;
+                if (inferred.Value != retained.Value) { return 2; }
+                return inferred.Value;
             }
             """;
         Assert.Equal(40, NativeJit.Execute(Compile(source, policy), policy));

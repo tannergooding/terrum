@@ -817,9 +817,9 @@ Version 19 and 20 semantic modules retain optional IR and types only inside a pr
 source-class leaf. Neither this nor the version 18 private-node module exposes
 an optional or managed-reference ABI. An optional-node-only module remains
 unsupported.
-The accepted target `is var item` / `is var? item` spelling and contextual
-multiple-output matching are not implemented; this profile retains `is some`
-and its existing optional IR. See the
+The `is var item` spelling aliases the supported `is some item` non-null
+optional-handle test. `is var? item` and contextual multiple-output matching
+remain unimplemented. See the
 [current support boundary](implementation.md).
 The independent C probe additionally fills a 4,096-object source-class cycle,
 checks that capacity refusal makes no extra allocation, then accounts for every

@@ -1013,6 +1013,10 @@ internal sealed class Parser
                 {
                     left = Node(SyntaxKind.IsNullExpression, [left, keyword, Take()]);
                 }
+                else if (Current.Kind == TokenKind.VarKeyword)
+                {
+                    left = Node(SyntaxKind.IsSomeExpression, [left, keyword, Take(), Expect(TokenKind.Identifier)]);
+                }
                 else
                 {
                     var some = Expect(TokenKind.Identifier);
