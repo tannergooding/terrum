@@ -606,7 +606,7 @@ internal sealed partial class PeCompiler
                     edgeParameters = Math.Max(edgeParameters, block.Parameters.Length);
                 }
             }
-            _returnSlots[i] = _edgeCopyBases[i] + (8 * edgeParameters);
+            _returnSlots[i] = _edgeCopyBases[i] + (16 * edgeParameters);
             var hasOutputParameters = false;
             var parameterOffset = function.IsConstructor ? 1 : 0;
             for (var parameter = parameterOffset;
@@ -1108,6 +1108,14 @@ internal sealed partial class PeCompiler
             case TrRmScalarWrappingBinary wrapping:
                 return Math.Max(ExpressionSpills(wrapping.Left, ref maximumArguments),
                     1 + ExpressionSpills(wrapping.Right, ref maximumArguments));
+            case TrRmScalarOptionalLift lift:
+                return 1 + ExpressionSpills(lift.Value, ref maximumArguments);
+            case TrRmScalarOptionalNone none when IsIndirect(none.Type):
+                return 1;
+            case TrRmScalarOptionalPresence presence:
+                return ExpressionSpills(presence.Optional, ref maximumArguments);
+            case TrRmScalarOptionalEquality:
+                return 2;
             case BoundOptionalLift lift:
                 return ExpressionSpills(lift.Value, ref maximumArguments);
             case BoundCoalesce coalesce:
@@ -1682,6 +1690,92 @@ internal sealed partial class PeCompiler
         }
     }
 
+    private void EmitOptionalPresenceInAccumulator(PrimitiveType optionalType)
+    {
+        var payloadSize = Size(TrRmOptionalScalar.PayloadType(optionalType));
+        if (IsIndirect(optionalType))
+        {
+            _code.Bytes(0x0F, 0xB6, 0x80);
+            _code.Int32(payloadSize);
+        }
+        else
+        {
+            _code.Bytes(0x48, 0xC1, 0xE8, (byte)(payloadSize * 8), 0x83, 0xE0, 0x01);
+        }
+    }
+
+    private void LoadOptionalPresence(int offset, PrimitiveType optionalType)
+    {
+        if (IsIndirect(optionalType))
+        {
+            _code.Address(offset);
+        }
+        else
+        {
+            _code.Load64(offset);
+        }
+        EmitOptionalPresenceInAccumulator(optionalType);
+    }
+
+    private void EmitOptionalEquality(TrRmScalarOptionalEquality equality, int spill)
+    {
+        var type = equality.Left.Type;
+        var left = Spill(spill);
+        var right = Spill(spill + 1);
+        Expression(equality.Left, spill + 2);
+        StoreValue(left, type);
+        Expression(equality.Right, spill + 2);
+        StoreValue(right, type);
+
+        LoadOptionalPresence(left, type);
+        _code.Bytes(0x85, 0xC0);
+        var leftAbsent = _code.JumpIf(0x84);
+        LoadOptionalPresence(right, type);
+        _code.Bytes(0x85, 0xC0);
+        var rightAbsent = _code.JumpIf(0x84);
+        LoadValue(left, equality.PayloadType);
+        if (IsWide(equality.PayloadType))
+        {
+            _code.Bytes(0x48, 0x89, 0xC1);
+        }
+        else
+        {
+            _code.Bytes(0x89, 0xC1);
+        }
+        LoadValue(right, equality.PayloadType);
+        if (IsWide(equality.PayloadType))
+        {
+            _code.Bytes(0x48, 0x39, 0xC8);
+        }
+        else
+        {
+            _code.Bytes(0x39, 0xC8);
+        }
+        _code.Bytes(0x0F, equality.Negated ? (byte)0x95 : (byte)0x94, 0xC0);
+        var compared = _code.Jump();
+
+        _code.PatchRelative(leftAbsent, _code.Position);
+        LoadOptionalPresence(right, type);
+        _code.Bytes(0x85, 0xC0);
+        var leftAbsentRightPresent = _code.JumpIf(0x85);
+        _code.Byte(0xB8);
+        _code.Int32(equality.Negated ? 0 : 1);
+        var bothAbsent = _code.Jump();
+
+        _code.PatchRelative(rightAbsent, _code.Position);
+        _code.Byte(0xB8);
+        _code.Int32(equality.Negated ? 1 : 0);
+        var mismatchedPresence = _code.Jump();
+
+        _code.PatchRelative(leftAbsentRightPresent, _code.Position);
+        _code.Byte(0xB8);
+        _code.Int32(equality.Negated ? 1 : 0);
+
+        _code.PatchRelative(bothAbsent, _code.Position);
+        _code.PatchRelative(mismatchedPresence, _code.Position);
+        _code.PatchRelative(compared, _code.Position);
+    }
+
     private void CopyToFrame(int destination, int size)
     {
         _code.AddressToRdx(destination);
@@ -1803,13 +1897,35 @@ internal sealed partial class PeCompiler
             // Backedges can exchange parameter values; no destination may overwrite a later source.
             for (var i = 0; i < parameters.Length; i++)
             {
-                _code.Load64(Slot(edge.Arguments[i] - 1));
-                _code.Store64(_edgeCopyBases[_currentFunction] + (8 * i));
+                var type = graph.Types[edge.Arguments[i] - 1];
+                var source = Slot(edge.Arguments[i] - 1);
+                var staged = _edgeCopyBases[_currentFunction] + (16 * i);
+                if (IsIndirect(type))
+                {
+                    _code.Address(source);
+                    CopyToFrame(staged, Size(type));
+                }
+                else
+                {
+                    LoadValue(source, type);
+                    StoreValue(staged, type);
+                }
             }
             for (var i = 0; i < parameters.Length; i++)
             {
-                _code.Load64(_edgeCopyBases[_currentFunction] + (8 * i));
-                _code.Store64(Slot(parameters[i] - 1));
+                var type = graph.Types[parameters[i] - 1];
+                var destination = Slot(parameters[i] - 1);
+                var staged = _edgeCopyBases[_currentFunction] + (16 * i);
+                if (IsIndirect(type))
+                {
+                    _code.Address(staged);
+                    CopyToFrame(destination, Size(type));
+                }
+                else
+                {
+                    LoadValue(staged, type);
+                    StoreValue(destination, type);
+                }
             }
             fixups.Add((_code.Jump(), edge.Target));
         }
@@ -2995,6 +3111,43 @@ internal sealed partial class PeCompiler
                 }
                 LoadValue(Spill(spill), wrapping.Type);
                 WrappingBinary(wrapping.Operator, wrapping.Type);
+                break;
+            case TrRmScalarOptionalNone none:
+                if (IsIndirect(none.Type))
+                {
+                    ZeroStruct(Spill(spill), Size(none.Type));
+                    _code.Address(Spill(spill));
+                }
+                else
+                {
+                    _code.Bytes(0x31, 0xC0);
+                }
+                break;
+            case TrRmScalarOptionalLift lift:
+            {
+                var storage = Spill(spill);
+                ZeroStruct(storage, Size(lift.Type));
+                Expression(lift.Value, spill + 1);
+                StoreValue(storage, lift.Value.Type);
+                _code.Byte(0xB8);
+                _code.Int32(1);
+                _code.StoreField(storage + Size(lift.Value.Type), 1);
+                if (IsIndirect(lift.Type))
+                {
+                    _code.Address(storage);
+                }
+                else
+                {
+                    _code.Load64(storage);
+                }
+                break;
+            }
+            case TrRmScalarOptionalPresence presence:
+                Expression(presence.Optional, spill);
+                EmitOptionalPresenceInAccumulator(presence.Optional.Type);
+                break;
+            case TrRmScalarOptionalEquality equality:
+                EmitOptionalEquality(equality, spill);
                 break;
             case BoundBinary binary:
                 if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe)

@@ -200,9 +200,10 @@ public static partial class TrRmExecutableCompiler
         }
 
         var types = new TrRmTypeSpecTableReader(typeBytes, typeCount, 0, 0, 0, 0);
+        var hasOptionalScalarTypes = false;
         for (var row = 1; row <= typeCount; row++)
         {
-            _ = FromRow(types, row);
+            hasOptionalScalarTypes |= TrRmOptionalScalar.IsOptionalType(BodyTypeFromRow(types, row));
         }
         var strings = new TrRmStringTableReader(stringBytes, stringCount);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 0, 0, methodCount, 0);
@@ -322,7 +323,9 @@ public static partial class TrRmExecutableCompiler
                 statements = DecodeBody(body, count, variables, noThrow, types, functions);
                 if (statements.Any(static statement => statement is BoundLocal
                     { Initializer: TrRmScalarReinterpret or TrRmScalarConvert
-                        or TrRmScalarWrappingBinary or BoundBinary
+                        or TrRmScalarWrappingBinary or TrRmScalarOptionalNone
+                        or TrRmScalarOptionalLift or TrRmScalarOptionalPresence
+                        or TrRmScalarOptionalEquality or BoundBinary
                         { Operator: TokenKind.ShiftLeft or TokenKind.ShiftRight } }
                     or BoundLocal { Initializer: BoundCall }
                     or BoundExpressionStatement { Expression: BoundCall }
@@ -363,6 +366,7 @@ public static partial class TrRmExecutableCompiler
         var program = new BoundProgram(functions.MoveToImmutable(), entry)
         {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
+            Structures = hasOptionalScalarTypes ? TrRmOptionalScalar.Structures : [],
         };
         try
         {
@@ -441,6 +445,23 @@ public static partial class TrRmExecutableCompiler
         }
         return row;
     }
+
+    private static PrimitiveType BodyTypeFromRow(TrRmTypeSpecTableReader types, int row)
+    {
+        var typeSpec = types.GetRow(row);
+        if (typeSpec.Length != 6 || typeSpec[0] != 0x06)
+        {
+            return FromRow(types, row);
+        }
+
+        var resolved = TrRmCompactLinearBodyReader.ResolveType(types, row);
+        var payloadCode = (byte)(resolved & 0xFF);
+        var payloadIndex = Array.IndexOf(s_codes, payloadCode);
+        return payloadIndex > 0
+            ? TrRmOptionalScalar.StorageType(s_types[payloadIndex])
+            : throw Invalid("Unsupported optional scalar payload.");
+    }
+
     private static PrimitiveType FromRow(TrRmTypeSpecTableReader types, int row)
     {
         var bytes = types.GetRow(row);

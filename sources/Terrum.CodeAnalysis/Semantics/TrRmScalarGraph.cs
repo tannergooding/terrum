@@ -22,8 +22,65 @@ internal sealed record TrRmScalarConvert(BoundExpression Operand, PrimitiveType 
 internal sealed record TrRmScalarWrappingBinary(TokenKind Operator, BoundRead Left,
     BoundRead Right, PrimitiveType Type) : BoundExpression(Type, default);
 
+internal sealed record TrRmScalarOptionalNone(PrimitiveType Type) : BoundExpression(Type, default);
+
+internal sealed record TrRmScalarOptionalLift(BoundExpression Value, PrimitiveType Type)
+    : BoundExpression(Type, default);
+
+internal sealed record TrRmScalarOptionalPresence(BoundExpression Optional)
+    : BoundExpression(PrimitiveType.Bool, default);
+
+internal sealed record TrRmScalarOptionalEquality(BoundRead Left, BoundRead Right,
+    PrimitiveType PayloadType, bool Negated) : BoundExpression(PrimitiveType.Bool, default);
+
 internal sealed record TrRmScalarDivRem(int QuotientVariable, int RemainderVariable,
     BoundRead Dividend, BoundRead Divisor, PrimitiveType Type) : BoundStatement(default(TextSpan));
+
+internal static class TrRmOptionalScalar
+{
+    private static readonly PrimitiveType[] s_payloadTypes =
+    [
+        PrimitiveType.Bool, PrimitiveType.Char16, PrimitiveType.Int32,
+        PrimitiveType.UInt32, PrimitiveType.Int64, PrimitiveType.UInt64,
+    ];
+
+    internal static ImmutableArray<BoundStruct> Structures { get; } = CreateStructures();
+
+    internal static bool IsOptionalType(PrimitiveType type)
+        => (int)type is >= 100 and < 106;
+
+    internal static PrimitiveType StorageType(PrimitiveType payloadType)
+    {
+        var index = Array.IndexOf(s_payloadTypes, payloadType);
+        return index >= 0 ? (PrimitiveType)(100 + index)
+            : throw new ArgumentOutOfRangeException(nameof(payloadType));
+    }
+
+    internal static PrimitiveType PayloadType(PrimitiveType optionalType)
+        => IsOptionalType(optionalType)
+            ? s_payloadTypes[(int)optionalType - 100]
+            : throw new ArgumentOutOfRangeException(nameof(optionalType));
+
+    private static ImmutableArray<BoundStruct> CreateStructures()
+    {
+        var structures = ImmutableArray.CreateBuilder<BoundStruct>(s_payloadTypes.Length);
+        foreach (var payloadType in s_payloadTypes)
+        {
+            var payloadSize = ValueLayout.Size(payloadType, []);
+            var alignment = payloadSize;
+            var size = (payloadSize + 1 + alignment - 1) & -alignment;
+            structures.Add(new BoundStruct($"$trrm.Optional<{payloadType}>",
+                [
+                    new BoundStructField("Payload", payloadType, 0, payloadSize),
+                    new BoundStructField("Present", PrimitiveType.Bool, payloadSize, 1),
+                ], size)
+            {
+                IsInternal = true,
+            });
+        }
+        return structures.MoveToImmutable();
+    }
+}
 
 internal sealed record TrRmScalarBlock(ImmutableArray<int> Parameters,
     ImmutableArray<BoundStatement> Operations, int Condition, TrRmScalarEdge? True,
@@ -111,6 +168,17 @@ internal sealed class TrRmScalarGraph
                         || Types[wrapping.Right.Variable] != wrapping.Type))
                 {
                     throw new ArgumentException("Indexed wrapping Binary result or operand contract does not match.");
+                }
+                if (operation is BoundLocal { Initializer: var initializer } optionalLocal
+                    && (initializer is TrRmScalarOptionalNone or TrRmScalarOptionalLift
+                        or TrRmScalarOptionalPresence or TrRmScalarOptionalEquality
+                        || initializer is BoundConditional conditional
+                            && TrRmOptionalScalar.IsOptionalType(conditional.Type))
+                    && (optionalLocal.Variable < ParameterCount || optionalLocal.Variable >= Types.Length
+                        || Types[optionalLocal.Variable] != initializer.Type
+                        || !ValidOptionalExpression(initializer, Types)))
+                {
+                    throw new ArgumentException("Indexed optional scalar operation does not match its value types.");
                 }
                 if (operation is TrRmScalarDivRem divRem
                     && (NoThrow || !IsInteger(divRem.Type)
@@ -395,6 +463,55 @@ internal sealed class TrRmScalarGraph
     private static bool IsInteger(PrimitiveType type)
         => type is PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Int64 or PrimitiveType.UInt64;
+
+    private static bool ValidOptionalExpression(BoundExpression expression,
+        ImmutableArray<PrimitiveType> types)
+    {
+        return expression switch
+        {
+            TrRmScalarOptionalNone none => TrRmOptionalScalar.IsOptionalType(none.Type),
+            TrRmScalarOptionalLift lift => TrRmOptionalScalar.IsOptionalType(lift.Type)
+                && IsReadOfType(lift.Value, TrRmOptionalScalar.PayloadType(lift.Type), types),
+            TrRmScalarOptionalPresence presence => IsOptionalValue(presence.Optional, types),
+            TrRmScalarOptionalEquality equality => equality.PayloadType == PrimitiveType.Char16
+                && IsOptionalRead(equality.Left, equality.PayloadType, types)
+                && IsOptionalRead(equality.Right, equality.PayloadType, types),
+            BoundConditional conditional => conditional.Condition.Type == PrimitiveType.Bool
+                && IsReadOfType(conditional.Condition, PrimitiveType.Bool, types)
+                && IsOptionalValue(conditional.WhenTrue, types)
+                && IsOptionalValue(conditional.WhenFalse, types)
+                && conditional.WhenTrue.Type == conditional.Type
+                && conditional.WhenFalse.Type == conditional.Type
+                && TrRmOptionalScalar.IsOptionalType(conditional.Type),
+            _ => false,
+        };
+    }
+
+    private static bool IsOptionalValue(BoundExpression expression,
+        ImmutableArray<PrimitiveType> types)
+        => expression is BoundRead read && TrRmOptionalScalar.IsOptionalType(read.Type)
+                && IsOptionalRead(read,
+                TrRmOptionalScalar.PayloadType(read.Type), types)
+            || expression is TrRmScalarOptionalNone none
+                && TrRmOptionalScalar.IsOptionalType(none.Type)
+            || expression is TrRmScalarOptionalLift lift
+                && TrRmOptionalScalar.IsOptionalType(lift.Type)
+                && IsReadOfType(lift.Value, TrRmOptionalScalar.PayloadType(lift.Type), types)
+            || expression is BoundConditional conditional
+                && ValidOptionalExpression(conditional, types);
+
+    private static bool IsReadOfType(BoundExpression expression, PrimitiveType type,
+        ImmutableArray<PrimitiveType> types)
+        => expression is BoundRead read
+            && (uint)read.Variable < (uint)types.Length
+            && read.Type == type && types[read.Variable] == type;
+
+    private static bool IsOptionalRead(BoundRead read, PrimitiveType payloadType,
+        ImmutableArray<PrimitiveType> types)
+        => (uint)read.Variable < (uint)types.Length
+            && types[read.Variable] == read.Type
+            && TrRmOptionalScalar.IsOptionalType(read.Type)
+            && TrRmOptionalScalar.PayloadType(read.Type) == payloadType;
 
     private static bool IsSwitchType(PrimitiveType type)
         => type is PrimitiveType.Bool or PrimitiveType.Char16 || IsInteger(type);

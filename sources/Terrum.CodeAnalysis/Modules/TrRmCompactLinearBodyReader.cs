@@ -423,7 +423,9 @@ public readonly ref struct TrRmCompactLinearBodyReader
                     : left != right
                         || kind switch
                         {
-                            4 or 5 when opcode == 5 && left <= byte.MaxValue => false,
+                            4 or 5 when opcode == 5
+                                => left is not (1 or 3 or 8 or 9 or 0x0D or 0x0E)
+                                    && left != 0x103,
                             _ => !IsInteger(left),
                         })
                 {

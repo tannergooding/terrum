@@ -2283,9 +2283,10 @@ source peers use the existing backend, not a new TRRM runtime policy.
 
 The current envelope is one self-contained Windows x64 Module
 (`targetRequirement=1`, `runtimePolicy=0`), with module-level scalar functions
-and by-value parameters. Supported types are `bool`, `char16`, `int32`,
-`uint32`, `int64`, `uint64`, and a `void` result. An executable entry must be a
-local parameterless `int32` function; `--library` produces a no-entry module.
+and by-value parameters. Callable parameters and results use `bool`, `char16`,
+`int32`, `uint32`, `int64`, `uint64`, or `void`; Body-local values also accept
+their assigned optional forms. An executable entry must be a local
+parameterless `int32` function; `--library` produces a no-entry module.
 Every public function has one Export key equal to its full callable name;
 private/internal visibility is not promoted, and arbitrary key aliases are
 not supported by this loader. DLL exports use the existing scalar native ABI.
@@ -2401,10 +2402,14 @@ the remainder follows the dividend.
 Wrapping Body `Binary` operations use low-width modular bits without overflow
 failure; they do not change the checked semantics of source arithmetic.
 `char16` has conversion/equality semantics, not integer arithmetic or ordering.
-Optional values remain outside this bounded executable implementation even
-where the approved ISA assigns them. `Select`
-consumes only already-defined values; its alternatives are never conditionally
-evaluated or transferred as owners.
+Body-local optional scalar values support `MakeOptional`, `None`, `IsPresent`,
+`Copy` and eager `Select`, preserving presence independently from payload bits.
+Optional `char16` also supports equality and inequality; optional equality for
+other payload types, optional arithmetic/conversions, and optional callable
+parameters, results and calls remain unsupported. `Select` consumes only
+already-defined values; its alternatives are never conditionally evaluated or
+transferred as owners. These Body operations do not extend the source-language
+scalar optional type system or native callable ABI.
 
 Body and instruction widths are emitted minimally; loading performs a strict
 minimal-width audit. Source binding may fold an expression to a constant

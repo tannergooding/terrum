@@ -889,6 +889,22 @@ public sealed class TrRmBodyExampleTests
                 parameterTypeIds: parameters, thirdTypeOptional: true));
     }
 
+    [Fact]
+    public void CompactIndexedReaderAllowsOnlyOptionalChar16Equality()
+    {
+        var optionalCharEquality = IndexedScalarOperation(
+            [5, 3, 4, 1, 2], [3, 3], 1);
+        Assert.Equal((1, 3), InspectIndexed(optionalCharEquality, 2,
+            resultTypeSpec: 1, parameterTypeIds: [3, 3], secondTypeCode: 3,
+            thirdTypeOptional: true));
+
+        var optionalIntegerEquality = IndexedScalarOperation(
+            [5, 3, 4, 1, 2], [3, 3], 1);
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(optionalIntegerEquality, 2,
+            resultTypeSpec: 1, parameterTypeIds: [3, 3], secondTypeCode: 8,
+            thirdTypeOptional: true));
+    }
+
     [Theory]
     [InlineData(new byte[] { 8, 2, 3, 1 }, new byte[] { 3 }, (byte)3)]
     [InlineData(new byte[] { 9, 1, 2 }, new byte[] { }, (byte)3)]

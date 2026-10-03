@@ -399,7 +399,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     var type = valueTypes[left];
                     var comparison = kind is >= 4 and <= 9;
                     if (kind is < 1 or > 12 || type != valueTypes[right]
-                        || (!IsInteger(type) && !(kind is 4 or 5 && type is 1 or 3))
+                        || !(IsInteger(type) || (kind is 4 or 5)
+                            && (type == 1 || type == 3 || type == 0x103))
                         || valueTypes[result] != (comparison ? 1 : type))
                     {
                         throw InvalidBody();

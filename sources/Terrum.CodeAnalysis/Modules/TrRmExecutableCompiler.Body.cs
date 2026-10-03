@@ -206,14 +206,14 @@ public static partial class TrRmExecutableCompiler
         var header = ReadByte(body, ref position);
         var localWidth = 1 << (header & 3);
         var typeCount = ReadInt(body, ref position, localWidth);
-        if (typeCount is < 0 or > 6)
+        if (typeCount is < 0 or > 12)
         {
             throw Invalid("Body type map exceeds the scalar profile.");
         }
         var mappedTypes = new PrimitiveType[typeCount + 1];
         for (var id = 1; id <= typeCount; id++)
         {
-            var type = FromRow(types, ReadInt(body, ref position, 4));
+            var type = BodyTypeFromRow(types, ReadInt(body, ref position, 4));
             if (type == PrimitiveType.Void || Array.IndexOf(mappedTypes, type, 1, id - 1) >= 0)
             {
                 throw Invalid("Void or duplicate scalar in Body type map.");
@@ -232,7 +232,8 @@ public static partial class TrRmExecutableCompiler
         for (var ordinal = 0; ordinal < count; ordinal++)
         {
             var (opcode, width, countWidth, dataWidth) = ReadInstruction(body, ref position);
-            if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 0x12 or 0x15 or 0x16 or 0x17 or 0x18))
+            if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 0x0A
+                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18))
             {
                 throw Invalid($"Operation 0x{opcode:X2} is not executable.");
             }
@@ -251,11 +252,12 @@ public static partial class TrRmExecutableCompiler
                     throw Invalid("Noncontiguous CheckedDivRem value definitions.");
                 }
             }
-            var typeId = opcode is 1 or 2 or 6 or 0x16 ? ReadInt(body, ref position, width) : 0;
+            var typeId = opcode is 1 or 2 or 6 or 8 or 9 or 0x16
+                ? ReadInt(body, ref position, width) : 0;
             var policy = opcode == 6 ? ReadByte(body, ref position) : (byte)0;
             var kind = opcode is 4 or 5 or 0x15 ? ReadByte(body, ref position) : (byte)0;
             var bits = opcode is 1 or 2 ? ReadBits(body, ref position, dataWidth) : 0;
-            var left = opcode is 3 or 4 or 6 or 7 or 0x16 or 0x17 or 5 or 0x15 or 0x18
+            var left = opcode is 3 or 4 or 6 or 7 or 8 or 0x0A or 0x16 or 0x17 or 5 or 0x15 or 0x18
                 ? ReadInt(body, ref position, width) : 0;
             var right = opcode is 5 or 7 or 0x15 or 0x18 ? ReadInt(body, ref position, width) : 0;
             var third = opcode == 7 ? ReadInt(body, ref position, width) : 0;
@@ -368,6 +370,39 @@ public static partial class TrRmExecutableCompiler
                 expression = new BoundConditional(condition, whenTrue, whenFalse,
                     whenTrue.Type, default);
             }
+            else if (opcode == 8)
+            {
+                if (typeId <= 0 || typeId > typeCount
+                    || !TrRmOptionalScalar.IsOptionalType(mappedTypes[typeId]))
+                {
+                    throw Invalid("MakeOptional target is not an optional scalar type.");
+                }
+                var value = Operand(left);
+                var optionalType = mappedTypes[typeId];
+                if (value.Type != TrRmOptionalScalar.PayloadType(optionalType))
+                {
+                    throw Invalid("MakeOptional payload does not match its optional type.");
+                }
+                expression = new TrRmScalarOptionalLift(value, optionalType);
+            }
+            else if (opcode == 9)
+            {
+                if (typeId <= 0 || typeId > typeCount
+                    || !TrRmOptionalScalar.IsOptionalType(mappedTypes[typeId]))
+                {
+                    throw Invalid("None target is not an optional scalar type.");
+                }
+                expression = new TrRmScalarOptionalNone(mappedTypes[typeId]);
+            }
+            else if (opcode == 0x0A)
+            {
+                var optional = Operand(left);
+                if (!TrRmOptionalScalar.IsOptionalType(optional.Type))
+                {
+                    throw Invalid("IsPresent operand is not an optional scalar value.");
+                }
+                expression = new TrRmScalarOptionalPresence(optional);
+            }
             else if (opcode == 6)
             {
                 if (typeId <= 0 || typeId > typeCount)
@@ -428,6 +463,19 @@ public static partial class TrRmExecutableCompiler
                     _ => throw Invalid("Unsupported wrapping Binary kind."),
                 };
                 expression = new TrRmScalarWrappingBinary(token, first, second, first.Type);
+            }
+            else if (opcode == 5 && (kind is 4 or 5)
+                && TrRmOptionalScalar.IsOptionalType(Operand(left).Type)
+                && TrRmOptionalScalar.PayloadType(Operand(left).Type) == PrimitiveType.Char16)
+            {
+                var first = Operand(left);
+                var second = Operand(right);
+                if (first.Type != second.Type)
+                {
+                    throw Invalid("Optional equality requires identical optional types.");
+                }
+                expression = new TrRmScalarOptionalEquality(first, second,
+                    TrRmOptionalScalar.PayloadType(first.Type), kind == 5);
             }
             else
             {

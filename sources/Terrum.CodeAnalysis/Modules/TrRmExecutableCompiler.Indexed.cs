@@ -367,6 +367,21 @@ public static partial class TrRmExecutableCompiler
                 case TrRmScalarReinterpret reinterpret:
                     VisitReads(reinterpret.Operand, visit);
                     break;
+                case TrRmScalarOptionalLift lift:
+                    VisitReads(lift.Value, visit);
+                    break;
+                case TrRmScalarOptionalPresence presence:
+                    VisitReads(presence.Optional, visit);
+                    break;
+                case TrRmScalarOptionalEquality equality:
+                    VisitReads(equality.Left, visit);
+                    VisitReads(equality.Right, visit);
+                    break;
+                case BoundConditional conditional:
+                    VisitReads(conditional.Condition, visit);
+                    VisitReads(conditional.WhenTrue, visit);
+                    VisitReads(conditional.WhenFalse, visit);
+                    break;
                 case BoundBinary binary:
                     VisitReads(binary.Left, visit);
                     VisitReads(binary.Right, visit);
@@ -615,7 +630,7 @@ public static partial class TrRmExecutableCompiler
             var typeCount = ReadInt(body, ref position, width);
             if (blockCount == 0 || blockCount > SemanticVerifier.MaximumAnalysisVisits
                 || valueCount > SemanticVerifier.MaximumVariables
-                || typeCount is < 0 or > 6)
+                || typeCount is < 0 or > 12)
             {
                 throw Invalid("Indexed scalar Body exceeds native verification bounds.");
             }
@@ -623,7 +638,7 @@ public static partial class TrRmExecutableCompiler
             for (var index = 0; index < typeMap.Length; index++)
             {
                 typeMap[index] = ReadInt(body, ref position, 4);
-                if (FromRow(types, typeMap[index]) == PrimitiveType.Void)
+                if (BodyTypeFromRow(types, typeMap[index]) == PrimitiveType.Void)
                 {
                     throw Invalid("Void indexed value type.");
                 }
@@ -638,7 +653,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     throw Invalid("Indexed value has unmapped type.");
                 }
-                valueTypes.Add(FromRow(types, typeMap[typeId - 1]));
+                valueTypes.Add(BodyTypeFromRow(types, typeMap[typeId - 1]));
             }
             var starts = new int[blockCount + 1];
             for (var index = 0; index < starts.Length; index++)

@@ -2,10 +2,12 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
@@ -261,6 +263,84 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Fact]
+    public async Task SourceFreeOptionalScalarBodyExecutesPresenceCopySelectAndAot()
+    {
+        var body = OptionalLinearBody(
+            [2, 4, 6, 8],
+            [
+                1, 1, 3, 0,
+                8, 2, 4, 1,
+                9, 3, 4,
+                3, 4, 2,
+                0x0A, 5, 4,
+                0x0A, 6, 3,
+                7, 7, 5, 4, 3,
+                0x0A, 8, 7,
+                1, 9, 2, 42,
+                1, 10, 2, 0,
+                7, 11, 8, 9, 10,
+                7, 12, 6, 4, 3,
+                0x0A, 13, 12,
+                7, 14, 13, 9, 10,
+                0x15, 15, 1, 11, 14,
+            ],
+            15, 15);
+        var loaded = TrRmExecutableCompiler.Load(OptionalScalarArtifact(body,
+            optionalChar16: false, optionalInt32: false, optionalInt64: true));
+
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.Equal(42, await StaticProtocolTests.RunAsync(
+            NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task SourceFreeOptionalChar16EqualityDistinguishesPresenceAndPayload()
+    {
+        var body = OptionalLinearBody(
+            [2, 4, 3, 8],
+            [
+                1, 1, 3, 65,
+                1, 2, 3, 66,
+                8, 3, 4, 1,
+                8, 4, 4, 1,
+                8, 5, 4, 2,
+                5, 6, 4, 3, 4,
+                5, 7, 5, 3, 5,
+                9, 8, 4,
+                5, 9, 4, 8, 8,
+                5, 10, 5, 3, 8,
+                1, 11, 2, 42,
+                1, 12, 2, 0,
+                7, 13, 6, 11, 12,
+                7, 14, 7, 11, 12,
+                7, 15, 9, 11, 12,
+                7, 16, 10, 11, 12,
+                0x15, 17, 1, 13, 14,
+                0x15, 18, 1, 17, 15,
+                0x15, 19, 1, 18, 16,
+            ],
+            19, 19);
+        var loaded = TrRmExecutableCompiler.Load(OptionalScalarArtifact(body,
+            optionalChar16: true, optionalInt32: false));
+
+        Assert.Equal(168, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.Equal(168, await StaticProtocolTests.RunAsync(
+            NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task IndexedOptionalEdgePreservesIndirectPayloadAndPresence()
+    {
+        var loaded = TrRmExecutableCompiler.Load(OptionalScalarArtifact(
+            IndexedOptionalTransferBody(), optionalChar16: false,
+            optionalInt32: false, optionalInt64: true));
+
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.Equal(42, await StaticProtocolTests.RunAsync(
+            NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+    }
+
+    [Fact]
     public void MaterializedValueLimitRejectsWithoutDroppingOperations()
     {
         var source = "int32 Main() { mut int32 x = 0; "
@@ -307,5 +387,103 @@ public sealed class TrRmExecutableCompilerTests
             return;
         }
         throw new InvalidOperationException("Module section missing.");
+    }
+
+    private static byte[] OptionalLinearBody(int[] typeRows, byte[] operations,
+        int operationCount, int returnValue)
+    {
+        var body = new List<byte> { 0x04, (byte)typeRows.Length };
+        foreach (var row in typeRows)
+        {
+            var bytes = new byte[sizeof(uint)];
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes, (uint)row);
+            body.AddRange(bytes);
+        }
+        body.Add((byte)operationCount);
+        body.AddRange(operations);
+        body.Add(0x83);
+        body.Add((byte)returnValue);
+        return body.ToArray();
+    }
+
+    private static byte[] IndexedOptionalTransferBody()
+    {
+        var firstBlock = new byte[]
+        {
+            0x18, 1, 2, 2, 1, 1, 2, 2, 2,
+            1, 1, 1, 0,
+            8, 2, 2, 1,
+            0x80, 2, 1, 2,
+        };
+        var secondBlock = new byte[]
+        {
+            0x12, 1, 3, 5, 3, 0, 4, 3, 5, 3, 6, 3, 7, 4, 4,
+            0x0A, 4, 3,
+            1, 5, 4, 42,
+            1, 6, 4, 0,
+            7, 7, 4, 5, 6,
+            0x83, 7,
+        };
+        var body = new List<byte> { 0x08, 2, 7, 0, 4 };
+        foreach (var row in new[] { 6, 8, 2, 4 })
+        {
+            var bytes = new byte[sizeof(uint)];
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes, (uint)row);
+            body.AddRange(bytes);
+        }
+        body.AddRange([1, 1, 2, 1, 2, 1, 3, 1, 4, 1, 4, 1, 4, 1]);
+        body.AddRange([0, 2, 7]);
+        body.AddRange([9, 13, 0xFF, 15, 18, 22, 26]);
+        body.AddRange([0, (byte)firstBlock.Length,
+            (byte)(firstBlock.Length + secondBlock.Length)]);
+        body.AddRange([17, 31]);
+        body.AddRange(firstBlock);
+        body.AddRange(secondBlock);
+        return body.ToArray();
+    }
+
+    private static byte[] OptionalScalarArtifact(byte[] body, bool optionalChar16,
+        bool optionalInt32, bool optionalInt64 = false)
+    {
+        var original = TrRmExecutableCompiler.Emit(
+            Compile("int32 Main() { return 0; }"), "optional-body");
+        var index = new TrRmArtifactIndex(original);
+        var rows = new List<ReadOnlyMemory<byte>>();
+        index.TryGetSection(0x11, out var typeBytes, out var typeCount);
+        var existingTypes = new TrRmTypeSpecTableReader(typeBytes, typeCount, 0, 0, 0, 0);
+        for (var row = 1; row <= typeCount; row++)
+        {
+            rows.Add(existingTypes.GetRow(row).ToArray());
+        }
+        if (optionalChar16)
+        {
+            rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, 3));
+        }
+        if (optionalInt32)
+        {
+            rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, 4));
+        }
+        if (optionalInt64)
+        {
+            rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, 6));
+        }
+        var rewrittenTypes = TrRmTypeSpecTableWriter.Encode(rows, 0, 0, 0, 0);
+        var rewrittenBody = TrRmVariableTableWriter.EncodeBodies([body]);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags, out var bytes, out var count);
+            sections.Add(new TrRmSection(kind, flags, (uint)(kind switch
+            {
+                0x11 => rows.Count,
+                _ => count,
+            }), kind switch
+            {
+                0x11 => rewrittenTypes,
+                0x20 => rewrittenBody,
+                _ => bytes.ToArray(),
+            }));
+        }
+        return TrRmArtifactWriter.Encode(sections);
     }
 }
