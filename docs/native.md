@@ -145,7 +145,7 @@ identity.
 
 Scanner-8/schema-8 appends diagnostic identities 11/12 for invalid and
 defined-but-unsupported maximal runs; see the
-[scanner contract](scanner.md) for spans and record compatibility. Hosted
+[scanner contract](scanner.md) for spans and current record shapes. Hosted
 role-specific punctuation rules are in the
 [implementation reference](implementation.md). The bounded frontend produces
 and accepts only v85: a 392-word single-function buffer or a separate 4,284-word

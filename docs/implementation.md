@@ -71,7 +71,7 @@ dispatcher retain their existing behavior. Runtime witnesses, general typed
 filters and their post-unwind phase still need binding, persistence, lifetime
 verification and native integration.
 
-### Current syntax and scanner compatibility
+### Current syntax and scanner profile
 
 A single loop label and its `while`, `do` or `for` introducer must occupy the
 same physical source line (`TRM1012`). The colon attaches to the label; trivia
@@ -124,7 +124,7 @@ and comments break the applicable raw boundary, while permitted interiors and
 ordinary grouping retain their existing trivia rules. Hosted, prelexed and
 compiled-scanner parsing share these checks. The native scalar parser's raw
 snapshot check scans contiguous punctuation records, including the first and
-last tokens, before spacing checks and modern/legacy selection; it has no
+last tokens, before spacing checks and parser selection; it has no
 type-context exemptions. Maintained scalar probes use it too. Its independent
 source audit rejects records that contradict the source.
 

@@ -113,10 +113,11 @@ accepts this lexical result and its complete integer-value records without
 invoking the host lexer. These boundaries validate shape, source coverage,
 record ordering, suffixes, keyword escape spelling/extents/classification,
 current comment rules and integer-token coverage, not every supplied
-scanner classification or its arithmetic. Raw historical records remain
-readable, but a historical split `@`/keyword or contradictory escape identifier
-cannot masquerade as current parser input. A record with a valid shape but an
-incorrect magnitude would affect binding. Use a trusted compiler component;
+scanner classification or its arithmetic. Raw buffers have no schema marker
+and are interpreted using current token identities and record shapes; there is
+no historical-schema reader contract. A split `@`/keyword or contradictory
+escape identifier cannot masquerade as current parser input. A record with a
+valid shape but an incorrect magnitude would affect binding. Use a trusted compiler component;
 host/component differential fixtures check actual numeric behavior, while
 shape validation alone cannot establish that an arbitrary replacement scanner
 implements Terrum.
@@ -180,9 +181,9 @@ the diagnostic count; subsequent triples are numeric code (1–12 maps to
 `TRM0001`–`TRM0012`), UTF-16 start and UTF-16 length, in reporting order.
 Scanner-8/schema-8 appends 11 for an invalid maximal punctuation run and 12
 for a defined but unsupported spelling; previous diagnostic meanings and
-record widths remain unchanged. Raw compatible historical records remain
-readable, but completed current-profile adapters reject split-run and
-name/literal framing contradictions without replacing supplied records.
+record widths remain unchanged. Raw buffers have no schema marker; adapters
+interpret them with current record identities and validate the current source
+profile without replacing supplied classifications.
 Overlong suffixed fences report their whole run plus the required suffix;
 recovery keeps them in the comment until a valid closer or EOF. EOF without
 a valid closer also reports `TRM0003`, retaining all source text.
@@ -231,13 +232,11 @@ overload re-lexes or duplicates the token stream.
 The adapter validates published counts, kinds, ranges, owner ordering,
 nonempty diagnostic/trivia spans, and exact contiguous coverage by token and
 trivia records. No source unit may be omitted, duplicated or reordered.
-Current parser adaptation additionally audits only the leading-trivia portions
-against the current comment rules, including required diagnostics; token
-classification and numeric decoding remain native results. Historical
-scanner-5 records keep their numeric identities and raw readers, and historical
-compiled scanners still execute. Compatible outputs can feed the current
-adapter, but old fixed-fence or documentation classifications that disagree
-with the current syntax profile reject as `TRM5001` in CLI adaptation rather than being relabeled.
+Current parser adaptation additionally audits leading trivia against current
+comment rules, including required diagnostics; token classification and numeric
+decoding remain native results. The current component emits scanner-8/schema-8
+only. Raw buffer adapters apply current identities and shapes and do not
+provide compatibility for historical scanner schemas.
 A malformed token remains a `Bad`, `NumericLiteral`, or `StringLiteral` token
 with its raw source span; diagnostics do not replace source characters.
 
@@ -256,8 +255,8 @@ boundary, and repeated optional marking retains `TRM1005`. Native scalar
 snapshots check whole runs before spacing/fallback, with no type exemptions.
 Scanner-8/schema-8
 adds only diagnostic identities 11/12; token IDs, record widths, projections,
-bounds and semantic/native ABI remain fixed. Historical raw records remain
-readable, while completed current adapters enforce current framing. See the
+bounds and semantic/native ABI remain fixed. Raw buffer records are interpreted
+only with the current identities and shapes. See the
 [implementation reference](implementation.md) for current parser and
 unsupported-spelling boundaries.
 

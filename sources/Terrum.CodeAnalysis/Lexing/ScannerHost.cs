@@ -4,7 +4,6 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Semantics;
@@ -646,8 +645,7 @@ public static class ScannerHost
         }
     }
 
-    // The record shape alone cannot distinguish a historical fixed-fence scanner
-    // from one implementing this source profile.
+    // The record shape carries no schema marker, so enforce the current source profile.
     private static void ValidateTriviaProfile(LexResult result, CancellationToken cancellationToken)
     {
         var position = 0;
@@ -691,25 +689,6 @@ public static class ScannerHost
             }
         }
     }
-}
-
-/// <summary>Legacy scanner-2 categories. Current scans publish exact <see cref="TokenKind"/> values.</summary>
-public enum ScannerTokenKind
-{
-    /// <summary>The end of the source snapshot.</summary>
-    EndOfFile,
-    /// <summary>An identifier or unclassified keyword spelling.</summary>
-    Identifier,
-    /// <summary>An ASCII numeric literal spelling, including fractions, exponents and width tags.</summary>
-    [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names a lexical category rather than a CLR storage type.")]
-    Integer,
-    /// <summary>An operator or punctuation token.</summary>
-    Punctuation,
-    /// <summary>An unrecognized source scalar or malformed UTF-16 unit.</summary>
-    Invalid,
-    /// <summary>A raw quoted string spelling, including malformed or unterminated strings.</summary>
-    [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names a lexical category rather than a CLR storage type.")]
-    String,
 }
 
 /// <summary>A compiled scanner token with an exact source range.</summary>

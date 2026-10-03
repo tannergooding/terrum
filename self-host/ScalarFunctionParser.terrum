@@ -1,7 +1,7 @@
 namespace Terrum.CodeAnalysis;
 
-// This bounded syntax-27 probe uses scanner-5 TokenKind ordinals, not source characters
-// to classify punctuation; the host parser's recovery remains a separate phase.
+// This bounded syntax-27 probe uses current TokenKind ordinals, not source
+// characters, to classify punctuation; host parser recovery remains separate.
 bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     out int32 scalarType, out SourceRange name, out SourceRange expression)
 {

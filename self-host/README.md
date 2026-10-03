@@ -54,15 +54,16 @@ reinterpretations to preserve the source's `int32` count semantics.
 It is implemented in C#,
 supports fail-fast only, and does not make these broader Terrum compiler
 candidates self-hosting or change their provisional frontend projections.
-Current scanner behavior and record compatibility are specified in the
+Current scanner behavior and record shapes are specified in the
 [scanner contract](../docs/scanner.md); hosted parser and native projection
 boundaries are in the [implementation reference](../docs/implementation.md).
 Scanner-8/schema-8 appends diagnostics 11/12 for invalid and unsupported
 maximal runs, including atomic Bad tokens for `..`, `..^` and `?.`. Hosted
 generic closers and optional suffixes require parser consumption; native
 scalar spacing permits only the `init ref<T>` parameter delimiters, not
-general generic type contexts. Historical raw records remain
-readable, while current adapters enforce current framing and syntax. Scanner,
+general generic type contexts. Raw buffers have no schema marker and current
+adapters interpret their records only with current identities and shapes; no
+historical-schema reader is retained. Scanner,
 projection and ABI formats are distinct. Projection tags are alpha
 implementation/validation details, not roadmap or product versions. Both scalar
 frontend readers reject every v1–v84 tag; no obsolete reader support is retained.

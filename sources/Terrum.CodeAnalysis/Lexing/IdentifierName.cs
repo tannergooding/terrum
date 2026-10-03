@@ -46,8 +46,7 @@ public static class IdentifierName
     public static string GetName(string text)
         => IsEscape(text.AsSpan()) ? text[1..] : text;
 
-    // A historical scanner may split '@' from an adjoining word. Current input
-    // must retain the entire candidate, including a rejected non-keyword name.
+    // Preserve the complete current identifier candidate, including rejected escapes.
     internal static int EscapeLength(ReadOnlySpan<char> source)
     {
         var length = 1;
