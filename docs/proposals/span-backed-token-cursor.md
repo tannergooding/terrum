@@ -57,11 +57,24 @@ span constructors.
 initial view and a proof that the view's complete dependencies remain valid
 through cursor use. The accepted cursor operations alone provide neither.
 
-**Recommendation:** Keep `TokenCursor` execution pending until a separate
-input-bridge contract defines how a successful scanner snapshot supplies a
-bounded, non-owning `Span<Token>`, including its range and dependency
-provenance. Do not add a cursor-specific adapter that silently treats either
-existing token-storage surface as a span.
+**Recommendation:** Define a separate, narrow bridge from a successful
+`TokenSnapshot` to a bounded, non-owning readonly `Span<Token>`. The snapshot
+already owns contiguous records of three `int32` words per token; the current
+`Token` layout is 12 bytes (`int32 Kind` plus an 8-byte `SourceRange`), so this
+is a candidate source that need not copy or rewrite token records. The bridge
+must prove that the view's range is exactly the validated snapshot prefix and
+carry the snapshot owner's dependency through the view and any captured
+cursor. Reject use when that dependency cannot be proven to outlive the
+cursor. This is a proposal, not approval to expose a view or claim support.
+Do not add a cursor-specific adapter that silently treats `HostBuffer` or
+`ManagedTokenChain` as a span.
+
+Before implementation, independently verify the native layout and alignment
+of `Token` and `OwnedInt32Buffer`, the snapshot's post-scan validation and
+publication conditions, and that owner dependency forwarding does not extend
+or duplicate ownership. Keep the bridge readonly and limited to the
+`TokenSnapshot` record prefix; no mutable access, arbitrary span construction,
+general slicing, parser integration, or new public ABI is implied.
 
 ## Decisions and rationale
 
