@@ -401,6 +401,10 @@ internal sealed class Parser
                             accessor.Add(Node(SyntaxKind.Attribute,
                                 [Take(), Expect(TokenKind.Identifier), Expect(TokenKind.CloseBracket)]));
                         }
+                        while (Current.Kind == TokenKind.UnsafeKeyword)
+                        {
+                            accessor.Add(Take());
+                        }
                         if (Current.Kind != TokenKind.Identifier || Current.Text != "get")
                         {
                             Report("TRM1002", "A property requires an explicit get accessor.", Current.Span);
@@ -739,7 +743,7 @@ internal sealed class Parser
                 }
                 break;
             }
-            case TokenKind.UnsafeKeyword:
+            case TokenKind.UnsafeKeyword when Peek(1).Kind == TokenKind.OpenBrace:
             {
                 node = Node(SyntaxKind.UnsafeStatement, [Take(), ParseBlock()]);
                 break;
@@ -1070,7 +1074,12 @@ internal sealed class Parser
     {
         SyntaxNode expression;
 
-        if (Current.Kind == TokenKind.OpenParen)
+        if (Current.Kind == TokenKind.UnsafeKeyword && Peek(1).Kind == TokenKind.OpenParen)
+        {
+            expression = Node(SyntaxKind.UnsafeExpression,
+                [Take(), Expect(TokenKind.OpenParen), ParseExpression(), Expect(TokenKind.CloseParen)]);
+        }
+        else if (Current.Kind == TokenKind.OpenParen)
         {
             var children = new List<SyntaxElement> { Take() };
             var isVoid = Current.Kind == TokenKind.CloseParen;
@@ -1426,7 +1435,8 @@ internal sealed class Parser
     }
 
     private static bool IsModifier(TokenKind kind)
-        => kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword or TokenKind.StaticKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword;
+        => kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword
+            or TokenKind.StaticKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword or TokenKind.UnsafeKeyword;
 
     private static bool IsTypeStart(TokenKind kind) => kind is TokenKind.Identifier or TokenKind.VoidKeyword
         or TokenKind.WriteKeyword;

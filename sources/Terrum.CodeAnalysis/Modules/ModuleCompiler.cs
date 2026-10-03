@@ -407,6 +407,10 @@ public static partial class ModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(exports);
         ArgumentNullException.ThrowIfNull(program);
+        if (ContainsCallerUnsafeContracts(program))
+        {
+            throw new ModuleContractException("Caller-unsafe callable contracts are not supported in persisted semantic modules.");
+        }
         if (program.Functions.Any(static function => function.IndexedBody is not null))
         {
             throw new ModuleFormatException("Indexed executable Bodies cannot be serialized as structured module IR.");
@@ -520,6 +524,10 @@ public static partial class ModuleCompiler
     public static byte[] CreateConsumer(BoundProgram program, byte[] referenceProducer)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (ContainsCallerUnsafeContracts(program))
+        {
+            throw new ModuleContractException("Caller-unsafe callable contracts are not supported in persisted semantic modules.");
+        }
         if (program.Functions.Any(static function => function.IndexedBody is not null))
         {
             throw new ModuleFormatException("Indexed executable Bodies cannot be serialized as structured module IR.");
@@ -1004,6 +1012,15 @@ public static partial class ModuleCompiler
             }
         }
     }
+
+    internal static bool ContainsCallerUnsafeCalls(BoundProgram program) =>
+        program.Functions.Any(function => Calls(function.Body).Any(index =>
+            index >= 0 && index < program.Functions.Length
+            && program.Functions[index].RequiresUnsafeCaller));
+
+    internal static bool ContainsCallerUnsafeContracts(BoundProgram program) =>
+        program.Functions.Any(static function => function.RequiresUnsafeCaller)
+        || ContainsCallerUnsafeCalls(program);
 
     private static bool HasLoopTransfer(ImmutableArray<ModuleFunction> functions)
     {

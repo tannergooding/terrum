@@ -63,6 +63,8 @@ public enum SyntaxKind
     LiteralExpression,
     /// <summary>An expression enclosed in parentheses.</summary>
     ParenthesizedExpression,
+    /// <summary>An expression whose caller-unsafe obligations are explicitly authorized.</summary>
+    UnsafeExpression,
     /// <summary>An empty parenthesized expression (<c>()</c>).</summary>
     VoidExpression,
     /// <summary>A unary operator expression.</summary>

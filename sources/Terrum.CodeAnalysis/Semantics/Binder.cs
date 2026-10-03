@@ -149,6 +149,7 @@ internal sealed partial class Binder
                     false, false, false, function.IsStatic, function.IsNoThrow, function.DoesNotReturn, function) {
                     IsCleanup = function.IsCleanup,
                     PropertyName = function.PropertyName,
+                    RequiresUnsafeCaller = function.RequiresUnsafeCaller,
                 });
             }
         }
@@ -418,6 +419,11 @@ internal sealed partial class Binder
                 else
                 {
                     entryPoint = index;
+                    if (signature.RequiresUnsafeCaller)
+                    {
+                        _tree = signature.Tree;
+                        Report("TRM3028", "An entry point cannot require an unsafe caller.", declaration.Span);
+                    }
                 }
             }
         }
@@ -525,6 +531,7 @@ internal sealed partial class Binder
                 IsInternal = signature.IsInternal,
                 IsStatic = signature.IsStatic,
                 IsNoThrow = signature.IsNoThrow,
+                RequiresUnsafeCaller = signature.RequiresUnsafeCaller,
                 IsClassConstructor = signature.IsClassConstructor,
                 IsCleanup = signature.IsCleanup,
                 DoesNotReturn = signature.DoesNotReturn,
@@ -622,7 +629,7 @@ internal sealed partial class Binder
                     || NameText((SyntaxNode)field.Children[^3]) != name
                     || field.Children.OfType<SyntaxTokenElement>().Any(static item =>
                         item.Token.Kind is TokenKind.StaticKeyword or TokenKind.PublicKeyword
-                            or TokenKind.InternalKeyword or TokenKind.MutKeyword))
+                            or TokenKind.InternalKeyword or TokenKind.MutKeyword or TokenKind.UnsafeKeyword))
                 {
                     Report("TRM3005", $"The Core primitive '{name}' needs a private, uninitialized backing field of its own type.",
                         field.Span);
@@ -635,7 +642,7 @@ internal sealed partial class Binder
             }
             else if (member is SyntaxNode { Kind: SyntaxKind.Attribute }
                 || member is SyntaxTokenElement { Token.Kind: TokenKind.UniqueKeyword
-                    or TokenKind.MutKeyword or TokenKind.InternalKeyword })
+                    or TokenKind.MutKeyword or TokenKind.InternalKeyword or TokenKind.UnsafeKeyword })
             {
                 Report("TRM3001", "Core primitive declarations have compiler-owned visibility and layout.",
                     member.Span);
@@ -695,7 +702,8 @@ internal sealed partial class Binder
                 isPublic |= modifier.Token.Kind == TokenKind.PublicKeyword;
                 isUnique |= modifier.Token.Kind == TokenKind.UniqueKeyword;
                 visibilityCount += modifier.Token.Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword ? 1 : 0;
-                if (modifier.Token.Kind is TokenKind.PrivateKeyword or TokenKind.StaticKeyword or TokenKind.MutKeyword)
+                if (modifier.Token.Kind is TokenKind.PrivateKeyword or TokenKind.StaticKeyword
+                    or TokenKind.MutKeyword or TokenKind.UnsafeKeyword)
                 {
                     Report("TRM3001", "Top-level structs support only public or internal visibility.", modifier.Span);
                 }
@@ -768,6 +776,10 @@ internal sealed partial class Binder
                     if (modifier.Token.Kind == TokenKind.StaticKeyword)
                     {
                         Report("TRM3001", "Static struct fields are not supported.", modifier.Span);
+                    }
+                    else if (modifier.Token.Kind == TokenKind.UnsafeKeyword)
+                    {
+                        Report("TRM3001", "Unsafe applies only to callable declarations.", modifier.Span);
                     }
                 }
             }
@@ -842,6 +854,7 @@ internal sealed partial class Binder
         var isInternal = false;
         var isStatic = false;
         var isNoThrow = false;
+        var requiresUnsafeCaller = false;
         var isCleanup = false;
         var isConstEval = false;
         var doesNotReturn = false;
@@ -891,6 +904,16 @@ internal sealed partial class Binder
                 isMutable = true;
                 continue;
             }
+            if (declaration.Children[index] is SyntaxTokenElement unsafeModifier
+                && unsafeModifier.Token.Kind == TokenKind.UnsafeKeyword)
+            {
+                if (requiresUnsafeCaller)
+                {
+                    Report("TRM3001", "A callable can declare only one unsafe modifier.", unsafeModifier.Span);
+                }
+                requiresUnsafeCaller = true;
+                continue;
+            }
             Report("TRM3001", "Function modifier is not supported.", declaration.Children[index].Span);
         }
         if ((constructor && (isStatic || isMutable)) || ((containingType is null) && isPrivate))
@@ -934,14 +957,28 @@ internal sealed partial class Binder
         {
             if (getter is not null)
             {
-                foreach (var attribute in getter.Children.OfType<SyntaxNode>()
-                    .Where(static child => child.Kind == SyntaxKind.Attribute))
+                foreach (var child in getter.Children)
                 {
-                    if (attribute.Children[1] is not SyntaxTokenElement { Token.Text: "NoThrow" } || isNoThrow)
+                    if (child is SyntaxNode { Kind: SyntaxKind.Attribute } attribute)
                     {
-                        Report("TRM3001", "Only a single getter-local NoThrow effect is supported.", attribute.Span);
+                        if (attribute.Children[1] is not SyntaxTokenElement { Token.Text: "NoThrow" } || isNoThrow)
+                        {
+                            Report("TRM3001", "Only a single getter-local NoThrow effect is supported.", attribute.Span);
+                        }
+                        isNoThrow = true;
                     }
-                    isNoThrow = true;
+                    else if (child is SyntaxTokenElement { Token.Kind: TokenKind.UnsafeKeyword } unsafeAccessor)
+                    {
+                        if (requiresUnsafeCaller)
+                        {
+                            Report("TRM3001", "A callable can declare only one unsafe modifier.", unsafeAccessor.Span);
+                        }
+                        requiresUnsafeCaller = true;
+                    }
+                    else if (child is SyntaxTokenElement modifier && modifier.Token.Text != "get")
+                    {
+                        Report("TRM3001", "Getter-local visibility and mut modifiers are not supported.", modifier.Span);
+                    }
                 }
             }
             if (containingType is null || isStatic || isMutable || isCleanup || doesNotReturn
@@ -982,7 +1019,7 @@ internal sealed partial class Binder
                 && IsStruct(structType) ? (int)structType - 100 : -1;
             var structure = structureIndex < 0 ? null : _structs[structureIndex];
             if (structure is null || !structure.IsUnique || isStatic || constructor || isMutable || !isNoThrow
-                || returnType != PrimitiveType.Void || parameters?.Children.Length != 2
+                || requiresUnsafeCaller || returnType != PrimitiveType.Void || parameters?.Children.Length != 2
                 || structure.CleanupMethod is not null || isPrivate || isInternal)
             {
                 Report("TRM3023", "Cleanup requires one public, NoThrow, nonmutating, parameterless instance method on a unique struct.", declaration.Span);
@@ -1090,6 +1127,7 @@ internal sealed partial class Binder
             IsClassConstructor = classConstructor,
             PropertyName = property ? nameText : null,
             IsConstEval = isConstEval,
+            RequiresUnsafeCaller = requiresUnsafeCaller,
         });
     }
 
@@ -1661,7 +1699,13 @@ internal sealed partial class Binder
                 {
                     return viewSet;
                 }
-                if (expressionNode.Kind is not (SyntaxKind.InvocationExpression or SyntaxKind.UpdateExpression))
+                var isDirectCall = expressionNode.Kind is SyntaxKind.InvocationExpression or SyntaxKind.UpdateExpression;
+                if (expressionNode.Kind == SyntaxKind.UnsafeExpression)
+                {
+                    isDirectCall = ((SyntaxNode)expressionNode.Children[2]).Kind
+                        is SyntaxKind.InvocationExpression or SyntaxKind.UpdateExpression;
+                }
+                if (!isDirectCall)
                 {
                     Report("TRM3009", "Only direct calls and updates may be used as expression statements.", expressionNode.Span);
                 }
@@ -2189,6 +2233,20 @@ internal sealed partial class Binder
                 expression = BindExpression((SyntaxNode)node.Children[1], expected);
                 break;
 
+            case SyntaxKind.UnsafeExpression:
+            {
+                _unsafeDepth++;
+                try
+                {
+                    expression = BindExpression((SyntaxNode)node.Children[2], expected);
+                }
+                finally
+                {
+                    _unsafeDepth--;
+                }
+                break;
+            }
+
             case SyntaxKind.ConstExpression:
             {
                 var operand = BindExpression((SyntaxNode)node.Children[1], expected);
@@ -2439,7 +2497,9 @@ internal sealed partial class Binder
                     {
                         Report("TRM3011", "Private operator is inaccessible.", op.Span);
                     }
-                    expression = new BoundCall(method, [operandValue], _signatures[method].ReturnType, node.Span);
+                    expression = new BoundCall(method, [operandValue], _signatures[method].ReturnType, node.Span) {
+                        IsUnsafeAuthorized = CheckUnsafeCaller(_signatures[method], node.Span),
+                    };
                     break;
                 }
                 var operandType = op.Kind == TokenKind.Bang ? PrimitiveType.Bool
@@ -2516,7 +2576,9 @@ internal sealed partial class Binder
                     {
                         Report("TRM3011", "Private update operator is inaccessible.", op.Span);
                     }
-                    expression = new BoundNominalUpdate(op.Kind, place, prefix, method, place.Type, node.Span);
+                    expression = new BoundNominalUpdate(op.Kind, place, prefix, method, place.Type, node.Span) {
+                        IsUnsafeAuthorized = CheckUnsafeCaller(_signatures[method], node.Span),
+                    };
                 }
                 else
                 {
@@ -2707,7 +2769,9 @@ internal sealed partial class Binder
             {
                 Report("TRM3011", "Private operator is inaccessible.", op.Span);
             }
-            return new BoundCall(method, [leftValue, rightValue], comparisonResult, node.Span);
+            return new BoundCall(method, [leftValue, rightValue], comparisonResult, node.Span) {
+                IsUnsafeAuthorized = CheckUnsafeCaller(_signatures[method], node.Span),
+            };
         }
         PrimitiveType? operandType;
         PrimitiveType resultType;
@@ -3070,6 +3134,7 @@ internal sealed partial class Binder
 
         if (signature is not null)
         {
+            _ = CheckUnsafeCaller(signature, node.Span);
             if (signature.IsCleanup)
             {
                 Report("TRM3023", "Cleanup methods are called only by lexical owner cleanup.", node.Span);
@@ -3081,7 +3146,20 @@ internal sealed partial class Binder
             }
         }
 
-        return new BoundCall(Math.Max(0, function), bound.ToImmutable(), signature?.ReturnType ?? PrimitiveType.Int32, node.Span);
+        return new BoundCall(Math.Max(0, function), bound.ToImmutable(),
+            signature?.ReturnType ?? PrimitiveType.Int32, node.Span) {
+            IsUnsafeAuthorized = signature is { RequiresUnsafeCaller: true } && _unsafeDepth != 0,
+        };
+    }
+
+    private bool CheckUnsafeCaller(Signature signature, TextSpan span)
+    {
+        if (signature.RequiresUnsafeCaller && _unsafeDepth == 0)
+        {
+            Report("TRM3028", $"Calling '{signature.Name}' requires an explicit unsafe context.", span);
+            return false;
+        }
+        return signature.RequiresUnsafeCaller;
     }
 
     private bool IsStruct(PrimitiveType type) => (int)type >= 100
@@ -3597,6 +3675,7 @@ internal sealed partial class Binder
     {
         internal string? PropertyName { get; init; }
         internal bool IsCleanup { get; init; }
+        internal bool RequiresUnsafeCaller { get; init; }
         internal bool IsOperator { get; init; }
         internal GenericInstantiation? Generic { get; init; }
         internal bool IsClassConstructor { get; init; }

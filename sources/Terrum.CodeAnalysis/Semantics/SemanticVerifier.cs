@@ -449,7 +449,7 @@ public static class SemanticVerifier
             }
             if (function.IsCleanup && (function.DeclaringStruct is null || function.IsConstructor
                 || function.IsStatic || function.IsPrivate || function.IsInternal || !function.IsNoThrow
-                || function.DoesNotReturn || function.ReturnType != PrimitiveType.Void
+                || function.RequiresUnsafeCaller || function.DoesNotReturn || function.ReturnType != PrimitiveType.Void
                 || function.ParameterCount != 1 || function.Variables[0].IsMutable))
             {
                 throw Invalid();
@@ -2996,6 +2996,10 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                if (updateTarget.RequiresUnsafeCaller && !update.IsUnsafeAuthorized)
+                {
+                    throw InvalidEffect(update.Span, "UnsafeCaller");
+                }
                 if (function.IsNoThrow && !updateTarget.IsNoThrow)
                 {
                     throw InvalidEffect(update.Span);
@@ -3242,6 +3246,10 @@ public static class SemanticVerifier
                 {
                     throw InvalidEffect(call.Span, "Ownership");
                 }
+                if (target.RequiresUnsafeCaller && !call.IsUnsafeAuthorized)
+                {
+                    throw InvalidEffect(call.Span, "UnsafeCaller");
+                }
                 if (function.IsNoThrow && !target.IsNoThrow)
                 {
                     throw InvalidEffect(call.Span);
@@ -3476,7 +3484,8 @@ public static class SemanticVerifier
             || function.Variables[function.ParameterCount - 1] is not { IsOut: true, IsMutable: false }
             || function.Variables[function.ParameterCount] is not { IsOut: false, IsMutable: false }
             || function.Variables[function.ParameterCount].Type != type
-            || function.IsNoThrow != constructor.IsNoThrow)
+            || function.IsNoThrow != constructor.IsNoThrow
+            || function.RequiresUnsafeCaller != constructor.RequiresUnsafeCaller)
         {
             throw Invalid();
         }

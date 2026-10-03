@@ -38,6 +38,8 @@ internal sealed partial class Binder
         PrimitiveType? ScalarReturnType, int ReturnTypeParameterIndex, ImmutableArray<GenericParameter> Parameters,
         SyntaxNode Body, SyntaxNode Declaration, SyntaxTree Tree, bool IsNoThrow)
     {
+        internal bool RequiresUnsafeCaller { get; init; }
+
         internal PrimitiveType ReturnType(ImmutableArray<PrimitiveType> types) =>
             ScalarReturnType ?? types[ReturnTypeParameterIndex];
 
@@ -183,6 +185,7 @@ internal sealed partial class Binder
             IsStatic = declaration.IsStatic,
             IsNoThrow = declaration.IsNoThrow,
             DoesNotReturn = declaration.DoesNotReturn,
+            RequiresUnsafeCaller = declaration.RequiresUnsafeCaller,
             DeclaringStruct = owner,
         };
         _functions.Add(declaration.Name, _signatures.Count);
@@ -468,11 +471,15 @@ internal sealed partial class Binder
         var returnIndex = Array.IndexOf(typeNames, returnName);
         var noThrow = declaration.Children.OfType<SyntaxNode>()
             .Any(static node => node.Kind == SyntaxKind.Attribute && NameText(node) == "[NoThrow]");
+        var unsafeModifierCount = declaration.Children.OfType<SyntaxTokenElement>()
+            .Count(static element => element.Token.Kind == TokenKind.UnsafeKeyword);
+        var requiresUnsafeCaller = unsafeModifierCount != 0;
         var valid = typeNames.Length is >= 1 and <= 8
             && typeNames.Distinct(StringComparer.Ordinal).Count() == typeNames.Length
             && returnType is not null && body is not null
             && (returnIndex >= 0 || scalarReturn is not null)
             && arguments.Length is >= 1 and <= 8
+            && unsafeModifierCount <= 1
             && declaration.Children.OfType<SyntaxTokenElement>().All(static element =>
                 element.Token.Kind is not (TokenKind.PublicKeyword or TokenKind.PrivateKeyword
                     or TokenKind.StaticKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword))
@@ -585,7 +592,9 @@ internal sealed partial class Binder
         }
         if (!_templates.TryAdd(qualified, new GenericTemplate(qualified,
             [.. typeNames.Select((name, index) => new GenericTypeParameter(name, operations[index].ToImmutable()))],
-            scalarReturn, returnIndex, templateParameters.ToImmutable(), body!, declaration, _tree, noThrow)))
+            scalarReturn, returnIndex, templateParameters.ToImmutable(), body!, declaration, _tree, noThrow) {
+                RequiresUnsafeCaller = requiresUnsafeCaller,
+            }))
         {
             Report("TRM3003", $"Duplicate generic function '{qualified}'.", declaration.Span);
         }
@@ -803,7 +812,9 @@ internal sealed partial class Binder
         var signature = new Signature(instantiated, template.ReturnType(types), parameters,
             _genericProofFunctions is null ? template.Body : null,
             _genericProofFunctions is null ? template.Declaration : null,
-            template.Tree, null, false, false, true, false, true, template.IsNoThrow, false);
+            template.Tree, null, false, false, true, false, true, template.IsNoThrow, false) {
+            RequiresUnsafeCaller = template.RequiresUnsafeCaller,
+        };
         if (_genericProofFunctions is not null)
         {
             var variables = parameters.Select(parameter => new BoundVariable(parameter.Name,
@@ -815,6 +826,7 @@ internal sealed partial class Binder
                 new BoundBlock([], callee.Span), callee.Span) {
                 IsExternal = true,
                 IsNoThrow = template.IsNoThrow,
+                RequiresUnsafeCaller = template.RequiresUnsafeCaller,
             };
             signature = signature with { External = external };
             _genericProofFunctions.Add(external);
@@ -933,6 +945,7 @@ internal sealed partial class Binder
                     new BoundBlock([], template.Declaration.Span), template.Declaration.Span) {
                     IsExternal = true,
                     IsNoThrow = template.IsNoThrow,
+                    RequiresUnsafeCaller = template.RequiresUnsafeCaller,
                 }));
             functions.Add(proofBinder._signatures[symbolicIndex].External
                 ?? throw new InvalidOperationException("Missing generic proof signature."));
@@ -969,6 +982,7 @@ internal sealed partial class Binder
                 [.. proofBinder._variables],
                 template.Parameters.Length, body, template.Declaration.Span) {
                 IsNoThrow = template.IsNoThrow,
+                RequiresUnsafeCaller = template.RequiresUnsafeCaller,
             };
             functions[symbolicIndex] = function;
             var proof = new BoundProgram(functions.ToImmutable(), -1) {

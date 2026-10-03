@@ -291,6 +291,9 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     /// <summary>Whether the declaration guarantees no language-level throwing effects; implementations must prove this bound.</summary>
     public bool IsNoThrow { get; init; }
 
+    /// <summary>Whether calling this declaration requires an explicit unsafe caller context.</summary>
+    public bool RequiresUnsafeCaller { get; init; }
+
     /// <summary>Whether this void declaration guarantees no normal continuation; exceptional or fatal failure remains possible.</summary>
     public bool DoesNotReturn { get; init; }
 
@@ -553,7 +556,10 @@ public sealed record BoundCompoundAssignment(TokenKind Operator, BoundExpression
 
 /// <summary>Calls a static Copy-struct operator on a saved place value, then commits its exact-type result.</summary>
 public sealed record BoundNominalUpdate(TokenKind Operator, BoundExpression Place, bool IsPrefix,
-    int Function, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+    int Function, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    internal bool IsUnsafeAuthorized { get; init; }
+}
 
 /// <summary>A checked binary or short-circuit boolean operation.</summary>
 /// <param name="Operator">The operator token.</param>
@@ -574,7 +580,10 @@ public sealed record BoundConditional(BoundExpression Condition, BoundExpression
 /// <param name="Type">The result type.</param>
 /// <param name="Span">The source range.</param>
 public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arguments,
-    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    internal bool IsUnsafeAuthorized { get; init; }
+}
 
 /// <summary>A checked conversion between supported scalar types.</summary>
 public sealed record BoundCast(BoundExpression Operand, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);

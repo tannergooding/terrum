@@ -175,7 +175,8 @@ internal sealed partial class Binder
                 mutableClass |= token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.MutKeyword;
                 if (token.Token.Kind is Terrum.CodeAnalysis.Lexing.TokenKind.UniqueKeyword
                     or Terrum.CodeAnalysis.Lexing.TokenKind.StaticKeyword
-                    or Terrum.CodeAnalysis.Lexing.TokenKind.PrivateKeyword)
+                    or Terrum.CodeAnalysis.Lexing.TokenKind.PrivateKeyword
+                    or Terrum.CodeAnalysis.Lexing.TokenKind.UnsafeKeyword)
                 {
                     Report("TRM3001", "Classes support public/internal visibility and optional mutability.", child.Span);
                 }
@@ -224,6 +225,10 @@ internal sealed partial class Binder
                     if (token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.StaticKeyword)
                     {
                         Report("TRM3001", "Static managed fields are not supported.", modifier.Span);
+                    }
+                    else if (token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.UnsafeKeyword)
+                    {
+                        Report("TRM3001", "Unsafe applies only to callable declarations.", modifier.Span);
                     }
                 }
             }
@@ -287,6 +292,7 @@ internal sealed partial class Binder
             _signatures.Add(new Signature(factory, PrimitiveType.Bool, parameters, null, null, tree,
                 name, false, signature.IsPrivate, !signature.IsPrivate, false, true, signature.IsNoThrow, false) {
                 ClassConstructor = constructor,
+                RequiresUnsafeCaller = signature.RequiresUnsafeCaller,
             });
         }
     }
@@ -309,6 +315,7 @@ internal sealed partial class Binder
             IsPrivate = signature.IsPrivate,
             IsInternal = signature.IsInternal,
             IsNoThrow = signature.IsNoThrow,
+            RequiresUnsafeCaller = signature.RequiresUnsafeCaller,
             Intrinsic = BoundIntrinsic.ClassTryCreate,
             ClassConstructor = signature.ClassConstructor,
         };

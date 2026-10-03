@@ -47,6 +47,10 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported("An audited indexed Body cannot be reserialized as structured source.");
         }
+        if (ModuleCompiler.ContainsCallerUnsafeContracts(program))
+        {
+            throw Unsupported("Caller-unsafe callable contracts are not supported in executable TRRM Bodies.");
+        }
         if (program.EntryPoint >= 0
             && (program.Functions[program.EntryPoint].ReturnType != PrimitiveType.Int32
                 || program.Functions[program.EntryPoint].ParameterCount != 0))
