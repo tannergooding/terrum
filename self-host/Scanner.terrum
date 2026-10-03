@@ -529,6 +529,24 @@ int32 SkipDigitSeparators(int32 at, int32 radix)
     return at;
 }
 
+bool TryAccumulateMagnitude(uint64 value, uint64 digit, int32 radix, out uint64 result)
+{
+    if (radix < 2 || radix > 36)
+    {
+        return false;
+    }
+
+    uint64 wideRadix = uint64(radix);
+    if (digit >= wideRadix || value > (uint64.MaxValue - digit) / wideRadix)
+    {
+        return false;
+    }
+
+    // Rearranging value * radix + digit <= MaxValue keeps the check in range.
+    result = value * wideRadix + digit;
+    return true;
+}
+
 int32 ScanBasedNumber(int32 initial, int32 tokenIndex, int32 radix)
 {
     mut int32 at = initial + 2;
@@ -578,13 +596,13 @@ int32 ScanBasedNumber(int32 initial, int32 tokenIndex, int32 radix)
             {
                 digit = uint64(HexValue(PeekUnit(at)));
             }
-            if (magnitude > (uint64.MaxValue - digit) / uint64(radix))
+            if (!TryAccumulateMagnitude(magnitude, digit, radix, out var accumulated))
             {
                 overflow = true;
             }
             else
             {
-                magnitude = magnitude * uint64(radix) + digit;
+                magnitude = accumulated;
             }
         }
         at = at + 1;
@@ -639,14 +657,13 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
         if (!overflow)
         {
             uint64 digit = uint64(PeekUnit(at) - 48);
-            // Rearrange magnitude * 10 + digit <= MaxValue before multiplying.
-            if (magnitude > (uint64.MaxValue - digit) / 10)
+            if (!TryAccumulateMagnitude(magnitude, digit, 10, out var accumulated))
             {
                 overflow = true;
             }
             else
             {
-                magnitude = magnitude * 10 + digit;
+                magnitude = accumulated;
             }
         }
         at = at + 1;
