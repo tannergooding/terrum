@@ -1221,9 +1221,9 @@ unhandled owned failures before they reach the managed JIT caller.
 This is not a general exception-class, throw-object or low-memory ABI. There is
 no `throw`, typed/filter catch, GC rooting, async
 or arbitrary native-fault recovery. Foreign callbacks must not unwind across
-an unsupported ABI. The selected policy is part of persisted module/native
-package compatibility; an old `native-10` fail-fast package remains valid
-only with another fail-fast package.
+an unsupported ABI. The selected policy is part of the current persisted
+module/native package contract and must match across linked artifacts; retired
+native image layouts are rejected rather than loaded for compatibility.
 
 ## Executable language
 

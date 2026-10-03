@@ -521,8 +521,7 @@ Producer-private owners retain recursive cleanup targets without exporting
 those private types or their methods. Native-12 marks contracts
 containing unique values under either runtime policy. Producers/consumers
 without unique layouts continue to use native-10 or native-11, even when
-serialized by the newer `.trm` writer, so compatible older native-10/package-1
-images remain usable. Native packages embed and check the exact
+serialized by the newer `.trm` writer. Native packages embed and check the exact
 semantic profile rather than inferring it from runtime policy alone.
 `ModuleCompiler.GetNativeProfileVersion` and
 `NativeModuleCompiler.Inspect(...).NativeProfileVersion` expose that retained
