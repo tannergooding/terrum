@@ -139,6 +139,42 @@ public sealed class CoalescingTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void KnownCoalescePresencePreservesNestedOutputState(NativeRuntimePolicy policy)
+    {
+        const string source = """
+            [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+                value = 42;
+                return null;
+            }
+            [NoThrow] bool Identity(bool input, init ref<int32> result) {
+                if (!input) { return false; }
+                result = 42;
+                return true;
+            }
+            [NoThrow] bool Fill(bool publish, init ref<int32> value) {
+                if (!publish) { return false; }
+                value = 42;
+                return true;
+            }
+            int32 Main() {
+                require ManagedNode.TryCreate(42, out var leaf);
+                init int32 vacant;
+                if (Identity((leaf ?? OptionalFallback(init vacant)) is some selected, init var live)) {
+                    require Fill(true, init vacant);
+                    init int32 nullResult;
+                    if (Identity((null ?? OptionalFallback(init nullResult)) is null, init var nullLive)) {
+                        return live + vacant + nullLive + nullResult;
+                    }
+                }
+                return 0;
+            }
+            """;
+        Assert.Equal(168, NativeJit.Execute(Compile(source, policy), policy));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public void ComputedFieldReceiverRunsOnceAndPresentValueSkipsFallback(NativeRuntimePolicy policy)
     {
         const string source = """

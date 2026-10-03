@@ -3867,11 +3867,18 @@ public static class SemanticVerifier
                 break;
             case BoundCoalesce coalesce:
                 VacateNestedOutputs(coalesce.Optional, state, ref remaining);
-                var absentState = state.Clone();
-                VacateNestedOutputs(coalesce.Fallback, absentState, ref remaining);
-                for (var index = 0; index < state.Length; index++)
+                if (coalesce.Optional is BoundNull)
                 {
-                    state.Merge(index, absentState);
+                    VacateNestedOutputs(coalesce.Fallback, state, ref remaining);
+                }
+                else if (coalesce.Optional is not BoundOptionalLift)
+                {
+                    var absentState = state.Clone();
+                    VacateNestedOutputs(coalesce.Fallback, absentState, ref remaining);
+                    for (var index = 0; index < state.Length; index++)
+                    {
+                        state.Merge(index, absentState);
+                    }
                 }
                 break;
             case BoundUnary unary:
