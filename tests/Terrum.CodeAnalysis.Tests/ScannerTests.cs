@@ -107,6 +107,13 @@ public sealed class ScannerTests
     }
 
     [Fact]
+    public async Task CharacterLiteralsRetainTokenKindsAndDiagnosticParityAsync()
+    {
+        await CheckScannerAsync("'A' '\\'' '\\u0041' '\\U0001F600' '😀' '' 'ab' '\\q' '\\uD800' 'unterminated\nnext")
+            .ConfigureAwait(true);
+    }
+
+    [Fact]
     public async Task EveryKeywordClassifiesNativelyAsync()
     {
         var keywords = Enum.GetValues<TokenKind>()
@@ -124,7 +131,7 @@ public sealed class ScannerTests
     }
 
     [Fact]
-    public void NewKeywordKindsAppendWithoutRenumberingPublishedKinds()
+    public void TokenKindsAppendWithoutRenumberingPublishedKinds()
     {
         Assert.Equal(24, (int)TokenKind.InterfaceKeyword);
         Assert.Equal(76, (int)TokenKind.UnsafeKeyword);
@@ -132,6 +139,7 @@ public sealed class ScannerTests
         Assert.Equal(78, (int)TokenKind.OperatorKeyword);
         Assert.Equal(79, (int)TokenKind.WhereKeyword);
         Assert.Equal(102, (int)TokenKind.AliasKeyword);
+        Assert.Equal(103, (int)TokenKind.CharacterLiteral);
     }
 
     [Fact]
@@ -144,6 +152,7 @@ public sealed class ScannerTests
         foreach (var kind in Enum.GetValues<TokenKind>())
         {
             if (kind is TokenKind.Bad or TokenKind.Identifier or TokenKind.NumericLiteral or TokenKind.StringLiteral
+                or TokenKind.CharacterLiteral
                 || kind.ToString().EndsWith("Keyword", StringComparison.Ordinal))
             {
                 continue;

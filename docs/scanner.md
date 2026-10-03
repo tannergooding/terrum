@@ -3,9 +3,8 @@
 `self-host/Scanner.terrum` is an executable lossless scanner component, not a
 bootstrapped compiler. It implements scalar decoding, Unicode identifier
 classification, keyword and operator selection, numeric token boundaries,
-quoted strings and escapes, leading trivia and lexical diagnostics in Terrum.
-Single-quoted character tokens are currently recognized by the hosted C# lexer
-only; they are not yet part of `Scanner.terrum` or `build-component` support.
+quoted strings and single-scalar character literals with escapes, leading
+trivia and lexical diagnostics in Terrum.
 The C# host supplies buffers and pinned lexical data; it does not pretokenize
 or make source-dependent classification decisions for the component.
 `_` remains a distinct token, while underscore-prefixed names remain
@@ -64,6 +63,13 @@ decoder handles decimal, hexadecimal and
 binary integers with digit separators; floating/custom literal parsing,
 registered string targets and `[ConstEval]` remain unsupported.
 
+Scanner-9/schema-9 appends `CharacterLiteral` as token kind 103 for single-
+quoted character tokens. Existing token IDs, record widths, diagnostic IDs and
+integer records remain unchanged. The component diagnoses empty or
+multi-scalar literals with `TRM0001`, unterminated literals with `TRM0002` and
+invalid escapes with `TRM0005`; it validates one scalar but leaves target-type
+representability to the hosted binder.
+
 ```powershell
 dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll scan-component self-host\Scanner.terrum input.txt --runtime fail-fast --json
 dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-component self-host\Scanner.terrum samples\native\factorial.terrum -o artifacts\scanned-factorial.exe --runtime fail-fast --json
@@ -73,7 +79,7 @@ Both are execution-worker commands: compiled scanner code runs inside that CLI
 process. Supervising clients must launch a bounded subprocess and treat abnormal
 termination as a runtime failure. Ordinary `build` still uses the host lexer.
 When `scan-component`
-scanning completes, JSON uses `schemaVersion: 8`, `component: "scanner-8"`,
+scanning completes, JSON uses `schemaVersion: 9`, `component: "scanner-9"`,
 `coordinateSystem: "utf-16"`, the pinned `unicodeVersion`, `sourceLength`,
 `success`, and arrays of `tokens`, `integerValues`, and `diagnostics`. Each token has an exact
 lexical `kind`, `start`, `length` and its ordered `leadingTrivia` array.
@@ -87,7 +93,7 @@ return `success: false` and exit code 1 but still publish the full token stream
 and diagnostics on stdout. Without `--json`, token rows go to stdout and
 diagnostic code/spans go to stderr. Input, compilation, or invalid-result
 failures retain the standard schema-1 error response rather than producing a
-scanner-8 token response.
+scanner-9 token response.
 
 `build-component` instead adapts the native records to `LexResult`, pairs the
 validated integer values with that same source and token stream, feeds them
@@ -236,10 +242,10 @@ nonempty diagnostic/trivia spans, and exact contiguous coverage by token and
 trivia records. No source unit may be omitted, duplicated or reordered.
 Current parser adaptation additionally audits leading trivia against current
 comment rules, including required diagnostics; token classification and numeric
-decoding remain native results. The current component emits scanner-8/schema-8
+decoding remain native results. The current component emits scanner-9/schema-9
 only. Raw buffer adapters apply current identities and shapes and do not
 provide compatibility for historical scanner schemas.
-A malformed token remains a `Bad`, `NumericLiteral`, or `StringLiteral` token
+A malformed token remains a `Bad`, `NumericLiteral`, `StringLiteral`, or `CharacterLiteral` token
 with its raw source span; diagnostics do not replace source characters.
 
 Hosted parsing and supported native scalar shapes enforce current delimiter

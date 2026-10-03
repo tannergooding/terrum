@@ -59,7 +59,8 @@ candidates self-hosting or change their provisional frontend projections.
 Current scanner behavior and record shapes are specified in the
 [scanner contract](../docs/scanner.md); hosted parser and native projection
 boundaries are in the [implementation reference](../docs/implementation.md).
-Scanner-8/schema-8 appends diagnostics 11/12 for invalid and unsupported
+Scanner-9/schema-9 appends `CharacterLiteral` token kind 103 while retaining
+Scanner-8/schema-8 diagnostic identities 11/12 for invalid and unsupported
 maximal runs, including atomic Bad tokens for `..`, `..^` and `?.`. Hosted
 generic closers and optional suffixes require parser consumption; native
 scalar spacing permits only the `init ref<T>` parameter delimiters, not

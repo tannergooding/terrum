@@ -143,8 +143,9 @@ The compiled scanner and native input path support generalized comment fences
 and closed-catalog `@keyword` names, preserving raw source ranges and name
 identity.
 
-Scanner-8/schema-8 appends diagnostic identities 11/12 for invalid and
-defined-but-unsupported maximal runs; see the
+Scanner-9/schema-9 appends `CharacterLiteral` token kind 103; Scanner-8/schema-8
+diagnostic identities 11/12 for invalid and defined-but-unsupported maximal
+runs remain unchanged. See the
 [scanner contract](scanner.md) for spans and current record shapes. Hosted
 role-specific punctuation rules are in the
 [implementation reference](implementation.md). The bounded frontend produces

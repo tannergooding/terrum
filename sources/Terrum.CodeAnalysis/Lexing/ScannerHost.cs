@@ -18,10 +18,10 @@ public static class ScannerHost
     public const int MaximumSourceLength = 16_384;
 
     /// <summary>The version of the lossless scanner and integer-decoder interchange.</summary>
-    public const int SchemaVersion = 8;
+    public const int SchemaVersion = 9;
 
     /// <summary>The component identity for the lossless scanner and integer-decoder protocol.</summary>
-    public const string ComponentName = "scanner-8";
+    public const string ComponentName = "scanner-9";
 
     // Lexemes are packed as (kind, UTF-16 length, code units...) and terminated by kind -1.
     private static readonly ImmutableArray<int> s_keywords = CreateKeywords();
