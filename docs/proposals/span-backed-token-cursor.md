@@ -44,6 +44,25 @@ establish a general slicing API. Broader `Span<T>` construction and escape
 rules remain open; this initial slice must not be described as general
 stored-view support.
 
+## Remaining execution prerequisite: acquiring the input view
+
+The accepted cursor rules describe how a `Span<Token>` is stored and read,
+but the current scanner exposes managed token storage rather than a
+`Span<Token>`. This proposal intentionally does not define parser integration
+or a conversion from that storage to a span. `HostBuffer` and
+`ManagedTokenChain` are separate contracts and cannot be treated as implicit
+span constructors.
+
+**Summary:** An end-to-end cursor fixture needs a specified source for its
+initial view and a proof that the view's complete dependencies remain valid
+through cursor use. The accepted cursor operations alone provide neither.
+
+**Recommendation:** Keep `TokenCursor` execution pending until a separate
+input-bridge contract defines how a successful scanner snapshot supplies a
+bounded, non-owning `Span<Token>`, including its range and dependency
+provenance. Do not add a cursor-specific adapter that silently treats either
+existing token-storage surface as a span.
+
 ## Decisions and rationale
 
 ### 1. Stored-view representation
