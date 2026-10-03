@@ -346,6 +346,15 @@ public sealed class TrRmIndexedExecutionAuditTests
     }
 
     [Fact]
+    public void NoThrowSwitchRemainsExecutable()
+    {
+        var artifact = TrRmExecutionAuditTests.Artifact(SwitchBody(256), effect: 1);
+        TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
     public void IndexedNoThrowAuditRejectsCheckedDivRem()
     {
         var artifact = TrRmExecutionAuditTests.Artifact(CheckedDivRemBody, effect: 1);
