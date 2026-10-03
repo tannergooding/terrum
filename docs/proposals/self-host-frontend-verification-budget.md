@@ -87,6 +87,18 @@ local reproduced `TRM3016` before this fix and passes under both runtime
 policies now. This is correctness evidence, not a reason to change the visit
 budget.
 
+State-aware feasibility also follows initialization-sensitive tests through
+short-circuit Boolean operators and conditional expressions, applying each
+preceding expression's existing outcome transfer before checking the next
+operand or arm. A grouped `(!(ready is init) && true)` condition previously
+left an impossible output-effectful operand classified as feasible and failed
+with `TRM3016`; it now passes under both runtime policies. Flow-sensitive
+analysis is limited to compounds containing initialization tests, preserving
+the shared state-independent feasibility cache for ordinary expressions. The
+constant-conditional output-publication regression remains within the
+unchanged visit limit. This is correctness evidence, not a budget change or a
+timing claim.
+
 During the v78 budget investigation, temporary visit counters measured 100,001
 semantic-analysis visits across 210 functions before the limit failure. In the
 largest function, `ParseExpressionCore`, output-vacating traversal accounted

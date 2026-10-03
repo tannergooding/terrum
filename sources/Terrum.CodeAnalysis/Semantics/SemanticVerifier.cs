@@ -2507,26 +2507,31 @@ public static class SemanticVerifier
         private readonly byte[] _possibilities;
         private readonly Dictionary<BoundExpression, byte> _canBeFacts;
         private readonly Dictionary<BoundExpression, bool> _outcomeEffectFacts;
+        private readonly Dictionary<BoundExpression, bool> _initializationTestFacts;
         internal Dictionary<BoundStatement, InitializationState>? StatementInputs { get; init; }
 
         internal InitializationState(int length)
             : this(length, new Dictionary<BoundExpression, byte>(ReferenceEqualityComparer.Instance),
+                new Dictionary<BoundExpression, bool>(ReferenceEqualityComparer.Instance),
                 new Dictionary<BoundExpression, bool>(ReferenceEqualityComparer.Instance))
         {
         }
 
         private InitializationState(int length, Dictionary<BoundExpression, byte> canBeFacts,
-            Dictionary<BoundExpression, bool> outcomeEffectFacts)
+            Dictionary<BoundExpression, bool> outcomeEffectFacts,
+            Dictionary<BoundExpression, bool> initializationTestFacts)
         {
             _possibilities = new byte[length];
             _canBeFacts = canBeFacts;
             _outcomeEffectFacts = outcomeEffectFacts;
+            _initializationTestFacts = initializationTestFacts;
             Array.Fill(_possibilities, (byte)1);
         }
 
         internal int Length => _possibilities.Length;
         internal Dictionary<BoundExpression, byte> CanBeFacts => _canBeFacts;
         internal Dictionary<BoundExpression, bool> OutcomeEffectFacts => _outcomeEffectFacts;
+        internal Dictionary<BoundExpression, bool> InitializationTestFacts => _initializationTestFacts;
 
         internal void Fill(bool value, int start, int count) =>
             Array.Fill(_possibilities, value ? (byte)2 : (byte)1, start, count);
@@ -2560,7 +2565,7 @@ public static class SemanticVerifier
 
         internal InitializationState Clone()
         {
-            var result = new InitializationState(Length, _canBeFacts, _outcomeEffectFacts) {
+            var result = new InitializationState(Length, _canBeFacts, _outcomeEffectFacts, _initializationTestFacts) {
                 StatementInputs = StatementInputs,
             };
             CopyTo(result);
@@ -4007,8 +4012,68 @@ public static class SemanticVerifier
         return false;
     }
 
-    // Ordinary expression feasibility is shared across flow-state clones; initialization-aware patterns
-    // are handled above. Charge every lookup to the existing visit budget.
+    private static bool HasInitializationTests(BoundExpression expression,
+        Dictionary<BoundExpression, bool> initializationTestFacts, ref int remaining)
+    {
+        Count(ref remaining, 0);
+        if (expression is null)
+        {
+            return true;
+        }
+        if (initializationTestFacts.TryGetValue(expression, out var hasTests))
+        {
+            return hasTests;
+        }
+
+        hasTests = expression switch {
+            BoundCall call => HasInitializationTests(call.Arguments, initializationTestFacts, ref remaining),
+            BoundBinary binary => HasInitializationTests(binary.Left, initializationTestFacts, ref remaining)
+                || HasInitializationTests(binary.Right, initializationTestFacts, ref remaining),
+            BoundConditional conditional =>
+                HasInitializationTests(conditional.Condition, initializationTestFacts, ref remaining)
+                || HasInitializationTests(conditional.WhenTrue, initializationTestFacts, ref remaining)
+                || HasInitializationTests(conditional.WhenFalse, initializationTestFacts, ref remaining),
+            BoundCoalesce coalesce => HasInitializationTests(coalesce.Optional, initializationTestFacts, ref remaining)
+                || HasInitializationTests(coalesce.Fallback, initializationTestFacts, ref remaining),
+            BoundUnary unary => HasInitializationTests(unary.Operand, initializationTestFacts, ref remaining),
+            BoundUpdate update => HasInitializationTests(update.Place, initializationTestFacts, ref remaining),
+            BoundCompoundAssignment compound =>
+                HasInitializationTests(compound.Place, initializationTestFacts, ref remaining)
+                || HasInitializationTests(compound.Right, initializationTestFacts, ref remaining),
+            BoundNominalUpdate update => HasInitializationTests(update.Place, initializationTestFacts, ref remaining),
+            BoundCast cast => HasInitializationTests(cast.Operand, initializationTestFacts, ref remaining),
+            BoundOptionalLift lift => HasInitializationTests(lift.Value, initializationTestFacts, ref remaining),
+            BoundReadonlyProjection projection =>
+                HasInitializationTests(projection.Value, initializationTestFacts, ref remaining),
+            BoundIsNull test => HasInitializationTests(test.Value, initializationTestFacts, ref remaining),
+            BoundIsSome test => HasInitializationTests(test.Value, initializationTestFacts, ref remaining),
+            BoundIsVariablePattern or BoundIsInitialized => true,
+            BoundFieldRead field => HasInitializationTests(field.Receiver, initializationTestFacts, ref remaining),
+            BoundBufferRead buffer => HasInitializationTests(buffer.Index, initializationTestFacts, ref remaining),
+            BoundViewRead view => HasInitializationTests(view.Index, initializationTestFacts, ref remaining),
+            BoundOutArgument or BoundViewLength or BoundConstant or BoundNull or BoundRead or BoundMove or BoundReceiverLoan
+                or BoundMutableReceiverLoan or BoundMutableFieldLoan or BoundFieldLoan => false,
+            _ => true,
+        };
+        initializationTestFacts.Add(expression, hasTests);
+        return hasTests;
+    }
+
+    private static bool HasInitializationTests(ImmutableArray<BoundExpression> expressions,
+        Dictionary<BoundExpression, bool> initializationTestFacts, ref int remaining)
+    {
+        foreach (var expression in expressions)
+        {
+            if (HasInitializationTests(expression, initializationTestFacts, ref remaining))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Ordinary expression feasibility is shared across flow-state clones; initialization-sensitive
+    // compound expressions are handled above. Charge every lookup to the existing visit budget.
     private static bool CanBe(BoundExpression expression, bool result, ref int remaining,
         InitializationState initialized)
     {
@@ -4022,6 +4087,73 @@ public static class SemanticVerifier
         {
             Count(ref remaining, 0);
             return CanBe(unary.Operand, !result, ref remaining, initialized);
+        }
+        if (expression is BoundBinary { Operator: TokenKind.AmpersandAmpersand } and
+            && HasInitializationTests(and, initialized.InitializationTestFacts, ref remaining))
+        {
+            Count(ref remaining, 0);
+            if (result)
+            {
+                if (!CanBe(and.Left, true, ref remaining, initialized))
+                {
+                    return false;
+                }
+                var leftTrue = Outcome(and.Left, initialized, true, ref remaining);
+                return CanBe(and.Right, true, ref remaining, leftTrue);
+            }
+            if (CanBe(and.Left, false, ref remaining, initialized))
+            {
+                return true;
+            }
+            if (!CanBe(and.Left, true, ref remaining, initialized))
+            {
+                return false;
+            }
+            var leftTrueState = Outcome(and.Left, initialized, true, ref remaining);
+            return CanBe(and.Right, false, ref remaining, leftTrueState);
+        }
+        if (expression is BoundBinary { Operator: TokenKind.PipePipe } or &&
+            HasInitializationTests(or, initialized.InitializationTestFacts, ref remaining))
+        {
+            Count(ref remaining, 0);
+            if (result)
+            {
+                if (CanBe(or.Left, true, ref remaining, initialized))
+                {
+                    return true;
+                }
+                if (!CanBe(or.Left, false, ref remaining, initialized))
+                {
+                    return false;
+                }
+                var leftFalse = Outcome(or.Left, initialized, false, ref remaining);
+                return CanBe(or.Right, true, ref remaining, leftFalse);
+            }
+            if (!CanBe(or.Left, false, ref remaining, initialized))
+            {
+                return false;
+            }
+            var rightFalse = Outcome(or.Left, initialized, false, ref remaining);
+            return CanBe(or.Right, false, ref remaining, rightFalse);
+        }
+        if (expression is BoundConditional conditional &&
+            HasInitializationTests(conditional, initialized.InitializationTestFacts, ref remaining))
+        {
+            Count(ref remaining, 0);
+            if (CanBe(conditional.Condition, true, ref remaining, initialized))
+            {
+                var conditionTrue = Outcome(conditional.Condition, initialized, true, ref remaining);
+                if (CanBe(conditional.WhenTrue, result, ref remaining, conditionTrue))
+                {
+                    return true;
+                }
+            }
+            if (!CanBe(conditional.Condition, false, ref remaining, initialized))
+            {
+                return false;
+            }
+            var conditionFalse = Outcome(conditional.Condition, initialized, false, ref remaining);
+            return CanBe(conditional.WhenFalse, result, ref remaining, conditionFalse);
         }
         if (expression is BoundIsVariablePattern pattern)
         {

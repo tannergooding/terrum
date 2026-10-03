@@ -127,11 +127,14 @@ public sealed class InitReferenceTests
     }
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
-    public void InfeasibleNestedOutputsRemainVacant(NativeRuntimePolicy policy, bool negateInitializationTest)
+    [InlineData(NativeRuntimePolicy.FailFast, false, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true, true)]
+    public void InfeasibleNestedOutputsRemainVacant(
+        NativeRuntimePolicy policy, bool negateInitializationTest, bool compoundInitializationTest)
     {
         var source = new StringBuilder("""
             [NoThrow] bool Fill(bool publish, init ref<int32> value) {
@@ -155,9 +158,12 @@ public sealed class InitReferenceTests
         {
             source.Append("    init int32 dead").Append(index).AppendLine(";");
         }
-        source.Append("    if (Identity(")
-            .Append(negateInitializationTest ? "!(ready is init)" : "(ready is init)")
-            .Append(" || (");
+        var initializationTest = negateInitializationTest ? "!(ready is init)" : "(ready is init)";
+        if (compoundInitializationTest)
+        {
+            initializationTest = "(" + initializationTest + " && true)";
+        }
+        source.Append("    if (Identity(").Append(initializationTest).Append(" || (");
         for (var index = 0; index < 24; index++)
         {
             if (index != 0)
