@@ -44,21 +44,25 @@ public sealed class ContextualPunctuationTests
                 }
                 yield return [form, punctuation, "", "", "TRM1008"];
             }
-            foreach (var form in new[] {
-                "int32 Main() { return F(@await#42); }",
-                "int32 Main() { return F(\U00010400#flag ? left : right); }",
-                "int32 Main() { @await#while (false) { } return 42; }",
-                "int32 Main() { \U00010400#for (;;) { break \U00010400; } return 42; }",
-                "int32 Main() { outer#do { break outer; } while (true); return 42; }",
+            foreach (var (form, loopLabel) in new[] {
+                ("int32 Main() { return F(@await#42); }", false),
+                ("int32 Main() { return F(\U00010400#flag ? left : right); }", false),
+                ("int32 Main() { @await#while (false) { } return 42; }", true),
+                ("int32 Main() { \U00010400#for (;;) { break \U00010400; } return 42; }", true),
+                ("int32 Main() { outer#do { break outer; } while (true); return 42; }", true),
             })
             {
                 foreach (var gap in Gaps)
                 {
-                    yield return [form, ":", "", gap, ""];
+                    var lineBreakAfterColon = gap.Contains('\r') || gap.Contains('\n');
+                    var afterColonCode = loopLabel && lineBreakAfterColon ? "TRM1012" : "";
+                    yield return [form, ":", "", gap, afterColonCode];
                     if (gap.Length != 0)
                     {
                         yield return [form, ":", gap, "", "TRM1010"];
-                        yield return [form, ":", gap, gap, "TRM1010"];
+                        var bothGapsCode = loopLabel && lineBreakAfterColon
+                            ? "TRM1010|TRM1012" : "TRM1010";
+                        yield return [form, ":", gap, gap, bothGapsCode];
                     }
                 }
             }
@@ -100,9 +104,9 @@ public sealed class ContextualPunctuationTests
             }
             else
             {
-                var diagnostic = Assert.Single(tree.Diagnostics);
-                Assert.Equal(code, diagnostic.Code);
-                Assert.Equal(span, diagnostic.Span);
+                var codes = code.Split('|');
+                Assert.Equal(codes, tree.Diagnostics.Select(static diagnostic => diagnostic.Code));
+                Assert.All(tree.Diagnostics, diagnostic => Assert.Equal(span, diagnostic.Span));
             }
         }
     }
