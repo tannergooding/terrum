@@ -55,6 +55,24 @@ and propagate the obligation at each call site. Only an explicit unsafe
 caller scope discharges it; an implementation's internal unsafe block or
 body analysis must not silently change the published contract.
 
+### 3. Which source rules and metadata gate general output-call migration?
+
+**Summary:** Grammar §5.1 accepts the explicit `init` call-site spelling but
+leaves complete place matching, overload binding and conditional-output
+metadata open. The hosted scalar projections implement bounded existing
+`out`/`init ref<T>` cases; they do not determine general reference, aliasing or
+publication rules.
+
+**Recommendation:** Specify eligible destination places, exact selected-callee
+and argument mapping, and live/vacant/exceptional publication states before
+general migration. Preserve the distinct explicit `out` and `init` modes and
+do not infer either mode or publication from a body or method name. Reuse the
+assigned `OutputState` clause only for an explicitly declared Boolean result
+relationship; keep non-Boolean normal-return completion and exceptional
+non-publication distinct. Until those source and verifier contracts are
+settled, retain the existing bounded hosted/scalar cases without widening
+them.
+
 ## Constraints retained
 
 Keep `ref`, writable reference access, and `init ref` distinct. Preserve the
