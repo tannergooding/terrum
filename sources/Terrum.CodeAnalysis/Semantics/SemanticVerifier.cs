@@ -16,6 +16,10 @@ public static class SemanticVerifier
     private const string FunctionIndexKey = "Terrum.FunctionIndex";
     private const string SourceSpanKey = "Terrum.SourceSpan";
     private const string InvalidEffectKey = "Terrum.InvalidEffect";
+    // Share structural optional-presence facts with feasibility caches across flow-state clones.
+    private const byte OptionalPresenceAnalyzed = 0x10;
+    private const byte OptionalPresencePresent = 0x20;
+    private const byte OptionalPresenceAbsent = 0x40;
     internal const int MaximumFunctions = 1024;
     internal const int MaximumVariables = 256;
     internal const int MaximumArguments = 64;
@@ -4190,6 +4194,12 @@ public static class SemanticVerifier
         {
             return null;
         }
+        var structuralPresenceAnalyzed = TryGetOptionalPresence(expression,
+            initialized.CanBeFacts, out var structuralPresence);
+        if (structuralPresenceAnalyzed && structuralPresence is bool knownPresence)
+        {
+            return knownPresence;
+        }
         if (expression is BoundCoalesce coalesce)
         {
             var optionalPresence = KnownOptionalPresence(coalesce.Optional, initialized, ref remaining);
@@ -4206,7 +4216,8 @@ public static class SemanticVerifier
         }
         if (expression is not BoundConditional conditional)
         {
-            return KnownOptionalPresence(expression, ref remaining);
+            return structuralPresenceAnalyzed
+                ? null : KnownOptionalPresence(expression, initialized.CanBeFacts, ref remaining);
         }
 
         var whenTruePossible = CanBe(conditional.Condition, true, ref remaining, initialized);
@@ -4249,9 +4260,11 @@ public static class SemanticVerifier
             BoundConstant { Type: PrimitiveType.Bool } constant => constant.Value != (result ? 0 : 1),
             BoundUnary { Operator: TokenKind.Bang } unary =>
                 CanBe(unary.Operand, !result, ref remaining, remainingCanBeFacts),
-            BoundIsNull test => KnownOptionalPresence(test.Value, ref remaining) is bool isPresent
+            BoundIsNull test => KnownOptionalPresence(test.Value, remainingCanBeFacts,
+                ref remaining) is bool isPresent
                 ? result != isPresent : true,
-            BoundIsSome test => KnownOptionalPresence(test.Value, ref remaining) is bool isPresent
+            BoundIsSome test => KnownOptionalPresence(test.Value, remainingCanBeFacts,
+                ref remaining) is bool isPresent
                 ? result == isPresent : true,
             BoundBinary { Operator: TokenKind.AmpersandAmpersand } and => result
                 ? CanBe(and.Left, true, ref remaining, remainingCanBeFacts)
@@ -4276,27 +4289,56 @@ public static class SemanticVerifier
         return canBe;
     }
 
-    private static bool? KnownOptionalPresence(BoundExpression expression, ref int remaining)
+    private static bool? KnownOptionalPresence(BoundExpression expression,
+        Dictionary<BoundExpression, byte> remainingCanBeFacts, ref int remaining)
     {
         Count(ref remaining, 0);
         if (!ManagedClassTypes.IsOptional(expression.Type))
         {
             return null;
         }
-        return expression switch {
-            BoundNull => false,
+        if (TryGetOptionalPresence(expression, remainingCanBeFacts, out var cachedPresence))
+        {
+            return cachedPresence;
+        }
+
+        var presence = expression switch {
+            BoundNull => (bool?)false,
             BoundOptionalLift => true,
-            BoundCoalesce coalesce => KnownOptionalPresence(coalesce.Optional, ref remaining) switch {
+            BoundCoalesce coalesce => KnownOptionalPresence(coalesce.Optional,
+                remainingCanBeFacts, ref remaining) switch {
                 true => true,
-                false => KnownOptionalPresence(coalesce.Fallback, ref remaining),
+                false => KnownOptionalPresence(coalesce.Fallback, remainingCanBeFacts, ref remaining),
                 null => null,
             },
             BoundConditional conditional =>
-                KnownOptionalPresence(conditional.WhenTrue, ref remaining) is bool whenTrue
-                    && KnownOptionalPresence(conditional.WhenFalse, ref remaining) == whenTrue
+                KnownOptionalPresence(conditional.WhenTrue, remainingCanBeFacts, ref remaining) is bool whenTrue
+                    && KnownOptionalPresence(conditional.WhenFalse, remainingCanBeFacts, ref remaining) == whenTrue
                     ? whenTrue : null,
             _ => null,
         };
+        var presenceFacts = presence switch {
+            true => (byte)(OptionalPresenceAnalyzed | OptionalPresencePresent),
+            false => (byte)(OptionalPresenceAnalyzed | OptionalPresenceAbsent),
+            null => OptionalPresenceAnalyzed,
+        };
+        remainingCanBeFacts.TryGetValue(expression, out var existingFacts);
+        remainingCanBeFacts[expression] = (byte)(existingFacts | presenceFacts);
+        return presence;
+    }
+
+    private static bool TryGetOptionalPresence(BoundExpression expression,
+        Dictionary<BoundExpression, byte> remainingCanBeFacts, out bool? presence)
+    {
+        if (remainingCanBeFacts.TryGetValue(expression, out var facts)
+            && (facts & OptionalPresenceAnalyzed) != 0)
+        {
+            presence = (facts & OptionalPresencePresent) != 0 ? true
+                : (facts & OptionalPresenceAbsent) != 0 ? false : null;
+            return true;
+        }
+        presence = null;
+        return false;
     }
 
     private static InitializationState Combine(InitializationState left, bool leftFeasible,

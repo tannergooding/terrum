@@ -139,6 +139,12 @@ output-effectful impossible Boolean arms pass regression coverage under both
 runtime policies. All additional analysis remains within the shared visit
 budget and changes no language or optional semantics.
 
+State-independent structural optional-presence results now share the existing
+per-expression feasibility cache, including cached unknown results. Flow-state-
+dependent results are not cached across states. This avoids repeating the same
+structural traversal when verifier flow revisits an expression; no visit-count
+or timing reduction is claimed, and the shared budget is unchanged.
+
 During the v78 budget investigation, temporary visit counters measured 100,001
 semantic-analysis visits across 210 functions before the limit failure. In the
 largest function, `ParseExpressionCore`, output-vacating traversal accounted
