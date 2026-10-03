@@ -48,12 +48,20 @@ reject unknown kinds and flags rather than infer dependencies from bodies.
 **Summary:** The grammar gives `unsafe` on a callable declaration a caller
 obligation, distinct from unsafe operations inside its body, but the source
 to metadata mapping is open. The metadata design already reserves Effects
-bit `0x04` for exactly the unsafe-caller requirement.
+bit `0x04` for exactly the unsafe-caller requirement. That function-level bit
+does not authorize a call inside a source-free executable Body: the current
+`Call` record carries no checked provenance for an explicit unsafe scope, so
+a reader cannot distinguish a scoped call from an unscoped one.
 
 **Recommendation:** Map the source declaration to that assigned Effects bit
 and propagate the obligation at each call site. Only an explicit unsafe
 caller scope discharges it; an implementation's internal unsafe block or
-body analysis must not silently change the published contract.
+body analysis must not silently change the published contract. Before
+executable support admits such calls, assign and validate a Body representation
+for explicit unsafe scopes. Until then, keep caller-unsafe declarations and
+calls outside the executable TRRM profile; do not treat the callee's Effects
+bit or hosted source verification as proof that an individual call was
+authorized.
 
 ### 3. Which source rules and metadata gate general output-call migration?
 
