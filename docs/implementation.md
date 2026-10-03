@@ -73,16 +73,20 @@ verification and native integration.
 
 ### Current syntax and scanner profile
 
-Hosted source compilation supports transparent, non-generic aliases declared
-at file scope, including under the existing file-scoped namespace form, across
-source snapshots, with forward references and cycle diagnostics; expansion is
-bounded by the existing 128-declaration semantic nesting limit. Generic aliases
-remain unsupported. A public alias may be used in ordinary source compilation
-only when its resolved target is public; library emission rejects public
-aliases because their metadata encoding remains open. Internal aliases can be
-erased during library compilation. This support does not extend the bounded
-scalar frontend or add alias declarations to source-free TRRM; Terrum-authored
-scalar frontend components still use the hosted verifier/emitter.
+Hosted source compilation supports transparent aliases declared at file scope,
+including under the existing file-scoped namespace form, across source
+snapshots, with forward references and unused-cycle diagnostics. Generic
+aliases substitute supported source type arguments without changing nominal
+identity or dropping managed-handle access/optional qualification; arity is
+checked and expansion is bounded by the existing 128-declaration semantic
+nesting limit. This does not add generic structs/classes or broaden the
+supported type system. A public alias may be used in ordinary source
+compilation only when its expanded target is public; library emission rejects
+public aliases because their metadata encoding remains open. Internal aliases
+can be erased during library compilation. This support does not extend the
+bounded scalar frontend or add alias declarations to source-free TRRM;
+Terrum-authored scalar frontend components still use the hosted
+verifier/emitter.
 
 A single loop label and its `while`, `do` or `for` introducer must occupy the
 same physical source line (`TRM1012`). The colon attaches to the label; trivia

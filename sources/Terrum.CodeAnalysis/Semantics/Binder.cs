@@ -32,6 +32,7 @@ internal sealed partial class Binder
     private readonly Dictionary<string, PrimitiveType> _structNames = new(StringComparer.Ordinal);
     private readonly Dictionary<string, AliasDefinition> _aliases = new(StringComparer.Ordinal);
     private readonly List<AliasDefinition> _aliasResolutionStack = [];
+    private readonly List<Dictionary<string, PrimitiveType>> _aliasTypeArguments = [];
     private readonly ImmutableArray<HostBuffer> _buffers;
     private readonly Dictionary<string, int> _functions = new(StringComparer.Ordinal);
     private readonly HashSet<string> _usings = new(StringComparer.Ordinal);
@@ -66,11 +67,12 @@ internal sealed partial class Binder
     }
 
     private sealed class AliasDefinition(SyntaxTree tree, SyntaxNode declaration, SyntaxNode target,
-        string qualifiedName, bool isPublic)
+        ImmutableArray<string> typeParameters, string qualifiedName, bool isPublic)
     {
         internal SyntaxTree Tree { get; } = tree;
         internal SyntaxNode Declaration { get; } = declaration;
         internal SyntaxNode Target { get; } = target;
+        internal ImmutableArray<string> TypeParameters { get; } = typeParameters;
         internal string QualifiedName { get; } = qualifiedName;
         internal bool IsPublic { get; } = isPublic;
         internal bool IsResolving { get; set; }
@@ -887,10 +889,15 @@ internal sealed partial class Binder
                 {
                     continue;
                 }
-                if (declaration.Children.OfType<SyntaxNode>()
-                    .Any(static node => node.Kind == SyntaxKind.TypeParameterList))
+                var typeParameterList = declaration.Children.OfType<SyntaxNode>()
+                    .FirstOrDefault(static node => node.Kind == SyntaxKind.TypeParameterList);
+                var typeParameters = typeParameterList is null ? [] : typeParameterList.Children
+                    .OfType<SyntaxTokenElement>()
+                    .Where(static element => element.Token.Kind == TokenKind.Identifier)
+                    .Select(static element => element.Token.Name).ToImmutableArray();
+                if (typeParameters.Distinct(StringComparer.Ordinal).Count() != typeParameters.Length)
                 {
-                    Report("TRM3001", "Generic type aliases are not supported.", declaration.Span);
+                    Report("TRM3001", "A type alias cannot repeat a type parameter.", declaration.Span);
                     continue;
                 }
                 var visibility = declaration.Children.OfType<SyntaxTokenElement>()
@@ -922,22 +929,136 @@ internal sealed partial class Binder
                     || _classNames.ContainsKey(qualifiedName)
                     || _protocols.ContainsKey(qualifiedName)
                     || !_aliases.TryAdd(qualifiedName,
-                        new AliasDefinition(tree, declaration, target, qualifiedName, isPublic)))
+                        new AliasDefinition(tree, declaration, target, typeParameters, qualifiedName, isPublic)))
                 {
                     Report("TRM3003", $"Duplicate or reserved type alias '{qualifiedName}'.", declaration.Span);
                 }
             }
         }
+        ValidateAliasCycles();
         foreach (var alias in _aliases.Values)
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            _ = ResolveAlias(alias, out _);
+            if (alias.TypeParameters.IsEmpty)
+            {
+                _ = ResolveAlias(alias, out _);
+            }
         }
     }
 
-    private DeclaredTypeResolution ResolveAlias(AliasDefinition alias, out PrimitiveType type)
+    private void ValidateAliasCycles()
     {
-        if (alias.IsResolved)
+        var dependencies = new Dictionary<AliasDefinition, HashSet<AliasDefinition>>();
+        foreach (var alias in _aliases.Values)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            var previousTree = _tree;
+            SetContext(alias.Tree);
+            var edges = new HashSet<AliasDefinition>();
+            foreach (var typeName in DescendantTypeNames(alias.Target))
+            {
+                var referencedName = TypeNameIdentifier(typeName);
+                if (!alias.TypeParameters.Contains(referencedName, StringComparer.Ordinal)
+                    && FindAliasDefinition(referencedName) is AliasDefinition referenced)
+                {
+                    _ = edges.Add(referenced);
+                }
+            }
+            dependencies.Add(alias, edges);
+            SetContext(previousTree);
+        }
+
+        var states = new Dictionary<AliasDefinition, byte>();
+        var stack = new List<AliasDefinition>();
+        foreach (var alias in _aliases.Values)
+        {
+            Visit(alias);
+        }
+
+        void Visit(AliasDefinition alias)
+        {
+            if (states.TryGetValue(alias, out var state))
+            {
+                if (state == 1)
+                {
+                    var first = stack.IndexOf(alias);
+                    var cycle = stack.Skip(Math.Max(first, 0)).Append(alias).ToArray();
+                    foreach (var member in cycle)
+                    {
+                        member.IsInvalid = true;
+                    }
+                    Report("TRM3005", $"Recursive type alias cycle: {string.Join(" -> ", cycle.Select(static item => item.QualifiedName))}.",
+                        alias.Declaration.Span);
+                }
+                return;
+            }
+
+            states.Add(alias, 1);
+            stack.Add(alias);
+            foreach (var dependency in dependencies[alias])
+            {
+                Visit(dependency);
+            }
+            stack.RemoveAt(stack.Count - 1);
+            states[alias] = 2;
+        }
+    }
+
+    private AliasDefinition? FindAliasDefinition(string name)
+    {
+        var candidates = new HashSet<string>(StringComparer.Ordinal);
+        if (name.Contains('.', StringComparison.Ordinal))
+        {
+            Add(name);
+        }
+        else
+        {
+            Add(name);
+            Add(Qualify(name));
+            var parent = _namespace;
+            while (parent.Contains('.', StringComparison.Ordinal))
+            {
+                parent = parent[..parent.LastIndexOf('.', StringComparison.Ordinal)];
+                Add(parent + "." + name);
+            }
+            foreach (var imported in _usings)
+            {
+                Add(imported + "." + name);
+            }
+        }
+        return candidates.Count == 1 ? _aliases[candidates.Single()] : null;
+
+        void Add(string qualified)
+        {
+            if (_aliases.ContainsKey(qualified))
+            {
+                _ = candidates.Add(qualified);
+            }
+        }
+    }
+
+    private static IEnumerable<SyntaxNode> DescendantTypeNames(SyntaxNode node)
+    {
+        if (node.Kind == SyntaxKind.TypeName)
+        {
+            yield return node;
+        }
+        foreach (var child in node.Children.OfType<SyntaxNode>())
+        {
+            foreach (var descendant in DescendantTypeNames(child))
+            {
+                yield return descendant;
+            }
+        }
+    }
+
+    private DeclaredTypeResolution ResolveAlias(AliasDefinition alias, out PrimitiveType type) =>
+        ResolveAlias(alias, null, alias.Declaration.Span, out type);
+
+    private DeclaredTypeResolution ResolveAlias(AliasDefinition alias,
+        ImmutableArray<PrimitiveType>? typeArguments, TextSpan useSite, out PrimitiveType type)
+    {
+        if (alias.IsResolved && typeArguments is null)
         {
             type = alias.Type;
             return DeclaredTypeResolution.Unique;
@@ -947,13 +1068,27 @@ internal sealed partial class Binder
             type = default;
             return DeclaredTypeResolution.Invalid;
         }
+        if (typeArguments is null && !alias.TypeParameters.IsEmpty)
+        {
+            Report("TRM3005", $"Generic type alias '{alias.QualifiedName}' requires type arguments.", useSite);
+            type = default;
+            return DeclaredTypeResolution.Invalid;
+        }
+        if (typeArguments is ImmutableArray<PrimitiveType> arguments
+            && arguments.Length != alias.TypeParameters.Length)
+        {
+            Report("TRM3005",
+                $"Type alias '{alias.QualifiedName}' expects {alias.TypeParameters.Length} type arguments but received {arguments.Length}.",
+                useSite);
+            type = default;
+            return DeclaredTypeResolution.Invalid;
+        }
         if (alias.IsResolving)
         {
             var first = _aliasResolutionStack.IndexOf(alias);
             var cycle = _aliasResolutionStack.Skip(Math.Max(first, 0))
                 .Select(static item => item.QualifiedName).Append(alias.QualifiedName);
-            Report("TRM3005", $"Recursive type alias cycle: {string.Join(" -> ", cycle)}.",
-                alias.Declaration.Span);
+            Report("TRM3005", $"Recursive type alias cycle: {string.Join(" -> ", cycle)}.", useSite);
             alias.IsInvalid = true;
             type = default;
             return DeclaredTypeResolution.Invalid;
@@ -970,6 +1105,15 @@ internal sealed partial class Binder
         var previousTree = _tree;
         SetContext(alias.Tree);
         var diagnosticCount = _diagnostics.Count;
+        if (typeArguments is ImmutableArray<PrimitiveType> resolvedArguments)
+        {
+            var parameters = new Dictionary<string, PrimitiveType>(StringComparer.Ordinal);
+            for (var index = 0; index < resolvedArguments.Length; index++)
+            {
+                parameters.Add(alias.TypeParameters[index], resolvedArguments[index]);
+            }
+            _aliasTypeArguments.Add(parameters);
+        }
         alias.IsResolving = true;
         _aliasResolutionStack.Add(alias);
         try
@@ -977,20 +1121,29 @@ internal sealed partial class Binder
             var resolved = BindType(alias.Target, allowVoid: false);
             if (_diagnostics.Count != diagnosticCount)
             {
-                alias.IsInvalid = true;
+                if (alias.TypeParameters.IsEmpty)
+                {
+                    alias.IsInvalid = true;
+                }
                 type = default;
                 return DeclaredTypeResolution.Invalid;
             }
             if (alias.IsPublic && !IsPublicType(resolved))
             {
                 Report("TRM3005", $"Public type alias '{alias.QualifiedName}' exposes a non-public target.",
-                    alias.Target.Span);
-                alias.IsInvalid = true;
+                    useSite);
+                if (alias.TypeParameters.IsEmpty)
+                {
+                    alias.IsInvalid = true;
+                }
                 type = default;
                 return DeclaredTypeResolution.Invalid;
             }
-            alias.Type = resolved;
-            alias.IsResolved = true;
+            if (alias.TypeParameters.IsEmpty)
+            {
+                alias.Type = resolved;
+                alias.IsResolved = true;
+            }
             type = resolved;
             return DeclaredTypeResolution.Unique;
         }
@@ -998,6 +1151,10 @@ internal sealed partial class Binder
         {
             _aliasResolutionStack.RemoveAt(_aliasResolutionStack.Count - 1);
             alias.IsResolving = false;
+            if (typeArguments is not null)
+            {
+                _aliasTypeArguments.RemoveAt(_aliasTypeArguments.Count - 1);
+            }
             SetContext(previousTree);
         }
     }
@@ -1313,35 +1470,60 @@ internal sealed partial class Binder
 
     private PrimitiveType BindType(SyntaxNode node, bool allowVoid)
     {
-        var name = NameText(node);
+        var name = TypeNameIdentifier(node);
         var writable = node.Children[0] is SyntaxTokenElement { Token.Kind: TokenKind.WriteKeyword };
-        if (writable)
+        var optional = node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.Question };
+        var typeArgumentNodes = node.Children.OfType<SyntaxNode>().ToArray();
+        PrimitiveType? type = null;
+        var resolution = DeclaredTypeResolution.Missing;
+        if (TryGetAliasTypeArgument(name, out var aliasType))
         {
-            name = name["write".Length..];
+            if (typeArgumentNodes.Length != 0)
+            {
+                Report("TRM3005", $"Type parameter '{name}' cannot take type arguments.", node.Span);
+                return PrimitiveType.Int32;
+            }
+            type = aliasType;
+            resolution = DeclaredTypeResolution.Unique;
         }
-        if (_genericContext is GenericInstantiation generic
+        else if (_genericContext is GenericInstantiation generic
             && generic.Template.ParameterIndex(name) is var parameterIndex
             && parameterIndex >= 0)
         {
-            if (writable)
+            if (typeArgumentNodes.Length != 0)
             {
-                Report("TRM3005", "write T requires a supported concrete managed handle.", node.Span);
+                Report("TRM3005", $"Type parameter '{name}' cannot take type arguments.", node.Span);
+                return PrimitiveType.Int32;
             }
-            return generic.Types[parameterIndex];
+            type = generic.Types[parameterIndex];
+            resolution = DeclaredTypeResolution.Unique;
         }
-        var optional = node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.Question };
-        if (optional)
+        else
         {
-            name = name[..^1];
+            ImmutableArray<PrimitiveType>? typeArguments = null;
+            if (typeArgumentNodes.Length != 0)
+            {
+                var diagnosticCount = _diagnostics.Count;
+                var arguments = ImmutableArray.CreateBuilder<PrimitiveType>(typeArgumentNodes.Length);
+                foreach (var argumentNode in typeArgumentNodes)
+                {
+                    arguments.Add(BindType(argumentNode, allowVoid: false));
+                }
+                if (_diagnostics.Count != diagnosticCount)
+                {
+                    return PrimitiveType.Int32;
+                }
+                typeArguments = arguments.MoveToImmutable();
+            }
+            resolution = ResolveTypeName(name, typeArguments, node.Span, out var resolved);
+            type = typeArguments is null && TryPrimitiveType(name, out var primitive) ? primitive : name switch {
+                "ReadonlyInt32BufferView" when typeArguments is null => PrimitiveType.ReadonlyInt32BufferView,
+                "MutableInt32BufferView" when typeArguments is null => PrimitiveType.MutableInt32BufferView,
+                "ManagedNode" when typeArguments is null => PrimitiveType.ManagedNode,
+                "void" when allowVoid && typeArguments is null => PrimitiveType.Void,
+                _ => resolution == DeclaredTypeResolution.Unique ? resolved : (PrimitiveType?)null,
+            };
         }
-        var resolution = ResolveTypeName(name, out var resolved);
-        var type = TryPrimitiveType(name, out var primitive) ? primitive : name switch {
-            "ReadonlyInt32BufferView" => PrimitiveType.ReadonlyInt32BufferView,
-            "MutableInt32BufferView" => PrimitiveType.MutableInt32BufferView,
-            "ManagedNode" => PrimitiveType.ManagedNode,
-            "void" when allowVoid => PrimitiveType.Void,
-            _ => resolution == DeclaredTypeResolution.Unique ? resolved : (PrimitiveType?)null,
-        };
 
         if (type is null && resolution != DeclaredTypeResolution.Invalid)
         {
@@ -1379,6 +1561,41 @@ internal sealed partial class Binder
         }
 
         return type ?? PrimitiveType.Int32;
+    }
+
+    private bool TryGetAliasTypeArgument(string name, out PrimitiveType type)
+    {
+        for (var index = _aliasTypeArguments.Count - 1; index >= 0; index--)
+        {
+            if (_aliasTypeArguments[index].TryGetValue(name, out type))
+            {
+                return true;
+            }
+        }
+        type = default;
+        return false;
+    }
+
+    private static string TypeNameIdentifier(SyntaxNode node)
+    {
+        var builder = new StringBuilder();
+        foreach (var child in node.Children)
+        {
+            if (child is not SyntaxTokenElement element
+                || element.Token.Kind is TokenKind.Less or TokenKind.Question or TokenKind.QuestionQuestion)
+            {
+                break;
+            }
+            if (element.Token.Kind is TokenKind.Identifier or TokenKind.VoidKeyword)
+            {
+                _ = builder.Append(element.Token.Name);
+            }
+            else if (element.Token.Kind == TokenKind.Dot)
+            {
+                _ = builder.Append('.');
+            }
+        }
+        return builder.ToString();
     }
 
     private bool IsUnique(PrimitiveType type) =>

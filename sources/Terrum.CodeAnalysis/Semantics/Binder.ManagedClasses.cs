@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
@@ -51,8 +52,17 @@ internal sealed partial class Binder
         Invalid,
     }
 
-    private DeclaredTypeResolution ResolveTypeName(string name, out PrimitiveType type)
+    private DeclaredTypeResolution ResolveTypeName(string name, out PrimitiveType type) =>
+        ResolveTypeName(name, null, default, out type);
+
+    private DeclaredTypeResolution ResolveTypeName(string name, ImmutableArray<PrimitiveType>? typeArguments,
+        TextSpan useSite, out PrimitiveType type)
     {
+        if (typeArguments is not null && _genericProofSource is not null
+            && FindAliasDefinition(name) is AliasDefinition localAlias)
+        {
+            return ResolveAlias(localAlias, typeArguments, useSite, out type);
+        }
         if (_genericContext is GenericInstantiation generic
             && generic.Template.ParameterIndex(name) is var index && index >= 0)
         {
@@ -61,7 +71,7 @@ internal sealed partial class Binder
         }
         if (_genericProofSource is Binder source)
         {
-            var resolution = source.ResolveTypeName(name, out var sourceType);
+            var resolution = source.ResolveTypeName(name, typeArguments, useSite, out var sourceType);
             if (resolution is DeclaredTypeResolution.Ambiguous or DeclaredTypeResolution.Invalid)
             {
                 type = default;
@@ -102,7 +112,7 @@ internal sealed partial class Binder
                 parent = parent[..parent.LastIndexOf('.', StringComparison.Ordinal)];
                 AddCandidate(parent + "." + name);
             }
-            foreach (var imported in _usings)
+            foreach (var imported in _usings.ToArray())
             {
                 AddCandidate(imported + "." + name);
             }
@@ -121,17 +131,17 @@ internal sealed partial class Binder
 
         void AddCandidate(string qualified)
         {
-            if (_structNames.TryGetValue(qualified, out var structure))
+            if (typeArguments is null && _structNames.TryGetValue(qualified, out var structure))
             {
                 _ = candidates.Add(structure);
             }
-            if (_classNames.TryGetValue(qualified, out var @class))
+            if (typeArguments is null && _classNames.TryGetValue(qualified, out var @class))
             {
                 _ = candidates.Add(@class);
             }
             if (_aliases.TryGetValue(qualified, out var alias))
             {
-                var aliasResolution = ResolveAlias(alias, out var aliasType);
+                var aliasResolution = ResolveAlias(alias, typeArguments, useSite, out var aliasType);
                 if (aliasResolution == DeclaredTypeResolution.Unique)
                 {
                     _ = candidates.Add(aliasType);

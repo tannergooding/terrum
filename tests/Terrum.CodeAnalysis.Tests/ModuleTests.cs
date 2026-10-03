@@ -37,6 +37,22 @@ public sealed class ModuleTests
             ModuleCompiler.Link(consumer, producer), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
     }
 
+    [Fact]
+    public async Task InternalGenericAliasesEraseBeforeModulePublicationAsync()
+    {
+        var library = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "alias Identity<T> = T; public Identity<int32> Get() { return 42; }"));
+        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Get"]);
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return Get(); }"), ModuleCompiler.CreateReference(producer));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, producer), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+    }
+
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]

@@ -107,19 +107,95 @@ public sealed class CompilationTests
     }
 
     [Fact]
-    public void RejectsRecursiveAndGenericAliases()
+    public void GenericAliasesSubstituteAndComposeAcrossSourceFiles()
+    {
+        var entry = SyntaxTree.Parse("""
+            using Demo;
+            T Identity<T>(T value) where T : [Copy] {
+                Same<T> copy = value;
+                return value;
+            }
+            int32 Main() { return Identity<Scalar<int32>>(42); }
+            """);
+        var aliases = SyntaxTree.Parse("""
+            namespace Demo;
+            alias Scalar<T> = T;
+            alias Same<T> = T;
+            """);
+        var compilation = Compilation.Create([entry, aliases]);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.NotNull(compilation.Program);
+        SemanticVerifier.Verify(compilation.Program);
+    }
+
+    [Fact]
+    public void GenericAliasesComposeOptionalManagedTargetsAcrossSourceFiles()
+    {
+        var entry = SyntaxTree.Parse("""
+            using Demo;
+            int32 Main() {
+                Maybe<ManagedNode> absent = null;
+                if (absent is some node) { return node.Value; }
+                return 0;
+            }
+            """);
+        var aliases = SyntaxTree.Parse("""
+            namespace Demo;
+            alias Maybe<T> = T?;
+            """);
+        var compilation = Compilation.Create([entry, aliases]);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.NotNull(compilation.Program);
+        SemanticVerifier.Verify(compilation.Program);
+    }
+
+    [Fact]
+    public void GenericAliasesPreserveManagedWriteQualification()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            mut class Node { public mut int32 Value; public Node(int32 value) { Value = value; } }
+            alias Writable<T> = write T;
+            void Set(Writable<Node> node) { node.Value = 42; }
+            int32 Main() { return 0; }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.NotNull(compilation.Program);
+        SemanticVerifier.Verify(compilation.Program);
+    }
+
+    [Fact]
+    public void RejectsGenericAliasArityAndUnusedCycles()
+    {
+        var missing = Compilation.Create(SyntaxTree.Parse(
+            "alias Identity<T> = T; int32 Main() { Identity value = 1; return 0; }"));
+        Assert.True(missing.HasErrors);
+        Assert.Contains(missing.Diagnostics, static diagnostic =>
+            diagnostic.Code == "TRM3005" && diagnostic.Message.Contains("requires type arguments", StringComparison.Ordinal));
+
+        var extra = Compilation.Create(SyntaxTree.Parse(
+            "alias Identity<T> = T; int32 Main() { Identity<int32, bool> value = 1; return 0; }"));
+        Assert.True(extra.HasErrors);
+        Assert.Contains(extra.Diagnostics, static diagnostic =>
+            diagnostic.Code == "TRM3005" && diagnostic.Message.Contains("expects 1 type arguments but received 2", StringComparison.Ordinal));
+
+        var cycle = Compilation.Create(SyntaxTree.Parse("""
+            alias First<T> = Second<T>;
+            alias Second<U> = First<U>;
+            int32 Main() { return 0; }
+            """));
+        Assert.True(cycle.HasErrors);
+        Assert.Contains(cycle.Diagnostics, static diagnostic =>
+            diagnostic.Code == "TRM3005" && diagnostic.Message.Contains("First -> Second -> First", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RejectsRecursiveAliases()
     {
         var recursive = Compilation.Create(SyntaxTree.Parse(
             "alias First = Second; alias Second = First; int32 Main() { return 0; }"));
         Assert.True(recursive.HasErrors);
         Assert.Contains(recursive.Diagnostics, static diagnostic =>
             diagnostic.Code == "TRM3005" && diagnostic.Message.Contains("First -> Second -> First", StringComparison.Ordinal));
-
-        var generic = Compilation.Create(SyntaxTree.Parse(
-            "alias Identity<T> = T; int32 Main() { return 0; }"));
-        Assert.True(generic.HasErrors);
-        Assert.Contains(generic.Diagnostics, static diagnostic =>
-            diagnostic.Code == "TRM3001" && diagnostic.Message.Contains("Generic type aliases", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -129,6 +205,16 @@ public sealed class CompilationTests
             "struct Hidden { int32 Value; } public alias PublicHidden = Hidden; int32 Main() { return 0; }"));
         Assert.True(inaccessible.HasErrors);
         Assert.Contains(inaccessible.Diagnostics, static diagnostic =>
+            diagnostic.Code == "TRM3005" && diagnostic.Message.Contains("non-public target", StringComparison.Ordinal));
+
+        var inaccessibleInstantiation = Compilation.Create(SyntaxTree.Parse("""
+            struct Hidden { int32 Value; }
+            public alias Identity<T> = T;
+            public void Take(Identity<Hidden> value) { }
+            int32 Main() { return 0; }
+            """));
+        Assert.True(inaccessibleInstantiation.HasErrors);
+        Assert.Contains(inaccessibleInstantiation.Diagnostics, static diagnostic =>
             diagnostic.Code == "TRM3005" && diagnostic.Message.Contains("non-public target", StringComparison.Ordinal));
 
         var library = Compilation.CreateLibrary(SyntaxTree.Parse("public alias Count = int32;"));

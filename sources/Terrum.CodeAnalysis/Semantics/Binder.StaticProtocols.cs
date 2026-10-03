@@ -865,7 +865,14 @@ internal sealed partial class Binder
             SetContext(template.Tree);
             var proofBinder = new Binder([template.Tree], [], _cancellationToken,
                 isLibrary: true, runtimePolicy: _runtimePolicy);
-            proofBinder._contexts.Add(template.Tree, _contexts[template.Tree]);
+            foreach (var (tree, context) in _contexts)
+            {
+                proofBinder._contexts.Add(tree, context);
+            }
+            foreach (var (name, alias) in _aliases)
+            {
+                proofBinder._aliases.Add(name, alias);
+            }
             proofBinder.SetContext(template.Tree);
             var functions = ImmutableArray.CreateBuilder<BoundFunction>();
             var probeTypes = ImmutableArray.CreateBuilder<PrimitiveType>(template.TypeParameters.Length);
@@ -1019,61 +1026,14 @@ internal sealed partial class Binder
 
     private bool TryResolveGenericArgument(SyntaxNode argument, out PrimitiveType type)
     {
-        type = default;
-        if (argument.Kind != SyntaxKind.TypeName
-            || argument.Children.Any(static child => child is SyntaxNode))
+        if (argument.Kind != SyntaxKind.TypeName)
         {
+            type = default;
             return false;
         }
-        var tokens = argument.Children.OfType<SyntaxTokenElement>().Select(static child => child.Token).ToArray();
-        var writable = tokens[0].Kind == TokenKind.WriteKeyword;
-        var optional = tokens[^1].Kind == TokenKind.Question;
-        var name = string.Join(".", tokens.Where(static token => token.Kind == TokenKind.Identifier)
-            .Select(static token => token.Name));
-        if (name.Length == 0)
-        {
-            return false;
-        }
-        if (_genericContext is GenericInstantiation generic
-            && generic.Template.ParameterIndex(name) is var index && index >= 0)
-        {
-            if (writable || optional)
-            {
-                return false;
-            }
-            type = generic.Types[index];
-            return true;
-        }
-        if (GenericScalarType(name) is PrimitiveType scalar)
-        {
-            type = scalar;
-        }
-        else if (name == NativeManagedNodeIntrinsics.TypeName)
-        {
-            type = PrimitiveType.ManagedNode;
-        }
-        else if (ResolveTypeName(name, out type) != DeclaredTypeResolution.Unique)
-        {
-            return false;
-        }
-        if (writable)
-        {
-            if (type != PrimitiveType.ManagedNode
-                && (!IsClass(type) || !_classes[ManagedClassTypes.ClassIndex(type)].IsMutable))
-            {
-                return false;
-            }
-            type = ManagedClassTypes.Writable(type);
-        }
-        if (optional)
-        {
-            if (!ManagedClassTypes.IsManaged(type))
-            {
-                return false;
-            }
-            type = ManagedClassTypes.Optional(type);
-        }
-        return true;
+        var diagnosticCount = _diagnostics.Count;
+        type = BindType(argument, allowVoid: false);
+        return _diagnostics.Count == diagnosticCount;
     }
 
     private string? FindProtocol(string name)
