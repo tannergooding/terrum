@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
@@ -42,6 +43,55 @@ public sealed class InitReferenceTests
             return node.Value;
         }
         """;
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, true)]
+    [InlineData(NativeRuntimePolicy.FailFast, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    public void ConstantConditionalKeepsSelectedOutputPublication(
+        NativeRuntimePolicy policy, bool selectTrueArm)
+    {
+        var source = new StringBuilder("""
+            [NoThrow] bool Fill(bool publish, out int32 value) {
+                if (publish) { value = 42; return true; }
+                return false;
+            }
+            int32 Main() {
+            """);
+        for (var group = 0; group < 6; group++)
+        {
+            var live = $"live{group}";
+            source.Append("    mut int32 ").Append(live).AppendLine(" = 0;");
+            var deadCalls = new StringBuilder();
+            for (var index = 0; index < 24; index++)
+            {
+                var dead = $"dead{group}_{index}";
+                source.Append("    mut int32 ").Append(dead).AppendLine(" = 0;");
+                if (index != 0)
+                {
+                    deadCalls.Append(" && ");
+                }
+                deadCalls.Append("Fill(false, out ").Append(dead).Append(')');
+            }
+
+            var selected = $"Fill(true, out {live})";
+            var deadExpression = deadCalls.ToString();
+            source.Append("    if (").Append(selectTrueArm ? "true" : "false").Append(" ? ")
+                .Append(selectTrueArm ? selected : deadExpression)
+                .Append(" : ").Append(selectTrueArm ? deadExpression : selected)
+                .Append(") { return ").Append(live).AppendLine("; }");
+        }
+        source.AppendLine("    return 0;");
+        source.AppendLine("}");
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()),
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+    }
 
     [Fact]
     public void ManagedInitReferenceRetainsWritableHandleAndVacantPassingMode()

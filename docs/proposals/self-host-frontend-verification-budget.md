@@ -51,6 +51,16 @@ analysis remains bounded by that limit. This is not a supported-workload target:
 the compiler need not accept pathological source merely because its syntax is
 otherwise valid.
 
+Outcome analysis also skips constructing an alternative state when exactly one
+result path is feasible. It retains the original traversals and join when both
+paths are feasible or neither is feasible. In the generated
+`ConstantConditionalKeepsSelectedOutputPublication` regression, six
+constant-conditionals each contain an unselected arm with 24 output-effectful
+calls. The verifier used 90,164/90,176 visits before pruning and 80,306/80,324
+afterward, reducing work by 9,858 visits (about 10.9%) in both generated
+source shapes. Both runtime policies and selected arms pass; this is work-count
+evidence, not a timing benchmark, and the shared limit remains unchanged.
+
 During the v78 budget investigation, temporary visit counters measured 100,001
 semantic-analysis visits across 210 functions before the limit failure. In the
 largest function, `ParseExpressionCore`, output-vacating traversal accounted

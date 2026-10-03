@@ -3667,40 +3667,74 @@ public static class SemanticVerifier
         }
         if (expression is BoundBinary { Operator: TokenKind.AmpersandAmpersand } and)
         {
-            var leftTrue = Outcome(and.Left, initialized, true, ref remaining);
             if (result)
             {
+                var leftTrue = Outcome(and.Left, initialized, true, ref remaining);
                 return Outcome(and.Right, leftTrue, true, ref remaining);
             }
+            var firstFalsePossible = CanBe(and.Left, false, ref remaining, initialized);
+            var rightFalsePossible = CanBe(and.Left, true, ref remaining, initialized)
+                && CanBe(and.Right, false, ref remaining, initialized);
+            if (firstFalsePossible && !rightFalsePossible)
+            {
+                return Outcome(and.Left, initialized, false, ref remaining);
+            }
+            if (!firstFalsePossible && rightFalsePossible)
+            {
+                var leftTrue = Outcome(and.Left, initialized, true, ref remaining);
+                return Outcome(and.Right, leftTrue, false, ref remaining);
+            }
+            var leftTrueState = Outcome(and.Left, initialized, true, ref remaining);
             var firstFalse = Outcome(and.Left, initialized, false, ref remaining);
-            var rightFalse = Outcome(and.Right, leftTrue, false, ref remaining);
-            return Combine(firstFalse, CanBe(and.Left, false, ref remaining, initialized), rightFalse,
-                CanBe(and.Left, true, ref remaining, initialized)
-                    && CanBe(and.Right, false, ref remaining, initialized));
+            var rightFalse = Outcome(and.Right, leftTrueState, false, ref remaining);
+            return Combine(firstFalse, firstFalsePossible, rightFalse, rightFalsePossible);
         }
         if (expression is BoundBinary { Operator: TokenKind.PipePipe } or)
         {
-            var leftFalse = Outcome(or.Left, initialized, false, ref remaining);
             if (!result)
             {
+                var leftFalse = Outcome(or.Left, initialized, false, ref remaining);
                 return Outcome(or.Right, leftFalse, false, ref remaining);
             }
+            var firstTruePossible = CanBe(or.Left, true, ref remaining, initialized);
+            var rightTruePossible = CanBe(or.Left, false, ref remaining, initialized)
+                && CanBe(or.Right, true, ref remaining, initialized);
+            if (firstTruePossible && !rightTruePossible)
+            {
+                return Outcome(or.Left, initialized, true, ref remaining);
+            }
+            if (!firstTruePossible && rightTruePossible)
+            {
+                var leftFalse = Outcome(or.Left, initialized, false, ref remaining);
+                return Outcome(or.Right, leftFalse, true, ref remaining);
+            }
+            var leftFalseState = Outcome(or.Left, initialized, false, ref remaining);
             var firstTrue = Outcome(or.Left, initialized, true, ref remaining);
-            var rightTrue = Outcome(or.Right, leftFalse, true, ref remaining);
-            return Combine(firstTrue, CanBe(or.Left, true, ref remaining, initialized), rightTrue,
-                CanBe(or.Left, false, ref remaining, initialized)
-                    && CanBe(or.Right, true, ref remaining, initialized));
+            var rightTrue = Outcome(or.Right, leftFalseState, true, ref remaining);
+            return Combine(firstTrue, firstTruePossible, rightTrue, rightTruePossible);
         }
         if (expression is BoundConditional conditional)
         {
+            var whenTruePossible = CanBe(conditional.Condition, true, ref remaining, initialized)
+                && CanBe(conditional.WhenTrue, result, ref remaining, initialized);
+            var whenFalsePossible = CanBe(conditional.Condition, false, ref remaining, initialized)
+                && CanBe(conditional.WhenFalse, result, ref remaining, initialized);
+            if (whenTruePossible && !whenFalsePossible)
+            {
+                var trueConditionState = Outcome(conditional.Condition, initialized, true, ref remaining);
+                return Outcome(conditional.WhenTrue, trueConditionState, result, ref remaining);
+            }
+            if (!whenTruePossible && whenFalsePossible)
+            {
+                var falseConditionState = Outcome(conditional.Condition, initialized, false, ref remaining);
+                return Outcome(conditional.WhenFalse, falseConditionState, result, ref remaining);
+            }
             var whenTrue = Outcome(conditional.Condition, initialized, true, ref remaining);
             var whenFalse = Outcome(conditional.Condition, initialized, false, ref remaining);
             return Combine(Outcome(conditional.WhenTrue, whenTrue, result, ref remaining),
-                CanBe(conditional.Condition, true, ref remaining, initialized)
-                    && CanBe(conditional.WhenTrue, result, ref remaining, initialized),
+                whenTruePossible,
                 Outcome(conditional.WhenFalse, whenFalse, result, ref remaining),
-                CanBe(conditional.Condition, false, ref remaining, initialized)
-                    && CanBe(conditional.WhenFalse, result, ref remaining, initialized));
+                whenFalsePossible);
         }
         var state = initialized.Clone();
         if (expression is BoundIsInitialized initializationTest)
