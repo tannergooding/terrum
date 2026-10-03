@@ -3,25 +3,23 @@ namespace Terrum.CodeAnalysis;
 
 public unique struct TokenCursor
 {
-    private Span<Token> _tokens;
-    private mut nuint _position;
+    private mut Span<Token> _tokens;
 
     [Captures(nameof(tokens))]
     public TokenCursor(Span<Token> tokens)
     {
         _tokens = tokens;
-        _position = 0;
     }
 
     public mut bool TryRead(out Token token)
     {
-        if (_position == _tokens.Length)
+        if (_tokens.Length == 0)
         {
             return false;
         }
 
-        token = _tokens[_position];
-        _position = _position + 1;
+        token = _tokens[0];
+        _tokens = _tokens.AdvanceOne();
 
         return true;
     }

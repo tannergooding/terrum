@@ -29,14 +29,20 @@ lifetimes. The first slice accepts readonly `Span<T>` access only when `T` is
 `Copy`, checks `nuint` indexes before reading, and returns elements by value.
 `[Captures(nameof(tokens))]` forwards the complete dependency set to the
 cursor field; construction is rejected if any dependency cannot be proven to
-outlive the cursor's uses. Validate all fields and captures before publishing
-the cursor.
+outlive the cursor's uses. To keep the cursor within the current 16-byte
+inline-value limit, store the remaining view in one `mut Span<T>` field
+instead of storing a second position counter. A successful read checks for a
+nonempty view, reads element zero, and advances that descriptor by one
+element. Validate all fields and captures before publishing the cursor.
 
 This direction does not add writable views, ref-returning element loans,
 arbitrary view construction or slicing, owner/guard retention, persisted
-cross-module capture metadata, or a parser integration contract. Broader
-`Span<T>` construction and escape rules remain open; this initial slice must
-not be described as general stored-view support.
+cross-module capture metadata, or a parser integration contract. The
+cursor-only `AdvanceOne` operation requires a nonempty descriptor, rebinds
+only the descriptor, and preserves its complete dependency set; it does not
+establish a general slicing API. Broader `Span<T>` construction and escape
+rules remain open; this initial slice must not be described as general
+stored-view support.
 
 ## Decisions and rationale
 
@@ -90,12 +96,26 @@ constructed value becomes observable. Failure leaves no published cursor;
 the operation does not transfer or duplicate cleanup responsibility for the
 backing.
 
+### 5. Cursor layout
+
+**Summary:** The existing candidate stores a two-word span descriptor and a
+separate `nuint` position. That needs 24 bytes on the current 64-bit target,
+exceeding `ValueLayout.MaximumSize` of 16 bytes. Increasing the general inline
+layout limit for this candidate would broaden layout and ABI support beyond
+this slice.
+
+**Selected:** Store the remaining span descriptor in a mutable field, read
+index zero, then use the checked cursor-only `AdvanceOne` operation to rebind
+it to the remaining range. This keeps the unique cursor at the span
+descriptor's fixed size, preserves readonly element access and capture
+provenance, and does not add general slicing or enlarge inline values.
+
 ## Scope after approval
 
 The first implementation target is the existing readonly `TokenCursor`:
 checked length/index reads, `Copy` token results, and dependency forwarding
 through its constructor and cursor value. It does not add arbitrary stored
-views, slicing, generic collection iteration, writable spans, new cleanup
-rules or a parser integration contract. The separate
+views, general slicing, generic collection iteration, writable spans, new
+cleanup rules or a parser integration contract. The separate
 [`HostBuffer`](../native.md) interchange surfaces and `ManagedTokenChain`
 remain unchanged and are not Span substitutes.
