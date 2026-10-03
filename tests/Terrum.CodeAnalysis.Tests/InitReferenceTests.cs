@@ -15,6 +15,7 @@ public sealed class InitReferenceTests
 {
     internal const string ScalarSource = """
         bool Fill(bool publish, init ref<int32> value) {
+            if (value is init) { return false; }
             if (!publish) { return false; }
             value = 42;
             return true;
@@ -128,6 +129,100 @@ public sealed class InitReferenceTests
         Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3016");
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void IsInitTracksScalarPublicationAndLifetime(NativeRuntimePolicy policy)
+    {
+        const string Source = """
+            bool Fill(bool publish, init ref<int32> value) {
+                if (value is init) { return false; }
+                if (!publish) { return false; }
+                value = 42;
+                return true;
+            }
+            void Write(out int32 value) { value = 17; }
+            int32 Main() {
+                int32 ready = 7;
+                if (!(ready is init)) { return 1; }
+                Fill(false, init var value);
+                if (value is init) { return 2; }
+                require Fill(true, init value);
+                if (!(value is init)) { return 3; }
+                init int32 local;
+                if (local is init) { return 4; }
+                local = 42;
+                if (!(local is init)) { return 5; }
+                local = _;
+                if (local is init) { return 6; }
+                local = 42;
+                if (!(local is init)) { return 7; }
+                Write(out var written);
+                if (!(written is init)) { return 8; }
+                return value + written;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source), runtimePolicy: (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(59, NativeJit.Execute(program, policy));
+        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+    }
+
+    [Theory]
+    [InlineData("1")]
+    [InlineData("Get()")]
+    public void IsInitRequiresNamedStorage(string operand)
+    {
+        var source = "int32 Get() { return 42; } int32 Main() { return " + operand
+            + " is init ? 1 : 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void IsInitDistinguishesInitializedManagedNullFromVacancy(NativeRuntimePolicy policy)
+    {
+        const string Source = """
+            bool Store(bool publish, init ref<ManagedNode?> value) {
+                if (!publish) { return false; }
+                value = null;
+                return true;
+            }
+            int32 Main() {
+                if (Store(false, init var value)) { return 1; }
+                if (value is init) { return 2; }
+                require Store(true, init value);
+                if (!(value is init)) { return 3; }
+                if (!(value is null)) { return 4; }
+                return 0;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source), runtimePolicy: (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(0, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void IsInitUsesUniqueOwnerLiveness(NativeRuntimePolicy policy)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(0, out var buffer);
+                if (!(buffer is init)) { return 1; }
+                buffer = _;
+                if (buffer is init) { return 2; }
+                return 0;
+            }
+            """), runtimePolicy: (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(0, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+    }
+
     [Fact]
     public void RepeatedInitAliasInOneCallIsRejected()
     {
@@ -182,7 +277,7 @@ public sealed class InitReferenceTests
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producerProgram = Assert.IsType<BoundProgram>(library.Program);
         var producer = ModuleCompiler.CreateProducer(producerProgram, ["Read"]);
-        Assert.Equal(48, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(49, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var compilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             ModuleCompiler.CreateReference(producer), runtimePolicy: sourcePolicy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -273,20 +368,30 @@ public sealed class InitReferenceTests
             """));
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Read"]);
-        Assert.Equal(48, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(49, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
     }
 
     [Fact]
     public void PrivateInitModeRoundTripsInCurrentSemanticFormat()
     {
         var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            bool Fill(init ref<int32> value) { value = 42; return true; }
-            public int32 Read() { require Fill(init var result); return result; }
+            bool Fill(bool publish, init ref<int32> value) {
+                if (!publish) { return false; }
+                value = 42;
+                return true;
+            }
+            public int32 Read() {
+                if (Fill(false, init var result)) { return 1; }
+                if (result is init) { return 2; }
+                require Fill(true, init result);
+                if (!(result is init)) { return 3; }
+                return result;
+            }
             """));
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Read"]);
-        Assert.Equal(48, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
-        BinaryPrimitives.WriteInt32LittleEndian(producer.AsSpan(4, 4), 46);
+        Assert.Equal(49, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        BinaryPrimitives.WriteInt32LittleEndian(producer.AsSpan(4, 4), 48);
         _ = Assert.Throws<ModuleFormatException>(() => _ = ModuleCompiler.CreateReference(producer));
     }
 
@@ -303,7 +408,8 @@ public sealed class InitReferenceTests
             int32 Main() {
                 require ManagedNode.TryCreate(42, out var created);
                 require Copy(created, init var node);
-                if (ManagedHeap.Collect() != 0) { return 1; }
+                if (!(node is init)) { return 1; }
+                if (ManagedHeap.Collect() != 0) { return 2; }
                 return node.Value;
             }
             """), runtimePolicy: (BoundRuntimePolicy)policy);

@@ -2257,6 +2257,19 @@ internal sealed partial class Binder
                     : new BoundIsSome(source, patternSlot, node.Span);
                 break;
 
+            case SyntaxKind.IsInitializedExpression:
+                var initializedSource = BindExpression((SyntaxNode)node.Children[0], null);
+                if (initializedSource is not BoundRead initializedRead)
+                {
+                    Report("TRM3007", "'is init' requires a named local or parameter.", node.Span);
+                    expression = new BoundConstant(0, PrimitiveType.Bool, node.Span);
+                }
+                else
+                {
+                    expression = new BoundIsInitialized(initializedRead.Variable, node.Span);
+                }
+                break;
+
             case SyntaxKind.IsVarNullableExpression:
                 var nullableSource = BindExpression((SyntaxNode)node.Children[0], null);
                 if (!ManagedClassTypes.IsOptional(nullableSource.Type))
@@ -3292,7 +3305,8 @@ internal sealed partial class Binder
                     _ => null,
                 };
             }
-            case SyntaxKind.IsNullExpression or SyntaxKind.IsSomeExpression or SyntaxKind.IsVarNullableExpression:
+            case SyntaxKind.IsNullExpression or SyntaxKind.IsSomeExpression
+                or SyntaxKind.IsVarNullableExpression or SyntaxKind.IsInitializedExpression:
                 return PrimitiveType.Bool;
             case SyntaxKind.InvocationExpression:
             {

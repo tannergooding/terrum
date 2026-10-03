@@ -141,4 +141,6 @@ public enum SyntaxKind
     LifetimeEndStatement,
     /// <summary>A nullable inferred-binding pattern, including initialized null.</summary>
     IsVarNullableExpression,
+    /// <summary>A direct initialization-state test.</summary>
+    IsInitializedExpression,
 }

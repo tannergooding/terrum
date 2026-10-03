@@ -667,6 +667,8 @@ public static class SemanticVerifier
                 case BoundIsNull test:
                     Expression(test.Value, scope, depth + 1);
                     break;
+                case BoundIsInitialized:
+                    break;
                 case BoundIsSome pattern:
                     Expression(pattern.Value, scope, depth + 1);
                     Declare(pattern.Variable, scope, pattern.Span);
@@ -1174,6 +1176,8 @@ public static class SemanticVerifier
                     break;
                 case BoundIsNull test:
                     Expression(test.Value, depth + 1, acquiringRoot);
+                    break;
+                case BoundIsInitialized:
                     break;
                 case BoundIsSome pattern:
                     Expression(pattern.Value, depth + 1, acquiringRoot);
@@ -2802,6 +2806,15 @@ public static class SemanticVerifier
                 Expression(test.Value, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
                 break;
+            case BoundIsInitialized initializationTest:
+                if (initializationTest.Type != PrimitiveType.Bool
+                    || initializationTest.Variable < 0 || initializationTest.Variable >= initialized.Length
+                    || (initializationTest.Variable >= function.ParameterCount
+                        + (function.IsConstructor ? 1 : 0) && !declarations.Contains(initializationTest.Variable)))
+                {
+                    throw Invalid(initializationTest.Span);
+                }
+                break;
             case BoundIsSome pattern:
                 if (pattern.Value is null || !ManagedClassTypes.IsOptional(pattern.Value.Type)
                     || pattern.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -3639,6 +3652,13 @@ public static class SemanticVerifier
                     && CanBe(conditional.WhenFalse, result, ref remaining, initialized));
         }
         var state = initialized.Clone();
+        if (expression is BoundIsInitialized initializationTest)
+        {
+            var possibilities = state.Possibilities(initializationTest.Variable);
+            state.SetPossibilities(initializationTest.Variable,
+                result ? (byte)(possibilities & 2) : (byte)(possibilities & 5));
+            return state;
+        }
         if (expression is BoundIsVariablePattern variablePattern)
         {
             if (variablePattern.Value is BoundRead sourceRead)
@@ -3773,6 +3793,8 @@ public static class SemanticVerifier
             case BoundIsNull test:
                 VacateNestedOutputs(test.Value, state, ref remaining);
                 break;
+            case BoundIsInitialized:
+                break;
             case BoundIsSome pattern:
                 VacateNestedOutputs(pattern.Value, state, ref remaining);
                 state[pattern.Variable] = false;
@@ -3845,6 +3867,7 @@ public static class SemanticVerifier
             BoundOptionalLift lift => HasVacateEffects(lift.Value, vacateEffectFacts, ref remaining),
             BoundReadonlyProjection projection => HasVacateEffects(projection.Value, vacateEffectFacts, ref remaining),
             BoundIsNull test => HasVacateEffects(test.Value, vacateEffectFacts, ref remaining),
+            BoundIsInitialized => false,
             BoundIsSome or BoundIsVariablePattern or BoundMove => true,
             BoundFieldRead field => HasVacateEffects(field.Receiver, vacateEffectFacts, ref remaining),
             BoundBufferRead buffer => HasVacateEffects(buffer.Index, vacateEffectFacts, ref remaining),
@@ -3875,6 +3898,12 @@ public static class SemanticVerifier
     private static bool CanBe(BoundExpression expression, bool result, ref int remaining,
         InitializationState initialized)
     {
+        if (expression is BoundIsInitialized initializationTest)
+        {
+            Count(ref remaining, 0);
+            var possibilities = initialized.Possibilities(initializationTest.Variable);
+            return result ? (possibilities & 2) != 0 : (possibilities & 5) != 0;
+        }
         if (expression is BoundIsVariablePattern pattern)
         {
             Count(ref remaining, 0);

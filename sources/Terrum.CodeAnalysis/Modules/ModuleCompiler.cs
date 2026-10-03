@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static partial class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 48;
+    private const int Version = 49;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1446,6 +1446,7 @@ public static partial class ModuleCompiler
             BoundIsVariablePattern pattern => pattern with {
                 Value = RemapExpression(pattern.Value, source, destination, classOffset),
             },
+            BoundIsInitialized => expression,
             BoundFieldRead field => field with {
                 Type = RemapType(field.Type, source, destination, classOffset),
                 Receiver = RemapExpression(field.Receiver, source, destination, classOffset),
@@ -2325,6 +2326,7 @@ public static partial class ModuleCompiler
             BoundIsNull => (byte)17,
             BoundIsSome => (byte)18,
             BoundIsVariablePattern => (byte)27,
+            BoundIsInitialized => (byte)28,
             _ => throw new ModuleFormatException("Unknown expression kind."),
         });
         writer.Write((int)expression.Type);
@@ -2378,6 +2380,9 @@ public static partial class ModuleCompiler
                 writer.Write(pattern.Variable);
                 writer.Write(pattern.IncludeNull);
                 PutExpression(writer, pattern.Value, names, ref remaining, depth + 1);
+                break;
+            case BoundIsInitialized initializationTest:
+                writer.Write(initializationTest.Variable);
                 break;
             case BoundUnary unary:
                 writer.Write((int)unary.Operator);
@@ -2540,6 +2545,8 @@ public static partial class ModuleCompiler
                 var includeNull = GetBool(reader);
                 return new BoundIsVariablePattern(GetExpression(reader, ref remaining, depth + 1),
                     variablePatternSlot, includeNull, span);
+            case 28 when type == PrimitiveType.Bool:
+                return new BoundIsInitialized(reader.ReadInt32(), span);
             default:
                 throw new ModuleFormatException("Unknown expression kind.");
         }

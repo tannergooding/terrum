@@ -1013,6 +1013,10 @@ internal sealed class Parser
                 {
                     left = Node(SyntaxKind.IsNullExpression, [left, keyword, Take()]);
                 }
+                else if (Current.Kind == TokenKind.Identifier && Current.Text == "init")
+                {
+                    left = Node(SyntaxKind.IsInitializedExpression, [left, keyword, Take()]);
+                }
                 else if (Current.Kind == TokenKind.VarKeyword)
                 {
                     var variable = Take();

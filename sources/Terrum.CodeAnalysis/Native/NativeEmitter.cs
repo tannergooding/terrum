@@ -322,6 +322,7 @@ internal sealed partial class PeCompiler
     private readonly int[] _returnSlots;
     private readonly int[] _edgeCopyBases;
     private readonly int[][] _liveSlots;
+    private readonly int[][] _initializationFlags;
     private readonly int[][] _constructedFieldSlots;
     private readonly int[] _replacementSlots;
     private readonly int[] _cleanupArgumentSlots;
@@ -392,6 +393,7 @@ internal sealed partial class PeCompiler
         _returnSlots = new int[program.Functions.Length];
         _edgeCopyBases = new int[program.Functions.Length];
         _liveSlots = new int[program.Functions.Length][];
+        _initializationFlags = new int[program.Functions.Length][];
         _managedRootFrames = new int[program.Functions.Length];
         _managedRootFlags = new Dictionary<int, int>[program.Functions.Length];
         for (var index = 0; index < _managedRootFlags.Length; index++)
@@ -635,6 +637,20 @@ internal sealed partial class PeCompiler
                 }
             }
             _liveSlots[i] = live;
+            var initializationTests = InitializationTestVariables(function);
+            var initializationFlags = new int[function.Variables.Length];
+            Array.Fill(initializationFlags, -1);
+            for (var variable = 0; variable < function.Variables.Length; variable++)
+            {
+                var slot = function.Variables[variable];
+                if (initializationTests.Contains(variable)
+                    && !ManagedClassTypes.IsManaged(slot.Type) && !IsUnique(slot.Type))
+                {
+                    initializationFlags[variable] = checked((int)required);
+                    required += 4;
+                }
+            }
+            _initializationFlags[i] = initializationFlags;
             var constructed = function.IsConstructor
                 ? new int[_program.Structures[(int)function.ReturnType - 100].Fields.Length] : [];
             Array.Fill(constructed, -1);
@@ -703,6 +719,13 @@ internal sealed partial class PeCompiler
                     _code.Clear(live);
                 }
             }
+            foreach (var flag in _initializationFlags[i])
+            {
+                if (flag >= 0)
+                {
+                    _code.Clear(flag);
+                }
+            }
             foreach (var field in _constructedFieldSlots[i])
             {
                 if (field >= 0)
@@ -767,6 +790,11 @@ internal sealed partial class PeCompiler
                 if (_liveSlots[i][slot] >= 0 && !function.Variables[slot].IsOut)
                 {
                     _code.Set(_liveSlots[i][slot]);
+                }
+                var initializationFlag = _initializationFlags[i][slot];
+                if (initializationFlag >= 0 && !function.Variables[slot].IsOut)
+                {
+                    _code.Set(initializationFlag);
                 }
             }
             if (function.Intrinsic is BoundIntrinsic.None or BoundIntrinsic.ClassTryCreate)
@@ -1088,6 +1116,8 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(pattern.Value, ref maximumArguments);
             case BoundIsVariablePattern pattern:
                 return ExpressionSpills(pattern.Value, ref maximumArguments);
+            case BoundIsInitialized:
+                return 0;
             case BoundFieldRead field:
                 return ExpressionSpills(field.Receiver, ref maximumArguments);
             case BoundBufferRead buffer:
@@ -1130,6 +1160,168 @@ internal sealed partial class PeCompiler
         return 3;
     }
 
+    private static HashSet<int> InitializationTestVariables(BoundFunction function)
+    {
+        var variables = new HashSet<int>();
+        VisitStatement(function.Body);
+        return variables;
+
+        void VisitStatement(BoundStatement statement)
+        {
+            switch (statement)
+            {
+                case BoundBlock block:
+                    foreach (var child in block.Statements)
+                    {
+                        VisitStatement(child);
+                    }
+                    break;
+                case BoundLocal local:
+                    VisitExpression(local.Initializer);
+                    break;
+                case BoundAssignment assignment:
+                    VisitExpression(assignment.Value);
+                    break;
+                case BoundOptionalAssignment assignment:
+                    VisitExpression(assignment.Place);
+                    VisitExpression(assignment.Value);
+                    break;
+                case BoundFieldAssignment assignment:
+                    VisitExpression(assignment.Value);
+                    break;
+                case BoundBufferAssignment assignment:
+                    VisitExpression(assignment.Index);
+                    VisitExpression(assignment.Value);
+                    break;
+                case BoundExpressionStatement expressionStatement:
+                    VisitExpression(expressionStatement.Expression);
+                    break;
+                case BoundIf conditional:
+                    VisitExpression(conditional.Condition);
+                    VisitStatement(conditional.Then);
+                    if (conditional.Else is not null)
+                    {
+                        VisitStatement(conditional.Else);
+                    }
+                    break;
+                case BoundWhile loop:
+                    VisitExpression(loop.Condition);
+                    VisitStatement(loop.Body);
+                    if (loop.Iterator is not null)
+                    {
+                        VisitStatement(loop.Iterator);
+                    }
+                    break;
+                case BoundTryFinally cleanup:
+                    VisitStatement(cleanup.Body);
+                    VisitStatement(cleanup.Finally);
+                    break;
+                case BoundViewScope view:
+                    VisitExpression(view.Owner);
+                    VisitExpression(view.Start);
+                    VisitExpression(view.Length);
+                    VisitStatement(view.Body);
+                    break;
+                case BoundViewSet write:
+                    VisitExpression(write.Index);
+                    VisitExpression(write.Value);
+                    break;
+                case BoundUnsafe unsafeBlock:
+                    VisitStatement(unsafeBlock.Body);
+                    break;
+                case BoundTryCatch recovery:
+                    VisitStatement(recovery.Body);
+                    VisitStatement(recovery.Catch);
+                    if (recovery.Finally is not null)
+                    {
+                        VisitStatement(recovery.Finally);
+                    }
+                    break;
+                case BoundRequire requirement:
+                    VisitExpression(requirement.Condition);
+                    break;
+                case BoundReturn { Value: BoundExpression value }:
+                    VisitExpression(value);
+                    break;
+            }
+        }
+
+        void VisitExpression(BoundExpression expression)
+        {
+            switch (expression)
+            {
+                case BoundIsInitialized initializationTest:
+                    _ = variables.Add(initializationTest.Variable);
+                    break;
+                case BoundUnary unary:
+                    VisitExpression(unary.Operand);
+                    break;
+                case BoundUpdate update:
+                    VisitExpression(update.Place);
+                    break;
+                case BoundCompoundAssignment compound:
+                    VisitExpression(compound.Place);
+                    VisitExpression(compound.Right);
+                    break;
+                case BoundNominalUpdate update:
+                    VisitExpression(update.Place);
+                    break;
+                case BoundCast cast:
+                    VisitExpression(cast.Operand);
+                    break;
+                case BoundOptionalLift lift:
+                    VisitExpression(lift.Value);
+                    break;
+                case BoundReadonlyProjection projection:
+                    VisitExpression(projection.Value);
+                    break;
+                case BoundIsNull test:
+                    VisitExpression(test.Value);
+                    break;
+                case BoundIsSome pattern:
+                    VisitExpression(pattern.Value);
+                    break;
+                case BoundIsVariablePattern pattern:
+                    VisitExpression(pattern.Value);
+                    break;
+                case BoundFieldRead field:
+                    VisitExpression(field.Receiver);
+                    break;
+                case BoundFieldLoan loan:
+                    VisitExpression(loan.Place);
+                    break;
+                case BoundMutableFieldLoan loan:
+                    VisitExpression(loan.Place);
+                    break;
+                case BoundViewRead view:
+                    VisitExpression(view.Index);
+                    break;
+                case BoundBufferRead buffer:
+                    VisitExpression(buffer.Index);
+                    break;
+                case BoundBinary binary:
+                    VisitExpression(binary.Left);
+                    VisitExpression(binary.Right);
+                    break;
+                case BoundConditional conditional:
+                    VisitExpression(conditional.Condition);
+                    VisitExpression(conditional.WhenTrue);
+                    VisitExpression(conditional.WhenFalse);
+                    break;
+                case BoundCoalesce coalesce:
+                    VisitExpression(coalesce.Optional);
+                    VisitExpression(coalesce.Fallback);
+                    break;
+                case BoundCall call:
+                    foreach (var argument in call.Arguments)
+                    {
+                        VisitExpression(argument);
+                    }
+                    break;
+            }
+        }
+    }
+
     private int Slot(int index) => _slots[_currentFunction][index];
     private int Spill(int index) => _spillBase + (index * 16);
     private int OutSlot(int index)
@@ -1143,6 +1335,62 @@ internal sealed partial class PeCompiler
     }
     private int OwnerPlace(int index) =>
         _program.Functions[_currentFunction].Variables[index].IsOut ? OutSlot(index) : Slot(index);
+    private void SetInitializationFlag(int variable, bool initialized)
+    {
+        var flag = _initializationFlags[_currentFunction][variable];
+        if (flag < 0)
+        {
+            return;
+        }
+        if (initialized)
+        {
+            _code.Set(flag);
+        }
+        else
+        {
+            _code.Clear(flag);
+        }
+    }
+
+    private void EmitInitializationTest(int variable)
+    {
+        var type = _program.Functions[_currentFunction].Variables[variable].Type;
+        if (ManagedClassTypes.IsManaged(type))
+        {
+            var sourceSlot = OwnerPlace(variable);
+            if (!_managedRootFlags[_currentFunction].TryGetValue(sourceSlot, out var flag))
+            {
+                throw new InvalidOperationException("Managed initialization test has no runtime state flag.");
+            }
+            _code.Load(flag);
+        }
+        else if (IsUnique(type))
+        {
+            var flag = _liveSlots[_currentFunction][variable];
+            if (flag >= 0)
+            {
+                _code.Load(flag);
+            }
+            else
+            {
+                _code.Bytes(0xB8, 0x01, 0x00, 0x00, 0x00);
+            }
+        }
+        else
+        {
+            var flag = _initializationFlags[_currentFunction][variable];
+            if (flag >= 0)
+            {
+                _code.Load(flag);
+            }
+            else
+            {
+                _code.Bytes(0xB8, 0x01, 0x00, 0x00, 0x00);
+            }
+        }
+        _code.Bytes(0x85, 0xC0, 0x0F, 0x95, 0xC0, 0x0F, 0xB6, 0xC0);
+    }
+
     private static bool IsStruct(PrimitiveType type) =>
         (int)type is >= 100 and < ManagedClassTypes.First;
     private static bool IsWide(PrimitiveType type) =>
@@ -1650,6 +1898,7 @@ internal sealed partial class PeCompiler
             case BoundLocal local:
                 Expression(local.Initializer, 0);
                 StoreValue(Slot(local.Variable), local.Initializer.Type);
+                SetInitializationFlag(local.Variable, initialized: true);
                 if (ManagedClassTypes.IsManaged(local.Initializer.Type))
                 {
                     SetManagedRoot(Slot(local.Variable), active: true);
@@ -1710,6 +1959,7 @@ internal sealed partial class PeCompiler
                 {
                     SetManagedRoot(Slot(end.Variable), active: false);
                 }
+                SetInitializationFlag(end.Variable, initialized: false);
                 break;
             case BoundAssignment assignment:
                 Expression(assignment.Value, 0);
@@ -1744,6 +1994,7 @@ internal sealed partial class PeCompiler
                 {
                     StoreValue(Slot(assignment.Variable), assignment.Value.Type);
                 }
+                SetInitializationFlag(assignment.Variable, initialized: true);
                 break;
             case BoundOptionalAssignment optionalAssignment:
                 if (optionalAssignment.Place is BoundRead optionalLocal)
@@ -2347,6 +2598,9 @@ internal sealed partial class PeCompiler
                 _code.Bytes(0x31, 0xC0);
                 _code.PatchRelative(variablePatternDone, _code.Position);
                 break;
+            case BoundIsInitialized initializationTest:
+                EmitInitializationTest(initializationTest.Variable);
+                break;
             case BoundRead read:
                 if (read.Variable == 0 && IsBorrowedReceiver() && !IsUnique(read.Type))
                 {
@@ -2843,6 +3097,7 @@ internal sealed partial class PeCompiler
                                 {
                                     _code.Set(_liveSlots[_currentFunction][output.Variable]);
                                 }
+                                SetInitializationFlag(output.Variable, initialized: true);
                                 continue;
                             }
                             if (output.Type is PrimitiveType.Bool or PrimitiveType.Char16)
@@ -2862,6 +3117,7 @@ internal sealed partial class PeCompiler
                             {
                                 _code.Set(_liveSlots[_currentFunction][output.Variable]);
                             }
+                            SetInitializationFlag(output.Variable, initialized: true);
                         }
                     }
                     if (conditionalOutputs)
@@ -2871,9 +3127,13 @@ internal sealed partial class PeCompiler
                         _code.PatchRelative(skip, _code.Position);
                         for (var i = 0; i < call.Arguments.Length; i++)
                         {
-                            if (call.Arguments[i] is BoundOutArgument output && IsUnique(output.Type))
+                            if (call.Arguments[i] is BoundOutArgument output)
                             {
-                                _code.Clear(_liveSlots[_currentFunction][output.Variable]);
+                                if (IsUnique(output.Type))
+                                {
+                                    _code.Clear(_liveSlots[_currentFunction][output.Variable]);
+                                }
+                                SetInitializationFlag(output.Variable, initialized: false);
                             }
                         }
                         _code.PatchRelative(done, _code.Position);
