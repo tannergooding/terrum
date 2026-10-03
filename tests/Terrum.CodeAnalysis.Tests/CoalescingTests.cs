@@ -338,6 +338,35 @@ public sealed class CoalescingTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void ConditionalKnownPresentCoalesceSkipsInfeasibleBooleanArm(NativeRuntimePolicy policy)
+    {
+        const string source = """
+            [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+                value = 42;
+                return null;
+            }
+            [NoThrow] bool Fill(init ref<int32> value) {
+                value = 42;
+                return true;
+            }
+            int32 Main() {
+                require ManagedNode.TryCreate(1, out var leaf);
+                bool choose = true;
+                init int32 dead;
+                if (((choose ? leaf : leaf) ?? OptionalFallback(init dead)) is some selected
+                    || Fill(init dead)) {
+                    require Fill(init dead);
+                    return dead;
+                }
+                return 0;
+            }
+            """;
+        Assert.Equal(42, NativeJit.Execute(Compile(source, policy), policy));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public void CoalescingPreservesQualifiedWriteCapability(NativeRuntimePolicy policy)
     {
         const string source = """

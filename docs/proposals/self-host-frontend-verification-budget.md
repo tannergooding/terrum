@@ -120,6 +120,12 @@ also reproduced `TRM3016` before the change and passes under both policies.
 The fallback remains unevaluated in the verifier's initialization state; the
 shared visit budget and optional semantics are unchanged.
 
+Known-presence analysis also accepts conditional optional expressions when
+both arms have the same structural presence. An output-effectful `||` arm
+after a conditional selecting between two known-present values reproduced
+`TRM3016` before this refinement and passes under both policies. These
+recursive structural checks charge their work to the existing visit budget.
+
 During the v78 budget investigation, temporary visit counters measured 100,001
 semantic-analysis visits across 210 functions before the limit failure. In the
 largest function, `ParseExpressionCore`, output-vacating traversal accounted

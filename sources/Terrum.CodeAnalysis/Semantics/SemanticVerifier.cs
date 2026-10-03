@@ -3872,7 +3872,7 @@ public static class SemanticVerifier
                 break;
             case BoundCoalesce coalesce:
                 VacateNestedOutputs(coalesce.Optional, state, ref remaining);
-                var optionalPresence = KnownOptionalPresence(coalesce.Optional);
+                var optionalPresence = KnownOptionalPresence(coalesce.Optional, ref remaining);
                 if (optionalPresence == false)
                 {
                     VacateNestedOutputs(coalesce.Fallback, state, ref remaining);
@@ -4185,9 +4185,9 @@ public static class SemanticVerifier
             BoundConstant { Type: PrimitiveType.Bool } constant => constant.Value != (result ? 0 : 1),
             BoundUnary { Operator: TokenKind.Bang } unary =>
                 CanBe(unary.Operand, !result, ref remaining, remainingCanBeFacts),
-            BoundIsNull test => KnownOptionalPresence(test.Value) is bool isPresent
+            BoundIsNull test => KnownOptionalPresence(test.Value, ref remaining) is bool isPresent
                 ? result != isPresent : true,
-            BoundIsSome test => KnownOptionalPresence(test.Value) is bool isPresent
+            BoundIsSome test => KnownOptionalPresence(test.Value, ref remaining) is bool isPresent
                 ? result == isPresent : true,
             BoundBinary { Operator: TokenKind.AmpersandAmpersand } and => result
                 ? CanBe(and.Left, true, ref remaining, remainingCanBeFacts)
@@ -4212,8 +4212,9 @@ public static class SemanticVerifier
         return canBe;
     }
 
-    private static bool? KnownOptionalPresence(BoundExpression expression)
+    private static bool? KnownOptionalPresence(BoundExpression expression, ref int remaining)
     {
+        Count(ref remaining, 0);
         if (!ManagedClassTypes.IsOptional(expression.Type))
         {
             return null;
@@ -4221,11 +4222,15 @@ public static class SemanticVerifier
         return expression switch {
             BoundNull => false,
             BoundOptionalLift => true,
-            BoundCoalesce coalesce => KnownOptionalPresence(coalesce.Optional) switch {
+            BoundCoalesce coalesce => KnownOptionalPresence(coalesce.Optional, ref remaining) switch {
                 true => true,
-                false => KnownOptionalPresence(coalesce.Fallback),
+                false => KnownOptionalPresence(coalesce.Fallback, ref remaining),
                 null => null,
             },
+            BoundConditional conditional =>
+                KnownOptionalPresence(conditional.WhenTrue, ref remaining) is bool whenTrue
+                    && KnownOptionalPresence(conditional.WhenFalse, ref remaining) == whenTrue
+                    ? whenTrue : null,
             _ => null,
         };
     }
