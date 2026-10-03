@@ -4,6 +4,8 @@
 bootstrapped compiler. It implements scalar decoding, Unicode identifier
 classification, keyword and operator selection, numeric token boundaries,
 quoted strings and escapes, leading trivia and lexical diagnostics in Terrum.
+Single-quoted character tokens are currently recognized by the hosted C# lexer
+only; they are not yet part of `Scanner.terrum` or `build-component` support.
 The C# host supplies buffers and pinned lexical data; it does not pretokenize
 or make source-dependent classification decisions for the component.
 `_` remains a distinct token, while underscore-prefixed names remain

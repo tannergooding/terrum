@@ -3787,6 +3787,25 @@ internal sealed partial class Binder
             return new BoundConstant(token.Kind == TokenKind.TrueKeyword ? 1 : 0, PrimitiveType.Bool, token.Span);
         }
 
+        if (token.Kind == TokenKind.CharacterLiteral)
+        {
+            if (!CharacterLiteralDecoder.TryDecode(token.Text.AsSpan(), out var scalar))
+            {
+                return ErrorExpression(token.Span);
+            }
+            if (expected != PrimitiveType.Char16)
+            {
+                Report("TRM3014", "A character literal requires a representable target type.", token.Span);
+                return ErrorExpression(token.Span);
+            }
+            if (scalar > ushort.MaxValue)
+            {
+                Report("TRM3013", "Character literal is outside the char16 scalar range.", token.Span);
+                return ErrorExpression(token.Span);
+            }
+            return new BoundConstant(scalar, PrimitiveType.Char16, token.Span);
+        }
+
         if (token.Kind != TokenKind.NumericLiteral)
         {
             Report("TRM3001", "Only boolean and integer literals are supported.", token.Span);

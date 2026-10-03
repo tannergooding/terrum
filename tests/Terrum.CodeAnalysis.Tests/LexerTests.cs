@@ -152,6 +152,46 @@ public sealed class LexerTests
         Assert.All(result.Diagnostics, d => Assert.Equal(DiagnosticSeverity.Error, d.Severity));
     }
 
+    [Theory]
+    [InlineData("'A'")]
+    [InlineData("'\\''")]
+    [InlineData("'\\u0041'")]
+    [InlineData("'\\U0001F600'")]
+    [InlineData("'😀'")]
+    public void ReadsSingleScalarCharacterLiterals(string text)
+    {
+        var result = Lexer.Lex(SourceText.From(text));
+        Assert.Empty(result.Diagnostics);
+        Assert.Equal(TokenKind.CharacterLiteral, result.Tokens[0].Kind);
+        Assert.Equal(text, result.Tokens[0].Text);
+        Assert.Equal(TokenKind.EndOfFile, result.Tokens[1].Kind);
+    }
+
+    [Theory]
+    [InlineData("''", "TRM0001")]
+    [InlineData("'ab'", "TRM0001")]
+    [InlineData("'\\q'", "TRM0005")]
+    [InlineData("'\\uD800'", "TRM0005")]
+    [InlineData("'unterminated", "TRM0002")]
+    public void DiagnosesInvalidCharacterLiteralContent(string text, string code)
+    {
+        var result = Lexer.Lex(SourceText.From(text));
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(code, diagnostic.Code);
+        Assert.Equal(TokenKind.CharacterLiteral, result.Tokens[0].Kind);
+    }
+
+    [Fact]
+    public void ReportsMalformedUtf16InCharacterLiteralsWithoutReplacingSource()
+    {
+        var text = string.Concat('\'', (char)0xD800, '\'');
+        var result = Lexer.Lex(SourceText.From(text));
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("TRM0001", diagnostic.Code);
+        Assert.Equal(new TextSpan(1, 1), diagnostic.Span);
+        Assert.Equal(text, result.Tokens[0].Text);
+    }
+
     [Fact]
     public void ReportsSurrogatesInCommentsWithoutLosingTrivia()
     {

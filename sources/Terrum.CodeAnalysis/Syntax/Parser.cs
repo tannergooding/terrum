@@ -1109,7 +1109,8 @@ internal sealed class Parser
         {
             expression = Node(SyntaxKind.ObjectCreationExpression, [Take(), ParseType(), ParseArguments()]);
         }
-        else if (Current.Kind is TokenKind.NumericLiteral or TokenKind.StringLiteral or TokenKind.TrueKeyword
+        else if (Current.Kind is TokenKind.NumericLiteral or TokenKind.StringLiteral or TokenKind.CharacterLiteral
+            or TokenKind.TrueKeyword
             or TokenKind.FalseKeyword or TokenKind.NullKeyword)
         {
             expression = Node(SyntaxKind.LiteralExpression, [Take()]);

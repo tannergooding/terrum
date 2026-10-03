@@ -253,6 +253,11 @@ public sealed class Lexer
             return ReadNumber();
         }
 
+        if (Current == '\'')
+        {
+            return ReadCharacter();
+        }
+
         if (Current == '"')
         {
             return ReadString();
@@ -433,6 +438,48 @@ public sealed class Lexer
         }
 
         return 0;
+    }
+
+    private TokenKind ReadCharacter()
+    {
+        var start = _position++;
+        var terminated = false;
+        while (!AtEnd && !IsNewline(Current))
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (Current == '\'')
+            {
+                _position++;
+                terminated = true;
+                break;
+            }
+
+            if (Current == '\\')
+            {
+                _position++;
+                if (AtEnd || IsNewline(Current))
+                {
+                    break;
+                }
+            }
+
+            _position += TryScalar(_position, out _, out var width) ? width : 1;
+        }
+
+        if (!terminated)
+        {
+            Report("TRM0002", "Unterminated character literal.", start, _position - start);
+        }
+        else if (!CharacterLiteralDecoder.TryDecode(_source.Text.AsSpan(start, _position - start),
+            out _, out var error, out var errorStart, out var errorLength))
+        {
+            var invalidEscape = error == CharacterLiteralError.InvalidEscape;
+            Report(invalidEscape ? "TRM0005" : "TRM0001",
+                invalidEscape ? "Invalid character escape." : "A character literal must contain exactly one Unicode scalar.",
+                start + errorStart, errorLength);
+        }
+
+        return TokenKind.CharacterLiteral;
     }
 
     private TokenKind ReadString()

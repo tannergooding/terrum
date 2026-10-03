@@ -3,6 +3,7 @@
 using System;
 using System.Linq;
 using System.Threading;
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Xunit;
@@ -32,6 +33,34 @@ public sealed class CompilationTests
         Assert.NotNull(compilation.Program);
         Assert.Same(tree, compilation.SyntaxTree);
         SemanticVerifier.Verify(compilation.Program);
+    }
+
+    [Fact]
+    public void CharacterLiteralsRequireAndRespectChar16Context()
+    {
+        var valid = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                char16 value = '\U00000041';
+                if (value == 'A') { return int32(value); }
+                return 0;
+            }
+            """));
+        Assert.False(valid.HasErrors, string.Join(Environment.NewLine, valid.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(valid.Program);
+        SemanticVerifier.Verify(program);
+        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+
+        var missingContext = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { var value = 'A'; return 0; }"));
+        Assert.Contains(missingContext.Diagnostics, static diagnostic => diagnostic.Code == "TRM3014");
+
+        var wrongContext = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { int32 value = 'A'; return value; }"));
+        Assert.Contains(wrongContext.Diagnostics, static diagnostic => diagnostic.Code == "TRM3014");
+
+        var unrepresentable = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { char16 value = '\\U0001F600'; return 0; }"));
+        Assert.Contains(unrepresentable.Diagnostics, static diagnostic => diagnostic.Code == "TRM3013");
     }
 
     [Fact]

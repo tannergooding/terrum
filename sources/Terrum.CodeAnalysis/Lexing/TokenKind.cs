@@ -211,4 +211,6 @@ public enum TokenKind
     ShiftRightUnsignedEquals,
     /// <summary>The <c>alias</c> keyword.</summary>
     AliasKeyword,
+    /// <summary>A single-scalar character literal.</summary>
+    CharacterLiteral,
 }

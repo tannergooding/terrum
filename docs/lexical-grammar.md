@@ -329,9 +329,10 @@ generalized-fence conformance.
 The final zero-width EOF token owns trailing trivia. Unterminated block
 comments receive a diagnostic. Malformed surrogate units inside any comment form are
 diagnosed without changing the trivia text. Lexical diagnostic codes are
-`TRM0001` for bad characters or malformed surrogates, `TRM0002` for an
-unterminated string, `TRM0003` for an unterminated block comment, `TRM0004`
-for an incomplete exponent, `TRM0005` for an invalid escape, `TRM0006`
+`TRM0001` for bad characters, malformed character-literal contents or
+malformed surrogates, `TRM0002` for an unterminated string or character
+literal, `TRM0003` for an unterminated block comment, `TRM0004` for an
+incomplete exponent, `TRM0005` for an invalid string or character escape, `TRM0006`
 for an attached numeric width suffix, `TRM0007` for a hexadecimal prefix
 without a digit, `TRM0008` for a binary prefix without a digit, `TRM0009`
 for malformed digit separators, and `TRM0010` for a longer closing star run
