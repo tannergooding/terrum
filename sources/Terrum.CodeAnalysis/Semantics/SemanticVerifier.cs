@@ -3871,8 +3871,8 @@ public static class SemanticVerifier
                 joined.CopyTo(state);
                 break;
             case BoundCoalesce coalesce:
+                var optionalPresence = KnownOptionalPresence(coalesce.Optional, state, ref remaining);
                 VacateNestedOutputs(coalesce.Optional, state, ref remaining);
-                var optionalPresence = KnownOptionalPresence(coalesce.Optional, ref remaining);
                 if (optionalPresence == false)
                 {
                     VacateNestedOutputs(coalesce.Fallback, state, ref remaining);
@@ -4168,6 +4168,58 @@ public static class SemanticVerifier
             return result;
         }
         return CanBe(expression, result, ref remaining, initialized.CanBeFacts);
+    }
+
+    private static bool? KnownOptionalPresence(BoundExpression expression, InitializationState initialized,
+        ref int remaining)
+    {
+        Count(ref remaining, 0);
+        if (!ManagedClassTypes.IsOptional(expression.Type))
+        {
+            return null;
+        }
+        if (expression is BoundCoalesce coalesce)
+        {
+            var optionalPresence = KnownOptionalPresence(coalesce.Optional, initialized, ref remaining);
+            if (optionalPresence == true)
+            {
+                return true;
+            }
+            if (optionalPresence == false)
+            {
+                var optionalState = Outcome(coalesce.Optional, initialized, true, ref remaining);
+                return KnownOptionalPresence(coalesce.Fallback, optionalState, ref remaining);
+            }
+            return null;
+        }
+        if (expression is not BoundConditional conditional)
+        {
+            return KnownOptionalPresence(expression, ref remaining);
+        }
+
+        var whenTruePossible = CanBe(conditional.Condition, true, ref remaining, initialized);
+        var whenFalsePossible = CanBe(conditional.Condition, false, ref remaining, initialized);
+        bool? whenTrue = null;
+        bool? whenFalse = null;
+        if (whenTruePossible)
+        {
+            var trueState = Outcome(conditional.Condition, initialized, true, ref remaining);
+            whenTrue = KnownOptionalPresence(conditional.WhenTrue, trueState, ref remaining);
+        }
+        if (whenFalsePossible)
+        {
+            var falseState = Outcome(conditional.Condition, initialized, false, ref remaining);
+            whenFalse = KnownOptionalPresence(conditional.WhenFalse, falseState, ref remaining);
+        }
+        if (!whenTruePossible)
+        {
+            return whenFalse;
+        }
+        if (!whenFalsePossible)
+        {
+            return whenTrue;
+        }
+        return whenTrue is bool presence && whenFalse == presence ? presence : null;
     }
 
     private static bool CanBe(BoundExpression expression, bool result, ref int remaining,

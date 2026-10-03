@@ -126,6 +126,16 @@ after a conditional selecting between two known-present values reproduced
 `TRM3016` before this refinement and passes under both policies. These
 recursive structural checks charge their work to the existing visit budget.
 
+Nested-output vacating now also checks conditional presence against the
+current initialization state. When an `is init` condition makes one arm
+infeasible, the verifier analyzes only the selected optional arm and carries
+its existing outcome transfer forward. A selected present arm previously
+reproduced `TRM3016`; the regression now passes under both runtime policies.
+A complementary selected absent arm confirms that the fallback's
+initialization effects are retained. Nested coalesces use the same
+state-aware presence check. All additional analysis remains within the shared
+visit budget and changes no language or optional semantics.
+
 During the v78 budget investigation, temporary visit counters measured 100,001
 semantic-analysis visits across 210 functions before the limit failure. In the
 largest function, `ParseExpressionCore`, output-vacating traversal accounted

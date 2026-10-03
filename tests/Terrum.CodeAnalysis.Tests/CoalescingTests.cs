@@ -247,6 +247,60 @@ public sealed class CoalescingTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void KnownInitializationSelectsPresentConditionalBeforeCoalescing(NativeRuntimePolicy policy)
+    {
+        const string source = """
+            [NoThrow] bool Fill(init ref<int32> value) {
+                value = 42;
+                return true;
+            }
+            [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+                value = 21;
+                return null;
+            }
+            int32 Main() {
+                require ManagedNode.TryCreate(42, out var leaf);
+                init int32 ready;
+                require Fill(init ready);
+                init int32 vacant;
+                if (((ready is init ? leaf : null)
+                    ?? OptionalFallback(init vacant)) is some selected) {
+                    require Fill(init vacant);
+                    return vacant;
+                }
+                return 0;
+            }
+            """;
+        Assert.Equal(42, NativeJit.Execute(Compile(source, policy), policy));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void KnownUninitializedSelectsAbsentConditionalBeforeCoalescing(NativeRuntimePolicy policy)
+    {
+        const string source = """
+            [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+                value = 21;
+                return null;
+            }
+            int32 Main() {
+                require ManagedNode.TryCreate(42, out var leaf);
+                init int32 ready;
+                init int32 result;
+                if (((ready is init ? leaf : null)
+                    ?? OptionalFallback(init result)) is some selected) {
+                    return 1;
+                }
+                return result;
+            }
+            """;
+        Assert.Equal(21, NativeJit.Execute(Compile(source, policy), policy));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public void NestedKnownPresentCoalesceKeepsFallbackOutputVacant(NativeRuntimePolicy policy)
     {
         const string source = """
