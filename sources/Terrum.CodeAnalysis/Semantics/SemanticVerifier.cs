@@ -2237,8 +2237,10 @@ public static class SemanticVerifier
                 {
                     if (cleanups.Count != 0 || hasOutParameter)
                     {
-                        foreach (var predicate in new[] { true, false })
+                        var outcomeCount = cleanups.Count != 0 ? 2 : 1;
+                        for (var outcome = 0; outcome < outcomeCount; outcome++)
                         {
+                            var predicate = outcome == 0;
                             if (!CanBe(boolResult, predicate, ref remaining, initialized))
                             {
                                 continue;

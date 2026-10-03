@@ -30,13 +30,14 @@ One short post-cache CPU-sampling trace of `terrumc frontend-component` showed
 the top 100 at 4.43% each. This confirms feasibility checks remain active,
 but does not measure cache speedup or establish them as the dominant cost.
 
-Skipping Boolean-return outcome analysis when it has neither cleanup nor
-output-publication consumers reduced shared verifier visits for the bundled
-frontend and the same `int32 Main() { return 42; }` input. On the fail-fast
-policy, visits fell from 79,243 to 75,418; on checked-exceptions, they fell
-from 79,379 to 75,554. Each reduction is 3,825 visits (about 4.8%). The
-temporary counter is removed; these counts measure verifier work, not
-wall-time.
+Boolean-return outcome analysis is limited to states with consumers. With no
+cleanup and no output parameters, no return outcomes are needed; with output
+parameters but no cleanup, only the successful outcome is needed for
+publication checks. For the bundled frontend and the same
+`int32 Main() { return 42; }` input, shared verifier visits fell from 79,243 to
+74,554 under fail-fast and from 79,379 to 74,690 under checked-exceptions.
+Each reduction is 4,689 visits (about 5.9%). The temporary counter is
+removed; these counts measure verifier work, not wall-time.
 
 During the v78 budget investigation, temporary visit counters measured 100,001
 semantic-analysis visits across 210 functions before the limit failure. In the
