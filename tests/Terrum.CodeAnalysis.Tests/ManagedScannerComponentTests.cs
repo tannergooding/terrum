@@ -1648,12 +1648,12 @@ public sealed partial class ManagedScannerComponentTests
     {
         var assertion = evaluable
             ? FormattableString.Invariant($$"""
-                require TryEvaluateInt32AddReturn(move tokens, move integers, out var name, out var bound);
+                require TryEvaluateInt32AddReturn(move tokens, move integers, init var name, init var bound);
                 if (name.Start != 6 || name.Length != 4 || bound != {{value}}) { return 1; }
                 """)
             : """
                 if (TryEvaluateInt32AddReturn(move tokens, move integers,
-                    out var name, out var bound)) { return 1; }
+                    init var name, init var bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
@@ -1689,12 +1689,12 @@ public sealed partial class ManagedScannerComponentTests
     {
         var assertion = evaluable
             ? FormattableString.Invariant($$"""
-                require TryEvaluateUInt32AddReturn(move tokens, move integers, out var name, out var bound);
+                require TryEvaluateUInt32AddReturn(move tokens, move integers, init var name, init var bound);
                 if (name.Start != 7 || name.Length != 5 || bound != {{value}}) { return 1; }
                 """)
             : """
                 if (TryEvaluateUInt32AddReturn(move tokens, move integers,
-                    out var name, out var bound)) { return 1; }
+                    init var name, init var bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
@@ -1735,12 +1735,12 @@ public sealed partial class ManagedScannerComponentTests
             : value.ToString(CultureInfo.InvariantCulture);
         var assertion = evaluable
             ? $$"""
-                require TryEvaluateInt64AddReturn(move tokens, move integers, out var name, out var bound);
+                require TryEvaluateInt64AddReturn(move tokens, move integers, init var name, init var bound);
                 if (name.Start != 6 || name.Length != 5 || bound != {{expected}}) { return 1; }
                 """
             : """
                 if (TryEvaluateInt64AddReturn(move tokens, move integers,
-                    out var name, out var bound)) { return 1; }
+                    init var name, init var bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
@@ -1782,12 +1782,12 @@ public sealed partial class ManagedScannerComponentTests
     {
         var assertion = evaluable
             ? FormattableString.Invariant($$"""
-                require TryEvaluateUInt64AddReturn(move tokens, move integers, out var name, out var bound);
+                require TryEvaluateUInt64AddReturn(move tokens, move integers, init var name, init var bound);
                 if (name.Start != 7 || name.Length != 5 || bound != {{value}}) { return 1; }
                 """)
             : """
                 if (TryEvaluateUInt64AddReturn(move tokens, move integers,
-                    out var name, out var bound)) { return 1; }
+                    init var name, init var bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
@@ -1847,13 +1847,13 @@ public sealed partial class ManagedScannerComponentTests
         var text = $"{typeName} Value() {{ return {expression}; }}";
         var assertion = evaluable
             ? $$"""
-                require {{evaluator}}(move tokens, move integers, out var name, out var bound);
+                require {{evaluator}}(move tokens, move integers, init var name, init var bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}}) { return 1; }
                 """
             : $$"""
                 if ({{evaluator}}(move tokens, move integers,
-                    out var name, out var bound)) { return 1; }
+                    init var name, init var bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
@@ -1915,13 +1915,13 @@ public sealed partial class ManagedScannerComponentTests
         var text = $"{typeName} Value() {{ return {expression}; }}";
         var assertion = evaluable
             ? $$"""
-                require {{evaluator}}(move tokens, move integers, out var name, out var bound);
+                require {{evaluator}}(move tokens, move integers, init var name, init var bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}}) { return 1; }
                 """
             : $$"""
                 if ({{evaluator}}(move tokens, move integers,
-                    out var name, out var bound)) { return 1; }
+                    init var name, init var bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
@@ -1986,13 +1986,13 @@ public sealed partial class ManagedScannerComponentTests
         var text = $"{typeName} Value() {{ return {expression}; }}";
         var assertion = evaluable
             ? $$"""
-                require {{evaluator}}(move tokens, move integers, out var name, out var bound);
+                require {{evaluator}}(move tokens, move integers, init var name, init var bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}}) { return 1; }
                 """
             : $$"""
                 if ({{evaluator}}(move tokens, move integers,
-                    out var name, out var bound)) { return 1; }
+                    init var name, init var bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
@@ -2055,7 +2055,7 @@ public sealed partial class ManagedScannerComponentTests
             using Terrum.CodeAnalysis;
             int32 Main() {
                 require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
-                require {{evaluator}}(move tokens, move integers, out var name, out var bound);
+                require {{evaluator}}(move tokens, move integers, init var name, init var bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}}) { return 1; }
                 return 42;
@@ -2074,6 +2074,36 @@ public sealed partial class ManagedScannerComponentTests
             Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
             Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    public async Task BoundedNativeBinaryEvaluatorKeepsOutputsVacantOnFailureAsync()
+    {
+        const string Text = "int32 Value() { return 20 + 22; }";
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                if (TryEvaluateInt32SubtractReturn(
+                    move tokens, move integers, init var name, init var value))
+                {
+                    return 1;
+                }
+                require TryScanCompilerInput(init var retryTokens, init var retryTrivia,
+                    init var retryIntegers);
+                require TryEvaluateInt32AddReturn(
+                    move retryTokens, move retryIntegers, init name, init value);
+                if (name.Start != 6 || name.Length != 5 || value != 42) { return 2; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileParserAsync(Text, Entry, (BoundRuntimePolicy)policy)
+                .ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }

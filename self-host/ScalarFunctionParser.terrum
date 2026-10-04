@@ -918,55 +918,63 @@ bool TryEvaluateUInt64ParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnaps
 }
 
 bool TryEvaluateInt32AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int32 result)
+    init ref<SourceRange> name, init ref<int32> result)
 {
-    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 57, out name, out result);
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 57,
+        init name, init result);
 }
 
 bool TryEvaluateInt32SubtractReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int32 result)
+    init ref<SourceRange> name, init ref<int32> result)
 {
-    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 58, out name, out result);
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 58,
+        init name, init result);
 }
 
 bool TryEvaluateInt32MultiplyReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int32 result)
+    init ref<SourceRange> name, init ref<int32> result)
 {
-    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 59, out name, out result);
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 59,
+        init name, init result);
 }
 
 bool TryEvaluateInt32DivideReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int32 result)
+    init ref<SourceRange> name, init ref<int32> result)
 {
-    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 60, out name, out result);
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 60,
+        init name, init result);
 }
 
 bool TryEvaluateInt32RemainderReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int32 result)
+    init ref<SourceRange> name, init ref<int32> result)
 {
-    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 61, out name, out result);
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 61,
+        init name, init result);
 }
 
 bool TryEvaluateInt32AndReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int32 result)
+    init ref<SourceRange> name, init ref<int32> result)
 {
-    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 71, out name, out result);
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 71,
+        init name, init result);
 }
 
 bool TryEvaluateInt32OrReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int32 result)
+    init ref<SourceRange> name, init ref<int32> result)
 {
-    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 73, out name, out result);
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 73,
+        init name, init result);
 }
 
 bool TryEvaluateInt32XorReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int32 result)
+    init ref<SourceRange> name, init ref<int32> result)
 {
-    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 75, out name, out result);
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 75,
+        init name, init result);
 }
 
 bool TryEvaluateInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    int32 expectedOperation, out SourceRange name, out int32 result)
+    int32 expectedOperation, init ref<SourceRange> name, init ref<int32> result)
 {
     if (!TryParseScalarBinaryReturn(move tokens, move integers,
             init var scalarType, init var operation, init var foundName,
@@ -1035,55 +1043,63 @@ bool TryEvaluateInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
 }
 
 bool TryEvaluateUInt32AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint32 result)
+    init ref<SourceRange> name, init ref<uint32> result)
 {
-    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 57, out name, out result);
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 57,
+        init name, init result);
 }
 
 bool TryEvaluateUInt32SubtractReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint32 result)
+    init ref<SourceRange> name, init ref<uint32> result)
 {
-    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 58, out name, out result);
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 58,
+        init name, init result);
 }
 
 bool TryEvaluateUInt32MultiplyReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint32 result)
+    init ref<SourceRange> name, init ref<uint32> result)
 {
-    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 59, out name, out result);
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 59,
+        init name, init result);
 }
 
 bool TryEvaluateUInt32DivideReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint32 result)
+    init ref<SourceRange> name, init ref<uint32> result)
 {
-    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 60, out name, out result);
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 60,
+        init name, init result);
 }
 
 bool TryEvaluateUInt32RemainderReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint32 result)
+    init ref<SourceRange> name, init ref<uint32> result)
 {
-    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 61, out name, out result);
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 61,
+        init name, init result);
 }
 
 bool TryEvaluateUInt32AndReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint32 result)
+    init ref<SourceRange> name, init ref<uint32> result)
 {
-    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 71, out name, out result);
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 71,
+        init name, init result);
 }
 
 bool TryEvaluateUInt32OrReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint32 result)
+    init ref<SourceRange> name, init ref<uint32> result)
 {
-    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 73, out name, out result);
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 73,
+        init name, init result);
 }
 
 bool TryEvaluateUInt32XorReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint32 result)
+    init ref<SourceRange> name, init ref<uint32> result)
 {
-    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 75, out name, out result);
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 75,
+        init name, init result);
 }
 
 bool TryEvaluateUInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    int32 expectedOperation, out SourceRange name, out uint32 result)
+    int32 expectedOperation, init ref<SourceRange> name, init ref<uint32> result)
 {
     if (!TryParseScalarBinaryReturn(move tokens, move integers,
             init var scalarType, init var operation, init var foundName,
@@ -1156,55 +1172,63 @@ bool TryEvaluateUInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
 }
 
 bool TryEvaluateInt64AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int64 result)
+    init ref<SourceRange> name, init ref<int64> result)
 {
-    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 57, out name, out result);
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 57,
+        init name, init result);
 }
 
 bool TryEvaluateInt64SubtractReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int64 result)
+    init ref<SourceRange> name, init ref<int64> result)
 {
-    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 58, out name, out result);
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 58,
+        init name, init result);
 }
 
 bool TryEvaluateInt64MultiplyReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int64 result)
+    init ref<SourceRange> name, init ref<int64> result)
 {
-    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 59, out name, out result);
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 59,
+        init name, init result);
 }
 
 bool TryEvaluateInt64DivideReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int64 result)
+    init ref<SourceRange> name, init ref<int64> result)
 {
-    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 60, out name, out result);
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 60,
+        init name, init result);
 }
 
 bool TryEvaluateInt64RemainderReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int64 result)
+    init ref<SourceRange> name, init ref<int64> result)
 {
-    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 61, out name, out result);
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 61,
+        init name, init result);
 }
 
 bool TryEvaluateInt64AndReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int64 result)
+    init ref<SourceRange> name, init ref<int64> result)
 {
-    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 71, out name, out result);
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 71,
+        init name, init result);
 }
 
 bool TryEvaluateInt64OrReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int64 result)
+    init ref<SourceRange> name, init ref<int64> result)
 {
-    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 73, out name, out result);
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 73,
+        init name, init result);
 }
 
 bool TryEvaluateInt64XorReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int64 result)
+    init ref<SourceRange> name, init ref<int64> result)
 {
-    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 75, out name, out result);
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 75,
+        init name, init result);
 }
 
 bool TryEvaluateInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    int32 expectedOperation, out SourceRange name, out int64 result)
+    int32 expectedOperation, init ref<SourceRange> name, init ref<int64> result)
 {
     if (!TryParseScalarBinaryReturn(move tokens, move integers,
             init var scalarType, init var operation, init var foundName,
@@ -1298,55 +1322,63 @@ bool TryEvaluateInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
 }
 
 bool TryEvaluateUInt64AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint64 result)
+    init ref<SourceRange> name, init ref<uint64> result)
 {
-    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 57, out name, out result);
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 57,
+        init name, init result);
 }
 
 bool TryEvaluateUInt64SubtractReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint64 result)
+    init ref<SourceRange> name, init ref<uint64> result)
 {
-    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 58, out name, out result);
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 58,
+        init name, init result);
 }
 
 bool TryEvaluateUInt64MultiplyReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint64 result)
+    init ref<SourceRange> name, init ref<uint64> result)
 {
-    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 59, out name, out result);
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 59,
+        init name, init result);
 }
 
 bool TryEvaluateUInt64DivideReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint64 result)
+    init ref<SourceRange> name, init ref<uint64> result)
 {
-    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 60, out name, out result);
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 60,
+        init name, init result);
 }
 
 bool TryEvaluateUInt64RemainderReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint64 result)
+    init ref<SourceRange> name, init ref<uint64> result)
 {
-    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 61, out name, out result);
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 61,
+        init name, init result);
 }
 
 bool TryEvaluateUInt64AndReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint64 result)
+    init ref<SourceRange> name, init ref<uint64> result)
 {
-    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 71, out name, out result);
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 71,
+        init name, init result);
 }
 
 bool TryEvaluateUInt64OrReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint64 result)
+    init ref<SourceRange> name, init ref<uint64> result)
 {
-    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 73, out name, out result);
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 73,
+        init name, init result);
 }
 
 bool TryEvaluateUInt64XorReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint64 result)
+    init ref<SourceRange> name, init ref<uint64> result)
 {
-    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 75, out name, out result);
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 75,
+        init name, init result);
 }
 
 bool TryEvaluateUInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    int32 expectedOperation, out SourceRange name, out uint64 result)
+    int32 expectedOperation, init ref<SourceRange> name, init ref<uint64> result)
 {
     if (!TryParseScalarBinaryReturn(move tokens, move integers,
             init var scalarType, init var operation, init var foundName,
