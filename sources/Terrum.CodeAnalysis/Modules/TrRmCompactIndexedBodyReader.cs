@@ -178,7 +178,6 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
         var owner = new int[ValueCount + 1];
         var valueCount = ValueCount;
-        var defined = new bool[ValueCount + 1];
         var actualUses = new int[ValueCount + 1];
         var blockParameters = new int[BlockCount + 1][];
         var liveIns = new int[BlockCount + 1][];
@@ -284,7 +283,6 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     throw InvalidBody();
                 }
 
-                defined[value] = true;
             }
 
             var operations = ReadCount(extent, ref cursor, width);
@@ -302,11 +300,12 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             var useOffset = cursor;
             void Use(int value, int ordinal)
             {
+                // Block framing means no operation result can start at offset zero.
                 if (value <= 0 || value > valueCount
                     || owner[value] > block
-                    || (owner[value] == block && (!defined[value]
-                        || definitions[value - 1] != sentinel
-                            && definitions[value - 1] >= useOffset)))
+                    || (owner[value] == block && definitions[value - 1] != sentinel
+                        && (definitions[value - 1] == 0
+                            || definitions[value - 1] >= useOffset)))
                 {
                     throw InvalidBody();
                 }
@@ -717,20 +716,6 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 {
                     throw InvalidBody();
                 }
-
-                if (result != 0 && defined[result])
-                {
-                    throw InvalidBody();
-                }
-
-                if (result != 0)
-                {
-                    defined[result] = true;
-                }
-                if (secondResult != 0)
-                {
-                    defined[secondResult] = true;
-                }
             }
 
             if (cursor != terminators[block - 1])
@@ -872,7 +857,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             {
                 if (definitions[value - 1] == sentinel
                     ? !Contains(blockParameters[block], (int)value)
-                    : definitions[value - 1] >= terminators[block - 1] || !defined[value])
+                    : definitions[value - 1] == 0
+                        || definitions[value - 1] >= terminators[block - 1])
                 {
                     throw InvalidBody();
                 }
