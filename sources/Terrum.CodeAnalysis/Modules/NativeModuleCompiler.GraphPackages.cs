@@ -378,20 +378,35 @@ public static partial class NativeModuleCompiler
         IReadOnlyList<NativeImportBinding> used)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
+        var usedByDll = new Dictionary<string, List<NativeImportBinding>>(StringComparer.Ordinal);
+        foreach (var import in used)
+        {
+            if (!usedByDll.TryGetValue(import.DllName, out var imports))
+            {
+                imports = [];
+                usedByDll.Add(import.DllName, imports);
+            }
+            imports.Add(import);
+        }
         var result = new GraphDependency[declarations.Length];
         for (var i = 0; i < result.Length; i++)
         {
             var dependency = declarations[i];
-            var imports = used.Where(item => item.DllName == DllName(dependency.Identity))
-                .Select(item => {
-                    if (item.ExportName != item.FunctionName
-                        || !dependency.Declarations.Contains(item.FunctionName, StringComparer.Ordinal)
-                        || !names.Add(item.FunctionName))
-                    {
-                        throw new ModuleFormatException("Emitted graph import has no declaration owner.");
-                    }
-                    return item.FunctionName;
-                }).Order(StringComparer.Ordinal).ToArray();
+            var actual = usedByDll.TryGetValue(DllName(dependency.Identity), out var providerImports)
+                ? providerImports : [];
+            var imports = new string[actual.Count];
+            for (var index = 0; index < actual.Count; index++)
+            {
+                var import = actual[index];
+                if (import.ExportName != import.FunctionName
+                    || !dependency.Declarations.Contains(import.FunctionName, StringComparer.Ordinal)
+                    || !names.Add(import.FunctionName))
+                {
+                    throw new ModuleFormatException("Emitted graph import has no declaration owner.");
+                }
+                imports[index] = import.FunctionName;
+            }
+            Array.Sort(imports, StringComparer.Ordinal);
             result[i] = dependency with { Imports = imports };
         }
         if (names.Count != used.Count)
