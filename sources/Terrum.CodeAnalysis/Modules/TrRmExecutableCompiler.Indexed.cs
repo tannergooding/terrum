@@ -188,9 +188,12 @@ public static partial class TrRmExecutableCompiler
                         external[b].Add(mapped);
                     }
                 }
-                for (var operation = 0; operation < block.Operations.Count; operation++)
+                var operationOrdinal = 0;
+                void UseAtOperation(int id) => Use(id, operationOrdinal);
+                Action<int> operationVisitor = UseAtOperation;
+                for (; operationOrdinal < block.Operations.Count; operationOrdinal++)
                 {
-                    VisitReads(block.Operations[operation].Expression, id => Use(id, operation));
+                    VisitReads(block.Operations[operationOrdinal].Expression, operationVisitor);
                 }
                 Use(block.Condition != 0 ? block.Condition : block.ReturnValue, block.Operations.Count);
                 if (block.True is { } trueEdge)
