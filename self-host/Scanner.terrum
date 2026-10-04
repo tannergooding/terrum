@@ -562,18 +562,6 @@ int32 SkipDigitSeparators(int32 at, int32 radix)
     return at;
 }
 
-bool TryAccumulateMagnitude(uint64 value, uint64 digit, uint64 radix,
-    uint64 cutoff, uint64 finalDigit, init ref<uint64> result)
-{
-    if (digit >= radix || value > cutoff || (value == cutoff && digit > finalDigit))
-    {
-        return false;
-    }
-
-    result = value * radix + digit;
-    return true;
-}
-
 int32 ScanBasedNumber(int32 initial, int32 tokenIndex, int32 radix)
 {
     mut int32 at = initial + 2;
@@ -626,14 +614,14 @@ int32 ScanBasedNumber(int32 initial, int32 tokenIndex, int32 radix)
             {
                 digit = uint64(HexValue(PeekUnit(at)));
             }
-            if (!TryAccumulateMagnitude(magnitude, digit, wideRadix, cutoff, finalDigit,
-                init var accumulated))
+            if (digit >= wideRadix || magnitude > cutoff
+                || (magnitude == cutoff && digit > finalDigit))
             {
                 overflow = true;
             }
             else
             {
-                magnitude = accumulated;
+                magnitude = magnitude * wideRadix + digit;
             }
         }
         at = at + 1;
@@ -772,14 +760,13 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
         if (!overflow)
         {
             uint64 digit = uint64(PeekUnit(at) - 48);
-            if (!TryAccumulateMagnitude(magnitude, digit, 10, cutoff, finalDigit,
-                init var accumulated))
+            if (magnitude > cutoff || (magnitude == cutoff && digit > finalDigit))
             {
                 overflow = true;
             }
             else
             {
-                magnitude = accumulated;
+                magnitude = magnitude * 10 + digit;
             }
         }
         at = at + 1;
