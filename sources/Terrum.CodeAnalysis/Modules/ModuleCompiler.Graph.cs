@@ -81,6 +81,10 @@ public static partial class ModuleCompiler
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(exports);
         RejectCompilationLocalSpans(program);
+        if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
+        {
+            throw new ModuleContractException("Only top-level caller-unsafe functions are supported in persisted semantic modules.");
+        }
         SemanticVerifier.VerifyLibraryReferences(program);
         if (program.EntryPoint != -1 || !program.Buffers.IsDefaultOrEmpty
             || program.RuntimePolicy != dependencies.RuntimePolicy)
@@ -231,6 +235,10 @@ public static partial class ModuleCompiler
             Classes = module.Classes,
             RuntimePolicy = module.RuntimePolicy,
         };
+        if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
+        {
+            throw new ModuleFormatException("Graph library contains an unsupported caller-unsafe contract.");
+        }
         try
         {
             SemanticVerifier.VerifyLibraryReferences(Resolve(program, indexes));
@@ -263,11 +271,16 @@ public static partial class ModuleCompiler
 
     private static BoundFunction RecordedImportPromises(string contract, BoundFunction replacement)
     {
-        if (!TryContractPromises(contract.AsSpan(), out _, out var noThrow, out var noReturn))
+        if (!TryContractPromises(contract.AsSpan(), out _, out var noThrow, out var noReturn,
+            out var unsafeCaller))
         {
             throw new ModuleFormatException("Invalid recorded import promises.");
         }
-        return replacement with { IsNoThrow = noThrow, DoesNotReturn = noReturn };
+        return replacement with {
+            IsNoThrow = noThrow,
+            DoesNotReturn = noReturn,
+            RequiresUnsafeCaller = unsafeCaller,
+        };
     }
 
     private static void ValidateGraphImports(Module module, CompilationReference dependencies)
@@ -328,6 +341,10 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Graph library has no functions.");
             }
             var functions = ReadFunctions(reader, count, expectedConsumer: true, structures, classes);
+            if (functions.Any(HasUnsupportedModuleCallerUnsafeContract))
+            {
+                throw new ModuleFormatException("Graph library contains an unsupported caller-unsafe contract.");
+            }
             var module = new Module(true, -1, structures, functions) {
                 Classes = classes,
                 ImportedStructures = imported,

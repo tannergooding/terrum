@@ -2,8 +2,10 @@
 
 **Status: unapproved.** This records a recommended first implementation slice
 for the roadmap's general reference/access/loan call contracts. It does not
-change accepted source semantics, the approved metadata schema, or current
-compiler support.
+change accepted source semantics or the approved metadata schema, and does not
+approve the broader proposal. Its marked provisional implementation slice now
+has hosted structured semantic-module support; that implementation boundary is
+described in [the module format](../modules.md) and [implementation notes](../implementation.md).
 
 ## Current boundary
 
@@ -27,6 +29,26 @@ this gap: they cover scalar call modes and still rely on the hosted verifier
 and emitter.
 
 ## Questions for direction
+
+### Provisional implementation slice: semantic-module caller obligations
+
+**Summary:** Same-compilation binding already enforces caller-unsafe function
+declarations and explicit `unsafe` scopes. Structured semantic modules retain
+`BoundUnsafe` scopes but currently reject every caller-unsafe declaration or
+call. Executable TRRM Bodies do not retain a validated unsafe-call scope.
+
+**Recommendation:** Provisionally implement round-tripping caller-unsafe
+contracts for top-level functions and calls enclosed by explicit `unsafe { }`
+blocks in structured semantic modules only. Persist the declaration
+obligation, retain the `BoundUnsafe` scope, and reconstruct call authorization
+from that scope when reading; do not trust a serialized authorization bit by
+itself. `unsafe(expr)` remains same-compilation-only because its scope is
+currently represented only by a bound-call authorization fact. Keep unsafe
+fields, accessors and operators outside this slice, and keep all caller-unsafe
+declarations and calls rejected in executable TRRM until its Body contract
+can prove explicit call scope. This slice changes the internal semantic-module
+format and must advance its revision. It is an implementation experiment, not
+approval of general reference metadata or the broader proposal.
 
 ### 1. Which dependency relations belong in the first callable profile?
 

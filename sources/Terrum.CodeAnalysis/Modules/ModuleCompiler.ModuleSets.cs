@@ -116,6 +116,10 @@ public static partial class ModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(program);
         RejectCompilationLocalSpans(program);
+        if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
+        {
+            throw new ModuleContractException("Only top-level caller-unsafe functions are supported in persisted semantic modules.");
+        }
         SemanticVerifier.VerifyReferences(program);
         if (!allowManagedParticipant)
         {
@@ -251,6 +255,10 @@ public static partial class ModuleCompiler
             Classes = consumer.Classes,
             RuntimePolicy = consumer.RuntimePolicy,
         };
+        if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
+        {
+            throw new ModuleFormatException("Consumer contains an unsupported caller-unsafe contract.");
+        }
         try
         {
             var resolved = Resolve(program, names);

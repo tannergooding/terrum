@@ -1,8 +1,13 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Xunit;
@@ -290,18 +295,94 @@ public sealed class CallerUnsafeTests
     }
 
     [Fact]
-    public void SemanticModulesRejectCallerUnsafeContracts()
+    public void SemanticModulesRoundTripTopLevelCallerUnsafeContracts()
     {
-        var program = CompileLibrary("public unsafe int32 Danger() { return 42; }");
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Danger"]));
+        var providerProgram = CompileLibrary("public unsafe int32 Danger() { return 42; }");
+        var producer = ModuleCompiler.CreateProducer(providerProgram, ["Danger"]);
+        var reference = ModuleCompiler.CreateReference(producer);
 
-        var producer = ModuleCompiler.CreateProducer(
-            CompileLibrary("public int32 Helper() { return 1; }"), ["Helper"]);
-        var compilation = Compilation.Create(SyntaxTree.Parse(
-            "unsafe int32 Danger() { return 42; } int32 Main() { return unsafe(Danger()); }"));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var safeCall = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Danger(); }"), reference);
+        Assert.Null(safeCall.Program);
+        Assert.Contains(safeCall.Diagnostics, static diagnostic => diagnostic.Code == "TRM3028");
+
+        var scopedCall = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { unsafe { return Danger(); } }"), reference);
+        Assert.False(scopedCall.HasErrors, string.Join(Environment.NewLine, scopedCall.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(scopedCall.Program), producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        SemanticVerifier.Verify(linked);
+        Assert.Equal(42, NativeJit.Execute(linked, NativeRuntimePolicy.FailFast));
+        var nativeProducer = NativeModuleCompiler.CreateProducer(providerProgram, ["Danger"],
+            "UnsafeProvider", NativeRuntimePolicy.FailFast);
+        var nativeConsumer = NativeModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(scopedCall.Program), nativeProducer, NativeRuntimePolicy.FailFast);
+        NativeModuleCompiler.Validate(nativeConsumer, nativeProducer);
+
+        var expressionScopedCall = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return unsafe(Danger()); }"), reference);
+        Assert.False(expressionScopedCall.HasErrors,
+            string.Join(Environment.NewLine, expressionScopedCall.Diagnostics));
         Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(
-            Assert.IsType<BoundProgram>(compilation.Program), producer));
+            Assert.IsType<BoundProgram>(expressionScopedCall.Program), producer));
+
+        var safeProducer = ModuleCompiler.CreateProducer(
+            CompileLibrary("public int32 Danger() { return 42; }"), ["Danger"]);
+        var safeReference = ModuleCompiler.CreateReference(safeProducer);
+        var safeConsumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Danger(); }"), safeReference);
+        Assert.False(safeConsumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, safeConsumerCompilation.Diagnostics));
+        var safeConsumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(safeConsumerCompilation.Program), safeProducer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(safeConsumer, safeProducer),
+            NativeRuntimePolicy.FailFast));
+        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+    }
+
+    [Fact]
+    public async Task SemanticModuleGraphPersistsUnsafeImportsWithinUnsafeBlocksAsync()
+    {
+        var policy = NativeRuntimePolicy.FailFast;
+        var leaf = NativeModuleCompiler.CreateProducer(
+            CompileLibrary("public unsafe int32 Danger() { return 42; }"), ["Danger"], "UnsafeLeaf", policy);
+        var middleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 SafeWrapper() { unsafe { return Danger(); } }"),
+            NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
+        Assert.False(middleCompilation.HasErrors,
+            string.Join(Environment.NewLine, middleCompilation.Diagnostics));
+        var middle = NativeModuleCompiler.CreateGraphProducer(
+            Assert.IsType<BoundProgram>(middleCompilation.Program), ["SafeWrapper"], "SafeMiddle", [leaf], policy);
+
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return SafeWrapper(); }"),
+            NativeModuleCompiler.CreateGraphReference([middle]), (BoundRuntimePolicy)policy);
+        Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(
+            Assert.IsType<BoundProgram>(rootCompilation.Program), [middle], policy);
+        NativeModuleCompiler.ValidateGraph(root, [middle, leaf]);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [leaf, middle],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public void GraphReadersRejectCallerUnsafeMemberContracts()
+    {
+        var policy = NativeRuntimePolicy.FailFast;
+        var dependency = NativeModuleCompiler.CreateProducer(
+            CompileLibrary("public int32 Helper() { return 0; }"), ["Helper"], "SafeDependency", policy);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public struct Box {
+                public int32 Value;
+                public static int32 Danger() { return 42; }
+            }
+            """), NativeModuleCompiler.CreateGraphReference([dependency]), (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var graph = NativeModuleCompiler.CreateGraphProducer(
+            Assert.IsType<BoundProgram>(compilation.Program), ["Box.Danger"], "GraphProvider", [dependency], policy);
+        var forged = ForgeCallerUnsafeMemberGraphPackage(graph, "Box.Danger");
+
+        Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateGraphReference([forged]));
+        Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(forged));
     }
 
     [Fact]
@@ -349,5 +430,45 @@ public sealed class CallerUnsafeTests
             """);
         Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(classProgram, ["Read"]));
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(classProgram, "unsafe-class-field"));
+    }
+
+    private static byte[] ForgeCallerUnsafeMemberGraphPackage(byte[] package, string functionName)
+    {
+        var contractLength = BinaryPrimitives.ReadInt32LittleEndian(package.AsSpan(11, 4));
+        var imageLength = BinaryPrimitives.ReadInt32LittleEndian(package.AsSpan(15, 4));
+        var contractStart = package.Length - 32 - imageLength - contractLength;
+        var contract = package.AsSpan(contractStart, contractLength).ToArray();
+        var name = Encoding.UTF8.GetBytes(functionName);
+        byte[] contractMarker = [.. name, (byte)'|'];
+        var contractTextStart = contract.AsSpan().IndexOf(contractMarker);
+        Assert.True(contractTextStart >= sizeof(int));
+        var contractLengthOffset = contractTextStart - sizeof(int);
+        var contractTextLength = BinaryPrimitives.ReadInt32LittleEndian(
+            contract.AsSpan(contractLengthOffset, sizeof(int)));
+        var contractText = Encoding.UTF8.GetString(contract, contractTextStart, contractTextLength);
+        var unsafeContractText = Encoding.UTF8.GetBytes(contractText + "|CallerUnsafe");
+        var growth = unsafeContractText.Length - contractTextLength;
+        var bodyNameStart = contract.AsSpan().LastIndexOf(name);
+        Assert.True(bodyNameStart > contractTextStart);
+        var forgedContract = new byte[contract.Length + growth];
+        contract.AsSpan(0, contractLengthOffset).CopyTo(forgedContract);
+        BinaryPrimitives.WriteInt32LittleEndian(forgedContract.AsSpan(contractLengthOffset, sizeof(int)),
+            unsafeContractText.Length);
+        unsafeContractText.CopyTo(forgedContract, contractLengthOffset + sizeof(int));
+        contract.AsSpan(contractLengthOffset + sizeof(int) + contractTextLength)
+            .CopyTo(forgedContract.AsSpan(contractLengthOffset + sizeof(int) + unsafeContractText.Length));
+        var requiresUnsafeCallerOffset = bodyNameStart + growth + name.Length + sizeof(int) + 6;
+        forgedContract[requiresUnsafeCallerOffset] = 1;
+
+        var forgedPackage = new byte[package.Length + growth];
+        package.AsSpan(0, contractStart).CopyTo(forgedPackage);
+        BinaryPrimitives.WriteInt32LittleEndian(forgedPackage.AsSpan(11, sizeof(int)),
+            forgedContract.Length);
+        forgedContract.CopyTo(forgedPackage, contractStart);
+        package.AsSpan(contractStart + contractLength, imageLength)
+            .CopyTo(forgedPackage.AsSpan(contractStart + forgedContract.Length));
+        SHA256.HashData(forgedPackage.AsSpan(0, forgedPackage.Length - 32))
+            .CopyTo(forgedPackage, forgedPackage.Length - 32);
+        return forgedPackage;
     }
 }

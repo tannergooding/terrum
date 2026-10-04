@@ -66,14 +66,14 @@ public sealed class ModuleTests
             """), policy);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Combine"]);
-        Assert.Equal(53, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(54, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
 
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return Combine(sixth: 2, fifth: 4, first: 0, second: 0, third: 0, fourth: 0); }"),
             ModuleCompiler.CreateReference(producer), policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(53, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.Equal(54, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
         var nativePolicy = policy == BoundRuntimePolicy.FailFast
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
         Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(
@@ -830,7 +830,7 @@ public sealed class ModuleTests
         reader.BaseStream.Position = functionName + name.Length;
         _ = reader.ReadInt32();
         Assert.True(reader.ReadBoolean());
-        for (var flag = 0; flag < 6; flag++)
+        for (var flag = 0; flag < 7; flag++)
         {
             _ = reader.ReadBoolean();
         }

@@ -27,7 +27,7 @@ Implementation hashes are not pinned: a compatible leaf implementation can
 replace an independently compiled package without changing the intermediate
 DLL or root EXE.
 For managed roots and intermediate producers in persisted acyclic native DLL
-graphs, each participant uses current semantic-module revision 53, the sole
+graphs, each participant uses current semantic-module revision 54, the sole
 accepted revision. This serialization revision is distinct from the graph
 container and native package formats. Participants
 communicate only through the established scalar and handle-free public `Copy`
@@ -203,7 +203,7 @@ leaf's managed roots.
 The [Copy-field variant](../samples/native/graph/managed-copy-class-leaf.terrum)
 can replace that same leaf with nested inline Copy values alongside its optional
 edges. Use it in place of `managed-class-leaf.terrum` in the producer command
-below. It writes current semantic-module revision 53 while retaining the
+below. It writes current semantic-module revision 54 while retaining the
 `native-20` profile, returns the same result and collects its private cycle.
 The unchanged root and intermediate do not import its nested struct layouts;
 retired semantic-module revisions are rejected and must be rebuilt from source.

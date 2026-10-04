@@ -370,7 +370,7 @@ public sealed class UpdateExpressionTests
             "public int32 Next(int32 input) { mut int32 value = input; return value++; }"));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), ["Next"]);
-        Assert.Equal(53, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(54, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var old = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(old.AsSpan(4, 4), 42);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(old));

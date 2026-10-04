@@ -46,8 +46,8 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 53. Writers use it for every producer,
-consumer and graph library; readers accept only revision 53. Revision 48 adds
+The current semantic-module revision is 54. Writers use it for every producer,
+consumer and graph library; readers accept only revision 54. Revision 48 adds
 the initialization-aware optional-handle pattern expression, recording its
 source expression, capture slot and whether initialized null is accepted.
 Revision 49 adds expression tag 28 for named-storage initialization tests,
@@ -60,8 +60,13 @@ older are retired and must be recreated from source. Revision 52 adds explicit
 relative-mode flags for lexical view endpoints, preserving dynamic end-relative
 offsets through producer and consumer artifacts. Revision 51 and older are
 retired and must be recreated from source. Revision 53 adds the `float32` and
-`float64` primitive payload types; revision 52 and older are retired and must
-be recreated from source.
+`float64` primitive payload types; revision 52 and older were retired and must
+be recreated from source. Revision 54 records top-level caller-unsafe function
+contracts and retains explicit unsafe-block scopes in structured semantic
+modules. Import readers derive call authorization from those scopes; calls
+authorized only by `unsafe(expr)`, unsafe fields, accessors, operators, and
+caller-unsafe TRRM Bodies remain unsupported. Revision 53 and older are retired
+and must be recreated from source.
 This revision is independent of native profile labels, native package and graph
 container formats, and scalar frontend projection revisions. See
 [implementation](implementation.md) for the compiler support boundary and
@@ -331,7 +336,7 @@ unsupported.
 
 The following feature notes document implementation milestones only. They do
 not describe current writer selection or reader compatibility: current
-artifacts always use revision 53, and older semantic-module revisions are
+artifacts always use revision 54, and older semantic-module revisions are
 rejected.
 
 Version 12 stored the unique layout flag, declared cleanup method, cleanup
