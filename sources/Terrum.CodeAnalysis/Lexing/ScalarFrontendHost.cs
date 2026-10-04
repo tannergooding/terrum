@@ -612,6 +612,16 @@ public static partial class ScalarFrontendHost
             {
                 throw InvalidResult();
             }
+            var resultStatements = ImmutableArray.CreateBuilder<ScalarFrontendStatement>(orderedStatements.Length);
+            for (var index = 0; index < orderedStatements.Length; index++)
+            {
+                var entry = orderedStatements[index];
+                resultStatements.Add(entry with
+                {
+                    BodySpan = bodySpans[index],
+                    LoopSpan = loopSpans[index],
+                });
+            }
             var projection = new ScalarFrontendResult(true, isPublic, 0, default,
                 words[5], count, words[7], words[8], words[34], name,
                 firstName, secondName, thirdName, words[15] != 0, words[15] == 2,
@@ -623,9 +633,9 @@ public static partial class ScalarFrontendHost
                 OutParameterMask = words[16],
                 InitRefParameterMask = words[17],
                 CallTargets = context?.Targets ?? default,
-                Locals = declaredLocals, Statements = orderedStatements
-                    .Select((entry, index) => entry with { BodySpan = bodySpans[index],
-                        LoopSpan = loopSpans[index] }).ToImmutableArray() };
+                Locals = declaredLocals,
+                Statements = resultStatements.MoveToImmutable(),
+            };
             if (context is null)
             {
                 // Structured returns have no terminal envelope: check every path before publishing.
