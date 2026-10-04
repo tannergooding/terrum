@@ -2,7 +2,6 @@
 
 using System;
 using System.Buffers.Binary;
-using System.Collections.Generic;
 using System.IO;
 
 namespace Terrum.CodeAnalysis.Modules;
@@ -45,7 +44,7 @@ public readonly ref struct TrRmArtifactIndex
         _artifact = artifact;
         _directory = artifact.Slice(32, (int)directoryEnd - 32);
         _entryCount = (int)entryCount;
-        var extents = new List<(uint Start, uint End)>(_entryCount);
+        var extents = new (uint Start, uint End)[_entryCount];
         var previousKind = 0;
         var moduleFound = false;
         for (var entry = 0; entry < _entryCount; entry++)
@@ -77,7 +76,7 @@ public readonly ref struct TrRmArtifactIndex
                 throw InvalidArtifact();
             }
 
-            extents.Add((start, start + length));
+            extents[entry] = (start, start + length);
         }
 
         if (!moduleFound)
@@ -85,7 +84,7 @@ public readonly ref struct TrRmArtifactIndex
             throw InvalidArtifact();
         }
 
-        extents.Sort(static (left, right) => left.Start.CompareTo(right.Start));
+        Array.Sort(extents, static (left, right) => left.Start.CompareTo(right.Start));
         var cursor = (int)directoryEnd;
         foreach (var (start, end) in extents)
         {
