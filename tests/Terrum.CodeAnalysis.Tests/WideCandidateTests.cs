@@ -670,9 +670,9 @@ public sealed class WideCandidateTests
     }
 
     [Theory]
-    [InlineData("TryAdd(int64.MaxValue, 1, out var value); return int32(value);")]
-    [InlineData("if (TryAdd(int64.MaxValue, 1, out var value)) { return 0; } return int32(value);")]
-    [InlineData("uint32 value = 1; require TryAdd(value, 2, out var sum); return int32(sum);")]
+    [InlineData("TryAddInt64(int64.MaxValue, 1, init var value); return int32(value);")]
+    [InlineData("if (!TryAddInt64(int64.MaxValue, 1, init var value)) { return int32(value); } return 0;")]
+    [InlineData("uint32 value = 1; require TryAddInt64(value, 2, init var sum); return int32(sum);")]
     [InlineData("TryAccumulateDecimal(1, 10, uint64.MaxValue, init var value); return int32(value);")]
     [InlineData("TryAccumulateBase(1, 2, 2, uint64.MaxValue, init var value); return int32(value);")]
     public void WideCandidateContractsRejectInvalidUse(string body)
@@ -714,9 +714,9 @@ public sealed class WideCandidateTests
         var compilation = Compilation.CreateLibrary(ReadTree(path), policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), [
-            "Terrum.CodeAnalysis.Numerics64.TryAdd",
-            "Terrum.CodeAnalysis.Numerics64.TrySubtract",
-            "Terrum.CodeAnalysis.Numerics64.TryMultiply",
+            "Terrum.CodeAnalysis.Numerics64.TryAddInt64",
+            "Terrum.CodeAnalysis.Numerics64.TrySubtractInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryMultiplyInt64",
             "Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal",
             "Terrum.CodeAnalysis.Numerics64.TryAccumulateBase",
         ]);

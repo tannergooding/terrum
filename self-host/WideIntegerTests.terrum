@@ -3,52 +3,52 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public static bool CheckWideAddition()
 {
-    if (TryAdd(int64.MaxValue, 1, out var tooLarge)
-        || TryAdd(int64.MinValue, -1, out var tooSmall))
+    if (TryAddInt64(int64.MaxValue, 1, init var tooLarge)
+        || TryAddInt64(int64.MinValue, -1, init var tooSmall))
     {
         return false;
     }
 
-    require TryAdd(int64.MinValue, int64.MaxValue, out var negative);
-    require TryAdd(int64.MaxValue, 0, out var maximum);
-    require TryAdd(int64.MinValue, 0, out var minimum);
+    require TryAddInt64(int64.MinValue, int64.MaxValue, init var negative);
+    require TryAddInt64(int64.MaxValue, 0, init var maximum);
+    require TryAddInt64(int64.MinValue, 0, init var minimum);
 
     return negative == -1 && maximum == int64.MaxValue && minimum == int64.MinValue;
 }
 
 public static bool CheckWideSubtraction()
 {
-    if (TrySubtract(int64.MaxValue, -1, out var tooLarge)
-        || TrySubtract(int64.MinValue, 1, out var tooSmall))
+    if (TrySubtractInt64(int64.MaxValue, -1, init var tooLarge)
+        || TrySubtractInt64(int64.MinValue, 1, init var tooSmall))
     {
         return false;
     }
 
-    require TrySubtract(int64.MinValue, int64.MinValue, out var zero);
-    require TrySubtract(-1, int64.MinValue, out var maximum);
-    require TrySubtract(0, int64.MaxValue, out var negative);
-    require TrySubtract(int64.MaxValue, 0, out var unchanged);
+    require TrySubtractInt64(int64.MinValue, int64.MinValue, init var zero);
+    require TrySubtractInt64(-1, int64.MinValue, init var maximum);
+    require TrySubtractInt64(0, int64.MaxValue, init var negative);
+    require TrySubtractInt64(int64.MaxValue, 0, init var unchanged);
     return zero == 0 && maximum == int64.MaxValue
         && negative == -int64.MaxValue && unchanged == int64.MaxValue;
 }
 
 public static bool CheckWideMultiplication()
 {
-    if (TryMultiply(int64.MaxValue, 2, out var positiveOverflow)
-        || TryMultiply(int64.MinValue, -1, out var negativeTimesNegativeOverflow)
-        || TryMultiply(int64.MinValue, 2, out var negativeOverflow)
-        || TryMultiply(-2, int64.MinValue, out var negativeTimesNegativeOverflow2)
-        || TryMultiply(2, int64.MaxValue, out var reversedPositiveOverflow))
+    if (TryMultiplyInt64(int64.MaxValue, 2, init var positiveOverflow)
+        || TryMultiplyInt64(int64.MinValue, -1, init var negativeTimesNegativeOverflow)
+        || TryMultiplyInt64(int64.MinValue, 2, init var negativeOverflow)
+        || TryMultiplyInt64(-2, int64.MinValue, init var negativeTimesNegativeOverflow2)
+        || TryMultiplyInt64(2, int64.MaxValue, init var reversedPositiveOverflow))
     {
         return false;
     }
 
-    require TryMultiply(int64.MinValue, 1, out var minimum);
-    require TryMultiply(int64.MinValue, 0, out var zero);
-    require TryMultiply(-1, int64.MaxValue, out var negative);
-    require TryMultiply(-1, -int64.MaxValue, out var positive);
-    require TryMultiply(int64.MinValue / 2, 2, out var boundary);
-    require TryMultiply(3037000499, 3037000499, out var square);
+    require TryMultiplyInt64(int64.MinValue, 1, init var minimum);
+    require TryMultiplyInt64(int64.MinValue, 0, init var zero);
+    require TryMultiplyInt64(-1, int64.MaxValue, init var negative);
+    require TryMultiplyInt64(-1, -int64.MaxValue, init var positive);
+    require TryMultiplyInt64(int64.MinValue / 2, 2, init var boundary);
+    require TryMultiplyInt64(3037000499, 3037000499, init var square);
     return minimum == int64.MinValue && zero == 0
         && negative == -int64.MaxValue && positive == int64.MaxValue
         && boundary == int64.MinValue && square == 9223372030926249001;

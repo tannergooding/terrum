@@ -1,6 +1,6 @@
 namespace Terrum.CodeAnalysis.Numerics64;
 
-public static bool TryAdd(int64 left, int64 right, out int64 result)
+public static bool TryAddInt64(int64 left, int64 right, init ref<int64> result)
 {
     if (right > 0 && left > int64.MaxValue - right)
     {
@@ -13,11 +13,10 @@ public static bool TryAdd(int64 left, int64 right, out int64 result)
     }
 
     result = left + right;
-
     return true;
 }
 
-public static bool TrySubtract(int64 left, int64 right, out int64 result)
+public static bool TrySubtractInt64(int64 left, int64 right, init ref<int64> result)
 {
     if (right < 0 && left > int64.MaxValue + right)
     {
@@ -30,57 +29,6 @@ public static bool TrySubtract(int64 left, int64 right, out int64 result)
     }
 
     result = left - right;
-    return true;
-}
-
-public static bool TryMultiply(int64 left, int64 right, out int64 result)
-{
-    if (left > 0)
-    {
-        if (right > 0 && left > int64.MaxValue / right)
-        {
-            return false;
-        }
-        if (right < 0 && right < int64.MinValue / left)
-        {
-            return false;
-        }
-    }
-    else if (left < 0)
-    {
-        if (right > 0 && left < int64.MinValue / right)
-        {
-            return false;
-        }
-        if (right < 0 && left < int64.MaxValue / right)
-        {
-            return false;
-        }
-    }
-
-    result = left * right;
-    return true;
-}
-
-public static bool TryAddInt64(int64 left, int64 right, init ref<int64> result)
-{
-    if (!TryAdd(left, right, out var value))
-    {
-        return false;
-    }
-
-    result = value;
-    return true;
-}
-
-public static bool TrySubtractInt64(int64 left, int64 right, init ref<int64> result)
-{
-    if (!TrySubtract(left, right, out var value))
-    {
-        return false;
-    }
-
-    result = value;
     return true;
 }
 
@@ -112,12 +60,30 @@ public static uint64 MagnitudeInt64(int64 value)
 
 public static bool TryMultiplyInt64(int64 left, int64 right, init ref<int64> result)
 {
-    if (!TryMultiply(left, right, out var value))
+    if (left > 0)
     {
-        return false;
+        if (right > 0 && left > int64.MaxValue / right)
+        {
+            return false;
+        }
+        if (right < 0 && right < int64.MinValue / left)
+        {
+            return false;
+        }
+    }
+    else if (left < 0)
+    {
+        if (right > 0 && left < int64.MinValue / right)
+        {
+            return false;
+        }
+        if (right < 0 && left < int64.MaxValue / right)
+        {
+            return false;
+        }
     }
 
-    result = value;
+    result = left * right;
     return true;
 }
 
