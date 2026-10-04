@@ -89,7 +89,7 @@ public sealed class ScannerTests
     [InlineData("\U00010400_var \u2118 \u212E \u2122 \u0301")]
     [InlineData("a\u200Cb a\u200Db \u200C \u200D \u0661 a\u06612")]
     [InlineData("a\u00E9 ae\u0301 \U0001F600x")]
-    [InlineData("0x1.fp+2 0x_1_f.0_fP+1_0 0x1p-4 0x1__p2 0x1._p2 0x1p2__")]
+    [InlineData("0x1.fp+2 0x_1_f.0_fP+1_0 0x1p-4 0x1p2 0x1__p2 0x1._p2 0x1p2__")]
     [InlineData("if while require int32 2147483648")]
     [InlineData("abstract operator where abstractly operator_ where2 G<T( ;")]
     [InlineData("// trailing comment")]
@@ -133,6 +133,13 @@ public sealed class ScannerTests
             binaryMaximum,
             binaryOverflow);
 
+        await CheckScannerAsync(source).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task LongHexFloatMantissaKeepsScannerParityAsync()
+    {
+        var source = "0x" + new string('A', 2048) + "." + new string('F', 2048) + "p+10";
         await CheckScannerAsync(source).ConfigureAwait(true);
     }
 

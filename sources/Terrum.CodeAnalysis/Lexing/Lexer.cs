@@ -327,16 +327,9 @@ public sealed class Lexer
         if (Current == '0' && Peek(1) is 'x' or 'X' or 'b' or 'B')
         {
             var hex = Peek(1) is 'x' or 'X';
-            if (hex && HasHexFloatForm(start))
+            if (hex && HasHexFloatForm(start, out var exponentPosition))
             {
-                _position += 2;
-                _ = ReadDigitRun(16, allowInitialSeparators: true);
-                if (Current == '.')
-                {
-                    _position++;
-                    _ = ReadDigitRun(16);
-                }
-                _position++;
+                _position = exponentPosition + 1;
                 if (Current is '+' or '-')
                 {
                     _position++;
@@ -407,8 +400,9 @@ public sealed class Lexer
         return TokenKind.NumericLiteral;
     }
 
-    private bool HasHexFloatForm(int start)
+    private bool HasHexFloatForm(int start, out int exponentPosition)
     {
+        exponentPosition = 0;
         var index = start + 2;
         var digitCount = 0;
         var hasPoint = false;
@@ -451,12 +445,18 @@ public sealed class Lexer
             return false;
         }
 
+        var markerPosition = index;
         index++;
         if (index < _source.Length && _source[index] is '+' or '-')
         {
             index++;
         }
-        return index < _source.Length && IsDigit(_source[index]);
+        if (index >= _source.Length || !IsDigit(_source[index]))
+        {
+            return false;
+        }
+        exponentPosition = markerPosition;
+        return true;
     }
 
     private bool ReadDigitRun(int radix, bool allowInitialSeparators = false)

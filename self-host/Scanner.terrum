@@ -638,7 +638,7 @@ int32 ScanBasedNumber(int32 initial, int32 tokenIndex, int32 radix)
     return at;
 }
 
-bool HasHexFloatForm(int32 initial)
+bool HasHexFloatForm(int32 initial, init ref<int32> exponentPosition)
 {
     mut int32 at = initial + 2;
     mut int32 digits = 0;
@@ -682,25 +682,23 @@ bool HasHexFloatForm(int32 initial)
         return false;
     }
 
+    int32 markerPosition = at;
     at = at + 1;
     if (PeekUnit(at) == 43 || PeekUnit(at) == 45)
     {
         at = at + 1;
     }
-    return IsDigit(PeekUnit(at));
+    if (!IsDigit(PeekUnit(at)))
+    {
+        return false;
+    }
+    exponentPosition = markerPosition;
+    return true;
 }
 
-int32 ScanHexFloat(int32 initial)
+int32 ScanHexFloat(int32 exponentPosition)
 {
-    mut int32 at = initial + 2;
-    at = ScanDigitRun(at, 16, true);
-    if (PeekUnit(at) == 46)
-    {
-        at = at + 1;
-        at = ScanDigitRun(at, 16, false);
-    }
-
-    at = at + 1;
+    mut int32 at = exponentPosition + 1;
     if (PeekUnit(at) == 43 || PeekUnit(at) == 45)
     {
         at = at + 1;
@@ -723,9 +721,9 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
         int32 prefix = PeekUnit(initial + 1);
         if (prefix == 120 || prefix == 88)
         {
-            if (HasHexFloatForm(initial))
+            if (HasHexFloatForm(initial, init var exponentPosition))
             {
-                return ScanHexFloat(initial);
+                return ScanHexFloat(exponentPosition);
             }
             return ScanBasedNumber(initial, tokenIndex, 16);
         }

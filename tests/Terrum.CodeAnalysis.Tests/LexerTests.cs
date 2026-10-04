@@ -66,7 +66,7 @@ public sealed class LexerTests
         new[] { "0b", "0B", "2", "0b10", "2", "0b1f32", "0b1u64", "0b1_0", "0b1", ".", "1" })]
     [InlineData("0x 0X 0xG 0x1g", new[] { "0x", "0X", "0x", "G", "0x1", "g" })]
     [InlineData("0x1u32 0x1f32 0x1_2 0x1.2 0x1p2",
-        new[] { "0x1u32", "0x1f32", "0x1_2", "0x1", ".", "2", "0x1", "p2" })]
+        new[] { "0x1u32", "0x1f32", "0x1_2", "0x1", ".", "2", "0x1p2" })]
     [InlineData("12u32 42.3f64", new[] { "12u32", "42.3f64" })]
     [InlineData("10i32 0.1f32 2u128 4f16", new[] { "10i32", "0.1f32", "2u128", "4f16" })]
     [InlineData("1e2f32", new[] { "1e2f32" })]
