@@ -221,12 +221,13 @@ public static partial class NativeModuleCompiler
             throw new ModuleFormatException("Graph declaration mapping differs from semantic declarations.");
         }
         var structures = ModuleCompiler.GetGraphRetainedTypes(contract, consumer);
-        if (structures.Length != origins.Length
-            || structures.Any(item => {
-                var origin = Array.Find(origins, candidate => candidate.Name == item.Name);
-                return origin is null || (item.CleanupMethod is not null ? origin.CleanupIdentity is null
-                    : origin.CleanupIdentity is not null);
-            }))
+        if (structures.Length != origins.Length)
+        {
+            throw new ModuleFormatException("Graph origin table differs from retained semantic types.");
+        }
+        var originsByName = origins.ToDictionary(static item => item.Name, StringComparer.Ordinal);
+        if (structures.Any(item => !originsByName.TryGetValue(item.Name, out var origin)
+            || (item.CleanupMethod is not null ? origin.CleanupIdentity is null : origin.CleanupIdentity is not null)))
         {
             throw new ModuleFormatException("Graph origin table differs from retained semantic types.");
         }
