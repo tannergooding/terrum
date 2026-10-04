@@ -2,7 +2,7 @@ namespace Terrum.CodeAnalysis;
 
 bool TryParseTwoParameterBinaryPrefix(TokenSnapshot tokens, int32 operatorKind,
     bool comparison,
-    out int32 scalarType, out SourceRange name)
+    init ref<int32> scalarType, init ref<SourceRange> name)
 {
     var spacing = tokens.GetScalarOperatorSpacingError();
     if (spacing.Length != 0)
@@ -53,13 +53,13 @@ bool TryParseTwoParameterBinaryPrefix(TokenSnapshot tokens, int32 operatorKind,
 }
 
 bool TryParseTwoParameterAddPrefix(TokenSnapshot tokens,
-    out int32 scalarType, out SourceRange name)
+    init ref<int32> scalarType, init ref<SourceRange> name)
 {
-    return TryParseTwoParameterBinaryPrefix(move tokens, 57, false, out scalarType, out name);
+    return TryParseTwoParameterBinaryPrefix(move tokens, 57, false, init scalarType, init name);
 }
 
 bool TryParseTwoParameterAddReturn(TokenSnapshot tokens,
-    out int32 scalarType, out SourceRange name)
+    init ref<int32> scalarType, init ref<SourceRange> name)
 {
     if (tokens.GetCount() != 17)
     {
@@ -72,11 +72,11 @@ bool TryParseTwoParameterAddReturn(TokenSnapshot tokens,
     {
         return false;
     }
-    return TryParseTwoParameterAddPrefix(move tokens, out scalarType, out name);
+    return TryParseTwoParameterAddPrefix(move tokens, init scalarType, init name);
 }
 
 bool TryParseTwoParameterSubtractReturn(TokenSnapshot tokens,
-    out int32 scalarType, out SourceRange name)
+    init ref<int32> scalarType, init ref<SourceRange> name)
 {
     if (tokens.GetCount() != 17)
     {
@@ -89,11 +89,11 @@ bool TryParseTwoParameterSubtractReturn(TokenSnapshot tokens,
     {
         return false;
     }
-    return TryParseTwoParameterBinaryPrefix(move tokens, 58, false, out scalarType, out name);
+    return TryParseTwoParameterBinaryPrefix(move tokens, 58, false, init scalarType, init name);
 }
 
 bool TryParseTwoParameterComparisonReturn(TokenSnapshot tokens,
-    out int32 scalarType, out int32 operation, out SourceRange name)
+    init ref<int32> scalarType, init ref<int32> operation, init ref<SourceRange> name)
 {
     if (tokens.GetCount() != 17)
     {
@@ -106,7 +106,7 @@ bool TryParseTwoParameterComparisonReturn(TokenSnapshot tokens,
     if (comparison.Kind < 65 || comparison.Kind > 70
         || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0
         || !TryParseTwoParameterBinaryPrefix(move tokens, comparison.Kind, true,
-            out var selected, out var foundName))
+            init var selected, init var foundName))
     {
         return false;
     }
@@ -117,8 +117,8 @@ bool TryParseTwoParameterComparisonReturn(TokenSnapshot tokens,
 }
 
 bool TryParseTwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
-    TokenIntegerSnapshot integers, out int32 scalarType, out SourceRange name,
-    out uint64 magnitude, out bool based)
+    TokenIntegerSnapshot integers, init ref<int32> scalarType, init ref<SourceRange> name,
+    init ref<uint64> magnitude, init ref<bool> based)
 {
     if (tokens.GetCount() != 19)
     {
@@ -131,8 +131,8 @@ bool TryParseTwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
     require tokens.TryGet(18, init var eof);
     if (add.Kind != 57 || literal.Kind != 3 || semicolon.Kind != 52
         || closeBody.Kind != 49 || eof.Kind != 0
-        || !TryParseTwoParameterAddPrefix(move tokens, out var selected,
-            out var foundName)
+        || !TryParseTwoParameterAddPrefix(move tokens, init var selected,
+            init var foundName)
         || !integers.TryFind(15, init var overflow, init var low, init var high)
         || overflow)
     {
@@ -150,7 +150,7 @@ bool TryEvaluateInt32TwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
     out SourceRange name, out int32 result)
 {
     if (!TryParseTwoParameterAddAndLiteralReturn(move tokens, move integers,
-            out var selected, out var foundName, out var magnitude, out var based)
+            init var selected, init var foundName, init var magnitude, init var based)
         || selected != 1
         || magnitude > uint64(uint32.MaxValue)
         || (!based && magnitude > uint64(int32.MaxValue)))
@@ -182,7 +182,7 @@ bool TryEvaluateUInt32TwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
     out SourceRange name, out uint32 result)
 {
     if (!TryParseTwoParameterAddAndLiteralReturn(move tokens, move integers,
-            out var selected, out var foundName, out var magnitude, out var based)
+            init var selected, init var foundName, init var magnitude, init var based)
         || selected != 2 || magnitude > uint64(uint32.MaxValue))
     {
         return false;
@@ -203,7 +203,7 @@ bool TryEvaluateInt64TwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
     out SourceRange name, out int64 result)
 {
     if (!TryParseTwoParameterAddAndLiteralReturn(move tokens, move integers,
-            out var selected, out var foundName, out var magnitude, out var based)
+            init var selected, init var foundName, init var magnitude, init var based)
         || selected != 3 || !TryDecodeSigned64Scalar(magnitude, based, init var literal)
         || (second > 0 && first > int64.MaxValue - second)
         || (second < 0 && first < int64.MinValue - second))
@@ -226,7 +226,7 @@ bool TryEvaluateUInt64TwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
     out SourceRange name, out uint64 result)
 {
     if (!TryParseTwoParameterAddAndLiteralReturn(move tokens, move integers,
-            out var selected, out var foundName, out var magnitude, out var based)
+            init var selected, init var foundName, init var magnitude, init var based)
         || selected != 4 || first > uint64.MaxValue - second)
     {
         return false;
@@ -244,7 +244,7 @@ bool TryEvaluateUInt64TwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
 bool TryEvaluateInt32TwoParameterAddReturn(TokenSnapshot tokens, int32 first, int32 second,
     out SourceRange name, out int32 result)
 {
-    if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
+    if (!TryParseTwoParameterAddReturn(move tokens, init var selected, init var foundName)
         || selected != 1 || !TryAddScalarInt32(first, second, init var sum))
     {
         return false;
@@ -257,7 +257,7 @@ bool TryEvaluateInt32TwoParameterAddReturn(TokenSnapshot tokens, int32 first, in
 bool TryEvaluateUInt32TwoParameterAddReturn(TokenSnapshot tokens, uint32 first, uint32 second,
     out SourceRange name, out uint32 result)
 {
-    if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
+    if (!TryParseTwoParameterAddReturn(move tokens, init var selected, init var foundName)
         || selected != 2 || !TryAddScalarUInt32(first, second, init var sum))
     {
         return false;
@@ -270,7 +270,7 @@ bool TryEvaluateUInt32TwoParameterAddReturn(TokenSnapshot tokens, uint32 first, 
 bool TryEvaluateInt64TwoParameterAddReturn(TokenSnapshot tokens, int64 first, int64 second,
     out SourceRange name, out int64 result)
 {
-    if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
+    if (!TryParseTwoParameterAddReturn(move tokens, init var selected, init var foundName)
         || selected != 3 || !TryAddScalarInt64(first, second, init var sum))
     {
         return false;
@@ -283,7 +283,7 @@ bool TryEvaluateInt64TwoParameterAddReturn(TokenSnapshot tokens, int64 first, in
 bool TryEvaluateUInt64TwoParameterAddReturn(TokenSnapshot tokens, uint64 first, uint64 second,
     out SourceRange name, out uint64 result)
 {
-    if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
+    if (!TryParseTwoParameterAddReturn(move tokens, init var selected, init var foundName)
         || selected != 4 || !TryAddScalarUInt64(first, second, init var sum))
     {
         return false;
@@ -296,7 +296,7 @@ bool TryEvaluateUInt64TwoParameterAddReturn(TokenSnapshot tokens, uint64 first, 
 bool TryEvaluateInt32TwoParameterSubtractReturn(TokenSnapshot tokens, int32 first, int32 second,
     out SourceRange name, out int32 result)
 {
-    if (!TryParseTwoParameterSubtractReturn(move tokens, out var selected, out var foundName)
+    if (!TryParseTwoParameterSubtractReturn(move tokens, init var selected, init var foundName)
         || selected != 1)
     {
         return false;
@@ -314,7 +314,7 @@ bool TryEvaluateInt32TwoParameterSubtractReturn(TokenSnapshot tokens, int32 firs
 bool TryEvaluateUInt32TwoParameterSubtractReturn(TokenSnapshot tokens, uint32 first, uint32 second,
     out SourceRange name, out uint32 result)
 {
-    if (!TryParseTwoParameterSubtractReturn(move tokens, out var selected, out var foundName)
+    if (!TryParseTwoParameterSubtractReturn(move tokens, init var selected, init var foundName)
         || selected != 2 || first < second)
     {
         return false;
@@ -327,7 +327,7 @@ bool TryEvaluateUInt32TwoParameterSubtractReturn(TokenSnapshot tokens, uint32 fi
 bool TryEvaluateInt64TwoParameterSubtractReturn(TokenSnapshot tokens, int64 first, int64 second,
     out SourceRange name, out int64 result)
 {
-    if (!TryParseTwoParameterSubtractReturn(move tokens, out var selected, out var foundName)
+    if (!TryParseTwoParameterSubtractReturn(move tokens, init var selected, init var foundName)
         || selected != 3
         || (second > 0 && first < int64.MinValue + second)
         || (second < 0 && first > int64.MaxValue + second))
@@ -342,7 +342,7 @@ bool TryEvaluateInt64TwoParameterSubtractReturn(TokenSnapshot tokens, int64 firs
 bool TryEvaluateUInt64TwoParameterSubtractReturn(TokenSnapshot tokens, uint64 first, uint64 second,
     out SourceRange name, out uint64 result)
 {
-    if (!TryParseTwoParameterSubtractReturn(move tokens, out var selected, out var foundName)
+    if (!TryParseTwoParameterSubtractReturn(move tokens, init var selected, init var foundName)
         || selected != 4 || first < second)
     {
         return false;
@@ -356,7 +356,7 @@ bool TryEvaluateInt32TwoParameterComparisonReturn(TokenSnapshot tokens, int32 fi
     out SourceRange name, out bool result)
 {
     if (!TryParseTwoParameterComparisonReturn(move tokens,
-            out var selected, out var operation, out var foundName)
+            init var selected, init var operation, init var foundName)
         || selected != 1)
     {
         return false;
@@ -370,7 +370,7 @@ bool TryEvaluateUInt32TwoParameterComparisonReturn(TokenSnapshot tokens, uint32 
     out SourceRange name, out bool result)
 {
     if (!TryParseTwoParameterComparisonReturn(move tokens,
-            out var selected, out var operation, out var foundName)
+            init var selected, init var operation, init var foundName)
         || selected != 2)
     {
         return false;
@@ -384,7 +384,7 @@ bool TryEvaluateInt64TwoParameterComparisonReturn(TokenSnapshot tokens, int64 fi
     out SourceRange name, out bool result)
 {
     if (!TryParseTwoParameterComparisonReturn(move tokens,
-            out var selected, out var operation, out var foundName)
+            init var selected, init var operation, init var foundName)
         || selected != 3)
     {
         return false;
@@ -398,7 +398,7 @@ bool TryEvaluateUInt64TwoParameterComparisonReturn(TokenSnapshot tokens, uint64 
     out SourceRange name, out bool result)
 {
     if (!TryParseTwoParameterComparisonReturn(move tokens,
-            out var selected, out var operation, out var foundName)
+            init var selected, init var operation, init var foundName)
         || selected != 4)
     {
         return false;
@@ -412,7 +412,7 @@ bool TryEvaluateChar16TwoParameterComparisonReturn(TokenSnapshot tokens, char16 
     out SourceRange name, out bool result)
 {
     if (!TryParseTwoParameterComparisonReturn(move tokens,
-            out var selected, out var operation, out var foundName)
+            init var selected, init var operation, init var foundName)
         || selected != 6)
     {
         return false;
