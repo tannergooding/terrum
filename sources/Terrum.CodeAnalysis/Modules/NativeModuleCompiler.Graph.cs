@@ -314,7 +314,8 @@ public static partial class NativeModuleCompiler
         {
             if (!cleanupOwners.TryGetValue(structure.Name, out var owner) || owner is null
                 || !providers.Any(provider => provider.Identity == owner
-                    && provider.Exports.Contains(structure.CleanupMethod, StringComparer.Ordinal))
+                    && Array.BinarySearch(provider.Exports, structure.CleanupMethod,
+                        StringComparer.Ordinal) >= 0)
                 || !result.Functions.Any(function => function.Name == structure.CleanupMethod
                     && function.IsCleanup && function.DeclaringStruct == structure.Name))
             {
@@ -376,7 +377,8 @@ public static partial class NativeModuleCompiler
             if (!providers.Any(provider => provider.Identity == origin.Identity)
                 || (structure.CleanupMethod is not null && (origin.CleanupIdentity != origin.Identity
                     || !providers.Any(provider => provider.Identity == origin.Identity
-                        && provider.Exports.Contains(structure.CleanupMethod, StringComparer.Ordinal)))))
+                        && Array.BinarySearch(provider.Exports, structure.CleanupMethod,
+                            StringComparer.Ordinal) >= 0))))
             {
                 throw new ModuleContractException($"Graph imported type '{structure.Name}' lacks its origin or cleanup.");
             }
