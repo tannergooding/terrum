@@ -70,19 +70,25 @@ public static partial class TrRmExecutableCompiler
 
         var functionFeatures = new (bool HasFloatingTypes, bool HasIndexedFlow)[program.Functions.Length];
         var hasFloatingTypes = false;
+        var parameterCount = 0;
         for (var index = 0; index < program.Functions.Length; index++)
         {
-            var features = AnalyzeFunction(program.Functions[index]);
+            var function = program.Functions[index];
+            var features = AnalyzeFunction(function);
             functionFeatures[index] = features;
             hasFloatingTypes |= features.HasFloatingTypes;
+            parameterCount = checked(parameterCount + function.ParameterCount);
         }
-        var names = new List<(string Text, int Encoding)> { (moduleIdentity, 1) };
+        var names = new List<(string Text, int Encoding)>(program.Functions.Length + 1)
+        {
+            (moduleIdentity, 1),
+        };
         var nameRows = new int[program.Functions.Length];
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var bodies = new List<ReadOnlyMemory<byte>>();
-        var signatures = new List<TrRmMethodSigRow>();
-        var parameters = new List<TrRmParamRow>();
-        var methods = new List<TrRmMethodDefRow>();
+        var seen = new HashSet<string>(program.Functions.Length, StringComparer.Ordinal);
+        var bodies = new List<ReadOnlyMemory<byte>>(program.Functions.Length);
+        var signatures = new List<TrRmMethodSigRow>(program.Functions.Length);
+        var parameters = new List<TrRmParamRow>(parameterCount);
+        var methods = new List<TrRmMethodDefRow>(program.Functions.Length);
         var effects = new List<TrRmContractRow>();
         var exports = new List<TrRmExportRow>();
         for (var index = 0; index < program.Functions.Length; index++)
