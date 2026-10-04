@@ -102,6 +102,33 @@ public sealed class NativeReadonlyBufferViewTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task RangeViewSurvivesSemanticModuleRoundTripAsync(BoundRuntimePolicy policy)
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Read(OwnedInt32Buffer owner) {
+                ReadonlyInt32BufferView view = owner[1..^0];
+                return view.Read(0);
+            }
+            """), policy);
+        Assert.False(provider.HasErrors, string.Join(Environment.NewLine, provider.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(provider.Program), ["Read"]);
+        var client = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                mut OwnedInt32Buffer value = move raw;
+                require value.TryAppend(20);
+                require value.TryAppend(22);
+                return Read(move value);
+            }
+            """), ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
+        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), producer);
+        Assert.Equal(22, await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public async Task NestedReadonlySlicesRetainRangeThroughBranchAndLoopAsync(BoundRuntimePolicy policy)
     {
         const string Source = Buffer + """
@@ -119,6 +146,25 @@ public sealed class NativeReadonlyBufferViewTests
                 return sum - 41;
             }
             return 0;
+        }
+        """;
+        Assert.Equal(42, await RunAsync(Source, policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task RangeSlicesCreateReadonlyViewsForSupportedBoundsAsync(BoundRuntimePolicy policy)
+    {
+        const string Source = Buffer + """
+            var all = buffer[..];
+            ReadonlyInt32BufferView prefix = buffer[..2];
+            var middle = buffer[1..2];
+            ReadonlyInt32BufferView suffix = buffer[1..];
+            ReadonlyInt32BufferView tail = buffer[1..^0];
+            ReadonlyInt32BufferView beforeLast = buffer[..^1];
+            ReadonlyInt32BufferView separated = buffer[0.. ^1];
+            return all.Read(0) + middle.Read(0) + suffix.Read(1) - 81;
         }
         """;
         Assert.Equal(42, await RunAsync(Source, policy).ConfigureAwait(true));
@@ -214,7 +260,7 @@ public sealed class NativeReadonlyBufferViewTests
                 public Index(OwnedInt32Buffer starts) { _starts = move starts; }
                 [NoThrow] [Cleanup] public void Close() {}
                 public int32 Find() {
-                    ReadonlyInt32BufferView starts = _starts.Slice(0, _starts.Count);
+                    ReadonlyInt32BufferView starts = _starts[..];
                     return starts.Read(0);
                 }
             }
@@ -268,6 +314,10 @@ public sealed class NativeReadonlyBufferViewTests
     [InlineData("buffer.Slice(3, 1)")]
     [InlineData("buffer.Slice(2, 2)")]
     [InlineData("buffer.Slice(2147483647, 2147483647)")]
+    [InlineData("buffer[4..]")]
+    [InlineData("buffer[-1..]")]
+    [InlineData("buffer[2..1]")]
+    [InlineData("buffer[..^4]")]
     public async Task SliceRejectsOutOfPrefixOrOverflowingRangeAsync(string range)
     {
         var source = $$"""
@@ -280,6 +330,57 @@ public sealed class NativeReadonlyBufferViewTests
             }
             """;
         Assert.Equal(unchecked((int)0xE0540003), await RunAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public void RangeViewsRequireCompileTimeBoundsAndReadonlyLocals()
+    {
+        var dynamicBound = Compilation.Create(SyntaxTree.Parse("""
+            int32 Start() { return 0; }
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                OwnedInt32Buffer owner = move raw;
+                ReadonlyInt32BufferView view = owner[Start()..];
+                return view.Length;
+            }
+            """));
+        Assert.Contains(dynamicBound.Diagnostics, static diagnostic => diagnostic.Code == "TRM3001");
+        Assert.Null(dynamicBound.Program);
+
+        var mutableView = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                mut OwnedInt32Buffer owner = move raw;
+                mut MutableInt32BufferView view = owner[..];
+                return view.Length;
+            }
+            """));
+        Assert.Contains(mutableView.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
+        Assert.Null(mutableView.Program);
+
+        var endRelativeLower = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                OwnedInt32Buffer owner = move raw;
+                ReadonlyInt32BufferView view = owner[^0..];
+                return view.Length;
+            }
+            """));
+        Assert.Contains(endRelativeLower.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3001");
+        Assert.Null(endRelativeLower.Program);
+
+        var mutation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                mut OwnedInt32Buffer owner = move raw;
+                ReadonlyInt32BufferView view = owner[..];
+                owner.Set(0, 42);
+                return view.Length;
+            }
+            """));
+        Assert.Contains(mutation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
+        Assert.Null(mutation.Program);
     }
 
     [Fact]
@@ -311,6 +412,25 @@ public sealed class NativeReadonlyBufferViewTests
                     try {
                         ReadonlyInt32BufferView view = owner.Slice(0, 0);
                         return view.Read(0);
+                    }
+                    catch { return owner.Count + 42; }
+                }
+            }
+            """;
+        Assert.Equal(42, await RunAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task CheckedRangeViewFailureRecoveryLeavesOriginalOwnerLiveAsync()
+    {
+        const string Source = """
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                OwnedInt32Buffer owner = move raw;
+                unsafe {
+                    try {
+                        ReadonlyInt32BufferView view = owner[..^1];
+                        return view.Length;
                     }
                     catch { return owner.Count + 42; }
                 }

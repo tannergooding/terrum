@@ -1439,7 +1439,16 @@ readonly slices and completed readonly queries may coexist. Slice start and
 length are evaluated once before capturing the owner place; calls in these
 expressions cannot invalidate that owner. A view cannot be copied, assigned,
 passed, returned, stored in a field, declared as a for initializer or used
-as a temporary expression. `mut MutableInt32BufferView window =
+as a temporary expression. The hosted parser and binder also permit a half-open
+range to initialize a readonly lexical view, for example
+`ReadonlyInt32BufferView tail = buffer[1..^0];` or `var all = buffer[..];`.
+This first range binding is limited to `OwnedInt32Buffer` receivers, readonly
+views, and compile-time `int32` bounds; omitted bounds and constant
+end-relative upper bounds are supported, while dynamic bounds and
+end-relative lower bounds are not. The existing checked view-scope operation
+validates the resulting range against the initialized prefix without clamping.
+Range syntax does not add mutable slicing, general indexer contracts,
+first-class range values or optional access. `mut MutableInt32BufferView window =
 buffer.SliceMutable(start, length);` requires a named mutable buffer or a
 writable buffer-field path through a fully initialized unique owner and grants
 exclusive access to `window.Length`, checked `window.Read(index)` and

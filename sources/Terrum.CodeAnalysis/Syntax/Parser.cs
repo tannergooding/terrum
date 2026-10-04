@@ -1140,7 +1140,8 @@ internal sealed class Parser
             }
             else if (Current.Kind == TokenKind.OpenBracket)
             {
-                expression = Node(SyntaxKind.IndexExpression, [expression, ExpectAttached(TokenKind.OpenBracket), ParseExpression(), Expect(TokenKind.CloseBracket)]);
+                expression = Node(SyntaxKind.IndexExpression, [expression, ExpectAttached(TokenKind.OpenBracket),
+                    ParseIndexArgument(), Expect(TokenKind.CloseBracket)]);
             }
             else if (Current.Kind is TokenKind.PlusPlus or TokenKind.MinusMinus)
             {
@@ -1163,6 +1164,49 @@ internal sealed class Parser
         }
 
         return expression;
+    }
+
+    private SyntaxNode ParseIndexArgument()
+    {
+        var start = Current.Kind is TokenKind.DotDot or TokenKind.DotDotCaret
+            ? Node(SyntaxKind.OmittedIndexBound, [])
+            : ParseIndexBound();
+        if (Current.Kind is not (TokenKind.DotDot or TokenKind.DotDotCaret))
+        {
+            return start;
+        }
+
+        var connector = Take();
+        SyntaxNode end;
+        if (Current.Kind == TokenKind.CloseBracket && connector.Token.Kind == TokenKind.DotDot)
+        {
+            end = Node(SyntaxKind.OmittedIndexBound, []);
+        }
+        else if (connector.Token.Kind == TokenKind.DotDotCaret)
+        {
+            end = ParseExpression(13);
+            if (connector.Span.End != end.Span.Start)
+            {
+                Report("TRM1009", "The '..^' operator must attach to its offset operand token.", connector.Span);
+            }
+        }
+        else
+        {
+            end = ParseIndexBound();
+        }
+
+        return Node(SyntaxKind.SliceRangeExpression, [start, connector, end]);
+    }
+
+    private SyntaxNode ParseIndexBound()
+    {
+        if (Current.Kind != TokenKind.Caret)
+        {
+            return ParseExpression();
+        }
+
+        var caret = TakePrefix();
+        return Node(SyntaxKind.EndRelativeIndexBound, [caret, ParseExpression(13)]);
     }
 
     private SyntaxNode ParseArguments()

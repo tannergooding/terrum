@@ -81,6 +81,12 @@ public enum SyntaxKind
     MemberAccessExpression,
     /// <summary>An indexed access expression.</summary>
     IndexExpression,
+    /// <summary>A half-open slice range used as an index argument.</summary>
+    SliceRangeExpression,
+    /// <summary>An intentionally omitted lower or upper slice bound.</summary>
+    OmittedIndexBound,
+    /// <summary>A contextual end-relative index or slice bound.</summary>
+    EndRelativeIndexBound,
     /// <summary>An invocation or creation argument list.</summary>
     ArgumentList,
     /// <summary>An individual argument.</summary>

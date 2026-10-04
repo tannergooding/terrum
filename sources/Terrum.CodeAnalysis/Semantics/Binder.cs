@@ -1671,6 +1671,12 @@ internal sealed partial class Binder
         PrimitiveType viewType)
     {
         var writable = viewType == PrimitiveType.MutableInt32BufferView;
+        if (initializer.Kind == SyntaxKind.IndexExpression
+            && ((SyntaxNode)initializer.Children[2]).Kind == SyntaxKind.SliceRangeExpression)
+        {
+            return BindRangeViewScope(name, isMutable, initializer, span, viewType);
+        }
+
         if (isMutable != writable || initializer.Kind != SyntaxKind.InvocationExpression
             || initializer.Children[0] is not SyntaxNode { Kind: SyntaxKind.MemberAccessExpression } callee
             || ((SyntaxTokenElement)callee.Children[2]).Token.Text != (writable ? "SliceMutable" : "Slice")
@@ -1703,6 +1709,107 @@ internal sealed partial class Binder
         return new BoundViewScope(variable, owner, start, length, new BoundBlock([], span), span) {
             IsMutable = writable,
         };
+    }
+
+    private BoundViewScope BindRangeViewScope(SyntaxToken name, bool isMutable, SyntaxNode initializer,
+        TextSpan span, PrimitiveType viewType)
+    {
+        if (isMutable || viewType != PrimitiveType.ReadonlyInt32BufferView
+            || KnownType((SyntaxNode)initializer.Children[0]) != PrimitiveType.OwnedInt32Buffer)
+        {
+            Report("TRM3023", "A native buffer range can only initialize a readonly lexical view local.", span);
+            var invalid = AddVariable(name.Name, viewType, isMutable, name.Span);
+            return new BoundViewScope(invalid, ErrorExpression(span), ErrorExpression(span), ErrorExpression(span),
+                new BoundBlock([], span), span);
+        }
+
+        var range = (SyntaxNode)initializer.Children[2];
+        var lower = (SyntaxNode)range.Children[0];
+        var connector = ((SyntaxTokenElement)range.Children[1]).Token;
+        var upper = (SyntaxNode)range.Children[2];
+        if (lower.Kind == SyntaxKind.EndRelativeIndexBound)
+        {
+            Report("TRM3001", "End-relative lower bounds are not supported for native buffer views.", lower.Span);
+            var invalid = AddVariable(name.Name, viewType, false, name.Span);
+            return new BoundViewScope(invalid, ErrorExpression(span), ErrorExpression(span), ErrorExpression(span),
+                new BoundBlock([], span), span);
+        }
+
+        var valid = true;
+        var startValue = lower.Kind == SyntaxKind.OmittedIndexBound
+            ? 0
+            : BindRangeConstant(lower, "lower", ref valid);
+        var owner = BindReceiverLoan((SyntaxNode)initializer.Children[0], PrimitiveType.OwnedInt32Buffer);
+        BoundExpression length;
+        if (connector.Kind == TokenKind.DotDotCaret || upper.Kind == SyntaxKind.EndRelativeIndexBound)
+        {
+            var offsetNode = upper.Kind == SyntaxKind.EndRelativeIndexBound
+                ? (SyntaxNode)upper.Children[1] : upper;
+            var offset = BindRangeConstant(offsetNode, "end-relative upper", ref valid);
+            var totalOffset = (long)startValue + offset;
+            if (startValue < 0 || offset < 0 || totalOffset > int.MaxValue)
+            {
+                length = new BoundConstant(-1, PrimitiveType.Int32, upper.Span);
+            }
+            else
+            {
+                length = BindBufferRemaining(owner, (int)totalOffset, upper.Span);
+            }
+        }
+        else if (upper.Kind == SyntaxKind.OmittedIndexBound)
+        {
+            length = startValue < 0
+                ? new BoundConstant(-1, PrimitiveType.Int32, upper.Span)
+                : BindBufferRemaining(owner, startValue, upper.Span);
+        }
+        else
+        {
+            var endValue = BindRangeConstant(upper, "upper", ref valid);
+            var lengthValue = (long)endValue - startValue;
+            length = lengthValue is < int.MinValue or > int.MaxValue
+                ? new BoundConstant(-1, PrimitiveType.Int32, upper.Span)
+                : new BoundConstant(lengthValue, PrimitiveType.Int32, upper.Span);
+        }
+
+        var start = valid
+            ? new BoundConstant(startValue, PrimitiveType.Int32, lower.Span)
+            : new BoundConstant(-1, PrimitiveType.Int32, lower.Span);
+        var variable = AddVariable(name.Name, viewType, false, name.Span);
+        return new BoundViewScope(variable, owner, start, length, new BoundBlock([], span), span);
+    }
+
+    private int BindRangeConstant(SyntaxNode node, string boundName, ref bool valid)
+    {
+        var expression = BindExpression(node, PrimitiveType.Int32);
+        if (expression is BoundConstant { Type: PrimitiveType.Int32 } constant
+            && constant.Value is >= int.MinValue and <= int.MaxValue)
+        {
+            return (int)constant.Value;
+        }
+
+        Report("TRM3001", $"The {boundName} bound of a native buffer view must be a compile-time int32 constant.",
+            node.Span);
+        valid = false;
+        return 0;
+    }
+
+    private BoundExpression BindBufferCount(BoundExpression owner, TextSpan span)
+    {
+        if (!TryFindFunction(NativeBufferIntrinsics.TypeName + ".Count", out var count))
+        {
+            Report("TRM3011", "The native buffer count intrinsic is unavailable.", span);
+            return ErrorExpression(span);
+        }
+
+        return new BoundCall(count, [owner], PrimitiveType.Int32, span);
+    }
+
+    private BoundExpression BindBufferRemaining(BoundExpression owner, int consumed, TextSpan span)
+    {
+        var count = BindBufferCount(owner, span);
+        return consumed == 0 ? count
+            : new BoundBinary(TokenKind.Minus, count, new BoundConstant(consumed, PrimitiveType.Int32, span),
+                PrimitiveType.Int32, span);
     }
 
     private int BindViewVariable(SyntaxNode receiver)
@@ -1919,6 +2026,12 @@ internal sealed partial class Binder
                 {
                     return BindViewScope(name, isMutable, initializerNode, node.Span, declaredType.Value);
                 }
+                if (declaredType is null
+                    && KnownType(initializerNode) == PrimitiveType.ReadonlyInt32BufferView)
+                {
+                    return BindViewScope(name, isMutable, initializerNode, node.Span,
+                        PrimitiveType.ReadonlyInt32BufferView);
+                }
                 var initializer = BindExpression(initializerNode, declaredType);
 
                 if (declaredType is null && initializer.Type == PrimitiveType.Void)
@@ -2009,6 +2122,12 @@ internal sealed partial class Binder
                 if (target.Kind == SyntaxKind.IndexExpression
                     && TryFindBuffer((SyntaxNode)target.Children[0], out var buffer))
                 {
+                    if (((SyntaxNode)target.Children[2]).Kind == SyntaxKind.SliceRangeExpression)
+                    {
+                        Report("TRM3008", "A slice range is not an assignment destination.", target.Span);
+                        _ = BindExpression(valueNode, null);
+                        return new BoundBlock([], node.Span);
+                    }
                     if (!_buffers[buffer].IsWritable)
                     {
                         Report("TRM3008", "A read-only host buffer cannot be modified.", target.Span);
@@ -3059,6 +3178,13 @@ internal sealed partial class Binder
 
             case SyntaxKind.IndexExpression:
             {
+                if (((SyntaxNode)node.Children[2]).Kind == SyntaxKind.SliceRangeExpression)
+                {
+                    Report("TRM3023", "A native buffer slice range must initialize a readonly lexical view local.",
+                        node.Span);
+                    expression = ErrorExpression(node.Span);
+                    break;
+                }
                 if (TryFindBuffer((SyntaxNode)node.Children[0], out var buffer))
                 {
                     expression = new BoundBufferRead(buffer,
@@ -4059,7 +4185,11 @@ internal sealed partial class Binder
             }
             case SyntaxKind.IndexExpression:
                 return TryFindBuffer((SyntaxNode)node.Children[0], out var buffer)
-                    ? _buffers[buffer].ElementType : null;
+                    ? ((SyntaxNode)node.Children[2]).Kind == SyntaxKind.SliceRangeExpression
+                        ? null : _buffers[buffer].ElementType
+                    : ((SyntaxNode)node.Children[2]).Kind == SyntaxKind.SliceRangeExpression
+                        && KnownType((SyntaxNode)node.Children[0]) == PrimitiveType.OwnedInt32Buffer
+                            ? PrimitiveType.ReadonlyInt32BufferView : null;
             case SyntaxKind.UnaryExpression:
             {
                 var operand = KnownType((SyntaxNode)node.Children[1]);

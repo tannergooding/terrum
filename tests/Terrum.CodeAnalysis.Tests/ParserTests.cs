@@ -18,7 +18,7 @@ public sealed class ParserTests
         const string Source = "int32 Main() { _ /* destination */ = int32(42); return 42; }";
         var tree = SyntaxTree.Parse(Source);
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal("syntax-45", SyntaxTree.LanguageVersion);
+        Assert.Equal("syntax-46", SyntaxTree.LanguageVersion);
         var discard = Assert.Single(tree.Root.DescendantNodes(), static node => node.Kind == SyntaxKind.DiscardStatement);
         Assert.Equal(TokenKind.Underscore, Assert.IsType<SyntaxTokenElement>(discard.Children[0]).Token.Kind);
         Assert.Equal(TokenKind.Equals, Assert.IsType<SyntaxTokenElement>(discard.Children[1]).Token.Kind);
@@ -32,7 +32,7 @@ public sealed class ParserTests
         const string Source = "public alias Count = int32;";
         var tree = SyntaxTree.Parse(Source);
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal("syntax-45", SyntaxTree.LanguageVersion);
+        Assert.Equal("syntax-46", SyntaxTree.LanguageVersion);
         var alias = Assert.Single(tree.Root.Children.OfType<SyntaxNode>(),
             static node => node.Kind == SyntaxKind.AliasDeclaration);
         Assert.Equal("Count", Assert.IsType<SyntaxTokenElement>(alias.Children[2]).Token.Name);
@@ -59,6 +59,32 @@ public sealed class ParserTests
         var tree = SyntaxTree.Parse(source);
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
         AssertLossless(tree);
+    }
+
+    [Fact]
+    public void ParsesSliceRangesAndEndRelativeUpperBoundsWithoutLosingTrivia()
+    {
+        const string Source = """
+            int32 Read(OwnedInt32Buffer items) {
+                var all = items[..];
+                var prefix = items[..2];
+                var suffix = items[1..];
+                var tail = items[1..^0];
+                var separated = items[1.. ^1];
+                return 0;
+            }
+            """;
+        var tree = SyntaxTree.Parse(Source);
+        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.Equal(5, tree.Root.DescendantNodes().Count(
+            static node => node.Kind == SyntaxKind.SliceRangeExpression));
+        Assert.Equal(1, tree.Root.DescendantNodes().Count(
+            static node => node.Kind == SyntaxKind.EndRelativeIndexBound));
+        AssertLossless(tree);
+
+        var unattached = SyntaxTree.Parse("int32 Read(OwnedInt32Buffer items) { var tail = items[..^ 1]; return 0; }");
+        Assert.Contains(unattached.Diagnostics, static diagnostic => diagnostic.Code == "TRM1009");
+        AssertLossless(unattached);
     }
 
     [Theory]

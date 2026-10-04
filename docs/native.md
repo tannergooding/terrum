@@ -126,7 +126,7 @@ cannot satisfy required constant calls. See the
 [implementation reference](implementation.md) for the exact evaluator and
 proof boundaries.
 
-The current host parser language version is 44. The bounded native scalar
+The current host parser language version is 46. The bounded native scalar
 frontend is a separate source subset: its raw checks and source-bound audits
 enforce supported spacing and attachment rules before projection selection.
 It supports named loop transfers, but not optional types or managed handles;
@@ -146,8 +146,11 @@ identity.
 Scanner-10/schema-10 appends `DotDot`, `DotDotCaret`, and `QuestionDot` token
 kinds 104–106 after Scanner-9/schema-9 added `CharacterLiteral` kind 103.
 Scanner-8/schema-8 diagnostic identities 11/12 for invalid and
-defined-but-unsupported maximal runs remain unchanged. These tokens do not
-imply parser or binder support. See the
+defined-but-unsupported maximal runs remain unchanged. The hosted parser and
+binder consume `..` and `..^` only for compile-time-bounded `OwnedInt32Buffer`
+ranges that initialize readonly lexical views; `?.` remains token-only.
+Scanner tokens do not imply support in the native scalar frontend or general
+indexer/slice contracts. See the
 [scanner contract](scanner.md) for spans and current record shapes. Hosted
 role-specific punctuation rules are in the
 [implementation reference](implementation.md). The bounded frontend produces

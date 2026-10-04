@@ -29,7 +29,7 @@ public sealed class StaticProofTests
         _ = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.StaticEnsureStatement);
         var version = Assert.IsAssignableFrom<System.Reflection.FieldInfo>(
             typeof(SyntaxTree).GetField(nameof(SyntaxTree.LanguageVersion)));
-        Assert.Equal("syntax-45", version.GetRawConstantValue());
+        Assert.Equal("syntax-46", version.GetRawConstantValue());
 
         var compilation = Compilation.Create(tree);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
