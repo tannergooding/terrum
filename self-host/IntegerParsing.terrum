@@ -1,6 +1,6 @@
 namespace Terrum.CodeAnalysis.Numerics64;
 
-bool TryParseMagnitude(int32 start, int32 length, uint32 radix, uint64 maximum, out uint64 result)
+bool TryParseMagnitude(int32 start, int32 length, uint32 radix, uint64 maximum, init ref<uint64> result)
 {
     if (start < 0 || length <= 0 || start > Host.Source.Length
         || length > Host.Source.Length - start || radix < 2 || radix > 36)
@@ -49,7 +49,7 @@ bool TryParseMagnitude(int32 start, int32 length, uint32 radix, uint64 maximum, 
 
 public static bool TryParseUInt64Base(int32 start, int32 length, uint32 radix, init ref<uint64> result)
 {
-    if (!TryParseMagnitude(start, length, radix, uint64.MaxValue, out var parsed))
+    if (!TryParseMagnitude(start, length, radix, uint64.MaxValue, init var parsed))
     {
         return false;
     }
@@ -59,7 +59,7 @@ public static bool TryParseUInt64Base(int32 start, int32 length, uint32 radix, i
 
 public static bool TryParseUInt32Base(int32 start, int32 length, uint32 radix, init ref<uint32> result)
 {
-    if (!TryParseMagnitude(start, length, radix, uint64(uint32.MaxValue), out var parsed))
+    if (!TryParseMagnitude(start, length, radix, uint64(uint32.MaxValue), init var parsed))
     {
         return false;
     }
@@ -69,7 +69,7 @@ public static bool TryParseUInt32Base(int32 start, int32 length, uint32 radix, i
 
 public static bool TryParseChar16Base(int32 start, int32 length, uint32 radix, init ref<char16> result)
 {
-    if (!TryParseMagnitude(start, length, radix, 65535, out var parsed))
+    if (!TryParseMagnitude(start, length, radix, 65535, init var parsed))
     {
         return false;
     }
@@ -78,7 +78,7 @@ public static bool TryParseChar16Base(int32 start, int32 length, uint32 radix, i
 }
 
 bool TryParseSignedBase(int32 start, int32 length, uint32 radix,
-    int64 minimum, int64 maximum, out int64 result)
+    int64 minimum, int64 maximum, init ref<int64> result)
 {
     if (start < 0 || length <= 0 || start > Host.Source.Length
         || length > Host.Source.Length - start)
@@ -102,7 +102,7 @@ bool TryParseSignedBase(int32 start, int32 length, uint32 radix,
         magnitudeLimit = uint64(-(minimum + 1)) + 1;
     }
 
-    if (!TryParseMagnitude(digitStart, digitLength, radix, magnitudeLimit, out var magnitude))
+    if (!TryParseMagnitude(digitStart, digitLength, radix, magnitudeLimit, init var magnitude))
     {
         return false;
     }
@@ -125,7 +125,7 @@ bool TryParseSignedBase(int32 start, int32 length, uint32 radix,
 public static bool TryParseInt64Base(int32 start, int32 length, uint32 radix, init ref<int64> result)
 {
     if (!TryParseSignedBase(start, length, radix,
-        int64.MinValue, int64.MaxValue, out var parsed))
+        int64.MinValue, int64.MaxValue, init var parsed))
     {
         return false;
     }
@@ -136,7 +136,7 @@ public static bool TryParseInt64Base(int32 start, int32 length, uint32 radix, in
 public static bool TryParseInt32Base(int32 start, int32 length, uint32 radix, init ref<int32> result)
 {
     if (!TryParseSignedBase(start, length, radix,
-        int64(int32.MinValue), int64(int32.MaxValue), out var parsed))
+        int64(int32.MinValue), int64(int32.MaxValue), init var parsed))
     {
         return false;
     }
