@@ -1030,7 +1030,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 throw InvalidBody();
             }
 
-            neededIns[block] = new HashSet<int>(externalUses[block]);
+            neededIns[block] = externalUses[block];
             neededOuts[block] = new HashSet<int>();
             foreach (var edge in successors[block])
             {
