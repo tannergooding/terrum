@@ -1192,7 +1192,7 @@ public sealed partial class ManagedScannerComponentTests
         var assertion = evaluable
             ? $$"""
                 require {{evaluator}}(move tokens, {{condition}}, {{first}}, {{second}},
-                    out var name, out var bound);
+                    init var name, init var bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}})
                 {
@@ -1201,7 +1201,7 @@ public sealed partial class ManagedScannerComponentTests
                 """
             : $$"""
                 if ({{evaluator}}(move tokens, {{condition}}, {{first}}, {{second}},
-                    out var name, out var bound))
+                    init var name, init var bound))
                 {
                     return 1;
                 }
@@ -2747,7 +2747,7 @@ public sealed partial class ManagedScannerComponentTests
 
     [Theory]
     [InlineData("int32 Value#(bool c, int32 x, int32 y) { if (c) { return x; } else { return y; } }",
-        "ScalarConditionalParser", "TryEvaluateInt32ScalarConditionalReturn(move tokens, true, 20, 22, out var name, out var value)")]
+        "ScalarConditionalParser", "TryEvaluateInt32ScalarConditionalReturn(move tokens, true, 20, 22, init var name, init var value)")]
     [InlineData("int32 Value#(bool c, int32 x, int32 y) { if (c) { return x + y; } else { return x; } }",
         "ScalarConditionalAddParser", "TryEvaluateInt32ScalarConditionalAddReturn(move tokens, true, 20, 22, out var name, out var value)")]
     [InlineData("int32 Value#(int32 x, int32 y) { if (x < y) { return x; } else { return y; } }",
