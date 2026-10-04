@@ -382,6 +382,16 @@ public sealed class TrRmIndexedExecutionAuditTests
     }
 
     [Fact]
+    public void IndexedOperationDefinitionOffsetCannotBeZero()
+    {
+        var body = SelectBody(true);
+        body[23] = 0;
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
+    }
+
+    [Fact]
     public void BooleanSwitchRejectsPatternsOutsideItsValueDomain()
     {
         var body = SmallScalarSwitchBody(selectorTypeRow: 2, selector: 0);
