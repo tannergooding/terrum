@@ -143,11 +143,11 @@ public static partial class ModuleCompiler
         var required = RequiredStructures(program.Functions.Select(static function =>
             function.IsExternal ? Declaration(function) : function), program.Structures);
         var structures = SelectStructures(program.Structures, required);
+        var referenceStructures = IndexStructures(reference.Structures);
         var imported = ImmutableArray.CreateBuilder<string>();
         foreach (var structure in structures)
         {
-            var match = reference.Structures.FirstOrDefault(item => item.Name == structure.Name);
-            if (match is not null)
+            if (referenceStructures.TryGetValue(structure.Name, out var match))
             {
                 if (structure.IsPrivate || structure.IsInternal
                     || !SameStructure(structure, match, structures, reference.Structures))
@@ -202,11 +202,7 @@ public static partial class ModuleCompiler
                 throw new ModuleContractException($"Incompatible or missing provider contract for '{imported.Name}'.");
             }
         }
-        var providerStructures = new Dictionary<string, BoundStruct>(StringComparer.Ordinal);
-        foreach (var structure in reference.Structures)
-        {
-            _ = providerStructures.TryAdd(structure.Name, structure);
-        }
+        var providerStructures = IndexStructures(reference.Structures);
         if (consumer.ImportedStructures.Any(name => !providerStructures.ContainsKey(name)))
         {
             throw new ModuleContractException("Missing imported value layout.");
@@ -255,6 +251,16 @@ public static partial class ModuleCompiler
         var consumer = Read(consumerBytes, expectedConsumer: true);
         return [.. consumer.Functions.Where(static item => item.Import).Select(static item => item.Name)
             .Order(StringComparer.Ordinal)];
+    }
+
+    private static Dictionary<string, BoundStruct> IndexStructures(IEnumerable<BoundStruct> structures)
+    {
+        var result = new Dictionary<string, BoundStruct>(StringComparer.Ordinal);
+        foreach (var structure in structures)
+        {
+            _ = result.TryAdd(structure.Name, structure);
+        }
+        return result;
     }
 
     private static void RejectImportedTypeMembers(IEnumerable<ModuleFunction> functions,
