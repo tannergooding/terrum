@@ -37,9 +37,8 @@ public static class TrRmSourceMapTableWriter
                 throw new InvalidDataException("Invalid TRRM SourceMap mapping.");
             }
 
-            if (!fileSlots.ContainsKey(mapping.SourceFileRow))
+            if (fileSlots.TryAdd(mapping.SourceFileRow, fileRows.Count))
             {
-                fileSlots.Add(mapping.SourceFileRow, fileRows.Count);
                 fileRows.Add(mapping.SourceFileRow);
             }
         }
