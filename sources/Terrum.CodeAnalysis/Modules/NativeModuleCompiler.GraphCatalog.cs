@@ -111,12 +111,18 @@ public static partial class NativeModuleCompiler
 
         void Search()
         {
-            var next = root.Dependencies.Select(static dependency => dependency.Identity)
-                .Concat(selected.Values.SelectMany(static item =>
-                    item.Package.Dependencies.Select(static dependency => dependency.Identity)))
-                .Where(identity => !selected.ContainsKey(identity))
-                .Order(StringComparer.Ordinal)
-                .FirstOrDefault();
+            string? next = null;
+            foreach (var dependency in root.Dependencies)
+            {
+                ConsiderNext(dependency.Identity);
+            }
+            foreach (var candidate in selected.Values)
+            {
+                foreach (var dependency in candidate.Package.Dependencies)
+                {
+                    ConsiderNext(dependency.Identity);
+                }
+            }
             if (next is null)
             {
                 var providers = selected.Values.Select(static item => item.Package)
@@ -182,6 +188,15 @@ public static partial class NativeModuleCompiler
                     Search();
                 }
                 _ = selected.Remove(next);
+            }
+
+            void ConsiderNext(string identity)
+            {
+                if (!selected.ContainsKey(identity)
+                    && (next is null || StringComparer.Ordinal.Compare(identity, next) < 0))
+                {
+                    next = identity;
+                }
             }
         }
 
