@@ -365,6 +365,30 @@ public sealed class CallerUnsafeTests
     }
 
     [Fact]
+    public async Task SemanticModuleSetsPersistCallerUnsafeImportsWithinUnsafeBlocksAsync()
+    {
+        var policy = NativeRuntimePolicy.FailFast;
+        var provider = NativeModuleCompiler.CreateProducer(
+            CompileLibrary("public unsafe int32 Danger() { return 42; }"),
+            ["Danger"], "UnsafeSetProvider", policy);
+        var unusedProvider = NativeModuleCompiler.CreateProducer(
+            CompileLibrary("public int32 Helper() { return 0; }"),
+            ["Helper"], "UnusedSetProvider", policy);
+        byte[][] providers = [provider, unusedProvider];
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { unsafe { return Danger(); } }"),
+            NativeModuleCompiler.CreateReferenceSet(providers), (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var consumer = NativeModuleCompiler.CreateConsumerSet(
+            Assert.IsType<BoundProgram>(compilation.Program), providers, policy);
+        NativeModuleCompiler.ValidateConsumerSet(consumer, providers);
+        Assert.Contains("UnsafeSetProvider", NativeModuleCompiler.InspectConsumerSet(consumer).Dependencies);
+        Assert.Equal(42, await NativeModuleCompiler.RunConsumerSetAsync(consumer, providers,
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+    }
+
+    [Fact]
     public void GraphReadersRejectCallerUnsafeMemberContracts()
     {
         var policy = NativeRuntimePolicy.FailFast;
