@@ -419,6 +419,141 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Fact]
+    public void FloatingArithmeticExecutesThroughLinearAndIndexedBodies()
+    {
+        const string source = """
+            [NoThrow] public float32 Add32(float32 left, float32 right) { return left + right; }
+            [NoThrow] public float32 Subtract32(float32 left, float32 right) { return left - right; }
+            [NoThrow] public float32 Multiply32(float32 left, float32 right) { return left * right; }
+            [NoThrow] public float32 Divide32(float32 left, float32 right) { return left / right; }
+            [NoThrow] public float64 Add64(float64 left, float64 right) { return left + right; }
+            [NoThrow] public float64 Subtract64(float64 left, float64 right) { return left - right; }
+            [NoThrow] public float64 Multiply64(float64 left, float64 right) { return left * right; }
+            [NoThrow] public float64 Divide64(float64 left, float64 right) { return left / right; }
+            public float32 Add32IfZero(float32 left, float32 right) {
+                if (left == 0.0) { return left + right; }
+                return 0.0;
+            }
+            public float64 Add64IfZero(float64 left, float64 right) {
+                if (left == 0.0) { return left + right; }
+                return 0.0;
+            }
+            """;
+        var original = Compile(source, true);
+        var artifact = TrRmExecutableCompiler.Emit(original, "float-arithmetic");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        string[] names = [
+            "Add32", "Subtract32", "Multiply32", "Divide32",
+            "Add64", "Subtract64", "Multiply64", "Divide64",
+            "Add32IfZero", "Add64IfZero",
+        ];
+        var images = new[]
+        {
+            NativeEmitter.EmitLibrary(original, names, NativeRuntimePolicy.FailFast),
+            NativeEmitter.EmitLibrary(loaded, names, NativeRuntimePolicy.FailFast),
+        };
+        var paths = new string[images.Length];
+        var handles = new IntPtr[images.Length];
+        try
+        {
+            for (var index = 0; index < images.Length; index++)
+            {
+                paths[index] = Path.Combine(Directory.GetCurrentDirectory(),
+                    $"trrm-float-arithmetic-{Guid.NewGuid():N}-{index}.dll");
+                File.WriteAllBytes(paths[index], images[index]);
+                handles[index] = NativeLibrary.Load(paths[index]);
+            }
+
+            foreach (var handle in handles)
+            {
+                var add32 = Marshal.GetDelegateForFunctionPointer<Float32Binary>(
+                    NativeLibrary.GetExport(handle, "Add32"));
+                var subtract32 = Marshal.GetDelegateForFunctionPointer<Float32Binary>(
+                    NativeLibrary.GetExport(handle, "Subtract32"));
+                var multiply32 = Marshal.GetDelegateForFunctionPointer<Float32Binary>(
+                    NativeLibrary.GetExport(handle, "Multiply32"));
+                var divide32 = Marshal.GetDelegateForFunctionPointer<Float32Binary>(
+                    NativeLibrary.GetExport(handle, "Divide32"));
+                var add64 = Marshal.GetDelegateForFunctionPointer<Float64Binary>(
+                    NativeLibrary.GetExport(handle, "Add64"));
+                var subtract64 = Marshal.GetDelegateForFunctionPointer<Float64Binary>(
+                    NativeLibrary.GetExport(handle, "Subtract64"));
+                var multiply64 = Marshal.GetDelegateForFunctionPointer<Float64Binary>(
+                    NativeLibrary.GetExport(handle, "Multiply64"));
+                var divide64 = Marshal.GetDelegateForFunctionPointer<Float64Binary>(
+                    NativeLibrary.GetExport(handle, "Divide64"));
+                var add32IfZero = Marshal.GetDelegateForFunctionPointer<Float32Binary>(
+                    NativeLibrary.GetExport(handle, "Add32IfZero"));
+                var add64IfZero = Marshal.GetDelegateForFunctionPointer<Float64Binary>(
+                    NativeLibrary.GetExport(handle, "Add64IfZero"));
+
+                Assert.Equal(0x40700000, add32(0x3FC00000, 0x40100000));
+                Assert.Equal(0x40200000, subtract32(0x40800000, 0x3FC00000));
+                Assert.Equal(0x40C00000, multiply32(0x40000000, 0x40400000));
+                Assert.Equal(0x3FC00000, divide32(0x40400000, 0x40000000));
+                Assert.Equal(0x7FC00000, add32(0x7F800000, unchecked((int)0xFF800000)));
+                Assert.Equal(0x7FC00000, subtract32(0x7F800000, 0x7F800000));
+                Assert.Equal(0x7FC00000, multiply32(0, 0x7F800000));
+                Assert.Equal(0x7FC00000, divide32(0, 0));
+                Assert.Equal(unchecked((int)0x7FC00000),
+                    add32(unchecked((int)0xFFC12345), 0x3F800000));
+                Assert.Equal(unchecked((int)0x80000000),
+                    multiply32(unchecked((int)0x80000000), 0x3F800000));
+
+                Assert.Equal(0x400E000000000000L, add64(0x3FF8000000000000L, 0x4002000000000000L));
+                Assert.Equal(0x4004000000000000L, subtract64(0x4010000000000000L, 0x3FF8000000000000L));
+                Assert.Equal(0x4018000000000000L, multiply64(0x4000000000000000L, 0x4008000000000000L));
+                Assert.Equal(0x3FF8000000000000L, divide64(0x4008000000000000L, 0x4000000000000000L));
+                Assert.Equal(0x7FF8000000000000L,
+                    add64(0x7FF0000000000000L, unchecked((long)0xFFF0000000000000UL)));
+                Assert.Equal(0x7FF8000000000000L,
+                    subtract64(0x7FF0000000000000L, 0x7FF0000000000000L));
+                Assert.Equal(0x7FF8000000000000L,
+                    multiply64(0, 0x7FF0000000000000L));
+                Assert.Equal(0x7FF8000000000000L, divide64(0, 0));
+                Assert.Equal(unchecked((long)0x7FF8000000000000UL),
+                    add64(unchecked((long)0xFFF8123456789ABCUL), 0x3FF0000000000000L));
+                Assert.Equal(long.MinValue, multiply64(long.MinValue, 0x3FF0000000000000L));
+                Assert.Equal(unchecked((int)0x80000000),
+                    add32IfZero(unchecked((int)0x80000000), unchecked((int)0x80000000)));
+                Assert.Equal(0, add32IfZero(0x3F800000, 0x40000000));
+                Assert.Equal(long.MinValue,
+                    add64IfZero(long.MinValue, long.MinValue));
+                Assert.Equal(0L, add64IfZero(0x3FF0000000000000L, 0x4000000000000000L));
+            }
+        }
+        finally
+        {
+            foreach (var handle in handles)
+            {
+                if (handle != IntPtr.Zero)
+                {
+                    NativeLibrary.Free(handle);
+                }
+            }
+            foreach (var path in paths)
+            {
+                if (path is not null)
+                {
+                    File.Delete(path);
+                }
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(5)]
+    public void InvalidFloatingArithmeticKindsAreRejected(byte kind)
+    {
+        const string source = "public float32 Add(float32 left, float32 right) { return left + right; }";
+        var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-float-binary");
+        var malformed = ReplaceBodyOperationByte(artifact, 1, 0x1D, 2, kind);
+
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
+    [Fact]
     public void LibraryPreservesScalarSignaturesVisibilityAndExportIdentity()
     {
         var source = """
@@ -609,6 +744,10 @@ public sealed class TrRmExecutableCompilerTests
     private delegate int Float32Unary(int value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Float64Unary(long value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Float32Binary(int left, int right);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Float64Binary(long left, long right);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate void VoidAction();
 

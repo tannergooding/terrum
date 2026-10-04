@@ -66,19 +66,22 @@ public static partial class TrRmExecutableCompiler
                 case BoundBinary binary:
                     if (IsFloat(binary.Left.Type))
                     {
-                        kind = binary.Operator switch
+                        (opcode, kind) = binary.Operator switch
                         {
-                            TokenKind.EqualsEquals => 1,
-                            TokenKind.BangEquals => 2,
-                            TokenKind.Less => 3,
-                            TokenKind.LessEquals => 4,
-                            TokenKind.Greater => 5,
-                            TokenKind.GreaterEquals => 6,
+                            TokenKind.Plus => (0x1D, 1),
+                            TokenKind.Minus => (0x1D, 2),
+                            TokenKind.Star => (0x1D, 3),
+                            TokenKind.Slash => (0x1D, 4),
+                            TokenKind.EqualsEquals => (0x19, 1),
+                            TokenKind.BangEquals => (0x19, 2),
+                            TokenKind.Less => (0x19, 3),
+                            TokenKind.LessEquals => (0x19, 4),
+                            TokenKind.Greater => (0x19, 5),
+                            TokenKind.GreaterEquals => (0x19, 6),
                             _ => throw Unsupported($"Floating operator {binary.Operator} has no executable TRRM encoding."),
                         };
                         left = EmitExpression(binary.Left);
                         right = EmitExpression(binary.Right);
-                        opcode = 0x19;
                         break;
                     }
                     if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe
@@ -152,7 +155,7 @@ public static partial class TrRmExecutableCompiler
             {
                 Write(instructions, (ulong)type, referenceWidth);
             }
-            if (opcode is 4 or 5 or 0x15 or 0x19)
+            if (opcode is 4 or 5 or 0x15 or 0x19 or 0x1D)
             {
                 instructions.Add((byte)kind);
             }
@@ -164,7 +167,7 @@ public static partial class TrRmExecutableCompiler
             {
                 Write(instructions, (ulong)left, referenceWidth);
             }
-            if (opcode is 5 or 0x15 or 0x19)
+            if (opcode is 5 or 0x15 or 0x19 or 0x1D)
             {
                 Write(instructions, (ulong)left, referenceWidth);
                 Write(instructions, (ulong)right, referenceWidth);
@@ -269,7 +272,7 @@ public static partial class TrRmExecutableCompiler
         {
             var (opcode, width, countWidth, dataWidth) = ReadInstruction(body, ref position);
             if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 0x0A
-                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18 or 0x19 or 0x1A or 0x1B or 0x1C))
+                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18 or 0x19 or 0x1A or 0x1B or 0x1C or 0x1D))
             {
                 throw Invalid($"Operation 0x{opcode:X2} is not executable.");
             }
@@ -291,11 +294,13 @@ public static partial class TrRmExecutableCompiler
             var typeId = opcode is 1 or 2 or 6 or 8 or 9 or 0x16 or 0x1A or 0x1B
                 ? ReadInt(body, ref position, width) : 0;
             var policy = opcode == 6 ? ReadByte(body, ref position) : (byte)0;
-            var kind = opcode is 4 or 5 or 0x15 or 0x19 ? ReadByte(body, ref position) : (byte)0;
+            var kind = opcode is 4 or 5 or 0x15 or 0x19 or 0x1D
+                ? ReadByte(body, ref position) : (byte)0;
             var bits = opcode is 1 or 2 ? ReadBits(body, ref position, dataWidth) : 0;
-            var left = opcode is 3 or 4 or 6 or 7 or 8 or 0x0A or 0x16 or 0x17 or 5 or 0x15 or 0x18 or 0x19 or 0x1A or 0x1B or 0x1C
+            var left = opcode is 3 or 4 or 6 or 7 or 8 or 0x0A or 0x16 or 0x17 or 5 or 0x15 or 0x18 or 0x19 or 0x1A or 0x1B or 0x1C or 0x1D
                 ? ReadInt(body, ref position, width) : 0;
-            var right = opcode is 5 or 7 or 0x15 or 0x18 or 0x19 ? ReadInt(body, ref position, width) : 0;
+            var right = opcode is 5 or 7 or 0x15 or 0x18 or 0x19 or 0x1D
+                ? ReadInt(body, ref position, width) : 0;
             var third = opcode == 7 ? ReadInt(body, ref position, width) : 0;
             var method = opcode == 0x12 ? ReadInt(body, ref position, width) : 0;
             if (opcode == 0x12 && (method == 0 || method > functions.Count))
@@ -412,6 +417,23 @@ public static partial class TrRmExecutableCompiler
                     _ => TokenKind.GreaterEquals,
                 };
                 expression = new BoundBinary(token, first, second, PrimitiveType.Bool, default);
+            }
+            else if (opcode == 0x1D)
+            {
+                var first = Operand(left);
+                var second = Operand(right);
+                if (kind is < 1 or > 4 || !IsFloat(first.Type) || second.Type != first.Type)
+                {
+                    throw Invalid("FloatBinary requires equal float32 or float64 operands.");
+                }
+                var token = kind switch
+                {
+                    1 => TokenKind.Plus,
+                    2 => TokenKind.Minus,
+                    3 => TokenKind.Star,
+                    _ => TokenKind.Slash,
+                };
+                expression = new BoundBinary(token, first, second, first.Type, default);
             }
             else if (opcode == 0x1A)
             {

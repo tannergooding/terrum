@@ -129,7 +129,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
             var (opcode, referenceWidth, countWidth, dataWidth) =
                 ReadInstruction(body, ref position);
             if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 0x0A
-                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18 or 0x19 or 0x1A or 0x1B or 0x1C))
+                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18 or 0x19 or 0x1A or 0x1B or 0x1C or 0x1D))
             {
                 throw InvalidBody();
             }
@@ -424,6 +424,18 @@ public readonly ref struct TrRmCompactLinearBodyReader
                 }
 
                 resultType = 1;
+            }
+            else if (opcode == 0x1D)
+            {
+                var kind = ReadByte(body, ref position);
+                var left = Use(body, ref position, referenceWidth, result, ordinal);
+                var right = Use(body, ref position, referenceWidth, result, ordinal);
+                if (kind is < 1 or > 4 || left != right || !IsFloat(left))
+                {
+                    throw InvalidBody();
+                }
+
+                resultType = left;
             }
             else
             {

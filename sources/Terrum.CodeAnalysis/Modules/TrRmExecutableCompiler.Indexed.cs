@@ -536,6 +536,10 @@ public static partial class TrRmExecutableCompiler
                     {
                         (opcode, kind) = binary.Operator switch
                         {
+                            TokenKind.Plus => (0x1D, 1),
+                            TokenKind.Minus => (0x1D, 2),
+                            TokenKind.Star => (0x1D, 3),
+                            TokenKind.Slash => (0x1D, 4),
                             TokenKind.EqualsEquals => (0x19, 1),
                             TokenKind.BangEquals => (0x19, 2),
                             TokenKind.Less => (0x19, 3),
@@ -637,7 +641,7 @@ public static partial class TrRmExecutableCompiler
             {
                 bytes.Add(3);
             }
-            if (opcode is 4 or 5 or 0x15 or 0x19)
+            if (opcode is 4 or 5 or 0x15 or 0x19 or 0x1D)
             {
                 bytes.Add((byte)kind);
             }
@@ -649,7 +653,7 @@ public static partial class TrRmExecutableCompiler
             {
                 Write(bytes, (ulong)left, referenceWidth);
             }
-            if (opcode is 5 or 0x15 or 0x19)
+            if (opcode is 5 or 0x15 or 0x19 or 0x1D)
             {
                 Write(bytes, (ulong)left, referenceWidth);
                 Write(bytes, (ulong)right, referenceWidth);

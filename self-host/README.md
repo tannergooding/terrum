@@ -49,8 +49,12 @@ the unapproved
 [TRRM integer-to-floating proposal](../docs/proposals/integer-to-floating-trrm-conversions.md).
 Unary floating negation is separately provisional under the unapproved
 [TRRM floating-negation proposal](../docs/proposals/floating-trrm-negation.md).
-Floating binary arithmetic and other conversion pairs remain unsupported
-there. The frontend candidates continue to depend on the hosted
+Same-format floating add, subtract, multiply and divide are separately
+provisional under the unapproved
+[TRRM arithmetic proposal](../docs/proposals/floating-trrm-arithmetic.md) and
+its separate [arithmetic-NaN proposal](../docs/proposals/floating-arithmetic-nan-encoding.md).
+Remainder, mixed-format arithmetic and other conversion pairs remain
+unsupported there. The frontend candidates continue to depend on the hosted
 verifier/emitter for supported executions.
 The provisional hosted `char16`-to-floating conversion likewise remains
 outside both paths; it treats the code unit as an unsigned numeric value and

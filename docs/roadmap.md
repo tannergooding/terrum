@@ -54,15 +54,13 @@ reconstructs exact target-format literal bits; verification and emission
 remain hosted. V85 also projects conversions between `float32`/`float64` and
 from `int32`, `uint32`, `int64` and `uint64` to either format. `char16`-to-
 floating and floating-to-integer conversions remain outside this projection
-while their eligibility is unapproved. Source-free TRRM still does not
-support floating arithmetic. Same-format comparisons and exact-bit constants,
-explicit conversion between the two floating formats, and conversion from the
-four fixed-width integer types are provisionally implemented under separate
-unapproved [comparison](proposals/floating-trrm-comparisons.md),
-[float-format conversion](proposals/floating-trrm-format-conversions.md) and
-[integer-to-floating conversion](proposals/integer-to-floating-trrm-conversions.md)
-and [floating-negation](proposals/floating-trrm-negation.md) proposals; these
-are not part of the approved `(1, 0)` Body profile.
+while their eligibility is unapproved. Source-free TRRM provisionally
+supports same-format floating add, subtract, multiply and divide under an
+unapproved proposal. Same-format comparisons and exact-bit constants,
+explicit conversion between the two floating formats, conversion from the
+four fixed-width integer types and unary negation are separately provisional
+under their unapproved proposals; none is part of the approved `(1, 0)` Body
+profile.
 
 The bounded Terrum-authored scalar source frontend supports v85 complete
 global-function snapshots and source-order scalar call targets, including
