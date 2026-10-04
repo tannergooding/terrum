@@ -228,6 +228,13 @@ operations. Actual DLL calls, JIT/EXE execution, byte parity and unchanged
 persisted consumers cover the bounded component; no ABI/profile change,
 general call syntax, field mutation or nominal operation is added.
 
+The same v85 scalar frontend projections also carry same-format `float32` and
+`float64` unary signs, `+`, `-`, `*`, `/` and IEEE comparisons for typed
+values. Floating literal construction and conversions remain outside this
+frontend subset, and source-free TRRM still has no floating operators.
+Verification and emission continue through the hosted implementation; this
+adds no projection layout or native ABI change.
+
 Only v85 is produced or accepted for single-function and complete-program
 scalar frontend projections, every function frame and diagnostic records.
 V1–v84 tags reject before body auditing. Compact expression and tree/statement

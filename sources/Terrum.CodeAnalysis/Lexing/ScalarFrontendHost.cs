@@ -367,8 +367,8 @@ public static partial class ScalarFrontendHost
                             || (node.Operation == 62 && node.Type != 5)
                             || (node.Operation == 63 && node.Type is not (>= 1 and <= 4))
                             || (node.Operation is 57 or 58
-                                && (node.Type is not (>= 1 and <= 4)
-                                    || node.Operation == 58 && node.Type is not (1 or 3))))
+                                && (node.Type is not (>= 1 and <= 4 or 7 or 8)
+                                    || node.Operation == 58 && node.Type is not (1 or 3 or 7 or 8))))
                         {
                             throw InvalidResult();
                         }
@@ -406,7 +406,8 @@ public static partial class ScalarFrontendHost
                                 && node.Operation >= 67)
                             || (bitwise && operand.Type == 6)
                             || (!logical && !bitwise && !comparison
-                                && operand.Type is not (>= 1 and <= 4)))
+                                && operand.Type is not (>= 1 and <= 4)
+                                && !((operand.Type is 7 or 8) && node.Operation is >= 57 and <= 60)))
                         {
                             throw InvalidResult();
                         }
@@ -2389,7 +2390,7 @@ public static partial class ScalarFrontendHost
         return true;
     }
 
-    private static bool ScalarType(int type) => type is >= 1 and <= 6;
+    private static bool ScalarType(int type) => type is >= 1 and <= 8;
 
     private static bool ValidMagnitude(ReadOnlySpan<char> digits, int type, bool negative,
         int low, int high)
@@ -2439,7 +2440,8 @@ public static partial class ScalarFrontendHost
     private static string TypeName(int code) => code switch {
         0 => "void",
         1 => "int32", 2 => "uint32", 3 => "int64", 4 => "uint64",
-        5 => "bool", 6 => "char16", _ => throw InvalidResult(),
+        5 => "bool", 6 => "char16", 7 => "float32", 8 => "float64",
+        _ => throw InvalidResult(),
     };
 
     /// <summary>Builds a verifier-checked scalar library with source-declared visibility from native frontend facts.</summary>
@@ -3325,6 +3327,7 @@ public static partial class ScalarFrontendHost
         1 => PrimitiveType.Int32, 2 => PrimitiveType.UInt32,
         3 => PrimitiveType.Int64, 4 => PrimitiveType.UInt64,
         5 => PrimitiveType.Bool, 6 => PrimitiveType.Char16,
+        7 => PrimitiveType.Float32, 8 => PrimitiveType.Float64,
         _ => throw InvalidResult(),
     };
 

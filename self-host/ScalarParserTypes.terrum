@@ -5,7 +5,8 @@ bool TokensAttach(Token receiver, Token opener)
     return receiver.Range.End == opener.Range.Start;
 }
 
-// Scalar type codes: 1=int32, 2=uint32, 3=int64, 4=uint64, 5=bool, 6=char16.
+// Scalar type codes: 1=int32, 2=uint32, 3=int64, 4=uint64, 5=bool,
+// 6=char16, 7=float32, 8=float64.
 bool TryGetScalarType(Token type, out int32 scalarType)
 {
     if (type.Kind != 2)
@@ -53,6 +54,19 @@ bool TryGetScalarType(Token type, out int32 scalarType)
         && Host.Source[at + 5] == char16(54))
     {
         selected = 6;
+    }
+    else if (type.Range.Length == 7 && Host.Source[at] == char16(102)
+        && Host.Source[at + 1] == char16(108) && Host.Source[at + 2] == char16(111)
+        && Host.Source[at + 3] == char16(97) && Host.Source[at + 4] == char16(116))
+    {
+        if (Host.Source[at + 5] == char16(51) && Host.Source[at + 6] == char16(50))
+        {
+            selected = 7;
+        }
+        else if (Host.Source[at + 5] == char16(54) && Host.Source[at + 6] == char16(52))
+        {
+            selected = 8;
+        }
     }
     if (selected == 0)
     {

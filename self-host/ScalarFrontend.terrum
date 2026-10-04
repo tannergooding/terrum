@@ -3462,8 +3462,8 @@ mut class ScalarFrontendState
             if ((token.Kind == 62 && type != 5)
                 || (token.Kind == 63 && type != 0 && (type < 1 || type > 4))
                 || ((token.Kind == 57 || token.Kind == 58)
-                    && type != 0 && (type < 1 || type > 4
-                        || (token.Kind == 58 && type != 1 && type != 3))))
+                    && type != 0 && ((type < 1 || type > 4) && type != 7 && type != 8
+                        || token.Kind == 58 && type != 1 && type != 3 && type != 7 && type != 8)))
             {
                 FailAt(2, token.Range);
                 return false;
@@ -3999,6 +3999,10 @@ bool IsScalarFrontendBinaryTypeValid(int32 operation, int32 left, int32 right)
     }
     if (operation == 71 || operation == 73 || operation == 75) { return left != 6; }
     if (left == 0) { return true; }
+    if (operation >= 57 && operation <= 60)
+    {
+        return left >= 1 && left <= 4 || left == 7 || left == 8;
+    }
     return left >= 1 && left <= 4;
 }
 

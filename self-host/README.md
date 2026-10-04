@@ -30,10 +30,12 @@ and audits are in the
 [native profile](../docs/native.md) and
 [implementation reference](../docs/implementation.md). General attributes,
 binding and broader call forms remain outside the frontend's subset.
-Hosted numeric floating conversions, same-format floating arithmetic and IEEE
-comparisons do not expand either native scalar frontend projection or
-source-free TRRM; those candidates still depend on the hosted
-verifier/emitter for their supported executions.
+The bounded Terrum-authored scalar frontend now projects same-format
+`float32`/`float64` unary signs, `+`, `-`, `*`, `/` and IEEE comparisons for
+typed values.
+Floating literal construction and conversions remain outside its subset, and
+source-free TRRM still has no floating operators. The frontend candidates
+continue to depend on the hosted verifier/emitter for supported executions.
 The provisional hosted `char16`-to-floating conversion likewise remains
 outside both paths; it treats the code unit as an unsigned numeric value and
 follows an unapproved eligibility proposal.
@@ -766,10 +768,11 @@ are reported as beyond the decoder's range, not lexical errors. The compiled
 scanner preserves decimal and valid hexadecimal floating tokens without
 publishing integer magnitudes; the hosted binder constructs target-typed
 `float32`/`float64` values and performs the supported numeric conversions,
-including provisional checked conversions to fixed-width integers. Floating
-arithmetic/comparisons, floating conversions in the Terrum-authored scalar
-frontend, and custom literal parsers remain unsupported; those authored
-components still rely on the hosted verifier/emitter. Bounded scalar
+including provisional checked conversions to fixed-width integers. Same-format
+floating arithmetic/comparisons are projected by the Terrum-authored scalar
+frontend for typed values, but floating literal construction/conversions and
+custom literal parsers remain unsupported there; those authored components
+still rely on the hosted verifier/emitter. Bounded scalar
 `[ConstEval]` is implemented separately from literal registration.
 Contextual integer literal typing/range checks
 and parser routines remain hosted, while

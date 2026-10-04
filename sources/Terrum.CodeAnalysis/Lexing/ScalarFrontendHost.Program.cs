@@ -341,7 +341,8 @@ public static partial class ScalarFrontendHost
         static int ScalarCode(string text, bool allowVoid) => text switch {
             "void" when allowVoid => 0,
             "int32" => 1, "uint32" => 2, "int64" => 3, "uint64" => 4,
-            "bool" => 5, "char16" => 6, _ => throw InvalidResult(),
+            "bool" => 5, "char16" => 6, "float32" => 7, "float64" => 8,
+            _ => throw InvalidResult(),
         };
     }
 }
