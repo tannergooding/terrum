@@ -183,7 +183,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         var liveIns = new int[BlockCount + 1][];
         var liveOuts = new int[BlockCount + 1][];
         var successors = new Edge[BlockCount + 1][];
-        var externalUses = new HashSet<int>[BlockCount + 1];
+        var externalUses = new HashSet<int>?[BlockCount + 1];
         var blockRegions = new int[BlockCount + 1];
         for (var block = 1; block <= BlockCount; block++)
         {
@@ -293,7 +293,6 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 _operationCounts[block] = operations;
             }
             var nextResult = (int)starts[block - 1] + blockParameters[block].Length + 1;
-            externalUses[block] = new HashSet<int>(liveIns[block].Length);
             var useOffset = cursor;
             void Use(int value, int ordinal)
             {
@@ -309,7 +308,9 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
                 if (owner[value] != block)
                 {
-                    if (externalUses[block].Add(value) && !Contains(liveIns[block], value))
+                    var uses = externalUses[block]
+                        ??= new HashSet<int>(liveIns[block].Length);
+                    if (uses.Add(value) && !Contains(liveIns[block], value))
                     {
                         throw InvalidBody();
                     }
@@ -1018,15 +1019,18 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         var checkedOwnerBlocks = new int[BlockCount + 1];
         for (var block = 1; block <= BlockCount; block++)
         {
-            foreach (var value in externalUses[block])
+            if (externalUses[block] is HashSet<int> uses)
             {
-                var definingBlock = owner[value];
-                if (checkedOwnerBlocks[definingBlock] != block)
+                foreach (var value in uses)
                 {
-                    checkedOwnerBlocks[definingBlock] = block;
-                    if (Bypasses(definingBlock, block))
+                    var definingBlock = owner[value];
+                    if (checkedOwnerBlocks[definingBlock] != block)
                     {
-                        throw InvalidBody();
+                        checkedOwnerBlocks[definingBlock] = block;
+                        if (Bypasses(definingBlock, block))
+                        {
+                            throw InvalidBody();
+                        }
                     }
                 }
             }
@@ -1039,8 +1043,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
         }
 
-        var neededIns = new HashSet<int>[BlockCount + 1];
-        var neededOuts = new HashSet<int>[BlockCount + 1];
+        var neededIns = new HashSet<int>?[BlockCount + 1];
+        var neededOuts = new HashSet<int>?[BlockCount + 1];
         for (var block = 1; block <= BlockCount; block++)
         {
             if (!reachable[block])
@@ -1049,7 +1053,6 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
 
             neededIns[block] = externalUses[block];
-            neededOuts[block] = new HashSet<int>();
             foreach (var edge in successors[block])
             {
                 var targetParameters = blockParameters[edge.Target];
@@ -1073,19 +1076,26 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         {
             for (var block = BlockCount; block > 0; block--)
             {
-                var neededOut = neededOuts[block];
                 foreach (var edge in successors[block])
                 {
-                    neededOut.UnionWith(neededIns[edge.Target]);
-                    neededOut.UnionWith(edge.Arguments);
+                    if (neededIns[edge.Target] is HashSet<int> targetIn)
+                    {
+                        (neededOuts[block] ??= new HashSet<int>()).UnionWith(targetIn);
+                    }
+                    if (edge.Arguments.Length != 0)
+                    {
+                        (neededOuts[block] ??= new HashSet<int>()).UnionWith(edge.Arguments);
+                    }
                 }
 
-                var neededIn = neededIns[block];
-                foreach (var value in neededOut)
+                if (neededOuts[block] is HashSet<int> neededOut)
                 {
-                    if (owner[value] != block)
+                    foreach (var value in neededOut)
                     {
-                        neededIn.Add(value);
+                        if (owner[value] != block)
+                        {
+                            (neededIns[block] ??= new HashSet<int>()).Add(value);
+                        }
                     }
                 }
             }
@@ -1099,11 +1109,17 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 foreach (var edge in successors[block])
                 {
                     predecessorCounts[edge.Target]++;
-                    neededOuts[block].UnionWith(edge.Arguments);
+                    if (edge.Arguments.Length != 0)
+                    {
+                        (neededOuts[block] ??= new HashSet<int>()).UnionWith(edge.Arguments);
+                    }
                 }
-                foreach (var value in neededIns[block])
+                if (neededIns[block] is HashSet<int> neededIn)
                 {
-                    (seeds[value] ??= []).Add(block);
+                    foreach (var value in neededIn)
+                    {
+                        (seeds[value] ??= []).Add(block);
+                    }
                 }
             }
 
@@ -1143,10 +1159,15 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     for (var index = predecessorStarts[block]; index < predecessorStarts[block + 1]; index++)
                     {
                         var predecessor = predecessors[index];
-                        neededOuts[predecessor].Add(value);
-                        if (owner[value] != predecessor && neededIns[predecessor].Add(value))
+                        (neededOuts[predecessor] ??= new HashSet<int>()).Add(value);
+                        if (owner[value] != predecessor)
                         {
-                            pendingBlocks[pendingCount++] = predecessor;
+                            var predecessorIn = neededIns[predecessor]
+                                ??= new HashSet<int>();
+                            if (predecessorIn.Add(value))
+                            {
+                                pendingBlocks[pendingCount++] = predecessor;
+                            }
                         }
                     }
                 }
@@ -1155,8 +1176,10 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
         for (var block = 1; block <= BlockCount; block++)
         {
-            if (!neededOuts[block].SetEquals(liveOuts[block])
-                || !neededIns[block].SetEquals(liveIns[block]))
+            if (!(neededOuts[block]?.SetEquals(liveOuts[block])
+                    ?? liveOuts[block].Length == 0)
+                || !(neededIns[block]?.SetEquals(liveIns[block])
+                    ?? liveIns[block].Length == 0))
             {
                 throw InvalidBody();
             }
