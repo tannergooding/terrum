@@ -53,10 +53,11 @@ public static partial class ModuleCompiler
             }
         }
         var combined = types.ToImmutable();
+        var destinationTypes = IndexTypes(combined);
         for (var index = 0; index < types.Count; index++)
         {
             var original = originals[types[index].Name];
-            types[index] = RemapStructure(original.Type, original.Table, combined);
+            types[index] = RemapStructure(original.Type, original.Table, combined, destinationTypes);
         }
         combined = types.ToImmutable();
         var functions = ImmutableArray.CreateBuilder<BoundFunction>();
@@ -68,7 +69,8 @@ public static partial class ModuleCompiler
                 {
                     throw new ModuleContractException($"Ambiguous graph export '{function.Name}'.");
                 }
-                functions.Add(RemapFunction(function, reference.Structures, combined));
+                functions.Add(RemapFunction(function, reference.Structures, combined,
+                    destinationTypes: destinationTypes));
             }
         }
         return new CompilationReference(combined, functions.ToImmutable(), references[0].RuntimePolicy);

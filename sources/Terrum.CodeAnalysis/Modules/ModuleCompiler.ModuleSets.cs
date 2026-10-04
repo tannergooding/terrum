@@ -48,12 +48,13 @@ public static partial class ModuleCompiler
             }
         }
         var allTypes = types.ToImmutable();
+        var destinationTypes = IndexTypes(allTypes);
         var typeIndex = 0;
         foreach (var reference in references)
         {
             foreach (var structure in reference.Structures)
             {
-                types[typeIndex++] = RemapStructure(structure, reference.Structures, allTypes);
+                types[typeIndex++] = RemapStructure(structure, reference.Structures, allTypes, destinationTypes);
             }
         }
         allTypes = types.ToImmutable();
@@ -65,7 +66,8 @@ public static partial class ModuleCompiler
                 {
                     throw new ModuleContractException($"Ambiguous provider export '{function.Name}'.");
                 }
-                functions.Add(RemapFunction(function, reference.Structures, allTypes));
+                functions.Add(RemapFunction(function, reference.Structures, allTypes,
+                    destinationTypes: destinationTypes));
             }
         }
         return new CompilationReference(allTypes, functions.ToImmutable(), references[0].RuntimePolicy);

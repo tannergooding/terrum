@@ -1361,8 +1361,23 @@ public static partial class ModuleCompiler
         return true;
     }
 
+    private static Dictionary<string, PrimitiveType>? IndexTypes(ImmutableArray<BoundStruct> destination)
+    {
+        if (destination.IsEmpty)
+        {
+            return null;
+        }
+        var types = new Dictionary<string, PrimitiveType>(destination.Length, StringComparer.Ordinal);
+        for (var index = 0; index < destination.Length; index++)
+        {
+            types.Add(destination[index].Name, (PrimitiveType)(100 + index));
+        }
+        return types;
+    }
+
     private static PrimitiveType RemapType(PrimitiveType type, ImmutableArray<BoundStruct> source,
-        ImmutableArray<BoundStruct> destination, int classOffset = 0)
+        ImmutableArray<BoundStruct> destination, int classOffset = 0,
+        IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null)
     {
         if (classOffset != 0 && (int)type >= ManagedClassTypes.First && ManagedClassTypes.IsManaged(type))
         {
@@ -1377,6 +1392,11 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("Unknown producer type reference.");
         }
+        if (destinationTypes is not null)
+        {
+            return destinationTypes.TryGetValue(source[index].Name, out var mapped)
+                ? mapped : throw new ModuleContractException($"Missing type '{source[index].Name}'.");
+        }
         for (var i = 0; i < destination.Length; i++)
         {
             if (destination[i].Name == source[index].Name)
@@ -1388,210 +1408,219 @@ public static partial class ModuleCompiler
     }
 
     private static BoundStruct RemapStructure(BoundStruct structure, ImmutableArray<BoundStruct> source,
-        ImmutableArray<BoundStruct> destination) => structure with {
-            Fields = [.. structure.Fields.Select(field => field with { Type = RemapType(field.Type, source, destination) })],
+        ImmutableArray<BoundStruct> destination, IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null) => structure with {
+            Fields = [.. structure.Fields.Select(field => field with {
+                Type = RemapType(field.Type, source, destination, destinationTypes: destinationTypes),
+            })],
         };
 
     private static BoundClass RemapClass(BoundClass @class, ImmutableArray<BoundStruct> source,
-        ImmutableArray<BoundStruct> destination, int classOffset = 0) => @class with {
+        ImmutableArray<BoundStruct> destination, int classOffset = 0,
+        IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null) => @class with {
             Fields = [.. @class.Fields.Select(field => field with {
-                Type = RemapType(field.Type, source, destination, classOffset),
+                Type = RemapType(field.Type, source, destination, classOffset, destinationTypes),
             })],
         };
 
     private static ImmutableArray<BoundStruct> SelectStructures(ImmutableArray<BoundStruct> source, HashSet<string> required)
     {
         var selected = source.Where(structure => required.Contains(structure.Name)).ToImmutableArray();
-        return [.. selected.Select(structure => RemapStructure(structure, source, selected))];
+        var destinationTypes = IndexTypes(selected);
+        return [.. selected.Select(structure => RemapStructure(structure, source, selected, destinationTypes))];
     }
 
     private static BoundFunction RemapFunction(BoundFunction function, ImmutableArray<BoundStruct> source,
-        ImmutableArray<BoundStruct> destination, int classOffset = 0)
+        ImmutableArray<BoundStruct> destination, int classOffset = 0,
+        IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null)
     {
         return function with {
-            ReturnType = RemapType(function.ReturnType, source, destination, classOffset),
+            ReturnType = RemapType(function.ReturnType, source, destination, classOffset, destinationTypes),
             Variables = [.. function.Variables.Select(variable => variable with {
-                Type = RemapType(variable.Type, source, destination, classOffset),
+                Type = RemapType(variable.Type, source, destination, classOffset, destinationTypes),
             })],
-            Body = (BoundBlock)RemapStatement(function.Body, source, destination, classOffset),
+            Body = (BoundBlock)RemapStatement(function.Body, source, destination, classOffset, destinationTypes),
         };
     }
 
     private static BoundExpression RemapExpression(BoundExpression expression, ImmutableArray<BoundStruct> source,
-        ImmutableArray<BoundStruct> destination, int classOffset = 0)
+        ImmutableArray<BoundStruct> destination, int classOffset = 0,
+        IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null)
     {
         return expression switch {
-            BoundConstant constant => constant with { Type = RemapType(constant.Type, source, destination, classOffset) },
-            BoundRead read => read with { Type = RemapType(read.Type, source, destination, classOffset) },
-            BoundMove move => move with { Type = RemapType(move.Type, source, destination, classOffset) },
-            BoundReceiverLoan loan => loan with { Type = RemapType(loan.Type, source, destination, classOffset) },
+            BoundConstant constant => constant with { Type = RemapType(constant.Type, source, destination, classOffset, destinationTypes) },
+            BoundRead read => read with { Type = RemapType(read.Type, source, destination, classOffset, destinationTypes) },
+            BoundMove move => move with { Type = RemapType(move.Type, source, destination, classOffset, destinationTypes) },
+            BoundReceiverLoan loan => loan with { Type = RemapType(loan.Type, source, destination, classOffset, destinationTypes) },
             BoundFieldLoan loan => loan with {
-                Type = RemapType(loan.Type, source, destination, classOffset),
-                Place = (BoundFieldRead)RemapExpression(loan.Place, source, destination, classOffset),
+                Type = RemapType(loan.Type, source, destination, classOffset, destinationTypes),
+                Place = (BoundFieldRead)RemapExpression(loan.Place, source, destination, classOffset, destinationTypes),
             },
             BoundMutableFieldLoan loan => loan with {
-                Type = RemapType(loan.Type, source, destination, classOffset),
-                Place = (BoundFieldRead)RemapExpression(loan.Place, source, destination, classOffset),
+                Type = RemapType(loan.Type, source, destination, classOffset, destinationTypes),
+                Place = (BoundFieldRead)RemapExpression(loan.Place, source, destination, classOffset, destinationTypes),
             },
-            BoundMutableReceiverLoan loan => loan with { Type = RemapType(loan.Type, source, destination, classOffset) },
+            BoundMutableReceiverLoan loan => loan with { Type = RemapType(loan.Type, source, destination, classOffset, destinationTypes) },
             BoundViewLength => expression,
-            BoundViewRead view => view with { Index = RemapExpression(view.Index, source, destination, classOffset) },
+            BoundViewRead view => view with { Index = RemapExpression(view.Index, source, destination, classOffset, destinationTypes) },
             BoundUnary unary => unary with {
-                Type = RemapType(unary.Type, source, destination, classOffset),
-                Operand = RemapExpression(unary.Operand, source, destination, classOffset),
+                Type = RemapType(unary.Type, source, destination, classOffset, destinationTypes),
+                Operand = RemapExpression(unary.Operand, source, destination, classOffset, destinationTypes),
             },
             BoundUpdate update => update with {
-                Type = RemapType(update.Type, source, destination, classOffset),
-                Place = RemapExpression(update.Place, source, destination, classOffset),
+                Type = RemapType(update.Type, source, destination, classOffset, destinationTypes),
+                Place = RemapExpression(update.Place, source, destination, classOffset, destinationTypes),
             },
             BoundCompoundAssignment compound => compound with {
-                Type = RemapType(compound.Type, source, destination, classOffset),
-                Place = RemapExpression(compound.Place, source, destination, classOffset),
-                Right = RemapExpression(compound.Right, source, destination, classOffset),
+                Type = RemapType(compound.Type, source, destination, classOffset, destinationTypes),
+                Place = RemapExpression(compound.Place, source, destination, classOffset, destinationTypes),
+                Right = RemapExpression(compound.Right, source, destination, classOffset, destinationTypes),
             },
             BoundNominalUpdate update => update with {
-                Type = RemapType(update.Type, source, destination, classOffset),
-                Place = RemapExpression(update.Place, source, destination, classOffset),
+                Type = RemapType(update.Type, source, destination, classOffset, destinationTypes),
+                Place = RemapExpression(update.Place, source, destination, classOffset, destinationTypes),
             },
             SymbolicNominalUpdate update => update with {
-                Type = RemapType(update.Type, source, destination, classOffset),
-                Place = RemapExpression(update.Place, source, destination, classOffset),
+                Type = RemapType(update.Type, source, destination, classOffset, destinationTypes),
+                Place = RemapExpression(update.Place, source, destination, classOffset, destinationTypes),
             },
             BoundBinary binary => binary with {
-                Type = RemapType(binary.Type, source, destination, classOffset),
-                Left = RemapExpression(binary.Left, source, destination, classOffset),
-                Right = RemapExpression(binary.Right, source, destination, classOffset),
+                Type = RemapType(binary.Type, source, destination, classOffset, destinationTypes),
+                Left = RemapExpression(binary.Left, source, destination, classOffset, destinationTypes),
+                Right = RemapExpression(binary.Right, source, destination, classOffset, destinationTypes),
             },
             BoundConditional conditional => conditional with {
-                Type = RemapType(conditional.Type, source, destination, classOffset),
-                Condition = RemapExpression(conditional.Condition, source, destination, classOffset),
-                WhenTrue = RemapExpression(conditional.WhenTrue, source, destination, classOffset),
-                WhenFalse = RemapExpression(conditional.WhenFalse, source, destination, classOffset),
+                Type = RemapType(conditional.Type, source, destination, classOffset, destinationTypes),
+                Condition = RemapExpression(conditional.Condition, source, destination, classOffset, destinationTypes),
+                WhenTrue = RemapExpression(conditional.WhenTrue, source, destination, classOffset, destinationTypes),
+                WhenFalse = RemapExpression(conditional.WhenFalse, source, destination, classOffset, destinationTypes),
             },
             BoundCoalesce coalesce => coalesce with {
-                Type = RemapType(coalesce.Type, source, destination, classOffset),
-                Optional = RemapExpression(coalesce.Optional, source, destination, classOffset),
-                Fallback = RemapExpression(coalesce.Fallback, source, destination, classOffset),
+                Type = RemapType(coalesce.Type, source, destination, classOffset, destinationTypes),
+                Optional = RemapExpression(coalesce.Optional, source, destination, classOffset, destinationTypes),
+                Fallback = RemapExpression(coalesce.Fallback, source, destination, classOffset, destinationTypes),
             },
             BoundCast cast => cast with {
-                Type = RemapType(cast.Type, source, destination, classOffset),
-                Operand = RemapExpression(cast.Operand, source, destination, classOffset),
+                Type = RemapType(cast.Type, source, destination, classOffset, destinationTypes),
+                Operand = RemapExpression(cast.Operand, source, destination, classOffset, destinationTypes),
             },
-            BoundNull nullValue => nullValue with { Type = RemapType(nullValue.Type, source, destination, classOffset) },
+            BoundNull nullValue => nullValue with { Type = RemapType(nullValue.Type, source, destination, classOffset, destinationTypes) },
             BoundOptionalLift lift => lift with {
-                Type = RemapType(lift.Type, source, destination, classOffset),
-                Value = RemapExpression(lift.Value, source, destination, classOffset),
+                Type = RemapType(lift.Type, source, destination, classOffset, destinationTypes),
+                Value = RemapExpression(lift.Value, source, destination, classOffset, destinationTypes),
             },
             BoundReadonlyProjection projection => projection with {
-                Type = RemapType(projection.Type, source, destination, classOffset),
-                Value = RemapExpression(projection.Value, source, destination, classOffset),
+                Type = RemapType(projection.Type, source, destination, classOffset, destinationTypes),
+                Value = RemapExpression(projection.Value, source, destination, classOffset, destinationTypes),
             },
-            BoundIsNull test => test with { Value = RemapExpression(test.Value, source, destination, classOffset) },
-            BoundIsSome pattern => pattern with { Value = RemapExpression(pattern.Value, source, destination, classOffset) },
+            BoundIsNull test => test with { Value = RemapExpression(test.Value, source, destination, classOffset, destinationTypes) },
+            BoundIsSome pattern => pattern with { Value = RemapExpression(pattern.Value, source, destination, classOffset, destinationTypes) },
             BoundIsVariablePattern pattern => pattern with {
-                Value = RemapExpression(pattern.Value, source, destination, classOffset),
+                Value = RemapExpression(pattern.Value, source, destination, classOffset, destinationTypes),
             },
             BoundIsInitialized => expression,
             BoundFieldRead field => field with {
-                Type = RemapType(field.Type, source, destination, classOffset),
-                Receiver = RemapExpression(field.Receiver, source, destination, classOffset),
+                Type = RemapType(field.Type, source, destination, classOffset, destinationTypes),
+                Receiver = RemapExpression(field.Receiver, source, destination, classOffset, destinationTypes),
             },
-            BoundOutArgument output => output with { Type = RemapType(output.Type, source, destination, classOffset) },
+            BoundOutArgument output => output with { Type = RemapType(output.Type, source, destination, classOffset, destinationTypes) },
             BoundCall call => call with {
-                Type = RemapType(call.Type, source, destination, classOffset),
-                Arguments = RemapExpressions(call.Arguments, source, destination, classOffset),
+                Type = RemapType(call.Type, source, destination, classOffset, destinationTypes),
+                Arguments = RemapExpressions(call.Arguments, source, destination, classOffset, destinationTypes),
             },
             SymbolicCall call => call with {
-                Type = RemapType(call.Type, source, destination, classOffset),
-                Arguments = RemapExpressions(call.Arguments, source, destination, classOffset),
+                Type = RemapType(call.Type, source, destination, classOffset, destinationTypes),
+                Arguments = RemapExpressions(call.Arguments, source, destination, classOffset, destinationTypes),
             },
             _ => throw new ModuleFormatException("Unknown producer expression kind."),
         };
     }
 
     private static ImmutableArray<BoundExpression> RemapExpressions(ImmutableArray<BoundExpression> expressions,
-        ImmutableArray<BoundStruct> source, ImmutableArray<BoundStruct> destination, int classOffset = 0)
+        ImmutableArray<BoundStruct> source, ImmutableArray<BoundStruct> destination, int classOffset = 0,
+        IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null)
     {
         var result = ImmutableArray.CreateBuilder<BoundExpression>(expressions.Length);
         foreach (var expression in expressions)
         {
-            result.Add(RemapExpression(expression, source, destination, classOffset));
+            result.Add(RemapExpression(expression, source, destination, classOffset, destinationTypes));
         }
         return result.MoveToImmutable();
     }
 
     private static BoundStatement RemapStatement(BoundStatement statement, ImmutableArray<BoundStruct> source,
-        ImmutableArray<BoundStruct> destination, int classOffset = 0)
+        ImmutableArray<BoundStruct> destination, int classOffset = 0,
+        IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null)
     {
         return statement switch {
-            BoundBlock block => block with { Statements = RemapStatements(block.Statements, source, destination, classOffset) },
-            BoundLocal local => local with { Initializer = RemapExpression(local.Initializer, source, destination, classOffset) },
+            BoundBlock block => block with { Statements = RemapStatements(block.Statements, source, destination, classOffset, destinationTypes) },
+            BoundLocal local => local with { Initializer = RemapExpression(local.Initializer, source, destination, classOffset, destinationTypes) },
             BoundLifetimeEnd or SymbolicLifetimeEnd or BoundOwnerDeclaration or BoundVacantLocal => statement,
-            BoundAssignment assignment => assignment with { Value = RemapExpression(assignment.Value, source, destination, classOffset) },
+            BoundAssignment assignment => assignment with { Value = RemapExpression(assignment.Value, source, destination, classOffset, destinationTypes) },
             BoundOptionalAssignment optionalAssignment => optionalAssignment with {
-                Place = RemapExpression(optionalAssignment.Place, source, destination, classOffset),
-                Value = RemapExpression(optionalAssignment.Value, source, destination, classOffset),
+                Place = RemapExpression(optionalAssignment.Place, source, destination, classOffset, destinationTypes),
+                Value = RemapExpression(optionalAssignment.Value, source, destination, classOffset, destinationTypes),
             },
-            BoundFieldAssignment field => field with { Value = RemapExpression(field.Value, source, destination, classOffset) },
+            BoundFieldAssignment field => field with { Value = RemapExpression(field.Value, source, destination, classOffset, destinationTypes) },
             BoundExpressionStatement expression => expression with {
-                Expression = RemapExpression(expression.Expression, source, destination, classOffset),
+                Expression = RemapExpression(expression.Expression, source, destination, classOffset, destinationTypes),
             },
             BoundIf conditional => conditional with {
-                Condition = RemapExpression(conditional.Condition, source, destination, classOffset),
-                Then = RemapStatement(conditional.Then, source, destination, classOffset),
-                Else = conditional.Else is null ? null : RemapStatement(conditional.Else, source, destination, classOffset),
+                Condition = RemapExpression(conditional.Condition, source, destination, classOffset, destinationTypes),
+                Then = RemapStatement(conditional.Then, source, destination, classOffset, destinationTypes),
+                Else = conditional.Else is null ? null : RemapStatement(conditional.Else, source, destination, classOffset, destinationTypes),
             },
             BoundWhile loop => loop with {
-                Condition = RemapExpression(loop.Condition, source, destination, classOffset),
-                Body = RemapStatement(loop.Body, source, destination, classOffset),
-                Iterator = loop.Iterator is null ? null : RemapStatement(loop.Iterator, source, destination, classOffset),
+                Condition = RemapExpression(loop.Condition, source, destination, classOffset, destinationTypes),
+                Body = RemapStatement(loop.Body, source, destination, classOffset, destinationTypes),
+                Iterator = loop.Iterator is null ? null : RemapStatement(loop.Iterator, source, destination, classOffset, destinationTypes),
             },
             BoundBreak or BoundContinue => statement,
             BoundTryFinally cleanup => cleanup with {
-                Body = (BoundBlock)RemapStatement(cleanup.Body, source, destination, classOffset),
-                Finally = (BoundBlock)RemapStatement(cleanup.Finally, source, destination, classOffset),
+                Body = (BoundBlock)RemapStatement(cleanup.Body, source, destination, classOffset, destinationTypes),
+                Finally = (BoundBlock)RemapStatement(cleanup.Finally, source, destination, classOffset, destinationTypes),
             },
             BoundViewScope view => view with {
-                Owner = RemapExpression(view.Owner, source, destination, classOffset),
-                Start = RemapExpression(view.Start, source, destination, classOffset),
-                Length = RemapExpression(view.Length, source, destination, classOffset),
+                Owner = RemapExpression(view.Owner, source, destination, classOffset, destinationTypes),
+                Start = RemapExpression(view.Start, source, destination, classOffset, destinationTypes),
+                Length = RemapExpression(view.Length, source, destination, classOffset, destinationTypes),
                 RangeEnd = view.RangeEnd is null ? null
-                    : RemapExpression(view.RangeEnd, source, destination, classOffset),
-                Body = (BoundBlock)RemapStatement(view.Body, source, destination, classOffset),
+                    : RemapExpression(view.RangeEnd, source, destination, classOffset, destinationTypes),
+                Body = (BoundBlock)RemapStatement(view.Body, source, destination, classOffset, destinationTypes),
             },
             BoundViewSet write => write with {
-                Index = RemapExpression(write.Index, source, destination, classOffset),
-                Value = RemapExpression(write.Value, source, destination, classOffset),
+                Index = RemapExpression(write.Index, source, destination, classOffset, destinationTypes),
+                Value = RemapExpression(write.Value, source, destination, classOffset, destinationTypes),
             },
             BoundDrop => statement,
             BoundDropConstructedFields => statement,
             SymbolicDrop => statement,
             BoundUnsafe unsafeBlock => unsafeBlock with {
-                Body = (BoundBlock)RemapStatement(unsafeBlock.Body, source, destination, classOffset),
+                Body = (BoundBlock)RemapStatement(unsafeBlock.Body, source, destination, classOffset, destinationTypes),
             },
             BoundTryCatch recovery => recovery with {
-                Body = (BoundBlock)RemapStatement(recovery.Body, source, destination, classOffset),
-                Catch = (BoundBlock)RemapStatement(recovery.Catch, source, destination, classOffset),
+                Body = (BoundBlock)RemapStatement(recovery.Body, source, destination, classOffset, destinationTypes),
+                Catch = (BoundBlock)RemapStatement(recovery.Catch, source, destination, classOffset, destinationTypes),
                 Finally = recovery.Finally is null ? null
-                    : (BoundBlock)RemapStatement(recovery.Finally, source, destination, classOffset),
+                    : (BoundBlock)RemapStatement(recovery.Finally, source, destination, classOffset, destinationTypes),
             },
             BoundRequire requirement => requirement with {
-                Condition = RemapExpression(requirement.Condition, source, destination, classOffset),
+                Condition = RemapExpression(requirement.Condition, source, destination, classOffset, destinationTypes),
             },
             BoundReturn result => result with {
-                Value = result.Value is null ? null : RemapExpression(result.Value, source, destination, classOffset),
+                Value = result.Value is null ? null : RemapExpression(result.Value, source, destination, classOffset, destinationTypes),
             },
             _ => throw new ModuleFormatException("Unknown producer statement kind."),
         };
     }
 
     private static ImmutableArray<BoundStatement> RemapStatements(ImmutableArray<BoundStatement> statements,
-        ImmutableArray<BoundStruct> source, ImmutableArray<BoundStruct> destination, int classOffset = 0)
+        ImmutableArray<BoundStruct> source, ImmutableArray<BoundStruct> destination, int classOffset = 0,
+        IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null)
     {
         var result = ImmutableArray.CreateBuilder<BoundStatement>(statements.Length);
         foreach (var statement in statements)
         {
-            result.Add(RemapStatement(statement, source, destination, classOffset));
+            result.Add(RemapStatement(statement, source, destination, classOffset, destinationTypes));
         }
         return result.MoveToImmutable();
     }
