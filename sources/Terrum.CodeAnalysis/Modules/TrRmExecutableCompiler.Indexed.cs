@@ -451,9 +451,9 @@ public static partial class TrRmExecutableCompiler
                     WriteIndexedTerminator(data, block, remap);
                     Write(offsets, (ulong)data.Count, width);
                 }
+                // Terminators are offsets within data, and starts are cumulative.
                 if (data.Count > sentinel || overflowedDefinition
-                    || terminators.Any(offset => offset > sentinel)
-                    || starts.Any(start => (ulong)start > sentinel))
+                    || (ulong)starts[^1] > sentinel)
                 {
                     return [];
                 }
