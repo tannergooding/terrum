@@ -253,7 +253,10 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleContractException("Graph direct dependencies or policies differ.");
         }
-        var reference = GraphReference(providers);
+        var references = providers.Select(GetValidatedProviderReference).ToArray();
+        var provenance = providers.Select((provider, index) =>
+            ProviderOrigins(provider, references[index])).ToArray();
+        var reference = GraphReference(providers, references, provenance);
         if (package.Consumer)
         {
             ModuleCompiler.ValidateConsumerAgainstReference(package.Contract, reference);
@@ -270,7 +273,8 @@ public static partial class NativeModuleCompiler
                 throw new ModuleContractException($"Graph declaration does not belong to '{dependency.Identity}'.");
             }
         }
-        var expected = CreateGraphOrigins(package.Contract, package.Consumer, package.Identity, providers);
+        var expected = CreateGraphOrigins(package.Contract, package.Consumer, package.Identity,
+            providers, provenance);
         if (!package.Origins.SequenceEqual(expected))
         {
             throw new ModuleContractException("Graph type origin or cleanup ownership differs from selected providers.");
@@ -282,6 +286,12 @@ public static partial class NativeModuleCompiler
         var references = providers.Select(GetValidatedProviderReference).ToArray();
         var provenance = providers.Select((provider, index) =>
             ProviderOrigins(provider, references[index])).ToArray();
+        return GraphReference(providers, references, provenance);
+    }
+
+    private static CompilationReference GraphReference(GraphPackage[] providers,
+        CompilationReference[] references, Dictionary<string, GraphTypeOrigin?>[] provenance)
+    {
         var origins = references.Select((reference, index) => (IReadOnlyDictionary<string, string?>)
             reference.Structures.ToDictionary(static item => item.Name,
                 item => provenance[index].GetValueOrDefault(item.Name)?.Identity, StringComparer.Ordinal)).ToArray();
@@ -339,12 +349,12 @@ public static partial class NativeModuleCompiler
     }
 
     private static GraphTypeOrigin[] CreateGraphOrigins(byte[] contract, bool consumer, string? identity,
-        GraphPackage[] providers)
+        GraphPackage[] providers, Dictionary<string, GraphTypeOrigin?>[]? provenance = null)
     {
         var imported = ModuleCompiler.GetGraphImportedTypes(contract, consumer)
             .ToHashSet(StringComparer.Ordinal);
         var structures = ModuleCompiler.GetGraphRetainedTypes(contract, consumer);
-        var provenance = providers.Select(provider => ProviderOrigins(provider)).ToArray();
+        provenance ??= providers.Select(provider => ProviderOrigins(provider)).ToArray();
         var result = new List<GraphTypeOrigin>(structures.Length);
         foreach (var structure in structures)
         {
