@@ -25,7 +25,8 @@ public static partial class ScalarFrontendHost
         int InitRefParameterMask, ImmutableArray<int> ParameterTypes, ImmutableArray<string> ParameterNames,
         int TokenStart, int TokenEnd, TextSpan Span, TextSpan BodySpan);
 
-    private sealed record ProgramReadContext(ImmutableArray<ProgramDeclaration> Declarations, int[] Targets)
+    private sealed record ProgramReadContext(ImmutableArray<ProgramDeclaration> Declarations,
+        ImmutableArray<int> Targets)
     {
         public ProgramDeclaration Callee(int node)
         {
@@ -88,7 +89,7 @@ public static partial class ScalarFrontendHost
                 throw InvalidResult();
             }
             var payload = programBytes.Slice((frame + 4) * sizeof(int), WordCount * sizeof(int));
-            var targets = words.AsSpan(frame + 396, 32).ToArray();
+            var targets = ImmutableArray.CreateBuilder<int>(32);
             var nodeCount = words[frame + 4 + 37];
             if (nodeCount is < 0 or > 32)
             {
@@ -97,14 +98,16 @@ public static partial class ScalarFrontendHost
             for (var node = 0; node < 32; node++)
             {
                 var operation = node < nodeCount ? words[frame + 4 + 42 + node * 8] : 0;
+                var target = words[frame + 396 + node];
                 if (operation == 105
-                    ? targets[node] < 0 || targets[node] >= declarations.Length
-                    : targets[node] != -1)
+                    ? target < 0 || target >= declarations.Length
+                    : target != -1)
                 {
                     throw InvalidResult();
                 }
+                targets.Add(target);
             }
-            var context = new ProgramReadContext(declarations, targets);
+            var context = new ProgramReadContext(declarations, targets.MoveToImmutable());
             var function = ReadResultCore(FunctionSource(source, declaration.Span), payload, policy, context);
             if (!function.IsValid || function.ReturnType != declaration.ReturnType
                 || function.ParameterCount != declaration.ParameterTypes.Length

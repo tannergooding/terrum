@@ -622,7 +622,7 @@ public static partial class ScalarFrontendHost
                 RequiresUnsafeCaller = (words[2] & 8) != 0,
                 OutParameterMask = words[16],
                 InitRefParameterMask = words[17],
-                CallTargets = context?.Targets.ToImmutableArray() ?? default,
+                CallTargets = context?.Targets ?? default,
                 Locals = declaredLocals, Statements = orderedStatements
                     .Select((entry, index) => entry with { BodySpan = bodySpans[index],
                         LoopSpan = loopSpans[index] }).ToImmutableArray() };
