@@ -86,6 +86,10 @@ public sealed class ParserTests
         var unattached = SyntaxTree.Parse("int32 Read(OwnedInt32Buffer items) { var tail = items[..^ 1]; return 0; }");
         Assert.Contains(unattached.Diagnostics, static diagnostic => diagnostic.Code == "TRM1009");
         AssertLossless(unattached);
+
+        var unattachedIndex = SyntaxTree.Parse("int32 Read(OwnedInt32Buffer items) { return items[^ 1]; }");
+        Assert.Contains(unattachedIndex.Diagnostics, static diagnostic => diagnostic.Code == "TRM1009");
+        AssertLossless(unattachedIndex);
     }
 
     [Theory]

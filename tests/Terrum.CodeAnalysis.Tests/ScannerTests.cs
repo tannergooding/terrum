@@ -57,6 +57,11 @@ public sealed class ScannerTests
     [Theory]
     [InlineData("int32 Main() { return Host.State[-1]; }", unchecked((int)0xE0540004))]
     [InlineData("int32 Main() { return Host.State[2]; }", unchecked((int)0xE0540004))]
+    [InlineData("int32 Main() { return Host.State[^0]; }", unchecked((int)0xE0540004))]
+    [InlineData("int32 Main() { return Host.State[^3]; }", unchecked((int)0xE0540004))]
+    [InlineData("int32 Main() { return Host.State[^(-1)]; }", unchecked((int)0xE0540004))]
+    [InlineData("int32 Main() { Host.State[^1] = 42; return Host.State[^1]; }", 42)]
+    [InlineData("int32 Main() { const int32 last = 1; Host.State[^last] = 42; return Host.State[1]; }", 42)]
     [InlineData("int32 Main() { Host.State[2] = Fail(); return 0; } int32 Fail() { require false; return 0; }", unchecked((int)0xE0540004))]
     [InlineData("int32 Main() { Host.State[Index()] = Value(); return Host.State[0] * 10 + Host.State[1]; } int32 Index() { Host.State[0] = Host.State[0] + 1; return 1; } int32 Value() { return Host.State[0] + 6; }", 17)]
     public async Task BufferAccessChecksBoundsAndPreservesEvaluationOrderAsync(string source, int expected)
@@ -65,6 +70,17 @@ public sealed class ScannerTests
             [new HostBuffer("State", PrimitiveType.Int32, [0, 0], true)]);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), expected).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public void DynamicEndRelativeHostBufferIndexIsRejected()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Offset() { return 1; }
+            int32 Main() { return Host.State[^Offset()]; }
+            """), [new HostBuffer("State", PrimitiveType.Int32, [40, 42], false)]);
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3001");
+        Assert.Null(compilation.Program);
     }
 
     [Theory]

@@ -40,6 +40,7 @@ internal sealed partial class Binder
     private readonly List<BoundVariable> _variables = [];
     private readonly HashSet<int> _unresolvedVacantLocals = [];
     private readonly HashSet<int> _constLocals = [];
+    private readonly Dictionary<int, int> _constInt32Values = [];
     private int _localStart;
     private readonly List<Dictionary<string, int>> _scopes = [];
     private readonly List<LoopBinding> _loops = [];
@@ -479,6 +480,7 @@ internal sealed partial class Binder
             _scopes.Clear();
             _unresolvedVacantLocals.Clear();
             _constLocals.Clear();
+            _constInt32Values.Clear();
             _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
             _returnType = signature.ReturnType;
             _currentStruct = signature.StructName;
@@ -1814,6 +1816,11 @@ internal sealed partial class Binder
 
     private int BindRangeConstant(SyntaxNode node, string boundName, ref bool valid)
     {
+        if (TryGetConstInt32Value(node, out var constantValue))
+        {
+            return constantValue;
+        }
+
         var expression = BindExpression(node, PrimitiveType.Int32);
         if (expression is BoundConstant { Type: PrimitiveType.Int32 } constant
             && constant.Value is >= int.MinValue and <= int.MaxValue)
@@ -1825,6 +1832,24 @@ internal sealed partial class Binder
             node.Span);
         valid = false;
         return 0;
+    }
+
+    private bool TryGetConstInt32Value(SyntaxNode node, out int value)
+    {
+        while (node.Kind == SyntaxKind.ParenthesizedExpression)
+        {
+            node = (SyntaxNode)node.Children[1];
+        }
+
+        if (node.Kind == SyntaxKind.NameExpression
+            && TryFindVariable(((SyntaxTokenElement)node.Children[0]).Token.Name, out var slot)
+            && _constInt32Values.TryGetValue(slot, out value))
+        {
+            return true;
+        }
+
+        value = 0;
+        return false;
     }
 
     private BoundExpression BindBufferCount(BoundExpression owner, TextSpan span)
@@ -1844,6 +1869,33 @@ internal sealed partial class Binder
         return consumed == 0 ? count
             : new BoundBinary(TokenKind.Minus, count, new BoundConstant(consumed, PrimitiveType.Int32, span),
                 PrimitiveType.Int32, span);
+    }
+
+    private BoundExpression BindBufferIndex(SyntaxNode index, int buffer)
+    {
+        if (index.Kind != SyntaxKind.EndRelativeIndexBound)
+        {
+            return BindExpression(index, PrimitiveType.Int32);
+        }
+
+        var offsetNode = (SyntaxNode)index.Children[1];
+        if (!TryGetConstInt32Value(offsetNode, out var offsetValue))
+        {
+            var offset = BindExpression(offsetNode, PrimitiveType.Int32);
+            if (offset is not BoundConstant { Type: PrimitiveType.Int32 } constant
+                || constant.Value is < int.MinValue or > int.MaxValue)
+            {
+                Report("TRM3001", "An end-relative host-buffer index requires a compile-time int32 offset.",
+                    index.Span);
+                return ErrorExpression(index.Span);
+            }
+            offsetValue = (int)constant.Value;
+        }
+
+        var indexValue = offsetValue < 0
+            ? -1
+            : (long)_buffers[buffer].Values.Length - offsetValue;
+        return new BoundConstant(indexValue, PrimitiveType.Int32, index.Span);
     }
 
     private int BindViewVariable(SyntaxNode receiver)
@@ -2110,6 +2162,12 @@ internal sealed partial class Binder
                 {
                     _ = _constRequired.Add(boundLocal);
                     _ = _constLocals.Add(boundLocal.Variable);
+                    if (boundLocal.Initializer is BoundConstant {
+                        Type: PrimitiveType.Int32, Value: >= int.MinValue and <= int.MaxValue,
+                    } constant)
+                    {
+                        _constInt32Values[boundLocal.Variable] = (int)constant.Value;
+                    }
                 }
                 return local;
             }
@@ -2167,7 +2225,7 @@ internal sealed partial class Binder
                         Report("TRM3008", "A read-only host buffer cannot be modified.", target.Span);
                     }
                     return new BoundBufferAssignment(buffer,
-                        BindExpression((SyntaxNode)target.Children[2], PrimitiveType.Int32),
+                        BindBufferIndex((SyntaxNode)target.Children[2], buffer),
                         BindExpression(valueNode, _buffers[buffer].ElementType), node.Span);
                 }
                 if (target.Kind == SyntaxKind.MemberAccessExpression)
@@ -3222,7 +3280,7 @@ internal sealed partial class Binder
                 if (TryFindBuffer((SyntaxNode)node.Children[0], out var buffer))
                 {
                     expression = new BoundBufferRead(buffer,
-                        BindExpression((SyntaxNode)node.Children[2], PrimitiveType.Int32),
+                        BindBufferIndex((SyntaxNode)node.Children[2], buffer),
                         _buffers[buffer].ElementType, node.Span);
                 }
                 else

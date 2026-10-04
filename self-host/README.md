@@ -64,9 +64,9 @@ kinds 104–106 after Scanner-9/schema-9 added `CharacterLiteral` kind 103.
 Scanner-8/schema-8 diagnostic identities 11/12 for invalid and unsupported
 maximal runs remain unchanged. These punctuation tokens do not imply parser
 consumption or binding in the native scalar frontend. The hosted parser and
-binder consume `..` and `..^` only for compile-time-bounded
-`OwnedInt32Buffer` ranges that initialize readonly lexical views; `?.` remains
-token-only. Hosted
+binder consume constant `^offset` bounds for compiler-supplied host-buffer
+indexing and `..`/`..^` ranges for readonly `OwnedInt32Buffer` lexical views;
+`?.` remains token-only. Hosted
 generic closers and optional suffixes require parser consumption; native
 scalar spacing permits only the `init ref<T>` parameter delimiters, not
 general generic type contexts. Raw buffers have no schema marker and current

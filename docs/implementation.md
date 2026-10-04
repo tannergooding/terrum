@@ -1447,6 +1447,11 @@ views, and compile-time `int32` bounds; omitted bounds and constant
 end-relative lower and upper bounds are supported, while dynamic bounds are
 not. The existing checked view-scope operation
 validates the resulting range against the initialized prefix without clamping.
+For the existing compiler-supplied `Host` buffers, indexed reads and writes
+also accept constant `^offset` bounds, lowered to the ordinary checked buffer
+index path; `^0` and other out-of-range positions fail there. Dynamic
+end-relative element indices remain unsupported. This does not add indexing
+to `OwnedInt32Buffer` or authorize arbitrary indexer contracts.
 Range syntax does not add mutable slicing, general indexer contracts,
 first-class range values or optional access. `mut MutableInt32BufferView window =
 buffer.SliceMutable(start, length);` requires a named mutable buffer or a
