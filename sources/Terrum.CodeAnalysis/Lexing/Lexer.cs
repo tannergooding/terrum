@@ -92,7 +92,7 @@ public sealed class Lexer
 
     private ImmutableArray<SyntaxTrivia> ReadTrivia()
     {
-        var trivia = ImmutableArray.CreateBuilder<SyntaxTrivia>();
+        ImmutableArray<SyntaxTrivia>.Builder? trivia = null;
 
         while (!AtEnd)
         {
@@ -140,10 +140,11 @@ public sealed class Lexer
             }
 
             TextSpan span = new(start, _position - start);
+            trivia ??= ImmutableArray.CreateBuilder<SyntaxTrivia>();
             trivia.Add(new SyntaxTrivia(kind, span, _source.GetSubText(span)));
         }
 
-        return trivia.ToImmutable();
+        return trivia?.ToImmutable() ?? ImmutableArray<SyntaxTrivia>.Empty;
     }
 
     private void ReadBlockComment(int start, int slashCount)
