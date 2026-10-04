@@ -184,7 +184,7 @@ mut class ScalarFrontendState
 
     private mut void Fail(int32 code)
     {
-        if (_tokens.TryGet(_at, out var token))
+        if (_tokens.TryGet(_at, init var token))
         {
             FailAt(code, token.Range);
         }
@@ -197,7 +197,7 @@ mut class ScalarFrontendState
 
     private mut bool Take(int32 kind, out Token token)
     {
-        if (!_tokens.TryGet(_at, out var current) || current.Kind != kind)
+        if (!_tokens.TryGet(_at, init var current) || current.Kind != kind)
         {
             Fail(1);
             return false;
@@ -210,12 +210,12 @@ mut class ScalarFrontendState
     private mut bool ParseParameter(out int32 type, out Token name, out bool isOut,
         out bool isInitRef)
     {
-        require _tokens.TryGet(_at, out var mode);
+        require _tokens.TryGet(_at, init var mode);
         isOut = mode.Kind == 15;
         // `init` can also be an identifier; recognize the mode only before `ref<`.
         isInitRef = !isOut && IsInitKeyword(mode)
-            && _tokens.TryGet(_at + 1, out var followingRef) && followingRef.Kind == 14
-            && _tokens.TryGet(_at + 2, out var followingLess) && followingLess.Kind == 67;
+            && _tokens.TryGet(_at + 1, init var followingRef) && followingRef.Kind == 14
+            && _tokens.TryGet(_at + 2, init var followingLess) && followingLess.Kind == 67;
         if (isOut)
         {
             _at = _at + 1;
@@ -510,14 +510,14 @@ mut class ScalarFrontendState
 
     private mut bool BeginUnaryOperand(out Token operand, out int32 groups)
     {
-        require _tokens.TryGet(_at, out var first);
+        require _tokens.TryGet(_at, init var first);
         mut Token current = first;
         groups = 0;
         while (current.Kind == 46)
         {
             _at = _at + 1;
             groups = groups + 1;
-            require _tokens.TryGet(_at, out var nested);
+            require _tokens.TryGet(_at, init var nested);
             current = nested;
         }
         operand = current;
@@ -542,13 +542,13 @@ mut class ScalarFrontendState
     private mut bool ParseExpression(int32 expectedType, out ScalarFrontendExpression expression)
     {
         mut int32 depth = 0;
-        require _tokens.TryGet(_at, out var first);
+        require _tokens.TryGet(_at, init var first);
         mut Token next = first;
         while (next.Kind == 46 && !StartsGroupedBinary())
         {
             _at = _at + 1;
             depth = depth + 1;
-            require _tokens.TryGet(_at, out var afterOpen);
+            require _tokens.TryGet(_at, init var afterOpen);
             next = afterOpen;
         }
         if (!ParseExpressionCore(expectedType, out var inner))
@@ -570,21 +570,21 @@ mut class ScalarFrontendState
     {
         mut int32 cursor = _at;
         mut int32 groups = 0;
-        while (_tokens.TryGet(cursor, out var open) && open.Kind == 46)
+        while (_tokens.TryGet(cursor, init var open) && open.Kind == 46)
         {
             groups = groups + 1;
             cursor = cursor + 1;
         }
-        if (_tokens.TryGet(cursor, out var sign) && (sign.Kind == 57 || sign.Kind == 58))
+        if (_tokens.TryGet(cursor, init var sign) && (sign.Kind == 57 || sign.Kind == 58))
         {
             cursor = cursor + 1;
-            while (_tokens.TryGet(cursor, out var signedOpen) && signedOpen.Kind == 46)
+            while (_tokens.TryGet(cursor, init var signedOpen) && signedOpen.Kind == 46)
             {
                 groups = groups + 1;
                 cursor = cursor + 1;
             }
         }
-        if (!_tokens.TryGet(cursor, out var atom)
+        if (!_tokens.TryGet(cursor, init var atom)
             || (atom.Kind != 2 && atom.Kind != 3
                 && atom.Kind != 20 && atom.Kind != 21))
         {
@@ -593,13 +593,13 @@ mut class ScalarFrontendState
         cursor = cursor + 1;
         for (mut int32 index = 0; index < groups; index = index + 1)
         {
-            if (!_tokens.TryGet(cursor, out var close) || close.Kind != 47)
+            if (!_tokens.TryGet(cursor, init var close) || close.Kind != 47)
             {
                 return false;
             }
             cursor = cursor + 1;
         }
-        if (!_tokens.TryGet(cursor, out var operation))
+        if (!_tokens.TryGet(cursor, init var operation))
         {
             return false;
         }
@@ -610,11 +610,11 @@ mut class ScalarFrontendState
     private bool HasOperandKind(int32 index, int32 kind)
     {
         mut int32 cursor = index;
-        while (_tokens.TryGet(cursor, out var token) && token.Kind == 46)
+        while (_tokens.TryGet(cursor, init var token) && token.Kind == 46)
         {
             cursor = cursor + 1;
         }
-        return _tokens.TryGet(cursor, out var operand) && operand.Kind == kind;
+        return _tokens.TryGet(cursor, init var operand) && operand.Kind == kind;
     }
 
     private bool IsScalarBinaryOperator(int32 kind)
@@ -629,13 +629,13 @@ mut class ScalarFrontendState
         mut int32 at = cursor;
         for (mut int32 index = 0; index < groups; index = index + 1)
         {
-            if (!_tokens.TryGet(at, out var close) || close.Kind != 47)
+            if (!_tokens.TryGet(at, init var close) || close.Kind != 47)
             {
                 return false;
             }
             at = at + 1;
         }
-        return _tokens.TryGet(at, out var following)
+        return _tokens.TryGet(at, init var following)
             && IsScalarBinaryOperator(following.Kind);
     }
 
@@ -643,19 +643,19 @@ mut class ScalarFrontendState
     {
         mut int32 cursor = _at + 1;
         mut int32 groups = 0;
-        while (_tokens.TryGet(cursor, out var open) && open.Kind == 46)
+        while (_tokens.TryGet(cursor, init var open) && open.Kind == 46)
         {
             cursor = cursor + 1;
             groups = groups + 1;
         }
-        return groups > 0 && _tokens.TryGet(cursor, out var number)
+        return groups > 0 && _tokens.TryGet(cursor, init var number)
             && number.Kind == 3 && HasBinaryAfterOperand(cursor + 1,
                 groups + outerGroups);
     }
 
     private mut bool ParseExpressionCore(int32 expectedType, out ScalarFrontendExpression expression)
     {
-        require _tokens.TryGet(_at, out var first);
+        require _tokens.TryGet(_at, init var first);
         mut Token literal = first;
         mut int32 prefixGroups = 0;
         if (first.Kind == 46)
@@ -667,11 +667,11 @@ mut class ScalarFrontendState
         {
             _at = _at + 1;
             mut int32 cursor = _at;
-            while (_tokens.TryGet(cursor, out var open) && open.Kind == 46)
+            while (_tokens.TryGet(cursor, init var open) && open.Kind == 46)
             {
                 cursor = cursor + 1;
             }
-            if (cursor > _at && _tokens.TryGet(cursor, out var firstOperand)
+            if (cursor > _at && _tokens.TryGet(cursor, init var firstOperand)
                 && (firstOperand.Kind == 2 || firstOperand.Kind == 20
                     || firstOperand.Kind == 21 || firstOperand.Kind == 3
                     || firstOperand.Kind == 57 || firstOperand.Kind == 58
@@ -703,7 +703,7 @@ mut class ScalarFrontendState
                 if (IsScalarFrontendNegatableBinary(nested, nestedBase, nestedGroup,
                     nestedKind, comparisonOperation))
                 {
-                    require _tokens.TryGet(_at - 1, out var close);
+                    require _tokens.TryGet(_at - 1, init var close);
                     require SourceRange.TryCreate(literal.Range.Start,
                         close.Range.End - literal.Range.Start, init var nestedSpan);
                     require ScalarFrontendExpression.TryCreate(5,
@@ -719,7 +719,7 @@ mut class ScalarFrontendState
                                 || nested.RightParameter == 21))
                         || (nestedBase >= 2000 && nestedBase < 4000)))
                 {
-                    require _tokens.TryGet(_at - 1, out var close);
+                    require _tokens.TryGet(_at - 1, init var close);
                     require SourceRange.TryCreate(literal.Range.Start,
                         close.Range.End - literal.Range.Start, init var composedSpan);
                     require ScalarFrontendExpression.TryCreate(5,
@@ -776,11 +776,11 @@ mut class ScalarFrontendState
                 return false;
             }
             mut int32 cursor = _at;
-            while (_tokens.TryGet(cursor, out var open) && open.Kind == 46)
+            while (_tokens.TryGet(cursor, init var open) && open.Kind == 46)
             {
                 cursor = cursor + 1;
             }
-            if (cursor > _at && _tokens.TryGet(cursor, out var firstOperand)
+            if (cursor > _at && _tokens.TryGet(cursor, init var firstOperand)
                 && (firstOperand.Kind == 2 || firstOperand.Kind == 3
                     || firstOperand.Kind == 57 || firstOperand.Kind == 58
                     || firstOperand.Kind == 63))
@@ -812,7 +812,7 @@ mut class ScalarFrontendState
                     && ((kind >= 57 && kind <= 61)
                         || kind == 71 || kind == 73 || kind == 75))
                 {
-                    require _tokens.TryGet(_at - 1, out var close);
+                    require _tokens.TryGet(_at - 1, init var close);
                     require SourceRange.TryCreate(literal.Range.Start,
                         close.Range.End - literal.Range.Start, init var binarySpan);
                     require ScalarFrontendExpression.TryCreate(expectedType,
@@ -827,7 +827,7 @@ mut class ScalarFrontendState
                         || (firstOperand.Kind == 58 && nested.Operation == 3)
                         || nested.Operation == 657 || nested.Operation == 658))
                 {
-                    require _tokens.TryGet(_at - 1, out var close);
+                    require _tokens.TryGet(_at - 1, init var close);
                     require SourceRange.TryCreate(literal.Range.Start,
                         close.Range.End - literal.Range.Start, init var composedSpan);
                     require ScalarFrontendExpression.TryCreate(expectedType,
@@ -841,7 +841,7 @@ mut class ScalarFrontendState
                     && nested.Operation % 40000 >= 6000
                     && nested.Operation % 40000 < 10000)
                 {
-                    require _tokens.TryGet(_at - 1, out var close);
+                    require _tokens.TryGet(_at - 1, init var close);
                     require SourceRange.TryCreate(literal.Range.Start,
                         close.Range.End - literal.Range.Start, init var composedSpan);
                     require ScalarFrontendExpression.TryCreate(expectedType,
@@ -854,7 +854,7 @@ mut class ScalarFrontendState
                     && nested.Operation % 40000 >= 4000
                     && nested.Operation % 40000 < 6000)
                 {
-                    require _tokens.TryGet(_at - 1, out var close);
+                    require _tokens.TryGet(_at - 1, init var close);
                     require SourceRange.TryCreate(literal.Range.Start,
                         close.Range.End - literal.Range.Start, init var composedSpan);
                     require ScalarFrontendExpression.TryCreate(expectedType,
@@ -907,7 +907,7 @@ mut class ScalarFrontendState
             return true;
         }
         if ((literal.Kind == 57 || literal.Kind == 58)
-            && _tokens.TryGet(_at + 1, out var signedOpen)
+            && _tokens.TryGet(_at + 1, init var signedOpen)
             && signedOpen.Kind == 46
             && !StartsSignedGroupedBinary(prefixGroups))
         {
@@ -922,11 +922,11 @@ mut class ScalarFrontendState
             int32 signAt = _at;
             _at = _at + 1;
             mut int32 cursor = _at;
-            while (_tokens.TryGet(cursor, out var open) && open.Kind == 46)
+            while (_tokens.TryGet(cursor, init var open) && open.Kind == 46)
             {
                 cursor = cursor + 1;
             }
-            if (_tokens.TryGet(cursor, out var firstOperand)
+            if (_tokens.TryGet(cursor, init var firstOperand)
                 && (firstOperand.Kind == 2 || firstOperand.Kind == 3
                     || firstOperand.Kind == 57 || firstOperand.Kind == 58
                     || firstOperand.Kind == 63))
@@ -957,7 +957,7 @@ mut class ScalarFrontendState
                     && ((kind >= 57 && kind <= 61)
                         || kind == 71 || kind == 73 || kind == 75))
                 {
-                    require _tokens.TryGet(_at - 1, out var close);
+                    require _tokens.TryGet(_at - 1, init var close);
                     require SourceRange.TryCreate(literal.Range.Start,
                         close.Range.End - literal.Range.Start, init var binarySpan);
                     mut int32 offset = 6000;
@@ -976,7 +976,7 @@ mut class ScalarFrontendState
                             && nested.LeftParameter >= 1 && nested.RightParameter == 0)
                         || nested.Operation == 163))
                 {
-                    require _tokens.TryGet(_at - 1, out var close);
+                    require _tokens.TryGet(_at - 1, init var close);
                     require SourceRange.TryCreate(literal.Range.Start,
                         close.Range.End - literal.Range.Start, init var composedSpan);
                     mut int32 offset = 12000;
@@ -995,7 +995,7 @@ mut class ScalarFrontendState
                     && nested.Operation % 40000 >= 4000
                     && nested.Operation % 40000 < 6000)
                 {
-                    require _tokens.TryGet(_at - 1, out var close);
+                    require _tokens.TryGet(_at - 1, init var close);
                     require SourceRange.TryCreate(literal.Range.Start,
                         close.Range.End - literal.Range.Start, init var composedSpan);
                     mut int32 offset = 26000;
@@ -1013,7 +1013,7 @@ mut class ScalarFrontendState
             _at = signAt;
         }
         if ((literal.Kind == 57 || literal.Kind == 58)
-            && _tokens.TryGet(_at + 1, out var unaryFirst)
+            && _tokens.TryGet(_at + 1, init var unaryFirst)
             && (unaryFirst.Kind == 2
                 || (unaryFirst.Kind == 46
                     && !StartsSignedGroupedBinary(prefixGroups))))
@@ -1079,7 +1079,7 @@ mut class ScalarFrontendState
             return true;
         }
         if (literal.Kind == 57
-            && _tokens.TryGet(_at + 1, out var plusOperand) && plusOperand.Kind == 3
+            && _tokens.TryGet(_at + 1, init var plusOperand) && plusOperand.Kind == 3
             && !HasBinaryAfterOperand(_at + 2, prefixGroups))
         {
             if ((expectedType < 1 || expectedType > 4)
@@ -1105,7 +1105,7 @@ mut class ScalarFrontendState
         bool negative = literal.Kind == 58;
         bool positive = literal.Kind == 57;
         mut bool signedGrouped = false;
-        if ((negative || positive) && _tokens.TryGet(_at + 1, out var nextNumber)
+        if ((negative || positive) && _tokens.TryGet(_at + 1, init var nextNumber)
             && nextNumber.Kind == 3)
         {
             numberToken = nextNumber;
@@ -1130,7 +1130,7 @@ mut class ScalarFrontendState
             {
                 return false;
             }
-            require _tokens.TryGet(_at, out var following);
+            require _tokens.TryGet(_at, init var following);
             if (expectedType == 5
                 && following.Kind >= 65 && following.Kind <= 70)
             {
@@ -1194,7 +1194,7 @@ mut class ScalarFrontendState
                 return false;
             }
             if (!negative && expectedType >= 1 && expectedType <= 2
-                && _tokens.TryGet(_at, out var pairOperator)
+                && _tokens.TryGet(_at, init var pairOperator)
                 && ((pairOperator.Kind >= 57 && pairOperator.Kind <= 61)
                     || pairOperator.Kind == 71 || pairOperator.Kind == 73 || pairOperator.Kind == 75)
                 && HasOperandKind(_at + 1, 3))
@@ -1214,7 +1214,7 @@ mut class ScalarFrontendState
                 expression = foldedPair;
                 return true;
             }
-            if (_tokens.TryGet(_at, out var next)
+            if (_tokens.TryGet(_at, init var next)
                 && ((next.Kind >= 57 && next.Kind <= 61)
                     || next.Kind == 71 || next.Kind == 73 || next.Kind == 75))
             {
@@ -1273,7 +1273,7 @@ mut class ScalarFrontendState
             {
                 return false;
             }
-            if (_tokens.TryGet(_at, out var booleanOperator)
+            if (_tokens.TryGet(_at, init var booleanOperator)
                 && ((booleanOperator.Kind >= 71 && booleanOperator.Kind <= 75)
                     || booleanOperator.Kind == 65 || booleanOperator.Kind == 66))
             {
@@ -1346,7 +1346,7 @@ mut class ScalarFrontendState
         mut int32 operation = 0;
         mut int32 rightIndex = 0;
         mut int32 end = leftEnd;
-        require _tokens.TryGet(_at, out var next);
+        require _tokens.TryGet(_at, init var next);
         if ((next.Kind >= 57 && next.Kind <= 61)
             || (next.Kind >= 65 && next.Kind <= 70)
             || (next.Kind >= 71 && next.Kind <= 75))
@@ -1360,13 +1360,13 @@ mut class ScalarFrontendState
             mut int32 numericGroups = groups;
             if (right.Kind == 57 || right.Kind == 58)
             {
-                if (_tokens.TryGet(_at + 1, out var signedNumber)
+                if (_tokens.TryGet(_at + 1, init var signedNumber)
                     && signedNumber.Kind == 3)
                 {
                     number = signedNumber;
                     unaryKind = right.Kind;
                 }
-                else if (_tokens.TryGet(_at + 1, out var open) && open.Kind == 46)
+                else if (_tokens.TryGet(_at + 1, init var open) && open.Kind == 46)
                 {
                     _at = _at + 1;
                     require BeginUnaryOperand(out var groupedNumber, out var signedGroups);
@@ -1507,7 +1507,7 @@ mut class ScalarFrontendState
     private mut bool ParseDeclarationEffects()
     {
         mut int32 effects = 0;
-        require _tokens.TryGet(_at, out var firstAttribute);
+        require _tokens.TryGet(_at, init var firstAttribute);
         mut Token attribute = firstAttribute;
         while (attribute.Kind == 50)
         {
@@ -1522,7 +1522,8 @@ mut class ScalarFrontendState
                 return false;
             }
             effects = effects | flag;
-            require _tokens.TryGet(_at, out attribute);
+            require _tokens.TryGet(_at, init var followingAttribute);
+            attribute = followingAttribute;
         }
         Host.Frontend[2] = effects;
         return true;
@@ -1536,7 +1537,7 @@ mut class ScalarFrontendState
         }
         mut bool sawVisibility = false;
         mut bool sawUnsafe = false;
-        while (_tokens.TryGet(_at, out var modifier))
+        while (_tokens.TryGet(_at, init var modifier))
         {
             if (modifier.Kind == 7 || modifier.Kind == 8)
             {
@@ -1566,7 +1567,7 @@ mut class ScalarFrontendState
             }
         }
         if (sawUnsafe) { Host.Frontend[2] = Host.Frontend[2] | 8; }
-        require _tokens.TryGet(_at, out var returnToken);
+        require _tokens.TryGet(_at, init var returnToken);
         if (!Take(returnToken.Kind == 11 ? 11 : 2, out var typeToken))
         {
             return false;
@@ -1591,7 +1592,7 @@ mut class ScalarFrontendState
             FailAt(1, openParameters.Range);
             return false;
         }
-        require _tokens.TryGet(_at, out var next);
+        require _tokens.TryGet(_at, init var next);
         if (next.Kind != 47)
         {
             if (!ParseParameter(out var firstType, out var first, out var firstIsOut,
@@ -1604,7 +1605,7 @@ mut class ScalarFrontendState
             if (firstIsOut) { _outParameterMask = _outParameterMask | 1; }
             if (firstIsInitRef) { _outParameterMask = _outParameterMask | 8; }
             _parameterCount = 1;
-            require _tokens.TryGet(_at, out var comma);
+            require _tokens.TryGet(_at, init var comma);
             if (comma.Kind == 53)
             {
                 _at = _at + 1;
@@ -1618,7 +1619,7 @@ mut class ScalarFrontendState
                 if (secondIsOut) { _outParameterMask = _outParameterMask | 2; }
                 if (secondIsInitRef) { _outParameterMask = _outParameterMask | 16; }
                 _parameterCount = 2;
-                require _tokens.TryGet(_at, out var thirdComma);
+                require _tokens.TryGet(_at, init var thirdComma);
                 if (thirdComma.Kind == 53)
                 {
                     _at = _at + 1;
@@ -1700,7 +1701,7 @@ mut class ScalarFrontendState
 
     private int32 TreeStatementEnd()
     {
-        require _tokens.TryGet(_at - 1, out var last);
+        require _tokens.TryGet(_at - 1, init var last);
         return last.Range.End;
     }
 
@@ -1713,7 +1714,7 @@ mut class ScalarFrontendState
 
     private mut bool ParseTreeClauseStatement(bool semicolon)
     {
-        require _tokens.TryGet(_at, out var first);
+        require _tokens.TryGet(_at, init var first);
         if (first.Kind == 81)
         {
             if (!semicolon)
@@ -1724,9 +1725,9 @@ mut class ScalarFrontendState
             return ParseTreeDiscard(first);
         }
         if (first.Kind == 2
-            && _tokens.TryGet(_at + 1, out var lifetimeEquals)
+            && _tokens.TryGet(_at + 1, init var lifetimeEquals)
             && lifetimeEquals.Kind == 64
-            && _tokens.TryGet(_at + 2, out var lifetimeValue)
+            && _tokens.TryGet(_at + 2, init var lifetimeValue)
             && lifetimeValue.Kind == 81)
         {
             if (!TryResolveParameter(first, out var slot, out var lifetimeType))
@@ -1751,7 +1752,7 @@ mut class ScalarFrontendState
             return AddTreeStatement(24, slot, -1, first.Range.Start, TreeStatementEnd());
         }
         if (first.Kind == 2
-            && _tokens.TryGet(_at + 1, out var callOpen)
+            && _tokens.TryGet(_at + 1, init var callOpen)
             && callOpen.Kind == 46)
         {
             if (!ParseTreeExpression(0, 1, 0, out var call))
@@ -1770,7 +1771,7 @@ mut class ScalarFrontendState
             return AddTreeStatement(37, 0, call, first.Range.Start, TreeStatementEnd());
         }
         if (first.Kind == 2
-            && _tokens.TryGet(_at + 1, out var equals)
+            && _tokens.TryGet(_at + 1, init var equals)
             && (equals.Kind == 64 || equals.Kind >= 91 && equals.Kind <= 101))
         {
             mut int32 slot = 0;
@@ -1834,14 +1835,14 @@ mut class ScalarFrontendState
             return AddTreeStatement(2, slot, value, first.Range.Start, TreeStatementEnd());
         }
         if (first.Kind == 46 || first.Kind == 86 || first.Kind == 87
-            || first.Kind == 2 && _tokens.TryGet(_at + 1, out var postfix)
+            || first.Kind == 2 && _tokens.TryGet(_at + 1, init var postfix)
                 && (postfix.Kind == 86 || postfix.Kind == 87))
         {
             if (!ParseTreeExpression(0, 1, 0, out var update))
             {
                 return false;
             }
-            if (_tokens.TryGet(_at, out var compound)
+            if (_tokens.TryGet(_at, init var compound)
                 && compound.Kind >= 91 && compound.Kind <= 101)
             {
                 if (!TryTreeUpdatePlace(update))
@@ -1899,7 +1900,7 @@ mut class ScalarFrontendState
             mutable = true;
             _at = _at + 1;
         }
-        require _tokens.TryGet(_at, out var declaredType);
+        require _tokens.TryGet(_at, init var declaredType);
         mut int32 type = 0;
         if (constant && declaredType.Kind == 12)
         {
@@ -2070,7 +2071,7 @@ mut class ScalarFrontendState
 
     private mut bool ParseTreeForClause(bool initializer)
     {
-        require _tokens.TryGet(_at, out var first);
+        require _tokens.TryGet(_at, init var first);
         if (first.Kind == 52 || first.Kind == 47)
         {
             return AddTreeStatement(13, 0, -1, first.Range.Start, first.Range.End);
@@ -2081,7 +2082,7 @@ mut class ScalarFrontendState
             return false;
         }
         if (!initializer && (first.Kind == 12 || first.Kind == 13
-            || first.Kind == 2 && _tokens.TryGet(_at + 1, out var following)
+            || first.Kind == 2 && _tokens.TryGet(_at + 1, init var following)
                 && following.Kind == 2))
         {
             FailAt(1, first.Range);
@@ -2092,11 +2093,11 @@ mut class ScalarFrontendState
 
     private mut bool ParseTreeStructuredBody(int32 depth, int32 nearestLoop)
     {
-        require _tokens.TryGet(_at, out var first);
+        require _tokens.TryGet(_at, init var first);
         mut Token next = first;
         while (next.Kind != 49 && _error == 0)
         {
-            if (next.Kind == 2 && _tokens.TryGet(_at + 1, out var colon)
+            if (next.Kind == 2 && _tokens.TryGet(_at + 1, init var colon)
                 && colon.Kind == 55)
             {
                 if (!ParseTreeNamedLoop(depth, next)) { return false; }
@@ -2147,13 +2148,13 @@ mut class ScalarFrontendState
                 if (!ParseTreeTerminatedStatement(next)) { return false; }
             }
             else if (next.Kind == 81 || next.Kind == 12 || next.Kind == 13
-                || next.Kind == 2 && _tokens.TryGet(_at + 1, out var following)
+                || next.Kind == 2 && _tokens.TryGet(_at + 1, init var following)
                     && (following.Kind == 2 || following.Kind == 46))
             {
                 if (!ParseTreeStatement()) { return false; }
             }
             else if (next.Kind == 2
-                && _tokens.TryGet(_at + 1, out var equals)
+                && _tokens.TryGet(_at + 1, init var equals)
                 && (equals.Kind == 64 || equals.Kind >= 91 && equals.Kind <= 101
                     || equals.Kind == 86 || equals.Kind == 87)
                 || next.Kind == 46 || next.Kind == 86 || next.Kind == 87)
@@ -2165,7 +2166,8 @@ mut class ScalarFrontendState
                 FailAt(1, next.Range);
                 return false;
             }
-            require _tokens.TryGet(_at, out next);
+            require _tokens.TryGet(_at, init var followingToken);
+            next = followingToken;
         }
         return true;
     }
@@ -2197,14 +2199,15 @@ mut class ScalarFrontendState
     {
         _at = _at + 1;
         mut int32 groups = 0;
-        require _tokens.TryGet(_at, out var first);
+        require _tokens.TryGet(_at, init var first);
         mut Token next = first;
         while (next.Kind == 46)
         {
             if (groups == 16) { FailAt(1, next.Range); return false; }
             groups = groups + 1;
             _at = _at + 1;
-            require _tokens.TryGet(_at, out next);
+            require _tokens.TryGet(_at, init var followingToken);
+            next = followingToken;
         }
         for (mut int32 index = 0; index < groups; index = index + 1)
         {
@@ -2238,7 +2241,7 @@ mut class ScalarFrontendState
             int32 kind = Host.Frontend[offset];
             if (kind < 16 || kind > 18 || Host.Frontend[offset + 1] != 0) { continue; }
             mut int32 index = 0;
-            while (_tokens.TryGet(index, out var token))
+            while (_tokens.TryGet(index, init var token))
             {
                 if (token.Range.Start == Host.Frontend[offset + 3])
                 {
@@ -2260,7 +2263,7 @@ mut class ScalarFrontendState
             return false;
         }
         _at = _at + 2;
-        require _tokens.TryGet(_at, out var keyword);
+        require _tokens.TryGet(_at, init var keyword);
         if (keyword.Kind == 18) { return ParseTreeWhile(depth, name.Range.Start); }
         if (keyword.Kind == 83) { return ParseTreeDo(depth, name.Range.Start); }
         if (keyword.Kind == 31) { return ParseTreeFor(depth, name.Range.Start); }
@@ -2271,7 +2274,7 @@ mut class ScalarFrontendState
     private mut bool ParseTreeTransfer(Token keyword, int32 nearest)
     {
         _at = _at + 1;
-        require _tokens.TryGet(_at, out var next);
+        require _tokens.TryGet(_at, init var next);
         mut int32 target = nearest;
         mut int32 kind = keyword.Kind == 33 ? 6 : 7;
         if (next.Kind == 2)
@@ -2291,7 +2294,7 @@ mut class ScalarFrontendState
 
     private int32 TreeReturnEnd()
     {
-        require _tokens.TryGet(_at - 1, out var semicolon);
+        require _tokens.TryGet(_at - 1, init var semicolon);
         return semicolon.Range.End;
     }
 
@@ -2524,13 +2527,13 @@ mut class ScalarFrontendState
 
     private mut bool ParseTreeStructuredCallableBody()
     {
-        require _tokens.TryGet(_at, out var body);
+        require _tokens.TryGet(_at, init var body);
         if (body.Kind == 82)
         {
             if (_structuredReturnType != 0) { FailAt(1, body.Range); return false; }
             _hasStructuredStatement = true;
             _at = _at + 1;
-            require _tokens.TryGet(_at, out var statement);
+            require _tokens.TryGet(_at, init var statement);
             if (statement.Kind == 41)
             {
                 if (!ParseTreeTerminatedStatement(statement)) { return false; }
@@ -2600,7 +2603,7 @@ mut class ScalarFrontendState
         }
         FinishTreeBody(header, enclosingLocals, endTrue.Range.End);
         mut int32 end = endTrue.Range.End;
-        require _tokens.TryGet(_at, out var next);
+        require _tokens.TryGet(_at, init var next);
         if (next.Kind == 17)
         {
             if (_statementCount >= 12 || !Take(17, out var otherwise))
@@ -2609,7 +2612,7 @@ mut class ScalarFrontendState
                 return false;
             }
             int32 marker = _statementCount;
-            require _tokens.TryGet(_at, out var following);
+            require _tokens.TryGet(_at, init var following);
             if (following.Kind == 16)
             {
                 if (!AddTreeStatement(23, 0, -1, otherwise.Range.Start, following.Range.Start)
@@ -2617,7 +2620,7 @@ mut class ScalarFrontendState
                 {
                     return false;
                 }
-                require _tokens.TryGet(_at - 1, out var close);
+                require _tokens.TryGet(_at - 1, init var close);
                 end = close.Range.End;
             }
             else
@@ -2657,7 +2660,7 @@ mut class ScalarFrontendState
             return false;
         }
         FinishTreeBody(header, enclosingLocals, endBody.Range.End);
-        if (_tokens.TryGet(_at, out var following) && following.Kind == 43)
+        if (_tokens.TryGet(_at, init var following) && following.Kind == 43)
         {
             Host.Frontend[332 + header * 5] = 32;
             int32 marker = _statementCount;
@@ -2673,7 +2676,7 @@ mut class ScalarFrontendState
                 return false;
             }
             FinishTreeBody(marker, enclosingLocals, endCatch.Range.End);
-            if (_tokens.TryGet(_at, out var followingCleanup) && followingCleanup.Kind == 44)
+            if (_tokens.TryGet(_at, init var followingCleanup) && followingCleanup.Kind == 44)
             {
                 if (_statementCount >= 12
                     || !Take(44, out var finallyKeyword)
@@ -2766,7 +2769,7 @@ mut class ScalarFrontendState
 
     private mut bool ParseTreeStaticProof(int32 depth)
     {
-        if (!Take(10, out var keyword) || !_tokens.TryGet(_at, out var proofKeyword))
+        if (!Take(10, out var keyword) || !_tokens.TryGet(_at, init var proofKeyword))
         {
             return false;
         }
@@ -2864,7 +2867,7 @@ mut class ScalarFrontendState
         {
             return false;
         }
-        require _tokens.TryGet(_at, out var next);
+        require _tokens.TryGet(_at, init var next);
         if (next.Kind != 52)
         {
             if (!ParseTreeExpression(5, 1, 0, out var condition))
@@ -2929,12 +2932,12 @@ mut class ScalarFrontendState
         {
             int32 start = TreeWord(node, 2);
             mut int32 tokenIndex = 0;
-            while (_tokens.TryGet(tokenIndex, out var token)
+            while (_tokens.TryGet(tokenIndex, init var token)
                 && token.Range.Start != start)
             {
                 tokenIndex = tokenIndex + 1;
             }
-            if (!_tokens.TryGet(tokenIndex, out var literal))
+            if (!_tokens.TryGet(tokenIndex, init var literal))
             {
                 return false;
             }
@@ -3052,7 +3055,7 @@ mut class ScalarFrontendState
                 return false;
             }
         }
-        require _tokens.TryGet(_at + 1, out var opening);
+        require _tokens.TryGet(_at + 1, init var opening);
         if (!TokensAttach(functionName, opening))
         {
             FailAt(1, opening.Range);
@@ -3074,9 +3077,9 @@ mut class ScalarFrontendState
                 return false;
             }
             mut int32 parameter = nextPositionalParameter;
-            if (_tokens.TryGet(_at, out var argumentName)
+            if (_tokens.TryGet(_at, init var argumentName)
                 && argumentName.Kind == 2
-                && _tokens.TryGet(_at + 1, out var labelColon)
+                && _tokens.TryGet(_at + 1, init var labelColon)
                 && labelColon.Kind == 55)
             {
                 if (!TokensAttach(argumentName, labelColon))
@@ -3109,7 +3112,7 @@ mut class ScalarFrontendState
             {
                 if (hasOutOfPositionNamedArgument)
                 {
-                    require _tokens.TryGet(_at, out var positionalAfterNamed);
+                    require _tokens.TryGet(_at, init var positionalAfterNamed);
                     FailAt(1, positionalAfterNamed.Range);
                     return false;
                 }
@@ -3118,7 +3121,7 @@ mut class ScalarFrontendState
             if (parameter < 0 || parameter >= argumentCount
                 || (assignedParameters & (1 << parameter)) != 0)
             {
-                require _tokens.TryGet(_at, out var duplicateArgument);
+                require _tokens.TryGet(_at, init var duplicateArgument);
                 FailAt(1, duplicateArgument.Range);
                 return false;
             }
@@ -3154,7 +3157,7 @@ mut class ScalarFrontendState
             mut int32 argument = -1;
             if (outputMode != 0)
             {
-                if (!_tokens.TryGet(_at, out var outputTarget))
+                if (!_tokens.TryGet(_at, init var outputTarget))
                 {
                     return false;
                 }
@@ -3172,7 +3175,7 @@ mut class ScalarFrontendState
                     return false;
                 }
                 mut bool newLocal = false;
-                if (_tokens.TryGet(_at, out var targetKind) && targetKind.Kind == 12)
+                if (_tokens.TryGet(_at, init var targetKind) && targetKind.Kind == 12)
                 {
                     _at = _at + 1;
                     newLocal = true;
@@ -3342,9 +3345,9 @@ mut class ScalarFrontendState
             Fail(1);
             return false;
         }
-        require _tokens.TryGet(_at, out var token);
+        require _tokens.TryGet(_at, init var token);
         if (token.Kind == 76
-            && _tokens.TryGet(_at + 1, out var unsafeOpening)
+            && _tokens.TryGet(_at + 1, init var unsafeOpening)
             && unsafeOpening.Kind == 46)
         {
             _at = _at + 2;
@@ -3357,7 +3360,7 @@ mut class ScalarFrontendState
                 unsafeClose.Range.End, operand, -1, 0, 0, out node);
         }
         if (token.Kind == 2
-            && _tokens.TryGet(_at + 1, out var opening)
+            && _tokens.TryGet(_at + 1, init var opening)
             && opening.Kind == 46)
         {
             if (!TokensAttach(token, opening))
@@ -3428,7 +3431,7 @@ mut class ScalarFrontendState
             {
                 return false;
             }
-            if (_tokens.TryGet(_at, out var update)
+            if (_tokens.TryGet(_at, init var update)
                 && (update.Kind == 86 || update.Kind == 87))
             {
                 _at = _at + 1;
@@ -3465,7 +3468,7 @@ mut class ScalarFrontendState
                 operandExpected = 0;
             }
             if (token.Kind == 58
-                && _tokens.TryGet(_at, out var directlySigned)
+                && _tokens.TryGet(_at, init var directlySigned)
                 && directlySigned.Kind == 3)
             {
                 operandExpected = 0;
@@ -3514,7 +3517,7 @@ mut class ScalarFrontendState
             {
                 return false;
             }
-            if (_tokens.TryGet(_at, out var update)
+            if (_tokens.TryGet(_at, init var update)
                 && (update.Kind == 86 || update.Kind == 87))
             {
                 _at = _at + 1;
@@ -3575,10 +3578,10 @@ mut class ScalarFrontendState
         {
             return false;
         }
-        while (_tokens.TryGet(_at, out var operation))
+        while (_tokens.TryGet(_at, init var operation))
         {
             bool initializationTest = IsInitializationTestOperator(operation)
-                && _tokens.TryGet(_at + 1, out var initialization)
+                && _tokens.TryGet(_at + 1, init var initialization)
                 && IsInitKeyword(initialization);
             mut int32 rank = TreePrecedence(operation.Kind);
             if (initializationTest) { rank = 6; }
@@ -3663,7 +3666,7 @@ mut class ScalarFrontendState
             }
             left = binary;
         }
-        if (precedence == 1 && _tokens.TryGet(_at, out var question)
+        if (precedence == 1 && _tokens.TryGet(_at, init var question)
             && question.Kind == 56)
         {
             if (TreeWord(left, 1) != 5)
@@ -3785,7 +3788,7 @@ mut class ScalarFrontendState
         {
             returnType = selected;
             name = foundName;
-            require _tokens.TryGet(_at, out var body);
+            require _tokens.TryGet(_at, init var body);
             if (body.Kind == 82)
             {
                 expressionBody = true;
@@ -3804,7 +3807,7 @@ mut class ScalarFrontendState
             }
             else if (Take(48, out var openBody))
             {
-                require _tokens.TryGet(_at, out var firstStatement);
+                require _tokens.TryGet(_at, init var firstStatement);
                 mut Token next = firstStatement;
                 while ((next.Kind == 12 || next.Kind == 13
                     || next.Kind == 2 || next.Kind == 18 || next.Kind == 16)
@@ -3813,15 +3816,16 @@ mut class ScalarFrontendState
                     if (next.Kind == 16)
                     {
                         mut int32 cursor = _at + 1;
-                        require _tokens.TryGet(cursor, out var firstProbe);
+                        require _tokens.TryGet(cursor, init var firstProbe);
                         mut Token probe = firstProbe;
                         while (probe.Kind != 0 && probe.Kind != 48)
                         {
                             cursor = cursor + 1;
-                            require _tokens.TryGet(cursor, out probe);
+                            require _tokens.TryGet(cursor, init var followingProbe);
+                            probe = followingProbe;
                         }
                         if (probe.Kind == 48
-                            && _tokens.TryGet(cursor + 1, out var arm)
+                            && _tokens.TryGet(cursor + 1, init var arm)
                             && arm.Kind == 19)
                         {
                             break;
@@ -3835,7 +3839,8 @@ mut class ScalarFrontendState
                     {
                         break;
                     }
-                    require _tokens.TryGet(_at, out next);
+                    require _tokens.TryGet(_at, init var followingToken);
+                    next = followingToken;
                 }
                 if (_error == 0 && next.Kind == 16)
                 {
@@ -3858,7 +3863,7 @@ mut class ScalarFrontendState
                         && Take(49, out var closeTrue))
                     {
                         whenTrue = first;
-                        require _tokens.TryGet(_at, out var following);
+                        require _tokens.TryGet(_at, init var following);
                         if (following.Kind == 17)
                         {
                             _at = _at + 1;
@@ -3944,7 +3949,7 @@ mut class ScalarFrontendState
         {
             returnType = selectedReturnType;
             name = foundName;
-            require _tokens.TryGet(_at, out var bodyNext);
+            require _tokens.TryGet(_at, init var bodyNext);
             if (bodyNext.Kind == 16)
             {
                 hasCondition = true;
@@ -3967,7 +3972,7 @@ mut class ScalarFrontendState
                     && Take(49, out var closeTrue))
                 {
                     whenTrue = firstReturn;
-                    require _tokens.TryGet(_at, out var followingTrue);
+                    require _tokens.TryGet(_at, init var followingTrue);
                     if (followingTrue.Kind == 17)
                     {
                         _at = _at + 1;
@@ -4045,7 +4050,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     int32 count = tokens.GetCount();
     if (count > 64)
     {
-        require tokens.TryGet(64, out var excess);
+        require tokens.TryGet(64, init var excess);
         return TryCreateScalarFrontendError(1, excess.Range, out result);
     }
     var spacing = tokens.GetScalarOperatorSpacingError();
@@ -4068,7 +4073,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     // into the existing bounded chain, without rescanning source or integer text.
     for (mut int32 at = 0; at < count; at = at + 1)
     {
-        require tokens.TryGet(at, out var token);
+        require tokens.TryGet(at, init var token);
         require chain.TryAppend(token.Kind, token.Range.Start, token.Range.Length);
     }
     if (!ScalarFrontendState.TryCreate(chain, empty, out var state))
@@ -4121,7 +4126,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
         mut int32 returnCount = 0;
         for (mut int32 index = 0; index < count; index = index + 1)
         {
-            require chain.TryGet(index, out var token);
+            require chain.TryGet(index, init var token);
             if (token.Kind == 48) { bodyDepth = bodyDepth + 1; }
             if (token.Kind == 49) { bodyDepth = bodyDepth - 1; }
             if (token.Kind == 19)
@@ -4137,9 +4142,9 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     }
     for (mut int32 index = 0; index < count; index = index + 1)
     {
-        require chain.TryGet(index, out var token);
+        require chain.TryGet(index, init var token);
         if (IsScalarFrontendTreeMarker(token.Kind)
-            || (token.Kind == 2 && chain.TryGet(index + 1, out var opener)
+            || (token.Kind == 2 && chain.TryGet(index + 1, init var opener)
                 && opener.Kind == 46 && TryGetScalarType(token, out var conversionType)))
         {
             result = modern;

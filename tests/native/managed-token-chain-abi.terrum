@@ -9,7 +9,7 @@ public int32 ChainAllocationFailure() {
     }
     require chain.GetCount() == 1;
     require chain.GetVersion() == 1;
-    require chain.TryGet(0, out var token);
+    require chain.TryGet(0, init var token);
     require token.Kind == 1 && token.Range.Start == 0 && token.Range.Length == 3;
     require token.Range.GetEnd() == 3;
     require ManagedHeap.Collect() == 0;
@@ -21,14 +21,14 @@ public int32 ChainReuse() {
     require chain.TryAppend(1, 0, 2);
     require chain.TryAppend(2, 2, 3);
     require chain.TryAppend(3, 5, 0);
-    require chain.TryGet(1, out var snapshot);
+    require chain.TryGet(1, init var snapshot);
     require chain.TryClear();
     require ManagedHeap.Collect() == 3;
     require snapshot.Kind == 2 && snapshot.Range.Start == 2 && snapshot.Range.Length == 3;
     require snapshot.Range.GetEnd() == 5;
     require chain.TryAppend(4, 0, 7);
     require chain.TryAppend(5, 7, 2);
-    require chain.TryGet(1, out var next);
+    require chain.TryGet(1, init var next);
     require next.Kind == 5 && next.Range.Start == 7 && next.Range.Length == 2;
     require chain.GetCount() == 2;
     require chain.GetVersion() == 6;

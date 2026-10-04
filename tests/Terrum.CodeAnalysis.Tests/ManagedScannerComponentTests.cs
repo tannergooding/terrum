@@ -88,11 +88,11 @@ public sealed partial class ManagedScannerComponentTests
             for (var index = 0; index < expected.Length; index++)
             {
                 _ = source.Append(CultureInfo.InvariantCulture,
-                    $"if (!chain.TryGet({index}, out var token{index}) || token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start} || token{index}.Range.Length != {expected[index].Span.Length}) {{ return 4; }}");
+                    $"if (!chain.TryGet({index}, init var token{index}) || token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start} || token{index}.Range.Length != {expected[index].Span.Length}) {{ return 4; }}");
             }
             _ = source.Append(CultureInfo.InvariantCulture,
-                $"if (chain.TryGetInit({expected.Length}, init var copied)) {{ return 9; }}"
-                + $" require chain.TryGetInit(0, init copied);"
+                $"if (chain.TryGet({expected.Length}, init var copied)) {{ return 9; }}"
+                + $" require chain.TryGet(0, init copied);"
                 + $" if (copied.Kind != {(int)expected[0].Kind} || copied.Range.Start != {expected[0].Span.Start}) {{ return 10; }}");
             _ = source.Append(CultureInfo.InvariantCulture,
                 $"if (!chain.TryClear() || ManagedHeap.Collect() != {expected.Length}) {{ return 5; }}");
@@ -2275,20 +2275,18 @@ public sealed partial class ManagedScannerComponentTests
             """);
         for (var index = 0; index < expected.Length; index++)
         {
-            var method = index % 2 == 0 ? "TryReadInit" : "TryRead";
-            var mode = index % 2 == 0 ? "init" : "out";
             if (index == 0 || index == expected.Length / 2 || index == expected.Length - 1)
             {
                 _ = source.Append(CultureInfo.InvariantCulture,
-                    $"if (!cursor.TryPeek(out var peek{index}) || !cursor.TryPeekInit(init var repeated{index}) || peek{index}.Kind != {(int)expected[index].Kind} || repeated{index}.Range.Start != {expected[index].Span.Start}) {{ return 4; }}");
+                    $"if (!cursor.TryPeek(init var peek{index}) || !cursor.TryPeek(init var repeated{index}) || peek{index}.Kind != {(int)expected[index].Kind} || repeated{index}.Range.Start != {expected[index].Span.Start}) {{ return 4; }}");
             }
             _ = source.Append(CultureInfo.InvariantCulture,
-                $"if (!cursor.{method}({mode} var token{index}) || token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start} || token{index}.Range.Length != {expected[index].Span.Length}) {{ return 1; }}");
+                $"if (!cursor.TryRead(init var token{index}) || token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start} || token{index}.Range.Length != {expected[index].Span.Length}) {{ return 1; }}");
         }
         _ = source.Append("""
-                if (cursor.TryPeek(out var pastPeek) || cursor.TryPeekInit(init var againPeek)
-                    || cursor.TryRead(out var pastEnd) || !cursor.IsCurrent) { return 2; }
-                if (cursor.TryReadInit(init var again)) { return 3; }
+                if (cursor.TryPeek(init var pastPeek) || cursor.TryRead(init var pastEnd)
+                    || !cursor.IsCurrent) { return 2; }
+                if (cursor.TryRead(init var again)) { return 3; }
                 return 42;
             }
             """);
@@ -2319,19 +2317,19 @@ public sealed partial class ManagedScannerComponentTests
                 require chain.TryAppend(8, 1, 1);
                 require chain.TryAppend(9, 2, 1);
                 require chain.TryCreateCursor(out var cursor);
-                if (cursor.TryPeekAhead(-1, out var negative)
-                    || cursor.TryPeekAhead(3, out var outside)
-                    || cursor.TryPeekAheadInit(3, init var beyond)) { return 1; }
-                require cursor.TryPeekAhead(2, out var last) && last.Kind == 9;
-                require cursor.TryPeekAheadInit(1, init var middle) && middle.Kind == 8;
-                require cursor.TryRead(out var first) && first.Kind == 7;
-                require cursor.TryPeekAhead(1, out var remaining) && remaining.Kind == 9;
-                require cursor.TryRead(out var second) && second.Kind == 8;
-                require cursor.TryRead(out var third) && third.Kind == 9;
-                if (cursor.TryPeekAhead(0, out var afterEnd) || !cursor.IsCurrent) { return 2; }
+                if (cursor.TryPeekAhead(-1, init var negative)
+                    || cursor.TryPeekAhead(3, init var outside)
+                    || cursor.TryPeekAhead(3, init var beyond)) { return 1; }
+                require cursor.TryPeekAhead(2, init var last) && last.Kind == 9;
+                require cursor.TryPeekAhead(1, init var middle) && middle.Kind == 8;
+                require cursor.TryRead(init var first) && first.Kind == 7;
+                require cursor.TryPeekAhead(1, init var remaining) && remaining.Kind == 9;
+                require cursor.TryRead(init var second) && second.Kind == 8;
+                require cursor.TryRead(init var third) && third.Kind == 9;
+                if (cursor.TryPeekAhead(0, init var afterEnd) || !cursor.IsCurrent) { return 2; }
                 require chain.TryCreateCursor(out var stale);
                 require chain.TryClear();
-                if (stale.TryPeekAhead(1, out var invalidated) || stale.IsCurrent) { return 3; }
+                if (stale.TryPeekAhead(1, init var invalidated) || stale.IsCurrent) { return 3; }
                 return 42;
             }
             """;
@@ -2351,18 +2349,18 @@ public sealed partial class ManagedScannerComponentTests
                 require ManagedTokenChain.TryCreate(out var chain);
                 require chain.TryAppend(7, 0, 1);
                 require chain.TryAppend(8, 1, 1);
-                require chain.TryCreateCursor(out var cursor);
-                if (cursor.TryReadKind(8, out var wrong)
-                    || cursor.TryReadKindInit(-1, init var invalid)) { return 1; }
-                require cursor.TryReadKindInit(7, init var first);
+                require chain.TryCreateCursorInit(init var cursor);
+                if (cursor.TryReadKind(8, init var wrong)
+                    || cursor.TryReadKind(-1, init var invalid)) { return 1; }
+                require cursor.TryReadKind(7, init var first);
                 if (first.Kind != 7 || first.Range.Start != 0) { return 2; }
-                if (cursor.TryReadKind(7, out var repeated)) { return 3; }
-                require cursor.TryReadKind(8, out var second);
+                if (cursor.TryReadKind(7, init var repeated)) { return 3; }
+                require cursor.TryReadKind(8, init var second);
                 if (second.Kind != 8 || second.Range.Start != 1
-                    || cursor.TryReadKind(8, out var afterEnd)) { return 4; }
-                require chain.TryCreateCursor(out var stale);
+                    || cursor.TryReadKind(8, init var afterEnd)) { return 4; }
+                require chain.TryCreateCursorInit(init var stale);
                 require chain.TryClear();
-                if (stale.TryReadKindInit(7, init var afterMutation) || stale.IsCurrent) { return 5; }
+                if (stale.TryReadKind(7, init var afterMutation) || stale.IsCurrent) { return 5; }
                 return 42;
             }
             """;
@@ -2404,16 +2402,16 @@ public sealed partial class ManagedScannerComponentTests
             int32 Main() {
                 require ManagedTokenChain.TryCreate(out var chain);
                 require chain.TryAppend(1, 0, 1);
-                require chain.TryCreateCursor(out var cursor);
-                require cursor.TryRead(out var first) && first.Kind == 1;
+                require chain.TryCreateCursorInit(init var cursor);
+                require cursor.TryRead(init var first) && first.Kind == 1;
                 require chain.TryCreateCursorInit(init var stale);
                 require {{mutation}};
                 if (cursor.IsCurrent || stale.IsCurrent
-                    || cursor.TryPeekInit(init var absent) || stale.TryPeek(out var missed)
-                    || cursor.TryReadInit(init var unread) || stale.TryRead(out var ignored)) { return 1; }
+                    || cursor.TryPeek(init var absent) || stale.TryPeek(init var missed)
+                    || cursor.TryRead(init var unread) || stale.TryRead(init var ignored)) { return 1; }
                 require chain.TryCreateCursorInit(init var fresh);
                 if (!fresh.IsCurrent) { return 2; }
-                if ({{(clear ? "fresh.TryRead(out var cleared)" : "!fresh.TryRead(out var appended) || appended.Kind != 1")}}) { return 3; }
+                if ({{(clear ? "fresh.TryRead(init var cleared)" : "!fresh.TryRead(init var appended) || appended.Kind != 1")}}) { return 3; }
                 return 42;
             }
             """;
@@ -2440,8 +2438,8 @@ public sealed partial class ManagedScannerComponentTests
             int32 Main() {
                 require MakeCursor(init var cursor);
                 if (ManagedHeap.Collect() != 0) { return 1; }
-                if (!cursor.TryRead(out var token) || token.Kind != 7) { return 2; }
-                if (cursor.TryRead(out var pastEnd) || !cursor.IsCurrent) { return 3; }
+                if (!cursor.TryRead(init var token) || token.Kind != 7) { return 2; }
+                if (cursor.TryRead(init var pastEnd) || !cursor.IsCurrent) { return 3; }
                 if (ManagedHeap.Collect() != 0) { return 4; }
                 return 42;
             }
@@ -2461,14 +2459,14 @@ public sealed partial class ManagedScannerComponentTests
             int32 Main() {
                 require ManagedTokenChain.TryCreate(out var chain);
                 require chain.TryAppend(7, 0, 1);
-                require chain.TryCreateCursor(out var cursor);
+                require chain.TryCreateCursorInit(init var cursor);
                 if (chain.TryAppend(-1, 1, 0) || !cursor.IsCurrent) { return 1; }
-                if (!cursor.TryRead(out var token) || token.Kind != 7) { return 2; }
-                require chain.TryCreateCursor(out var stale);
+                if (!cursor.TryRead(init var token) || token.Kind != 7) { return 2; }
+                require chain.TryCreateCursorInit(init var stale);
                 require chain.TryClear();
-                if (stale.TryReadInit(init var absent) || stale.IsCurrent) { return 3; }
+                if (stale.TryRead(init var absent) || stale.IsCurrent) { return 3; }
                 if (ManagedHeap.Collect() != 1) { return 4; }
-                if (cursor.TryRead(out var afterClear) || cursor.IsCurrent) { return 5; }
+                if (cursor.TryRead(init var afterClear) || cursor.IsCurrent) { return 5; }
                 return 42;
             }
             """;

@@ -172,6 +172,7 @@ The first implementation target is the existing readonly `TokenCursor`:
 checked length/index reads, `Copy` token results, and dependency forwarding
 through its constructor and cursor value. It does not add arbitrary stored
 views, general slicing, generic collection iteration, writable spans, new
-cleanup rules or a parser integration contract. The separate
-[`HostBuffer`](../native.md) interchange surfaces and `ManagedTokenChain`
-remain unchanged and are not Span substitutes.
+cleanup rules or a parser integration contract. The bridge does not repurpose
+the separate [`HostBuffer`](../native.md) interchange surfaces or
+`ManagedTokenChain`; both remain distinct contracts and neither is a Span
+substitute.

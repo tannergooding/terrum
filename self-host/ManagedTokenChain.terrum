@@ -54,7 +54,7 @@ mut class ManagedTokenChain {
         return true;
     }
 
-    public bool TryGet(int32 index, out Token token) {
+    public bool TryGet(int32 index, init ref<Token> token) {
         if (index < 0 || index >= _count) { return false; }
         mut ManagedTokenLink? cursor = _first;
         for (mut int32 at = 0; at < index; at = at + 1) {
@@ -72,12 +72,6 @@ mut class ManagedTokenChain {
         }
         require false;
         return false;
-    }
-
-    public bool TryGetInit(int32 index, init ref<Token> token) {
-        if (!TryGet(index, out var found)) { return false; }
-        token = found;
-        return true;
     }
 
     public bool TryCreateCursor(out write ManagedTokenCursor cursor) {
@@ -113,11 +107,11 @@ mut class ManagedTokenCursor {
 
     public bool IsCurrent { [NoThrow] get { return _owner.Version == _version; } }
 
-    public mut bool TryPeek(out Token token) {
-        return TryPeekAhead(0, out token);
+    public mut bool TryPeek(init ref<Token> token) {
+        return TryPeekAhead(0, init token);
     }
 
-    public mut bool TryPeekAhead(int32 distance, out Token token) {
+    public mut bool TryPeekAhead(int32 distance, init ref<Token> token) {
         if (!IsCurrent) {
             _next = null;
             return false;
@@ -139,28 +133,12 @@ mut class ManagedTokenCursor {
         return false;
     }
 
-    public mut bool TryPeekInit(init ref<Token> token) {
-        return TryPeekAheadInit(0, init token);
+    public mut bool TryReadKind(int32 kind, init ref<Token> token) {
+        if (!TryPeek(init var next) || next.Kind != kind) { return false; }
+        return TryRead(init token);
     }
 
-    public mut bool TryPeekAheadInit(int32 distance, init ref<Token> token) {
-        if (!TryPeekAhead(distance, out var next)) { return false; }
-        token = next;
-        return true;
-    }
-
-    public mut bool TryReadKind(int32 kind, out Token token) {
-        if (!TryPeek(out var next) || next.Kind != kind) { return false; }
-        return TryRead(out token);
-    }
-
-    public mut bool TryReadKindInit(int32 kind, init ref<Token> token) {
-        if (!TryReadKind(kind, out var next)) { return false; }
-        token = next;
-        return true;
-    }
-
-    public mut bool TryRead(out Token token) {
+    public mut bool TryRead(init ref<Token> token) {
         if (!IsCurrent) {
             _next = null;
             return false;
@@ -171,11 +149,5 @@ mut class ManagedTokenCursor {
             return true;
         }
         return false;
-    }
-
-    public mut bool TryReadInit(init ref<Token> token) {
-        if (!TryRead(out var next)) { return false; }
-        token = next;
-        return true;
     }
 }

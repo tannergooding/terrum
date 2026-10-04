@@ -2075,10 +2075,12 @@ source, rejects malformed records and lexical diagnostics, and publishes no
 chain on failure. AOT/JIT fixtures compare host token kinds and spans, repeated
 scans, and collection after clearing links under both runtime policies. This
 does not alter scanner records or make the bounded chain the parser's token
-storage. Indexed and sequential cursor reads also offer `init ref<Token>`
-publication beside their existing `out` forms. Failed indexes, end-of-chain
-and invalidated cursors leave the destination vacant; copied tokens remain
-valid after their source links are collected.
+storage. Indexed lookups, cursor lookahead and sequential reads use
+vacancy-only `init ref<Token>` outputs. Public cursor creation retains its
+`out` form; an internal `init ref` wrapper serves scanner construction because
+managed-handle `init ref` parameters are compilation-private. Failed indexes,
+end-of-chain and invalidated cursors leave the destination vacant; copied
+tokens remain valid after their source links are collected.
 
 The bounded [Terrum-authored scalar frontend](../self-host/ScalarFrontend.terrum)
 consumes one successful scanner token snapshot and publishes an in-process

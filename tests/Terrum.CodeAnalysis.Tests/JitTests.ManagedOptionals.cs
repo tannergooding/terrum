@@ -113,8 +113,8 @@ public sealed partial class JitTests
                 require chain.TryAppend(7, 42, 5);
                 if (chain.TryAppend(-1, 43, 1) || chain.TryAppend(9, 41, 1)
                     || chain.TryAppend(9, 43, -1) || chain.TryAppend(9, int32.MaxValue, 1)) { return 2; }
-                if (chain.TryGet(-1, out var invalid)) { return 3; }
-                require chain.TryGet(1, out var token);
+                if (chain.TryGet(-1, init var invalid)) { return 3; }
+                require chain.TryGet(1, init var token);
                 if (token.Kind != 7 || token.Range.Start != 42 || token.Range.Length != 5
                     || token.Range.End != 47 || chain.Count != 2
                     || chain.Version != 2) { return 4; }
@@ -127,7 +127,7 @@ public sealed partial class JitTests
                 }
                 if (chain.TryAppend(64, 64, 1) || chain.Count != 64
                     || chain.Version != 67) { return 7; }
-                require chain.TryGet(63, out var last);
+                require chain.TryGet(63, init var last);
                 if (last.Kind != 63 || last.Range.Start != 63 || last.Range.Length != 1) { return 8; }
                 require chain.TryClear();
                 if (ManagedHeap.Collect() != 64) { return 9; }
@@ -168,7 +168,7 @@ public sealed partial class JitTests
         }
         for (var index = 0; index < lexical.Tokens.Length; index++)
         {
-            _ = source.Append(CultureInfo.InvariantCulture, $"require chain.TryGet({index}, out var copy{index});");
+            _ = source.Append(CultureInfo.InvariantCulture, $"require chain.TryGet({index}, init var copy{index});");
         }
         _ = source.Append(CultureInfo.InvariantCulture,
             $"require chain.TryClear(); require ManagedHeap.Collect() == {lexical.Tokens.Length};");

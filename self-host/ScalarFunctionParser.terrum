@@ -16,16 +16,16 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
         return false;
     }
 
-    require tokens.TryGet(0, out var type);
+    require tokens.TryGet(0, init var type);
     if (!TryGetScalarType(type, out var selected) || selected > 5)
     {
         return false;
     }
-    require tokens.TryGet(1, out var function);
-    require tokens.TryGet(2, out var openParameters);
-    require tokens.TryGet(3, out var closeParameters);
-    require tokens.TryGet(4, out var openBody);
-    require tokens.TryGet(5, out var returnKeyword);
+    require tokens.TryGet(1, init var function);
+    require tokens.TryGet(2, init var openParameters);
+    require tokens.TryGet(3, init var closeParameters);
+    require tokens.TryGet(4, init var openBody);
+    require tokens.TryGet(5, init var returnKeyword);
     if (!TokensAttach(function, openParameters))
     {
         return false;
@@ -37,7 +37,7 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     }
 
     mut int32 first = 6;
-    require tokens.TryGet(first, out var initial);
+    require tokens.TryGet(first, init var initial);
     mut Token value = initial;
     bool grouped = count == 12 || count == 13;
     bool outerSign = count == 13 && ((selected == 5 && initial.Kind == 62)
@@ -47,7 +47,8 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     if (outerSign)
     {
         first = first + 1;
-        require tokens.TryGet(first, out group);
+        require tokens.TryGet(first, init var groupToken);
+        group = groupToken;
         value = group;
     }
     if (grouped)
@@ -57,7 +58,8 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
             return false;
         }
         first = first + 1;
-        require tokens.TryGet(first, out value);
+        require tokens.TryGet(first, init var groupedValue);
+        value = groupedValue;
     }
     if (count == 11 || (count == 13 && !outerSign))
     {
@@ -68,7 +70,8 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
             return false;
         }
         first = first + 1;
-        require tokens.TryGet(first, out value);
+        require tokens.TryGet(first, init var signedValue);
+        value = signedValue;
     }
     if ((selected == 5 && value.Kind != 20 && value.Kind != 21)
         || (selected != 5 && value.Kind != 3))
@@ -80,7 +83,7 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     mut int32 end = value.Range.End;
     if (grouped)
     {
-        require tokens.TryGet(afterValue, out var closeGroup);
+        require tokens.TryGet(afterValue, init var closeGroup);
         if (closeGroup.Kind != 47)
         {
             return false;
@@ -88,9 +91,9 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
         end = closeGroup.Range.End;
         afterValue = afterValue + 1;
     }
-    require tokens.TryGet(afterValue, out var semicolon);
-    require tokens.TryGet(afterValue + 1, out var closeBody);
-    require tokens.TryGet(afterValue + 2, out var eof);
+    require tokens.TryGet(afterValue, init var semicolon);
+    require tokens.TryGet(afterValue + 1, init var closeBody);
+    require tokens.TryGet(afterValue + 2, init var eof);
     if (semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0)
     {
         return false;
@@ -103,7 +106,7 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     }
     if (count == 11 || outerSign)
     {
-        require tokens.TryGet(6, out var prefix);
+        require tokens.TryGet(6, init var prefix);
         start = prefix.Range.Start;
     }
     require SourceRange.TryCreate(start, end - start, init var scalar);
@@ -130,7 +133,7 @@ bool TryEvaluateBoolScalarReturn(TokenSnapshot tokens,
     {
         valueIndex = 8;
     }
-    require tokens.TryGet(valueIndex, out var literal);
+    require tokens.TryGet(valueIndex, init var literal);
     bool negate = count == 11 || count == 13;
     if (!TryParseScalarReturnFunctionTyped(move tokens, out var scalarType,
             out var foundName, out var expression)
@@ -229,7 +232,7 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     {
         valueIndex = 8;
     }
-    require tokens.TryGet(valueIndex, out var literal);
+    require tokens.TryGet(valueIndex, init var literal);
     mut bool negative = false;
     mut bool invert = false;
     mut bool outerSign = false;
@@ -238,7 +241,7 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         mut int32 prefixIndex = 6;
         if (count == 13)
         {
-            require tokens.TryGet(6, out var firstToken);
+            require tokens.TryGet(6, init var firstToken);
             if (firstToken.Kind == 46)
             {
                 prefixIndex = 7;
@@ -248,7 +251,7 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
                 outerSign = true;
             }
         }
-        require tokens.TryGet(prefixIndex, out var prefix);
+        require tokens.TryGet(prefixIndex, init var prefix);
         negative = prefix.Kind == 58;
         invert = prefix.Kind == 63;
     }
@@ -308,13 +311,13 @@ bool TryEvaluateUInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
         mut int32 prefixIndex = 6;
         if (count == 13)
         {
-            require tokens.TryGet(6, out var firstToken);
+            require tokens.TryGet(6, init var firstToken);
             if (firstToken.Kind == 46)
             {
                 prefixIndex = 7;
             }
         }
-        require tokens.TryGet(prefixIndex, out var prefix);
+        require tokens.TryGet(prefixIndex, init var prefix);
         if (prefix.Kind != 57 && prefix.Kind != 63)
         {
             return false;
@@ -359,13 +362,13 @@ bool TryEvaluateUInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
         mut int32 prefixIndex = 6;
         if (count == 13)
         {
-            require tokens.TryGet(6, out var firstToken);
+            require tokens.TryGet(6, init var firstToken);
             if (firstToken.Kind == 46)
             {
                 prefixIndex = 7;
             }
         }
-        require tokens.TryGet(prefixIndex, out var prefix);
+        require tokens.TryGet(prefixIndex, init var prefix);
         if (prefix.Kind != 57 && prefix.Kind != 63)
         {
             return false;
@@ -406,7 +409,7 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     {
         valueIndex = 8;
     }
-    require tokens.TryGet(valueIndex, out var literal);
+    require tokens.TryGet(valueIndex, init var literal);
     mut bool negative = false;
     mut bool invert = false;
     mut bool outerSign = false;
@@ -415,7 +418,7 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         mut int32 prefixIndex = 6;
         if (count == 13)
         {
-            require tokens.TryGet(6, out var firstToken);
+            require tokens.TryGet(6, init var firstToken);
             if (firstToken.Kind == 46)
             {
                 prefixIndex = 7;
@@ -425,7 +428,7 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
                 outerSign = true;
             }
         }
-        require tokens.TryGet(prefixIndex, out var prefix);
+        require tokens.TryGet(prefixIndex, init var prefix);
         negative = prefix.Kind == 58;
         invert = prefix.Kind == 63;
     }
@@ -488,22 +491,22 @@ bool TryParseScalarBinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
     {
         return false;
     }
-    require tokens.TryGet(0, out var type);
+    require tokens.TryGet(0, init var type);
     if (!TryGetScalarType(type, out var selected) || selected == 5 || selected == 6)
     {
         return false;
     }
-    require tokens.TryGet(1, out var function);
-    require tokens.TryGet(2, out var openParameters);
-    require tokens.TryGet(3, out var closeParameters);
-    require tokens.TryGet(4, out var openBody);
-    require tokens.TryGet(5, out var returnKeyword);
-    require tokens.TryGet(6, out var left);
-    require tokens.TryGet(7, out var binary);
-    require tokens.TryGet(8, out var right);
-    require tokens.TryGet(9, out var semicolon);
-    require tokens.TryGet(10, out var closeBody);
-    require tokens.TryGet(11, out var eof);
+    require tokens.TryGet(1, init var function);
+    require tokens.TryGet(2, init var openParameters);
+    require tokens.TryGet(3, init var closeParameters);
+    require tokens.TryGet(4, init var openBody);
+    require tokens.TryGet(5, init var returnKeyword);
+    require tokens.TryGet(6, init var left);
+    require tokens.TryGet(7, init var binary);
+    require tokens.TryGet(8, init var right);
+    require tokens.TryGet(9, init var semicolon);
+    require tokens.TryGet(10, init var closeBody);
+    require tokens.TryGet(11, init var eof);
     if (!TokensAttach(function, openParameters))
     {
         return false;
@@ -548,24 +551,24 @@ bool TryEvaluateTypedScalarComparisonReturn(TokenSnapshot tokens, TokenIntegerSn
     {
         return false;
     }
-    require tokens.TryGet(0, out var returnType);
-    require tokens.TryGet(1, out var function);
-    require tokens.TryGet(2, out var openParameters);
-    require tokens.TryGet(3, out var closeParameters);
-    require tokens.TryGet(4, out var openBody);
-    require tokens.TryGet(5, out var returnKeyword);
-    require tokens.TryGet(6, out var leftType);
-    require tokens.TryGet(7, out var leftOpen);
-    require tokens.TryGet(8, out var leftLiteral);
-    require tokens.TryGet(9, out var leftClose);
-    require tokens.TryGet(10, out var comparison);
-    require tokens.TryGet(11, out var rightType);
-    require tokens.TryGet(12, out var rightOpen);
-    require tokens.TryGet(13, out var rightLiteral);
-    require tokens.TryGet(14, out var rightClose);
-    require tokens.TryGet(15, out var semicolon);
-    require tokens.TryGet(16, out var closeBody);
-    require tokens.TryGet(17, out var eof);
+    require tokens.TryGet(0, init var returnType);
+    require tokens.TryGet(1, init var function);
+    require tokens.TryGet(2, init var openParameters);
+    require tokens.TryGet(3, init var closeParameters);
+    require tokens.TryGet(4, init var openBody);
+    require tokens.TryGet(5, init var returnKeyword);
+    require tokens.TryGet(6, init var leftType);
+    require tokens.TryGet(7, init var leftOpen);
+    require tokens.TryGet(8, init var leftLiteral);
+    require tokens.TryGet(9, init var leftClose);
+    require tokens.TryGet(10, init var comparison);
+    require tokens.TryGet(11, init var rightType);
+    require tokens.TryGet(12, init var rightOpen);
+    require tokens.TryGet(13, init var rightLiteral);
+    require tokens.TryGet(14, init var rightClose);
+    require tokens.TryGet(15, init var semicolon);
+    require tokens.TryGet(16, init var closeBody);
+    require tokens.TryGet(17, init var eof);
     if (!TokensAttach(function, openParameters)
         || !TokensAttach(leftType, leftOpen) || !TokensAttach(rightType, rightOpen))
     {
@@ -650,20 +653,20 @@ bool TryParseParameterComparisonReturn(TokenSnapshot tokens, TokenIntegerSnapsho
     {
         return false;
     }
-    require tokens.TryGet(0, out var returnType);
-    require tokens.TryGet(1, out var function);
-    require tokens.TryGet(2, out var openParameters);
-    require tokens.TryGet(3, out var parameterType);
-    require tokens.TryGet(4, out var parameter);
-    require tokens.TryGet(5, out var closeParameters);
-    require tokens.TryGet(6, out var openBody);
-    require tokens.TryGet(7, out var returnKeyword);
-    require tokens.TryGet(8, out var parameterUse);
-    require tokens.TryGet(9, out var comparison);
-    require tokens.TryGet(10, out var literal);
-    require tokens.TryGet(11, out var semicolon);
-    require tokens.TryGet(12, out var closeBody);
-    require tokens.TryGet(13, out var eof);
+    require tokens.TryGet(0, init var returnType);
+    require tokens.TryGet(1, init var function);
+    require tokens.TryGet(2, init var openParameters);
+    require tokens.TryGet(3, init var parameterType);
+    require tokens.TryGet(4, init var parameter);
+    require tokens.TryGet(5, init var closeParameters);
+    require tokens.TryGet(6, init var openBody);
+    require tokens.TryGet(7, init var returnKeyword);
+    require tokens.TryGet(8, init var parameterUse);
+    require tokens.TryGet(9, init var comparison);
+    require tokens.TryGet(10, init var literal);
+    require tokens.TryGet(11, init var semicolon);
+    require tokens.TryGet(12, init var closeBody);
+    require tokens.TryGet(13, init var eof);
     if (!TokensAttach(function, openParameters))
     {
         return false;
@@ -792,20 +795,20 @@ bool TryParseParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
     {
         return false;
     }
-    require tokens.TryGet(0, out var returnType);
-    require tokens.TryGet(1, out var function);
-    require tokens.TryGet(2, out var openParameters);
-    require tokens.TryGet(3, out var parameterType);
-    require tokens.TryGet(4, out var parameter);
-    require tokens.TryGet(5, out var closeParameters);
-    require tokens.TryGet(6, out var openBody);
-    require tokens.TryGet(7, out var returnKeyword);
-    require tokens.TryGet(8, out var parameterUse);
-    require tokens.TryGet(9, out var add);
-    require tokens.TryGet(10, out var literal);
-    require tokens.TryGet(11, out var semicolon);
-    require tokens.TryGet(12, out var closeBody);
-    require tokens.TryGet(13, out var eof);
+    require tokens.TryGet(0, init var returnType);
+    require tokens.TryGet(1, init var function);
+    require tokens.TryGet(2, init var openParameters);
+    require tokens.TryGet(3, init var parameterType);
+    require tokens.TryGet(4, init var parameter);
+    require tokens.TryGet(5, init var closeParameters);
+    require tokens.TryGet(6, init var openBody);
+    require tokens.TryGet(7, init var returnKeyword);
+    require tokens.TryGet(8, init var parameterUse);
+    require tokens.TryGet(9, init var add);
+    require tokens.TryGet(10, init var literal);
+    require tokens.TryGet(11, init var semicolon);
+    require tokens.TryGet(12, init var closeBody);
+    require tokens.TryGet(13, init var eof);
     if (!TokensAttach(function, openParameters))
     {
         return false;

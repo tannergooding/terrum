@@ -13,20 +13,20 @@ bool TryParseTwoParameterBinaryPrefix(TokenSnapshot tokens, int32 operatorKind,
     {
         return false;
     }
-    require tokens.TryGet(0, out var returnType);
-    require tokens.TryGet(1, out var function);
-    require tokens.TryGet(2, out var openParameters);
-    require tokens.TryGet(3, out var firstType);
-    require tokens.TryGet(4, out var firstParameter);
-    require tokens.TryGet(5, out var comma);
-    require tokens.TryGet(6, out var secondType);
-    require tokens.TryGet(7, out var secondParameter);
-    require tokens.TryGet(8, out var closeParameters);
-    require tokens.TryGet(9, out var openBody);
-    require tokens.TryGet(10, out var returnKeyword);
-    require tokens.TryGet(11, out var firstUse);
-    require tokens.TryGet(12, out var binary);
-    require tokens.TryGet(13, out var secondUse);
+    require tokens.TryGet(0, init var returnType);
+    require tokens.TryGet(1, init var function);
+    require tokens.TryGet(2, init var openParameters);
+    require tokens.TryGet(3, init var firstType);
+    require tokens.TryGet(4, init var firstParameter);
+    require tokens.TryGet(5, init var comma);
+    require tokens.TryGet(6, init var secondType);
+    require tokens.TryGet(7, init var secondParameter);
+    require tokens.TryGet(8, init var closeParameters);
+    require tokens.TryGet(9, init var openBody);
+    require tokens.TryGet(10, init var returnKeyword);
+    require tokens.TryGet(11, init var firstUse);
+    require tokens.TryGet(12, init var binary);
+    require tokens.TryGet(13, init var secondUse);
     if (!TokensAttach(function, openParameters))
     {
         return false;
@@ -65,9 +65,9 @@ bool TryParseTwoParameterAddReturn(TokenSnapshot tokens,
     {
         return false;
     }
-    require tokens.TryGet(14, out var semicolon);
-    require tokens.TryGet(15, out var closeBody);
-    require tokens.TryGet(16, out var eof);
+    require tokens.TryGet(14, init var semicolon);
+    require tokens.TryGet(15, init var closeBody);
+    require tokens.TryGet(16, init var eof);
     if (semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0)
     {
         return false;
@@ -82,9 +82,9 @@ bool TryParseTwoParameterSubtractReturn(TokenSnapshot tokens,
     {
         return false;
     }
-    require tokens.TryGet(14, out var semicolon);
-    require tokens.TryGet(15, out var closeBody);
-    require tokens.TryGet(16, out var eof);
+    require tokens.TryGet(14, init var semicolon);
+    require tokens.TryGet(15, init var closeBody);
+    require tokens.TryGet(16, init var eof);
     if (semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0)
     {
         return false;
@@ -99,10 +99,10 @@ bool TryParseTwoParameterComparisonReturn(TokenSnapshot tokens,
     {
         return false;
     }
-    require tokens.TryGet(12, out var comparison);
-    require tokens.TryGet(14, out var semicolon);
-    require tokens.TryGet(15, out var closeBody);
-    require tokens.TryGet(16, out var eof);
+    require tokens.TryGet(12, init var comparison);
+    require tokens.TryGet(14, init var semicolon);
+    require tokens.TryGet(15, init var closeBody);
+    require tokens.TryGet(16, init var eof);
     if (comparison.Kind < 65 || comparison.Kind > 70
         || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0
         || !TryParseTwoParameterBinaryPrefix(move tokens, comparison.Kind, true,
@@ -124,11 +124,11 @@ bool TryParseTwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
     {
         return false;
     }
-    require tokens.TryGet(14, out var add);
-    require tokens.TryGet(15, out var literal);
-    require tokens.TryGet(16, out var semicolon);
-    require tokens.TryGet(17, out var closeBody);
-    require tokens.TryGet(18, out var eof);
+    require tokens.TryGet(14, init var add);
+    require tokens.TryGet(15, init var literal);
+    require tokens.TryGet(16, init var semicolon);
+    require tokens.TryGet(17, init var closeBody);
+    require tokens.TryGet(18, init var eof);
     if (add.Kind != 57 || literal.Kind != 3 || semicolon.Kind != 52
         || closeBody.Kind != 49 || eof.Kind != 0
         || !TryParseTwoParameterAddPrefix(move tokens, out var selected,

@@ -60,10 +60,10 @@ bool CopyScalarProgramTokens(ManagedTokenChain tokens, int32 start, int32 end,
     if (!ManagedTokenChain.TryCreate(out var created)) { return false; }
     for (mut int32 index = start; index < end; index = index + 1)
     {
-        require tokens.TryGet(index, out var token);
+        require tokens.TryGet(index, init var token);
         require created.TryAppend(token.Kind, token.Range.Start, token.Range.Length);
     }
-    require tokens.TryGet(end - 1, out var last);
+    require tokens.TryGet(end - 1, init var last);
     require created.TryAppend(0, last.Range.End, 0);
     chain = created;
     return true;
@@ -76,7 +76,7 @@ bool TryPublishScalarFrontendProgram(out bool handled)
     int32 count = tokens.GetCount();
     if (count > 64)
     {
-        require tokens.TryGet(64, out var excess);
+        require tokens.TryGet(64, init var excess);
         return ScalarProgramError(1, excess.Range, out handled);
     }
     var spacing = tokens.GetScalarOperatorSpacingError();
@@ -84,7 +84,7 @@ bool TryPublishScalarFrontendProgram(out bool handled)
     if (!ManagedTokenChain.TryCreate(out var sourceTokens)) { return false; }
     for (mut int32 index = 0; index < count; index = index + 1)
     {
-        require tokens.TryGet(index, out var token);
+        require tokens.TryGet(index, init var token);
         require sourceTokens.TryAppend(token.Kind, token.Range.Start, token.Range.Length);
     }
     require SourceRange.TryCreate(0, 0, init var empty);
@@ -109,13 +109,13 @@ bool TryPublishScalarFrontendProgram(out bool handled)
             return ScalarProgramError(header.ErrorCode, header.ErrorSpan, out handled);
         }
         int32 body = start + headerEnd;
-        require tokens.TryGet(body, out var opening);
+        require tokens.TryGet(body, init var opening);
         mut int32 end = body;
         if (opening.Kind == 82)
         {
             while (end < count - 1)
             {
-                require tokens.TryGet(end, out var token);
+                require tokens.TryGet(end, init var token);
                 end = end + 1;
                 if (token.Kind == 52) { break; }
             }
@@ -126,7 +126,7 @@ bool TryPublishScalarFrontendProgram(out bool handled)
             end = body + 1;
             while (end < count - 1 && depth != 0)
             {
-                require tokens.TryGet(end, out var token);
+                require tokens.TryGet(end, init var token);
                 if (token.Kind == 48) { depth = depth + 1; }
                 if (token.Kind == 49) { depth = depth - 1; }
                 end = end + 1;
@@ -139,8 +139,8 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         }
         if (functions == 10) { return ScalarProgramError(1, header.Name, out handled); }
         int32 frame = 4 + functions * 428;
-        require tokens.TryGet(start, out var first);
-        require tokens.TryGet(end - 1, out var last);
+        require tokens.TryGet(start, init var first);
+        require tokens.TryGet(end - 1, init var last);
         Host.FrontendProgram[frame] = start;
         Host.FrontendProgram[frame + 1] = end;
         Host.FrontendProgram[frame + 2] = first.Range.Start;
