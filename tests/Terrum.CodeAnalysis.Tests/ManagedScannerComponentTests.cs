@@ -496,6 +496,37 @@ public sealed partial class ManagedScannerComponentTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CompilerInputSnapshotsOwnEveryRecordBufferAsync(NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 count = Scan();
+                require TryBuildCompilerInput(count, init var tokens, init var trivia,
+                    init var integers);
+                Host.Tokens[0] = -1;
+                Host.Trivia[1] = -1;
+                Host.IntegerValues[1] = -1;
+                require tokens.TryGet(0, init var firstToken);
+                require trivia.TryGet(0, init var firstTrivia, init var firstOwner);
+                require integers.TryGet(0, init var integerIndex, init var overflow,
+                    init var low, init var high);
+                if (firstToken.Kind != 2 || firstToken.Range.Start != 0
+                    || firstTrivia.Range.Start != 5 || firstOwner != 1
+                    || integerIndex != 1 || overflow || low != 42 || high != 0) {
+                    return 1;
+                }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("alpha 42", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CompilerInputPermitsNoDecodedIntegersAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """

@@ -115,8 +115,7 @@ bool TryBuildCompilerInput(int32 count,
     init ref<TokenSnapshot> tokens, init ref<TokenTriviaSnapshot> trivia,
     init ref<TokenIntegerSnapshot> integers)
 {
-    if (!TokenSnapshot.TryBuild(count, init var scanned)
-        || !TokenTriviaSnapshot.TryBuild(count, init var leading)
+    if (!TryBuildLossless(count, init var scanned, init var leading)
         || !TokenIntegerSnapshot.TryBuild(count, init var magnitudes))
     {
         return false;
