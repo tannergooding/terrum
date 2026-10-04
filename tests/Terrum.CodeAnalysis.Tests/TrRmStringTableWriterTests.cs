@@ -67,6 +67,14 @@ public sealed class TrRmStringTableWriterTests
             TrRmStringTableWriter.EncodeTextRows([("X\0Y", 1)]));
     }
 
+    [Fact]
+    public void AsciiNulRejectionPrecedesNonAsciiRejection()
+    {
+        var exception = Assert.Throws<ArgumentException>(() =>
+            TrRmStringTableWriter.EncodeNames([("A\u00E9\0B", 0)]));
+        Assert.Equal("names", exception.ParamName);
+    }
+
     private static string DecodeName(byte[] section, int row)
         => new TrRmStringTableReader(section, 5).DecodeName(row);
 

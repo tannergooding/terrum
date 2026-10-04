@@ -39,7 +39,7 @@ public static class TrRmStringTableWriter
         {
             var (text, encoding) = names[index];
             ArgumentNullException.ThrowIfNull(text);
-            if ((!allowEmpty && text.Length == 0) || text.Contains('\0'))
+            if ((!allowEmpty && text.Length == 0) || (encoding != 0 && text.Contains('\0')))
             {
                 throw new ArgumentException("A TRRM text row must be NUL-free and required names nonempty.", argumentName);
             }
@@ -50,7 +50,7 @@ public static class TrRmStringTableWriter
             {
                 (content, width) = encoding switch
                 {
-                    0 => (EncodeAscii(text), 1),
+                    0 => (EncodeAscii(text, argumentName), 1),
                     1 => (s_utf8.GetBytes(text), 1),
                     2 => (s_utf16.GetBytes(text), 2),
                     3 => (s_utf32.GetBytes(text), 4),
@@ -99,14 +99,23 @@ public static class TrRmStringTableWriter
         return result;
     }
 
-    private static byte[] EncodeAscii(string text)
+    private static byte[] EncodeAscii(string text, string argumentName)
     {
+        var containsZero = false;
+        var containsNonAscii = false;
         foreach (var unit in text)
         {
-            if (unit > 0x7F)
-            {
-                throw new ArgumentException("ASCII TRRM names cannot contain non-ASCII scalars.", nameof(text));
-            }
+            containsZero |= unit == '\0';
+            containsNonAscii |= unit > 0x7F;
+        }
+
+        if (containsZero)
+        {
+            throw new ArgumentException("A TRRM text row must be NUL-free and required names nonempty.", argumentName);
+        }
+        if (containsNonAscii)
+        {
+            throw new ArgumentException("ASCII TRRM names cannot contain non-ASCII scalars.", nameof(text));
         }
 
         return Encoding.ASCII.GetBytes(text);
