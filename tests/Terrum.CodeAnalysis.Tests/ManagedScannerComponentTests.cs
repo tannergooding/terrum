@@ -281,6 +281,9 @@ public sealed partial class ManagedScannerComponentTests
                 Host.Tokens[0] = 2;
                 Host.Tokens[3] = -1;
                 if (TokenSnapshot.TryBuild(count, init var invalid)) { return 2; }
+                if (TryBuildLossless(count, init var invalidTokens, init var invalidTrivia)) {
+                    return 4;
+                }
                 if (!snapshot.TryGet(1, init var second) || second.Kind != 2
                     || second.Range.Start != 6) { return 3; }
                 return 42;
@@ -351,6 +354,38 @@ public sealed partial class ManagedScannerComponentTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task LosslessTokenSnapshotMatchesStandaloneBuilderAsync(NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 count = Scan();
+                require TokenSnapshot.TryBuild(count, init var standalone);
+                require TryBuildLossless(count, init var tokens, init var trivia);
+                if (tokens.GetCount() != standalone.GetCount()) { return 1; }
+                for (mut int32 index = 0; index < count; index = index + 1) {
+                    require standalone.TryGet(index, init var expected);
+                    require tokens.TryGet(index, init var actual);
+                    if (actual.Kind != expected.Kind || actual.Range.Start != expected.Range.Start
+                        || actual.Range.Length != expected.Range.Length) { return 2; }
+                }
+                Host.Tokens[0] = -1;
+                Host.Trivia[1] = -1;
+                require tokens.TryGet(0, init var first);
+                require trivia.TryGet(0, init var firstTrivia, init var firstOwner);
+                if (first.Kind != 2 || first.Range.Start != 0
+                    || firstTrivia.Range.Start != 5 || firstOwner != 1) { return 3; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("alpha beta", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OwnedTriviaSnapshotSurvivesTheManagedChainLimitAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """
@@ -404,8 +439,10 @@ public sealed partial class ManagedScannerComponentTests
             using Terrum.CodeAnalysis;
             int32 Main() {
                 int32 count = Scan();
+                require TokenSnapshot.TryBuild(count, init var standalone);
                 Host.Trivia[{{word}}] = {{value}};
                 if (TryBuildLossless(count, init var tokens, init var trivia)) { return 1; }
+                if (standalone.GetCount() != count) { return 2; }
                 return 42;
             }
             """;

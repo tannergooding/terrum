@@ -5,7 +5,7 @@ public unique struct TokenSnapshot
     private OwnedInt32Buffer _records;
     private int32 _count;
 
-    private TokenSnapshot(OwnedInt32Buffer records, int32 count)
+    internal TokenSnapshot(OwnedInt32Buffer records, int32 count)
     {
         _records = move records;
         _count = count;
