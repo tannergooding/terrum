@@ -79,6 +79,7 @@ public static partial class ScalarFrontendHost
             throw InvalidResult();
         }
         var functions = ImmutableArray.CreateBuilder<ScalarFrontendResult>(declarations.Length);
+        var functionSources = ImmutableArray.CreateBuilder<SourceText>(declarations.Length);
         for (var i = 0; i < declarations.Length; i++)
         {
             var declaration = declarations[i];
@@ -108,7 +109,9 @@ public static partial class ScalarFrontendHost
                 targets.Add(target);
             }
             var context = new ProgramReadContext(declarations, targets.MoveToImmutable());
-            var function = ReadResultCore(FunctionSource(source, declaration.Span), payload, policy, context);
+            var functionSource = FunctionSource(source, declaration.Span);
+            functionSources.Add(functionSource);
+            var function = ReadResultCore(functionSource, payload, policy, context);
             if (!function.IsValid || function.ReturnType != declaration.ReturnType
                 || function.ParameterCount != declaration.ParameterTypes.Length
                 || function.OutParameterMask != declaration.OutParameterMask
@@ -123,7 +126,7 @@ public static partial class ScalarFrontendHost
             functions.Add(function);
         }
         var results = functions.MoveToImmutable();
-        var program = BindProgramCore(source, results, declarations, policy);
+        var program = BindProgramCore(results, declarations, functionSources.MoveToImmutable(), policy);
         return new ScalarFrontendReadResult(results[0] with { Functions = results }, program);
     }
 
@@ -139,8 +142,9 @@ public static partial class ScalarFrontendHost
         return read.Program ?? BindLibraryCore(source, read.Projection, policy);
     }
 
-    private static BoundProgram BindProgramCore(SourceText source, ImmutableArray<ScalarFrontendResult> results,
-        ImmutableArray<ProgramDeclaration> declarations, BoundRuntimePolicy policy)
+    private static BoundProgram BindProgramCore(ImmutableArray<ScalarFrontendResult> results,
+        ImmutableArray<ProgramDeclaration> declarations, ImmutableArray<SourceText> functionSources,
+        BoundRuntimePolicy policy)
     {
         var functions = ImmutableArray.CreateBuilder<BoundFunction>(results.Length);
         for (var i = 0; i < results.Length; i++)
@@ -157,7 +161,7 @@ public static partial class ScalarFrontendHost
                 }
             }
             var omitImplicitReturn = hasDoesNotReturnCallStatement && results[i].TrueRoot < 0;
-            var function = BindLibraryCore(FunctionSource(source, declarations[i].Span),
+            var function = BindLibraryCore(functionSources[i],
                 results[i], policy, verify: false,
                 omitImplicitReturn: omitImplicitReturn).Functions[0];
             functions.Add(function with {
