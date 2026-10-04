@@ -363,7 +363,8 @@ public static partial class TrRmExecutableCompiler
             ImmutableArray<BoundStatement> statements;
             if ((body[0] & 0x0C) == 0x08)
             {
-                _ = new TrRmCompactIndexedBodyReader(bodies, row, modules, defs, sigs, parameters, types);
+                TrRmCompactIndexedBodyReader.ValidateOnly(bodies, row, modules, defs, sigs,
+                    parameters, types);
                 indexed = IndexedBuilder.DecodeIndexedBody(body, count,
                     declaration.ReturnType, noThrow, declaration.DoesNotReturn, types, functions);
                 for (var value = count; value < indexed.Types.Length; value++)

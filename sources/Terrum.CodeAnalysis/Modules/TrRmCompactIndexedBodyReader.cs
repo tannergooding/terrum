@@ -21,7 +21,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
     public int ValueCount { get; }
 
     public int GetOperationCount(int block)
-        => block > 0 && block <= BlockCount ? _operationCounts[block] : throw InvalidBody();
+        => block > 0 && block <= BlockCount && block < _operationCounts.Length
+            ? _operationCounts[block] : throw InvalidBody();
 
     public TrRmCompactIndexedBodyReader(TrRmBodyTableReader bodies, int methodRow,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
@@ -46,6 +47,25 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
         TrRmImportTableReader imports)
+        : this(bodies, methodRow, modules, methods, signatures, parameters, types,
+            nominalTypes, imports, true)
+    {
+    }
+
+    internal static void ValidateOnly(TrRmBodyTableReader bodies, int methodRow,
+        TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types)
+    {
+        _ = new TrRmCompactIndexedBodyReader(bodies, methodRow, modules, methods, signatures,
+            parameters, types, default, default, false);
+    }
+
+    private TrRmCompactIndexedBodyReader(TrRmBodyTableReader bodies, int methodRow,
+        TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
+        TrRmImportTableReader imports, bool captureOperationCounts)
     {
         var bodyRow = methods.GetBodyRow(methodRow);
         if (bodyRow == 0
@@ -82,7 +102,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             throw InvalidBody();
         }
 
-        _operationCounts = new int[BlockCount + 1];
+        _operationCounts = captureOperationCounts ? new int[BlockCount + 1] : [];
         var mappedTypes = new ushort[typeCount + 1];
         for (var typeId = 1; typeId <= typeCount; typeId++)
         {
@@ -271,7 +291,10 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 throw InvalidBody();
             }
 
-            _operationCounts[block] = operations;
+            if (captureOperationCounts)
+            {
+                _operationCounts[block] = operations;
+            }
             var nextResult = (int)starts[block - 1] + blockParameters[block].Length + 1;
             externalUses[block] = new HashSet<int>();
             var useOffset = cursor;
