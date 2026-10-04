@@ -954,25 +954,36 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
         var auditVisits = 0;
         var auditBlockCount = BlockCount;
+        int[]? bypassVisits = null;
+        Queue<int>? pendingBypassBlocks = null;
+        var bypassGeneration = 0;
         bool Bypasses(int guard, int destination)
         {
             if (guard == 1 || guard == destination)
             {
                 return false;
             }
-            var visited = new bool[auditBlockCount + 1];
-            var pending = new Queue<int>();
-            pending.Enqueue(1);
-            visited[1] = true;
-            while (pending.Count != 0)
+
+            bypassVisits ??= new int[auditBlockCount + 1];
+            pendingBypassBlocks ??= new Queue<int>();
+            if (bypassGeneration == int.MaxValue)
+            {
+                Array.Clear(bypassVisits);
+                bypassGeneration = 0;
+            }
+            var generation = ++bypassGeneration;
+            pendingBypassBlocks.Clear();
+            pendingBypassBlocks.Enqueue(1);
+            bypassVisits[1] = generation;
+            while (pendingBypassBlocks.Count != 0)
             {
                 if (++auditVisits > SemanticVerifier.MaximumAnalysisVisits)
                 {
                     throw InvalidBody();
                 }
-                foreach (var edge in successors[pending.Dequeue()])
+                foreach (var edge in successors[pendingBypassBlocks.Dequeue()])
                 {
-                    if (edge.Target == guard || visited[edge.Target])
+                    if (edge.Target == guard || bypassVisits[edge.Target] == generation)
                     {
                         continue;
                     }
@@ -980,8 +991,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     {
                         return true;
                     }
-                    visited[edge.Target] = true;
-                    pending.Enqueue(edge.Target);
+                    bypassVisits[edge.Target] = generation;
+                    pendingBypassBlocks.Enqueue(edge.Target);
                 }
             }
             return false;
