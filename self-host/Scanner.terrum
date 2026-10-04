@@ -2,41 +2,6 @@ namespace Terrum.CodeAnalysis;
 
 // This component scans source token boundaries and lexical diagnostics.
 // Host buffers are bounded capabilities, not source-constructible pointers.
-int32 ReadScalar(int32 at)
-{
-    int32 first = int32(Host.Source[at]);
-    if (first >= 55296 && first <= 56319)
-    {
-        if (at + 1 < Host.Source.Length)
-        {
-            int32 second = int32(Host.Source[at + 1]);
-            if (second >= 56320 && second <= 57343)
-            {
-                return 65536 + (first - 55296) * 1024 + second - 56320;
-            }
-        }
-
-        return -1;
-    }
-
-    if (first >= 56320 && first <= 57343)
-    {
-        return -1;
-    }
-
-    return first;
-}
-
-int32 ScalarWidth(int32 scalar)
-{
-    if (scalar >= 65536)
-    {
-        return 2;
-    }
-
-    return 1;
-}
-
 bool IsIdentifierStart(int32 scalar)
 {
     if (scalar == 95)
@@ -147,7 +112,7 @@ void Report(int32 code, int32 start, int32 length)
 
 void AdvanceCommentScalar(int32 at)
 {
-    if (ReadScalar(at) == -1)
+    if (ReadUtf16Scalar(at, Host.Source.Length) == -1)
     {
         Report(1, at, 1);
     }
@@ -166,7 +131,7 @@ int32 SkipBlockComment(int32 start, int32 slashes)
         if (PeekUnit(at) != 42)
         {
             AdvanceCommentScalar(at);
-            at = at + ScalarWidth(ReadScalar(at));
+            at = at + Utf16ScalarWidth(ReadUtf16Scalar(at, Host.Source.Length));
             continue;
         }
 
@@ -247,7 +212,7 @@ int32 SkipTrivia(int32 initial, int32 owner)
             while (at < Host.Source.Length && !IsNewline(PeekUnit(at)))
             {
                 AdvanceCommentScalar(at);
-                at = at + ScalarWidth(ReadScalar(at));
+                at = at + Utf16ScalarWidth(ReadUtf16Scalar(at, Host.Source.Length));
             }
             if (documentation)
             {
@@ -419,7 +384,7 @@ int32 ReadNumericTag(int32 at)
 
     if (length != 0 && at + length < Host.Source.Length)
     {
-        int32 next = ReadScalar(at + length);
+        int32 next = ReadUtf16Scalar(at + length, Host.Source.Length);
         if (next == 95 || IsIdentifierContinue(next))
         {
             return 0;
@@ -803,7 +768,7 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
         mut bool nextStartsIdentifier = false;
         if (following < Host.Source.Length)
         {
-            int32 scalar = ReadScalar(following);
+            int32 scalar = ReadUtf16Scalar(following, Host.Source.Length);
             nextStartsIdentifier = scalar == 95 || IsIdentifierContinue(scalar);
         }
 
@@ -904,13 +869,13 @@ int32 ScanString(int32 initial)
         }
         else if (current != 92)
         {
-            int32 scalar = ReadScalar(at);
+            int32 scalar = ReadUtf16Scalar(at, Host.Source.Length);
             if (scalar == -1)
             {
                 Report(1, at, 1);
             }
 
-            at = at + ScalarWidth(scalar);
+            at = at + Utf16ScalarWidth(scalar);
         }
         else
         {
@@ -969,13 +934,13 @@ int32 ScanCharacter(int32 initial)
                 break;
             }
 
-            int32 escapedScalar = ReadScalar(at);
-            at = at + ScalarWidth(escapedScalar);
+            int32 escapedScalar = ReadUtf16Scalar(at, Host.Source.Length);
+            at = at + Utf16ScalarWidth(escapedScalar);
         }
         else
         {
-            int32 scalar = ReadScalar(at);
-            at = at + ScalarWidth(scalar);
+            int32 scalar = ReadUtf16Scalar(at, Host.Source.Length);
+            at = at + Utf16ScalarWidth(scalar);
         }
     }
 
@@ -1012,16 +977,17 @@ int32 Scan()
         if (position < Host.Source.Length)
         {
             int32 start = position;
-            int32 scalar = ReadScalar(position);
+            int32 scalar = ReadUtf16Scalar(position, Host.Source.Length);
             mut int32 kind = 1;
-            position = position + ScalarWidth(scalar);
+            position = position + Utf16ScalarWidth(scalar);
             if (scalar == 64 && position < Host.Source.Length
-                && IsIdentifierStart(ReadScalar(position)))
+                && IsIdentifierStart(ReadUtf16Scalar(position, Host.Source.Length)))
             {
-                position = position + ScalarWidth(ReadScalar(position));
-                while (position < Host.Source.Length && IsIdentifierContinue(ReadScalar(position)))
+                position = position + Utf16ScalarWidth(ReadUtf16Scalar(position, Host.Source.Length));
+                while (position < Host.Source.Length
+                    && IsIdentifierContinue(ReadUtf16Scalar(position, Host.Source.Length)))
                 {
-                    position = position + ScalarWidth(ReadScalar(position));
+                    position = position + Utf16ScalarWidth(ReadUtf16Scalar(position, Host.Source.Length));
                 }
                 if (IsEscapeKeyword(start + 1, position - start - 1))
                 {
@@ -1037,10 +1003,10 @@ int32 Scan()
                 kind = 2;
                 while (position < Host.Source.Length)
                 {
-                    int32 next = ReadScalar(position);
+                    int32 next = ReadUtf16Scalar(position, Host.Source.Length);
                     if (IsIdentifierContinue(next))
                     {
-                        position = position + ScalarWidth(next);
+                        position = position + Utf16ScalarWidth(next);
                     }
                     else
                     {

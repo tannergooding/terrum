@@ -24,6 +24,7 @@ public sealed class FixtureTests
 
     [Theory]
     [InlineData("SourceRange.terrum")]
+    [InlineData("Utf16Scalar.terrum")]
     [InlineData("CharacterFacts.terrum")]
     [InlineData("RangeTests.terrum")]
     [InlineData("Token.terrum")]

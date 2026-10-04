@@ -16,7 +16,7 @@ bool IsValidScannerToken(int32 index, int32 count, int32 previousEnd,
     {
         return kind == 2 && IsEscapeKeyword(start + 1, length - 1)
             && (start + length == Host.Source.Length
-                || !IsIdentifierContinue(ReadScalar(start + length)));
+                || !IsIdentifierContinue(ReadUtf16Scalar(start + length, Host.Source.Length)));
     }
     if (kind == 2 && length == 1 && Host.Source[start] == char16(95))
     {

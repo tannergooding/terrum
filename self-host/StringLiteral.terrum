@@ -383,26 +383,12 @@ bool TryReadLiteralScalarAt(int32 at, int32 end, init ref<int32> scalar, init re
         return true;
     }
 
-    if (first >= 55296 && first <= 56319)
-    {
-        if (end - at < 2)
-        {
-            return false;
-        }
-        int32 second = int32(Host.Source[at + 1]);
-        if (second < 56320 || second > 57343)
-        {
-            return false;
-        }
-        scalar = 65536 + (first - 55296) * 1024 + second - 56320;
-        next = at + 2;
-        return true;
-    }
-    if (first >= 56320 && first <= 57343)
+    int32 decodedScalar = ReadUtf16Scalar(at, end);
+    if (decodedScalar < 0)
     {
         return false;
     }
-    scalar = first;
-    next = at + 1;
+    scalar = decodedScalar;
+    next = at + Utf16ScalarWidth(decodedScalar);
     return true;
 }

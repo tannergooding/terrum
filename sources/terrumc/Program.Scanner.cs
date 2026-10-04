@@ -234,7 +234,8 @@ internal static partial class Program
             return [SyntaxTree.Parse(ReadSource(fullPath) + "\nint32 Main() { return Scan(); }\n", path)];
         }
 
-        string[] componentNames = ["SourceRange.terrum", "CharacterLiteral.terrum", "StringEscape.terrum", "Scanner.terrum"];
+        string[] componentNames = ["SourceRange.terrum", "Utf16Scalar.terrum", "CharacterLiteral.terrum",
+            "StringEscape.terrum", "Scanner.terrum"];
         var trees = ImmutableArray.CreateBuilder<SyntaxTree>(componentNames.Length);
         const string NamespaceDeclaration = "namespace Terrum.CodeAnalysis;";
         foreach (var componentName in componentNames)

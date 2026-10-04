@@ -689,13 +689,16 @@ public sealed class ScannerTests
         var selfHostDirectory = Path.Combine(root, "self-host");
         var sourceRange = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "SourceRange.terrum"))
             .ConfigureAwait(true);
+        var utf16Scalar = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "Utf16Scalar.terrum"))
+            .ConfigureAwait(true);
         var characterLiteral = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "CharacterLiteral.terrum"))
             .ConfigureAwait(true);
         var stringEscape = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "StringEscape.terrum"))
             .ConfigureAwait(true);
         var scanner = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "Scanner.terrum"))
             .ConfigureAwait(true);
-        return sourceRange + RemoveFileScopedNamespace(characterLiteral)
+        return sourceRange + RemoveFileScopedNamespace(utf16Scalar)
+            + RemoveFileScopedNamespace(characterLiteral)
             + RemoveFileScopedNamespace(stringEscape) + RemoveFileScopedNamespace(scanner);
     }
 
