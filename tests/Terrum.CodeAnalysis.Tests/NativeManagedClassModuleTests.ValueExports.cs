@@ -58,6 +58,15 @@ public sealed partial class NativeManagedClassModuleTests
             result = value;
             return publish;
         }
+        public int32 FillCopy(int64 first, out Pair value) {
+            require Box.TryCreate(new Pair(first, 22), out var box);
+            value = box.Data;
+            return 7;
+        }
+        public void FillVoid(out Pair value) {
+            require Box.TryCreate(new Pair(18, 24), out var box);
+            value = box.Data;
+        }
         public int32 CollectGarbage() { return ManagedHeap.Collect(); }
         """;
 
@@ -336,8 +345,15 @@ public sealed partial class NativeManagedClassModuleTests
                         if (CollectGarbage() != 1) { return 9; }
                     }
                 }
-            """ : "") + "return number; }";
-        string[] exports = ["Make", "TryPair", "TryScalar", "CollectGarbage"];
+            """ : "") + """
+                int32 status = FillCopy(20, out var copy);
+                FillVoid(out var final);
+                if (status != 7 || copy.First != 20 || copy.Second != 22
+                    || final.First != 18 || final.Second != 24) { return 10; }
+                return number;
+            }
+            """;
+        string[] exports = ["Make", "TryPair", "TryScalar", "FillCopy", "FillVoid", "CollectGarbage"];
         var program = Compile(ConditionalValueSource, policy);
         var producer = ModuleCompiler.CreateProducer(program, exports);
         Assert.Equal(54, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));

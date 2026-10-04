@@ -14,7 +14,7 @@ by-value representation and Boolean `out` supports them.
 
 Should hosted source compilation provisionally admit handle-free Copy-struct
 `out` parameters on non-Boolean and void functions, including public semantic
-module and native exports?
+module, native module and native graph exports?
 
 ## Recommendation
 
@@ -35,6 +35,6 @@ output metadata or resolve general `out`/`init ref<T>` migration.
 Cover both non-Boolean and void results, inferred `out var` destinations,
 publication on every normal return, and public producer/consumer boundaries
 under fail-fast and checked-exception policies. Verify semantic-module linking,
-native AOT emission and native consumer execution. Reject non-unique Copy
-eligibility for unique or managed-containing values through the existing
-export-shape checks.
+native AOT emission, native consumer execution and managed native graph
+imports. Reject non-unique Copy eligibility for unique or managed-containing
+values through the existing export-shape checks.
