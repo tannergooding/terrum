@@ -263,6 +263,7 @@ boundaries remain in the [implementation reference](implementation.md).
 | `dd5e072` | Reuse the validated graph dependency-function map during contract reconstruction |
 | `eb3f0a8` | Reuse the strict UTF-8 codec across native graph and module-set package records |
 | `041b780` | Reuse the strict UTF-8 codec across semantic module readers and string records |
+| `055386d` | Compare parsed graph and module-set declarations against already-built import sets |
 | `ef83b3c` | Replace indexed TRRM per-use tree updates with dictionary updates and final key sorting |
 | `ae4ceea` | Cache managed-state detection outside per-function module-set boundary checks |
 | `3bb7cc7` | Cache graph managed-state checks outside per-function boundary validation |
