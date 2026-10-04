@@ -456,13 +456,22 @@ internal sealed partial class PeCompiler
             else
             {
                 var @class = _program.Classes[descriptor - 1];
-                var edges = @class.Fields.Where(static field => ManagedClassTypes.IsManaged(field.Type))
-                    .Select(static field => field.Offset + 32).ToArray();
-                _code.Int32(edges.Length);
-                _code.Int32(@class.Size + 32);
-                foreach (var edge in edges)
+                var edgeCount = 0;
+                foreach (var field in @class.Fields)
                 {
-                    _code.Int32(edge);
+                    if (ManagedClassTypes.IsManaged(field.Type))
+                    {
+                        edgeCount++;
+                    }
+                }
+                _code.Int32(edgeCount);
+                _code.Int32(@class.Size + 32);
+                foreach (var field in @class.Fields)
+                {
+                    if (ManagedClassTypes.IsManaged(field.Type))
+                    {
+                        _code.Int32(field.Offset + 32);
+                    }
                 }
             }
         }
