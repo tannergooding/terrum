@@ -268,7 +268,8 @@ public static partial class NativeModuleCompiler
         }
         foreach (var (dependency, provider) in package.Dependencies.Zip(providers))
         {
-            if (dependency.Declarations.Any(name => !provider.Exports.Contains(name, StringComparer.Ordinal)))
+            if (dependency.Declarations.Any(name =>
+                Array.BinarySearch(provider.Exports, name, StringComparer.Ordinal) < 0))
             {
                 throw new ModuleContractException($"Graph declaration does not belong to '{dependency.Identity}'.");
             }
