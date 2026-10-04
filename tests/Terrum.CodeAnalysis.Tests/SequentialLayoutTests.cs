@@ -60,6 +60,43 @@ public sealed class SequentialLayoutTests
             field => Assert.Equal(12, field.Offset));
     }
 
+    [Fact]
+    public void RepeatedClassFieldsRetainDeepSequentialStructureLayout()
+    {
+        var program = Compile(Library + """
+            [Layout(Sequential)] struct LevelOne {
+                Outer Value;
+                public LevelOne(int32 number) { Value = new Outer(number); }
+            }
+            [Layout(Sequential)] struct LevelTwo {
+                LevelOne Value;
+                public LevelTwo(int32 number) { Value = new LevelOne(number); }
+            }
+            [Layout(Sequential)] struct LevelThree {
+                LevelTwo Value;
+                public LevelThree(int32 number) { Value = new LevelTwo(number); }
+            }
+            [Layout(Sequential)] struct LevelFour {
+                LevelThree Value;
+                public LevelFour(int32 number) { Value = new LevelThree(number); }
+            }
+            class Repeated {
+                public LevelFour First; public LevelFour Second; public LevelFour Third;
+                public Repeated(int32 number) {
+                    First = new LevelFour(number); Second = new LevelFour(number); Third = new LevelFour(number);
+                }
+            }
+            """);
+
+        Assert.Equal(16, program.Structures[1].Size);
+        Assert.Equal(16, program.Structures[4].Size);
+        Assert.Equal(48, program.Classes[0].Size);
+        Assert.Collection(program.Classes[0].Fields,
+            field => Assert.Equal((0, 16), (field.Offset, field.Size)),
+            field => Assert.Equal((16, 16), (field.Offset, field.Size)),
+            field => Assert.Equal((32, 16), (field.Offset, field.Size)));
+    }
+
     [Theory]
     [InlineData("[Layout(Sequential)] public struct Bad { int32 Value; }")]
     [InlineData("[Layout(Sequential)] struct Bad { public int32 Value; }")]

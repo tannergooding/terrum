@@ -165,7 +165,10 @@ public static class SemanticVerifier
                     throw Invalid();
                 }
                 var width = ValueLayout.Size(field.Type, program.Structures);
-                var alignment = width == 0 ? 1 : ValueLayout.Alignment(field.Type, program.Structures);
+                var nested = (int)field.Type >= 100 && !ManagedClassTypes.IsClass(field.Type)
+                    ? (int)field.Type - 100 : -1;
+                var alignment = width == 0 ? 1 : nested >= 0 && nested < alignments.Length
+                    ? alignments[nested] : ValueLayout.Alignment(field.Type, program.Structures);
                 offset = (offset + alignment - 1) & -alignment;
                 if (field.Size != width || field.Offset != offset || (field.IsMutable && !@class.IsMutable)
                     || width is < 1 or > ValueLayout.MaximumSize
