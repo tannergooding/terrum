@@ -1024,15 +1024,19 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
             return false;
         }
-        var checkedOwners = new HashSet<(int Owner, int Block)>();
+        var checkedOwnerBlocks = new int[BlockCount + 1];
         for (var block = 1; block <= BlockCount; block++)
         {
             foreach (var value in externalUses[block])
             {
                 var definingBlock = owner[value];
-                if (checkedOwners.Add((definingBlock, block)) && Bypasses(definingBlock, block))
+                if (checkedOwnerBlocks[definingBlock] != block)
                 {
-                    throw InvalidBody();
+                    checkedOwnerBlocks[definingBlock] = block;
+                    if (Bypasses(definingBlock, block))
+                    {
+                        throw InvalidBody();
+                    }
                 }
             }
             for (var region = blockRegions[block]; region != 0; region = regions[region].Parent)
