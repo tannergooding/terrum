@@ -281,6 +281,28 @@ public sealed partial class CliTests
         Assert.Empty(error);
     }
 
+    [Theory]
+    [InlineData("float32", "int32")]
+    [InlineData("float32", "uint32")]
+    [InlineData("float32", "int64")]
+    [InlineData("float32", "uint64")]
+    [InlineData("float64", "int32")]
+    [InlineData("float64", "uint32")]
+    [InlineData("float64", "int64")]
+    [InlineData("float64", "uint64")]
+    public async Task ScalarFrontendFailFastFloatingToIntegerUsesOverflowStatusAsync(
+        string sourceType, string targetType)
+    {
+        var source = Encoding.UTF8.GetBytes(
+            $"int32 Main() {{ return int32({targetType}({sourceType}(1.0 / 0.0))); }}");
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var (exit, output, error) = await RunAsync(source, "frontend-run", directory, "-",
+            "--runtime", "fail-fast");
+        Assert.Equal(unchecked((int)0xE0540001), exit);
+        Assert.Empty(output);
+        Assert.Empty(error);
+    }
+
     [Fact]
     public async Task ScalarFrontendFloatingConversionsMatchHostedLibrariesAsync()
     {
