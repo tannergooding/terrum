@@ -392,7 +392,7 @@ public static partial class NativeModuleCompiler
                 string name;
                 try
                 {
-                    name = new UTF8Encoding(false, true).GetString(bytes, at, size);
+                    name = StrictUtf8.GetString(bytes, at, size);
                 }
                 catch (DecoderFallbackException exception)
                 {

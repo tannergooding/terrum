@@ -14,6 +14,7 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class NativeModuleCompiler
 {
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int MaximumGraphProviderCount = 16;
     private const int GraphHeaderSize = 19;
     private const int GraphMaximumBytes = 16 * 1024 * 1024;
@@ -440,7 +441,7 @@ public static partial class NativeModuleCompiler
         }
         try
         {
-            var result = new UTF8Encoding(false, true).GetString(bytes, at, length);
+            var result = StrictUtf8.GetString(bytes, at, length);
             at += length;
             return result;
         }
@@ -452,7 +453,7 @@ public static partial class NativeModuleCompiler
 
     private static void PutGraphString(BinaryWriter writer, string value)
     {
-        var bytes = new UTF8Encoding(false, true).GetBytes(value);
+        var bytes = StrictUtf8.GetBytes(value);
         if (bytes.Length is < 1 or > 256)
         {
             throw new ModuleFormatException("Graph string exceeds its bound.");
