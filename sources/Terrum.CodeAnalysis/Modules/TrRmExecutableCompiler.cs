@@ -211,7 +211,7 @@ public static partial class TrRmExecutableCompiler
 
     public static BoundProgram Load(ReadOnlySpan<byte> artifact)
     {
-        TrRmStructuralMetadataValidator.ValidateCompact(artifact);
+        TrRmStructuralMetadataValidator.Validate(artifact);
         var index = new TrRmArtifactIndex(artifact);
         for (var section = 0; section < index.SectionCount; section++)
         {
