@@ -103,6 +103,32 @@ public sealed partial class CliTests
     }
 
     [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task ScalarFrontendRejectsNoThrowFloatingToIntegerConversionsAsync(string policy)
+    {
+        const string Source =
+            "[NoThrow] public int32 Convert(float32 value) { return int32(value); }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var outputPath = Path.Combine(Path.GetTempPath(),
+            $"terrum-scalar-no-throw-float-to-int-{Guid.NewGuid():N}.dll");
+        try
+        {
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
+                "frontend-build-library", directory, "-", "-o", outputPath,
+                "--runtime", policy, "--json");
+            Assert.Equal(1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        }
+        finally
+        {
+            File.Delete(outputPath);
+        }
+    }
+
+    [Theory]
     [InlineData("fail-fast", "public float32 Literal() => 0.1;", 7, 3)]
     [InlineData("checked-exceptions", "public float32 Literal() => 0.1;", 7, 3)]
     [InlineData("fail-fast", "public float32 Literal() { return 0.1; }", 7, 3)]
@@ -227,6 +253,25 @@ public sealed partial class CliTests
             int32 Main() { return
                 (int32(float32(char16(55296))) == 55296
                     && int32(float64(char16(65535))) == 65535) ? 42 : 1;
+            }
+            """;
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
+            "frontend-run", directory, "-", "--runtime", policy);
+        Assert.True(exit == 42, $"{policy}: {output}{error}");
+        Assert.Empty(error);
+    }
+
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task ScalarFrontendExecutesFloatingIntegerConversionsAsync(string policy)
+    {
+        const string Source = """
+            int32 Main() { return
+                (int32(float32(1.9)) == 1 && uint32(float32(2.9)) == 2
+                    && int64(float64(-3.9)) == -3
+                    && uint64(float64(4.9)) == 4) ? 42 : 1;
             }
             """;
         var directory = Path.Combine(RepositoryRoot(), "self-host");
