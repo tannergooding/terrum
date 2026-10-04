@@ -558,7 +558,7 @@ mut class ScalarFrontendState
             require _tokens.TryGet(_at, init var afterOpen);
             next = afterOpen;
         }
-        if (!ParseExpressionCore(expectedType, out var inner))
+        if (!ParseExpressionCore(expectedType, init var inner))
         {
             return false;
         }
@@ -660,7 +660,8 @@ mut class ScalarFrontendState
                 groups + outerGroups);
     }
 
-    private mut bool ParseExpressionCore(int32 expectedType, out ScalarFrontendExpression expression)
+    private mut bool ParseExpressionCore(
+        int32 expectedType, init ref<ScalarFrontendExpression> expression)
     {
         require _tokens.TryGet(_at, init var first);
         mut Token literal = first;
