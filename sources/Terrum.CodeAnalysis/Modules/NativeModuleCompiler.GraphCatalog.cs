@@ -203,7 +203,8 @@ public static partial class NativeModuleCompiler
                 }
                 assignments++;
                 selected.Add(next, option);
-                if (HasCycle())
+                // Every recursive branch is acyclic on entry, so only the new provider can introduce a cycle.
+                if (HasCycle(next))
                 {
                     cycle = true;
                 }
@@ -224,11 +225,11 @@ public static partial class NativeModuleCompiler
             }
         }
 
-        bool HasCycle()
+        bool HasCycle(string identity)
         {
             visiting.Clear();
             visited.Clear();
-            return selected.Keys.Any(Visit);
+            return Visit(identity);
 
             bool Visit(string identity)
             {
