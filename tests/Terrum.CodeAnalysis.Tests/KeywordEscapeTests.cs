@@ -98,6 +98,13 @@ public sealed class KeywordEscapeTests
         Assert.Equal(spelling, SyntaxTree.Parse(result).Root.ToFullString());
     }
 
+    [Fact]
+    public async Task ManyInvalidEscapesAdaptWithAllDiagnosticsAsync()
+    {
+        var source = string.Join(' ', Enumerable.Repeat("@ordinaryName", 256));
+        await ScannerTests.CheckScannerAsync(source);
+    }
+
     [Theory]
     [InlineData("int32 Main() { int32 @const = 42; return const; }")]
     [InlineData("int32 Main() { int32 const = 42; return @const; }")]

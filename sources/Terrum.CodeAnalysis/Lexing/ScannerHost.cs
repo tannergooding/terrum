@@ -647,6 +647,7 @@ public static class ScannerHost
 
     private static void ValidateEscapeProfile(LexResult result)
     {
+        HashSet<TextSpan>? escapeDiagnostics = null;
         foreach (var token in result.Tokens)
         {
             if (!token.Text.StartsWith('@'))
@@ -664,14 +665,19 @@ public static class ScannerHost
 
         bool HasEscapeDiagnostic(TextSpan span)
         {
-            foreach (var diagnostic in result.Diagnostics)
+            if (escapeDiagnostics is null)
             {
-                if (diagnostic.Code == "TRM0001" && diagnostic.Span == span)
+                escapeDiagnostics = [];
+                foreach (var diagnostic in result.Diagnostics)
                 {
-                    return true;
+                    if (diagnostic.Code == "TRM0001")
+                    {
+                        escapeDiagnostics.Add(diagnostic.Span);
+                    }
                 }
             }
-            return false;
+
+            return escapeDiagnostics.Contains(span);
         }
     }
 
