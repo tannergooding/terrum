@@ -175,9 +175,13 @@ public static partial class ScalarFrontendHost
     // non-trivia source tokens; no other declaration can disappear into padding.
     private static SourceText FunctionSource(SourceText source, TextSpan span)
     {
-        var text = new string(' ', source.Length).ToCharArray();
-        source.Text.AsSpan(span.Start, span.Length).CopyTo(text.AsSpan(span.Start));
-        return SourceText.From(new string(text));
+        var text = string.Create(source.Length, (Source: source, Span: span), static (destination, state) =>
+        {
+            destination.Fill(' ');
+            state.Source.Text.AsSpan(state.Span.Start, state.Span.Length)
+                .CopyTo(destination[state.Span.Start..]);
+        });
+        return SourceText.From(text);
     }
 
     private static ImmutableArray<ProgramDeclaration> InventoryProgram(SourceText source)
