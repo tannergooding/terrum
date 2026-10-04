@@ -209,15 +209,15 @@ public static partial class NativeModuleCompiler
                 exports, providers[i].Policy, allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(providerProfile),
                 allowManagedRuntimeData: AllowsManagedRuntimeData(providerProfile));
         }
-        ModuleCompiler.ValidateConsumerSet(set.Contract, [.. providers.Select(static item => item.Contract)]);
+        var referenceSet = ModuleCompiler.CreateReferenceSet([.. providers.Select(static item => item.Contract)]);
+        ModuleCompiler.ValidateConsumerAgainstReference(set.Contract, referenceSet);
         var actual = ModuleCompiler.GetConsumerSetDeclarations(set.Contract).ToHashSet(StringComparer.Ordinal);
         var mapped = set.Dependencies.SelectMany(static item => item.Imports).ToHashSet(StringComparer.Ordinal);
         if (!actual.SetEquals(mapped))
         {
             throw new ModuleFormatException("Native set import mapping omits a called semantic import.");
         }
-        var declarations = ModuleCompiler.CreateReferenceSet([.. providers.Select(static item => item.Contract)]);
-        var declarationNames = declarations.Functions.Select(static item => item.Name).ToHashSet(StringComparer.Ordinal);
+        var declarationNames = referenceSet.Functions.Select(static item => item.Name).ToHashSet(StringComparer.Ordinal);
         for (var i = 0; i < providers.Length; i++)
         {
             var dependency = set.Dependencies[i];

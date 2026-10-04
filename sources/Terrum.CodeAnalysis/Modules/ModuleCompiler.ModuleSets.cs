@@ -87,10 +87,9 @@ public static partial class ModuleCompiler
     /// <summary>Persists only the consumer and selected imports; no provider implementation is embedded.</summary>
     internal static byte[] CreateConsumerSet(BoundProgram program, IReadOnlyList<byte[]> producers)
     {
-        _ = ReadSet(producers);
         var reference = CreateReferenceSet(producers);
         var result = CreateConsumerAgainstReference(program, reference, allowManagedParticipant: true);
-        ValidateConsumerSet(result, producers);
+        ValidateConsumerAgainstReference(result, reference);
         return result;
     }
 
@@ -175,7 +174,6 @@ public static partial class ModuleCompiler
     /// <summary>Checks retained consumer contracts against each selected, independently verified leaf provider.</summary>
     internal static void ValidateConsumerSet(byte[] consumerBytes, IReadOnlyList<byte[]> producerBytes)
     {
-        _ = ReadSet(producerBytes);
         var reference = CreateReferenceSet(producerBytes);
         ValidateConsumerAgainstReference(consumerBytes, reference);
     }
