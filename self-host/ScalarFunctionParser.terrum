@@ -845,7 +845,7 @@ bool TryParseParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
 }
 
 bool TryEvaluateInt32ParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    int32 parameter, out SourceRange name, out int32 result)
+    int32 parameter, init ref<SourceRange> name, init ref<int32> result)
 {
     if (!TryParseParameterAddReturn(move tokens, move integers,
             init var selected, init var foundName, init var magnitude, init var based)
@@ -870,7 +870,7 @@ bool TryEvaluateInt32ParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapsh
 }
 
 bool TryEvaluateUInt32ParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    uint32 parameter, out SourceRange name, out uint32 result)
+    uint32 parameter, init ref<SourceRange> name, init ref<uint32> result)
 {
     if (!TryParseParameterAddReturn(move tokens, move integers,
             init var selected, init var foundName, init var magnitude, init var based)
@@ -885,7 +885,7 @@ bool TryEvaluateUInt32ParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnaps
 }
 
 bool TryEvaluateInt64ParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    int64 parameter, out SourceRange name, out int64 result)
+    int64 parameter, init ref<SourceRange> name, init ref<int64> result)
 {
     if (!TryParseParameterAddReturn(move tokens, move integers,
             init var selected, init var foundName, init var magnitude, init var based)
@@ -904,7 +904,7 @@ bool TryEvaluateInt64ParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapsh
 }
 
 bool TryEvaluateUInt64ParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    uint64 parameter, out SourceRange name, out uint64 result)
+    uint64 parameter, init ref<SourceRange> name, init ref<uint64> result)
 {
     if (!TryParseParameterAddReturn(move tokens, move integers,
             init var selected, init var foundName, init var magnitude, init var based)
