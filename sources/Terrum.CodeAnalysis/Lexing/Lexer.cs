@@ -22,7 +22,7 @@ public sealed class Lexer
 
     private readonly SourceText _source;
     private readonly CancellationToken _cancellationToken;
-    private readonly ImmutableArray<Diagnostic>.Builder _diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+    private ImmutableArray<Diagnostic>.Builder? _diagnostics;
     private int _position;
     private int _deferredRunEnd;
 
@@ -56,7 +56,7 @@ public sealed class Lexer
         }
         while (tokens[^1].Kind != TokenKind.EndOfFile);
 
-        return new LexResult(source, tokens.ToImmutable(), lexer._diagnostics.ToImmutable());
+        return new LexResult(source, tokens.ToImmutable(), lexer.GetDiagnostics());
     }
 
     internal static (ImmutableArray<SyntaxTrivia> Trivia, ImmutableArray<Diagnostic> Diagnostics, int End)
@@ -64,7 +64,7 @@ public sealed class Lexer
     {
         Lexer lexer = new(source, cancellationToken) { _position = position };
         var trivia = lexer.ReadTrivia();
-        return (trivia, lexer._diagnostics.ToImmutable(), lexer._position);
+        return (trivia, lexer.GetDiagnostics(), lexer._position);
     }
 
     internal static int TokenEnd(SourceText source, int position, CancellationToken cancellationToken)
@@ -725,7 +725,13 @@ public sealed class Lexer
     }
 
     private void Report(string code, string message, int start, int length)
-        => _diagnostics.Add(new Diagnostic(code, DiagnosticSeverity.Error, message, new TextSpan(start, length)));
+    {
+        _diagnostics ??= ImmutableArray.CreateBuilder<Diagnostic>();
+        _diagnostics.Add(new Diagnostic(code, DiagnosticSeverity.Error, message, new TextSpan(start, length)));
+    }
+
+    private ImmutableArray<Diagnostic> GetDiagnostics() =>
+        _diagnostics?.ToImmutable() ?? ImmutableArray<Diagnostic>.Empty;
 
     private static TokenKind Keyword(ReadOnlySpan<char> text) => text switch {
         "_" => TokenKind.Underscore,
