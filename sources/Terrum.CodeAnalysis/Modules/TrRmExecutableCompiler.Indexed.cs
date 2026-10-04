@@ -42,6 +42,7 @@ public static partial class TrRmExecutableCompiler
         internal IndexedBlock? Exit;
         internal int[] VisibleSlots = visibleSlots;
         internal bool HasSourceContinuation;
+        internal bool HasHeaderBackedge;
         internal readonly Dictionary<int, (IndexedRegion Target, bool Continue)> Transfers = [];
         internal readonly List<(IndexedBlock Source, IndexedEdge Edge, int Code)> ExitEdges = [];
     }
@@ -1460,7 +1461,7 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        private readonly List<(IndexedRegion Region, IndexedBlock Placeholder)> _pendingBreaks = [];
+        private readonly List<(IndexedRegion Region, IndexedEdge Edge)> _pendingBreaks = [];
 
         private IndexedRegion TransferTarget(int depth)
         {
@@ -1491,9 +1492,9 @@ public static partial class TrRmExecutableCompiler
             // Visibility selects membership only; the edge carries the values at this
             // transfer, including outer writes, not the loop-entry definitions.
             Jump(deferred, _slots, region.VisibleSlots);
-            region.ExitEdges.Add((source, source.True
-                ?? throw Unsupported("Missing scalar transfer edge."), code));
-            _pendingBreaks.Add((region, deferred));
+            var edge = source.True ?? throw Unsupported("Missing scalar transfer edge.");
+            region.ExitEdges.Add((source, edge, code));
+            _pendingBreaks.Add((region, edge));
         }
 
         internal byte[] Encode()
@@ -1516,20 +1517,21 @@ public static partial class TrRmExecutableCompiler
                 _current.ReturnValue = 0;
                 _current = null;
             }
-            foreach (var (region, placeholder) in _pendingBreaks)
+            foreach (var (region, edge) in _pendingBreaks)
             {
-                foreach (var block in _blocks)
+                edge.Target = region.Exit ?? throw Unsupported("Loop exit is missing.");
+            }
+            foreach (var block in _blocks)
+            {
+                if (block.True?.Target is { IsLoopHeader: true } header
+                    && block.Region == header.Region && block != header)
                 {
-                    if (block.True?.Target == placeholder)
-                    {
-                        block.True.Target = region.Exit ?? throw Unsupported("Loop exit is missing.");
-                    }
+                    _regions[block.Region - 1].HasHeaderBackedge = true;
                 }
             }
             foreach (var region in _regions)
             {
-                if (!region.HasSourceContinuation || !_blocks.Any(block => block.Region == region.Id && block != region.Header
-                    && block.True?.Target == region.Header))
+                if (!region.HasSourceContinuation || !region.HasHeaderBackedge)
                 {
                     throw Unsupported("An indexed loop requires a reachable header backedge.");
                 }
