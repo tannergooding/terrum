@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `feccab4` | Reuse a decoded graph contract during export validation |
 | `b33fde4` | Index graph type and import lookups to avoid repeated linear scans |
 | `f9f7729` | Exercise non-Boolean/void Copy outputs through managed native graph exports |
 | `3f7f4ed` | Cover compatible native provider replacement with reordered type declarations |
