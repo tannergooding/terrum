@@ -62,6 +62,8 @@ public static partial class NativeModuleCompiler
             throw new ModuleContractException("Native graph catalog requires a persisted consumer root.");
         }
         var catalog = new Dictionary<string, List<CatalogCandidate>>(StringComparer.Ordinal);
+        var catalogIdentities = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var ambiguousCatalogIdentities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < snapshots.Length; index++)
         {
             var snapshot = snapshots[index];
@@ -74,6 +76,17 @@ public static partial class NativeModuleCompiler
             {
                 choices = [];
                 catalog.Add(identity, choices);
+                if (catalogIdentities.TryGetValue(identity, out var existing))
+                {
+                    if (existing != identity)
+                    {
+                        _ = ambiguousCatalogIdentities.Add(identity);
+                    }
+                }
+                else
+                {
+                    catalogIdentities.Add(identity, identity);
+                }
             }
             if (!choices.Any(choice => choice.Bytes.AsSpan().SequenceEqual(snapshot)))
             {
@@ -157,7 +170,7 @@ public static partial class NativeModuleCompiler
             }
             if (!catalog.TryGetValue(next, out var options))
             {
-                if (catalog.Keys.Any(identity => string.Equals(identity, next, StringComparison.OrdinalIgnoreCase)))
+                if (catalogIdentities.ContainsKey(next))
                 {
                     incompatible = true;
                 }
@@ -167,8 +180,7 @@ public static partial class NativeModuleCompiler
                 }
                 return;
             }
-            if (catalog.Keys.Any(identity => identity != next
-                && string.Equals(identity, next, StringComparison.OrdinalIgnoreCase)))
+            if (ambiguousCatalogIdentities.Contains(next))
             {
                 throw new ModuleContractException($"Case-ambiguous graph catalog identity '{next}'.");
             }
