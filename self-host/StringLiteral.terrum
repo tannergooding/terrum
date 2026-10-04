@@ -383,6 +383,13 @@ bool TryReadLiteralScalarAt(int32 at, int32 end, init ref<int32> scalar, init re
         return true;
     }
 
+    if (first < 55296 || first > 57343)
+    {
+        scalar = first;
+        next = at + 1;
+        return true;
+    }
+
     int32 decodedScalar = ReadUtf16Scalar(at, end);
     if (decodedScalar < 0)
     {

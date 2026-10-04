@@ -153,6 +153,39 @@ public sealed class StringLiteralComponentTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task LongAsciiLiteralReadsEveryScalarAsync(NativeRuntimePolicy policy)
+    {
+        const int ScalarCount = 8192;
+        var spelling = "\"" + new string('A', ScalarCount) + "\"";
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var entry = SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
+                require StringLiteral.TryCreate(spelling, init var literal);
+                mut StringLiteralCursor cursor = StringLiteralCursor.Create(literal);
+                mut int32 count = 0;
+                while (cursor.TryRead(init var scalar, init var next)) {
+                    if (scalar != 65) { return 1; }
+                    count = count + 1;
+                    cursor = next;
+                }
+                if (count != 8192) { return 2; }
+                return 0;
+            }
+            """, "long-ascii-string-literal-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, policy));
+        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+    }
+
+    [Theory]
     [InlineData("TryGetUtf8Length", "EncodeUtf8", "\"\u00E9\"", new[] { 195, 169 })]
     [InlineData("TryGetUtf16Length", "EncodeUtf16", "\"\uD83D\uDE00\"", new[] { 0xD83D, 0xDE00 })]
     [InlineData("TryGetUtf16ByteLength", "EncodeUtf16LeBytes", "\"\uD83D\uDE00\"", new[] { 0x3D, 0xD8, 0, 0xDE })]
