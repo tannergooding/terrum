@@ -250,6 +250,7 @@ internal static class NativeModuleImageValidator
                         throw Invalid();
                     }
                     var symbols = new List<string>();
+                    string? previousSymbol = null;
                     for (var symbol = 0; symbol <= 1024; symbol++)
                     {
                         var hint = Rva64(checked(lookup + (symbol * 8)));
@@ -266,11 +267,16 @@ internal static class NativeModuleImageValidator
                         {
                             throw Invalid();
                         }
-                        symbols.Add(Name(hint + 2));
+                        var symbolName = Name(hint + 2);
+                        if (previousSymbol is not null
+                            && StringComparer.Ordinal.Compare(previousSymbol, symbolName) >= 0)
+                        {
+                            throw Invalid();
+                        }
+                        symbols.Add(symbolName);
+                        previousSymbol = symbolName;
                     }
-                    if (symbols.Count == 0 || symbols.Count > 1024
-                        || symbols.Distinct(StringComparer.Ordinal).Count() != symbols.Count
-                        || !symbols.SequenceEqual(symbols.Order(StringComparer.Ordinal))
+                    if (symbols.Count == 0
                         || lookup < table.RelativeVirtualAddress + table.Size
                         || lookup >= header.ImportAddressTableDirectory.RelativeVirtualAddress
                         || address < header.ImportAddressTableDirectory.RelativeVirtualAddress
