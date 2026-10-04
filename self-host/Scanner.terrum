@@ -277,14 +277,15 @@ bool IsEscapeKeyword(int32 start, int32 length)
 
 int32 KeywordKind(int32 start, int32 length)
 {
+    int32 firstUnit = int32(Host.Source[start]);
     mut int32 entry = 0;
     while (Host.Keywords[entry] != -1)
     {
         int32 kind = Host.Keywords[entry];
         int32 size = Host.Keywords[entry + 1];
-        if (size == length)
+        if (size == length && firstUnit == Host.Keywords[entry + 2])
         {
-            mut int32 offset = 0;
+            mut int32 offset = 1;
             while (offset < size && int32(Host.Source[start + offset]) == Host.Keywords[entry + 2 + offset])
             {
                 offset = offset + 1;
