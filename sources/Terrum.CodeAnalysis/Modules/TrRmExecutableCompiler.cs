@@ -345,6 +345,13 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("Orphan MethodSig is not part of a defined function.");
         }
 
+        var entry = (int)BinaryPrimitives.ReadUInt32LittleEndian(moduleBytes.Slice(12, 4)) - 1;
+        if (entry >= 0 && (entry >= methodCount || functions[entry].ReturnType != PrimitiveType.Int32
+            || functions[entry].ParameterCount != 0))
+        {
+            throw Invalid("Entry method must be a local int32 no-argument function.");
+        }
+
         for (var row = 1; row <= methodCount; row++)
         {
             var declaration = functions[row - 1];
@@ -396,12 +403,6 @@ public static partial class TrRmExecutableCompiler
                 Body = new BoundBlock(statements, default),
                 IndexedBody = indexed,
             };
-        }
-        var entry = (int)BinaryPrimitives.ReadUInt32LittleEndian(moduleBytes.Slice(12, 4)) - 1;
-        if (entry >= 0 && (entry >= methodCount || functions[entry].ReturnType != PrimitiveType.Int32
-            || functions[entry].ParameterCount != 0))
-        {
-            throw Invalid("Entry method must be a local int32 no-argument function.");
         }
         var program = new BoundProgram(functions.MoveToImmutable(), entry)
         {
