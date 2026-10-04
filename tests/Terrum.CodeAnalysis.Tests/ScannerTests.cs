@@ -160,6 +160,13 @@ public sealed class ScannerTests
     }
 
     [Fact]
+    public async Task LongAsciiCommentsPreserveScannerParityAsync()
+    {
+        var source = "//" + new string('a', 8_000) + "\r\n/*" + new string('b', 8_000) + "*/value";
+        await CheckScannerAsync(source).ConfigureAwait(true);
+    }
+
+    [Fact]
     public async Task CharacterLiteralEscapeDiagnosticsMatchHostedBoundariesAsync()
     {
         string[] literals = [

@@ -113,6 +113,12 @@ void Report(int32 code, int32 start, int32 length)
 
 int32 ReadCommentScalar(int32 at)
 {
+    int32 unit = PeekUnit(at);
+    if (unit < 55296 || unit > 57343)
+    {
+        return unit;
+    }
+
     int32 scalar = ReadUtf16Scalar(at, Host.Source.Length);
     if (scalar == -1)
     {

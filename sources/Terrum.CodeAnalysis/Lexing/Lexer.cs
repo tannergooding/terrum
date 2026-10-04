@@ -199,6 +199,12 @@ public sealed class Lexer
 
     private void AdvanceCommentScalar()
     {
+        if (!char.IsSurrogate(Current))
+        {
+            _position++;
+            return;
+        }
+
         if (TryScalar(_position, out _, out var width))
         {
             _position += width;
