@@ -1055,20 +1055,25 @@ internal sealed partial class Binder
         {
             return _protocols.ContainsKey(name) ? name : null;
         }
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        if (_protocols.ContainsKey(Qualify(name)))
-        {
-            _ = names.Add(Qualify(name));
-        }
+        var candidate = Qualify(name);
+        var hasCandidate = _protocols.ContainsKey(candidate);
         foreach (var imported in _usings)
         {
             var qualified = imported + "." + name;
-            if (_protocols.ContainsKey(qualified))
+            if (!_protocols.ContainsKey(qualified))
             {
-                _ = names.Add(qualified);
+                continue;
             }
+
+            if (hasCandidate && candidate != qualified)
+            {
+                return null;
+            }
+
+            candidate = qualified;
+            hasCandidate = true;
         }
-        return names.Count == 1 ? names.Single() : null;
+        return hasCandidate ? candidate : null;
     }
 
     private static bool TryProtocolApplication(SyntaxNode type, out string head, out SyntaxNode[] arguments)
