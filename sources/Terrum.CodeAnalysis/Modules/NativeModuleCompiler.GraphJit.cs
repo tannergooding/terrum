@@ -68,9 +68,9 @@ public static partial class NativeModuleCompiler
         cancellationToken.ThrowIfCancellationRequested();
         var rootBytes = (byte[])consumer.Clone();
         var selected = inputs.Select(static bytes => (byte[])bytes.Clone()).ToArray();
-        var root = ReadGraphPackage(rootBytes);
+        var root = ReadGraphPackageSnapshot(rootBytes);
         ValidateGraphProviderCount(selected.Length);
-        var indexed = selected.Select(bytes => (Bytes: bytes, Package: ReadGraphPackage(bytes))).ToArray();
+        var indexed = selected.Select(bytes => (Bytes: bytes, Package: ReadGraphPackageSnapshot(bytes))).ToArray();
         var providers = ValidateGraphProviders(indexed.Select(static item => item.Package).ToArray());
         if (root.Policy != runtimePolicy)
         {
@@ -202,8 +202,8 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native graph JIT package paths differ from their staging directory.");
         }
-        var root = ReadGraphPackage(ReadGraphSnapshot(rootPath));
-        var providers = ReadGraphProviders([.. artifactPaths.Select(ReadGraphSnapshot)]);
+        var root = ReadGraphPackageSnapshot(ReadGraphSnapshot(rootPath));
+        var providers = ReadGraphProviderSnapshots([.. artifactPaths.Select(ReadGraphSnapshot)]);
         if (root.Policy != runtimePolicy)
         {
             throw new ModuleContractException("Native graph JIT runtime policy differs from persisted consumer.");

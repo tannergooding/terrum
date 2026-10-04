@@ -56,7 +56,7 @@ public static partial class NativeModuleCompiler
             snapshots[index] = (byte[])candidate.Clone();
         }
 
-        var root = ReadGraphPackage(rootBytes);
+        var root = ReadGraphPackageSnapshot(rootBytes);
         if (!root.Consumer || root.IsLeaf)
         {
             throw new ModuleContractException("Native graph catalog requires a persisted consumer root.");
@@ -67,7 +67,7 @@ public static partial class NativeModuleCompiler
         for (var index = 0; index < snapshots.Length; index++)
         {
             var snapshot = snapshots[index];
-            var package = ReadGraphPackage(snapshot);
+            var package = ReadGraphPackageSnapshot(snapshot);
             if (package.Consumer || package.Identity is not string identity)
             {
                 throw new ModuleContractException("Native graph catalog contains a consumer package.");

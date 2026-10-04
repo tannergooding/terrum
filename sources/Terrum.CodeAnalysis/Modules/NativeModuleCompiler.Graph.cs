@@ -54,7 +54,7 @@ public static partial class NativeModuleCompiler
             Origins = CreateGraphOrigins(contract, false, identity, providers),
         };
         var result = WriteGraphPackage(package);
-        ValidateGraphDirect(ReadGraphPackage(result), providers);
+        ValidateGraphDirect(ReadGraphPackageSnapshot(result), providers);
         return result;
     }
 
@@ -83,7 +83,7 @@ public static partial class NativeModuleCompiler
             Origins = CreateGraphOrigins(contract, true, null, providers),
         };
         var result = WriteGraphPackage(package);
-        ValidateGraphDirect(ReadGraphPackage(result), providers);
+        ValidateGraphDirect(ReadGraphPackageSnapshot(result), providers);
         return result;
     }
 

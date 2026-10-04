@@ -35,6 +35,13 @@ public static partial class NativeModuleCompiler
         return ValidateGraphProviders(artifacts.Select(ReadGraphPackage).ToArray());
     }
 
+    private static GraphPackage[] ReadGraphProviderSnapshots(IReadOnlyList<byte[]> snapshots)
+    {
+        ArgumentNullException.ThrowIfNull(snapshots);
+        ValidateGraphProviderCount(snapshots.Count);
+        return ValidateGraphProviders(snapshots.Select(ReadGraphPackageSnapshot).ToArray());
+    }
+
     private static GraphPackage[] ValidateGraphProviders(GraphPackage[] providers)
     {
         ValidateGraphProviderCount(providers.Length);
@@ -61,7 +68,12 @@ public static partial class NativeModuleCompiler
         }
     }
 
-    private static GraphPackage ReadGraphPackage(byte[] artifact)
+    private static GraphPackage ReadGraphPackage(byte[] artifact) => ReadGraphPackage(artifact, isSnapshot: false);
+
+    private static GraphPackage ReadGraphPackageSnapshot(byte[] snapshot) =>
+        ReadGraphPackage(snapshot, isSnapshot: true);
+
+    private static GraphPackage ReadGraphPackage(byte[] artifact, bool isSnapshot)
     {
         ArgumentNullException.ThrowIfNull(artifact);
         if (artifact.AsSpan().StartsWith("TNPK"u8))
@@ -79,7 +91,7 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native graph package has invalid bounds.");
         }
-        var bytes = (byte[])artifact.Clone();
+        var bytes = isSnapshot ? artifact : (byte[])artifact.Clone();
         if (!bytes.AsSpan(0, 4).SequenceEqual("TNGP"u8) || bytes[4] != 2
             || bytes[5] is not (1 or 2)
             || bytes[6] is not ((byte)NativeRuntimePolicy.FailFast or (byte)NativeRuntimePolicy.CheckedExceptions)
