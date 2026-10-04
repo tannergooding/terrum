@@ -10,6 +10,10 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <remarks>Rejects other assigned operation schemas; it does not execute a Body or validate published effects.</remarks>
 public readonly ref struct TrRmCompactLinearBodyReader
 {
+    // ResolveType's largest key is optional char16 (0x100 | 0x0E).
+    private const int MaximumTypeKey = 0x100 | 0x0E;
+    private const int TypeKeyBitmapWordCount = (MaximumTypeKey >> 6) + 1;
+
     private readonly ValueInfo[] _values;
     private readonly int _valueCount;
 
@@ -77,6 +81,8 @@ public readonly ref struct TrRmCompactLinearBodyReader
         }
 
         var mappedTypes = new ushort[typeCount + 1];
+        Span<ulong> mappedTypeKeys = stackalloc ulong[TypeKeyBitmapWordCount];
+        mappedTypeKeys.Clear();
         for (var index = 1; index <= typeCount; index++)
         {
             var reference = Read(body, ref position, 4);
@@ -86,15 +92,14 @@ public readonly ref struct TrRmCompactLinearBodyReader
             }
 
             var type = ResolveType(types, (int)reference);
-
-            for (var previous = 1; previous < index; previous++)
+            var typeWord = type >> 6;
+            var typeMask = 1UL << (type & 63);
+            if (type > MaximumTypeKey || (mappedTypeKeys[typeWord] & typeMask) != 0)
             {
-                if (mappedTypes[previous] == type)
-                {
-                    throw InvalidBody();
-                }
+                throw InvalidBody();
             }
 
+            mappedTypeKeys[typeWord] |= typeMask;
             mappedTypes[index] = type;
         }
 
@@ -117,7 +122,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
                 throw InvalidBody();
             }
 
-            _values[index].TypeKey = MatchType(types, mappedTypes,
+            _values[index].TypeKey = MatchType(types, mappedTypeKeys,
                 parameters.GetTypeSpec(first + index - 1));
             _values[index].DefinitionOffset = -1;
         }
@@ -320,7 +325,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
                 }
 
                 resultType = voidResult ? (ushort)0
-                    : MatchType(types, mappedTypes, targetResult);
+                    : MatchType(types, mappedTypeKeys, targetResult);
                 var (firstArgument, argumentCount) = signatures.GetParamRange(targetSignature);
                 var arguments = ReadLocal(body, ref position, countWidth);
                 if (arguments != argumentCount
@@ -334,7 +339,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
                     var source = Use(body, ref position, referenceWidth,
                         result == 0 ? valueCount + 1 : result, ordinal);
                     if (parameters.GetMode(firstArgument + argument) != 0
-                        || source != MatchType(types, mappedTypes,
+                        || source != MatchType(types, mappedTypeKeys,
                             parameters.GetTypeSpec(firstArgument + argument)))
                     {
                         throw InvalidBody();
@@ -470,7 +475,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
             }
 
             if ((opcode is not (1 or 2) && dataWidth != 0)
-                || resultType != 0 && Array.IndexOf(mappedTypes, resultType, 1) < 0)
+                || resultType != 0 && !IsMappedType(mappedTypeKeys, resultType))
             {
                 throw InvalidBody();
             }
@@ -509,7 +514,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
             }
             else
             {
-                var expected = MatchType(types, mappedTypes,
+                var expected = MatchType(types, mappedTypeKeys,
                     signatures.GetResultTypeSpec(signature));
                 if (result > valueCount || _values[result].TypeKey != expected)
                 {
@@ -554,15 +559,23 @@ public readonly ref struct TrRmCompactLinearBodyReader
     public bool IsOptional(int value)
         => value > 0 && value <= ValueCount ? _values[value].TypeKey >= 0x100 : throw InvalidBody();
 
-    private static ushort MatchType(TrRmTypeSpecTableReader types, ushort[] mappedTypes, int row)
+    private static ushort MatchType(TrRmTypeSpecTableReader types,
+        ReadOnlySpan<ulong> mappedTypeKeys, int row)
     {
         var type = ResolveType(types, row);
-        if (Array.IndexOf(mappedTypes, type, 1) < 0)
+        if (!IsMappedType(mappedTypeKeys, type))
         {
             throw InvalidBody();
         }
 
         return type;
+    }
+
+    private static bool IsMappedType(ReadOnlySpan<ulong> mappedTypeKeys, ushort type)
+    {
+        var word = type >> 6;
+        return word < mappedTypeKeys.Length
+            && (mappedTypeKeys[word] & (1UL << (type & 63))) != 0;
     }
 
     internal static ushort ResolveType(TrRmTypeSpecTableReader types, int row)

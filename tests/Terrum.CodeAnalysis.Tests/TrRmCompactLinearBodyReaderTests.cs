@@ -384,6 +384,13 @@ public sealed class TrRmCompactLinearBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(row, 0));
     }
 
+    [Fact]
+    public void RejectsDuplicateResolvedTypesInTypeMap()
+    {
+        byte[] row = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1];
+        Assert.Throws<InvalidDataException>(() => Inspect(row, 0, secondTypeCode: 8));
+    }
+
     [Theory]
     [InlineData(new byte[] { 0x12, 2, 2, 1, 1 })]
     [InlineData(new byte[] { 0xF0, 0x04, 0x12, 2, 2, 1, 0, 1 })]
