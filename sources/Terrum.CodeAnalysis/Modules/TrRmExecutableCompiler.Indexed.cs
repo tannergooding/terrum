@@ -270,7 +270,7 @@ public static partial class TrRmExecutableCompiler
                 var offsets = new List<byte>(checked(width * (ordered.Count + 1)));
                 var definitions = new uint[sourceTypes.Count];
                 var terminators = new List<int>(ordered.Count);
-                var data = new List<byte>();
+                var data = new List<byte>(checked(ordered.Count * (width + 3)));
                 var overflowedDefinition = false;
                 for (var index = 0; index < width; index++)
                 {
@@ -829,10 +829,12 @@ public static partial class TrRmExecutableCompiler
                 var operationBytes = extent[cursor..terminators[b]];
                 // Reuse scalar opcode/effect auditing with earlier SSA IDs as inputs.
                 // The indexed audit has already established their real dominance and types.
-                var synthetic = new List<byte> { (byte)(0x04 | WidthCode(
-                            Width((ulong)Math.Max(Math.Max(starts[b + 1], countOperations),
-                                typeCount)))) };
-                var localWidth = 1 << (synthetic[0] & 3);
+                var localWidthCode = WidthCode(
+                    Width((ulong)Math.Max(Math.Max(starts[b + 1], countOperations), typeCount)));
+                var localWidth = 1 << localWidthCode;
+                var syntheticCapacity = checked(1 + (2 * localWidth) + (typeMap.Length * 4)
+                    + operationBytes.Length + 2);
+                var synthetic = new List<byte>(syntheticCapacity) { (byte)(0x04 | localWidthCode) };
                 Write(synthetic, (ulong)typeCount, localWidth);
                 foreach (var typeRow in typeMap)
                 {
