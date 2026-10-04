@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `ef83b3c` | Replace indexed TRRM per-use tree updates with dictionary updates and final key sorting |
 | `ae4ceea` | Cache managed-state detection outside per-function module-set boundary checks |
 | `3bb7cc7` | Cache graph managed-state checks outside per-function boundary validation |
 | `bb928ac` | Remove redundant graph dependency identity set after ordinal-order validation |
