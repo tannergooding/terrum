@@ -260,6 +260,7 @@ boundaries remain in the [implementation reference](implementation.md).
 | `3149b1b` | Group native module-set machine imports by DLL before serialization |
 | `6da56e9` | Group emitted graph imports by dependency before validating ownership |
 | `3268fb5` | Populate indexed TRRM value remaps, types and owners in one pass |
+| `dd5e072` | Reuse the validated graph dependency-function map during contract reconstruction |
 | `ef83b3c` | Replace indexed TRRM per-use tree updates with dictionary updates and final key sorting |
 | `ae4ceea` | Cache managed-state detection outside per-function module-set boundary checks |
 | `3bb7cc7` | Cache graph managed-state checks outside per-function boundary validation |
