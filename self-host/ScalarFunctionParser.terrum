@@ -542,7 +542,7 @@ bool TryParseScalarBinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
 }
 
 bool TryEvaluateTypedScalarComparisonReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out bool result)
+    init ref<SourceRange> name, init ref<bool> result)
 {
     var spacing = tokens.GetScalarOperatorSpacingError();
     if (spacing.Length != 0)
@@ -698,7 +698,8 @@ bool TryParseParameterComparisonReturn(TokenSnapshot tokens, TokenIntegerSnapsho
 }
 
 bool TryEvaluateInt32ParameterComparisonReturn(TokenSnapshot tokens,
-    TokenIntegerSnapshot integers, int32 parameter, out SourceRange name, out bool result)
+    TokenIntegerSnapshot integers, int32 parameter,
+    init ref<SourceRange> name, init ref<bool> result)
 {
     if (!TryParseParameterComparisonReturn(move tokens, move integers,
             init var selected, init var operation, init var foundName, init var magnitude,
@@ -720,7 +721,8 @@ bool TryEvaluateInt32ParameterComparisonReturn(TokenSnapshot tokens,
 }
 
 bool TryEvaluateUInt32ParameterComparisonReturn(TokenSnapshot tokens,
-    TokenIntegerSnapshot integers, uint32 parameter, out SourceRange name, out bool result)
+    TokenIntegerSnapshot integers, uint32 parameter,
+    init ref<SourceRange> name, init ref<bool> result)
 {
     if (!TryParseParameterComparisonReturn(move tokens, move integers,
             init var selected, init var operation, init var foundName, init var magnitude,
@@ -737,7 +739,8 @@ bool TryEvaluateUInt32ParameterComparisonReturn(TokenSnapshot tokens,
 }
 
 bool TryEvaluateInt64ParameterComparisonReturn(TokenSnapshot tokens,
-    TokenIntegerSnapshot integers, int64 parameter, out SourceRange name, out bool result)
+    TokenIntegerSnapshot integers, int64 parameter,
+    init ref<SourceRange> name, init ref<bool> result)
 {
     if (!TryParseParameterComparisonReturn(move tokens, move integers,
             init var selected, init var operation, init var foundName, init var magnitude,
@@ -753,7 +756,8 @@ bool TryEvaluateInt64ParameterComparisonReturn(TokenSnapshot tokens,
 }
 
 bool TryEvaluateUInt64ParameterComparisonReturn(TokenSnapshot tokens,
-    TokenIntegerSnapshot integers, uint64 parameter, out SourceRange name, out bool result)
+    TokenIntegerSnapshot integers, uint64 parameter,
+    init ref<SourceRange> name, init ref<bool> result)
 {
     if (!TryParseParameterComparisonReturn(move tokens, move integers,
             init var selected, init var operation, init var foundName, init var magnitude,
@@ -769,7 +773,8 @@ bool TryEvaluateUInt64ParameterComparisonReturn(TokenSnapshot tokens,
 }
 
 bool TryEvaluateChar16ParameterComparisonReturn(TokenSnapshot tokens,
-    TokenIntegerSnapshot integers, char16 parameter, out SourceRange name, out bool result)
+    TokenIntegerSnapshot integers, char16 parameter,
+    init ref<SourceRange> name, init ref<bool> result)
 {
     if (!TryParseParameterComparisonReturn(move tokens, move integers,
             init var selected, init var operation, init var foundName, init var magnitude,

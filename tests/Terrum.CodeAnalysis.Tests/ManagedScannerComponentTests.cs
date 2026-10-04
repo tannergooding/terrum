@@ -811,7 +811,7 @@ public sealed partial class ManagedScannerComponentTests
         var assertion = evaluable
             ? $$"""
                 require TryEvaluateTypedScalarComparisonReturn(move tokens, move integers,
-                    out var name, out var bound);
+                    init var name, init var bound);
                 if (name.Start != 5 || name.Length != 5 || bound != {{(expected ? "true" : "false")}})
                 {
                     return 1;
@@ -819,7 +819,7 @@ public sealed partial class ManagedScannerComponentTests
                 """
             : """
                 if (TryEvaluateTypedScalarComparisonReturn(move tokens, move integers,
-                    out var name, out var bound))
+                    init var name, init var bound))
                 {
                     return 1;
                 }
@@ -1563,7 +1563,7 @@ public sealed partial class ManagedScannerComponentTests
         var assertion = evaluable
             ? $$"""
                 require {{evaluator}}(move tokens, move integers, {{parameter}},
-                    out var name, out var bound);
+                    init var name, init var bound);
                 if (name.Start != 5 || name.Length != 5 || bound != {{expectedValue}})
                 {
                     return 1;
@@ -1571,7 +1571,7 @@ public sealed partial class ManagedScannerComponentTests
                 """
             : $$"""
                 if ({{evaluator}}(move tokens, move integers, {{parameter}},
-                    out var name, out var bound))
+                    init var name, init var bound))
                 {
                     return 1;
                 }
