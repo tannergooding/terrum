@@ -97,7 +97,9 @@ internal sealed partial class Binder
             }
         }
         var invalidAlias = false;
-        var candidates = new HashSet<PrimitiveType>();
+        var hasCandidate = false;
+        var ambiguous = false;
+        var candidate = default(PrimitiveType);
         if (name.Contains('.', StringComparison.Ordinal))
         {
             AddCandidate(name);
@@ -117,39 +119,58 @@ internal sealed partial class Binder
                 AddCandidate(imported + "." + name);
             }
         }
-        type = candidates.Count == 1 ? candidates.Single() : default;
+        type = candidate;
         if (invalidAlias)
         {
             type = default;
             return DeclaredTypeResolution.Invalid;
         }
-        return candidates.Count switch {
-            0 => DeclaredTypeResolution.Missing,
-            1 => DeclaredTypeResolution.Unique,
-            _ => DeclaredTypeResolution.Ambiguous,
-        };
+        if (!hasCandidate)
+        {
+            type = default;
+            return DeclaredTypeResolution.Missing;
+        }
+        if (ambiguous)
+        {
+            type = default;
+            return DeclaredTypeResolution.Ambiguous;
+        }
+        return DeclaredTypeResolution.Unique;
 
         void AddCandidate(string qualified)
         {
             if (typeArguments is null && _structNames.TryGetValue(qualified, out var structure))
             {
-                _ = candidates.Add(structure);
+                AddTypeCandidate(structure);
             }
             if (typeArguments is null && _classNames.TryGetValue(qualified, out var @class))
             {
-                _ = candidates.Add(@class);
+                AddTypeCandidate(@class);
             }
             if (_aliases.TryGetValue(qualified, out var alias))
             {
                 var aliasResolution = ResolveAlias(alias, typeArguments, useSite, out var aliasType);
                 if (aliasResolution == DeclaredTypeResolution.Unique)
                 {
-                    _ = candidates.Add(aliasType);
+                    AddTypeCandidate(aliasType);
                 }
                 else if (aliasResolution == DeclaredTypeResolution.Invalid)
                 {
                     invalidAlias = true;
                 }
+            }
+        }
+
+        void AddTypeCandidate(PrimitiveType candidateType)
+        {
+            if (!hasCandidate)
+            {
+                candidate = candidateType;
+                hasCandidate = true;
+            }
+            else if (candidate != candidateType)
+            {
+                ambiguous = true;
             }
         }
     }

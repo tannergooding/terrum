@@ -98,6 +98,19 @@ public sealed class CompilationTests
     }
 
     [Fact]
+    public void AliasImportsWithTheSameResolvedTypeAreNotAmbiguous()
+    {
+        var entry = SyntaxTree.Parse(
+            "using First; using Second; int32 Main() { Count value = 42; return value; }");
+        var first = SyntaxTree.Parse("namespace First; alias Count = int32;");
+        var second = SyntaxTree.Parse("namespace Second; alias Count = int32;");
+        var compilation = Compilation.Create([entry, first, second]);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.NotNull(compilation.Program);
+        SemanticVerifier.Verify(compilation.Program);
+    }
+
+    [Fact]
     public void PublicAliasesPreserveTheResolvedTypeInExecutableSource()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
