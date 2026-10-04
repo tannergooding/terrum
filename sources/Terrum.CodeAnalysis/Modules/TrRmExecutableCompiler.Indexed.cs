@@ -1627,12 +1627,20 @@ public static partial class TrRmExecutableCompiler
         internal byte[] Encode()
         {
             Statement(_function.Body);
-            if (_function.IsNoThrow && _blocks.Any(block => block.FailureReason != 0
-                && (block.Operations.Count == 0
-                    || block.Operations[^1].Expression is not BoundCall call
-                    || !_program.Functions[call.Function].DoesNotReturn)))
+            foreach (var block in _blocks)
             {
-                throw Unsupported("NoThrow indexed Body contains an unproved failure effect.");
+                if (_function.IsNoThrow && block.FailureReason != 0
+                    && (block.Operations.Count == 0
+                        || block.Operations[^1].Expression is not BoundCall call
+                        || !_program.Functions[call.Function].DoesNotReturn))
+                {
+                    throw Unsupported("NoThrow indexed Body contains an unproved failure effect.");
+                }
+                if (block.True?.Target is { IsLoopHeader: true } header
+                    && block.Region == header.Region && block != header)
+                {
+                    _regions[block.Region - 1].HasHeaderBackedge = true;
+                }
             }
             if (_current is not null)
             {
@@ -1647,14 +1655,6 @@ public static partial class TrRmExecutableCompiler
             foreach (var (region, edge) in _pendingBreaks)
             {
                 edge.Target = region.Exit ?? throw Unsupported("Loop exit is missing.");
-            }
-            foreach (var block in _blocks)
-            {
-                if (block.True?.Target is { IsLoopHeader: true } header
-                    && block.Region == header.Region && block != header)
-                {
-                    _regions[block.Region - 1].HasHeaderBackedge = true;
-                }
             }
             foreach (var region in _regions)
             {
