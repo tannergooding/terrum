@@ -84,12 +84,21 @@ public struct CharacterLiteralDecodeResult
             }
             else
             {
-                decoded = ReadUtf16Scalar(at, end);
-                if (decoded < 0)
+                int32 unit = int32(Host.Source[at]);
+                if (unit < 55296 || unit > 57343)
                 {
-                    return TryPublishError(1, scalarStart, 1, init result);
+                    decoded = unit;
+                    at = at + 1;
                 }
-                at = at + Utf16ScalarWidth(decoded);
+                else
+                {
+                    decoded = ReadUtf16Scalar(at, end);
+                    if (decoded < 0)
+                    {
+                        return TryPublishError(1, scalarStart, 1, init result);
+                    }
+                    at = at + Utf16ScalarWidth(decoded);
+                }
             }
 
             if (scalarCount != 0)

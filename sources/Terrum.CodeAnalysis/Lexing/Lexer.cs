@@ -603,7 +603,14 @@ public sealed class Lexer
                 }
             }
 
-            _position += TryScalar(_position, out _, out var width) ? width : 1;
+            if (char.IsSurrogate(Current))
+            {
+                _position += TryScalar(_position, out _, out var width) ? width : 1;
+            }
+            else
+            {
+                _position++;
+            }
         }
 
         if (!terminated)
@@ -655,7 +662,11 @@ public sealed class Lexer
             }
 
             var escape = _source.Text[_position];
-            if (TryScalar(_position, out _, out var escapeWidth))
+            if (!char.IsSurrogate(escape))
+            {
+                _position++;
+            }
+            else if (TryScalar(_position, out _, out var escapeWidth))
             {
                 _position += escapeWidth;
             }

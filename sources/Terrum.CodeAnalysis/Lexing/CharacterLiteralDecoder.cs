@@ -49,16 +49,25 @@ internal static class CharacterLiteralDecoder
             }
             else
             {
-                var status = Rune.DecodeFromUtf16(content[position..], out var rune, out var width);
-                if (status != OperationStatus.Done)
+                var codeUnit = content[position];
+                if (!char.IsSurrogate(codeUnit))
                 {
-                    error = CharacterLiteralError.InvalidScalar;
-                    errorStart = scalarStart + 1;
-                    errorLength = 1;
-                    return false;
+                    value = codeUnit;
+                    position++;
                 }
-                value = rune.Value;
-                position += width;
+                else
+                {
+                    var status = Rune.DecodeFromUtf16(content[position..], out var rune, out var width);
+                    if (status != OperationStatus.Done)
+                    {
+                        error = CharacterLiteralError.InvalidScalar;
+                        errorStart = scalarStart + 1;
+                        errorLength = 1;
+                        return false;
+                    }
+                    value = rune.Value;
+                    position += width;
+                }
             }
 
             if (count++ != 0)

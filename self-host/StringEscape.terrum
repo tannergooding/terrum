@@ -33,8 +33,13 @@ public struct StringEscapeDecodeResult
 
         int32 escapedAt = spelling.Start + 1;
         int32 escaped = int32(Host.Source[escapedAt]);
-        mut int32 scalar = ReadUtf16Scalar(escapedAt, spelling.End);
-        int32 width = Utf16ScalarWidth(scalar);
+        mut int32 scalar = escaped;
+        mut int32 width = 1;
+        if (escaped >= 55296 && escaped <= 57343)
+        {
+            scalar = ReadUtf16Scalar(escapedAt, spelling.End);
+            width = Utf16ScalarWidth(scalar);
+        }
         if (scalar < 0)
         {
             return TryPublish(5, 0, 2, 2, true, init result);
