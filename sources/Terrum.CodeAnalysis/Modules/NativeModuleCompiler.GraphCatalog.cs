@@ -82,6 +82,9 @@ public static partial class NativeModuleCompiler
         }
 
         var selected = new Dictionary<string, CatalogCandidate>(StringComparer.Ordinal);
+        // Candidate search backtracks synchronously, so cycle checks can share these traversal sets.
+        var visiting = new HashSet<string>(StringComparer.Ordinal);
+        var visited = new HashSet<string>(StringComparer.Ordinal);
         CatalogCandidate[]? resolved = null;
         var assignments = 0;
         var missing = new SortedSet<string>(StringComparer.Ordinal);
@@ -184,8 +187,8 @@ public static partial class NativeModuleCompiler
 
         bool HasCycle()
         {
-            var visiting = new HashSet<string>(StringComparer.Ordinal);
-            var visited = new HashSet<string>(StringComparer.Ordinal);
+            visiting.Clear();
+            visited.Clear();
             return selected.Keys.Any(Visit);
 
             bool Visit(string identity)
