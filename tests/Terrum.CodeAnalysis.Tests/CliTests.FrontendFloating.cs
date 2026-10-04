@@ -256,9 +256,9 @@ public sealed partial class CliTests
                         : ["float32", "float64"];
                     foreach (var targetType in targetTypes)
                     {
-                            var noThrow = sourceType == "char16" ? "[NoThrow] " : string.Empty;
-                            var source = Encoding.UTF8.GetBytes(
-                                $"{noThrow}public {targetType} Convert({sourceType} value) => {targetType}(value);");
+                        var noThrow = sourceType == "char16" ? "[NoThrow] " : string.Empty;
+                        var source = Encoding.UTF8.GetBytes(
+                            $"{noThrow}public {targetType} Convert({sourceType} value) => {targetType}(value);");
                         var output = Path.Combine(outputDirectory, "scalar.dll");
                         var hosted = Path.Combine(outputDirectory, "hosted.dll");
                         var (componentExit, componentJson, componentError) = await RunAsync(source,
