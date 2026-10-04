@@ -10,7 +10,8 @@ namespace Terrum;
     return second;
 }
 
-[NoThrow] bool TrySelectCopy<T>(int32 index, T first, T second, out T result) where T : [Copy]
+[NoThrow] bool TrySelectCopyInit<T>(int32 index, T first, T second, init ref<T> result)
+    where T : [Copy]
 {
     if (index == 0)
     {
@@ -26,9 +27,9 @@ namespace Terrum;
     return false;
 }
 
-[NoThrow] bool TrySelectCopyInit<T>(int32 index, T first, T second, init ref<T> result) where T : [Copy]
+[NoThrow] bool TrySelectCopy<T>(int32 index, T first, T second, out T result) where T : [Copy]
 {
-    if (!TrySelectCopy(index, first, second, out var selected))
+    if (!TrySelectCopyInit(index, first, second, init var selected))
     {
         return false;
     }

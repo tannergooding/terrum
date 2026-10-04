@@ -234,7 +234,7 @@ native emitter or compiler self-build.
 
 | Candidate | Purpose | Gates before execution |
 |---|---|---|
-| [CopyAlgorithms](CopyAlgorithms.terrum) | NoThrow selection and conditional `out` or `init ref<T>` output of complete Copy values without operator witnesses | Composed AOT/JIT calls select scalars, nested tokens and ranges under both policies; invalid indices publish no value; existing `out` calls remain valid; no primitive operator conformance, borrowed views or generic runtime dispatch |
+| [CopyAlgorithms](CopyAlgorithms.terrum) | NoThrow selection and conditional `init ref<T>` publication of complete Copy values, with an explicit forwarding `out` adapter and no operator witnesses | Composed AOT/JIT calls select scalars, nested tokens and ranges under both policies; invalid indices publish no value; existing `out` calls remain valid; no primitive operator conformance, borrowed views or generic runtime dispatch |
 | [IntegerFacts](IntegerFacts.terrum) | Internal `[ConstEval]` eligibility predicates for checked `int32`, `uint32`, `int64` and `uint64` arithmetic, including signed negation and absolute value | Boundary predicates are proven in required static expressions and executed under both native policies; 32-bit signed checks widen safely, 64-bit checks rearrange bounds without overflowing, zero divisors reject, and signed-minimum remainder by `-1` remains valid; no public arithmetic API or compiler bootstrap |
 | [WideIntegerFacts](WideIntegerFacts.terrum) | Checked signed and unsigned 64-bit addition, subtraction, multiplication, division and remainder, signed negation and absolute value with conditional `init ref` publication, total unsigned signed-magnitude extraction, plus bounded decimal/radix-2..36 accumulation through the full unsigned range | Executed as separately compiled modules with vacancy-only `init ref` outputs and accumulation under both policies; division by zero, signed-minimum quotient overflow, negation and absolute value do not publish; magnitude includes the signed minimum |
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed arithmetic extrema, invalid digits/radices, per-radix unsigned/signed limits and conditional output publication | Executed through AOT and JIT with a shared entry wrapper under both failure policies |
@@ -600,11 +600,12 @@ The caller can compose it through another Copy-constrained helper while retainin
 the declared NoThrow contract. Token/range fixtures verify independent nested
 copies after the original local values are replaced. The function remains a
 compilation-local template, not a separately published generic library contract.
-`TrySelectCopy<T>` accepts index zero or one and publishes the corresponding
-value through the existing conditional `bool`/`out` contract. Other indices
-return false without publishing an output; inputs are still ordinary eagerly
-evaluated values. Generic helper forwarding preserves that contract rather
-than manufacturing a default token or range.
+`TrySelectCopyInit<T>` accepts index zero or one and publishes the corresponding
+value through vacancy-only `init ref<T>`; other indices return false without
+publishing an output. Inputs remain ordinary eagerly evaluated values.
+`TrySelectCopy<T>` preserves the explicit existing `out` contract by forwarding
+to that `init ref<T>` implementation and publishing only after successful
+selection.
 
 `SourceLines` reads the same immutable `Host.Source` capability as the scanner,
 without retaining a pointer, borrowing writable storage or allocating a line table.

@@ -1904,11 +1904,12 @@ from its body.
 The [Copy selection candidate](../self-host/CopyAlgorithms.terrum)
 selects complete values without requiring operator conformance.
 Its `TrySelectCopy` variant publishes a selected value only for index zero or
-one. `TrySelectCopyInit` offers the same selection through vacancy-only
-`init ref<T>` publication; it reuses the original `out` implementation without
-changing existing callers. Scalar return typing and output modes remain part
-of each helper's declared
-signature during definition-site proof and closed specialization.
+one through the existing conditional `bool`/`out` contract. The vacancy-only
+`TrySelectCopyInit` implementation now owns the selection logic;
+`TrySelectCopy` is an explicit forwarding adapter that publishes its `out`
+value only after successful selection. Scalar return typing and output modes
+remain part of each helper's declared signature during definition-site proof
+and closed specialization.
 Copy-only templates also specialize for `bool`, `char16`, `int32`, `uint32`,
 `int64` and `uint64`, using their existing concrete argument/result ABI.
 This permits scalar selection and conditional output, not new arithmetic
