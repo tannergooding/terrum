@@ -23,6 +23,13 @@ public static partial class TrRmExecutableCompiler
     private static readonly byte[] s_codes = [0, 1, 3, 8, 0x0D, 9, 0x0E, 0x14, 0x15];
     private static readonly ReadOnlyMemory<byte>[] s_typeRows = CreateTypeRows(s_codes);
     private static readonly ReadOnlyMemory<byte>[] s_nonFloatTypeRows = CreateTypeRows(s_codes[..^2]);
+    private static readonly ReadOnlyMemory<byte>[] s_effectPayloads =
+    [
+        ReadOnlyMemory<byte>.Empty,
+        new byte[] { 1, 0, 0, 0 },
+        new byte[] { 2, 0, 0, 0 },
+        new byte[] { 3, 0, 0, 0 },
+    ];
 
     public static byte[] Emit(BoundProgram program, string moduleIdentity)
     {
@@ -118,9 +125,8 @@ public static partial class TrRmExecutableCompiler
             var contractFirst = effectMask != 0 ? effects.Count + 1 : 0;
             if (effectMask != 0)
             {
-                var payload = new byte[sizeof(uint)];
-                BinaryPrimitives.WriteUInt32LittleEndian(payload, effectMask);
-                effects.Add(new TrRmContractRow(0x1600_0000u | (uint)(index + 1), 1, payload));
+                effects.Add(new TrRmContractRow(0x1600_0000u | (uint)(index + 1), 1,
+                    s_effectPayloads[effectMask]));
             }
 
             var visibility = function.IsPrivate ? 0u : function.IsInternal ? 1u : 2u;

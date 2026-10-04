@@ -964,13 +964,19 @@ public sealed class TrRmExecutableCompilerTests
         Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
     }
 
-    [Fact]
-    public void NoThrowEffectRoundTripsWithoutFabricatedProof()
+    [Theory]
+    [InlineData("[NoThrow] ", true, false)]
+    [InlineData("[DoesNotReturn] ", false, true)]
+    [InlineData("[NoThrow][DoesNotReturn] ", true, true)]
+    public void EffectsRoundTripWithoutFabricatedProof(string attributes, bool noThrow, bool doesNotReturn)
     {
-        var source = "[NoThrow] int32 Main() { return 42; }";
+        var haltBody = doesNotReturn ? "while (true) { }" : string.Empty;
+        var source = attributes + $"void Halt() {{ {haltBody} }} int32 Main() {{ return 42; }}";
         var program = TrRmExecutableCompiler.Load(
-            TrRmExecutableCompiler.Emit(Compile(source), "no-throw"));
-        Assert.True(program.Functions[0].IsNoThrow);
+            TrRmExecutableCompiler.Emit(Compile(source), "effects"));
+        var function = Assert.Single(program.Functions, static function => function.Name == "Halt");
+        Assert.Equal(noThrow, function.IsNoThrow);
+        Assert.Equal(doesNotReturn, function.DoesNotReturn);
     }
 
     [Theory]
