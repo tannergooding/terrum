@@ -489,38 +489,42 @@ int32 ScanDigitRun(int32 initial, int32 radix, bool allowInitialSeparators)
 {
     mut int32 at = initial;
     mut bool hasDigit = false;
-    while (IsBasedDigit(PeekUnit(at), radix) || PeekUnit(at) == 95)
+    while (true)
     {
-        if (IsBasedDigit(PeekUnit(at), radix))
+        int32 unit = PeekUnit(at);
+        if (IsBasedDigit(unit, radix))
         {
             hasDigit = true;
             at = at + 1;
+            continue;
         }
-        else
+        if (unit != 95)
         {
-            mut int32 next = at;
-            while (PeekUnit(next) == 95)
-            {
-                next = next + 1;
-            }
-            if ((hasDigit || allowInitialSeparators) && IsBasedDigit(PeekUnit(next), radix))
-            {
-                at = next;
-                continue;
-            }
-            if (hasDigit)
-            {
-                Report(9, at, next - at);
-            }
             break;
         }
+
+        mut int32 next = at + 1;
+        while (PeekUnit(next) == 95)
+        {
+            next = next + 1;
+        }
+        if ((hasDigit || allowInitialSeparators) && IsBasedDigit(PeekUnit(next), radix))
+        {
+            at = next;
+            continue;
+        }
+        if (hasDigit)
+        {
+            Report(9, at, next - at);
+        }
+        break;
     }
     return at;
 }
 
 int32 SkipDigitSeparators(int32 at, int32 radix)
 {
-    mut int32 next = at;
+    mut int32 next = at + 1;
     while (PeekUnit(next) == 95)
     {
         next = next + 1;
@@ -566,9 +570,10 @@ int32 ScanBasedNumber(int32 initial, int32 tokenIndex, int32 radix)
     uint64 wideRadix = uint64(radix);
     uint64 cutoff = uint64.MaxValue / wideRadix;
     uint64 finalDigit = uint64.MaxValue - cutoff * wideRadix;
-    while (IsBasedDigit(PeekUnit(at), radix) || PeekUnit(at) == 95)
+    while (true)
     {
-        if (PeekUnit(at) == 95)
+        int32 unit = PeekUnit(at);
+        if (unit == 95)
         {
             int32 next = SkipDigitSeparators(at, radix);
             if (next == at)
@@ -578,12 +583,16 @@ int32 ScanBasedNumber(int32 initial, int32 tokenIndex, int32 radix)
             at = next;
             continue;
         }
+        if (!IsBasedDigit(unit, radix))
+        {
+            break;
+        }
         if (!overflow)
         {
-            mut uint64 digit = uint64(PeekUnit(at) - 48);
+            mut uint64 digit = uint64(unit - 48);
             if (radix == 16)
             {
-                digit = uint64(HexValue(PeekUnit(at)));
+                digit = uint64(HexValue(unit));
             }
             if (digit >= wideRadix || magnitude > cutoff
                 || (magnitude == cutoff && digit > finalDigit))
@@ -716,9 +725,10 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
     mut bool overflow = false;
     uint64 cutoff = uint64.MaxValue / 10;
     uint64 finalDigit = uint64.MaxValue - cutoff * 10;
-    while (IsDigit(PeekUnit(at)) || PeekUnit(at) == 95)
+    while (true)
     {
-        if (PeekUnit(at) == 95)
+        int32 unit = PeekUnit(at);
+        if (unit == 95)
         {
             int32 next = SkipDigitSeparators(at, 10);
             if (next == at)
@@ -728,9 +738,13 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
             at = next;
             continue;
         }
+        if (!IsDigit(unit))
+        {
+            break;
+        }
         if (!overflow)
         {
-            uint64 digit = uint64(PeekUnit(at) - 48);
+            uint64 digit = uint64(unit - 48);
             if (magnitude > cutoff || (magnitude == cutoff && digit > finalDigit))
             {
                 overflow = true;
@@ -748,9 +762,10 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
     {
         integerForm = false;
         at = at + 1;
-        while (IsDigit(PeekUnit(at)) || PeekUnit(at) == 95)
+        while (true)
         {
-            if (PeekUnit(at) == 95)
+            int32 unit = PeekUnit(at);
+            if (unit == 95)
             {
                 int32 next = SkipDigitSeparators(at, 10);
                 if (next == at)
@@ -759,6 +774,10 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
                 }
                 at = next;
                 continue;
+            }
+            if (!IsDigit(unit))
+            {
+                break;
             }
             at = at + 1;
         }
@@ -800,9 +819,10 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
             }
             else
             {
-                while (IsDigit(PeekUnit(at)) || PeekUnit(at) == 95)
+                while (true)
                 {
-                    if (PeekUnit(at) == 95)
+                    int32 unit = PeekUnit(at);
+                    if (unit == 95)
                     {
                         int32 next = SkipDigitSeparators(at, 10);
                         if (next == at)
@@ -811,6 +831,10 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
                         }
                         at = next;
                         continue;
+                    }
+                    if (!IsDigit(unit))
+                    {
+                        break;
                     }
                     at = at + 1;
                 }
