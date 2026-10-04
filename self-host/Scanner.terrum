@@ -860,9 +860,13 @@ int32 ScanString(int32 initial)
     int32 start = at;
     at = at + 1;
     mut bool terminated = false;
-    while (at < Host.Source.Length && !IsNewline(PeekUnit(at)))
+    while (at < Host.Source.Length)
     {
         int32 current = PeekUnit(at);
+        if (IsNewline(current))
+        {
+            break;
+        }
         if (current == 34)
         {
             at = at + 1;
@@ -919,9 +923,13 @@ int32 ScanCharacter(int32 initial)
     mut int32 at = initial + 1;
     int32 start = initial;
     mut bool terminated = false;
-    while (at < Host.Source.Length && !IsNewline(PeekUnit(at)))
+    while (at < Host.Source.Length)
     {
         int32 current = PeekUnit(at);
+        if (IsNewline(current))
+        {
+            break;
+        }
         if (current == 39)
         {
             at = at + 1;
