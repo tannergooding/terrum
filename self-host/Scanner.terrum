@@ -198,8 +198,13 @@ int32 SkipTrivia(int32 initial, int32 owner)
         else if (IsSourceWhitespace(current))
         {
             at = at + 1;
-            while (IsSourceWhitespace(PeekUnit(at)) && !IsNewline(PeekUnit(at)))
+            while (at < Host.Source.Length)
             {
+                int32 unit = PeekUnit(at);
+                if (!IsSourceWhitespace(unit) || IsNewline(unit))
+                {
+                    break;
+                }
                 at = at + 1;
             }
             PublishTrivia(0, start, at, owner);
@@ -213,9 +218,13 @@ int32 SkipTrivia(int32 initial, int32 owner)
         {
             bool documentation = PeekUnit(at + 2) == 47;
             at = at + 2;
-            while (at < Host.Source.Length && !IsNewline(PeekUnit(at)))
+            while (at < Host.Source.Length)
             {
                 int32 scalar = ReadCommentScalar(at);
+                if (IsNewline(scalar))
+                {
+                    break;
+                }
                 at = at + Utf16ScalarWidth(scalar);
             }
             if (documentation)
@@ -332,9 +341,13 @@ bool TryReadPunctuationRun(int32 start, init ref<int32> end, init ref<bool> type
 {
     mut int32 at = start;
     mut bool deferred = true;
-    while (at < Host.Source.Length && IsPunctuationGlyph(PeekUnit(at)))
+    while (at < Host.Source.Length)
     {
         int32 unit = PeekUnit(at);
+        if (!IsPunctuationGlyph(unit))
+        {
+            break;
+        }
         if (unit == 47 && (PeekUnit(at + 1) == 47 || PeekUnit(at + 1) == 42))
         {
             break;
