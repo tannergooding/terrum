@@ -53,6 +53,7 @@ public static partial class TrRmExecutableCompiler
         internal int[] VisibleSlots = visibleSlots;
         internal bool HasSourceContinuation;
         internal bool HasHeaderBackedge;
+        internal bool HasDirectBreak;
         internal readonly Dictionary<int, (IndexedRegion Target, bool Continue)> Transfers = [];
         internal readonly List<(IndexedBlock Source, IndexedEdge Edge, int Code)> ExitEdges = [];
     }
@@ -1558,7 +1559,7 @@ public static partial class TrRmExecutableCompiler
                         loopRegion.Transfers.Count == 0 ? null : PrimitiveType.Int32);
                     var normalExitPossible = loop.Condition is not BoundConstant {
                         Type: PrimitiveType.Bool, Value: not 0,
-                    } || loopRegion.ExitEdges.Any(static edge => edge.Code == 0);
+                    } || loopRegion.HasDirectBreak;
                     if (loop.IsPostTested)
                     {
                         var conditionBlock = _current ?? throw Unsupported("Post-tested condition did not produce a branch.");
@@ -1659,6 +1660,7 @@ public static partial class TrRmExecutableCompiler
             Jump(deferred, _slots, region.VisibleSlots);
             var edge = source.True ?? throw Unsupported("Missing scalar transfer edge.");
             region.ExitEdges.Add((source, edge, code));
+            region.HasDirectBreak |= code == 0;
             _pendingBreaks.Add((region, edge));
         }
 
