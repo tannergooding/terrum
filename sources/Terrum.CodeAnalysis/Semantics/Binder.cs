@@ -21,8 +21,8 @@ internal sealed partial class Binder
     private readonly ImmutableArray<SyntaxTree> _trees;
     private readonly Dictionary<SyntaxTree, (string Namespace, ImmutableArray<string> Usings)> _contexts = [];
     private readonly CancellationToken _cancellationToken;
-    private readonly List<Diagnostic> _diagnostics = [];
-    private readonly List<SourceDiagnostic> _sourceDiagnostics = [];
+    private List<Diagnostic>? _diagnostics;
+    private List<SourceDiagnostic>? _sourceDiagnostics;
     private readonly List<Signature> _signatures = [];
     private readonly HashSet<BoundLocal> _constRequired = new(ReferenceEqualityComparer.Instance);
     private readonly List<BoundStruct> _structs = [];
@@ -115,8 +115,11 @@ internal sealed partial class Binder
         _runtimePolicy = runtimePolicy;
     }
 
-    internal IReadOnlyList<Diagnostic> Diagnostics => _diagnostics;
-    internal IReadOnlyList<SourceDiagnostic> SourceDiagnostics => _sourceDiagnostics;
+    internal IReadOnlyList<Diagnostic> Diagnostics => _diagnostics is not null
+        ? _diagnostics : Array.Empty<Diagnostic>();
+    internal IReadOnlyList<SourceDiagnostic> SourceDiagnostics => _sourceDiagnostics is not null
+        ? _sourceDiagnostics : Array.Empty<SourceDiagnostic>();
+    private int DiagnosticCount => _diagnostics?.Count ?? 0;
 
     private void SetContext(SyntaxTree tree)
     {
@@ -421,7 +424,7 @@ internal sealed partial class Binder
             }
         }
         ValidateConformances();
-        if (_diagnostics.Count == 0 && !ValidateGenericTemplates())
+        if (DiagnosticCount == 0 && !ValidateGenericTemplates())
         {
             return null;
         }
@@ -567,7 +570,7 @@ internal sealed partial class Binder
             });
         }
 
-        if (_diagnostics.Count != 0)
+        if (DiagnosticCount != 0)
         {
             return null;
         }
@@ -1123,7 +1126,7 @@ internal sealed partial class Binder
 
         var previousTree = _tree;
         SetContext(alias.Tree);
-        var diagnosticCount = _diagnostics.Count;
+        var diagnosticCount = DiagnosticCount;
         if (typeArguments is ImmutableArray<PrimitiveType> resolvedArguments)
         {
             var parameters = new Dictionary<string, PrimitiveType>(StringComparer.Ordinal);
@@ -1138,7 +1141,7 @@ internal sealed partial class Binder
         try
         {
             var resolved = BindType(alias.Target, allowVoid: false);
-            if (_diagnostics.Count != diagnosticCount)
+            if (DiagnosticCount != diagnosticCount)
             {
                 if (alias.TypeParameters.IsEmpty)
                 {
@@ -1522,13 +1525,13 @@ internal sealed partial class Binder
             ImmutableArray<PrimitiveType>? typeArguments = null;
             if (typeArgumentNodes.Length != 0)
             {
-                var diagnosticCount = _diagnostics.Count;
+                var diagnosticCount = DiagnosticCount;
                 var arguments = ImmutableArray.CreateBuilder<PrimitiveType>(typeArgumentNodes.Length);
                 foreach (var argumentNode in typeArgumentNodes)
                 {
                     arguments.Add(BindType(argumentNode, allowVoid: false));
                 }
-                if (_diagnostics.Count != diagnosticCount)
+                if (DiagnosticCount != diagnosticCount)
                 {
                     return PrimitiveType.Int32;
                 }
@@ -2781,7 +2784,7 @@ internal sealed partial class Binder
     private BoundExpression BindExpression(SyntaxNode node, PrimitiveType? expected)
     {
         _cancellationToken.ThrowIfCancellationRequested();
-        var diagnosticCount = _diagnostics.Count;
+        var diagnosticCount = DiagnosticCount;
         BoundExpression expression;
 
         switch (node.Kind)
@@ -3265,7 +3268,7 @@ internal sealed partial class Binder
             Report("TRM3007", $"Expected {TypeName(expected.Value)}, got {TypeName(expression.Type)}.", node.Span);
         }
 
-        return _diagnostics.Count == diagnosticCount ? FoldScalarConstant(expression) : expression;
+        return DiagnosticCount == diagnosticCount ? FoldScalarConstant(expression) : expression;
     }
 
     private static bool CanImplicitlyConvert(PrimitiveType source, PrimitiveType target)
@@ -4436,8 +4439,13 @@ internal sealed partial class Binder
     private void Report(string code, string message, TextSpan span)
     {
         var diagnostic = new Diagnostic(code, DiagnosticSeverity.Error, message, span);
-        _diagnostics.Add(diagnostic);
-        _sourceDiagnostics.Add(new SourceDiagnostic(_tree, diagnostic));
+        AddDiagnostic(diagnostic, _tree);
+    }
+
+    private void AddDiagnostic(Diagnostic diagnostic, SyntaxTree tree)
+    {
+        (_diagnostics ??= []).Add(diagnostic);
+        (_sourceDiagnostics ??= []).Add(new SourceDiagnostic(tree, diagnostic));
     }
 
     private sealed record Parameter(string Name, PrimitiveType Type, TextSpan Span, bool IsOut, bool IsInit = false);

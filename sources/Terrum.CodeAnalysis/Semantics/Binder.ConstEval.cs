@@ -41,7 +41,7 @@ internal sealed partial class Binder
                 }
             }
         }
-        if (_diagnostics.Count != 0)
+        if (DiagnosticCount != 0)
         {
             return false;
         }
@@ -59,7 +59,7 @@ internal sealed partial class Binder
                     functions[index].Variables.Length),
             };
         }
-        return _diagnostics.Count == 0;
+        return DiagnosticCount == 0;
     }
 
     private bool CheckConstStatement(BoundStatement statement, out TextSpan unsupported)

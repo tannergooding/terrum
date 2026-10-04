@@ -993,12 +993,11 @@ internal sealed partial class Binder
             }
             proofBinder._localStart = proofBinder._variables.Count;
             var body = proofBinder.BindGenericBody(new GenericInstantiation(template, symbolicTypes));
-            if (proofBinder._diagnostics.Count != 0)
+            if (proofBinder.DiagnosticCount != 0)
             {
-                foreach (var diagnostic in proofBinder._diagnostics)
+                foreach (var diagnostic in proofBinder.Diagnostics)
                 {
-                    _diagnostics.Add(diagnostic);
-                    _sourceDiagnostics.Add(new SourceDiagnostic(template.Tree, diagnostic));
+                    AddDiagnostic(diagnostic, template.Tree);
                 }
                 Report("TRM3007", "Generic function requires a body valid using only its declared Copy and operator constraints.",
                     template.Declaration.Span);
@@ -1044,9 +1043,9 @@ internal sealed partial class Binder
             type = default;
             return false;
         }
-        var diagnosticCount = _diagnostics.Count;
+        var diagnosticCount = DiagnosticCount;
         type = BindType(argument, allowVoid: false);
-        return _diagnostics.Count == diagnosticCount;
+        return DiagnosticCount == diagnosticCount;
     }
 
     private string? FindProtocol(string name)
