@@ -43,6 +43,10 @@ public enum PrimitiveType
     WriteManagedNode,
     /// <summary>An explicitly nullable writable managed-node handle.</summary>
     OptionalWriteManagedNode,
+    /// <summary>An IEEE-754 binary32 value stored as its raw 32-bit representation.</summary>
+    Float32,
+    /// <summary>An IEEE-754 binary64 value stored as its raw 64-bit representation.</summary>
+    Float64,
 }
 
 /// <summary>Disjoint source-class type identifiers start above the complete inline-struct range.</summary>
@@ -498,8 +502,8 @@ public sealed record BoundReturn(BoundExpression? Value, TextSpan Span) : BoundS
 /// <param name="Span">The source range.</param>
 public abstract record BoundExpression(PrimitiveType Type, TextSpan Span);
 
-/// <summary>An integer or canonical boolean constant.</summary>
-/// <param name="Value">The 64-bit payload; uint64 uses its unchecked bit pattern, int32/uint32 retain their signed 32-bit bit-pattern payload, char16 uses 0..65535, and booleans use zero or one.</param>
+/// <summary>A scalar constant represented by its canonical or raw-bit payload.</summary>
+/// <param name="Value">The 64-bit payload; uint64 uses its unchecked bit pattern, float32/float64 use IEEE-754 bits, int32/uint32 retain their signed 32-bit bit-pattern payload, char16 uses 0..65535, and booleans use zero or one.</param>
 /// <param name="Type">The constant type.</param>
 /// <param name="Span">The source range.</param>
 public sealed record BoundConstant(long Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);

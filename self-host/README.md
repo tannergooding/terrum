@@ -743,8 +743,9 @@ descriptor alone cannot extend an external allocation lease. `[Captures]` is
 working contract notation, not an unchecked annotation accepted by the MVP.
 
 The scanner shares the host's generated Unicode ranges; classification,
-token boundaries, keywords, leading trivia and lexical diagnostic decisions
-execute in Terrum. Untagged decimal, hexadecimal (`0x`/`0X`) and binary
+token boundaries (including valid hexadecimal floating `p`-exponent forms),
+keywords, leading trivia and lexical diagnostic decisions execute in Terrum.
+Untagged decimal, hexadecimal (`0x`/`0X`) and binary
 (`0b`/`0B`) integer magnitudes, including digit separators, through the
 unsigned 64-bit range are decoded natively without assigning a default numeric
 type. Empty hexadecimal and binary prefixes
@@ -754,9 +755,12 @@ diagnosed, and decimal signed-range and negative-minimum rules are unchanged.
 Attached width suffixes are lexical errors (`TRM0006`); scanner-6 retains
 recognized suffix-tag metadata only in the existing record for those rejected
 tokens, while valid integer records are untagged. Larger integer magnitudes
-are reported as beyond the decoder's range, not lexical errors. Floating
-literal binding and custom literal parsers remain unsupported; bounded
-scalar `[ConstEval]` is implemented separately from literal registration.
+are reported as beyond the decoder's range, not lexical errors. The compiled
+scanner preserves decimal and valid hexadecimal floating tokens without
+publishing integer magnitudes; the hosted binder constructs target-typed
+`float32`/`float64` values. Floating arithmetic/comparisons, typed floating
+conversions and custom literal parsers remain unsupported; bounded scalar
+`[ConstEval]` is implemented separately from literal registration.
 Contextual integer literal typing/range checks
 and parser routines remain hosted, while
 `build-component` binds the scanner's validated integer records without a host

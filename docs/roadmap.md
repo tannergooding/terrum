@@ -30,6 +30,12 @@ Hosted source binding now carries grammar-defined named calls, including
 and semantic-module persistence. The mapping preserves source-order
 evaluation; overload selection remains outside current support.
 
+Hosted contextual construction also supports `float32` and `float64` literals:
+decimal and hexadecimal floating spellings are rounded directly to the target
+format, based integers construct directly in that format, and unary signs
+preserve IEEE bit patterns. Floating arithmetic, comparisons, typed-value
+conversions and scalar-frontend support remain outside this implementation.
+
 The bounded Terrum-authored scalar source frontend supports v85 complete
 global-function snapshots and source-order scalar call targets, including
 forward and recursive calls with up to three by-value scalar arguments.

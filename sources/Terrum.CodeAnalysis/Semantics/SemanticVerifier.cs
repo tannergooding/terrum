@@ -255,7 +255,8 @@ public static class SemanticVerifier
             }
             if (structure.IsTransparent && (structure.IsUnique || structure.Fields.Length != 1
                 || structure.Fields[0].Type is not (PrimitiveType.Bool or PrimitiveType.Char16
-                    or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                    or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                    or PrimitiveType.Float32 or PrimitiveType.Float64)
                 || structure.Fields[0].Offset != 0 || structure.Fields[0].Size != structure.Size))
             {
                 throw Invalid();
@@ -310,6 +311,7 @@ public static class SemanticVerifier
                     if ((variable.IsInit && (!variable.IsOut
                         || (variable.Type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
                             or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                            or PrimitiveType.Float32 or PrimitiveType.Float64
                             or PrimitiveType.OwnedInt32Buffer)
                             && !ManagedClassTypes.IsManaged(variable.Type)
                             && ((int)variable.Type < 100 || (int)variable.Type >= ManagedClassTypes.First))
@@ -319,7 +321,8 @@ public static class SemanticVerifier
                             || (function.ReturnType != PrimitiveType.Bool
                                 && (!variable.IsInit && variable.Type is not (PrimitiveType.Bool
                                     or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
-                                    or PrimitiveType.Int64 or PrimitiveType.UInt64))))))
+                                    or PrimitiveType.Int64 or PrimitiveType.UInt64
+                                    or PrimitiveType.Float32 or PrimitiveType.Float64))))))
                     {
                         throw Invalid();
                     }
@@ -2751,11 +2754,14 @@ public static class SemanticVerifier
         switch (expression)
         {
             case BoundConstant constant:
-                if (constant.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool)
+                if (constant.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+                    or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
+                    or PrimitiveType.Char16 or PrimitiveType.Bool)
                     || (constant.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
                         && constant.Value is < int.MinValue or > int.MaxValue)
                     || (constant.Type == PrimitiveType.Bool && constant.Value is not (0 or 1))
-                    || (constant.Type == PrimitiveType.Char16 && constant.Value is < 0 or > ushort.MaxValue))
+                    || (constant.Type == PrimitiveType.Char16 && constant.Value is < 0 or > ushort.MaxValue)
+                    || (constant.Type == PrimitiveType.Float32 && constant.Value is < 0 or > uint.MaxValue))
                 {
                     throw Invalid();
                 }
@@ -3082,9 +3088,12 @@ public static class SemanticVerifier
             case BoundUnary unary:
                 Expression(unary.Operand, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 var unaryValid = unary.Operator switch {
-                    TokenKind.Plus or TokenKind.Tilde =>
-                        unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 && unary.Type == unary.Operand.Type,
-                    TokenKind.Minus => unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.Int64 && unary.Type == unary.Operand.Type,
+                    TokenKind.Plus => unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+                        or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64 && unary.Type == unary.Operand.Type,
+                    TokenKind.Tilde => unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64 && unary.Type == unary.Operand.Type,
+                    TokenKind.Minus => unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.Int64 or PrimitiveType.Float32
+                        or PrimitiveType.Float64 && unary.Type == unary.Operand.Type,
                     TokenKind.Bang => unary.Operand.Type == PrimitiveType.Bool && unary.Type == PrimitiveType.Bool,
                     _ => false,
                 };
@@ -3093,12 +3102,13 @@ public static class SemanticVerifier
                     throw Invalid();
                 }
                 if (function.IsNoThrow && unary.Operator == TokenKind.Minus
+                    && unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64
                     && (unary.Operand is not BoundConstant operand
                         || operand.Value == (unary.Type == PrimitiveType.Int32 ? int.MinValue : long.MinValue)))
                 {
                     throw InvalidEffect(unary.Span);
                 }
-                if (unary.Operator == TokenKind.Minus)
+                if (unary.Operator == TokenKind.Minus && unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64)
                 {
                     failures?.Add(initialized, fieldMasks);
                 }
@@ -3479,6 +3489,7 @@ public static class SemanticVerifier
 
     private static bool ValidType(PrimitiveType type, bool allowVoid, BoundProgram program) =>
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.Float32 or PrimitiveType.Float64
             or PrimitiveType.Char16 or PrimitiveType.Bool or PrimitiveType.OwnedInt32Buffer
             or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode
             || (allowVoid && type == PrimitiveType.Void)
@@ -3493,7 +3504,8 @@ public static class SemanticVerifier
 
     internal static bool IsClassArgumentType(PrimitiveType type, IReadOnlyList<BoundStruct> structures) =>
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-            or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool
+            or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
+            or PrimitiveType.Char16 or PrimitiveType.Bool
             || ManagedClassTypes.IsManaged(type)
             || ((int)type >= 100 && (int)type - 100 < structures.Count
                 && !structures[(int)type - 100].IsUnique);

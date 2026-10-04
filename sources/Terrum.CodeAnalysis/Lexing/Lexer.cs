@@ -327,6 +327,30 @@ public sealed class Lexer
         if (Current == '0' && Peek(1) is 'x' or 'X' or 'b' or 'B')
         {
             var hex = Peek(1) is 'x' or 'X';
+            if (hex && HasHexFloatForm(start))
+            {
+                _position += 2;
+                _ = ReadDigitRun(16, allowInitialSeparators: true);
+                if (Current == '.')
+                {
+                    _position++;
+                    _ = ReadDigitRun(16);
+                }
+                _position++;
+                if (Current is '+' or '-')
+                {
+                    _position++;
+                }
+                _ = ReadDigitRun(10);
+                var hexFloatTagLength = ReadNumericTag();
+                if (hexFloatTagLength != 0)
+                {
+                    Report("TRM0006", "Numeric width suffixes are not supported.", _position, hexFloatTagLength);
+                    _position += hexFloatTagLength;
+                }
+                return TokenKind.NumericLiteral;
+            }
+
             _position += 2;
             if (!ReadDigitRun(hex ? 16 : 2, allowInitialSeparators: true))
             {
@@ -381,6 +405,58 @@ public sealed class Lexer
         }
 
         return TokenKind.NumericLiteral;
+    }
+
+    private bool HasHexFloatForm(int start)
+    {
+        var index = start + 2;
+        var digitCount = 0;
+        var hasPoint = false;
+        var segmentHasDigit = false;
+        while (index < _source.Length)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            var character = _source[index];
+            if (IsRadixDigit(character, 16))
+            {
+                digitCount++;
+                segmentHasDigit = true;
+                index++;
+            }
+            else if (character == '_')
+            {
+                while (index < _source.Length && _source[index] == '_')
+                {
+                    index++;
+                }
+                if ((hasPoint && !segmentHasDigit) || index >= _source.Length
+                    || !IsRadixDigit(_source[index], 16))
+                {
+                    return false;
+                }
+            }
+            else if (character == '.' && !hasPoint)
+            {
+                hasPoint = true;
+                segmentHasDigit = false;
+                index++;
+            }
+            else
+            {
+                break;
+            }
+        }
+        if (digitCount == 0 || index >= _source.Length || _source[index] is not ('p' or 'P'))
+        {
+            return false;
+        }
+
+        index++;
+        if (index < _source.Length && _source[index] is '+' or '-')
+        {
+            index++;
+        }
+        return index < _source.Length && IsDigit(_source[index]);
     }
 
     private bool ReadDigitRun(int radix, bool allowInitialSeparators = false)

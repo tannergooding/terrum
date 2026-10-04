@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static partial class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 52;
+    private const int Version = 53;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;

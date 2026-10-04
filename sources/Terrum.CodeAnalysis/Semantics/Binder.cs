@@ -634,6 +634,8 @@ internal sealed partial class Binder
             "uint32" => PrimitiveType.UInt32,
             "int64" => PrimitiveType.Int64,
             "uint64" => PrimitiveType.UInt64,
+            "float32" => PrimitiveType.Float32,
+            "float64" => PrimitiveType.Float64,
             _ => PrimitiveType.Void,
         };
         return type != PrimitiveType.Void;
@@ -3068,7 +3070,9 @@ internal sealed partial class Binder
 
                 var operandContext = operandType == PrimitiveType.Bool ? operandType
                     : expected is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                        or PrimitiveType.Float32 or PrimitiveType.Float64
                         || KnownType(operandNode) is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                            or PrimitiveType.Float32 or PrimitiveType.Float64
                         ? operandType : (PrimitiveType?)null;
                 var operand = BindExpression(operandNode, operandContext);
                 if (operand.Type != operandType)
@@ -3076,8 +3080,10 @@ internal sealed partial class Binder
                     Report("TRM3007", $"Unary operator requires {TypeName(operandType)}.", op.Span);
                 }
                 if (op.Kind is not (TokenKind.Plus or TokenKind.Minus or TokenKind.Tilde or TokenKind.Bang)
-                    || (op.Kind == TokenKind.Minus && operandType is not (PrimitiveType.Int32 or PrimitiveType.Int64))
-                    || (op.Kind is TokenKind.Plus or TokenKind.Tilde && operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)))
+                    || (op.Kind == TokenKind.Minus && operandType is not (PrimitiveType.Int32 or PrimitiveType.Int64 or PrimitiveType.Float32 or PrimitiveType.Float64))
+                    || (op.Kind == TokenKind.Plus && operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64))
+                    || (op.Kind == TokenKind.Tilde && operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)))
                 {
                     Report("TRM3001", "Unsupported unary operator.", op.Span);
                 }
@@ -3540,9 +3546,11 @@ internal sealed partial class Binder
             "int64" => PrimitiveType.Int64,
             "uint64" => PrimitiveType.UInt64,
             "char16" => PrimitiveType.Char16,
+            "float32" => PrimitiveType.Float32,
+            "float64" => PrimitiveType.Float64,
             _ => PrimitiveType.Int32,
         };
-        return name is "int32" or "uint32" or "int64" or "uint64" or "char16";
+        return name is "int32" or "uint32" or "int64" or "uint64" or "char16" or "float32" or "float64";
     }
 
     private BoundExpression BindConversionCall(SyntaxNode node, SyntaxNode arguments, PrimitiveType target)
@@ -3554,6 +3562,16 @@ internal sealed partial class Binder
             return ErrorExpression(node.Span);
         }
         var operand = BindExpression(operandNode, KnownType(operandNode) is null ? target : null);
+        if (operand.Type == target)
+        {
+            return operand;
+        }
+        if (target is PrimitiveType.Float32 or PrimitiveType.Float64
+            || operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
+        {
+            Report("TRM3007", "Typed floating-point conversions are not supported.", operand.Span);
+            return ErrorExpression(node.Span);
+        }
         if (operand.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
             or PrimitiveType.UInt64 or PrimitiveType.Char16))
         {
@@ -3956,11 +3974,20 @@ internal sealed partial class Binder
         }
 
         var text = _tree.Source.GetSubText(token.Span);
+        if (expected is PrimitiveType.Float32 or PrimitiveType.Float64)
+        {
+            if (FloatingLiteralParser.TryParse(text.AsSpan(), expected.Value, out var floatingValue))
+            {
+                return new BoundConstant(floatingValue, expected.Value, token.Span);
+            }
+            Report("TRM3013", "Floating-point literal is outside its target format.", token.Span);
+            return ErrorExpression(token.Span);
+        }
         var digits = text.AsSpan();
 
         if (digits.IsEmpty || ScannerHost.IntegerDigitCount(digits) != digits.Length)
         {
-            Report("TRM3013", "Floating-point literals and unsupported numeric tags are not supported.", token.Span);
+            Report("TRM3013", "Floating-point literals require a float32 or float64 target context; unsupported numeric tags are not supported.", token.Span);
             return ErrorExpression(token.Span);
         }
 
@@ -4343,6 +4370,8 @@ internal sealed partial class Binder
         PrimitiveType.UInt32 => "uint32",
         PrimitiveType.Int64 => "int64",
         PrimitiveType.UInt64 => "uint64",
+        PrimitiveType.Float32 => "float32",
+        PrimitiveType.Float64 => "float64",
         PrimitiveType.Char16 => "char16",
         PrimitiveType.Bool => "bool",
         PrimitiveType.Void => "void",

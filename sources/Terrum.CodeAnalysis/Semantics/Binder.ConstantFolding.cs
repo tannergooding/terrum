@@ -74,6 +74,15 @@ internal sealed partial class Binder
                 break;
 
             case BoundUnary { Operand: BoundConstant operand } unary
+                when unary.Type == operand.Type && unary.Type is PrimitiveType.Float32 or PrimitiveType.Float64
+                    && unary.Operator is TokenKind.Plus or TokenKind.Minus:
+            {
+                var signMask = unary.Type == PrimitiveType.Float32 ? 0x8000_0000L : long.MinValue;
+                var resultBits = unary.Operator == TokenKind.Minus ? operand.Value ^ signMask : operand.Value;
+                return new BoundConstant(resultBits, unary.Type, expression.Span);
+            }
+
+            case BoundUnary { Operand: BoundConstant operand } unary
                 when unary.Type == operand.Type && TryScalarValue(operand, out var input):
                 switch (unary.Operator)
                 {

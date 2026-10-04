@@ -1414,7 +1414,7 @@ internal sealed partial class PeCompiler
     private static bool IsStruct(PrimitiveType type) =>
         (int)type is >= 100 and < ManagedClassTypes.First;
     private static bool IsWide(PrimitiveType type) =>
-        type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.OwnedInt32Buffer
+        type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.OwnedInt32Buffer
             || ManagedClassTypes.IsManaged(type);
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
     private bool IsIndirect(PrimitiveType type) => IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);
@@ -2790,7 +2790,9 @@ internal sealed partial class PeCompiler
                 else
                 {
                     _code.Byte(0xB8);
-                    _code.Int32(checked((int)constant.Value));
+                    _code.Int32(constant.Type == PrimitiveType.Float32
+                        ? unchecked((int)constant.Value)
+                        : checked((int)constant.Value));
                 }
                 break;
             case BoundNull:
@@ -2990,12 +2992,23 @@ internal sealed partial class PeCompiler
                 switch (unary.Operator)
                 {
                     case TokenKind.Minus:
-                        if (IsWide(unary.Type))
+                        if (unary.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
                         {
-                            _code.Byte(0x48);
+                            if (unary.Type == PrimitiveType.Float64)
+                            {
+                                _code.Byte(0x48);
+                            }
+                            _code.Bytes(0x0F, 0xBA, 0xF8, unary.Type == PrimitiveType.Float32 ? (byte)31 : (byte)63);
                         }
-                        _code.Bytes(0xF7, 0xD8);
-                        RuntimeBranch(0x80, 0);
+                        else
+                        {
+                            if (IsWide(unary.Type))
+                            {
+                                _code.Byte(0x48);
+                            }
+                            _code.Bytes(0xF7, 0xD8);
+                            RuntimeBranch(0x80, 0);
+                        }
                         break;
                     case TokenKind.Tilde:
                         if (IsWide(unary.Type))

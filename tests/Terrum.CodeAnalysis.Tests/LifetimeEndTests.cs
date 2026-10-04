@@ -225,7 +225,7 @@ public sealed class LifetimeEndTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.Equal(52, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(53, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var retiredRevision = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(retiredRevision.AsSpan(4, 4), 46);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(retiredRevision));
@@ -263,7 +263,7 @@ public sealed class LifetimeEndTests
             public int32 Read() { int32 value = 1; return 42; }
             """));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(scalar.Program), ["Read"]);
-        Assert.Equal(52, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(53, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         _ = ModuleCompiler.CreateReference(producer);
     }
 
@@ -297,7 +297,7 @@ public sealed class LifetimeEndTests
         Assert.False(consumerCompilation.HasErrors,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
-        Assert.Equal(52, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.Equal(53, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
         Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
         BinaryPrimitives.WriteInt32LittleEndian(consumer.AsSpan(4, 4), 46);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer, producer));

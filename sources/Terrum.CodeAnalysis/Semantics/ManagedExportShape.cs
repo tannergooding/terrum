@@ -55,7 +55,8 @@ internal static class ManagedExportShape
     }
 
     private static bool Scalar(PrimitiveType type) => type is PrimitiveType.Bool or PrimitiveType.Int32
-        or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16;
+        or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16
+        or PrimitiveType.Float32 or PrimitiveType.Float64;
 
     private static bool Value(PrimitiveType type, IReadOnlyList<BoundStruct> structures, int depth)
     {

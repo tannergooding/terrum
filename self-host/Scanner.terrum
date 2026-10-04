@@ -514,6 +514,39 @@ bool IsBasedDigit(int32 value, int32 radix)
     return value == 48 || value == 49;
 }
 
+int32 ScanDigitRun(int32 initial, int32 radix, bool allowInitialSeparators)
+{
+    mut int32 at = initial;
+    mut bool hasDigit = false;
+    while (IsBasedDigit(PeekUnit(at), radix) || PeekUnit(at) == 95)
+    {
+        if (IsBasedDigit(PeekUnit(at), radix))
+        {
+            hasDigit = true;
+            at = at + 1;
+        }
+        else
+        {
+            mut int32 next = at;
+            while (PeekUnit(next) == 95)
+            {
+                next = next + 1;
+            }
+            if ((hasDigit || allowInitialSeparators) && IsBasedDigit(PeekUnit(next), radix))
+            {
+                at = next;
+                continue;
+            }
+            if (hasDigit)
+            {
+                Report(9, at, next - at);
+            }
+            break;
+        }
+    }
+    return at;
+}
+
 int32 SkipDigitSeparators(int32 at, int32 radix)
 {
     mut int32 next = at;
@@ -623,6 +656,84 @@ int32 ScanBasedNumber(int32 initial, int32 tokenIndex, int32 radix)
     return at;
 }
 
+bool HasHexFloatForm(int32 initial)
+{
+    mut int32 at = initial + 2;
+    mut int32 digits = 0;
+    mut bool hasPoint = false;
+    mut bool segmentHasDigit = false;
+    while (at < Host.Source.Length)
+    {
+        int32 unit = PeekUnit(at);
+        if (IsHex(unit))
+        {
+            digits = digits + 1;
+            segmentHasDigit = true;
+            at = at + 1;
+        }
+        else if (unit == 95)
+        {
+            mut int32 next = at;
+            while (PeekUnit(next) == 95)
+            {
+                next = next + 1;
+            }
+            if ((hasPoint && !segmentHasDigit) || !IsHex(PeekUnit(next)))
+            {
+                return false;
+            }
+            at = next;
+        }
+        else if (unit == 46 && !hasPoint)
+        {
+            hasPoint = true;
+            segmentHasDigit = false;
+            at = at + 1;
+        }
+        else
+        {
+            break;
+        }
+    }
+    if (digits == 0 || (PeekUnit(at) != 112 && PeekUnit(at) != 80))
+    {
+        return false;
+    }
+
+    at = at + 1;
+    if (PeekUnit(at) == 43 || PeekUnit(at) == 45)
+    {
+        at = at + 1;
+    }
+    return IsDigit(PeekUnit(at));
+}
+
+int32 ScanHexFloat(int32 initial)
+{
+    mut int32 at = initial + 2;
+    at = ScanDigitRun(at, 16, true);
+    if (PeekUnit(at) == 46)
+    {
+        at = at + 1;
+        at = ScanDigitRun(at, 16, false);
+    }
+
+    at = at + 1;
+    if (PeekUnit(at) == 43 || PeekUnit(at) == 45)
+    {
+        at = at + 1;
+    }
+    at = ScanDigitRun(at, 10, false);
+
+    int32 tagLength = ReadNumericTag(at);
+    if (tagLength != 0)
+    {
+        Report(6, at, tagLength);
+        at = at + tagLength;
+    }
+    return at;
+}
+
 int32 ScanNumber(int32 initial, int32 tokenIndex)
 {
     if (PeekUnit(initial) == 48)
@@ -630,6 +741,10 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
         int32 prefix = PeekUnit(initial + 1);
         if (prefix == 120 || prefix == 88)
         {
+            if (HasHexFloatForm(initial))
+            {
+                return ScanHexFloat(initial);
+            }
             return ScanBasedNumber(initial, tokenIndex, 16);
         }
         if (prefix == 98 || prefix == 66)

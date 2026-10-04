@@ -84,7 +84,7 @@ are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
-Persisted semantic modules currently write and accept only revision 52. The
+Persisted semantic modules currently write and accept only revision 53. The
 semantic v24-v32 labels below are historical module revisions and implementation
 milestones, not reader-compatibility promises; those revisions are retired and
 rejected instead of normalized.
@@ -102,19 +102,21 @@ Source visibility may be public or private. Named mutable locals, their
 writable nested fields, and forwarding through an existing writable `this`
 and its writable fields are supported receiver places. Current artifacts
 record the validated access and receiver contracts directly; all use semantic
-module revision 52 regardless of which supported constructs they contain.
+module revision 53 regardless of which supported constructs they contain.
 Older revisions are not upgraded while reading.
 The `native-18` through `native-20` labels below identify bounded runtime
 features; they do not imply that general references/views, ownership forms, or
 managed public ABI are implemented.
 The current numeric surface accepts unsuffixed contextual decimal, hexadecimal
-and binary integers, `_` digit separators, and checked `T(expression)`
+and binary integers, target-typed decimal and hexadecimal floating literals,
+`float32`/`float64` unary signs, `_` digit separators, and checked `T(expression)`
 conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`. Attached
 width suffixes diagnose as `TRM0006`; missing hexadecimal/binary digits and
 malformed separators diagnose as `TRM0007`–`TRM0009`. Based literals construct
 target-width bit patterns; decimal literals retain numeric range semantics.
-Floating/custom literal parsing and registered literal targets remain outside
-this executable profile.
+Based integers can also construct directly as floating values. Floating
+arithmetic/comparisons, typed floating conversions, custom literal parsing and
+registered literal targets remain outside this executable profile.
 
 The hosted compiler supports internal scalar `[ConstEval]` functions,
 required `const T name = expression;` locals and nested scalar `const`
@@ -571,7 +573,7 @@ existing initialization authority; ordinary immutable locals cannot. Failed
 initialization leaves vacancy and does not reactivate a root or cleanup bit.
 Retained end nodes were added at the v47 feature milestone and are audited through
 producer/reference/consumer linking and private native graphs. Both PE and
-JIT policies use the same lowering under current semantic-module revision 52,
+JIT policies use the same lowering under current semantic-module revision 53,
 with no native ABI/profile or scanner change. Parameter/receiver aliases, fields, indexers, const aliases and
 unresolved/vacant locals reject. General ref/pin types, enums, arbitrary
 guards/ARC, view rebinding, source-free TRRM and the compiled scalar frontend
@@ -1294,7 +1296,7 @@ cleanup. Labels may identify enclosing `while`, `for` and `do` loops.
 The bounded implementation rejects duplicate enclosing labels and permits
 reuse in disjoint scopes; the general source collision policy remains
 unspecified. The v39 feature milestone added post-tested loops and non-nearest
-transfer depths; current semantic-module revision 52 serializes these nodes
+transfer depths; current semantic-module revision 53 serializes these nodes
 when present. Native calling conventions, cleanup funclets and public ABI do
 not change.
 
