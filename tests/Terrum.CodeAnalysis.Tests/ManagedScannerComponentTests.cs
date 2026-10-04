@@ -2780,6 +2780,7 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("+++", TokenKind.PlusPlus, TokenKind.Plus)]
     [InlineData(">?>", TokenKind.Greater, TokenKind.Question, TokenKind.Greater)]
     [InlineData(">>>>", TokenKind.ShiftRightUnsigned, TokenKind.Greater)]
+    [InlineData("+-*", TokenKind.Plus, TokenKind.Minus, TokenKind.Star)]
     [InlineData("!!", TokenKind.Identifier)]
     [InlineData("==", TokenKind.Equals, TokenKind.Equals)]
     public async Task NativeScalarRunGateRejectsIndependentHistoricAndForgedRecordsAsync(
@@ -2848,6 +2849,36 @@ public sealed partial class ManagedScannerComponentTests
                 if (result.IsValid != {{(offending.Length == 0 ? "true" : "false")}}) { return 3; }
                 if (result.ErrorSpan.Start != {{expectedStart}}) { return 4; }
                 if (result.ErrorSpan.Length != {{offending.Length}}) { return 5; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
+                "ScalarFrontend").ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 Value(int32 a, int32 b, int32 c, int32 d) { return a + b * c - d; }", "")]
+    [InlineData("int32 Value(int32 a, int32 b, int32 c) { return -a + b * c; }", "")]
+    [InlineData("int32 Value(int32 a, int32 b, int32 c) { return a + b *c; }", "*")]
+    [InlineData("int32 Value(int32 a, int32 b, int32 c, int32 d) { return a + b * c- d; }", "-")]
+    public async Task NativeSnapshotPreservesMultiTokenOperatorSpacingDecisionsAsync(
+        string text, string offending)
+    {
+        var expectedStart = offending.Length == 0 ? 0 : text.IndexOf(offending, StringComparison.Ordinal);
+        var expectedLength = offending.Length;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                var spacing = tokens.GetScalarOperatorSpacingError();
+                if (spacing.Start != {{expectedStart}} || spacing.Length != {{expectedLength}}) {
+                    return 1;
+                }
                 return 42;
             }
             """;
@@ -4443,17 +4474,17 @@ public sealed partial class ManagedScannerComponentTests
         BoundRuntimePolicy policy, string? parserName = null)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        string[] names = ["SourceRange", "Token", "ManagedTokenChain", "Scanner", "ManagedScanner",
+        string[] names = ["SourceRange", "Utf16Scalar", "CharacterLiteral", "StringEscape",
+            "Token", "ManagedTokenChain", "Scanner", "ManagedScanner",
             "TokenSnapshot", "TokenTriviaSnapshot", "TokenIntegerSnapshot",
             "TokenDiagnosticSnapshot"];
         if (parserName is not null)
         {
             names = parserName == "ScalarFrontendProjection"
-                ? [.. names, "ScalarParserTypes", "CharacterLiteral",
-                    "ScalarFrontend", "ScalarFrontendProgram", parserName]
+                ? [.. names, "ScalarParserTypes", "ScalarFrontend", "ScalarFrontendProgram", parserName]
                 : parserName == "ScalarFrontend"
-                    ? [.. names, "ScalarParserTypes", "CharacterLiteral", parserName,
-                        "ScalarFrontendProgram", "ScalarFrontendProjection"]
+                    ? [.. names, "ScalarParserTypes", parserName, "ScalarFrontendProgram",
+                        "ScalarFrontendProjection"]
                     : [.. names, "ScalarParserTypes", parserName];
         }
         var trees = new List<SyntaxTree>(names.Length + 1);

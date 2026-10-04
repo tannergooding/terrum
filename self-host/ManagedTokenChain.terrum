@@ -136,8 +136,18 @@ mut class ManagedTokenCursor {
     }
 
     public mut bool TryReadKind(int32 kind, init ref<Token> token) {
-        if (!TryPeek(init var next) || next.Kind != kind) { return false; }
-        return TryRead(init token);
+        if (!IsCurrent) {
+            _next = null;
+            return false;
+        }
+        if (_next is some current) {
+            Token next = current.Value;
+            if (next.Kind != kind) { return false; }
+            token = next;
+            _next = current.Next;
+            return true;
+        }
+        return false;
     }
 
     public mut bool TryRead(init ref<Token> token) {

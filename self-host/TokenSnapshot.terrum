@@ -42,69 +42,74 @@ public unique struct TokenSnapshot
         }
         require TryGet(0, init var first);
         mut Token previous = first;
-        for (mut int32 index = 1; index < _count - 1; index = index + 1)
+        if (_count > 2)
         {
-            require TryGet(index, init var op);
-            require TryGet(index + 1, init var next);
-            int32 kind = op.Kind;
-            bool operandEnd = IsScalarOperandEnd(previous.Kind);
-            mut bool prefix = kind == 62 || kind == 63;
-            mut bool postfix = false;
-            mut bool separated = false;
-            if (kind == 57 || kind == 58)
+            require TryGet(1, init var second);
+            mut Token current = second;
+            for (mut int32 index = 1; index < _count - 1; index = index + 1)
             {
-                if (operandEnd) { separated = true; }
-                else { prefix = true; }
-            }
-            if (kind == 86 || kind == 87)
-            {
-                if (operandEnd) { postfix = true; }
-                else { prefix = true; }
-            }
-            if (kind >= 59 && kind <= 61) { separated = true; }
-            if (kind == 55 || kind == 56) { separated = true; }
-            if (kind == 55 && previous.Kind == 2
-                && previous.Range.End == op.Range.Start && index >= 2
-                && TryGet(index - 2, init var argumentStart)
-                && (argumentStart.Kind == 46 || argumentStart.Kind == 53))
-            {
-                separated = false;
-            }
-            if (kind >= 64 && kind <= 75 && !IsInitRefAngleDelimiter(index, previous, op))
-            {
-                separated = true;
-            }
-            if (kind == 82 || kind == 84 || kind == 85) { separated = true; }
-            if (kind >= 88 && kind <= 101) { separated = true; }
-            if (kind == 55 && (next.Kind == 18 || next.Kind == 83 || next.Kind == 31))
-            {
-                if (previous.Kind != 2 || previous.Range.End != op.Range.Start)
+                require TryGet(index + 1, init var next);
+                int32 kind = current.Kind;
+                bool operandEnd = IsScalarOperandEnd(previous.Kind);
+                mut bool prefix = kind == 62 || kind == 63;
+                mut bool postfix = false;
+                mut bool separated = false;
+                if (kind == 57 || kind == 58)
                 {
-                    return op.Range;
+                    if (operandEnd) { separated = true; }
+                    else { prefix = true; }
                 }
-                for (mut int32 at = op.Range.End; at < next.Range.Start; at = at + 1)
+                if (kind == 86 || kind == 87)
                 {
-                    if (IsNewline(PeekUnit(at)))
+                    if (operandEnd) { postfix = true; }
+                    else { prefix = true; }
+                }
+                if (kind >= 59 && kind <= 61) { separated = true; }
+                if (kind == 55 || kind == 56) { separated = true; }
+                if (kind == 55 && previous.Kind == 2
+                    && previous.Range.End == current.Range.Start && index >= 2
+                    && TryGet(index - 2, init var argumentStart)
+                    && (argumentStart.Kind == 46 || argumentStart.Kind == 53))
+                {
+                    separated = false;
+                }
+                if (kind >= 64 && kind <= 75 && !IsInitRefAngleDelimiter(index, previous, current))
+                {
+                    separated = true;
+                }
+                if (kind == 82 || kind == 84 || kind == 85) { separated = true; }
+                if (kind >= 88 && kind <= 101) { separated = true; }
+                if (kind == 55 && (next.Kind == 18 || next.Kind == 83 || next.Kind == 31))
+                {
+                    if (previous.Kind != 2 || previous.Range.End != current.Range.Start)
                     {
-                        return op.Range;
+                        return current.Range;
                     }
+                    for (mut int32 at = current.Range.End; at < next.Range.Start; at = at + 1)
+                    {
+                        if (IsNewline(PeekUnit(at)))
+                        {
+                            return current.Range;
+                        }
+                    }
+                    separated = false;
                 }
-                separated = false;
+                if (prefix && current.Range.End != next.Range.Start)
+                {
+                    return current.Range;
+                }
+                if (postfix && previous.Range.End != current.Range.Start)
+                {
+                    return current.Range;
+                }
+                if (separated && (previous.Range.End == current.Range.Start
+                    || current.Range.End == next.Range.Start))
+                {
+                    return current.Range;
+                }
+                previous = current;
+                current = next;
             }
-            if (prefix && op.Range.End != next.Range.Start)
-            {
-                return op.Range;
-            }
-            if (postfix && previous.Range.End != op.Range.Start)
-            {
-                return op.Range;
-            }
-            if (separated && (previous.Range.End == op.Range.Start
-                || op.Range.End == next.Range.Start))
-            {
-                return op.Range;
-            }
-            previous = op;
         }
         require SourceRange.TryCreate(0, 0, init var empty);
         return empty;
