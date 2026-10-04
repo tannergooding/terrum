@@ -583,19 +583,23 @@ public sealed class TrRmExecutableCompilerTests
         const string source = """
             [NoThrow] public float32 ToFloat32(char16 value) { return float32(value); }
             [NoThrow] public float64 ToFloat64(char16 value) { return float64(value); }
-            public float32 ToFloat32IfSurrogate(char16 value) {
-                if (value == char16(55296)) { return float32(value); }
+            public float32 ToFloat32IfBoundary(char16 value) {
+                if (value == char16(0) || value == char16(55296) || value == char16(65535)) {
+                    return float32(value);
+                }
                 return 0.0;
             }
-            public float64 ToFloat64IfSurrogate(char16 value) {
-                if (value == char16(55296)) { return float64(value); }
+            public float64 ToFloat64IfBoundary(char16 value) {
+                if (value == char16(0) || value == char16(55296) || value == char16(65535)) {
+                    return float64(value);
+                }
                 return 0.0;
             }
             """;
         var original = Compile(source, true);
         var artifact = TrRmExecutableCompiler.Emit(original, "char16-float-conversions");
         var loaded = TrRmExecutableCompiler.Load(artifact);
-        string[] names = ["ToFloat32", "ToFloat64", "ToFloat32IfSurrogate", "ToFloat64IfSurrogate"];
+        string[] names = ["ToFloat32", "ToFloat64", "ToFloat32IfBoundary", "ToFloat64IfBoundary"];
         var images = new[]
         {
             NativeEmitter.EmitLibrary(original, names, NativeRuntimePolicy.FailFast),
@@ -620,9 +624,9 @@ public sealed class TrRmExecutableCompilerTests
                 var toFloat64 = Marshal.GetDelegateForFunctionPointer<Char16ToFloat64>(
                     NativeLibrary.GetExport(handle, "ToFloat64"));
                 var toFloat32If = Marshal.GetDelegateForFunctionPointer<Char16ToFloat32>(
-                    NativeLibrary.GetExport(handle, "ToFloat32IfSurrogate"));
+                    NativeLibrary.GetExport(handle, "ToFloat32IfBoundary"));
                 var toFloat64If = Marshal.GetDelegateForFunctionPointer<Char16ToFloat64>(
-                    NativeLibrary.GetExport(handle, "ToFloat64IfSurrogate"));
+                    NativeLibrary.GetExport(handle, "ToFloat64IfBoundary"));
 
                 Assert.Equal(0, toFloat32(0));
                 Assert.Equal(BitConverter.SingleToInt32Bits(55296.0F), toFloat32(0xD800));
@@ -630,10 +634,12 @@ public sealed class TrRmExecutableCompilerTests
                 Assert.Equal(0L, toFloat64(0));
                 Assert.Equal(BitConverter.DoubleToInt64Bits(55296.0), toFloat64(0xD800));
                 Assert.Equal(BitConverter.DoubleToInt64Bits(65535.0), toFloat64(ushort.MaxValue));
+                Assert.Equal(BitConverter.SingleToInt32Bits(0.0F), toFloat32If(0));
                 Assert.Equal(BitConverter.SingleToInt32Bits(55296.0F), toFloat32If(0xD800));
-                Assert.Equal(0, toFloat32If(0xFFFF));
+                Assert.Equal(BitConverter.SingleToInt32Bits(65535.0F), toFloat32If(0xFFFF));
+                Assert.Equal(0L, toFloat64If(0));
                 Assert.Equal(BitConverter.DoubleToInt64Bits(55296.0), toFloat64If(0xD800));
-                Assert.Equal(0L, toFloat64If(0xFFFF));
+                Assert.Equal(BitConverter.DoubleToInt64Bits(65535.0), toFloat64If(0xFFFF));
             }
         }
         finally

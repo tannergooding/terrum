@@ -6,14 +6,16 @@
 
 The hosted implementation provisionally supports explicit conversion from
 `char16` to `float32` or `float64` as the unsigned UTF-16 code-unit value.
-Eligibility remains unapproved in the separate
-[source-conversion proposal](char16-floating-conversion-eligibility.md), and
-executable TRRM has no operation for this pair.
+Executable TRRM provisionally encodes this pair with opcode `0x1E` in both
+linear and indexed Bodies. This implementation remains unapproved; eligibility
+also remains unapproved in the separate
+[source-conversion proposal](char16-floating-conversion-eligibility.md).
 
 ## Question
 
-Should the unreleased executable `(1, 0)` draft encode the two provisional
-`char16`-to-floating pairs without widening integer conversion operations?
+Should this provisional opcode and its exact type eligibility be adopted in
+the executable TRRM contract? Its current implementation is an unreleased
+draft choice, not an approved IL specification.
 
 ## Recommendation
 
@@ -36,3 +38,9 @@ its version and compatibility policy explicit.
 Exercise zero, surrogate code units and `0xFFFF` through linear and indexed
 Bodies. Reject integer or floating sources and integer destinations. Keep
 integer and `IntToFloat` Body bytes unchanged.
+
+The current regression covers zero, surrogate and maximum code-unit values
+for both floating destinations through linear and indexed Bodies, and rejects
+an integer destination. The reader checks that the source is exactly `char16`
+and the destination exactly `float32` or `float64`; integer conversion
+opcodes retain their existing source-type restrictions.
