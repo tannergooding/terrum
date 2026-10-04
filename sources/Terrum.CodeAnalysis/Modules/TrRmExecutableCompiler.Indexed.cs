@@ -455,11 +455,24 @@ public static partial class TrRmExecutableCompiler
                 bytes.Add((byte)block.FailureReason);
                 return;
             }
-            var operands = Edges(block).SelectMany(static edge => edge.Arguments)
-                .Select(id => remap[id]).Append(block.Condition == 0
-                    ? block.ReturnValue <= 0 ? 0 : remap[block.ReturnValue]
-                    : remap[block.Condition]).Append(block.True?.Target.Id ?? 0).Append(block.False?.Target.Id ?? 0);
-            var referenceWidth = Width((ulong)operands.Max());
+            var maximumOperand = Math.Max(block.Condition == 0
+                ? block.ReturnValue <= 0 ? 0 : remap[block.ReturnValue]
+                : remap[block.Condition], Math.Max(block.True?.Target.Id ?? 0, block.False?.Target.Id ?? 0));
+            if (block.True is { } trueEdgeForWidth)
+            {
+                foreach (var value in trueEdgeForWidth.Arguments)
+                {
+                    maximumOperand = Math.Max(maximumOperand, remap[value]);
+                }
+            }
+            if (block.False is { } falseEdgeForWidth)
+            {
+                foreach (var value in falseEdgeForWidth.Arguments)
+                {
+                    maximumOperand = Math.Max(maximumOperand, remap[value]);
+                }
+            }
+            var referenceWidth = Width((ulong)maximumOperand);
             var countWidth = Width((ulong)Math.Max(block.True?.Arguments.Length ?? 0,
                 block.False?.Arguments.Length ?? 0));
             if (block.True is null)
@@ -483,14 +496,24 @@ public static partial class TrRmExecutableCompiler
             {
                 Write(bytes, (ulong)remap[block.Condition], referenceWidth);
             }
-            foreach (var edge in Edges(block))
+            if (block.True is { } trueEdgeToWrite)
             {
-                Write(bytes, (ulong)edge.Target.Id, referenceWidth);
-                Write(bytes, (ulong)edge.Arguments.Length, countWidth);
-                foreach (var value in edge.Arguments)
-                {
-                    Write(bytes, (ulong)remap[value], referenceWidth);
-                }
+                WriteIndexedEdge(bytes, trueEdgeToWrite, remap, referenceWidth, countWidth);
+            }
+            if (block.False is { } falseEdgeToWrite)
+            {
+                WriteIndexedEdge(bytes, falseEdgeToWrite, remap, referenceWidth, countWidth);
+            }
+        }
+
+        private static void WriteIndexedEdge(List<byte> bytes, IndexedEdge edge, int[] remap,
+            int referenceWidth, int countWidth)
+        {
+            Write(bytes, (ulong)edge.Target.Id, referenceWidth);
+            Write(bytes, (ulong)edge.Arguments.Length, countWidth);
+            foreach (var value in edge.Arguments)
+            {
+                Write(bytes, (ulong)remap[value], referenceWidth);
             }
         }
 
