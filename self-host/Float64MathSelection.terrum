@@ -1,0 +1,75 @@
+namespace Terrum.CodeAnalysis.Numerics64;
+
+public float64 AbsFloat64(float64 value)
+{
+    if (value == 0.0)
+    {
+        return 0.0;
+    }
+    return value < 0.0 ? -value : value;
+}
+
+public float64 MinFloat64(float64 left, float64 right)
+{
+    if (left != left)
+    {
+        return left;
+    }
+    if (right != right)
+    {
+        return right;
+    }
+    if (left == 0.0 && right == 0.0)
+    {
+        if (IsNegativeZeroFloat64(left) || IsNegativeZeroFloat64(right))
+        {
+            return -0.0;
+        }
+        return 0.0;
+    }
+    return left < right ? left : right;
+}
+
+public float64 MaxFloat64(float64 left, float64 right)
+{
+    if (left != left)
+    {
+        return left;
+    }
+    if (right != right)
+    {
+        return right;
+    }
+    if (left == 0.0 && right == 0.0)
+    {
+        if (IsNegativeZeroFloat64(left) && IsNegativeZeroFloat64(right))
+        {
+            return -0.0;
+        }
+        return 0.0;
+    }
+    return left > right ? left : right;
+}
+
+public float64 ClampFloat64(float64 value, float64 minimum, float64 maximum)
+{
+    require minimum == minimum && maximum == maximum && minimum <= maximum;
+    if (value != value)
+    {
+        return value;
+    }
+    if (value < minimum)
+    {
+        return minimum;
+    }
+    if (value > maximum)
+    {
+        return maximum;
+    }
+    return value;
+}
+
+bool IsNegativeZeroFloat64(float64 value)
+{
+    return value == 0.0 && 1.0 / value < 0.0;
+}

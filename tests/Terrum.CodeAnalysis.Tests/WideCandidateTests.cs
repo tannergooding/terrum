@@ -194,6 +194,62 @@ public sealed class WideCandidateTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task Float64MathSelectionMatchesCandidateContractAcrossModulesAsync(NativeRuntimePolicy policy)
+    {
+        var producer = CreateNumericsLibrary("Float64MathSelection.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.AbsFloat64",
+            "Terrum.CodeAnalysis.Numerics64.MinFloat64",
+            "Terrum.CodeAnalysis.Numerics64.MaxFloat64",
+            "Terrum.CodeAnalysis.Numerics64.ClampFloat64");
+        var compilation = Compilation.Create(SyntaxTree.Parse(BuildFloat64MathSelectionConsumer()),
+            ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, "ClampFloat64(0.0, 2.0, 1.0)")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "ClampFloat64(0.0, 2.0, 1.0)")]
+    [InlineData(NativeRuntimePolicy.FailFast, "ClampFloat64(0.0, notANumber, 1.0)")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "ClampFloat64(0.0, notANumber, 1.0)")]
+    [InlineData(NativeRuntimePolicy.FailFast, "ClampFloat64(0.0, -1.0, notANumber)")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "ClampFloat64(0.0, -1.0, notANumber)")]
+    [InlineData(NativeRuntimePolicy.FailFast, "ClampFloat64(notANumber, 1.0, -1.0)")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "ClampFloat64(notANumber, 1.0, -1.0)")]
+    public async Task Float64ClampRejectsInvalidBoundsBeforeSelectingNaNAsync(
+        NativeRuntimePolicy policy, string expression)
+    {
+        var producer = CreateNumericsLibrary("Float64MathSelection.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.ClampFloat64");
+        var consumerSource = SyntaxTree.Parse($$"""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                float64 notANumber = 0.0 / 0.0;
+                return int32({{expression}});
+            }
+            """);
+        var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        var program = ModuleCompiler.Link(consumer, producer);
+        var image = Path.Combine(AppContext.BaseDirectory, $"float64-math-failure-{Guid.NewGuid():N}.exe");
+        try
+        {
+            await File.WriteAllBytesAsync(image, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);
+            await RunAsync(image, [], unchecked((int)0xE0540003)).ConfigureAwait(true);
+        }
+        finally
+        {
+            File.Delete(image);
+        }
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task IntegerMathCandidatesMatchHostedReferenceAcrossModulesAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerMath.terrum", policy,
@@ -1138,6 +1194,89 @@ public sealed class WideCandidateTests
         return source.ToString();
     }
 
+    private static string BuildFloat64MathSelectionConsumer()
+    {
+        var source = new StringBuilder("""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                float64 positiveInfinity = 1.0 / 0.0;
+                float64 negativeInfinity = -positiveInfinity;
+                float64 notANumber = 0.0 / 0.0;
+                float64 negativeZero = -0.0;
+                float64 positiveZero = 0.0;
+            """);
+        var failureCode = 1;
+
+        AppendBitCheck(source, "AbsFloat64(-1.5)", "1.5", ref failureCode);
+        AppendBitCheck(source, "AbsFloat64(negativeInfinity)", "positiveInfinity", ref failureCode);
+        AppendBitCheck(source, "AbsFloat64(notANumber) == AbsFloat64(notANumber)", "false", ref failureCode);
+        AppendBitCheck(source, "AbsFloat64(negativeZero) != positiveZero", "false", ref failureCode);
+        AppendBitCheck(source, "1.0 / AbsFloat64(negativeZero) < 0.0", "false", ref failureCode);
+
+        AppendBitCheck(source, "MinFloat64(positiveInfinity, negativeInfinity)", "negativeInfinity",
+            ref failureCode);
+        AppendBitCheck(source, "MinFloat64(notANumber, 1.0) == MinFloat64(notANumber, 1.0)", "false",
+            ref failureCode);
+        AppendBitCheck(source, "MinFloat64(1.0, notANumber) == MinFloat64(1.0, notANumber)", "false",
+            ref failureCode);
+        AppendBitCheck(source, "MinFloat64(positiveZero, negativeZero) != positiveZero", "false",
+            ref failureCode);
+        AppendBitCheck(source, "1.0 / MinFloat64(positiveZero, negativeZero) < 0.0", "true",
+            ref failureCode);
+        AppendBitCheck(source, "MinFloat64(negativeZero, positiveZero) != positiveZero", "false",
+            ref failureCode);
+
+        AppendBitCheck(source, "MaxFloat64(negativeInfinity, positiveInfinity)", "positiveInfinity",
+            ref failureCode);
+        AppendBitCheck(source, "MaxFloat64(notANumber, 1.0) == MaxFloat64(notANumber, 1.0)", "false",
+            ref failureCode);
+        AppendBitCheck(source, "MaxFloat64(1.0, notANumber) == MaxFloat64(1.0, notANumber)", "false",
+            ref failureCode);
+        AppendBitCheck(source, "1.0 / MaxFloat64(negativeZero, positiveZero) < 0.0", "false",
+            ref failureCode);
+        AppendBitCheck(source, "1.0 / MaxFloat64(positiveZero, negativeZero) < 0.0", "false",
+            ref failureCode);
+        AppendBitCheck(source, "MaxFloat64(negativeZero, negativeZero) != negativeZero", "false",
+            ref failureCode);
+        AppendBitCheck(source, "1.0 / MaxFloat64(negativeZero, negativeZero) < 0.0", "true",
+            ref failureCode);
+
+        AppendBitCheck(source, "ClampFloat64(-2.0, -1.0, 1.0)", "-1.0", ref failureCode);
+        AppendBitCheck(source, "ClampFloat64(2.0, -1.0, 1.0)", "1.0", ref failureCode);
+        AppendBitCheck(source, "ClampFloat64(notANumber, -1.0, 1.0) == notANumber", "false",
+            ref failureCode);
+        AppendBitCheck(source, "ClampFloat64(negativeZero, positiveZero, 1.0) != positiveZero", "false",
+            ref failureCode);
+        AppendBitCheck(source, "1.0 / ClampFloat64(negativeZero, positiveZero, 1.0) < 0.0", "true",
+            ref failureCode);
+        AppendBitCheck(source, "ClampFloat64(negativeZero, positiveZero, positiveZero) != positiveZero",
+            "false", ref failureCode);
+        AppendBitCheck(source, "1.0 / ClampFloat64(negativeZero, positiveZero, positiveZero) < 0.0",
+            "true", ref failureCode);
+        AppendBitCheck(source, "ClampFloat64(1.5, negativeInfinity, positiveInfinity)", "1.5",
+            ref failureCode);
+
+        double[] values = [-123.5, -2.25, -1.0, 0.125, 2.25, 123.5];
+        foreach (double value in values)
+        {
+            var literal = DoubleLiteral(value);
+            AppendBitCheck(source, $"AbsFloat64({literal})", DoubleLiteral(Math.Abs(value)), ref failureCode);
+            AppendBitCheck(source, $"ClampFloat64({literal}, -2.25, 2.25)",
+                DoubleLiteral(Math.Clamp(value, -2.25, 2.25)), ref failureCode);
+            foreach (double other in values)
+            {
+                var otherLiteral = DoubleLiteral(other);
+                AppendBitCheck(source, $"MinFloat64({literal}, {otherLiteral})",
+                    DoubleLiteral(Math.Min(value, other)), ref failureCode);
+                AppendBitCheck(source, $"MaxFloat64({literal}, {otherLiteral})",
+                    DoubleLiteral(Math.Max(value, other)), ref failureCode);
+            }
+        }
+
+        source.AppendLine("return 42;").AppendLine("}");
+        return source.ToString();
+    }
+
     private static void AppendBitCheck(StringBuilder source, string expression, string expected,
         ref int failureCode)
     {
@@ -1186,6 +1325,8 @@ public sealed class WideCandidateTests
     private static string Hex(ulong value) => $"0x{value:X16}";
 
     private static string FloatLiteral(float value) => value.ToString("R", CultureInfo.InvariantCulture);
+
+    private static string DoubleLiteral(double value) => value.ToString("R", CultureInfo.InvariantCulture);
 
     private static string SignedLiteral(int value) =>
         value == int.MinValue ? "int32.MinValue" : value.ToString(CultureInfo.InvariantCulture);
