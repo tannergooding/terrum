@@ -80,8 +80,7 @@ public static bool TryParseChar16Base(int32 start, int32 length, uint32 radix, i
 bool TryParseSignedBase(int32 start, int32 length, uint32 radix,
     int64 minimum, int64 maximum, init ref<int64> result)
 {
-    if (start < 0 || length <= 0 || start > Host.Source.Length
-        || length > Host.Source.Length - start)
+    if (start < 0 || length <= 0 || start >= Host.Source.Length)
     {
         return false;
     }

@@ -20,24 +20,6 @@ OwnedInt32Buffer ReverseDigits(OwnedInt32Buffer workspace)
     return move buffer;
 }
 
-OwnedInt32Buffer PrefixMinus(OwnedInt32Buffer workspace)
-{
-    mut OwnedInt32Buffer buffer = move workspace;
-    require buffer.TryAppend(0);
-    {
-        mut MutableInt32BufferView digits = buffer.SliceMutable(0, buffer.Count);
-        mut int32 index = digits.Length - 1;
-        while (index > 0)
-        {
-            digits.Set(index, digits.Read(index - 1));
-            index = index - 1;
-        }
-        digits.Set(0, 45);
-    }
-
-    return move buffer;
-}
-
 uint64 FormattingMagnitude(int64 value)
 {
     if (value < 0)
@@ -50,6 +32,11 @@ uint64 FormattingMagnitude(int64 value)
 
 public static OwnedInt32Buffer FormatUInt64(uint64 value, OwnedInt32Buffer workspace)
 {
+    return FormatUInt64WithSign(value, false, move workspace);
+}
+
+OwnedInt32Buffer FormatUInt64WithSign(uint64 value, bool negative, OwnedInt32Buffer workspace)
+{
     mut OwnedInt32Buffer buffer = move workspace;
     buffer.Clear();
 
@@ -61,6 +48,10 @@ public static OwnedInt32Buffer FormatUInt64(uint64 value, OwnedInt32Buffer works
         remaining = quotient;
     }
     require buffer.TryAppend(int32(remaining) + 48);
+    if (negative)
+    {
+        require buffer.TryAppend(45);
+    }
     return ReverseDigits(move buffer);
 }
 
@@ -71,8 +62,7 @@ public static OwnedInt32Buffer FormatInt64(int64 value, OwnedInt32Buffer workspa
         return FormatUInt64(uint64(value), move workspace);
     }
 
-    OwnedInt32Buffer buffer = FormatUInt64(FormattingMagnitude(value), move workspace);
-    return PrefixMinus(move buffer);
+    return FormatUInt64WithSign(FormattingMagnitude(value), true, move workspace);
 }
 
 public static OwnedInt32Buffer FormatUInt32(uint32 value, OwnedInt32Buffer workspace)
@@ -93,21 +83,21 @@ public static OwnedInt32Buffer FormatChar16(char16 value, OwnedInt32Buffer works
 public static OwnedInt32Buffer FormatUInt64Base(uint64 value, uint32 radix, OwnedInt32Buffer workspace)
 {
     // Digit 10 maps to ASCII 'a' (97) or 'A' (65).
-    return FormatUInt64BaseWithAlphabet(value, radix, 87, move workspace);
+    return FormatUInt64BaseWithAlphabet(value, radix, 87, false, move workspace);
 }
 
 public static OwnedInt32Buffer FormatUInt64BaseUpper(uint64 value, uint32 radix, OwnedInt32Buffer workspace)
 {
-    return FormatUInt64BaseWithAlphabet(value, radix, 55, move workspace);
+    return FormatUInt64BaseWithAlphabet(value, radix, 55, false, move workspace);
 }
 
 OwnedInt32Buffer FormatUInt64BaseWithAlphabet(uint64 value, uint32 radix,
-    int32 letterOffset, OwnedInt32Buffer workspace)
+    int32 letterOffset, bool negative, OwnedInt32Buffer workspace)
 {
     require radix >= 2 && radix <= 36;
     if (radix == 10)
     {
-        return FormatUInt64(value, move workspace);
+        return FormatUInt64WithSign(value, negative, move workspace);
     }
     mut OwnedInt32Buffer buffer = move workspace;
     buffer.Clear();
@@ -137,6 +127,10 @@ OwnedInt32Buffer FormatUInt64BaseWithAlphabet(uint64 value, uint32 radix,
     {
         require buffer.TryAppend(lastDigit + letterOffset);
     }
+    if (negative)
+    {
+        require buffer.TryAppend(45);
+    }
 
     return ReverseDigits(move buffer);
 }
@@ -148,8 +142,7 @@ public static OwnedInt32Buffer FormatInt64Base(int64 value, uint32 radix, OwnedI
         return FormatUInt64Base(uint64(value), radix, move workspace);
     }
 
-    OwnedInt32Buffer buffer = FormatUInt64Base(FormattingMagnitude(value), radix, move workspace);
-    return PrefixMinus(move buffer);
+    return FormatUInt64BaseWithAlphabet(FormattingMagnitude(value), radix, 87, true, move workspace);
 }
 
 public static OwnedInt32Buffer FormatInt64BaseUpper(int64 value, uint32 radix, OwnedInt32Buffer workspace)
@@ -159,8 +152,7 @@ public static OwnedInt32Buffer FormatInt64BaseUpper(int64 value, uint32 radix, O
         return FormatUInt64BaseUpper(uint64(value), radix, move workspace);
     }
 
-    OwnedInt32Buffer buffer = FormatUInt64BaseUpper(FormattingMagnitude(value), radix, move workspace);
-    return PrefixMinus(move buffer);
+    return FormatUInt64BaseWithAlphabet(FormattingMagnitude(value), radix, 55, true, move workspace);
 }
 
 public static OwnedInt32Buffer FormatUInt32Base(uint32 value, uint32 radix, OwnedInt32Buffer workspace)

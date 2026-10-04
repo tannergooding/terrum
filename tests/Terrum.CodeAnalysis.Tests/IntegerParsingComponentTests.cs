@@ -117,10 +117,15 @@ public sealed class IntegerParsingComponentTests
         }
         var zeroStart = source.Length;
         _ = source.Append('0');
+        var oversizedNegativeStart = source.Length;
+        _ = source.Append('-');
+        var sourceEnd = source.Length;
         _ = checks.AppendLine($"if (TryParseUInt64Base(0, 1, 10, init var reusable)) {{ return 102; }}"
             + $" require TryParseUInt64Base({zeroStart}, 1, 10, init reusable);"
             + " if (reusable != 0) { return 103; }");
         _ = checks.AppendLine("if (TryParseUInt64Base(-1, 1, 10, init var negativeStart)"
+            + $" || TryParseInt64Base({oversizedNegativeStart}, 2, 10, init var oversizedNegative)"
+            + $" || TryParseInt64Base({sourceEnd}, 1, 10, init var sourceEndStart)"
             + " || TryParseUInt64Base(int32.MaxValue, 1, 10, init var hugeStart)"
             + " || TryParseUInt32Base(int32.MaxValue, 1, 10, init var initHugeStart)"
             + " || TryParseInt64Base(0, int32.MaxValue, 10, init var hugeLength)"
