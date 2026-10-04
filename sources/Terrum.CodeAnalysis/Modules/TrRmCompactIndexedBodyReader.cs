@@ -197,8 +197,12 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         var localMethodStart = 0;
         var localMethodEnd = 0;
         var callerModule = 0;
+        var declaredLastUses = new Dictionary<int, int>();
+        var observedLastUses = new Dictionary<int, int>();
         for (var block = 1; block <= BlockCount; block++)
         {
+            declaredLastUses.Clear();
+            observedLastUses.Clear();
             var extent = blockData[(int)offsets[block - 1]..(int)offsets[block]];
             var cursor = 0;
             var presence = Read(extent, ref cursor, 1);
@@ -220,7 +224,6 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             blockParameters[block] = ReadList(extent, ref cursor, width, (presence & 2) != 0, ValueCount);
             liveIns[block] = ReadList(extent, ref cursor, width, (presence & 4) != 0, ValueCount);
             liveOuts[block] = ReadList(extent, ref cursor, width, (presence & 8) != 0, ValueCount);
-            var declaredLastUses = new Dictionary<int, int>();
             if ((presence & 16) != 0)
             {
                 var count = ReadCount(extent, ref cursor, width);
@@ -270,7 +273,6 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
             _operationCounts[block] = operations;
             var nextResult = (int)starts[block - 1] + blockParameters[block].Length + 1;
-            var observedLastUses = new Dictionary<int, int>();
             externalUses[block] = new HashSet<int>();
             var useOffset = cursor;
             void Use(int value, int ordinal)
