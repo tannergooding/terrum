@@ -129,6 +129,33 @@ public sealed class NativeReadonlyBufferViewTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task DynamicRangeUpperSurvivesSemanticModuleRoundTripAsync(BoundRuntimePolicy policy)
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Read(OwnedInt32Buffer owner, int32 end) {
+                ReadonlyInt32BufferView prefix = owner[..end];
+                return prefix.Read(0);
+            }
+            """), policy);
+        Assert.False(provider.HasErrors, string.Join(Environment.NewLine, provider.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(provider.Program), ["Read"]);
+        var client = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                mut OwnedInt32Buffer value = move raw;
+                require value.TryAppend(20);
+                require value.TryAppend(22);
+                return Read(move value, 1);
+            }
+            """), ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
+        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), producer);
+        Assert.Equal(20, await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public async Task NestedReadonlySlicesRetainRangeThroughBranchAndLoopAsync(BoundRuntimePolicy policy)
     {
         const string Source = Buffer + """
