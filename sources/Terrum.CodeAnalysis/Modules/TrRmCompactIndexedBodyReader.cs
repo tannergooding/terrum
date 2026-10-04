@@ -219,6 +219,9 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         var localMethodStart = 0;
         var localMethodEnd = 0;
         var callerModule = 0;
+        var callerTargetRequirement = 0u;
+        var callerRuntimePolicy = 0u;
+        var callerRequirementsLoaded = false;
         Dictionary<int, (int Declared, int Observed)>? lastUses = null;
         for (var block = 1; block <= BlockCount; block++)
         {
@@ -534,11 +537,17 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         }
 
                         var targetModule = methods.GetOwnerModule(target);
-                        var (callerTarget, callerPolicy) = modules.GetRequirements(callerModule);
+                        if (!callerRequirementsLoaded)
+                        {
+                            (callerTargetRequirement, callerRuntimePolicy) =
+                                modules.GetRequirements(callerModule);
+                            callerRequirementsLoaded = true;
+                        }
                         var (targetRequirement, targetPolicy) = modules.GetRequirements(targetModule);
                         if (targetModule == callerModule
                             || (targetBodyRow = methods.GetBodyRow(target)) == 0
-                            || targetPolicy != callerPolicy || targetRequirement > callerTarget)
+                            || targetPolicy != callerRuntimePolicy
+                            || targetRequirement > callerTargetRequirement)
                         {
                             throw InvalidBody();
                         }
@@ -578,9 +587,15 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                             throw InvalidBody();
                         }
 
-                        var (callerTarget, callerPolicy) = modules.GetRequirements(callerModule);
+                        if (!callerRequirementsLoaded)
+                        {
+                            (callerTargetRequirement, callerRuntimePolicy) =
+                                modules.GetRequirements(callerModule);
+                            callerRequirementsLoaded = true;
+                        }
                         var (targetRequirement, targetPolicy) = requirements;
-                        if (targetPolicy != callerPolicy || targetRequirement > callerTarget)
+                        if (targetPolicy != callerRuntimePolicy
+                            || targetRequirement > callerTargetRequirement)
                         {
                             throw InvalidBody();
                         }
