@@ -365,7 +365,17 @@ public static partial class NativeModuleCompiler
             .ToHashSet(StringComparer.Ordinal);
         var structures = ModuleCompiler.GetGraphRetainedTypes(contract, consumer);
         provenance ??= providers.Select(provider => ProviderOrigins(provider)).ToArray();
+        var originEntryCount = 0;
+        foreach (var table in provenance)
+        {
+            originEntryCount += table.Count;
+        }
+        // Aggregate only when repeated provider lookups exceed two entry probes plus one lookup per type.
+        var aggregateOrigins = provenance.Length > 1
+            && (long)(provenance.Length - 1) * imported.Count > 2L * originEntryCount;
         var result = new List<GraphTypeOrigin>(structures.Length);
+        Dictionary<string, GraphTypeOrigin>? originsByType = null;
+        HashSet<string>? ambiguousOrigins = null;
         Dictionary<string, GraphPackage>? providersByIdentity = null;
         foreach (var structure in structures)
         {
@@ -377,17 +387,52 @@ public static partial class NativeModuleCompiler
                 continue;
             }
             GraphTypeOrigin? origin = null;
-            foreach (var table in provenance)
+            if (aggregateOrigins)
             {
-                if (!table.TryGetValue(structure.Name, out var candidate) || candidate is null)
+                // Sparse provider maps benefit from one aggregate; dense overlaps keep direct probes.
+                if (originsByType is null)
                 {
-                    continue;
+                    originsByType = new Dictionary<string, GraphTypeOrigin>(
+                        Math.Min(imported.Count, originEntryCount), StringComparer.Ordinal);
+                    foreach (var table in provenance)
+                    {
+                        foreach (var (name, candidate) in table)
+                        {
+                            if (candidate is null || !imported.Contains(name))
+                            {
+                                continue;
+                            }
+                            if (!originsByType.TryGetValue(name, out var previous))
+                            {
+                                originsByType.Add(name, candidate);
+                            }
+                            else if (previous != candidate)
+                            {
+                                ambiguousOrigins ??= new HashSet<string>(StringComparer.Ordinal);
+                                _ = ambiguousOrigins.Add(name);
+                            }
+                        }
+                    }
                 }
-                if (origin is not null && origin != candidate)
+                if (ambiguousOrigins?.Contains(structure.Name) != true)
                 {
-                    throw new ModuleContractException($"Graph imported type '{structure.Name}' has no unambiguous origin.");
+                    _ = originsByType.TryGetValue(structure.Name, out origin);
                 }
-                origin = candidate;
+            }
+            else
+            {
+                foreach (var table in provenance)
+                {
+                    if (!table.TryGetValue(structure.Name, out var candidate) || candidate is null)
+                    {
+                        continue;
+                    }
+                    if (origin is not null && origin != candidate)
+                    {
+                        throw new ModuleContractException($"Graph imported type '{structure.Name}' has no unambiguous origin.");
+                    }
+                    origin = candidate;
+                }
             }
             if (origin is null)
             {

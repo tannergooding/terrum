@@ -42,6 +42,19 @@ public sealed class NativeGraphOriginTests
         NativeModuleCompiler.CreateProducer(Compile(source, policy), ["Make", "Ticket.Close"],
             "Leaf", policy);
 
+    private static byte[] CopyLeaf(string type, string factory, string identity, int value,
+        NativeRuntimePolicy policy)
+    {
+        var source = $$"""
+            public struct {{type}} {
+                public int32 Value;
+                public {{type}}(int32 value) { Value = value; }
+            }
+            public {{type}} {{factory}}() { return new {{type}}({{value}}); }
+            """;
+        return NativeModuleCompiler.CreateProducer(Compile(source, policy), [factory], identity, policy);
+    }
+
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
@@ -127,6 +140,43 @@ public sealed class NativeGraphOriginTests
             ["Make"], "Leaf", policy);
         Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
             TimeSpan.FromSeconds(10), policy));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task SparseSharedTypeOriginsMergeAcrossProvidersAsync(NativeRuntimePolicy policy)
+    {
+        const string SharedSource = """
+            public struct Shared {
+                public int32 Value;
+                public Shared(int32 value) { Value = value; }
+            }
+            public Shared MakeShared() { return new Shared(40); }
+            """;
+        var leaf = NativeModuleCompiler.CreateProducer(Compile(SharedSource, policy),
+            ["MakeShared"], "Leaf", policy);
+        var middle = NativeModuleCompiler.CreateGraphProducer(Compile(
+            "public Shared Forward() { return MakeShared(); }", policy,
+            NativeModuleCompiler.CreateGraphReference([leaf])),
+            ["Forward"], "Middle", [leaf], policy);
+        var alpha = CopyLeaf("Alpha", "MakeAlpha", "Alpha", 0, policy);
+        var beta = CopyLeaf("Beta", "MakeBeta", "Beta", 0, policy);
+        var gamma = CopyLeaf("Gamma", "MakeGamma", "Gamma", 0, policy);
+        var dependencies = new[] { leaf, middle, alpha, beta, gamma };
+        var root = NativeModuleCompiler.CreateGraphConsumer(Compile("""
+            int32 Main() {
+                Shared shared = Forward();
+                Alpha alpha = MakeAlpha();
+                Beta beta = MakeBeta();
+                Gamma gamma = MakeGamma();
+                return shared.Value + alpha.Value + beta.Value + gamma.Value + 2;
+            }
+            """, policy, NativeModuleCompiler.CreateGraphReference(dependencies), library: false),
+            dependencies, policy);
+        NativeModuleCompiler.ValidateGraph(root, dependencies);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root,
+            [gamma, middle, leaf, beta, alpha], TimeSpan.FromSeconds(10), policy));
     }
 
     [Theory]
