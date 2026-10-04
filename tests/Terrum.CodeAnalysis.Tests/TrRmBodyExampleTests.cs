@@ -556,6 +556,23 @@ public sealed class TrRmBodyExampleTests
             InspectIndexed(section, 0, secondTypeCode: 0x0D));
     }
 
+    [Fact]
+    public void CompactIndexedReaderRejectsDuplicateResolvedTypeMapKeys()
+    {
+        var original = IndexedConstantCopy();
+        var section = new byte[original.Length + sizeof(uint)];
+        original.AsSpan(0, 17).CopyTo(section);
+        section[12] = 2;
+        BinaryPrimitives.WriteUInt32LittleEndian(section.AsSpan(4),
+            (uint)(section.Length - 8));
+        BinaryPrimitives.WriteUInt32LittleEndian(section.AsSpan(17), 1);
+        original.AsSpan(17).CopyTo(section.AsSpan(21));
+
+        Assert.Equal((1, 2), InspectIndexed(section, 0));
+        Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(section, 0, firstTypeCode: 8, secondTypeCode: 8));
+    }
+
     [Theory]
     [InlineData(13, 0)]
     [InlineData(23, 0)]

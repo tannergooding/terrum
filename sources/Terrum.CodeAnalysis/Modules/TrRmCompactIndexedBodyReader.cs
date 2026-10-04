@@ -104,6 +104,9 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
         _operationCounts = captureOperationCounts ? new int[BlockCount + 1] : [];
         var mappedTypes = new ushort[typeCount + 1];
+        Span<ulong> mappedTypeKeys =
+            stackalloc ulong[TrRmCompactLinearBodyReader.TypeKeyBitmapWordCount];
+        mappedTypeKeys.Clear();
         for (var typeId = 1; typeId <= typeCount; typeId++)
         {
             var row = Read(body, ref position, 4);
@@ -113,7 +116,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
 
             var type = TrRmCompactLinearBodyReader.ResolveType(types, (int)row);
-            if (Array.IndexOf(mappedTypes, type, 1, typeId - 1) >= 0)
+            if (!TrRmCompactLinearBodyReader.TryAddMappedType(mappedTypeKeys, type))
             {
                 throw InvalidBody();
             }

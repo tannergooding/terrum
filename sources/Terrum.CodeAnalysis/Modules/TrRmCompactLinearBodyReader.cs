@@ -12,7 +12,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
 {
     // ResolveType's largest key is optional char16 (0x100 | 0x0E).
     private const int MaximumTypeKey = 0x100 | 0x0E;
-    private const int TypeKeyBitmapWordCount = (MaximumTypeKey >> 6) + 1;
+    internal const int TypeKeyBitmapWordCount = (MaximumTypeKey >> 6) + 1;
 
     private readonly ValueInfo[] _values;
     private readonly int _valueCount;
@@ -92,14 +92,11 @@ public readonly ref struct TrRmCompactLinearBodyReader
             }
 
             var type = ResolveType(types, (int)reference);
-            var typeWord = type >> 6;
-            var typeMask = 1UL << (type & 63);
-            if (type > MaximumTypeKey || (mappedTypeKeys[typeWord] & typeMask) != 0)
+            if (!TryAddMappedType(mappedTypeKeys, type))
             {
                 throw InvalidBody();
             }
 
-            mappedTypeKeys[typeWord] |= typeMask;
             mappedTypes[index] = type;
         }
 
@@ -571,7 +568,25 @@ public readonly ref struct TrRmCompactLinearBodyReader
         return type;
     }
 
-    private static bool IsMappedType(ReadOnlySpan<ulong> mappedTypeKeys, ushort type)
+    internal static bool TryAddMappedType(Span<ulong> mappedTypeKeys, ushort type)
+    {
+        var word = type >> 6;
+        if (type > MaximumTypeKey || word >= mappedTypeKeys.Length)
+        {
+            return false;
+        }
+
+        var mask = 1UL << (type & 63);
+        if ((mappedTypeKeys[word] & mask) != 0)
+        {
+            return false;
+        }
+
+        mappedTypeKeys[word] |= mask;
+        return true;
+    }
+
+    internal static bool IsMappedType(ReadOnlySpan<ulong> mappedTypeKeys, ushort type)
     {
         var word = type >> 6;
         return word < mappedTypeKeys.Length
