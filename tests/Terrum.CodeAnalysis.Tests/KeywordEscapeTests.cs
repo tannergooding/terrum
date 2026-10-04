@@ -88,6 +88,16 @@ public sealed class KeywordEscapeTests
         Assert.Equal(source, SyntaxTree.Parse(result).Root.ToFullString());
     }
 
+    [Fact]
+    public void LongInvalidEscapeRetainsItsCompleteSourceRange()
+    {
+        var spelling = "@" + new string('a', 8_000);
+        var result = Lexer.Lex(SourceText.From(spelling));
+        Assert.Equal(TokenKind.Bad, result.Tokens[0].Kind);
+        Assert.Equal(new TextSpan(0, spelling.Length), result.Tokens[0].Span);
+        Assert.Equal(spelling, SyntaxTree.Parse(result).Root.ToFullString());
+    }
+
     [Theory]
     [InlineData("int32 Main() { int32 @const = 42; return const; }")]
     [InlineData("int32 Main() { int32 const = 42; return @const; }")]

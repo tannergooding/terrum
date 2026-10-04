@@ -50,18 +50,40 @@ public static class IdentifierName
     internal static int EscapeLength(ReadOnlySpan<char> source)
     {
         var length = 1;
-        if (source.Length > 1 && Rune.DecodeFromUtf16(source[1..], out var scalar, out var width) == OperationStatus.Done
-            && (scalar.Value == '_' || UnicodeXid.IsStart(scalar.Value)))
+        if (source.Length > 1 && TryReadScalar(source[1..], out var scalar, out var width)
+            && (scalar == '_' || UnicodeXid.IsStart(scalar)))
         {
             length += width;
             while (length < source.Length
-                && Rune.DecodeFromUtf16(source[length..], out scalar, out width) == OperationStatus.Done
-                && (scalar.Value == '_' || UnicodeXid.IsContinue(scalar.Value)))
+                && TryReadScalar(source[length..], out scalar, out width)
+                && (scalar == '_' || UnicodeXid.IsContinue(scalar)))
             {
                 length += width;
             }
         }
 
         return length;
+    }
+
+    private static bool TryReadScalar(ReadOnlySpan<char> source, out int scalar, out int width)
+    {
+        if (source.IsEmpty)
+        {
+            scalar = 0;
+            width = 0;
+            return false;
+        }
+
+        var unit = source[0];
+        if (!char.IsSurrogate(unit))
+        {
+            scalar = unit;
+            width = 1;
+            return true;
+        }
+
+        var status = Rune.DecodeFromUtf16(source, out var rune, out width);
+        scalar = rune.Value;
+        return status == OperationStatus.Done;
     }
 }
