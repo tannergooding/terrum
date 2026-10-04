@@ -3244,10 +3244,11 @@ mut class ScalarFrontendState
                 if (newLocal)
                 {
                     if (!ParseTreeOutLocal(outputName, expectedType,
-                            out slot))
+                            init var outputSlot))
                     {
                         return false;
                     }
+                    slot = outputSlot;
                     operation = outputMode == 2 ? 108 : 104;
                     type = expectedType;
                     writable = true;
@@ -3356,9 +3357,9 @@ mut class ScalarFrontendState
         return false;
     }
 
-    private mut bool ParseTreeOutLocal(Token name, int32 type, out int32 slot)
+    private mut bool ParseTreeOutLocal(Token name, int32 type,
+        init ref<int32> slot)
     {
-        slot = -1;
         if (_localCount >= 8 || IsParameterName(name))
         {
             FailAt(1, name.Range);
