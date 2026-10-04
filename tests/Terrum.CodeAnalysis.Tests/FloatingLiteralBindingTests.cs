@@ -531,8 +531,13 @@ public sealed class FloatingLiteralBindingTests
             "[NoThrow] public float32 Narrow(float64 value) { return float32(value); } "
             + "[NoThrow] public float64 Widen(float32 value) { return float64(value); } "
             + "[NoThrow] public float32 FromInt32(int32 value) { return float32(value); } "
+            + "[NoThrow] public float32 FromInt64(int64 value) { return float32(value); } "
             + "[NoThrow] public float32 FromUInt32(uint32 value) { return float32(value); } "
             + "[NoThrow] public float32 FromUInt64(uint64 value) { return float32(value); } "
+            + "[NoThrow] public float64 FromInt32Wide(int32 value) { return float64(value); } "
+            + "[NoThrow] public float64 FromInt64Wide(int64 value) { return float64(value); } "
+            + "[NoThrow] public float64 FromUInt32Wide(uint32 value) { return float64(value); } "
+            + "[NoThrow] public float64 FromUInt64Wide(uint64 value) { return float64(value); } "
             + "public int32 Catch(float64 value) { unsafe { try { return int32(value); } catch { return 42; } } }"),
             BoundRuntimePolicy.CheckedExceptions);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -545,14 +550,20 @@ public sealed class FloatingLiteralBindingTests
         {
             File.WriteAllBytes(path,
                 NativeEmitter.EmitLibrary(program,
-                    ["Narrow", "Widen", "FromInt32", "FromUInt32", "FromUInt64", "Catch"],
+                    ["Narrow", "Widen", "FromInt32", "FromInt64", "FromUInt32", "FromUInt64",
+                        "FromInt32Wide", "FromInt64Wide", "FromUInt32Wide", "FromUInt64Wide", "Catch"],
                     NativeRuntimePolicy.CheckedExceptions));
             library = NativeLibrary.Load(path);
             var narrow = Export<Float64ToFloat32>(library, "Narrow");
             var widen = Export<Float32ToFloat64>(library, "Widen");
             var fromInt32 = Export<Int32ToFloat32>(library, "FromInt32");
+            var fromInt64 = Export<Int64ToFloat32>(library, "FromInt64");
             var fromUInt32 = Export<UInt32ToFloat32>(library, "FromUInt32");
             var fromUInt64 = Export<UInt64ToFloat32>(library, "FromUInt64");
+            var fromInt32Wide = Export<Int32ToFloat64>(library, "FromInt32Wide");
+            var fromInt64Wide = Export<Int64ToFloat64>(library, "FromInt64Wide");
+            var fromUInt32Wide = Export<UInt32ToFloat64>(library, "FromUInt32Wide");
+            var fromUInt64Wide = Export<UInt64ToFloat64>(library, "FromUInt64Wide");
             var catchConversion = Export<Float64ToInt32>(library, "Catch");
             var alteredControl = (originalControl & ~floatingControlMask) | 0x01000200;
             WriteFloatingControl(alteredControl, floatingControlMask);
@@ -561,8 +572,15 @@ public sealed class FloatingLiteralBindingTests
             Assert.Equal(0x00000001, narrow(0x36A0000000000000L));
             Assert.Equal(0x36A0000000000000L, widen(1));
             Assert.Equal(0x4B800000, fromInt32(16_777_217));
+            Assert.Equal(0x4B800000, fromInt64(16_777_217));
             Assert.Equal(0x4B800000, fromUInt32(16_777_217));
+            Assert.Equal(0x4B800000, fromUInt64(16_777_217));
             Assert.Equal(0x5F000000, fromUInt64(0x8000_0000_0000_0001UL));
+            Assert.Equal(BitConverter.DoubleToInt64Bits(-16_777_217.0), fromInt32Wide(-16_777_217));
+            Assert.Equal(0x4340000000000000L, fromInt64Wide(9_007_199_254_740_993L));
+            Assert.Equal(BitConverter.DoubleToInt64Bits(4_294_967_295.0), fromUInt32Wide(uint.MaxValue));
+            Assert.Equal(0x4340000000000000L, fromUInt64Wide(9_007_199_254_740_993UL));
+            Assert.Equal(0x43E0000000000000L, fromUInt64Wide(0x8000_0000_0000_0001UL));
             Assert.Equal(42, catchConversion(0x7FF0000000000001L));
             Assert.Equal(alteredControl & floatingControlMask,
                 ReadFloatingControl() & floatingControlMask);
