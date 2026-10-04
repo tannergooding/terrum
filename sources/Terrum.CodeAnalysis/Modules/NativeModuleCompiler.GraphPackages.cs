@@ -134,7 +134,6 @@ public static partial class NativeModuleCompiler
             }
             var importCount = ReadGraphCount(bytes, ref at, 1024);
             var declarations = new string[importCount];
-            var declarationLookup = new HashSet<string>(StringComparer.Ordinal);
             for (var j = 0; j < declarations.Length; j++)
             {
                 var name = ReadGraphString(bytes, ref at, 256);
@@ -144,14 +143,14 @@ public static partial class NativeModuleCompiler
                     throw new ModuleFormatException("Duplicate, unordered or invalid graph declaration.");
                 }
                 declarations[j] = name;
-                declarationLookup.Add(name);
             }
             var actualCount = ReadGraphCount(bytes, ref at, 1024);
             var imports = new string[actualCount];
             for (var j = 0; j < imports.Length; j++)
             {
                 var name = ReadGraphString(bytes, ref at, 256);
-                if (!ValidGraphSymbol(name) || !declarationLookup.Contains(name)
+                if (!ValidGraphSymbol(name)
+                    || Array.BinarySearch(declarations, name, StringComparer.Ordinal) < 0
                     || (j != 0 && StringComparer.Ordinal.Compare(imports[j - 1], name) >= 0))
                 {
                     throw new ModuleFormatException("Graph machine import is not a declared dependency.");
