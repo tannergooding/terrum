@@ -7,7 +7,7 @@ bool TokensAttach(Token receiver, Token opener)
 
 // Scalar type codes: 1=int32, 2=uint32, 3=int64, 4=uint64, 5=bool,
 // 6=char16, 7=float32, 8=float64.
-bool TryGetScalarType(Token type, out int32 scalarType)
+bool TryGetScalarType(Token type, init ref<int32> scalarType)
 {
     if (type.Kind != 2)
     {
@@ -135,7 +135,7 @@ uint64 DecodeScannerMagnitude(int32 low, int32 high)
     return uint64(highBits) * 4294967296 + uint64(lowBits);
 }
 
-bool TryDecodeSigned64Scalar(uint64 magnitude, bool based, out int64 value)
+bool TryDecodeSigned64Scalar(uint64 magnitude, bool based, init ref<int64> value)
 {
     uint64 signBit = uint64(int64.MaxValue) + 1;
     if (!based && magnitude > uint64(int64.MaxValue))
@@ -163,7 +163,7 @@ bool EvaluateScalarComparison(int32 operation, bool equal, bool less, bool great
         || operation == 70 && !less;
 }
 
-bool TryAddScalarInt32(int32 first, int32 second, out int32 sum)
+bool TryAddScalarInt32(int32 first, int32 second, init ref<int32> sum)
 {
     int64 wide = int64(first) + int64(second);
     if (wide < int64(int32.MinValue) || wide > int64(int32.MaxValue))
@@ -174,7 +174,7 @@ bool TryAddScalarInt32(int32 first, int32 second, out int32 sum)
     return true;
 }
 
-bool TryAddScalarUInt32(uint32 first, uint32 second, out uint32 sum)
+bool TryAddScalarUInt32(uint32 first, uint32 second, init ref<uint32> sum)
 {
     uint64 wide = uint64(first) + uint64(second);
     if (wide > uint64(uint32.MaxValue))
@@ -185,7 +185,7 @@ bool TryAddScalarUInt32(uint32 first, uint32 second, out uint32 sum)
     return true;
 }
 
-bool TryAddScalarInt64(int64 first, int64 second, out int64 sum)
+bool TryAddScalarInt64(int64 first, int64 second, init ref<int64> sum)
 {
     if ((second > 0 && first > int64.MaxValue - second)
         || (second < 0 && first < int64.MinValue - second))
@@ -196,7 +196,7 @@ bool TryAddScalarInt64(int64 first, int64 second, out int64 sum)
     return true;
 }
 
-bool TryAddScalarUInt64(uint64 first, uint64 second, out uint64 sum)
+bool TryAddScalarUInt64(uint64 first, uint64 second, init ref<uint64> sum)
 {
     if (first > uint64.MaxValue - second)
     {

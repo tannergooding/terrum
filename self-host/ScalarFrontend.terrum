@@ -233,7 +233,7 @@ mut class ScalarFrontendState
         {
             return false;
         }
-        if (!TryGetScalarType(typeToken, out var selected))
+        if (!TryGetScalarType(typeToken, init var selected))
         {
             FailAt(2, typeToken.Range);
             return false;
@@ -1573,10 +1573,14 @@ mut class ScalarFrontendState
             return false;
         }
         mut int32 selected = 0;
-        if (typeToken.Kind != 11 && !TryGetScalarType(typeToken, out selected))
+        if (typeToken.Kind != 11)
         {
-            FailAt(2, typeToken.Range);
-            return false;
+            if (!TryGetScalarType(typeToken, init var selectedType))
+            {
+                FailAt(2, typeToken.Range);
+                return false;
+            }
+            selected = selectedType;
         }
         if ((Host.Frontend[2] & 4) != 0 && selected != 0)
         {
@@ -1921,13 +1925,14 @@ mut class ScalarFrontendState
             FailAt(1, declaredType.Range);
             return false;
         }
-        else if (!TryGetScalarType(declaredType, out type))
+        else if (!TryGetScalarType(declaredType, init var selectedType))
         {
             FailAt(2, declaredType.Range);
             return false;
         }
         else
         {
+            type = selectedType;
             _at = _at + 1;
         }
         if (!Take(2, out var name))
@@ -3372,7 +3377,7 @@ mut class ScalarFrontendState
             {
                 return ParseTreeSelfCall(token, depth, out node);
             }
-            if (!TryGetScalarType(token, out var target)
+            if (!TryGetScalarType(token, init var target)
                 || target == 5)
             {
                 if (SameTokenSpelling(_function, token))
@@ -4145,7 +4150,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
         require chain.TryGet(index, init var token);
         if (IsScalarFrontendTreeMarker(token.Kind)
             || (token.Kind == 2 && chain.TryGet(index + 1, init var opener)
-                && opener.Kind == 46 && TryGetScalarType(token, out var conversionType)))
+                && opener.Kind == 46 && TryGetScalarType(token, init var conversionType)))
         {
             result = modern;
             return true;

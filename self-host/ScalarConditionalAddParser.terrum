@@ -44,10 +44,10 @@ bool TryParseScalarConditionalAddReturn(TokenSnapshot tokens,
     require tokens.TryGet(29, init var closeFalse);
     require tokens.TryGet(30, init var closeBody);
     require tokens.TryGet(31, init var eof);
-    if (!TryGetScalarType(returnType, out var selected)
-        || !TryGetScalarType(conditionType, out var condition) || condition != 5
-        || !TryGetScalarType(firstType, out var matchingFirst)
-        || !TryGetScalarType(secondType, out var matchingSecond)
+    if (!TryGetScalarType(returnType, init var selected)
+        || !TryGetScalarType(conditionType, init var condition) || condition != 5
+        || !TryGetScalarType(firstType, init var matchingFirst)
+        || !TryGetScalarType(secondType, init var matchingSecond)
         || selected != matchingFirst || selected != matchingSecond || selected == 5
         || selected == 6)
     {
@@ -95,7 +95,7 @@ bool TryEvaluateInt32ScalarConditionalAddReturn(TokenSnapshot tokens, bool condi
     }
     if (condition)
     {
-        if (!TryAddScalarInt32(first, second, out var sum))
+        if (!TryAddScalarInt32(first, second, init var sum))
         {
             return false;
         }
@@ -119,7 +119,7 @@ bool TryEvaluateUInt32ScalarConditionalAddReturn(TokenSnapshot tokens, bool cond
     }
     if (condition)
     {
-        if (!TryAddScalarUInt32(first, second, out var sum))
+        if (!TryAddScalarUInt32(first, second, init var sum))
         {
             return false;
         }
@@ -143,7 +143,7 @@ bool TryEvaluateInt64ScalarConditionalAddReturn(TokenSnapshot tokens, bool condi
     }
     if (condition)
     {
-        if (!TryAddScalarInt64(first, second, out var sum))
+        if (!TryAddScalarInt64(first, second, init var sum))
         {
             return false;
         }
@@ -167,7 +167,7 @@ bool TryEvaluateUInt64ScalarConditionalAddReturn(TokenSnapshot tokens, bool cond
     }
     if (condition)
     {
-        if (!TryAddScalarUInt64(first, second, out var sum))
+        if (!TryAddScalarUInt64(first, second, init var sum))
         {
             return false;
         }

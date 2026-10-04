@@ -46,10 +46,10 @@ bool TryParseScalarConditionalReturn(TokenSnapshot tokens,
     {
         return false;
     }
-    if (!TryGetScalarType(returnType, out var selected)
-        || !TryGetScalarType(conditionType, out var condition) || condition != 5
-        || !TryGetScalarType(firstType, out var matchingFirst)
-        || !TryGetScalarType(secondType, out var matchingSecond)
+    if (!TryGetScalarType(returnType, init var selected)
+        || !TryGetScalarType(conditionType, init var condition) || condition != 5
+        || !TryGetScalarType(firstType, init var matchingFirst)
+        || !TryGetScalarType(secondType, init var matchingSecond)
         || selected != matchingFirst || selected != matchingSecond
         || function.Kind != 2 || openParameters.Kind != 46
         || firstComma.Kind != 53 || secondComma.Kind != 53

@@ -45,9 +45,9 @@ bool TryParseScalarComparisonConditionalReturn(TokenSnapshot tokens,
     {
         return false;
     }
-    if (!TryGetScalarType(returnType, out var selected)
-        || !TryGetScalarType(firstType, out var matchingFirst)
-        || !TryGetScalarType(secondType, out var matchingSecond)
+    if (!TryGetScalarType(returnType, init var selected)
+        || !TryGetScalarType(firstType, init var matchingFirst)
+        || !TryGetScalarType(secondType, init var matchingSecond)
         || selected != matchingFirst || selected != matchingSecond || selected == 5
         || function.Kind != 2 || openParameters.Kind != 46 || comma.Kind != 53
         || closeParameters.Kind != 47 || openBody.Kind != 48

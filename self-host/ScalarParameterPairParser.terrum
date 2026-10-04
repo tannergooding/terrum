@@ -31,9 +31,9 @@ bool TryParseTwoParameterBinaryPrefix(TokenSnapshot tokens, int32 operatorKind,
     {
         return false;
     }
-    if (!TryGetScalarType(returnType, out var resultType)
-        || !TryGetScalarType(firstType, out var matchingFirst)
-        || !TryGetScalarType(secondType, out var matchingSecond)
+    if (!TryGetScalarType(returnType, init var resultType)
+        || !TryGetScalarType(firstType, init var matchingFirst)
+        || !TryGetScalarType(secondType, init var matchingSecond)
         || matchingFirst != matchingSecond
         || (comparison && resultType != 5)
         || (!comparison && resultType != matchingFirst)
@@ -204,7 +204,7 @@ bool TryEvaluateInt64TwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
 {
     if (!TryParseTwoParameterAddAndLiteralReturn(move tokens, move integers,
             out var selected, out var foundName, out var magnitude, out var based)
-        || selected != 3 || !TryDecodeSigned64Scalar(magnitude, based, out var literal)
+        || selected != 3 || !TryDecodeSigned64Scalar(magnitude, based, init var literal)
         || (second > 0 && first > int64.MaxValue - second)
         || (second < 0 && first < int64.MinValue - second))
     {
@@ -245,7 +245,7 @@ bool TryEvaluateInt32TwoParameterAddReturn(TokenSnapshot tokens, int32 first, in
     out SourceRange name, out int32 result)
 {
     if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
-        || selected != 1 || !TryAddScalarInt32(first, second, out var sum))
+        || selected != 1 || !TryAddScalarInt32(first, second, init var sum))
     {
         return false;
     }
@@ -258,7 +258,7 @@ bool TryEvaluateUInt32TwoParameterAddReturn(TokenSnapshot tokens, uint32 first, 
     out SourceRange name, out uint32 result)
 {
     if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
-        || selected != 2 || !TryAddScalarUInt32(first, second, out var sum))
+        || selected != 2 || !TryAddScalarUInt32(first, second, init var sum))
     {
         return false;
     }
@@ -271,7 +271,7 @@ bool TryEvaluateInt64TwoParameterAddReturn(TokenSnapshot tokens, int64 first, in
     out SourceRange name, out int64 result)
 {
     if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
-        || selected != 3 || !TryAddScalarInt64(first, second, out var sum))
+        || selected != 3 || !TryAddScalarInt64(first, second, init var sum))
     {
         return false;
     }
@@ -284,7 +284,7 @@ bool TryEvaluateUInt64TwoParameterAddReturn(TokenSnapshot tokens, uint64 first, 
     out SourceRange name, out uint64 result)
 {
     if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
-        || selected != 4 || !TryAddScalarUInt64(first, second, out var sum))
+        || selected != 4 || !TryAddScalarUInt64(first, second, init var sum))
     {
         return false;
     }

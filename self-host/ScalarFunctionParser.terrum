@@ -17,7 +17,7 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     }
 
     require tokens.TryGet(0, init var type);
-    if (!TryGetScalarType(type, out var selected) || selected > 5)
+    if (!TryGetScalarType(type, init var selected) || selected > 5)
     {
         return false;
     }
@@ -454,7 +454,7 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         return true;
     }
 
-    if (!TryDecodeSigned64Scalar(magnitude, based, out var decoded))
+    if (!TryDecodeSigned64Scalar(magnitude, based, init var decoded))
     {
         return false;
     }
@@ -492,7 +492,7 @@ bool TryParseScalarBinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
         return false;
     }
     require tokens.TryGet(0, init var type);
-    if (!TryGetScalarType(type, out var selected) || selected == 5 || selected == 6)
+    if (!TryGetScalarType(type, init var selected) || selected == 5 || selected == 6)
     {
         return false;
     }
@@ -574,9 +574,9 @@ bool TryEvaluateTypedScalarComparisonReturn(TokenSnapshot tokens, TokenIntegerSn
     {
         return false;
     }
-    if (!TryGetScalarType(returnType, out var selectedReturn) || selectedReturn != 5
-        || !TryGetScalarType(leftType, out var selected)
-        || !TryGetScalarType(rightType, out var matching) || selected != matching
+    if (!TryGetScalarType(returnType, init var selectedReturn) || selectedReturn != 5
+        || !TryGetScalarType(leftType, init var selected)
+        || !TryGetScalarType(rightType, init var matching) || selected != matching
         || selected == 5 || function.Kind != 2
         || openParameters.Kind != 46 || closeParameters.Kind != 47
         || openBody.Kind != 48 || returnKeyword.Kind != 19
@@ -626,8 +626,8 @@ bool TryEvaluateTypedScalarComparisonReturn(TokenSnapshot tokens, TokenIntegerSn
     }
     else if (selected == 3)
     {
-        if (!TryDecodeSigned64Scalar(left, IsBasedInteger(leftLiteral), out var signedLeft)
-            || !TryDecodeSigned64Scalar(right, IsBasedInteger(rightLiteral), out var signedRight))
+        if (!TryDecodeSigned64Scalar(left, IsBasedInteger(leftLiteral), init var signedLeft)
+            || !TryDecodeSigned64Scalar(right, IsBasedInteger(rightLiteral), init var signedRight))
         {
             return false;
         }
@@ -671,8 +671,8 @@ bool TryParseParameterComparisonReturn(TokenSnapshot tokens, TokenIntegerSnapsho
     {
         return false;
     }
-    if (!TryGetScalarType(returnType, out var selectedReturn) || selectedReturn != 5
-        || !TryGetScalarType(parameterType, out var selected) || selected == 5
+    if (!TryGetScalarType(returnType, init var selectedReturn) || selectedReturn != 5
+        || !TryGetScalarType(parameterType, init var selected) || selected == 5
         || function.Kind != 2 || openParameters.Kind != 46 || parameter.Kind != 2
         || closeParameters.Kind != 47 || openBody.Kind != 48
         || returnKeyword.Kind != 19 || parameterUse.Kind != 2
@@ -740,7 +740,7 @@ bool TryEvaluateInt64ParameterComparisonReturn(TokenSnapshot tokens,
     if (!TryParseParameterComparisonReturn(move tokens, move integers,
             out var selected, out var operation, out var foundName, out var magnitude,
             out var based)
-        || selected != 3 || !TryDecodeSigned64Scalar(magnitude, based, out var literal))
+        || selected != 3 || !TryDecodeSigned64Scalar(magnitude, based, init var literal))
     {
         return false;
     }
@@ -813,8 +813,8 @@ bool TryParseParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
     {
         return false;
     }
-    if (!TryGetScalarType(returnType, out var selected)
-        || !TryGetScalarType(parameterType, out var matching) || selected != matching
+    if (!TryGetScalarType(returnType, init var selected)
+        || !TryGetScalarType(parameterType, init var matching) || selected != matching
         || selected == 5 || selected == 6 || function.Kind != 2
         || openParameters.Kind != 46 || parameter.Kind != 2 || closeParameters.Kind != 47
         || openBody.Kind != 48 || returnKeyword.Kind != 19
@@ -881,7 +881,7 @@ bool TryEvaluateInt64ParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapsh
 {
     if (!TryParseParameterAddReturn(move tokens, move integers,
             out var selected, out var foundName, out var magnitude, out var based)
-        || selected != 3 || !TryDecodeSigned64Scalar(magnitude, based, out var literal))
+        || selected != 3 || !TryDecodeSigned64Scalar(magnitude, based, init var literal))
     {
         return false;
     }
@@ -1204,9 +1204,9 @@ bool TryEvaluateInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
             out var rightLow, out var rightHigh, out var rightBased)
         || scalarType != 3 || operation != expectedOperation
         || !TryDecodeSigned64Scalar(DecodeScannerMagnitude(leftLow, leftHigh),
-            leftBased, out var left)
+            leftBased, init var left)
         || !TryDecodeSigned64Scalar(DecodeScannerMagnitude(rightLow, rightHigh),
-            rightBased, out var right))
+            rightBased, init var right))
     {
         return false;
     }
