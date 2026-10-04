@@ -144,12 +144,112 @@ public sealed class OperatorRunTests
     [InlineData("x!!", TokenKind.Identifier)]
     [InlineData("\"x\"!!", TokenKind.StringLiteral)]
     [InlineData("1!!", TokenKind.NumericLiteral)]
+    [InlineData("identifier!!", TokenKind.Identifier)]
+    [InlineData("'!'!!", TokenKind.CharacterLiteral)]
+    [InlineData(";!!", TokenKind.Semicolon)]
+    [InlineData("1e-2!!", TokenKind.NumericLiteral)]
     public void IndependentlyWrittenHistoricalRawRecordsCannotHideCurrentRuns(string text, TokenKind kind)
     {
         var source = SourceText.From(text);
         var bytes = TokenRecords((kind, 0, text.Length), (TokenKind.EndOfFile, text.Length, 0));
         Assert.Equal(2, ScannerHost.ReadTokens(source, 2, bytes).Length);
         Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(source, 2, bytes, new byte[4], new byte[4]));
+    }
+
+    [Theory]
+    [InlineData("name", TokenKind.PublicKeyword)]
+    [InlineData("public", TokenKind.Identifier)]
+    [InlineData("1e-2", TokenKind.Bad)]
+    [InlineData("1e+", TokenKind.Identifier)]
+    [InlineData("'!'", TokenKind.Identifier)]
+    [InlineData("\"\\q\"", TokenKind.StringLiteral)]
+    public void ReusableFramingAuditPreservesSuppliedClassificationsAndOptionalTokenDiagnostics(string text, TokenKind kind)
+    {
+        var source = SourceText.From(text);
+        var bytes = TokenRecords((kind, 0, text.Length), (TokenKind.EndOfFile, text.Length, 0));
+        var raw = ScannerHost.ReadTokens(source, 2, bytes);
+        var result = ScannerHost.ReadLexResult(source, 2, bytes, new byte[4], new byte[4]);
+        Assert.Equal(raw.Select(token => (token.Kind, token.Span)), result.Tokens.Select(token => (token.Kind, token.Span)));
+        Assert.Equal(text, result.Tokens[0].Text);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void ReusableFramingAuditPreservesUnpairedSurrogateClassification()
+    {
+        var text = new string((char)0xD800, 1);
+        var source = SourceText.From(text);
+        var bytes = TokenRecords((TokenKind.Identifier, 0, 1), (TokenKind.EndOfFile, 1, 0));
+        var raw = ScannerHost.ReadTokens(source, 2, bytes);
+        var result = ScannerHost.ReadLexResult(source, 2, bytes, new byte[4], new byte[4]);
+        Assert.Equal(raw.Select(token => (token.Kind, token.Span)), result.Tokens.Select(token => (token.Kind, token.Span)));
+        Assert.Equal(text, result.Tokens[0].Text);
+        Assert.Empty(result.Diagnostics);
+
+        var hiddenPunctuation = text + "!!";
+        var hiddenSource = SourceText.From(hiddenPunctuation);
+        var hiddenBytes = TokenRecords((TokenKind.Bad, 0, hiddenPunctuation.Length),
+            (TokenKind.EndOfFile, hiddenPunctuation.Length, 0));
+        Assert.Equal(2, ScannerHost.ReadTokens(hiddenSource, 2, hiddenBytes).Length);
+        Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(hiddenSource, 2, hiddenBytes, new byte[4], new byte[4]));
+    }
+
+    [Theory]
+    [InlineData("\"x\"", TokenKind.Identifier)]
+    [InlineData("x", TokenKind.StringLiteral)]
+    [InlineData("'x'", TokenKind.StringLiteral)]
+    public void ReusableFramingAuditRetainsStringLiteralClassificationValidation(string text, TokenKind kind)
+    {
+        var source = SourceText.From(text);
+        var bytes = TokenRecords((kind, 0, text.Length), (TokenKind.EndOfFile, text.Length, 0));
+        Assert.Equal(2, ScannerHost.ReadTokens(source, 2, bytes).Length);
+        Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(source, 2, bytes, new byte[4], new byte[4]));
+    }
+
+    [Fact]
+    public void ShiftedFramingCannotHidePunctuationWithAnUnchangedTokenCount()
+    {
+        var source = SourceText.From("x!!");
+        var bytes = TokenRecords((TokenKind.Identifier, 0, 2), (TokenKind.Bang, 2, 1),
+            (TokenKind.EndOfFile, 3, 0));
+        Assert.Equal(Lexer.Lex(source).Tokens.Length, ScannerHost.ReadTokens(source, 3, bytes).Length);
+        Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(source, 3, bytes, new byte[4], new byte[4]));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReusableCursorDiscardsTokenDiagnosticsBeforeAuditingNextTrivia(bool includeTokenDiagnostic)
+    {
+        var source = SourceText.From("1e+ /*\uD800*/ x");
+        var tokens = TokenRecords((TokenKind.NumericLiteral, 0, 3), (TokenKind.Identifier, 10, 1),
+            (TokenKind.EndOfFile, 11, 0));
+        var trivia = Words(3, (int)TriviaKind.Whitespace, 3, 1, 1,
+            (int)TriviaKind.MultiLineComment, 4, 5, 1, (int)TriviaKind.Whitespace, 9, 1, 1);
+        var diagnostics = includeTokenDiagnostic ? Words(2, 4, 0, 3, 1, 6, 1) : Words(1, 1, 6, 1);
+        var result = ScannerHost.ReadLexResult(source, 3, tokens, trivia, diagnostics);
+        Assert.Equal(includeTokenDiagnostic ? 2 : 1, result.Diagnostics.Length);
+        Assert.Equal("TRM0001", result.Diagnostics[^1].Code);
+        Assert.Equal(new TextSpan(6, 1), result.Diagnostics[^1].Span);
+        Assert.Equal(source.Text, SyntaxTree.Parse(result).Root.ToFullString());
+        Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(source, 3, tokens, trivia, new byte[4]));
+        BinaryPrimitives.WriteInt32LittleEndian(diagnostics.AsSpan(diagnostics.Length - 8), 7);
+        Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(source, 3, tokens, trivia, diagnostics));
+    }
+
+    [Fact]
+    public void DeferredPunctuationDoesNotAffectFollowingNumericFramingOrRequiredRunDiagnostics()
+    {
+        var source = SourceText.From(">>>>?1e-2!!");
+        var tokens = TokenRecords((TokenKind.ShiftRightUnsigned, 0, 3), (TokenKind.Greater, 3, 1),
+            (TokenKind.Question, 4, 1), (TokenKind.Identifier, 5, 4), (TokenKind.Bad, 9, 2),
+            (TokenKind.EndOfFile, 11, 0));
+        var diagnostics = Words(1, 11, 9, 2);
+        var result = ScannerHost.ReadLexResult(source, 6, tokens, new byte[4], diagnostics);
+        Assert.Equal(new[] { ">>>", ">", "?", "1e-2", "!!", "" }, result.Tokens.Select(token => token.Text));
+        Assert.Equal(TokenKind.Identifier, result.Tokens[3].Kind);
+        Assert.Equal(new TextSpan(9, 2), Assert.Single(result.Diagnostics).Span);
+        Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(source, 6, tokens, new byte[4], new byte[4]));
     }
 
     [Theory]
@@ -370,6 +470,16 @@ public sealed class OperatorRunTests
         Assert.Equal(text, lexed.Tokens[0].Text);
         Assert.Throws<ArgumentException>(() => ScannerHost.CreateBuffers(SourceText.From(text + "!")));
         await ScannerTests.CheckScannerAsync(text, repeat: true);
+    }
+
+    private static byte[] Words(params int[] words)
+    {
+        var bytes = new byte[words.Length * sizeof(int)];
+        for (var index = 0; index < words.Length; index++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(index * sizeof(int)), words[index]);
+        }
+        return bytes;
     }
 
     private static byte[] TokenRecords(params (TokenKind Kind, int Start, int Length)[] records)

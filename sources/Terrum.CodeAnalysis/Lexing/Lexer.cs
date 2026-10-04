@@ -59,19 +59,29 @@ public sealed class Lexer
         return new LexResult(source, tokens.ToImmutable(), lexer.GetDiagnostics());
     }
 
-    internal static (ImmutableArray<SyntaxTrivia> Trivia, ImmutableArray<Diagnostic> Diagnostics, int End)
-        LexTrivia(SourceText source, int position, CancellationToken cancellationToken)
+    internal static Lexer CreateValidationCursor(SourceText source, CancellationToken cancellationToken)
+        => new(source, cancellationToken);
+
+    internal (ImmutableArray<SyntaxTrivia> Trivia, ImmutableArray<Diagnostic> Diagnostics, int End)
+        ReadValidationTrivia(int position)
     {
-        Lexer lexer = new(source, cancellationToken) { _position = position };
-        var trivia = lexer.ReadTrivia();
-        return (trivia, lexer.GetDiagnostics(), lexer._position);
+        // Match an independent record audit: punctuation state is host-owned,
+        // and ignored token diagnostics must not leak into the next trivia audit.
+        _position = position;
+        _deferredRunEnd = 0;
+        _diagnostics?.Clear();
+        var trivia = ReadTrivia();
+        return (trivia, GetDiagnostics(), _position);
     }
 
-    internal static int TokenEnd(SourceText source, int position, CancellationToken cancellationToken)
+    internal int ReadValidationTokenEnd(int position)
     {
-        Lexer lexer = new(source, cancellationToken) { _position = position };
-        _ = lexer.ReadToken();
-        return lexer._position;
+        // Match the former isolated token-framing scan.
+        _position = position;
+        _deferredRunEnd = 0;
+        _diagnostics?.Clear();
+        _ = ReadToken();
+        return _position;
     }
 
     private bool AtEnd => _position == _source.Length;

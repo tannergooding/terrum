@@ -594,13 +594,6 @@ public static class ScannerHost
             var start = token.Span.Start;
             if (!PunctuationRun.IsGlyph(result.Source[start]))
             {
-                // Audit framing, not ordinary caller-owned keyword/name classification.
-                // A fabricated long literal/name must not hide later punctuation.
-                if (Lexer.TokenEnd(result.Source, start, cancellationToken) != token.Span.End
-                    || (token.Kind == TokenKind.StringLiteral) != (result.Source[start] == '"'))
-                {
-                    throw new ArgumentException("Scanner records contradict source token framing.", nameof(result));
-                }
                 continue;
             }
             var end = PunctuationRun.End(result.Source.Text, start, cancellationToken);
@@ -684,12 +677,13 @@ public static class ScannerHost
     // The record shape carries no schema marker, so enforce the current source profile.
     private static void ValidateTriviaProfile(LexResult result, CancellationToken cancellationToken)
     {
+        var cursor = Lexer.CreateValidationCursor(result.Source, cancellationToken);
         var position = 0;
         var diagnosticIndex = 0;
         foreach (var token in result.Tokens)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var expected = Lexer.LexTrivia(result.Source, position, cancellationToken);
+            var expected = cursor.ReadValidationTrivia(position);
             if (expected.End != token.Span.Start || expected.Trivia.Length != token.LeadingTrivia.Length)
             {
                 throw new ArgumentException("Scanner records do not match the current source lexical profile.", nameof(result));
@@ -722,6 +716,15 @@ public static class ScannerHost
                 && result.Diagnostics[diagnosticIndex].Span.Start < position)
             {
                 diagnosticIndex++;
+            }
+            if (token.Kind != TokenKind.EndOfFile && !PunctuationRun.IsGlyph(result.Source[token.Span.Start]))
+            {
+                // Audit framing, not caller-owned classifications; a long fabricated span must not hide punctuation.
+                if (cursor.ReadValidationTokenEnd(token.Span.Start) != token.Span.End
+                    || (token.Kind == TokenKind.StringLiteral) != (result.Source[token.Span.Start] == '"'))
+                {
+                    throw new ArgumentException("Scanner records contradict source token framing.", nameof(result));
+                }
             }
         }
     }
