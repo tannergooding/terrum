@@ -1,11 +1,13 @@
 # Span-backed token cursor proposal
 
-**Status: initial direction accepted; implementation not yet supported.**
+**Status: initial cursor direction accepted; a bounded compilation-local
+implementation path is selected provisionally, but remains unsupported until
+its proof and regression gates pass.**
 This proposal identifies the smallest runtime and source-binding contracts
 needed to execute the existing [`TokenCursor`](../../self-host/TokenCursor.terrum)
 candidate without copying its `Span<Token>` backing or claiming ownership of
-it. The accepted slice is limited to this readonly Copy-indexed cursor; it
-does not approve general stored views or imply current compiler support.
+it. The implementation slice is limited to this readonly Copy-indexed cursor;
+it does not approve general stored views or imply current compiler support.
 
 ## Current boundary
 
@@ -15,9 +17,12 @@ rebinding, and writable element referents are distinct capabilities.
 Forwarding a descriptor does not keep its backing allocation or guard alive;
 the backing dependencies must remain valid through each use. The exact anchor
 representation, calling convention and source relationships remain open in
-the [lifetime specification](../lifetimes.md). The candidate currently requires
-Span indexing, matched access, stored backing dependencies, a capture contract
-and constructor initialization before it can be executed.
+the [lifetime specification](../lifetimes.md) outside this slice. For the
+initial cursor, use a fixed 16-byte x64 descriptor containing a data address
+and element count; keep backing and guard provenance compiler-checked rather
+than storing runtime roots or leases. The candidate still requires Span
+indexing, matched access, stored backing dependencies, a capture contract and
+constructor initialization before it can be executed.
 
 ## Accepted initial slice
 
@@ -47,27 +52,38 @@ stored-view support.
 ## Remaining execution prerequisite: acquiring the input view
 
 The accepted cursor rules describe how a `Span<Token>` is stored and read,
-but the current scanner exposes managed token storage rather than a
-`Span<Token>`. This proposal intentionally does not define parser integration
-or a conversion from that storage to a span. `HostBuffer` and
-`ManagedTokenChain` are separate contracts and cannot be treated as implicit
-span constructors.
+while current scanner components expose managed token storage. The provisional
+bridge below uses only a completed `TokenSnapshot`; it does not define general
+parser integration or convert `HostBuffer` or `ManagedTokenChain` into spans.
+Those remain separate contracts.
 
-**Summary:** An end-to-end cursor fixture needs a specified source for its
-initial view and a proof that the view's complete dependencies remain valid
-through cursor use. The accepted cursor operations alone provide neither.
+**Summary:** An end-to-end cursor needs both a specified source for its input
+view and a proof that the view's complete dependencies remain valid through
+cursor use. A raw pointer/length bridge would establish neither the initialized
+snapshot prefix nor the snapshot owner's cleanup lifetime.
 
-**Recommendation:** Define a separate, narrow bridge from a successful
-`TokenSnapshot` to a bounded, non-owning readonly `Span<Token>`. The snapshot
-already owns contiguous records of three `int32` words per token; the current
-`Token` layout is 12 bytes (`int32 Kind` plus an 8-byte `SourceRange`), so this
-is a candidate source that need not copy or rewrite token records. The bridge
-must prove that the view's range is exactly the validated snapshot prefix and
-carry the snapshot owner's dependency through the view and any captured
-cursor. Reject use when that dependency cannot be proven to outlive the
-cursor. This is a proposal, not approval to expose a view or claim support.
-Do not add a cursor-specific adapter that silently treats `HostBuffer` or
-`ManagedTokenChain` as a span.
+**Recommendation (provisional):** Implement the compiler-owned readonly
+`Span<T>` representation, stored-dependency proof, and a narrow
+`TokenSnapshot`-to-`Span<Token>` projection as one compilation-local unit;
+do not implement the raw bridge first. Limit `T` to eligible closed `Copy`
+elements, initially `Token`, and the current Windows x64 native profile.
+Validate the snapshot's complete initialized three-word prefix, scanner kind
+and source-range records before publishing the typed view; check all count,
+stride and address calculations without overflow. Verify the resolved `Token`
+layout (field offsets 0/4/8, 12-byte stride, four-byte alignment) before
+lowering by-value element loads. Preserve the snapshot owner as an opaque
+compile-time dependency through the view, captured cursor field, cursor moves,
+control-flow joins and exceptional unwinding; moving or ending the owner while
+any dependent view/cursor is live must be rejected. Empty and exhausted views
+retain the same dependency. Failed construction publishes no descriptor and
+does not transfer or duplicate cleanup.
+
+Honor the accepted `nuint` index contract with unsigned native-width bounds
+checks on this x64 profile; do not substitute signed `int32` or claim general
+`nuint` arithmetic or non-x64 support. Keep escaping results, heap fields,
+cross-module capture persistence, writable views, general slicing, and
+arbitrary view construction rejected. This provisional choice does not approve
+general stored-view support or claim that the bridge is currently implemented.
 
 ## Verified implementation boundary
 
@@ -93,12 +109,12 @@ snapshot owner's lifetime through a stored `Span<Token>` field and
 `[Captures]` relationship. A raw pointer/length bridge would lose that
 obligation and is not safe to implement as a mechanical adapter.
 
-**Recommendation:** Keep the bridge and cursor unsupported until the bounded
-stored-dependency proof is implemented. If that proof is advanced, keep the
-bridge readonly and limited to the validated `TokenSnapshot` prefix; do not
-add mutable access, arbitrary span construction, general slicing, parser
-integration, or a new public ABI. This evidence does not approve the bridge
-or block independent roadmap work.
+**Implementation gate:** The bridge and cursor remain unsupported until the
+bounded stored-dependency proof and regression gates pass. The selected
+provisional path above is to implement that proof together with a readonly
+bridge limited to the validated `TokenSnapshot` prefix. Do not add mutable
+access, arbitrary span construction, general slicing, parser integration, or
+a new public ABI.
 
 ## Decisions and rationale
 
@@ -166,7 +182,7 @@ it to the remaining range. This keeps the unique cursor at the span
 descriptor's fixed size, preserves readonly element access and capture
 provenance, and does not add general slicing or enlarge inline values.
 
-## Scope after approval
+## Scope of the selected initial slice
 
 The first implementation target is the existing readonly `TokenCursor`:
 checked length/index reads, `Copy` token results, and dependency forwarding
