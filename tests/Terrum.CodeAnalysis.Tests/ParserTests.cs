@@ -286,6 +286,70 @@ public sealed class ParserTests
         Assert.Equal(SyntaxKind.NameExpression, Assert.IsType<SyntaxNode>(outer.Children[2]).Kind);
     }
 
+    [Fact]
+    public void ParsesNestedGenericCallsWithTheirExistingSyntaxShape()
+    {
+        const string Source = "void F() { Outer<Inner<Box<int32>>>(Leaf<T>(value)); }";
+        var tree = SyntaxTree.Parse(Source);
+        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+
+        var genericNames = tree.Root.DescendantNodes()
+            .Where(static node => node.Kind == SyntaxKind.GenericNameExpression).ToArray();
+        Assert.Equal(2, genericNames.Length);
+        Assert.Equal(2, tree.Root.DescendantNodes().Count(
+            static node => node.Kind == SyntaxKind.InvocationExpression));
+
+        var outer = Assert.Single(genericNames, static node =>
+            Assert.IsType<SyntaxTokenElement>(node.Children[0]).Token.Text == "Outer");
+        var outerArguments = Assert.IsType<SyntaxNode>(outer.Children[1]);
+        var inner = Assert.IsType<SyntaxNode>(outerArguments.Children[1]);
+        var box = Assert.IsType<SyntaxNode>(inner.Children[2]);
+        var primitive = Assert.IsType<SyntaxNode>(box.Children[2]);
+        Assert.Equal(SyntaxKind.TypeName, inner.Kind);
+        Assert.Equal(SyntaxKind.TypeName, box.Kind);
+        Assert.Equal(SyntaxKind.TypeName, primitive.Kind);
+        var outerInvocation = Assert.Single(tree.Root.DescendantNodes(),
+            node => node.Kind == SyntaxKind.InvocationExpression && ReferenceEquals(node.Children[0], outer));
+        Assert.Same(outer, outerInvocation.Children[0]);
+        Assert.Equal(Source.IndexOf("Outer", StringComparison.Ordinal), outer.Span.Start);
+        Assert.Equal(Source.IndexOf(">>>", StringComparison.Ordinal) + 3, outer.Span.End);
+        AssertLossless(tree);
+    }
+
+    [Theory]
+    [InlineData("void F() { return F /* gap */ <int32>(value); }", "<")]
+    [InlineData("void F() { return F<int32> /* gap */ (value); }", "(")]
+    public void GenericCallsRemainSelectedWhenTheirDelimitersFailAttachment(string source, string unattached)
+    {
+        var tree = SyntaxTree.Parse(source);
+        var diagnostic = Assert.Single(tree.Diagnostics);
+        Assert.Equal("TRM1006", diagnostic.Code);
+        Assert.Equal(source.LastIndexOf(unattached, StringComparison.Ordinal), diagnostic.Span.Start);
+        Assert.Equal(1, diagnostic.Span.Length);
+        Assert.Contains(tree.Root.DescendantNodes(),
+            static node => node.Kind == SyntaxKind.GenericNameExpression);
+        Assert.Contains(tree.Root.DescendantNodes(),
+            static node => node.Kind == SyntaxKind.InvocationExpression);
+        AssertLossless(tree);
+    }
+
+    [Fact]
+    public void MalformedGenericCandidateRecoversWithoutSelectingAGenericCall()
+    {
+        const string Source = "void F() { Outer<,>(value); return; }";
+        var tree = SyntaxTree.Parse(Source);
+        Assert.True(tree.HasErrors);
+        Assert.DoesNotContain(tree.Root.DescendantNodes(),
+            static node => node.Kind == SyntaxKind.GenericNameExpression);
+        Assert.Contains(tree.Root.DescendantNodes(),
+            static node => node.Kind == SyntaxKind.BinaryExpression);
+        Assert.Single(tree.Root.DescendantNodes(),
+            static node => node.Kind == SyntaxKind.ReturnStatement);
+        Assert.All(tree.Diagnostics, diagnostic =>
+            Assert.InRange(diagnostic.Span.End, 0, Source.Length));
+        AssertLossless(tree);
+    }
+
     [Theory]
     [InlineData("void F( { return ;")]
     [InlineData("void F() { var a = ; @@@ return 2 }")]
