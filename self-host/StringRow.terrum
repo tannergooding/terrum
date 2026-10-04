@@ -71,7 +71,7 @@ bool TryMeasureStringRowCore(StringLiteral literal, int32 flags, bool allowEmpty
     int32 extent = 4 + bytes + width;
     contentBytes = bytes;
     unitWidth = width;
-    rowBytes = extent + (4 - extent % 4) % 4;
+    rowBytes = extent + ((4 - (extent & 3)) & 3);
     return true;
 }
 
@@ -205,9 +205,9 @@ OwnedInt32Buffer EncodeMeasuredStringRow(StringLiteral literal, int32 flags,
         }
         int32 units = contentBytes / unitWidth;
         row.Set(0, flags);
-        row.Set(1, units % 256);
-        row.Set(2, (units / 256) % 256);
-        row.Set(3, units / 65536);
+        row.Set(1, units & 255);
+        row.Set(2, (units >> 8) & 255);
+        row.Set(3, units >> 16);
     }
     return move bytes;
 }
