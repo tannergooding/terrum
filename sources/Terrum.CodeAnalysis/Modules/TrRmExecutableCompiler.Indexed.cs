@@ -201,7 +201,10 @@ public static partial class TrRmExecutableCompiler
                     foreach (var edge in Edges(block))
                     {
                         liveOuts[b].UnionWith(liveIns[edge.Target.Id - 1]);
-                        liveOuts[b].UnionWith(edge.Arguments.Select(id => remap[id]));
+                        foreach (var argument in edge.Arguments)
+                        {
+                            liveOuts[b].Add(remap[argument]);
+                        }
                     }
                     foreach (var id in liveOuts[b])
                     {
