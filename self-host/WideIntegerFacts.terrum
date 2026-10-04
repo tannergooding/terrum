@@ -204,7 +204,8 @@ public static bool TryRemainderUInt64(uint64 left, uint64 right, init ref<uint64
     return true;
 }
 
-public static bool TryAccumulateDecimal(uint64 value, uint32 digit, uint64 maximum, out uint64 result)
+public static bool TryAccumulateDecimal(uint64 value, uint32 digit, uint64 maximum,
+    init ref<uint64> result)
 {
     uint64 widenedDigit = uint64(digit);
     if (digit > 9 || maximum < widenedDigit)
@@ -223,7 +224,8 @@ public static bool TryAccumulateDecimal(uint64 value, uint32 digit, uint64 maxim
     return true;
 }
 
-public static bool TryAccumulateBase(uint64 value, uint32 digit, uint32 radix, uint64 maximum, out uint64 result)
+public static bool TryAccumulateBase(uint64 value, uint32 digit, uint32 radix, uint64 maximum,
+    init ref<uint64> result)
 {
     if (radix < 2 || radix > 36 || digit >= radix)
     {
@@ -232,7 +234,7 @@ public static bool TryAccumulateBase(uint64 value, uint32 digit, uint32 radix, u
 
     if (radix == 10)
     {
-        if (!TryAccumulateDecimal(value, digit, maximum, out var decimalResult))
+        if (!TryAccumulateDecimal(value, digit, maximum, init var decimalResult))
         {
             return false;
         }
@@ -247,26 +249,5 @@ public static bool TryAccumulateBase(uint64 value, uint32 digit, uint32 radix, u
     }
 
     result = value * uint64(radix) + widenedDigit;
-    return true;
-}
-
-public static bool TryAccumulateDecimalInit(uint64 value, uint32 digit, uint64 maximum, init ref<uint64> result)
-{
-    if (!TryAccumulateDecimal(value, digit, maximum, out var accumulated))
-    {
-        return false;
-    }
-    result = accumulated;
-    return true;
-}
-
-public static bool TryAccumulateBaseInit(uint64 value, uint32 digit, uint32 radix, uint64 maximum,
-    init ref<uint64> result)
-{
-    if (!TryAccumulateBase(value, digit, radix, maximum, out var accumulated))
-    {
-        return false;
-    }
-    result = accumulated;
     return true;
 }

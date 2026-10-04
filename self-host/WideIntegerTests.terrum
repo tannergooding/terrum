@@ -57,31 +57,35 @@ public static bool CheckWideMultiplication()
 public static bool CheckWideDecimalAccumulation()
 {
     mut uint64 value = 1844674407370955161;
-    require TryAccumulateDecimal(value, 5, uint64.MaxValue, out value);
+    require TryAccumulateDecimal(value, 5, uint64.MaxValue, init var accumulated);
+    value = accumulated;
     require value == uint64.MaxValue;
 
-    if (TryAccumulateDecimal(value, 0, uint64.MaxValue, out value))
+    if (TryAccumulateDecimal(value, 0, uint64.MaxValue, init var overflow))
     {
         return false;
     }
 
-    if (TryAccumulateDecimal(0, 10, uint64.MaxValue, out var notADigit)
-        || TryAccumulateDecimal(0, 1, 0, out var exceedsLimit)
-        || TryAccumulateDecimal(922337203685477580, 8, uint64(int64.MaxValue), out var signedOverflow))
+    if (TryAccumulateDecimal(0, 10, uint64.MaxValue, init var notADigit)
+        || TryAccumulateDecimal(0, 1, 0, init var exceedsLimit)
+        || TryAccumulateDecimal(922337203685477580, 8,
+            uint64(int64.MaxValue), init var signedOverflow))
     {
         return false;
     }
 
-    require TryAccumulateDecimal(922337203685477580, 7, uint64(int64.MaxValue), out var maximumSigned);
-    require TryAccumulateDecimal(0, 0, 0, out value);
-    require TryAccumulateDecimalInit(1844674407370955161, 5, uint64.MaxValue, init var maximumInit);
-    if (TryAccumulateDecimalInit(uint64.MaxValue, 0, uint64.MaxValue, init var overflowInit)
-        || TryAccumulateDecimalInit(0, 10, uint64.MaxValue, init var invalidInit))
+    require TryAccumulateDecimal(922337203685477580, 7,
+        uint64(int64.MaxValue), init var maximumSigned);
+    require TryAccumulateDecimal(0, 0, 0, init var zero);
+    value = zero;
+    if (TryAccumulateDecimal(0, 10, uint64.MaxValue, init var reusable))
     {
         return false;
     }
+    require TryAccumulateDecimal(1844674407370955161, 5, uint64.MaxValue, init reusable);
 
-    return maximumSigned == uint64(int64.MaxValue) && maximumInit == uint64.MaxValue && value == 0;
+    return maximumSigned == uint64(int64.MaxValue)
+        && reusable == uint64.MaxValue && value == 0;
 }
 
 public static bool CheckWideBaseAccumulation()
@@ -89,27 +93,36 @@ public static bool CheckWideBaseAccumulation()
     mut uint64 binary = 0;
     for (mut int32 bit = 0; bit < 64; bit = bit + 1)
     {
-        require TryAccumulateBase(binary, 1, 2, uint64.MaxValue, out binary);
+        require TryAccumulateBase(binary, 1, 2, uint64.MaxValue, init var accumulated);
+        binary = accumulated;
     }
     if (binary != uint64.MaxValue
-        || TryAccumulateBase(binary, 0, 2, uint64.MaxValue, out var overflow)
-        || TryAccumulateBase(0, 36, 36, uint64.MaxValue, out var invalidDigit)
-        || TryAccumulateBase(0, 1, 1, uint64.MaxValue, out var lowBase)
-        || TryAccumulateBase(0, 1, 37, uint64.MaxValue, out var highBase)
-        || TryAccumulateBase(0, 1, 16, 0, out var overLimit))
+        || TryAccumulateBase(binary, 0, 2, uint64.MaxValue, init var overflow)
+        || TryAccumulateBase(0, 36, 36, uint64.MaxValue, init var invalidDigit)
+        || TryAccumulateBase(0, 1, 1, uint64.MaxValue, init var lowBase)
+        || TryAccumulateBase(0, 1, 37, uint64.MaxValue, init var highBase)
+        || TryAccumulateBase(0, 1, 16, 0, init var overLimit))
     {
         return false;
     }
 
-    require TryAccumulateBase(0, 35, 36, 35, out var lastDigit);
-    require TryAccumulateBase(0, 15, 16, 15, out var hexDigit);
-    require TryAccumulateBase(1844674407370955161, 5, 10, uint64.MaxValue, out var decimalValue);
-    require TryAccumulateBase(0, 0, 2, 0, out var zero);
+    require TryAccumulateBase(0, 35, 36, 35, init var lastDigit);
+    require TryAccumulateBase(0, 15, 16, 15, init var hexDigit);
+    require TryAccumulateBase(1844674407370955161, 5, 10,
+        uint64.MaxValue, init var decimalValue);
+    require TryAccumulateBase(0, 0, 2, 0, init var zero);
     if (lastDigit != 35 || hexDigit != 15
-        || decimalValue != uint64.MaxValue || zero != 0
-        || TryAccumulateBaseInit(0, 1, 1, uint64.MaxValue, init var lowBaseInit)
-        || TryAccumulateBaseInit(0, 1, 37, uint64.MaxValue, init var highBaseInit)
-        || TryAccumulateBaseInit(0, 1, 16, 0, init var overLimitInit))
+        || decimalValue != uint64.MaxValue || zero != 0)
+    {
+        return false;
+    }
+
+    if (TryAccumulateBase(0, 1, 1, uint64.MaxValue, init var reusable))
+    {
+        return false;
+    }
+    require TryAccumulateBase(0, 15, 16, 15, init reusable);
+    if (reusable != 15)
     {
         return false;
     }
@@ -119,29 +132,24 @@ public static bool CheckWideBaseAccumulation()
         uint64 divisor = uint64(radix);
         uint64 prefix = uint64.MaxValue / divisor;
         uint32 finalDigit = uint32(uint64.MaxValue % divisor);
-        require TryAccumulateBase(prefix, finalDigit, radix, uint64.MaxValue, out var maximum);
-        require TryAccumulateBaseInit(prefix, finalDigit, radix, uint64.MaxValue, init var maximumInit);
+        require TryAccumulateBase(prefix, finalDigit, radix,
+            uint64.MaxValue, init var maximum);
         if (maximum != uint64.MaxValue
-            || maximumInit != maximum
-            || TryAccumulateBase(prefix + 1, finalDigit, radix, uint64.MaxValue, out var tooLarge)
-            || TryAccumulateBase(0, radix, radix, uint64.MaxValue, out var tooWide)
-            || TryAccumulateBaseInit(prefix + 1, finalDigit, radix, uint64.MaxValue, init var largeInit)
-            || TryAccumulateBaseInit(0, radix, radix, uint64.MaxValue, init var wideInit))
+            || TryAccumulateBase(prefix + 1, finalDigit, radix,
+                uint64.MaxValue, init var tooLarge)
+            || TryAccumulateBase(0, radix, radix, uint64.MaxValue,
+                init var tooWide))
         {
             return false;
         }
 
         uint64 signedPrefix = uint64(int64.MaxValue) / divisor;
         uint32 signedDigit = uint32(uint64(int64.MaxValue) % divisor);
-        require TryAccumulateBase(signedPrefix, signedDigit, radix, uint64(int64.MaxValue), out var signedMaximum);
-        require TryAccumulateBaseInit(signedPrefix, signedDigit, radix,
-            uint64(int64.MaxValue), init var signedMaximumInit);
+        require TryAccumulateBase(signedPrefix, signedDigit, radix,
+            uint64(int64.MaxValue), init var signedMaximum);
         if (signedMaximum != uint64(int64.MaxValue)
-            || signedMaximumInit != signedMaximum
             || TryAccumulateBase(signedPrefix + 1, signedDigit, radix,
-                uint64(int64.MaxValue), out var signedOverflow)
-            || TryAccumulateBaseInit(signedPrefix + 1, signedDigit, radix,
-                uint64(int64.MaxValue), init var signedOverflowInit))
+                uint64(int64.MaxValue), init var signedOverflow))
         {
             return false;
         }
