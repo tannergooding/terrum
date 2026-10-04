@@ -84,12 +84,11 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native set import mapping differs from its semantic declarations.");
         }
+        var profile = ModuleCompiler.GetNativeProfileVersion(set.Contract, true);
         NativeModuleImageValidator.Validate(set.Image, true, Imports(set), [], set.Policy,
-            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(
-                ModuleCompiler.GetNativeProfileVersion(set.Contract, true)),
-            allowManagedRuntimeData: AllowsManagedRuntimeData(
-                ModuleCompiler.GetNativeProfileVersion(set.Contract, true)));
-        return new NativeModuleSetInfo(ModuleCompiler.GetNativeProfileVersion(set.Contract, true), set.Policy,
+            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
+            allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
+        return new NativeModuleSetInfo(profile, set.Policy,
             Convert.ToHexString(SHA256.HashData(set.Image)), [.. set.Dependencies.Select(static item => item.Identity)]);
     }
 
@@ -205,10 +204,10 @@ public static partial class NativeModuleCompiler
             var functions = ModuleCompiler.CreateReference(providers[i].Contract).Functions;
             var exports = functions.Select(static item => item.Name).ToArray();
             providerExports[i] = exports.ToHashSet(StringComparer.Ordinal);
-            var profile = ModuleCompiler.GetNativeProfileVersion(providers[i].Contract, false);
+            var providerProfile = ModuleCompiler.GetNativeProfileVersion(providers[i].Contract, false);
             NativeModuleImageValidator.Validate(providers[i].Image, false, DllName(providers[i].Identity),
-                exports, providers[i].Policy, allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
-                allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
+                exports, providers[i].Policy, allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(providerProfile),
+                allowManagedRuntimeData: AllowsManagedRuntimeData(providerProfile));
         }
         ModuleCompiler.ValidateConsumerSet(set.Contract, [.. providers.Select(static item => item.Contract)]);
         var actual = ModuleCompiler.GetConsumerSetDeclarations(set.Contract).ToHashSet(StringComparer.Ordinal);
@@ -234,11 +233,10 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native set machine imports omit a retained semantic call.");
         }
+        var profile = ModuleCompiler.GetNativeProfileVersion(set.Contract, true);
         NativeModuleImageValidator.Validate(set.Image, true, Imports(set), [], set.Policy,
-            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(
-                ModuleCompiler.GetNativeProfileVersion(set.Contract, true)),
-            allowManagedRuntimeData: AllowsManagedRuntimeData(
-                ModuleCompiler.GetNativeProfileVersion(set.Contract, true)));
+            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
+            allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
     }
 
     private static Dictionary<string, IReadOnlyList<string>> Imports(SetPackage set) =>

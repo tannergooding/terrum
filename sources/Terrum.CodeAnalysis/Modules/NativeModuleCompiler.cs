@@ -233,11 +233,10 @@ public static partial class NativeModuleCompiler
         }
         var exports = ModuleCompiler.CreateReference(producer.Contract).Functions.Select(static function => function.Name)
             .ToArray();
+        var profile = ModuleCompiler.GetNativeProfileVersion(producer.Contract, false);
         NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity), exports,
-            producer.Policy, allowOwnedBufferRuntime:
-                AllowsOwnedBufferRuntime(ModuleCompiler.GetNativeProfileVersion(producer.Contract, false)),
-            allowManagedRuntimeData:
-                AllowsManagedRuntimeData(ModuleCompiler.GetNativeProfileVersion(producer.Contract, false)));
+            producer.Policy, allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
+            allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
         ValidateConsumerImage(consumer);
     }
 
@@ -249,11 +248,10 @@ public static partial class NativeModuleCompiler
         {
             groups.Add(DllName(consumer.Identity), imports);
         }
+        var profile = ModuleCompiler.GetNativeProfileVersion(consumer.Contract, true);
         NativeModuleImageValidator.Validate(consumer.Image, isConsumer: true, groups, [], consumer.Policy,
-            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(
-                ModuleCompiler.GetNativeProfileVersion(consumer.Contract, true)),
-            allowManagedRuntimeData: AllowsManagedRuntimeData(
-                ModuleCompiler.GetNativeProfileVersion(consumer.Contract, true)));
+            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
+            allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
     }
 
     private static void ValidateProducer(Package producer)
@@ -267,12 +265,11 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native package and semantic contract policies differ.");
         }
+        var profile = ModuleCompiler.GetNativeProfileVersion(producer.Contract, false);
         NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity),
             [.. reference.Functions.Select(static function => function.Name)], producer.Policy,
-            allowOwnedBufferRuntime:
-                AllowsOwnedBufferRuntime(ModuleCompiler.GetNativeProfileVersion(producer.Contract, false)),
-            allowManagedRuntimeData:
-                AllowsManagedRuntimeData(ModuleCompiler.GetNativeProfileVersion(producer.Contract, false)));
+            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
+            allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
     }
 
     private static byte[] Write(bool isConsumer, string identity, NativeRuntimePolicy policy, byte[] contract,

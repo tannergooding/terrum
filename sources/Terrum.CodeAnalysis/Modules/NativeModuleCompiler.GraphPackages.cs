@@ -229,13 +229,12 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Graph dependency supplies neither declarations nor types.");
         }
+        var profile = consumer
+            ? ModuleCompiler.GetNativeProfileVersion(contract, true)
+            : ModuleCompiler.GetGraphProfile(contract);
         NativeModuleImageValidator.Validate(image, consumer, GraphImports(package), exports, policy,
-            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(consumer
-                ? ModuleCompiler.GetNativeProfileVersion(contract, true)
-                : ModuleCompiler.GetGraphProfile(contract)),
-            allowManagedRuntimeData: AllowsManagedRuntimeData(consumer
-                ? ModuleCompiler.GetNativeProfileVersion(contract, true)
-                : ModuleCompiler.GetGraphProfile(contract)));
+            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
+            allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
         return package;
     }
 
