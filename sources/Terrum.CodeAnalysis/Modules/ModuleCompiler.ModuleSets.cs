@@ -136,12 +136,13 @@ public static partial class ModuleCompiler
             throw new ModuleContractException("Consumer and producer checked-failure policies differ.");
         }
         var available = reference.Functions.ToDictionary(static function => function.Name, StringComparer.Ordinal);
+        var hasPrivateManagedState = HasPrivateManagedState(program);
         var declarations = ImmutableArray.CreateBuilder<ModuleFunction>();
         foreach (var function in program.Functions)
         {
             if (function.IsExternal)
             {
-                if (HasPrivateManagedState(program) && !ManagedExportShape.Supported(function, program.Structures))
+                if (hasPrivateManagedState && !ManagedExportShape.Supported(function, program.Structures))
                 {
                     throw new ModuleContractException($"Managed graph import '{function.Name}' crosses a non-Copy boundary.");
                 }
