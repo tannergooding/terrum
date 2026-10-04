@@ -3,35 +3,67 @@ namespace Terrum.CodeAnalysis;
 bool TryMeasureStringRow(StringLiteral literal, int32 flags,
     init ref<int32> contentBytes, init ref<int32> unitWidth, init ref<int32> rowBytes)
 {
+    return TryMeasureStringRowCore(literal, flags, true, false, init contentBytes,
+        init unitWidth, init rowBytes);
+}
+
+bool TryMeasureStringTextRow(StringLiteral literal, int32 flags, bool allowEmpty,
+    init ref<int32> contentBytes, init ref<int32> unitWidth, init ref<int32> rowBytes)
+{
+    return TryMeasureStringRowCore(literal, flags, allowEmpty, true, init contentBytes,
+        init unitWidth, init rowBytes);
+}
+
+bool TryMeasureStringRowCore(StringLiteral literal, int32 flags, bool allowEmpty,
+    bool rejectEmbeddedZero, init ref<int32> contentBytes, init ref<int32> unitWidth,
+    init ref<int32> rowBytes)
+{
     mut int32 bytes = 0;
     mut int32 width = 1;
-    if (flags == 0)
-    {
-        if (!literal.TryGetAsciiLength(init var length)) { return false; }
-        bytes = length;
-    }
-    else if (flags == 1)
-    {
-        if (!literal.TryGetUtf8Length(init var length)) { return false; }
-        bytes = length;
-    }
-    else if (flags == 2)
-    {
-        if (!literal.TryGetUtf16ByteLength(init var length)) { return false; }
-        bytes = length;
-        width = 2;
-    }
-    else if (flags == 3)
-    {
-        if (!literal.TryGetUtf32ByteLength(init var length)) { return false; }
-        bytes = length;
-        width = 4;
-    }
-    else
+    if (flags == 2) { width = 2; }
+    else if (flags == 3) { width = 4; }
+    else if (flags != 0 && flags != 1)
     {
         return false;
     }
 
+    if (!allowEmpty && literal.ScalarCount == 0)
+    {
+        return false;
+    }
+    mut StringLiteralCursor cursor = StringLiteralCursor.Create(literal);
+    while (cursor.TryRead(init var scalar, init var next))
+    {
+        if (rejectEmbeddedZero && scalar == 0)
+        {
+            return false;
+        }
+        mut int32 scalarBytes = 1;
+        if (flags == 0)
+        {
+            if (scalar >= 128) { return false; }
+        }
+        else if (flags == 1)
+        {
+            if (scalar >= 65536) { scalarBytes = 4; }
+            else if (scalar >= 2048) { scalarBytes = 3; }
+            else if (scalar >= 128) { scalarBytes = 2; }
+        }
+        else if (flags == 2)
+        {
+            scalarBytes = scalar >= 65536 ? 4 : 2;
+        }
+        else
+        {
+            scalarBytes = 4;
+        }
+        if (bytes > int32.MaxValue - scalarBytes)
+        {
+            return false;
+        }
+        bytes = bytes + scalarBytes;
+        cursor = next;
+    }
     if (bytes / width > 16777215)
     {
         return false;
@@ -74,16 +106,11 @@ bool IsValidStringText(StringLiteral literal, bool allowEmpty)
     return true;
 }
 
-bool IsValidStringName(StringLiteral literal)
-{
-    return IsValidStringText(literal, false);
-}
-
 public static bool TryGetStringNameRowByteLength(StringLiteral literal, int32 flags,
     init ref<int32> byteLength)
 {
-    if (!TryMeasureStringRow(literal, flags, init var contentBytes, init var unitWidth,
-            init var rowBytes) || !IsValidStringName(literal))
+    if (!TryMeasureStringTextRow(literal, flags, false, init var contentBytes,
+            init var unitWidth, init var rowBytes))
     {
         return false;
     }
@@ -94,8 +121,8 @@ public static bool TryGetStringNameRowByteLength(StringLiteral literal, int32 fl
 public static bool TryGetStringNamespaceRowByteLength(StringLiteral literal, int32 flags,
     init ref<int32> byteLength)
 {
-    if (!TryMeasureStringRow(literal, flags, init var contentBytes, init var unitWidth,
-            init var rowBytes) || !IsValidStringText(literal, true))
+    if (!TryMeasureStringTextRow(literal, flags, true, init var contentBytes,
+            init var unitWidth, init var rowBytes))
     {
         return false;
     }
@@ -145,6 +172,13 @@ public static OwnedInt32Buffer EncodeStringRow(StringLiteral literal, int32 flag
 {
     require TryMeasureStringRow(literal, flags, init var contentBytes, init var unitWidth,
         init var rowBytes);
+    return EncodeMeasuredStringRow(literal, flags, contentBytes, unitWidth, rowBytes,
+        move workspace);
+}
+
+OwnedInt32Buffer EncodeMeasuredStringRow(StringLiteral literal, int32 flags,
+    int32 contentBytes, int32 unitWidth, int32 rowBytes, OwnedInt32Buffer workspace)
+{
     require workspace.Capacity >= rowBytes;
     mut OwnedInt32Buffer bytes = move workspace;
     if (flags == 0) { bytes = literal.EncodeAscii(move bytes); }
@@ -177,13 +211,17 @@ public static OwnedInt32Buffer EncodeStringRow(StringLiteral literal, int32 flag
 public static OwnedInt32Buffer EncodeStringNameRow(StringLiteral literal, int32 flags,
     OwnedInt32Buffer workspace)
 {
-    require TryGetStringNameRowByteLength(literal, flags, init var byteLength);
-    return EncodeStringRow(literal, flags, move workspace);
+    require TryMeasureStringTextRow(literal, flags, false, init var contentBytes,
+        init var unitWidth, init var rowBytes);
+    return EncodeMeasuredStringRow(literal, flags, contentBytes, unitWidth, rowBytes,
+        move workspace);
 }
 
 public static OwnedInt32Buffer EncodeStringNamespaceRow(StringLiteral literal, int32 flags,
     OwnedInt32Buffer workspace)
 {
-    require TryGetStringNamespaceRowByteLength(literal, flags, init var byteLength);
-    return EncodeStringRow(literal, flags, move workspace);
+    require TryMeasureStringTextRow(literal, flags, true, init var contentBytes,
+        init var unitWidth, init var rowBytes);
+    return EncodeMeasuredStringRow(literal, flags, contentBytes, unitWidth, rowBytes,
+        move workspace);
 }
