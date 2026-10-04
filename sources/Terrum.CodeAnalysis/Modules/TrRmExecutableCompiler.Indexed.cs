@@ -179,7 +179,8 @@ public static partial class TrRmExecutableCompiler
                 }
             }
 
-            var lastUses = new SortedDictionary<int, int>?[ordered.Count];
+            // Repeated use updates are cheaper unsorted; value order is restored only when encoded.
+            var lastUses = new Dictionary<int, int>?[ordered.Count];
             var liveIns = new HashSet<int>?[ordered.Count];
             var currentBlockIndex = 0;
             var operationOrdinal = 0;
@@ -190,7 +191,7 @@ public static partial class TrRmExecutableCompiler
                     return;
                 }
                 var mapped = remap[id];
-                (lastUses[currentBlockIndex] ??= new SortedDictionary<int, int>())[mapped] = ordinal;
+                (lastUses[currentBlockIndex] ??= new Dictionary<int, int>())[mapped] = ordinal;
                 if (owner[mapped] != ordered[currentBlockIndex].Id)
                 {
                     (liveIns[currentBlockIndex] ??= new HashSet<int>()).Add(mapped);
@@ -378,7 +379,7 @@ public static partial class TrRmExecutableCompiler
                 var terminators = new List<int>(ordered.Count);
                 var data = new List<byte>(checked(ordered.Count * (width + 3)));
                 var overflowedDefinition = false;
-                int[]? sortedLiveValues = null;
+                int[]? sortedValues = null;
                 for (var index = 0; index < width; index++)
                 {
                     offsets.Add(0);
@@ -410,32 +411,40 @@ public static partial class TrRmExecutableCompiler
                     if (blockLiveIns is { Count: > 0 } liveInSet)
                     {
                         var liveInCount = liveInSet.Count;
-                        sortedLiveValues ??= new int[sourceTypes.Count];
-                        liveInSet.CopyTo(sortedLiveValues);
+                        sortedValues ??= new int[sourceTypes.Count];
+                        liveInSet.CopyTo(sortedValues);
                         if (liveInCount > 1)
                         {
-                            Array.Sort(sortedLiveValues, 0, liveInCount);
+                            Array.Sort(sortedValues, 0, liveInCount);
                         }
-                        WriteList(data, sortedLiveValues.AsSpan(0, liveInCount), width);
+                        WriteList(data, sortedValues.AsSpan(0, liveInCount), width);
                     }
                     if (blockLiveOuts is { Count: > 0 } liveOutSet)
                     {
                         var liveOutCount = liveOutSet.Count;
-                        sortedLiveValues ??= new int[sourceTypes.Count];
-                        liveOutSet.CopyTo(sortedLiveValues);
+                        sortedValues ??= new int[sourceTypes.Count];
+                        liveOutSet.CopyTo(sortedValues);
                         if (liveOutCount > 1)
                         {
-                            Array.Sort(sortedLiveValues, 0, liveOutCount);
+                            Array.Sort(sortedValues, 0, liveOutCount);
                         }
-                        WriteList(data, sortedLiveValues.AsSpan(0, liveOutCount), width);
+                        WriteList(data, sortedValues.AsSpan(0, liveOutCount), width);
                     }
                     if (blockLastUses is { Count: > 0 } blockLastUseSet)
                     {
-                        Write(data, (ulong)blockLastUseSet.Count, width);
-                        foreach (var (value, ordinal) in blockLastUseSet)
+                        var lastUseCount = blockLastUseSet.Count;
+                        sortedValues ??= new int[sourceTypes.Count];
+                        blockLastUseSet.Keys.CopyTo(sortedValues, 0);
+                        if (lastUseCount > 1)
                         {
+                            Array.Sort(sortedValues, 0, lastUseCount);
+                        }
+                        Write(data, (ulong)lastUseCount, width);
+                        for (var index = 0; index < lastUseCount; index++)
+                        {
+                            var value = sortedValues[index];
                             Write(data, (ulong)value, width);
-                            Write(data, (ulong)ordinal, width);
+                            Write(data, (ulong)blockLastUseSet[value], width);
                         }
                     }
                     Write(data, (ulong)block.Operations.Count, width);
