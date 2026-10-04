@@ -455,6 +455,8 @@ public sealed class StringLiteralComponentTests
     [InlineData("\"A\"", "\"a\"", false)]
     [InlineData("\"A\"", "\"AB\"", false)]
     [InlineData("\"AB\"", "\"A\"", false)]
+    [InlineData("\"A\"", "\"B\\0\"", null)]
+    [InlineData("\"A\\0\"", "\"B\"", null)]
     [InlineData("\"A\u0301\"", "\"\u00C1\"", false)]
     [InlineData("\"\"", "\"A\"", null)]
     [InlineData("\"A\"", "\"\\0\"", null)]
@@ -494,6 +496,7 @@ public sealed class StringLiteralComponentTests
     [InlineData(NativeRuntimePolicy.FailFast, "\"\u00E9\"", "\"\\u00E9\"", true)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "\"\uD83D\uDE00\"", "\"\\U0001F600\"", true)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "\"A\u0301\"", "\"\u00C1\"", false)]
+    [InlineData(NativeRuntimePolicy.FailFast, "\"A\"", "\"B\\0\"", null)]
     [InlineData(NativeRuntimePolicy.FailFast, "\"\"", "\"\\0\"", null)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "\"A\"", "\"A\\u0000\"", null)]
     public async Task MetadataNamespaceEqualityAllowsEmptyWithoutNormalizingAsync(

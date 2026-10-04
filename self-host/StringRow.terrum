@@ -87,25 +87,6 @@ public static bool TryGetStringRowByteLength(StringLiteral literal, int32 flags,
     return true;
 }
 
-bool IsValidStringText(StringLiteral literal, bool allowEmpty)
-{
-    if (literal.ScalarCount == 0 && !allowEmpty)
-    {
-        return false;
-    }
-
-    mut StringLiteralCursor cursor = StringLiteralCursor.Create(literal);
-    while (cursor.TryRead(init var scalar, init var next))
-    {
-        if (scalar == 0)
-        {
-            return false;
-        }
-        cursor = next;
-    }
-    return true;
-}
-
 public static bool TryGetStringNameRowByteLength(StringLiteral literal, int32 flags,
     init ref<int32> byteLength)
 {
@@ -145,25 +126,48 @@ public static bool TryCompareStringNamespaces(StringLiteral left, StringLiteral 
 bool TryCompareStringText(StringLiteral left, StringLiteral right, bool allowEmpty,
     init ref<bool> equal)
 {
-    if (!IsValidStringText(left, allowEmpty) || !IsValidStringText(right, allowEmpty))
+    if (!allowEmpty && (left.ScalarCount == 0 || right.ScalarCount == 0))
     {
         return false;
     }
 
     mut StringLiteralCursor leftCursor = StringLiteralCursor.Create(left);
     mut StringLiteralCursor rightCursor = StringLiteralCursor.Create(right);
+    mut bool same = true;
     while (leftCursor.TryRead(init var leftScalar, init var leftNext))
     {
-        if (!rightCursor.TryRead(init var rightScalar, init var rightNext)
-            || leftScalar != rightScalar)
+        if (leftScalar == 0)
         {
-            equal = false;
-            return true;
+            return false;
+        }
+        if (rightCursor.TryRead(init var rightScalar, init var rightNext))
+        {
+            if (rightScalar == 0)
+            {
+                return false;
+            }
+            if (leftScalar != rightScalar)
+            {
+                same = false;
+            }
+            rightCursor = rightNext;
+        }
+        else
+        {
+            same = false;
         }
         leftCursor = leftNext;
-        rightCursor = rightNext;
     }
-    equal = !rightCursor.TryRead(init var remaining, init var following);
+    while (rightCursor.TryRead(init var remaining, init var following))
+    {
+        if (remaining == 0)
+        {
+            return false;
+        }
+        same = false;
+        rightCursor = following;
+    }
+    equal = same;
     return true;
 }
 
