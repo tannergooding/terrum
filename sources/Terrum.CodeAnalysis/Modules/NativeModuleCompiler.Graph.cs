@@ -310,16 +310,24 @@ public static partial class NativeModuleCompiler
             }
         }
         var result = ModuleCompiler.MergeGraphReferences(references, origins);
-        foreach (var structure in result.Structures.Where(static item => item.CleanupMethod is not null))
+        if (result.Structures.Any(static item => item.CleanupMethod is not null))
         {
-            if (!cleanupOwners.TryGetValue(structure.Name, out var owner) || owner is null
-                || !providers.Any(provider => provider.Identity == owner
-                    && Array.BinarySearch(provider.Exports, structure.CleanupMethod,
-                        StringComparer.Ordinal) >= 0)
-                || !result.Functions.Any(function => function.Name == structure.CleanupMethod
-                    && function.IsCleanup && function.DeclaringStruct == structure.Name))
+            var cleanupExports = providers.ToDictionary(static provider => provider.Identity!,
+                static provider => provider.Exports.ToHashSet(StringComparer.Ordinal), StringComparer.Ordinal);
+            var cleanupFunctions = result.Functions.Where(static function => function.IsCleanup)
+                .Select(static function => (function.DeclaringStruct, function.Name)).ToHashSet();
+            foreach (var structure in result.Structures)
             {
-                throw new ModuleContractException($"Graph unique type '{structure.Name}' requires its origin cleanup provider.");
+                if (structure.CleanupMethod is not string cleanup)
+                {
+                    continue;
+                }
+                if (!cleanupOwners.TryGetValue(structure.Name, out var owner) || owner is null
+                    || !cleanupExports.TryGetValue(owner, out var exports) || !exports.Contains(cleanup)
+                    || !cleanupFunctions.Contains((structure.Name, cleanup)))
+                {
+                    throw new ModuleContractException($"Graph unique type '{structure.Name}' requires its origin cleanup provider.");
+                }
             }
         }
         return result;
