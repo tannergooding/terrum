@@ -359,7 +359,7 @@ bool IsPunctuationGlyph(int32 unit)
     return ((0x7A007631 >> (unit - 33)) & 1) != 0;
 }
 
-bool TryReadPunctuationRun(int32 start, out int32 end, out bool typeBoundary)
+bool TryReadPunctuationRun(int32 start, init ref<int32> end, init ref<bool> typeBoundary)
 {
     mut int32 at = start;
     mut bool deferred = true;
@@ -562,7 +562,7 @@ int32 SkipDigitSeparators(int32 at, int32 radix)
     return at;
 }
 
-bool TryAccumulateMagnitude(uint64 value, uint64 digit, int32 radix, out uint64 result)
+bool TryAccumulateMagnitude(uint64 value, uint64 digit, int32 radix, init ref<uint64> result)
 {
     if (radix < 2 || radix > 36)
     {
@@ -629,7 +629,7 @@ int32 ScanBasedNumber(int32 initial, int32 tokenIndex, int32 radix)
             {
                 digit = uint64(HexValue(PeekUnit(at)));
             }
-            if (!TryAccumulateMagnitude(magnitude, digit, radix, out var accumulated))
+            if (!TryAccumulateMagnitude(magnitude, digit, radix, init var accumulated))
             {
                 overflow = true;
             }
@@ -772,7 +772,7 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
         if (!overflow)
         {
             uint64 digit = uint64(PeekUnit(at) - 48);
-            if (!TryAccumulateMagnitude(magnitude, digit, 10, out var accumulated))
+            if (!TryAccumulateMagnitude(magnitude, digit, 10, init var accumulated))
             {
                 overflow = true;
             }
@@ -1206,7 +1206,7 @@ int32 Scan()
                 int32 matched = OperatorMatch(start);
                 if (start >= deferredEnd && IsPunctuationGlyph(scalar))
                 {
-                    require TryReadPunctuationRun(start, out var end, out var typeBoundary);
+                    require TryReadPunctuationRun(start, init var end, init var typeBoundary);
                     int32 length = end - start;
                     if (matched != -1 && matched % 8 == length)
                     {
