@@ -1775,23 +1775,30 @@ internal sealed partial class Binder
         }
         else
         {
-            var endValue = BindRangeConstant(upper, "upper", ref valid);
-            if (fromEndLower)
+            if (!fromEndLower && startValue == 0 && !TryGetConstInt32Value(upper, out _))
             {
-                var lengthBase = (long)endValue + lowerValue;
-                length = lowerValue < 0 || lowerValue > NativeBufferIntrinsics.MaximumCapacity
-                    || endValue < 0 || endValue > NativeBufferIntrinsics.MaximumCapacity
-                    ? new BoundConstant(-1, PrimitiveType.Int32, upper.Span)
-                    : new BoundBinary(TokenKind.Minus,
-                        new BoundConstant(lengthBase, PrimitiveType.Int32, upper.Span),
-                        BindBufferCount(owner, upper.Span), PrimitiveType.Int32, upper.Span);
+                length = BindExpression(upper, PrimitiveType.Int32);
             }
             else
             {
-                var lengthValue = (long)endValue - startValue;
-                length = lengthValue is < int.MinValue or > int.MaxValue
-                    ? new BoundConstant(-1, PrimitiveType.Int32, upper.Span)
-                    : new BoundConstant(lengthValue, PrimitiveType.Int32, upper.Span);
+                var endValue = BindRangeConstant(upper, "upper", ref valid);
+                if (fromEndLower)
+                {
+                    var lengthBase = (long)endValue + lowerValue;
+                    length = lowerValue < 0 || lowerValue > NativeBufferIntrinsics.MaximumCapacity
+                        || endValue < 0 || endValue > NativeBufferIntrinsics.MaximumCapacity
+                        ? new BoundConstant(-1, PrimitiveType.Int32, upper.Span)
+                        : new BoundBinary(TokenKind.Minus,
+                            new BoundConstant(lengthBase, PrimitiveType.Int32, upper.Span),
+                            BindBufferCount(owner, upper.Span), PrimitiveType.Int32, upper.Span);
+                }
+                else
+                {
+                    var lengthValue = (long)endValue - startValue;
+                    length = lengthValue is < int.MinValue or > int.MaxValue
+                        ? new BoundConstant(-1, PrimitiveType.Int32, upper.Span)
+                        : new BoundConstant(lengthValue, PrimitiveType.Int32, upper.Span);
+                }
             }
         }
 

@@ -1443,10 +1443,12 @@ as a temporary expression. The hosted parser and binder also permit a half-open
 range to initialize a readonly lexical view, for example
 `ReadonlyInt32BufferView tail = buffer[1..^0];` or `var all = buffer[..];`.
 This first range binding is limited to `OwnedInt32Buffer` receivers, readonly
-views, and compile-time `int32` bounds; omitted bounds and constant
-end-relative lower and upper bounds are supported, while dynamic bounds are
-not. The existing checked view-scope operation
-validates the resulting range against the initialized prefix without clamping.
+views, and compile-time `int32` lower bounds. Omitted bounds and constant
+end-relative lower and upper bounds are supported; a dynamic absolute upper
+bound is supported when the lower bound is omitted or zero. Dynamic lower
+bounds and dynamic end-relative bounds remain unsupported. The existing
+checked view-scope operation validates the resulting range against the
+initialized prefix without clamping.
 For the existing compiler-supplied `Host` buffers, indexed reads and writes
 also accept constant and dynamic `^offset` bounds, lowered to the ordinary
 checked buffer index path; dynamic offsets evaluate once, and `^0` and other

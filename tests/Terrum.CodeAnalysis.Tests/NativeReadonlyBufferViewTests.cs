@@ -182,6 +182,46 @@ public sealed class NativeReadonlyBufferViewTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task RangePrefixEvaluatesDynamicUpperBoundOnceAsync(BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            int32 End() {
+                Host.Trace[0] = Host.Trace[0] + 1;
+                return 1;
+            }
+            """ + Buffer + """
+            ReadonlyInt32BufferView prefix = buffer[..End()];
+            return prefix.Length == 1 && prefix.Read(0) == 40 && Host.Trace[0] == 1 ? 42 : 0;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source),
+            [new HostBuffer("Trace", PrimitiveType.Int32, [0], true)], policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(42, await RunAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(4)]
+    public async Task RangePrefixRejectsDynamicUpperOutsideInitializedPrefixAsync(int end)
+    {
+        var source = $$"""
+            int32 End() { return {{end}}; }
+            """ + Buffer + """
+            ReadonlyInt32BufferView prefix = buffer[..End()];
+            return prefix.Length;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(unchecked((int)0xE0540003),
+            await RunAsync(Assert.IsType<BoundProgram>(compilation.Program), BoundRuntimePolicy.FailFast)
+                .ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SliceBoundsEvaluateOnceInSourceOrderAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -343,7 +383,7 @@ public sealed class NativeReadonlyBufferViewTests
     }
 
     [Fact]
-    public void RangeViewsRequireCompileTimeBoundsAndReadonlyLocals()
+    public void RangeViewsRejectDynamicLowerBoundsAndMutableLocals()
     {
         var dynamicBound = Compilation.Create(SyntaxTree.Parse("""
             int32 Start() { return 0; }
@@ -356,6 +396,32 @@ public sealed class NativeReadonlyBufferViewTests
             """));
         Assert.Contains(dynamicBound.Diagnostics, static diagnostic => diagnostic.Code == "TRM3001");
         Assert.Null(dynamicBound.Program);
+
+        var dynamicUpperAfterNonzeroStart = Compilation.Create(SyntaxTree.Parse("""
+            int32 End() { return 1; }
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                OwnedInt32Buffer owner = move raw;
+                ReadonlyInt32BufferView view = owner[1..End()];
+                return view.Length;
+            }
+            """));
+        Assert.Contains(dynamicUpperAfterNonzeroStart.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3001");
+        Assert.Null(dynamicUpperAfterNonzeroStart.Program);
+
+        var dynamicEndRelativeUpper = Compilation.Create(SyntaxTree.Parse("""
+            int32 End() { return 1; }
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                OwnedInt32Buffer owner = move raw;
+                ReadonlyInt32BufferView view = owner[..^End()];
+                return view.Length;
+            }
+            """));
+        Assert.Contains(dynamicEndRelativeUpper.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3001");
+        Assert.Null(dynamicEndRelativeUpper.Program);
 
         var mutableView = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
