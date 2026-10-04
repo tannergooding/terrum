@@ -780,6 +780,37 @@ public sealed partial class CliTests
     }
 
     [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task FrontendExecutesRepresentableCharacterLiteralsAsync(string policy)
+    {
+        const string source = """
+            int32 Main() {
+                char16 direct = 'é';
+                char16 shortEscape = '\u00E9';
+                char16 longEscape = '\U000000E9';
+                return (direct == shortEscape && shortEscape == longEscape
+                    && int32(direct) == 233) ? 42 : 1;
+            }
+            """;
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var input = Encoding.UTF8.GetBytes(source);
+
+        var (frontendExit, frontendOutput, frontendError) = await RunAsync(input,
+            "frontend-run", directory, "-", "--runtime", policy);
+        Assert.Equal(42, frontendExit);
+        Assert.Empty(frontendOutput);
+        Assert.Empty(frontendError);
+
+        var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
+            "jit", "-", "--runtime", policy, "--json");
+        Assert.Equal(42, hostedExit);
+        Assert.Empty(hostedOutput);
+        Assert.Empty(hostedError);
+    }
+
+    [Theory]
     [InlineData("int32", "2147483648")]
     [InlineData("int32", "0x100000000")]
     [InlineData("uint32", "4294967296")]
