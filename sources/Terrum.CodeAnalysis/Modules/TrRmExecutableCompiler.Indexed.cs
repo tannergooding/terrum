@@ -144,32 +144,23 @@ public static partial class TrRmExecutableCompiler
             var starts = new int[ordered.Count + 1];
             foreach (var block in ordered)
             {
+                var next = starts[block.Id - 1];
                 foreach (var value in block.Parameters)
                 {
-                    remap[value] = ++starts[block.Id];
+                    remap[value] = ++next;
+                    types[next] = sourceTypes[value - 1];
+                    owner[next] = block.Id;
                 }
                 foreach (var (result, _) in block.Operations)
                 {
                     if (result != 0)
                     {
-                        remap[result] = ++starts[block.Id];
+                        remap[result] = ++next;
+                        types[next] = sourceTypes[result - 1];
+                        owner[next] = block.Id;
                     }
                 }
-                starts[block.Id] += starts[block.Id - 1];
-                var first = starts[block.Id - 1];
-                foreach (var value in block.Parameters)
-                {
-                    types[remap[value] += first] = sourceTypes[value - 1];
-                    owner[remap[value]] = block.Id;
-                }
-                foreach (var (result, _) in block.Operations)
-                {
-                    if (result != 0)
-                    {
-                        types[remap[result] += first] = sourceTypes[result - 1];
-                        owner[remap[result]] = block.Id;
-                    }
-                }
+                starts[block.Id] = next;
             }
             for (var id = 1; id < remap.Length; id++)
             {
