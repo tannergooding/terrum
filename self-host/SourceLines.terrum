@@ -1,7 +1,8 @@
 namespace Terrum.CodeAnalysis;
 
 // Host.Source is the immutable UTF-16 snapshot granted for this invocation.
-public bool TryReadSourceLine(int32 start, out SourceRange content, out SourceRange includingBreak)
+public bool TryReadSourceLine(int32 start, init ref<SourceRange> content,
+    init ref<SourceRange> includingBreak)
 {
     if (start < 0 || start > Host.Source.Length)
     {
@@ -31,7 +32,7 @@ public bool TryReadSourceLine(int32 start, out SourceRange content, out SourceRa
     return true;
 }
 
-public bool TryGetSourcePosition(int32 position, out int32 line, out int32 character)
+public bool TryGetSourcePosition(int32 position, init ref<int32> line, init ref<int32> character)
 {
     if (position < 0 || position > Host.Source.Length)
     {
@@ -42,7 +43,7 @@ public bool TryGetSourcePosition(int32 position, out int32 line, out int32 chara
     mut int32 index = 0;
     while (true)
     {
-        require TryReadSourceLine(start, out var content, out var includingBreak);
+        require TryReadSourceLine(start, init var content, init var includingBreak);
         int32 next = includingBreak.End;
 
         // Break units belong to their preceding line; a trailing break adds an empty line.
@@ -59,7 +60,7 @@ public bool TryGetSourcePosition(int32 position, out int32 line, out int32 chara
     }
 }
 
-public bool TryGetSourceOffset(int32 line, int32 character, out int32 offset)
+public bool TryGetSourceOffset(int32 line, int32 character, init ref<int32> offset)
 {
     if (line < 0 || character < 0)
     {
@@ -70,7 +71,7 @@ public bool TryGetSourceOffset(int32 line, int32 character, out int32 offset)
     mut int32 index = 0;
     while (true)
     {
-        require TryReadSourceLine(start, out var content, out var includingBreak);
+        require TryReadSourceLine(start, init var content, init var includingBreak);
         bool finalLine = content.Length == includingBreak.Length;
         if (index == line)
         {
@@ -97,7 +98,7 @@ public bool TryGetSourceOffset(int32 line, int32 character, out int32 offset)
     }
 }
 
-public bool TryGetSourceLineExtent(int32 line, out SourceRange includingBreak)
+public bool TryGetSourceLineExtent(int32 line, init ref<SourceRange> includingBreak)
 {
     if (line < 0)
     {
@@ -108,7 +109,7 @@ public bool TryGetSourceLineExtent(int32 line, out SourceRange includingBreak)
     mut int32 index = 0;
     while (true)
     {
-        require TryReadSourceLine(start, out var content, out var range);
+        require TryReadSourceLine(start, init var content, init var range);
         if (index == line)
         {
             includingBreak = range;
@@ -121,47 +122,4 @@ public bool TryGetSourceLineExtent(int32 line, out SourceRange includingBreak)
         start = range.End;
         index = index + 1;
     }
-}
-
-public bool TryReadSourceLineInit(int32 start, init ref<SourceRange> content,
-    init ref<SourceRange> includingBreak)
-{
-    if (!TryReadSourceLine(start, out var resolvedContent, out var resolvedBreak))
-    {
-        return false;
-    }
-    content = resolvedContent;
-    includingBreak = resolvedBreak;
-    return true;
-}
-
-public bool TryGetSourcePositionInit(int32 position, init ref<int32> line, init ref<int32> character)
-{
-    if (!TryGetSourcePosition(position, out var resolvedLine, out var resolvedCharacter))
-    {
-        return false;
-    }
-    line = resolvedLine;
-    character = resolvedCharacter;
-    return true;
-}
-
-public bool TryGetSourceOffsetInit(int32 line, int32 character, init ref<int32> offset)
-{
-    if (!TryGetSourceOffset(line, character, out var resolved))
-    {
-        return false;
-    }
-    offset = resolved;
-    return true;
-}
-
-public bool TryGetSourceLineExtentInit(int32 line, init ref<SourceRange> includingBreak)
-{
-    if (!TryGetSourceLineExtent(line, out var resolved))
-    {
-        return false;
-    }
-    includingBreak = resolved;
-    return true;
 }

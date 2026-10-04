@@ -17,7 +17,7 @@ public unique struct SourceLineIndex
         mut int32 position = 0;
         while (true)
         {
-            require TryReadSourceLine(position, out var content, out var includingBreak);
+            require TryReadSourceLine(position, init var content, init var includingBreak);
             if (lineCount == int32.MaxValue)
             {
                 return false;
@@ -54,7 +54,7 @@ public unique struct SourceLineIndex
             position = 0;
             while (filled < lineCount - 1)
             {
-                require TryReadSourceLine(position, out var content, out var includingBreak);
+                require TryReadSourceLine(position, init var content, init var includingBreak);
                 position = includingBreak.End;
                 require starts.TryAppend(position);
                 filled = filled + 1;

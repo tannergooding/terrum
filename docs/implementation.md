@@ -1687,6 +1687,9 @@ ordinals leave the conditional output vacant. Vacancy-only `init ref`
 construction and position, offset and extent lookups reuse the original
 `out` paths without changing their contracts. Invalid requests publish no
 value, while a later valid request may fill the same vacant destination.
+The streaming `SourceLines` entry points expose range and coordinate results
+only through vacancy-only `init ref` outputs; invalid queries leave every
+result vacant.
 `SourceRange.TryCreate` uses `init ref<SourceRange>` as its sole output mode:
 invalid bounds leave the destination vacant, while valid empty ranges publish
 normally.
