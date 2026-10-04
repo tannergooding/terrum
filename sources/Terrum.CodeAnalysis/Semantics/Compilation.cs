@@ -359,12 +359,19 @@ public sealed class Compilation
         SyntaxTrees = syntaxTrees.IsDefault ? [syntaxTree] : syntaxTrees;
         if (sourceDiagnostics.IsDefault)
         {
-            var mapped = ImmutableArray.CreateBuilder<SourceDiagnostic>(diagnostics.Length);
-            foreach (var diagnostic in diagnostics)
+            if (diagnostics.IsEmpty)
             {
-                mapped.Add(new SourceDiagnostic(syntaxTree, diagnostic));
+                sourceDiagnostics = ImmutableArray<SourceDiagnostic>.Empty;
             }
-            sourceDiagnostics = mapped.ToImmutable();
+            else
+            {
+                var mapped = ImmutableArray.CreateBuilder<SourceDiagnostic>(diagnostics.Length);
+                foreach (var diagnostic in diagnostics)
+                {
+                    mapped.Add(new SourceDiagnostic(syntaxTree, diagnostic));
+                }
+                sourceDiagnostics = mapped.MoveToImmutable();
+            }
         }
         SourceDiagnostics = sourceDiagnostics;
     }
@@ -483,7 +490,13 @@ public sealed class Compilation
 
         var binder = new Binder([tree], [], cancellationToken, isLibrary, reference, runtimePolicy);
         var program = binder.Bind();
-        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+        var diagnosticCount = tree.Diagnostics.Length + binder.Diagnostics.Count;
+        if (diagnosticCount == 0)
+        {
+            return new Compilation(tree, ImmutableArray<Diagnostic>.Empty, program);
+        }
+
+        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>(diagnosticCount);
         diagnostics.AddRange(tree.Diagnostics);
         diagnostics.AddRange(binder.Diagnostics);
         diagnostics.Sort(static (left, right) => {
@@ -588,35 +601,52 @@ public sealed class Compilation
         ArgumentNullException.ThrowIfNull(trees);
         cancellationToken.ThrowIfCancellationRequested();
         var snapshots = ImmutableArray.CreateBuilder<SyntaxTree>();
-        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
-        var sourceDiagnostics = ImmutableArray.CreateBuilder<SourceDiagnostic>();
+        ImmutableArray<Diagnostic>.Builder? diagnostics = null;
+        ImmutableArray<SourceDiagnostic>.Builder? sourceDiagnostics = null;
         foreach (var tree in trees)
         {
             ArgumentNullException.ThrowIfNull(tree);
             snapshots.Add(tree);
-            diagnostics.AddRange(tree.Diagnostics);
-            foreach (var diagnostic in tree.Diagnostics)
+            if (!tree.Diagnostics.IsEmpty)
             {
-                sourceDiagnostics.Add(new SourceDiagnostic(tree, diagnostic));
+                diagnostics ??= ImmutableArray.CreateBuilder<Diagnostic>(tree.Diagnostics.Length);
+                diagnostics.AddRange(tree.Diagnostics);
+                sourceDiagnostics ??= ImmutableArray.CreateBuilder<SourceDiagnostic>(tree.Diagnostics.Length);
+                foreach (var diagnostic in tree.Diagnostics)
+                {
+                    sourceDiagnostics.Add(new SourceDiagnostic(tree, diagnostic));
+                }
             }
         }
         if (snapshots.Count == 0)
         {
             throw new ArgumentException("At least one source tree is required.", nameof(trees));
         }
-        if (diagnostics.Count != 0)
+        if (diagnostics is not null)
         {
+            var sourceDiagnosticBuilder = sourceDiagnostics
+                ?? throw new InvalidOperationException("Syntax diagnostics require source provenance.");
             return new Compilation(snapshots[0], diagnostics.ToImmutable(), null,
-                snapshots.ToImmutable(), sourceDiagnostics.ToImmutable());
+                snapshots.ToImmutable(), sourceDiagnosticBuilder.ToImmutable());
         }
         var binder = new Binder(snapshots.ToImmutable(), buffers, cancellationToken, isLibrary, reference,
             runtimePolicy, coreLibrary);
         var program = binder.Bind();
-        diagnostics.AddRange(binder.Diagnostics);
-        sourceDiagnostics.AddRange(binder.SourceDiagnostics);
+        if (binder.Diagnostics.Count != 0)
+        {
+            diagnostics = ImmutableArray.CreateBuilder<Diagnostic>(binder.Diagnostics.Count);
+            diagnostics.AddRange(binder.Diagnostics);
+        }
+        if (binder.SourceDiagnostics.Count != 0)
+        {
+            sourceDiagnostics = ImmutableArray.CreateBuilder<SourceDiagnostic>(binder.SourceDiagnostics.Count);
+            sourceDiagnostics.AddRange(binder.SourceDiagnostics);
+        }
         cancellationToken.ThrowIfCancellationRequested();
-        return new Compilation(snapshots[0], diagnostics.ToImmutable(), diagnostics.Count == 0 ? program : null,
-            snapshots.ToImmutable(), sourceDiagnostics.ToImmutable());
+        var diagnosticResult = diagnostics?.MoveToImmutable() ?? ImmutableArray<Diagnostic>.Empty;
+        var sourceDiagnosticResult = sourceDiagnostics?.MoveToImmutable() ?? ImmutableArray<SourceDiagnostic>.Empty;
+        return new Compilation(snapshots[0], diagnosticResult, diagnosticResult.IsEmpty ? program : null,
+            snapshots.ToImmutable(), sourceDiagnosticResult);
     }
 
     /// <summary>Binds one source snapshot with explicit, fixed-size host buffer capabilities.</summary>

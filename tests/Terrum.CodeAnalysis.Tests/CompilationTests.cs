@@ -32,6 +32,9 @@ public sealed class CompilationTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.NotNull(compilation.Program);
         Assert.Same(tree, compilation.SyntaxTree);
+        Assert.False(compilation.Diagnostics.IsDefault);
+        Assert.False(compilation.SourceDiagnostics.IsDefault);
+        Assert.Empty(compilation.SourceDiagnostics);
         SemanticVerifier.Verify(compilation.Program);
     }
 
@@ -70,6 +73,7 @@ public sealed class CompilationTests
         var aliases = SyntaxTree.Parse("namespace Demo; alias Count = Scalar; alias Scalar = int32;");
         var compilation = Compilation.Create([entry, aliases]);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Empty(compilation.SourceDiagnostics);
         Assert.NotNull(compilation.Program);
         SemanticVerifier.Verify(compilation.Program);
     }
