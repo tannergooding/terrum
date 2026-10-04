@@ -702,20 +702,33 @@ internal sealed partial class Binder
 
     private GenericTemplate? FindGenericTemplate(string name)
     {
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        if (_templates.ContainsKey(Qualify(name)))
+        GenericTemplate? candidate = null;
+        var candidateName = string.Empty;
+        var hasCandidate = false;
+        var qualifiedName = Qualify(name);
+        if (_templates.TryGetValue(qualifiedName, out candidate))
         {
-            _ = names.Add(Qualify(name));
+            candidateName = qualifiedName;
+            hasCandidate = true;
         }
         foreach (var imported in _usings)
         {
             var qualified = imported + "." + name;
-            if (_templates.ContainsKey(qualified))
+            if (!_templates.TryGetValue(qualified, out var template))
             {
-                _ = names.Add(qualified);
+                continue;
             }
+            if (hasCandidate && candidateName != qualified)
+            {
+                return null;
+            }
+
+            candidateName = qualified;
+            candidate = template;
+            hasCandidate = true;
         }
-        return names.Count == 1 ? _templates[names.Single()] : null;
+
+        return candidate;
     }
 
     private int InstantiateGeneric(SyntaxNode callee, SyntaxNode? callArguments = null, PrimitiveType? expected = null)
