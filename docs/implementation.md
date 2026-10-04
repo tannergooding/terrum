@@ -1207,11 +1207,13 @@ between `float32`/`float64` and from `int32`, `uint32`, `int64` and `uint64`
 to either format are also projected through v85. `char16`-to-floating and
 floating-to-integer conversions remain outside this projection while their
 eligibility is unapproved. Source-free TRRM still does not support floating
-arithmetic or conversion pairs other than `float32`/`float64`. Same-format
-comparisons and exact-bit constants are provisionally implemented under the
-unapproved [TRRM floating-comparison proposal](proposals/floating-trrm-comparisons.md);
-float-format conversions are separately provisional under the
-[TRRM floating-conversion proposal](proposals/floating-trrm-format-conversions.md).
+arithmetic. Same-format comparisons and exact-bit constants, explicit
+conversion between the two floating formats, and conversion from the four
+fixed-width integer types are provisionally implemented under separate
+unapproved [comparison](proposals/floating-trrm-comparisons.md),
+[float-format conversion](proposals/floating-trrm-format-conversions.md) and
+[integer-to-floating conversion](proposals/integer-to-floating-trrm-conversions.md)
+proposals. These are not part of the approved `(1, 0)` Body profile.
 Frontend verification/emission remains hosted.
 Existing source function and local shadowing keeps its ordinary call-binding
 precedence. Top-level generic function templates support multiple independently
@@ -2494,8 +2496,10 @@ Under the same unapproved proposal, `float32`/`float64` accept exact-width
 `ConstBits` bit patterns with width-minimal payloads and same-format IEEE
 comparisons via the distinct `FloatCompare` opcode `0x19`; floating arithmetic
 remains unsupported. Explicit conversion between the two floating formats is
-separately provisional via `FloatConvert` opcode `0x1A`; other numeric
-conversion pairs remain unsupported.
+separately provisional via `FloatConvert` opcode `0x1A`; conversion from the
+four fixed-width integer types is provisionally implemented via `IntToFloat`
+opcode `0x1B`. Both remain unapproved; other numeric conversion pairs remain
+unsupported.
 Body-local optional scalar values support `MakeOptional`, `None`, `IsPresent`,
 `Copy` and eager `Select`, preserving presence independently from payload bits.
 Optional `char16` also supports equality and inequality; optional equality for
@@ -2658,9 +2662,10 @@ Param and TypeSpec rows and checks the fail-fast scalar subset of `ConstBits`,
 `ConstSigned`, `Copy`, `Unary`, `Binary`, `Convert`, `Select`,
 `MakeOptional`, `None`, `IsPresent`, `CheckedBinary`, `CheckedConvert`,
 `CheckedNegate`, `CheckedDivRem`, static `Call`, `Return` and `Fail`.
-Provisionally, this reader also recognizes float TypeSpecs, float `ConstBits`
-`FloatCompare` `0x19` and `FloatConvert` `0x1A` under the unapproved TRRM
-proposals above; this is not approved executable-profile support.
+Provisionally, this reader also recognizes float TypeSpecs, float `ConstBits`,
+`FloatCompare` `0x19`, `FloatConvert` `0x1A` and `IntToFloat` `0x1B` under
+their unapproved TRRM proposals; this is not approved executable-profile
+support.
 Calls inspect authored local MethodDefs, packed direct references to public
 global or public type-owned static MethodDefs in another included module with
 a Body row, and retained imports of public global or public type-owned static
@@ -2700,8 +2705,9 @@ dual-result `CheckedDivRem`, static `Call` to global or type-owned local or
 retained imported MethodDefs with scalar/optional parameters and result
 (including void), `Switch`, `Return` and `Fail`. Provisionally, the indexed
 reader also recognizes float `ConstBits` and same-format `FloatCompare` under
-the unapproved comparison proposal, and `FloatConvert` under its separate
-unapproved proposal; the approved `(1, 0)` profile does not.
+the unapproved comparison proposal, and `FloatConvert` and `IntToFloat` under
+their separate unapproved conversion proposals; the approved `(1, 0)` profile
+does not.
 The bounded call inspection
 rejects receiver/generic calls and generic owners for external members.
 Packed direct MethodDef `DefId` calls require

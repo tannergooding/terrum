@@ -48,6 +48,9 @@ approved.
 - [Floating format conversions in executable TRRM](floating-trrm-format-conversions.md)
   recommends a distinct opcode for the accepted `float32`/`float64` conversion
   pair without extending integer conversion policies or adding other pairs.
+- [Integer-to-floating conversions in executable TRRM](integer-to-floating-trrm-conversions.md)
+  recommends a distinct opcode for the eight accepted fixed-width
+  integer-to-floating conversion pairs.
 
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,

@@ -121,9 +121,14 @@ public static partial class TrRmExecutableCompiler
                         opcode = cast.Operand.Type == cast.Type ? 3 : 0x1A;
                         type = opcode == 0x1A ? TypeRow(cast.Type) - 1 : 0;
                     }
+                    else if (IsInteger(cast.Operand.Type) && IsFloat(cast.Type))
+                    {
+                        opcode = 0x1B;
+                        type = TypeRow(cast.Type) - 1;
+                    }
                     else if (IsFloat(cast.Operand.Type) || IsFloat(cast.Type))
                     {
-                        throw Unsupported("Float conversions to or from non-floating types are outside executable TRRM.");
+                        throw Unsupported("This floating conversion pair is outside executable TRRM.");
                     }
                     else
                     {
@@ -142,7 +147,7 @@ public static partial class TrRmExecutableCompiler
             var referenceWidth = Width((ulong)Math.Max(next, type));
             WriteInstruction(instructions, opcode, referenceWidth, dataWidth);
             Write(instructions, (ulong)next, referenceWidth);
-            if (opcode is 1 or 0x16 or 0x1A)
+            if (opcode is 1 or 0x16 or 0x1A or 0x1B)
             {
                 Write(instructions, (ulong)type, referenceWidth);
             }
@@ -154,7 +159,7 @@ public static partial class TrRmExecutableCompiler
             {
                 Write(instructions, data, dataWidth);
             }
-            if (opcode is 4 or 0x16 or 0x17 or 0x1A)
+            if (opcode is 4 or 0x16 or 0x17 or 0x1A or 0x1B)
             {
                 Write(instructions, (ulong)left, referenceWidth);
             }
@@ -263,7 +268,7 @@ public static partial class TrRmExecutableCompiler
         {
             var (opcode, width, countWidth, dataWidth) = ReadInstruction(body, ref position);
             if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 0x0A
-                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18 or 0x19 or 0x1A))
+                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18 or 0x19 or 0x1A or 0x1B))
             {
                 throw Invalid($"Operation 0x{opcode:X2} is not executable.");
             }
@@ -282,12 +287,12 @@ public static partial class TrRmExecutableCompiler
                     throw Invalid("Noncontiguous CheckedDivRem value definitions.");
                 }
             }
-            var typeId = opcode is 1 or 2 or 6 or 8 or 9 or 0x16 or 0x1A
+            var typeId = opcode is 1 or 2 or 6 or 8 or 9 or 0x16 or 0x1A or 0x1B
                 ? ReadInt(body, ref position, width) : 0;
             var policy = opcode == 6 ? ReadByte(body, ref position) : (byte)0;
             var kind = opcode is 4 or 5 or 0x15 or 0x19 ? ReadByte(body, ref position) : (byte)0;
             var bits = opcode is 1 or 2 ? ReadBits(body, ref position, dataWidth) : 0;
-            var left = opcode is 3 or 4 or 6 or 7 or 8 or 0x0A or 0x16 or 0x17 or 5 or 0x15 or 0x18 or 0x19 or 0x1A
+            var left = opcode is 3 or 4 or 6 or 7 or 8 or 0x0A or 0x16 or 0x17 or 5 or 0x15 or 0x18 or 0x19 or 0x1A or 0x1B
                 ? ReadInt(body, ref position, width) : 0;
             var right = opcode is 5 or 7 or 0x15 or 0x18 or 0x19 ? ReadInt(body, ref position, width) : 0;
             var third = opcode == 7 ? ReadInt(body, ref position, width) : 0;
@@ -415,6 +420,16 @@ public static partial class TrRmExecutableCompiler
                     || source.Type == mappedTypes[typeId])
                 {
                     throw Invalid("FloatConvert requires distinct float32 or float64 types.");
+                }
+                expression = new BoundCast(source, mappedTypes[typeId], default);
+            }
+            else if (opcode == 0x1B)
+            {
+                var source = Operand(left);
+                if (typeId <= 0 || typeId > mappedTypes.Length - 1
+                    || !IsInteger(source.Type) || !IsFloat(mappedTypes[typeId]))
+                {
+                    throw Invalid("IntToFloat requires an integer source and floating destination.");
                 }
                 expression = new BoundCast(source, mappedTypes[typeId], default);
             }

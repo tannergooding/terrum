@@ -44,6 +44,9 @@ under the unapproved
 explicit conversion between the floating formats is separately provisional
 under the unapproved
 [TRRM floating-conversion proposal](../docs/proposals/floating-trrm-format-conversions.md).
+Fixed-width integer-to-floating conversion is separately provisional under
+the unapproved
+[TRRM integer-to-floating proposal](../docs/proposals/integer-to-floating-trrm-conversions.md).
 Floating arithmetic and other conversion pairs remain unsupported there. The
 frontend candidates continue to depend on the hosted verifier/emitter for
 supported executions.

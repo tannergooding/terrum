@@ -261,15 +261,62 @@ public sealed class TrRmExecutableCompilerTests
         }
     }
 
+    [Fact]
+    public void IntegerToFloatingConversionsExecuteThroughLinearAndIndexedBodies()
+    {
+        const string source = """
+            public float32 Int32ToFloat32(int32 value) { return float32(value); }
+            public float32 UInt32ToFloat32(uint32 value) { return float32(value); }
+            public float32 Int64ToFloat32(int64 value) { return float32(value); }
+            public float32 UInt64ToFloat32(uint64 value) { return float32(value); }
+            public float64 Int32ToFloat64(int32 value) { return float64(value); }
+            public float64 UInt32ToFloat64(uint32 value) { return float64(value); }
+            public float64 Int64ToFloat64(int64 value) { return float64(value); }
+            public float64 UInt64ToFloat64(uint64 value) { return float64(value); }
+            public float32 Int64ToFloat32If(int64 value) {
+                float32 converted = float32(value);
+                if (converted == 16777216.0) { return converted; }
+                return 0.0;
+            }
+            int32 Main() {
+                if (Int32ToFloat32(16777217) != 16777216.0) { return 1; }
+                if (UInt32ToFloat32(4294967295) != 4294967296.0) { return 2; }
+                if (Int64ToFloat32(16777219) != 16777220.0) { return 3; }
+                if (UInt64ToFloat32(18446744073709551615) != 18446744073709551616.0) { return 4; }
+                if (Int32ToFloat64(-2147483648) != -2147483648.0) { return 5; }
+                if (UInt32ToFloat64(4294967295) != 4294967295.0) { return 6; }
+                if (Int64ToFloat64(-9223372036854775808) != -9223372036854775808.0) { return 7; }
+                if (UInt64ToFloat64(18446744073709551615) != 18446744073709551616.0) { return 8; }
+                if (Int64ToFloat32If(16777217) != 16777216.0) { return 9; }
+                return 42;
+            }
+            """;
+        var original = Compile(source);
+        var artifact = TrRmExecutableCompiler.Emit(original, "integer-float-conversions");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+
+        Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+    }
+
     [Theory]
     [InlineData("int32 ToInt(float32 value) { return int32(value); }")]
-    [InlineData("float32 FromInt(int32 value) { return float32(value); }")]
     [InlineData("float32 FromChar(char16 value) { return float32(value); }")]
     public void OtherFloatingConversionPairsRemainOutsideExecutableTrRm(string function)
     {
         var program = Compile(function, true);
 
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "float-conversion"));
+    }
+
+    [Fact]
+    public void IntegerToFloatRejectsAnIntegerDestinationTypeSpec()
+    {
+        const string source = "public float32 Convert(int32 value) { return float32(value); }";
+        var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-integer-float");
+        var malformed = ReplaceBodyOperationByte(artifact, 1, 0x1B, 2, 1);
+
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
     [Fact]
