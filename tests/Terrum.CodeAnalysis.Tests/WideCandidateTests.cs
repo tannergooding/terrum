@@ -136,6 +136,64 @@ public sealed class WideCandidateTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task IntegerMathCandidatesMatchHostedReferenceAcrossModulesAsync(NativeRuntimePolicy policy)
+    {
+        var producer = CreateNumericsLibrary("IntegerMath.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.AbsInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryAbsInt32",
+            "Terrum.CodeAnalysis.Numerics64.SignInt32",
+            "Terrum.CodeAnalysis.Numerics64.MinInt32",
+            "Terrum.CodeAnalysis.Numerics64.MaxInt32",
+            "Terrum.CodeAnalysis.Numerics64.ClampInt32",
+            "Terrum.CodeAnalysis.Numerics64.BigMultiplyInt32",
+            "Terrum.CodeAnalysis.Numerics64.GreatestCommonDivisorInt32",
+            "Terrum.CodeAnalysis.Numerics64.AbsInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryAbsInt64",
+            "Terrum.CodeAnalysis.Numerics64.SignInt64",
+            "Terrum.CodeAnalysis.Numerics64.MinInt64",
+            "Terrum.CodeAnalysis.Numerics64.MaxInt64",
+            "Terrum.CodeAnalysis.Numerics64.ClampInt64",
+            "Terrum.CodeAnalysis.Numerics64.GreatestCommonDivisorInt64");
+        var compilation = Compilation.Create(SyntaxTree.Parse(BuildIntegerMathConsumer()),
+            ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, "AbsInt32(int32.MinValue)", unchecked((int)0xE0540001))]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "AbsInt32(int32.MinValue)", unchecked((int)0xE0540001))]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32(AbsInt64(int64.MinValue))", unchecked((int)0xE0540001))]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32(AbsInt64(int64.MinValue))", unchecked((int)0xE0540001))]
+    [InlineData(NativeRuntimePolicy.FailFast, "ClampInt32(0, 2, 1)", unchecked((int)0xE0540003))]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "ClampInt32(0, 2, 1)", unchecked((int)0xE0540003))]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32(ClampInt64(0, 2, 1))", unchecked((int)0xE0540003))]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32(ClampInt64(0, 2, 1))", unchecked((int)0xE0540003))]
+    public async Task IntegerMathCandidatesPreserveCheckedFailureSemanticsAsync(
+        NativeRuntimePolicy policy, string expression, int expected)
+    {
+        var component = File.ReadAllText(Path.Combine(RepositoryRoot(), "self-host", "IntegerMath.terrum"));
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            component + $"\nint32 Main() {{ return {expression}; }}"), (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var image = Path.Combine(AppContext.BaseDirectory, $"integer-math-failure-{Guid.NewGuid():N}.exe");
+        try
+        {
+            await File.WriteAllBytesAsync(image, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);
+            await RunAsync(image, [], expected).ConfigureAwait(true);
+        }
+        finally
+        {
+            File.Delete(image);
+        }
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast, "Int32")]
     [InlineData(NativeRuntimePolicy.FailFast, "Int64")]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "Int32")]
@@ -863,11 +921,107 @@ public sealed class WideCandidateTests
         return source.ToString();
     }
 
+    private static string BuildIntegerMathConsumer()
+    {
+        var source = new StringBuilder("using Terrum.CodeAnalysis.Numerics64;\nint32 Main() {\n");
+        var failureCode = 1;
+        int[] values32 = [int.MinValue, int.MinValue + 1, -17, -1, 0, 1, 17, int.MaxValue];
+        long[] values64 = [long.MinValue, long.MinValue + 1, -17, -1, 0, 1, 17, long.MaxValue];
+        foreach (int value in values32)
+        {
+            var literal = SignedLiteral(value);
+            if (value != int.MinValue)
+            {
+                AppendBitCheck(source, $"AbsInt32({literal})", SignedLiteral(Math.Abs(value)), ref failureCode);
+            }
+            AppendTryAbsCheck(source, "TryAbsInt32", literal,
+                value == int.MinValue ? "0" : SignedLiteral(Math.Abs(value)), value != int.MinValue, ref failureCode);
+            AppendBitCheck(source, $"SignInt32({literal})", Math.Sign(value).ToString(CultureInfo.InvariantCulture),
+                ref failureCode);
+        }
+        foreach (int left in values32)
+        {
+            foreach (int right in values32)
+            {
+                var leftLiteral = SignedLiteral(left);
+                var rightLiteral = SignedLiteral(right);
+                AppendBitCheck(source, $"MinInt32({leftLiteral}, {rightLiteral})",
+                    SignedLiteral(Math.Min(left, right)), ref failureCode);
+                AppendBitCheck(source, $"MaxInt32({leftLiteral}, {rightLiteral})",
+                    SignedLiteral(Math.Max(left, right)), ref failureCode);
+                AppendBitCheck(source, $"BigMultiplyInt32({leftLiteral}, {rightLiteral})",
+                    ((long)left * right).ToString(CultureInfo.InvariantCulture), ref failureCode);
+                AppendBitCheck(source, $"GreatestCommonDivisorInt32({leftLiteral}, {rightLiteral})",
+                    Hex(GreatestCommonDivisor(Magnitude(left), Magnitude(right))), ref failureCode);
+            }
+        }
+
+        foreach (int value in values32)
+        {
+            AppendBitCheck(source, $"ClampInt32({SignedLiteral(value)}, -5, 5)",
+                SignedLiteral(Math.Clamp(value, -5, 5)), ref failureCode);
+        }
+
+        foreach (long value in values64)
+        {
+            var literal = SignedLiteral(value);
+            if (value != long.MinValue)
+            {
+                AppendBitCheck(source, $"AbsInt64({literal})", SignedLiteral(Math.Abs(value)), ref failureCode);
+            }
+            AppendTryAbsCheck(source, "TryAbsInt64", literal,
+                value == long.MinValue ? "0" : SignedLiteral(Math.Abs(value)), value != long.MinValue, ref failureCode);
+            AppendBitCheck(source, $"SignInt64({literal})", Math.Sign(value).ToString(CultureInfo.InvariantCulture),
+                ref failureCode);
+        }
+        foreach (long left in values64)
+        {
+            foreach (long right in values64)
+            {
+                var leftLiteral = SignedLiteral(left);
+                var rightLiteral = SignedLiteral(right);
+                AppendBitCheck(source, $"MinInt64({leftLiteral}, {rightLiteral})",
+                    SignedLiteral(Math.Min(left, right)), ref failureCode);
+                AppendBitCheck(source, $"MaxInt64({leftLiteral}, {rightLiteral})",
+                    SignedLiteral(Math.Max(left, right)), ref failureCode);
+                AppendBitCheck(source, $"GreatestCommonDivisorInt64({leftLiteral}, {rightLiteral})",
+                    Hex(GreatestCommonDivisor(Magnitude(left), Magnitude(right))), ref failureCode);
+            }
+        }
+
+        foreach (long value in values64)
+        {
+            AppendBitCheck(source, $"ClampInt64({SignedLiteral(value)}, -5, 5)",
+                SignedLiteral(Math.Clamp(value, -5, 5)), ref failureCode);
+        }
+
+        source.AppendLine("return 42;").AppendLine("}");
+        return source.ToString();
+    }
+
     private static void AppendBitCheck(StringBuilder source, string expression, string expected,
         ref int failureCode)
     {
         source.Append("if (").Append(expression).Append(" != ").Append(expected)
             .Append(") { return ").Append(failureCode++).AppendLine("; }");
+    }
+
+    private static void AppendTryAbsCheck(StringBuilder source, string method, string value,
+        string expected, bool succeeds, ref int failureCode)
+    {
+        var code = failureCode++;
+        var output = $"absolute{code}";
+        var call = $"{method}({value}, init var {output})";
+        if (!succeeds)
+        {
+            source.Append("if (").Append(call).Append(") { return ").Append(code).AppendLine("; }");
+            source.Append("require ").Append(method).Append("(1, init ").Append(output).AppendLine(");");
+            AppendBitCheck(source, output, "1", ref failureCode);
+            return;
+        }
+
+        source.Append("require ").Append(call).AppendLine(";");
+        AppendBitCheck(source, output, expected, ref failureCode);
     }
 
     private static void AppendRoundUpCheck(StringBuilder source, string method, string value,
@@ -891,6 +1045,34 @@ public sealed class WideCandidateTests
     private static string Hex(uint value) => $"0x{value:X8}";
 
     private static string Hex(ulong value) => $"0x{value:X16}";
+
+    private static string SignedLiteral(int value) =>
+        value == int.MinValue ? "int32.MinValue" : value.ToString(CultureInfo.InvariantCulture);
+
+    private static string SignedLiteral(long value) =>
+        value == long.MinValue ? "int64.MinValue" : value.ToString(CultureInfo.InvariantCulture);
+
+    private static uint Magnitude(int value) => value < 0 ? (uint)-((long)value) : (uint)value;
+
+    private static ulong Magnitude(long value) => value < 0 ? (ulong)(-(value + 1)) + 1 : (ulong)value;
+
+    private static uint GreatestCommonDivisor(uint left, uint right)
+    {
+        while (right != 0)
+        {
+            (left, right) = (right, left % right);
+        }
+        return left;
+    }
+
+    private static ulong GreatestCommonDivisor(ulong left, ulong right)
+    {
+        while (right != 0)
+        {
+            (left, right) = (right, left % right);
+        }
+        return left;
+    }
 
     private static uint ReverseBits(uint value)
     {

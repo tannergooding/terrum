@@ -1,0 +1,144 @@
+namespace Terrum.CodeAnalysis.Numerics64;
+
+public int32 AbsInt32(int32 value)
+{
+    if (value < 0)
+    {
+        return -value;
+    }
+    return value;
+}
+
+public bool TryAbsInt32(int32 value, init ref<int32> result)
+{
+    if (value == int32.MinValue)
+    {
+        return false;
+    }
+    result = value < 0 ? -value : value;
+    return true;
+}
+
+public int32 SignInt32(int32 value)
+{
+    if (value < 0)
+    {
+        return -1;
+    }
+    if (value > 0)
+    {
+        return 1;
+    }
+    return 0;
+}
+
+public int32 MinInt32(int32 left, int32 right)
+{
+    return left < right ? left : right;
+}
+
+public int32 MaxInt32(int32 left, int32 right)
+{
+    return left > right ? left : right;
+}
+
+public int32 ClampInt32(int32 value, int32 minimum, int32 maximum)
+{
+    require minimum <= maximum;
+    if (value < minimum)
+    {
+        return minimum;
+    }
+    if (value > maximum)
+    {
+        return maximum;
+    }
+    return value;
+}
+
+public int64 BigMultiplyInt32(int32 left, int32 right)
+{
+    return int64(left) * int64(right);
+}
+
+public uint32 GreatestCommonDivisorInt32(int32 left, int32 right)
+{
+    mut uint32 first = left < 0 ? uint32(-int64(left)) : uint32(left);
+    mut uint32 second = right < 0 ? uint32(-int64(right)) : uint32(right);
+    while (second != 0)
+    {
+        uint32 remainder = first % second;
+        first = second;
+        second = remainder;
+    }
+    return first;
+}
+
+public int64 AbsInt64(int64 value)
+{
+    if (value < 0)
+    {
+        return -value;
+    }
+    return value;
+}
+
+public bool TryAbsInt64(int64 value, init ref<int64> result)
+{
+    if (value == int64.MinValue)
+    {
+        return false;
+    }
+    result = value < 0 ? -value : value;
+    return true;
+}
+
+public int32 SignInt64(int64 value)
+{
+    if (value < 0)
+    {
+        return -1;
+    }
+    if (value > 0)
+    {
+        return 1;
+    }
+    return 0;
+}
+
+public int64 MinInt64(int64 left, int64 right)
+{
+    return left < right ? left : right;
+}
+
+public int64 MaxInt64(int64 left, int64 right)
+{
+    return left > right ? left : right;
+}
+
+public int64 ClampInt64(int64 value, int64 minimum, int64 maximum)
+{
+    require minimum <= maximum;
+    if (value < minimum)
+    {
+        return minimum;
+    }
+    if (value > maximum)
+    {
+        return maximum;
+    }
+    return value;
+}
+
+public uint64 GreatestCommonDivisorInt64(int64 left, int64 right)
+{
+    mut uint64 first = left < 0 ? uint64(-(left + 1)) + 1 : uint64(left);
+    mut uint64 second = right < 0 ? uint64(-(right + 1)) + 1 : uint64(right);
+    while (second != 0)
+    {
+        uint64 remainder = first % second;
+        first = second;
+        second = remainder;
+    }
+    return first;
+}
