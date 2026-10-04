@@ -102,15 +102,15 @@ public static partial class NativeModuleCompiler
         var visited = new HashSet<string>(StringComparer.Ordinal);
         CatalogCandidate[]? resolved = null;
         var assignments = 0;
-        var missing = new SortedSet<string>(StringComparer.Ordinal);
+        string? missing = null;
         var incompatible = false;
         var cycle = false;
         Search();
         if (resolved is null)
         {
-            if (missing.Count != 0)
+            if (missing is not null)
             {
-                throw new ModuleContractException($"Missing graph catalog dependency '{missing.Min}'.");
+                throw new ModuleContractException($"Missing graph catalog dependency '{missing}'.");
             }
             if (cycle)
             {
@@ -187,7 +187,10 @@ public static partial class NativeModuleCompiler
                 }
                 else
                 {
-                    _ = missing.Add(next);
+                    if (missing is null || StringComparer.Ordinal.Compare(next, missing) < 0)
+                    {
+                        missing = next;
+                    }
                 }
                 return;
             }
