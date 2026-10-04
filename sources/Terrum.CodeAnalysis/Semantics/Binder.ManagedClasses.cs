@@ -260,7 +260,7 @@ internal sealed partial class Binder
             }
             var type = BindType((SyntaxNode)child.Children[^3], allowVoid: false);
             if (type is PrimitiveType.OwnedInt32Buffer or PrimitiveType.ReadonlyInt32BufferView
-                or PrimitiveType.MutableInt32BufferView || IsUnique(type))
+                or PrimitiveType.MutableInt32BufferView or PrimitiveType.TokenSpan || IsUnique(type))
             {
                 Report("TRM3023", "Class fields require scalars, managed handles, or handle-free Copy values.", child.Span);
             }

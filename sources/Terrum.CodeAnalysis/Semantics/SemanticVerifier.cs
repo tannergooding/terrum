@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Text;
 namespace Terrum.CodeAnalysis.Semantics;
 
 /// <summary>Validates untrusted structured IR before a native backend consumes it.</summary>
-public static class SemanticVerifier
+public static partial class SemanticVerifier
 {
     private const string FunctionIndexKey = "Terrum.FunctionIndex";
     private const string SourceSpanKey = "Terrum.SourceSpan";
@@ -159,6 +159,7 @@ public static class SemanticVerifier
             {
                 if (field is null || !ValidType(field.Type, allowVoid: false, program)
                     || field.Type is PrimitiveType.OwnedInt32Buffer or PrimitiveType.ReadonlyInt32BufferView
+                        or PrimitiveType.TokenSpan
                         or PrimitiveType.MutableInt32BufferView
                     || IsUnique(program, field.Type))
                 {
@@ -244,7 +245,8 @@ public static class SemanticVerifier
                     throw Invalid();
                 }
                 var width = ValueLayout.Size(field.Type, program.Structures);
-                var fieldAlignment = nested >= 0 ? alignments[nested] : width;
+                var fieldAlignment = nested >= 0 ? alignments[nested]
+                    : field.Type == PrimitiveType.TokenSpan ? 8 : width;
                 var alignedOffset = fieldAlignment == 0 ? offset : (offset + fieldAlignment - 1) & -fieldAlignment;
                 if (string.IsNullOrWhiteSpace(field.Name) || !fieldNames.Add(field.Name)
                     || (field.IsPrivate && field.IsInternal)
@@ -533,6 +535,7 @@ public static class SemanticVerifier
             }
         }
 
+        var hasSpanDependencies = VerifySpanContracts(program);
         for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)
         {
             var function = program.Functions[functionIndex];
@@ -552,6 +555,7 @@ public static class SemanticVerifier
                 StatementInputs = function.Variables.Any(variable => variable.Type is
                     PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
                     ? new Dictionary<BoundStatement, InitializationState>(ReferenceEqualityComparer.Instance) : null,
+                Dependencies = CreateBackingDependencies(function, program, hasSpanDependencies),
             };
             if (function.IsConstructor)
             {
@@ -581,6 +585,7 @@ public static class SemanticVerifier
             try
             {
                 VerifyOwnerScopes(function.Body, function, program);
+                VerifySpanScopes(function);
                 VerifyManagedRoots(function);
                 var returns = Statement(function.Body, initialized, fieldMasks, declarations, function, program, ref remaining, 0);
                 VerifyViewScopes(function.Body, function, initialized.StatementInputs);
@@ -730,6 +735,18 @@ public static class SemanticVerifier
                 case BoundViewRead view:
                     Expression(view.Index, scope, depth + 1);
                     break;
+                case BoundSpanLength length:
+                    Expression(length.View, scope, depth + 1);
+                    break;
+                case BoundSpanRead read:
+                    Expression(read.View, scope, depth + 1);
+                    Expression(read.Index, scope, depth + 1);
+                    break;
+                case BoundSpanAdvance advance:
+                    Expression(advance.View, scope, depth + 1);
+                    break;
+                case BoundSnapshotSpan:
+                    break;
                 case BoundConstant or BoundNull or BoundRead or BoundMove or BoundReceiverLoan
                     or BoundMutableReceiverLoan or BoundOutArgument or BoundViewLength:
                     break;
@@ -869,7 +886,7 @@ public static class SemanticVerifier
                 case BoundReturn result when result.Value is not null:
                     Expression(result.Value, scope, depth + 1);
                     break;
-                case BoundLifetimeEnd or BoundDrop or BoundDropConstructedFields or BoundOwnerDeclaration or BoundReturn
+                case BoundLifetimeEnd or BoundDrop or BoundDropSpan or BoundDropConstructedFields or BoundOwnerDeclaration or BoundReturn
                     or BoundBreak or BoundContinue:
                     break;
                 default:
@@ -1009,6 +1026,8 @@ public static class SemanticVerifier
                         throw Invalid(vacant.Span);
                     }
                     break;
+                case BoundDropSpan:
+                    break;
                 case BoundDrop drop:
                     drops.Add(drop);
                     break;
@@ -1144,6 +1163,22 @@ public static class SemanticVerifier
                         throw InvalidEffect(viewRead.Span, "Ownership");
                     }
                     Expression(viewRead.Index, depth + 1, acquiringRoot);
+                    break;
+                case BoundSpanLength length:
+                    Expression(length.View, depth + 1, acquiringRoot);
+                    break;
+                case BoundSpanRead read:
+                    Expression(read.View, depth + 1, acquiringRoot);
+                    Expression(read.Index, depth + 1, acquiringRoot);
+                    break;
+                case BoundSpanAdvance advance:
+                    Expression(advance.View, depth + 1, acquiringRoot);
+                    break;
+                case BoundSnapshotSpan snapshot:
+                    if (snapshot.Variable < 0 || snapshot.Variable >= roots.Length || exclusive[snapshot.Variable])
+                    {
+                        throw InvalidEffect(snapshot.Span, "Ownership");
+                    }
                     break;
                 case BoundRead localRead when localRead.Type is PrimitiveType.ReadonlyInt32BufferView
                     or PrimitiveType.MutableInt32BufferView:
@@ -1306,6 +1341,7 @@ public static class SemanticVerifier
                     Expression(local.Initializer, depth + 1);
                     break;
                 case BoundVacantLocal:
+                case BoundDropSpan:
                     break;
                 case BoundAssignment assignment:
                     if (assignment.Variable < 0 || assignment.Variable >= roots.Length
@@ -1634,6 +1670,7 @@ public static class SemanticVerifier
                 {
                     throw Invalid(end.Span);
                 }
+                CheckBackingInvalidation(end.Variable, initialized, end.Span);
                 initialized.Retire(end.Variable);
                 fieldMasks[end.Variable] = 0;
                 return false;
@@ -1655,8 +1692,18 @@ public static class SemanticVerifier
                 {
                     throw Invalid(drop.Span);
                 }
+                CheckBackingInvalidation(drop.Variable, initialized, drop.Span);
                 initialized[drop.Variable] = false;
                 fieldMasks[drop.Variable] = 0;
+                return false;
+            case BoundDropSpan span:
+                if (!inCleanup || span.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                    || span.Variable >= initialized.Length || !declarations.Contains(span.Variable)
+                    || function.Variables[span.Variable].Type != PrimitiveType.TokenSpan)
+                {
+                    throw InvalidEffect(span.Span, "Ownership");
+                }
+                initialized[span.Variable] = false;
                 return false;
             case BoundDropConstructedFields partial:
                 if (!inCleanup || !function.IsConstructor || partial.Variable != 0
@@ -1666,6 +1713,7 @@ public static class SemanticVerifier
                 }
                 return false;
             case BoundAssignment assignment:
+                CheckBackingInvalidation(assignment.Variable, initialized, assignment.Span);
                 if (assignment.Variable < 0 || assignment.Variable >= initialized.Length
                     || (assignment.Variable < function.ParameterCount && !function.Variables[assignment.Variable].IsOut)
                     || (function.IsConstructor && assignment.Variable == 0)
@@ -1742,6 +1790,7 @@ public static class SemanticVerifier
                 }
                 return false;
             case BoundFieldAssignment fieldAssignment:
+                CheckBackingInvalidation(fieldAssignment.Variable, initialized, fieldAssignment.Span);
                 if (fieldAssignment.Variable < 0 || fieldAssignment.Variable >= initialized.Length
                     || (!function.Variables[fieldAssignment.Variable].IsMutable
                         && !ManagedClassTypes.IsClass(function.Variables[fieldAssignment.Variable].Type))
@@ -1836,6 +1885,10 @@ public static class SemanticVerifier
                     || (nestedWrite && (fieldMasks[fieldAssignment.Variable] & (1u << fieldAssignment.Field)) == 0))
                 {
                     throw Invalid();
+                }
+                if (targetField.Type == PrimitiveType.TokenSpan)
+                {
+                    VerifySpanFieldWrite(fieldAssignment, function, initialized);
                 }
                 fieldMasks[fieldAssignment.Variable] |= 1u << fieldAssignment.Field;
                 initialized[fieldAssignment.Variable] = fieldMasks[fieldAssignment.Variable]
@@ -2526,6 +2579,7 @@ public static class SemanticVerifier
         private readonly Dictionary<BoundExpression, byte> _canBeFacts;
         private readonly Dictionary<BoundExpression, byte> _flowFacts;
         internal Dictionary<BoundStatement, InitializationState>? StatementInputs { get; init; }
+        internal BackingDependencies? Dependencies { get; init; }
 
         internal InitializationState(int length)
             : this(length, new Dictionary<BoundExpression, byte>(ReferenceEqualityComparer.Instance),
@@ -2580,6 +2634,7 @@ public static class SemanticVerifier
         {
             var result = new InitializationState(Length, _canBeFacts, _flowFacts) {
                 StatementInputs = StatementInputs,
+                Dependencies = Dependencies,
             };
             CopyTo(result);
             return result;
@@ -2988,6 +3043,69 @@ public static class SemanticVerifier
                     throw Invalid(read.Span);
                 }
                 break;
+            case BoundSnapshotSpan snapshot:
+                if (snapshot.Type != PrimitiveType.TokenSpan
+                    || snapshot.Variable < 0 || snapshot.Variable >= initialized.Length
+                    || !initialized[snapshot.Variable]
+                    || (int)function.Variables[snapshot.Variable].Type < 100
+                    || (int)function.Variables[snapshot.Variable].Type - 100 >= program.Structures.Length
+                    || !TokenSpanContract.ValidSnapshot(program.Structures[(int)function.Variables[snapshot.Variable].Type - 100])
+                    || !TokenSpanContract.ValidTokenLayout(program.Structures)
+                    || snapshot.SourceBuffer < 0 || snapshot.SourceBuffer >= program.Buffers.Length
+                    || program.Buffers[snapshot.SourceBuffer].Name != "Source"
+                    || program.Buffers[snapshot.SourceBuffer].ElementType != PrimitiveType.Char16
+                    || program.Buffers[snapshot.SourceBuffer].IsWritable || function.IsNoThrow)
+                {
+                    throw InvalidEffect(snapshot.Span, "Ownership");
+                }
+                failures?.Add(initialized, fieldMasks);
+                break;
+            case BoundSpanLength length:
+                if (length.Type != TokenSpanContract.IndexCarrier)
+                {
+                    throw InvalidEffect(length.Span, "Ownership");
+                }
+                VerifySpanOperand(length.View, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth, failures);
+                break;
+            case BoundSpanRead spanRead:
+                VerifySpanOperand(spanRead.View, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth, failures);
+                if (spanRead.Index is null || spanRead.Index.Type != TokenSpanContract.IndexCarrier
+                    || !TokenSpanContract.ValidTokenLayout(program.Structures)
+                    || spanRead.Type != (PrimitiveType)(100 + TokenSpanContract.Find(program.Structures, TokenSpanContract.TokenName))
+                    || function.IsNoThrow)
+                {
+                    throw InvalidEffect(spanRead.Span, "Ownership");
+                }
+                var readBacking = BackingOf(spanRead.View, initialized.Dependencies, program, ref remaining, depth + 1);
+                initialized.Dependencies?.Staged.Add(readBacking);
+                try
+                {
+                    Expression(spanRead.Index, initialized, fieldMasks, declarations, function, program,
+                        ref remaining, depth + 1, failures);
+                }
+                finally
+                {
+                    if (initialized.Dependencies is BackingDependencies dependencies)
+                    {
+                        dependencies.Staged.RemoveAt(dependencies.Staged.Count - 1);
+                    }
+                }
+                failures?.Add(initialized, fieldMasks);
+                break;
+            case BoundSpanAdvance advance:
+                if (advance.Type != PrimitiveType.TokenSpan
+                    || function.DeclaringStruct != TokenSpanContract.CursorName || function.IsConstructor
+                    || function.IsStatic || !function.Variables[0].IsMutable || function.IsNoThrow
+                    || advance.View is not BoundFieldRead { Receiver: BoundRead { Variable: 0 }, Field: 0 })
+                {
+                    throw InvalidEffect(advance.Span, "Ownership");
+                }
+                VerifySpanOperand(advance.View, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth, failures);
+                failures?.Add(initialized, fieldMasks);
+                break;
             case BoundViewLength length:
                 if (length.Variable < 0 || length.Variable >= initialized.Length
                     || !initialized[length.Variable]
@@ -3060,6 +3178,7 @@ public static class SemanticVerifier
                 }
                 break;
             case BoundMove move:
+                CheckBackingInvalidation(move.Variable, initialized, move.Span);
                 if (!IsUnique(program, move.Type) || move.Variable < 0 || move.Variable >= initialized.Length
                     || (move.Variable == 0 && function.DeclaringStruct is not null && !function.IsStatic)
                     || !initialized[move.Variable] || move.Type != function.Variables[move.Variable].Type
@@ -3344,159 +3463,178 @@ public static class SemanticVerifier
                 var loanRoot = -1;
                 var loanOfInitializedField = false;
                 var reservedReceiver = -1;
-                for (var i = 0; i < call.Arguments.Length; i++)
+                var stagedDependencyCount = initialized.Dependencies?.Staged.Count ?? 0;
+                try
                 {
-                    var argument = call.Arguments[i];
-                    var parameterIndex = call.ParameterIndex(i);
-                    if (argumentParameters is not null)
+                    for (var i = 0; i < call.Arguments.Length; i++)
                     {
-                        if ((uint)parameterIndex >= (uint)call.Arguments.Length
-                            || argumentParameters[parameterIndex])
+                        var argument = call.Arguments[i];
+                        var parameterIndex = call.ParameterIndex(i);
+                        if (argumentParameters is not null)
                         {
-                            throw Invalid();
-                        }
-                        argumentParameters[parameterIndex] = true;
-                    }
-                    var parameterSlot = parameterIndex + (target.IsConstructor ? 1 : 0);
-                    if (reservedReceiver >= 0 && InvalidatesReservedOwner(argument, reservedReceiver,
-                        ref remaining, depth + 1))
-                    {
-                        throw InvalidEffect(argument.Span, "Ownership");
-                    }
-                    if (argument is BoundOutArgument output)
-                    {
-                        if (output.Variable < 0 || output.Variable >= initialized.Length
-                            || (output.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
-                                && (!function.Variables[output.Variable].IsOut || output.DeclaresVariable))
-                            || output.Type != function.Variables[output.Variable].Type
-                            || (output.DeclaresVariable && (!declarations.Add(output.Variable) || initialized[output.Variable]
-                                || function.Variables[output.Variable].IsInitializationLocal))
-                            || (!output.DeclaresVariable && !output.IsInit
-                                && !function.Variables[output.Variable].IsMutable)
-                            || (output.IsInit && !output.DeclaresVariable && !initialized.IsVacant(output.Variable))
-                            || (output.IsInit && !output.DeclaresVariable
-                                && !function.Variables[output.Variable].IsMutable
-                                && !function.Variables[output.Variable].IsInitializationLocal
-                                && initialized.HasRetiredValue(output.Variable))
-                            || output.IsInit != target.Variables[parameterSlot].IsInit)
-                        {
-                            throw Invalid();
-                        }
-                        if (!outTargets.Add(output.Variable))
-                        {
-                            throw InvalidEffect(output.Span, "Ownership");
-                        }
-                        initialized[output.Variable] = false;
-                        fieldMasks[output.Variable] = 0;
-                    }
-                    else
-                    {
-                        if (argument is BoundMutableReceiverLoan mutableLoan)
-                        {
-                            var bufferMutation = target.Intrinsic is BoundIntrinsic.BufferSet
-                                or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear;
-                            var structMutation = target.Intrinsic == BoundIntrinsic.None
-                                && target.DeclaringStruct is not null && !target.IsStatic
-                                && !target.IsConstructor && target.Variables[0].IsMutable
-                                && HasFields(program, mutableLoan.Type)
-                                && !ManagedClassTypes.IsClass(mutableLoan.Type);
-                            if (parameterIndex != 0 || (!bufferMutation && !structMutation)
-                                || mutableLoan.Variable < 0 || mutableLoan.Variable >= initialized.Length
-                                || (bufferMutation && mutableLoan.Type != PrimitiveType.OwnedInt32Buffer)
-                                || mutableLoan.Type != target.Variables[0].Type
-                                || function.Variables[mutableLoan.Variable].Type != mutableLoan.Type
-                                || !function.Variables[mutableLoan.Variable].IsMutable
-                                || !initialized[mutableLoan.Variable])
+                            if ((uint)parameterIndex >= (uint)call.Arguments.Length
+                                || argumentParameters[parameterIndex])
                             {
-                                throw InvalidEffect(mutableLoan.Span, "Ownership");
+                                throw Invalid();
                             }
-                            loanRoot = mutableLoan.Variable;
+                            argumentParameters[parameterIndex] = true;
                         }
-                        else if (argument is BoundMutableFieldLoan mutableField)
+                        var parameterSlot = parameterIndex + (target.IsConstructor ? 1 : 0);
+                        if (reservedReceiver >= 0 && InvalidatesReservedOwner(argument, reservedReceiver,
+                            ref remaining, depth + 1))
                         {
-                            var bufferMutation = target.Intrinsic is BoundIntrinsic.BufferSet
-                                or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear;
-                            if (parameterIndex != 0 || (target.Intrinsic != BoundIntrinsic.None && !bufferMutation)
-                                || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
-                                || !target.Variables[0].IsMutable || mutableField.Place is null
-                                || mutableField.Type != target.Variables[0].Type
-                                || mutableField.Place.Type != mutableField.Type
-                                || (bufferMutation && mutableField.Type != PrimitiveType.OwnedInt32Buffer))
-                            {
-                                throw InvalidEffect(mutableField.Span, "Ownership");
-                            }
-                            loanRoot = VerifyMutableFieldPlace(mutableField.Place, initialized,
-                                function, program, ref remaining, depth + 1, bufferMutation);
+                            throw InvalidEffect(argument.Span, "Ownership");
                         }
-                        else if (argument is BoundReceiverLoan loan)
+                        if (argument is BoundOutArgument output)
                         {
-                            if (parameterIndex != 0 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
-                                || loan.Variable < 0 || loan.Variable >= initialized.Length
-                                || loan.Type != target.Variables[0].Type || !IsUnique(program, loan.Type)
-                                || target.Variables[0].IsMutable
-                                || !initialized[loan.Variable]
-                                || function.Variables[loan.Variable].Type != loan.Type)
+                            CheckBackingInvalidation(output.Variable, initialized, output.Span);
+                            if (output.Variable < 0 || output.Variable >= initialized.Length
+                                || (output.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                                    && (!function.Variables[output.Variable].IsOut || output.DeclaresVariable))
+                                || output.Type != function.Variables[output.Variable].Type
+                                || (output.DeclaresVariable && (!declarations.Add(output.Variable) || initialized[output.Variable]
+                                    || function.Variables[output.Variable].IsInitializationLocal))
+                                || (!output.DeclaresVariable && !output.IsInit
+                                    && !function.Variables[output.Variable].IsMutable)
+                                || (output.IsInit && !output.DeclaresVariable && !initialized.IsVacant(output.Variable))
+                                || (output.IsInit && !output.DeclaresVariable
+                                    && !function.Variables[output.Variable].IsMutable
+                                    && !function.Variables[output.Variable].IsInitializationLocal
+                                    && initialized.HasRetiredValue(output.Variable))
+                                || output.IsInit != target.Variables[parameterSlot].IsInit)
                             {
-                                throw InvalidEffect(loan.Span, "Ownership");
+                                throw Invalid();
                             }
-                            loanRoot = loan.Variable;
-                        }
-                        else if (argument is BoundFieldLoan fieldLoan)
-                        {
-                            if (parameterIndex != 0 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
-                                || fieldLoan.Place is null
-                                || fieldLoan.Type != target.Variables[0].Type
-                                || target.Variables[0].IsMutable
-                                || fieldLoan.Place.Type != fieldLoan.Type || !IsUnique(program, fieldLoan.Type))
+                            if (!outTargets.Add(output.Variable))
                             {
-                                throw InvalidEffect(fieldLoan.Span, "Ownership");
+                                throw InvalidEffect(output.Span, "Ownership");
                             }
-                            loanRoot = VerifyUniqueFieldPlace(fieldLoan.Place, initialized, fieldMasks,
-                                function, program, ref remaining, depth + 1);
-                            loanOfInitializedField = true;
+                            initialized[output.Variable] = false;
+                            fieldMasks[output.Variable] = 0;
                         }
                         else
                         {
-                            if (IsUnique(program, argument.Type)
-                                && argument is not (BoundMove or BoundCall))
+                            if (argument is BoundMutableReceiverLoan mutableLoan)
                             {
-                                throw InvalidEffect(argument.Span, "Ownership");
+                                CheckBackingInvalidation(mutableLoan.Variable, initialized, mutableLoan.Span);
+                                var bufferMutation = target.Intrinsic is BoundIntrinsic.BufferSet
+                                    or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear;
+                                var structMutation = target.Intrinsic == BoundIntrinsic.None
+                                    && target.DeclaringStruct is not null && !target.IsStatic
+                                    && !target.IsConstructor && target.Variables[0].IsMutable
+                                    && HasFields(program, mutableLoan.Type)
+                                    && !ManagedClassTypes.IsClass(mutableLoan.Type);
+                                if (parameterIndex != 0 || (!bufferMutation && !structMutation)
+                                    || mutableLoan.Variable < 0 || mutableLoan.Variable >= initialized.Length
+                                    || (bufferMutation && mutableLoan.Type != PrimitiveType.OwnedInt32Buffer)
+                                    || mutableLoan.Type != target.Variables[0].Type
+                                    || function.Variables[mutableLoan.Variable].Type != mutableLoan.Type
+                                    || !function.Variables[mutableLoan.Variable].IsMutable
+                                    || !initialized[mutableLoan.Variable])
+                                {
+                                    throw InvalidEffect(mutableLoan.Span, "Ownership");
+                                }
+                                loanRoot = mutableLoan.Variable;
                             }
-                            Expression(argument, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                            else if (argument is BoundMutableFieldLoan mutableField)
+                            {
+                                var bufferMutation = target.Intrinsic is BoundIntrinsic.BufferSet
+                                    or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear;
+                                if (parameterIndex != 0 || (target.Intrinsic != BoundIntrinsic.None && !bufferMutation)
+                                    || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
+                                    || !target.Variables[0].IsMutable || mutableField.Place is null
+                                    || mutableField.Type != target.Variables[0].Type
+                                    || mutableField.Place.Type != mutableField.Type
+                                    || (bufferMutation && mutableField.Type != PrimitiveType.OwnedInt32Buffer))
+                                {
+                                    throw InvalidEffect(mutableField.Span, "Ownership");
+                                }
+                                loanRoot = VerifyMutableFieldPlace(mutableField.Place, initialized,
+                                    function, program, ref remaining, depth + 1, bufferMutation);
+                                CheckBackingInvalidation(loanRoot, initialized, mutableField.Span);
+                            }
+                            else if (argument is BoundReceiverLoan loan)
+                            {
+                                if (parameterIndex != 0 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
+                                    || loan.Variable < 0 || loan.Variable >= initialized.Length
+                                    || loan.Type != target.Variables[0].Type || !IsUnique(program, loan.Type)
+                                    || target.Variables[0].IsMutable
+                                    || !initialized[loan.Variable]
+                                    || function.Variables[loan.Variable].Type != loan.Type)
+                                {
+                                    throw InvalidEffect(loan.Span, "Ownership");
+                                }
+                                loanRoot = loan.Variable;
+                            }
+                            else if (argument is BoundFieldLoan fieldLoan)
+                            {
+                                if (parameterIndex != 0 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
+                                    || fieldLoan.Place is null
+                                    || fieldLoan.Type != target.Variables[0].Type
+                                    || target.Variables[0].IsMutable
+                                    || fieldLoan.Place.Type != fieldLoan.Type || !IsUnique(program, fieldLoan.Type))
+                                {
+                                    throw InvalidEffect(fieldLoan.Span, "Ownership");
+                                }
+                                loanRoot = VerifyUniqueFieldPlace(fieldLoan.Place, initialized, fieldMasks,
+                                    function, program, ref remaining, depth + 1);
+                                loanOfInitializedField = true;
+                            }
+                            else
+                            {
+                                if (IsUnique(program, argument.Type)
+                                    && argument is not (BoundMove or BoundCall))
+                                {
+                                    throw InvalidEffect(argument.Span, "Ownership");
+                                }
+                                Expression(argument, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                            }
+                        }
+                        if (parameterIndex == 0 && loanRoot >= 0)
+                        {
+                            reservedReceiver = loanRoot;
+                        }
+                        if (argument.Type != target.Variables[parameterSlot].Type)
+                        {
+                            throw Invalid();
+                        }
+                        if ((argument is BoundOutArgument)
+                            != target.Variables[parameterSlot].IsOut)
+                        {
+                            throw Invalid();
+                        }
+                        if (initialized.Dependencies is BackingDependencies dependencies
+                            && TokenSpanContract.IsDependent(argument.Type, program.Structures))
+                        {
+                            dependencies.Staged.Add(BackingOf(argument, dependencies, program, ref remaining, depth + 1));
                         }
                     }
-                    if (parameterIndex == 0 && loanRoot >= 0)
+                    if (loanRoot >= 0 && !initialized[loanRoot]
+                        && !(loanOfInitializedField && function.IsConstructor && loanRoot == 0))
                     {
-                        reservedReceiver = loanRoot;
+                        throw InvalidEffect(call.Span, "Ownership");
                     }
-                    if (argument.Type != target.Variables[parameterSlot].Type)
+                    if (!target.IsNoThrow)
                     {
-                        throw Invalid();
+                        failures?.Add(initialized, fieldMasks);
                     }
-                    if ((argument is BoundOutArgument)
-                        != target.Variables[parameterSlot].IsOut)
+                    foreach (var output in outTargets)
                     {
-                        throw Invalid();
+                        if (target.ReturnType == PrimitiveType.Bool)
+                        {
+                            initialized.MarkConditional(output);
+                        }
+                        else
+                        {
+                            initialized[output] = true;
+                        }
                     }
                 }
-                if (loanRoot >= 0 && !initialized[loanRoot]
-                    && !(loanOfInitializedField && function.IsConstructor && loanRoot == 0))
+                finally
                 {
-                    throw InvalidEffect(call.Span, "Ownership");
-                }
-                if (!target.IsNoThrow)
-                {
-                    failures?.Add(initialized, fieldMasks);
-                }
-                foreach (var output in outTargets)
-                {
-                    if (target.ReturnType == PrimitiveType.Bool)
+                    if (initialized.Dependencies is BackingDependencies dependencies)
                     {
-                        initialized.MarkConditional(output);
-                    }
-                    else
-                    {
-                        initialized[output] = true;
+                        dependencies.Staged.RemoveRange(stagedDependencyCount, dependencies.Staged.Count - stagedDependencyCount);
                     }
                 }
                 break;
@@ -3508,7 +3646,7 @@ public static class SemanticVerifier
     private static bool ValidType(PrimitiveType type, bool allowVoid, BoundProgram program) =>
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
             or PrimitiveType.Float32 or PrimitiveType.Float64
-            or PrimitiveType.Char16 or PrimitiveType.Bool or PrimitiveType.OwnedInt32Buffer
+            or PrimitiveType.Char16 or PrimitiveType.Bool or PrimitiveType.OwnedInt32Buffer or PrimitiveType.TokenSpan
             or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode
             || (allowVoid && type == PrimitiveType.Void)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length)
@@ -3625,6 +3763,10 @@ public static class SemanticVerifier
             BoundFieldRead field => InvalidatesReservedOwner(field.Receiver, variable, ref remaining, depth + 1),
             BoundBufferRead buffer => InvalidatesReservedOwner(buffer.Index, variable, ref remaining, depth + 1),
             BoundViewRead view => InvalidatesReservedOwner(view.Index, variable, ref remaining, depth + 1),
+            BoundSpanLength length => InvalidatesReservedOwner(length.View, variable, ref remaining, depth + 1),
+            BoundSpanRead read => InvalidatesReservedOwner(read.View, variable, ref remaining, depth + 1)
+                || InvalidatesReservedOwner(read.Index, variable, ref remaining, depth + 1),
+            BoundSpanAdvance advance => InvalidatesReservedOwner(advance.View, variable, ref remaining, depth + 1),
             _ => false,
         };
     }
@@ -3977,6 +4119,18 @@ public static class SemanticVerifier
             case BoundViewRead view:
                 VacateNestedOutputs(view.Index, state, ref remaining);
                 break;
+            case BoundSpanLength length:
+                VacateNestedOutputs(length.View, state, ref remaining);
+                break;
+            case BoundSpanRead read:
+                VacateNestedOutputs(read.View, state, ref remaining);
+                VacateNestedOutputs(read.Index, state, ref remaining);
+                break;
+            case BoundSpanAdvance advance:
+                VacateNestedOutputs(advance.View, state, ref remaining);
+                break;
+            case BoundSnapshotSpan:
+                break;
             case BoundViewLength:
             case BoundConstant:
             case BoundNull:
@@ -4046,6 +4200,11 @@ public static class SemanticVerifier
             BoundFieldRead field => FlowFacts(field.Receiver, flowFacts, ref remaining),
             BoundBufferRead buffer => FlowFacts(buffer.Index, flowFacts, ref remaining),
             BoundViewRead view => FlowFacts(view.Index, flowFacts, ref remaining),
+            BoundSpanLength length => FlowFacts(length.View, flowFacts, ref remaining),
+            BoundSpanRead read => AddFlowFact(AddFlowFact(0, read.View, flowFacts, ref remaining),
+                read.Index, flowFacts, ref remaining),
+            BoundSpanAdvance advance => FlowFacts(advance.View, flowFacts, ref remaining),
+            BoundSnapshotSpan => 0,
             BoundViewLength or BoundConstant or BoundNull or BoundRead or BoundReceiverLoan
                 or BoundMutableReceiverLoan or BoundMutableFieldLoan or BoundFieldLoan => 0,
             _ => AllFlowFacts,

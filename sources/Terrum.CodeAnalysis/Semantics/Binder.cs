@@ -271,7 +271,7 @@ internal sealed partial class Binder
                         }
                         continue;
                     }
-                    if (qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
+                    if (name == "Span" || qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
                         or "MutableInt32BufferView"
                         || name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
                     {
@@ -567,6 +567,7 @@ internal sealed partial class Binder
                 DeclaringStruct = signature.StructName is null ? null
                    : (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".") + signature.StructName,
                 PropertyName = signature.PropertyName,
+                CapturedParameters = signature.CapturedParameters,
             });
         }
 
@@ -765,6 +766,11 @@ internal sealed partial class Binder
                 || ManagedClassTypes.IsManaged(type))
             {
                 Report("TRM3023", "A native buffer view or managed handle cannot be stored in an inline struct.", field.Span);
+            }
+            if (type == PrimitiveType.TokenSpan && (qualified != TokenSpanContract.CursorName || !isUnique)
+                || TokenSpanContract.IsCursor(type, _structs))
+            {
+                Report("TRM3023", "Stored span dependencies are limited to the compilation-local TokenCursor field.", field.Span);
             }
             if (IsStruct(type) && !_laidOut.Contains((int)type - 100))
             {
@@ -1217,6 +1223,7 @@ internal sealed partial class Binder
         var isCleanup = false;
         var isConstEval = false;
         var doesNotReturn = false;
+        SyntaxNode? captures = null;
         var accessModifiers = 0;
         for (var index = 0; index < modifierCount; index++)
         {
@@ -1242,6 +1249,11 @@ internal sealed partial class Binder
                     && !isConstEval)
                 {
                     isConstEval = true;
+                }
+                else if (attribute.Children[1] is SyntaxTokenElement { Token.Text: "Captures" }
+                    && captures is null)
+                {
+                    captures = attribute;
                 }
                 else
                 {
@@ -1367,7 +1379,8 @@ internal sealed partial class Binder
         {
             Report("TRM3007", "A getter must return a supported by-value Copy type.", declaration.Span);
         }
-        if (returnType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
+        if (returnType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
+            || !constructor && TokenSpanContract.IsDependent(returnType, _structs))
         {
             Report("TRM3023", "A native buffer view cannot be returned.", returnNode!.Span);
         }
@@ -1445,6 +1458,10 @@ internal sealed partial class Binder
             {
                 Report("TRM3011", "Managed-handle init ref parameters are compilation-private.", parameter.Span);
             }
+            if ((isInit || isOut) && TokenSpanContract.IsDependent(type, _structs))
+            {
+                Report("TRM3023", "Dependency-bearing span and cursor outputs are compilation-local and unsupported.", parameter.Span);
+            }
             if (isConstEval && (isOut || isInit || !ConstEvalScalar(type)))
             {
                 Report("TRM3024", "ConstEval parameters must be non-output scalar values.", parameter.Span);
@@ -1472,6 +1489,41 @@ internal sealed partial class Binder
         var qualifiedName = (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".")
             + (containingType is null ? "" : containingType + ".")
             + (constructor ? "#ctor" : property ? "#get:" + nameText : nameText);
+        ImmutableArray<int> capturedParameters = [];
+        if (captures is not null)
+        {
+            if (!constructor || returnType == PrimitiveType.Void
+                || !TokenSpanContract.IsCursor(returnType, _structs)
+                || declared.Count != 1 || declared[0].Type != PrimitiveType.TokenSpan || declared[0].IsOut
+                || captures.Children is not [
+                    SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
+                    SyntaxTokenElement { Token.Text: "Captures" },
+                    SyntaxTokenElement { Token.Kind: TokenKind.OpenParen },
+                    SyntaxTokenElement { Token.Text: "nameof" },
+                    SyntaxTokenElement { Token.Kind: TokenKind.OpenParen },
+                    SyntaxTokenElement { Token.Kind: TokenKind.Identifier } selector,
+                    SyntaxTokenElement { Token.Kind: TokenKind.CloseParen },
+                    SyntaxTokenElement { Token.Kind: TokenKind.CloseParen },
+                    SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket }]
+                || selector.Token.Name != declared[0].Name)
+            {
+                Report("TRM3023", "Captures requires nameof of the sole Span<Token> input of TokenCursor's constructor.",
+                    captures.Span);
+            }
+            else
+            {
+                capturedParameters = [1];
+            }
+        }
+        if (constructor && TokenSpanContract.IsCursor(returnType, _structs) && capturedParameters.IsEmpty)
+        {
+            Report("TRM3023", "TokenCursor construction must declare its checked backing dependency capture.", declaration.Span);
+        }
+        if (containingType is not null && Qualify(containingType) == TokenSpanContract.SnapshotName
+            && nameText == "AsSpan")
+        {
+            Report("TRM3003", "TokenSnapshot.AsSpan is a compiler-owned compilation-local projection.", declaration.Span);
+        }
         if (!_functions.TryAdd(qualifiedName, _signatures.Count))
         {
             Report("TRM3003", $"Duplicate function '{nameToken.Text}'; overloads are not supported.", nameToken.Span);
@@ -1487,6 +1539,7 @@ internal sealed partial class Binder
             PropertyName = property ? nameText : null,
             IsConstEval = isConstEval,
             RequiresUnsafeCaller = requiresUnsafeCaller,
+            CapturedParameters = capturedParameters,
         });
     }
 
@@ -1496,6 +1549,30 @@ internal sealed partial class Binder
         var writable = node.Children[0] is SyntaxTokenElement { Token.Kind: TokenKind.WriteKeyword };
         var optional = node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.Question };
         var typeArgumentNodes = node.Children.OfType<SyntaxNode>().ToArray();
+        if (name is "Span" or "Terrum.Span")
+        {
+            if (typeArgumentNodes.Length != 1 || writable || optional
+                || node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
+            {
+                Report("TRM3005", "The compilation-local span profile requires readonly Span<Token>.", node.Span);
+                return PrimitiveType.Int32;
+            }
+            var element = BindType(typeArgumentNodes[0], allowVoid: false);
+            if (!IsStruct(element) || _structs[(int)element - 100].Name != TokenSpanContract.TokenName)
+            {
+                Report("TRM3005", "Only the closed Copy Token span is available in this provisional profile.", node.Span);
+                return PrimitiveType.Int32;
+            }
+            var context = _tree;
+            DeclareStruct((int)element - 100);
+            SetContext(context);
+            if (!TokenSpanContract.ValidTokenLayout(_structs))
+            {
+                Report("TRM3005", "Token spans require the verified 0/4/8 field offsets, 12-byte stride and four-byte alignment.",
+                    node.Span);
+            }
+            return PrimitiveType.TokenSpan;
+        }
         PrimitiveType? type = null;
         var resolution = DeclaredTypeResolution.Missing;
         if (TryGetAliasTypeArgument(name, out var aliasType))
@@ -1920,6 +1997,12 @@ internal sealed partial class Binder
                     new BoundBlock([new BoundDrop(local.Variable, cleanupFunction, block.Span)], block.Span),
                     block.Span));
             }
+            if (bound[index] is BoundLocal span && span.Initializer.Type == PrimitiveType.TokenSpan)
+            {
+                bound = bound[..(index + 1)].Add(new BoundTryFinally(
+                    new BoundBlock(bound[(index + 1)..], block.Span),
+                    new BoundBlock([new BoundDropSpan(span.Variable, block.Span)], block.Span), block.Span));
+            }
             if (bound[index] is BoundVacantLocal vacant && IsUnique(_variables[vacant.Variable].Type))
             {
                 var method = CleanupMethod(_variables[vacant.Variable].Type);
@@ -2091,6 +2174,10 @@ internal sealed partial class Binder
                 if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
                 {
                     Report("TRM3023", "Native buffer views require an initialized lexical owner loan.", node.Span);
+                }
+                if (TokenSpanContract.IsDependent(type, _structs))
+                {
+                    Report("TRM3023", "Span and cursor bindings require a complete initializer in this provisional profile.", node.Span);
                 }
                 var slot = AddVariable(name.Name, type, false, name.Span);
                 _variables[slot] = _variables[slot] with { IsInitializationLocal = true };
@@ -2960,6 +3047,11 @@ internal sealed partial class Binder
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Name;
                 var receiverNode = (SyntaxNode)node.Children[0];
                 var receiverType = KnownType(receiverNode);
+                if (receiverType == PrimitiveType.TokenSpan && member == "Length")
+                {
+                    expression = new BoundSpanLength(BindExpression(receiverNode, PrimitiveType.TokenSpan), node.Span);
+                    break;
+                }
                 if (_currentStruct is not null
                     && _primitiveBackingFields.TryGetValue(_currentStruct, out var backing)
                     && member == backing
@@ -3229,6 +3321,14 @@ internal sealed partial class Binder
             }
 
             case SyntaxKind.IndexExpression:
+                if (KnownType((SyntaxNode)node.Children[0]) == PrimitiveType.TokenSpan)
+                {
+                    expression = new BoundSpanRead(
+                        BindExpression((SyntaxNode)node.Children[0], PrimitiveType.TokenSpan),
+                        BindExpression((SyntaxNode)node.Children[2], TokenSpanContract.IndexCarrier),
+                        (PrimitiveType)(100 + TokenSpanContract.Find(_structs, TokenSpanContract.TokenName)), node.Span);
+                    break;
+                }
             {
                 if (((SyntaxNode)node.Children[2]).Kind == SyntaxKind.SliceRangeExpression)
                 {
@@ -3503,6 +3603,45 @@ internal sealed partial class Binder
             var left = (SyntaxNode)callee.Children[0];
             var member = ((SyntaxTokenElement)callee.Children[2]).Token.Name;
             var type = KnownType(left);
+            if (member == "AsSpan" && type is PrimitiveType snapshot && IsStruct(snapshot)
+                && _structs[(int)snapshot - 100].Name == TokenSpanContract.SnapshotName)
+            {
+                var arguments = (SyntaxNode)node.Children[1];
+                if (arguments.Children.OfType<SyntaxNode>().Any()
+                    || BindReceiverLoan(left, snapshot) is not BoundReceiverLoan loan
+                    || !TokenSpanContract.ValidSnapshot(_structs[(int)snapshot - 100])
+                    || !TokenSpanContract.ValidTokenLayout(_structs))
+                {
+                    Report("TRM3023", "AsSpan requires a named validated TokenSnapshot and the closed Copy Token layout.", node.Span);
+                    return ErrorExpression(node.Span);
+                }
+                var source = -1;
+                for (var index = 0; index < _buffers.Length; index++)
+                {
+                    if (_buffers[index].Name == "Source" && _buffers[index].ElementType == PrimitiveType.Char16
+                        && !_buffers[index].IsWritable)
+                    {
+                        source = index;
+                    }
+                }
+                if (source < 0)
+                {
+                    Report("TRM3023", "AsSpan requires the immutable scanner Source grant to validate record ranges.", node.Span);
+                    return ErrorExpression(node.Span);
+                }
+                return new BoundSnapshotSpan(loan.Variable, source, node.Span);
+            }
+            if (type == PrimitiveType.TokenSpan)
+            {
+                if (member != "AdvanceOne" || _currentStruct is null
+                    || Qualify(_currentStruct) != TokenSpanContract.CursorName
+                    || ((SyntaxNode)node.Children[1]).Children.OfType<SyntaxNode>().Any())
+                {
+                    Report("TRM3023", "AdvanceOne is restricted to the compilation-local TokenCursor remaining-view update.", node.Span);
+                    return ErrorExpression(node.Span);
+                }
+                return new BoundSpanAdvance(BindExpression(left, PrimitiveType.TokenSpan), node.Span);
+            }
             if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
             {
                 var arguments = ((SyntaxNode)node.Children[1]).Children.OfType<SyntaxNode>().ToArray();
@@ -4196,6 +4335,12 @@ internal sealed partial class Binder
                     var left = (SyntaxNode)callee.Children[0];
                     var member = ((SyntaxTokenElement)callee.Children[2]).Token.Name;
                     var receiverType = KnownType(left);
+                    if (receiverType == PrimitiveType.TokenSpan && member == "AdvanceOne"
+                        || member == "AsSpan" && receiverType is PrimitiveType snapshot
+                            && IsStruct(snapshot) && _structs[(int)snapshot - 100].Name == TokenSpanContract.SnapshotName)
+                    {
+                        return PrimitiveType.TokenSpan;
+                    }
                     if (receiverType == PrimitiveType.OwnedInt32Buffer && member is "Slice" or "SliceMutable")
                     {
                         return member == "Slice" ? PrimitiveType.ReadonlyInt32BufferView
@@ -4234,6 +4379,10 @@ internal sealed partial class Binder
                 var receiver = (SyntaxNode)node.Children[0];
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Name;
                 var receiverType = KnownType(receiver);
+                if (receiverType == PrimitiveType.TokenSpan && member == "Length")
+                {
+                    return TokenSpanContract.IndexCarrier;
+                }
                 if (_currentStruct is not null
                     && _primitiveBackingFields.TryGetValue(_currentStruct, out var backing)
                     && member == backing && receiverType is PrimitiveType primitive
@@ -4288,6 +4437,10 @@ internal sealed partial class Binder
                 return null;
             }
             case SyntaxKind.IndexExpression:
+                if (KnownType((SyntaxNode)node.Children[0]) == PrimitiveType.TokenSpan)
+                {
+                    return (PrimitiveType)(100 + TokenSpanContract.Find(_structs, TokenSpanContract.TokenName));
+                }
                 return TryFindBuffer((SyntaxNode)node.Children[0], out var buffer)
                     ? ((SyntaxNode)node.Children[2]).Kind == SyntaxKind.SliceRangeExpression
                         ? null : _buffers[buffer].ElementType
@@ -4438,6 +4591,7 @@ internal sealed partial class Binder
         PrimitiveType.OwnedInt32Buffer => NativeBufferIntrinsics.TypeName,
         PrimitiveType.ReadonlyInt32BufferView => "ReadonlyInt32BufferView",
         PrimitiveType.MutableInt32BufferView => "MutableInt32BufferView",
+        PrimitiveType.TokenSpan => "Span<Token>",
         PrimitiveType.ManagedNode => "ManagedNode",
         PrimitiveType.WriteManagedNode => "write ManagedNode",
         PrimitiveType.OptionalManagedNode => "ManagedNode?",
@@ -4477,5 +4631,6 @@ internal sealed partial class Binder
         internal bool IsClassConstructor { get; init; }
         internal int ClassConstructor { get; init; } = -1;
         internal bool IsConstEval { get; init; }
+        internal ImmutableArray<int> CapturedParameters { get; init; } = [];
     }
 }

@@ -355,6 +355,15 @@ internal sealed partial class Binder
                 return buffer with { Index = ResolveConstExpression(buffer.Index, locals, functions, variableCount) };
             case BoundViewRead view:
                 return view with { Index = ResolveConstExpression(view.Index, locals, functions, variableCount) };
+            case BoundSpanLength length:
+                return length with { View = ResolveConstExpression(length.View, locals, functions, variableCount) };
+            case BoundSpanRead read:
+                return read with {
+                    View = ResolveConstExpression(read.View, locals, functions, variableCount),
+                    Index = ResolveConstExpression(read.Index, locals, functions, variableCount),
+                };
+            case BoundSpanAdvance advance:
+                return advance with { View = ResolveConstExpression(advance.View, locals, functions, variableCount) };
             case BoundOptionalLift lift:
                 return lift with { Value = ResolveConstExpression(lift.Value, locals, functions, variableCount) };
             case BoundReadonlyProjection projection:

@@ -292,6 +292,13 @@ internal sealed class Parser
             {
                 attribute.Add(ExpectAttached(TokenKind.OpenParen));
                 attribute.Add(Expect(TokenKind.Identifier));
+                if (Current.Kind == TokenKind.OpenParen
+                    && attribute[1] is SyntaxTokenElement { Token.Text: "Captures" })
+                {
+                    attribute.Add(ExpectAttached(TokenKind.OpenParen));
+                    attribute.Add(Expect(TokenKind.Identifier));
+                    attribute.Add(Expect(TokenKind.CloseParen));
+                }
                 attribute.Add(Expect(TokenKind.CloseParen));
             }
             attribute.Add(Expect(TokenKind.CloseBracket));

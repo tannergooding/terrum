@@ -115,6 +115,7 @@ public static partial class ModuleCompiler
         bool allowManagedParticipant = false)
     {
         ArgumentNullException.ThrowIfNull(program);
+        RejectCompilationLocalSpans(program);
         SemanticVerifier.VerifyReferences(program);
         if (!allowManagedParticipant)
         {

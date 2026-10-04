@@ -80,6 +80,7 @@ public static partial class ModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(exports);
+        RejectCompilationLocalSpans(program);
         SemanticVerifier.VerifyLibraryReferences(program);
         if (program.EntryPoint != -1 || !program.Buffers.IsDefaultOrEmpty
             || program.RuntimePolicy != dependencies.RuntimePolicy)

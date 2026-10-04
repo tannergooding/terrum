@@ -297,6 +297,25 @@ public sealed partial class ManagedScannerComponentTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task StandaloneTriviaBuilderRejectsInvalidTokenRecordsAsync(NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 count = Scan();
+                Host.Tokens[0] = -1;
+                if (TokenTriviaSnapshot.TryBuild(count, init var invalid)) { return 1; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("alpha", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task LexicalFailureLeavesOwnedTokenSnapshotVacantAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """

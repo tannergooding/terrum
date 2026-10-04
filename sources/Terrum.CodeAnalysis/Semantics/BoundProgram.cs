@@ -47,6 +47,8 @@ public enum PrimitiveType
     Float32,
     /// <summary>An IEEE-754 binary64 value stored as its raw 64-bit representation.</summary>
     Float64,
+    /// <summary>A compilation-local readonly descriptor of validated Copy token records, not a public ABI type.</summary>
+    TokenSpan,
 }
 
 /// <summary>Disjoint source-class type identifiers start above the complete inline-struct range.</summary>
@@ -240,7 +242,7 @@ public sealed record BoundClass(string Name, ImmutableArray<BoundStructField> Fi
     public bool IsMutable { get; init; }
 }
 
-/// <summary>A compact value type of at most sixteen bytes, with no references or aliases.</summary>
+/// <summary>A compact value type of at most sixteen bytes, with checked value fields or the compilation-local token cursor capture.</summary>
 public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> Fields, int Size)
 {
     /// <summary>Whether source requested private declaration-order natural layout.</summary>
@@ -330,6 +332,9 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 
     /// <summary>Source constructor called by a compiler-defined class factory, or -1.</summary>
     public int ClassConstructor { get; init; } = -1;
+
+    /// <summary>Constructor input slots whose backing dependencies must be forwarded before publication. Never persisted.</summary>
+    public ImmutableArray<int> CapturedParameters { get; init; } = [];
 }
 
 /// <summary>A parameter or local storage declaration.</summary>
@@ -478,6 +483,9 @@ public sealed record BoundDrop(int Variable, int CleanupFunction, TextSpan Span)
     public bool IsOutput { get; init; }
 }
 
+/// <summary>Retires a lexical span descriptor's dependency, without releasing its backing owner.</summary>
+public sealed record BoundDropSpan(int Variable, TextSpan Span) : BoundStatement(Span);
+
 /// <summary>Drops completed owning fields on checked exceptional constructor exit in reverse acquisition order.</summary>
 public sealed record BoundDropConstructedFields(int Variable, ImmutableArray<int> AcquisitionOrder, TextSpan Span) : BoundStatement(Span);
 
@@ -554,6 +562,22 @@ public sealed record BoundViewLength(int Variable, TextSpan Span) : BoundExpress
 
 /// <summary>Reads a checked element from an active lexical native buffer view.</summary>
 public sealed record BoundViewRead(int Variable, BoundExpression Index, TextSpan Span) : BoundExpression(PrimitiveType.Int32, Span);
+
+/// <summary>Validates a named TokenSnapshot's initialized records before publishing its readonly descriptor.</summary>
+public sealed record BoundSnapshotSpan(int Variable, int SourceBuffer, TextSpan Span)
+    : BoundExpression(PrimitiveType.TokenSpan, Span);
+
+/// <summary>Reads a descriptor's unsigned native-width count using the compilation target's integer carrier.</summary>
+public sealed record BoundSpanLength(BoundExpression View, TextSpan Span)
+    : BoundExpression(TokenSpanContract.IndexCarrier, Span);
+
+/// <summary>Checks an unsigned native-width index and copies one complete token record.</summary>
+public sealed record BoundSpanRead(BoundExpression View, BoundExpression Index, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span);
+
+/// <summary>The cursor-only nonempty remaining-view operation; all backing dependencies are preserved.</summary>
+public sealed record BoundSpanAdvance(BoundExpression View, TextSpan Span)
+    : BoundExpression(PrimitiveType.TokenSpan, Span);
 
 /// <summary>A synchronous readonly loan of an initialized owning field place.</summary>
 public sealed record BoundFieldLoan(BoundFieldRead Place, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);

@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Native;
 
@@ -141,7 +142,7 @@ internal static class PeImage
         var pe = 0x80;
         Write32(image, pe, 0x00004550);
         var coff = pe + 4;
-        Write16(image, coff, 0x8664);
+        Write16(image, coff, (int)NativeTargetProfile.CoffMachine);
         Write16(image, coff + 2, 4 + (readOnlyLength == 0 ? 0 : 1)
             + (writableLength == 0 ? 0 : 1) + (library ? 1 : 0));
         Write16(image, coff + 16, 0xF0);

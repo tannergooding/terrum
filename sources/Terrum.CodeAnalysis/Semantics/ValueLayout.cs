@@ -18,6 +18,7 @@ internal static class ValueLayout
         PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.OwnedInt32Buffer => 8,
         _ when ManagedClassTypes.IsManaged(type) => 8,
         PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView => 16,
+        PrimitiveType.TokenSpan => TokenSpanContract.DescriptorSize,
         PrimitiveType.Void => 0,
         _ when (int)type >= 100 && (int)type < ManagedClassTypes.First
             && (int)type - 100 < structures.Count => structures[(int)type - 100].Size,
@@ -33,6 +34,10 @@ internal static class ValueLayout
         }
         if ((int)type < 100)
         {
+            if (type == PrimitiveType.TokenSpan)
+            {
+                return NativeTargetProfile.PointerSize;
+            }
             return type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
                 ? 8 : Size(type, structures);
         }

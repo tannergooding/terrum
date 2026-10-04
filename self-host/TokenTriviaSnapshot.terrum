@@ -136,8 +136,8 @@ public unique struct TokenTriviaSnapshot
             int32 tokenKind = Host.Tokens[tokenOffset];
             int32 tokenStart = Host.Tokens[tokenOffset + 1];
             int32 tokenLength = Host.Tokens[tokenOffset + 2];
-            if (!IsValidScannerToken(index, tokenCount, previousEnd,
-                tokenKind, tokenStart, tokenLength))
+            if (tokenStart < previousEnd || tokenStart > Host.Source.Length
+                || tokenLength < 0 || tokenLength > Host.Source.Length - tokenStart)
             {
                 return false;
             }
@@ -176,7 +176,10 @@ public unique struct TokenTriviaSnapshot
             return false;
         }
 
-        mut TokenSnapshot scanned = new TokenSnapshot(move ownedTokens, tokenCount);
+        if (!TokenSnapshot.TryCreateValidated(move ownedTokens, tokenCount, init var scanned))
+        {
+            return false;
+        }
         mut TokenTriviaSnapshot leading = new TokenTriviaSnapshot(move ownedTrivia, triviaCount);
         tokens = move scanned;
         trivia = move leading;

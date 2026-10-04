@@ -262,7 +262,7 @@ public static class NativeEmitter
 
         bool PublicLayout(PrimitiveType type)
         {
-            if (ManagedClassTypes.IsManaged(type))
+            if (ManagedClassTypes.IsManaged(type) || TokenSpanContract.IsDependent(type, program.Structures))
             {
                 return false;
             }
@@ -1138,6 +1138,15 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(buffer.Index, ref maximumArguments);
             case BoundViewRead view:
                 return ExpressionSpills(view.Index, ref maximumArguments);
+            case BoundSnapshotSpan:
+                return 4;
+            case BoundSpanLength length:
+                return ExpressionSpills(length.View, ref maximumArguments);
+            case BoundSpanRead read:
+                return Math.Max(2, Math.Max(ExpressionSpills(read.View, ref maximumArguments),
+                    1 + ExpressionSpills(read.Index, ref maximumArguments)));
+            case BoundSpanAdvance advance:
+                return Math.Max(1, ExpressionSpills(advance.View, ref maximumArguments));
             case BoundBinary binary:
                 return Math.Max(3, Math.Max(ExpressionSpills(binary.Left, ref maximumArguments),
                     1 + ExpressionSpills(binary.Right, ref maximumArguments)));
@@ -1317,6 +1326,16 @@ internal sealed partial class PeCompiler
                 case BoundViewRead view:
                     VisitExpression(view.Index);
                     break;
+                case BoundSpanLength length:
+                    VisitExpression(length.View);
+                    break;
+                case BoundSpanRead read:
+                    VisitExpression(read.View);
+                    VisitExpression(read.Index);
+                    break;
+                case BoundSpanAdvance advance:
+                    VisitExpression(advance.View);
+                    break;
                 case BoundBufferRead buffer:
                     VisitExpression(buffer.Index);
                     break;
@@ -1419,9 +1438,11 @@ internal sealed partial class PeCompiler
             || target is PrimitiveType.Float32 or PrimitiveType.Float64;
     private static bool IsWide(PrimitiveType type) =>
         type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.OwnedInt32Buffer
+            or PrimitiveType.TokenSpan
             || ManagedClassTypes.IsManaged(type);
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
-    private bool IsIndirect(PrimitiveType type) => IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);
+    private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
+        || IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);
     private bool IsUnique(PrimitiveType type) =>
         type == PrimitiveType.OwnedInt32Buffer
             || (IsStruct(type) && _program.Structures[(int)type - 100].IsUnique);
@@ -2039,6 +2060,9 @@ internal sealed partial class PeCompiler
         }
         switch (statement)
         {
+            case BoundDropSpan span:
+                SetInitializationFlag(span.Variable, initialized: false);
+                break;
             case BoundRequire requirement:
                 Expression(requirement.Condition, 0);
                 _code.Bytes(0x85, 0xC0);
@@ -2901,6 +2925,30 @@ internal sealed partial class PeCompiler
                 break;
             case BoundViewLength length:
                 _code.Load(Slot(length.Variable) + 8);
+                break;
+            case BoundSnapshotSpan snapshot:
+                EmitSnapshotSpan(snapshot, spill);
+                break;
+            case BoundSpanLength length:
+                Expression(length.View, spill);
+                _code.LoadPointerField(TokenSpanContract.CountOffset, NativeTargetProfile.PointerSize);
+                break;
+            case BoundSpanRead read:
+                EmitSpanRead(read, spill);
+                break;
+            case BoundSpanAdvance advance:
+                Expression(advance.View, spill);
+                CopyToFrame(Spill(spill), TokenSpanContract.DescriptorSize);
+                _code.Load64(Spill(spill) + TokenSpanContract.CountOffset);
+                _code.Bytes(0x48, 0x85, 0xC0);
+                RuntimeBranch(0x84, 2);
+                _code.Bytes(0x48, 0x83, 0xE8, 0x01);
+                _code.Store64(Spill(spill) + TokenSpanContract.CountOffset);
+                _code.Load64(Spill(spill));
+                _code.Bytes(0x48, 0x83, 0xC0, TokenSpanContract.Stride);
+                RuntimeBranch(0x82, 0);
+                _code.Store64(Spill(spill));
+                _code.Address(Spill(spill));
                 break;
             case BoundViewRead viewRead:
                 Expression(viewRead.Index, spill);

@@ -82,6 +82,15 @@ public static partial class ModuleCompiler
 
     private static string RetainedNativeProfile(Module module)
     {
+        if (module.Structures.Any(static structure => structure.Fields.Any(static field => field.Type == PrimitiveType.TokenSpan))
+            || module.Functions.Any(static item => ContractContainsType(item.Contract, PrimitiveType.TokenSpan)
+                || item.Function is BoundFunction function
+                    && (function.ReturnType == PrimitiveType.TokenSpan
+                        || !function.CapturedParameters.IsDefaultOrEmpty
+                        || function.Variables.Any(static variable => variable.Type == PrimitiveType.TokenSpan))))
+        {
+            throw new ModuleFormatException("Compilation-local span and capture metadata cannot be persisted.");
+        }
         if (module.Structures.Any(static structure => structure.Fields.Any(
             static field => field.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView))
             || module.Functions.Any(static item => item.Import
@@ -368,6 +377,7 @@ public static partial class ModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(exports);
         ArgumentNullException.ThrowIfNull(program);
+        RejectCompilationLocalSpans(program);
         if (ContainsCallerUnsafeContracts(program))
         {
             throw new ModuleContractException("Caller-unsafe callable contracts are not supported in persisted semantic modules.");
@@ -485,6 +495,7 @@ public static partial class ModuleCompiler
     public static byte[] CreateConsumer(BoundProgram program, byte[] referenceProducer)
     {
         ArgumentNullException.ThrowIfNull(program);
+        RejectCompilationLocalSpans(program);
         if (ContainsCallerUnsafeContracts(program))
         {
             throw new ModuleContractException("Caller-unsafe callable contracts are not supported in persisted semantic modules.");
@@ -1532,8 +1543,17 @@ public static partial class ModuleCompiler
         return result.MoveToImmutable();
     }
 
+    private static void RejectCompilationLocalSpans(BoundProgram program)
+    {
+        if (TokenSpanContract.HasMetadata(program))
+        {
+            throw new ModuleContractException("Compilation-local span and capture metadata cannot be persisted.");
+        }
+    }
+
     private static byte[] Write(Module module, BoundProgram program)
     {
+        RejectCompilationLocalSpans(program);
         if (program.Functions.Any(static function => function.IndexedBody is not null))
         {
             throw new ModuleFormatException("Indexed executable Bodies cannot be serialized as structured module IR.");

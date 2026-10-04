@@ -1,0 +1,434 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Terrum.CodeAnalysis.Text;
+
+namespace Terrum.CodeAnalysis.Semantics;
+
+public static partial class SemanticVerifier
+{
+    private static bool VerifySpanContracts(BoundProgram program)
+    {
+        var hasSpans = TokenSpanContract.HasMetadata(program);
+        if (hasSpans && !TokenSpanContract.ValidTokenLayout(program.Structures))
+        {
+            throw InvalidEffect(default, "Ownership");
+        }
+        foreach (var structure in program.Structures)
+        {
+            if (structure.Fields.Any(static field => field.Type == PrimitiveType.TokenSpan)
+                && !TokenSpanContract.ValidCursor(structure)
+                || structure.Fields.Any(field => TokenSpanContract.IsCursor(field.Type, program.Structures)))
+            {
+                throw InvalidEffect(default, "Ownership");
+            }
+        }
+        foreach (var function in program.Functions)
+        {
+            if (function.CapturedParameters.IsDefault)
+            {
+                throw Invalid(function.Span);
+            }
+            var cursorConstructor = function.IsConstructor
+                && TokenSpanContract.IsCursor(function.ReturnType, program.Structures);
+            if (cursorConstructor)
+            {
+                if (function.CapturedParameters is not [1] || function.ParameterCount != 1
+                    || function.Variables.Length < 2 || function.Variables[1].Type != PrimitiveType.TokenSpan
+                    || function.Variables[1].IsOut || function.Variables[1].IsInit
+                    || function.IsExternal || function.Intrinsic != BoundIntrinsic.None)
+                {
+                    throw InvalidEffect(function.Span, "Ownership");
+                }
+            }
+            else if (!function.CapturedParameters.IsEmpty
+                || TokenSpanContract.IsDependent(function.ReturnType, program.Structures))
+            {
+                throw InvalidEffect(function.Span, "Ownership");
+            }
+            if (function.IndexedBody is not null && hasSpans)
+            {
+                throw InvalidEffect(function.Span, "Ownership");
+            }
+            for (var slot = 0; slot < function.Variables.Length; slot++)
+            {
+                var variable = function.Variables[slot];
+                if (TokenSpanContract.IsDependent(variable.Type, program.Structures)
+                    && (function.IsExternal || function.Intrinsic != BoundIntrinsic.None
+                        || variable.IsOut || variable.IsInit || variable.IsInitializationLocal
+                        || variable.Type == PrimitiveType.TokenSpan && variable.IsMutable))
+                {
+                    throw InvalidEffect(variable.Span, "Ownership");
+                }
+            }
+        }
+        return hasSpans;
+    }
+
+    private sealed class BackingDependencies(int length)
+    {
+        // A slot conservatively retains every source it can hold on any path. Liveness
+        // remains path-sensitive in InitializationState, including unwind replay.
+        internal HashSet<int>[] Sources { get; } = [.. Enumerable.Range(0, length).Select(static _ => new HashSet<int>())];
+        internal List<HashSet<int>> Staged { get; } = [];
+    }
+
+    private static BackingDependencies? CreateBackingDependencies(BoundFunction function, BoundProgram program, bool hasSpans)
+    {
+        if (!hasSpans)
+        {
+            return null;
+        }
+        var facts = new BackingDependencies(function.Variables.Length);
+        var edges = new List<int>[function.Variables.Length];
+        for (var slot = 0; slot < edges.Length; slot++)
+        {
+            edges[slot] = [];
+            if (slot < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                && !(slot == 0 && function.IsConstructor)
+                && TokenSpanContract.IsDependent(function.Variables[slot].Type, program.Structures))
+            {
+                // Negative roots denote incoming backing, not the callee's descriptor place.
+                _ = facts.Sources[slot].Add(~slot);
+            }
+        }
+        var remaining = MaximumAnalysisVisits;
+
+        void Source(int destination, BoundExpression expression, int depth)
+        {
+            Count(ref remaining, depth);
+            if (expression is null)
+            {
+                throw Invalid();
+            }
+            switch (expression)
+            {
+                case BoundSnapshotSpan snapshot:
+                    _ = facts.Sources[destination].Add(snapshot.Variable);
+                    break;
+                case BoundRead read:
+                    if ((uint)read.Variable >= (uint)edges.Length)
+                    {
+                        throw Invalid(read.Span);
+                    }
+                    edges[read.Variable].Add(destination);
+                    break;
+                case BoundMove move:
+                    if ((uint)move.Variable >= (uint)edges.Length)
+                    {
+                        throw Invalid(move.Span);
+                    }
+                    edges[move.Variable].Add(destination);
+                    break;
+                case BoundFieldRead field:
+                    Source(destination, field.Receiver, depth + 1);
+                    break;
+                case BoundSpanAdvance advance:
+                    Source(destination, advance.View, depth + 1);
+                    break;
+                case BoundCall call when (uint)call.Function < (uint)program.Functions.Length
+                    && program.Functions[call.Function].IsConstructor
+                    && TokenSpanContract.IsCursor(call.Type, program.Structures):
+                    if (call.Arguments.IsDefault || call.Arguments.Length != 1
+                        || !call.ArgumentParameterIndices.IsDefault && call.ArgumentParameterIndices is not [0])
+                    {
+                        throw Invalid(call.Span);
+                    }
+                    foreach (var capture in program.Functions[call.Function].CapturedParameters)
+                    {
+                        var parameter = capture - 1;
+                        if ((uint)parameter >= (uint)call.Arguments.Length)
+                        {
+                            throw Invalid(call.Span);
+                        }
+                        Source(destination, call.Arguments[call.ArgumentIndex(parameter)], depth + 1);
+                    }
+                    break;
+                case BoundConditional conditional:
+                    Source(destination, conditional.WhenTrue, depth + 1);
+                    Source(destination, conditional.WhenFalse, depth + 1);
+                    break;
+                default:
+                    throw InvalidEffect(expression.Span, "Ownership");
+            }
+        }
+
+        void Collect(BoundStatement statement, int depth)
+        {
+            Count(ref remaining, depth);
+            switch (statement)
+            {
+                case BoundLocal { Initializer: BoundExpression initializer } local
+                    when TokenSpanContract.IsDependent(initializer.Type, program.Structures):
+                    if ((uint)local.Variable >= (uint)facts.Sources.Length)
+                    {
+                        throw Invalid(local.Span);
+                    }
+                    Source(local.Variable, initializer, depth + 1);
+                    break;
+                case BoundAssignment { Value: BoundExpression value } assignment
+                    when TokenSpanContract.IsDependent(value.Type, program.Structures):
+                    if ((uint)assignment.Variable >= (uint)facts.Sources.Length)
+                    {
+                        throw Invalid(assignment.Span);
+                    }
+                    Source(assignment.Variable, value, depth + 1);
+                    break;
+                case BoundFieldAssignment { Value.Type: PrimitiveType.TokenSpan } field:
+                    if ((uint)field.Variable >= (uint)facts.Sources.Length)
+                    {
+                        throw Invalid(field.Span);
+                    }
+                    Source(field.Variable, field.Value, depth + 1);
+                    break;
+                case BoundBlock block:
+                    if (block.Statements.IsDefault)
+                    {
+                        throw Invalid(block.Span);
+                    }
+                    foreach (var child in block.Statements)
+                    {
+                        Collect(child, depth + 1);
+                    }
+                    break;
+                case BoundTryFinally region:
+                    Collect(region.Body, depth + 1);
+                    Collect(region.Finally, depth + 1);
+                    break;
+                case BoundTryCatch region:
+                    Collect(region.Body, depth + 1);
+                    Collect(region.Catch, depth + 1);
+                    if (region.Finally is not null)
+                    {
+                        Collect(region.Finally, depth + 1);
+                    }
+                    break;
+                case BoundUnsafe region:
+                    Collect(region.Body, depth + 1);
+                    break;
+                case BoundViewScope region:
+                    Collect(region.Body, depth + 1);
+                    break;
+                case BoundIf conditional:
+                    Collect(conditional.Then, depth + 1);
+                    if (conditional.Else is not null)
+                    {
+                        Collect(conditional.Else, depth + 1);
+                    }
+                    break;
+                case BoundWhile loop:
+                    Collect(loop.Body, depth + 1);
+                    if (loop.Iterator is not null)
+                    {
+                        Collect(loop.Iterator, depth + 1);
+                    }
+                    break;
+            }
+        }
+
+        Collect(function.Body, 0);
+        var pending = new Queue<int>(Enumerable.Range(0, edges.Length));
+        var queued = Enumerable.Repeat(true, edges.Length).ToArray();
+        while (pending.TryDequeue(out var source))
+        {
+            queued[source] = false;
+            foreach (var destination in edges[source])
+            {
+                Count(ref remaining, 0);
+                var before = facts.Sources[destination].Count;
+                facts.Sources[destination].UnionWith(facts.Sources[source]);
+                if (before != facts.Sources[destination].Count && !queued[destination])
+                {
+                    pending.Enqueue(destination);
+                    queued[destination] = true;
+                }
+            }
+        }
+        return facts;
+    }
+
+    private static HashSet<int> BackingOf(BoundExpression expression, BackingDependencies? facts,
+        BoundProgram program, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        if (facts is null)
+        {
+            throw InvalidEffect(expression.Span, "Ownership");
+        }
+        switch (expression)
+        {
+            case BoundSnapshotSpan snapshot:
+                return [snapshot.Variable];
+            case BoundRead read when (uint)read.Variable < (uint)facts.Sources.Length:
+                return facts.Sources[read.Variable];
+            case BoundMove move when (uint)move.Variable < (uint)facts.Sources.Length:
+                return facts.Sources[move.Variable];
+            case BoundReceiverLoan loan when (uint)loan.Variable < (uint)facts.Sources.Length:
+                return facts.Sources[loan.Variable];
+            case BoundMutableReceiverLoan loan when (uint)loan.Variable < (uint)facts.Sources.Length:
+                return facts.Sources[loan.Variable];
+            case BoundFieldRead field:
+                return BackingOf(field.Receiver, facts, program, ref remaining, depth + 1);
+            case BoundSpanAdvance advance:
+                return BackingOf(advance.View, facts, program, ref remaining, depth + 1);
+            case BoundCall call when (uint)call.Function < (uint)program.Functions.Length:
+                var result = new HashSet<int>();
+                foreach (var capture in program.Functions[call.Function].CapturedParameters)
+                {
+                    result.UnionWith(BackingOf(call.Arguments[call.ArgumentIndex(capture - 1)], facts,
+                        program, ref remaining, depth + 1));
+                }
+                return result;
+            case BoundConditional conditional:
+                var union = new HashSet<int>(BackingOf(conditional.WhenTrue, facts, program, ref remaining, depth + 1));
+                union.UnionWith(BackingOf(conditional.WhenFalse, facts, program, ref remaining, depth + 1));
+                return union;
+            default:
+                throw InvalidEffect(expression.Span, "Ownership");
+        }
+    }
+
+    private static void CheckBackingInvalidation(int owner, InitializationState state, TextSpan span)
+    {
+        if (state.Dependencies is not BackingDependencies facts)
+        {
+            return;
+        }
+        for (var slot = 0; slot < state.Length; slot++)
+        {
+            if ((state.Possibilities(slot) & 2) != 0 && facts.Sources[slot].Contains(owner))
+            {
+                throw InvalidEffect(span, "Ownership");
+            }
+        }
+        if (facts.Staged.Any(sources => sources.Contains(owner)))
+        {
+            throw InvalidEffect(span, "Ownership");
+        }
+    }
+
+    private static void VerifySpanOperand(BoundExpression view, InitializationState initialized, uint[] masks,
+        HashSet<int> declarations, BoundFunction function, BoundProgram program, ref int remaining, int depth,
+        FailureEdges? failures)
+    {
+        if (view is null || view.Type != PrimitiveType.TokenSpan)
+        {
+            throw InvalidEffect(function.Span, "Ownership");
+        }
+        Expression(view, initialized, masks, declarations, function, program, ref remaining, depth + 1, failures);
+        if (BackingOf(view, initialized.Dependencies, program, ref remaining, depth + 1).Count == 0)
+        {
+            throw InvalidEffect(view.Span, "Ownership");
+        }
+    }
+
+    private static void VerifySpanFieldWrite(BoundFieldAssignment write, BoundFunction function,
+        InitializationState initialized)
+    {
+        if (write.Variable != 0 || write.Field != 0 || !write.NestedFields.IsEmpty
+            || function.DeclaringStruct != TokenSpanContract.CursorName)
+        {
+            throw InvalidEffect(write.Span, "Ownership");
+        }
+        if (function.IsConstructor)
+        {
+            if (write.Value is not BoundRead { Variable: 1, Type: PrimitiveType.TokenSpan }
+                || function.CapturedParameters is not [1])
+            {
+                throw InvalidEffect(write.Span, "Ownership");
+            }
+        }
+        else if (write.Value is not BoundSpanAdvance {
+            View: BoundFieldRead { Receiver: BoundRead { Variable: 0 }, Field: 0 } })
+        {
+            // Replacing backing would require caller-visible capture effect metadata.
+            throw InvalidEffect(write.Span, "Ownership");
+        }
+        if (initialized.Dependencies is not BackingDependencies facts || facts.Sources[0].Count == 0)
+        {
+            throw InvalidEffect(write.Span, "Ownership");
+        }
+    }
+
+    private static void VerifySpanScopes(BoundFunction function)
+    {
+        var allowed = new HashSet<BoundDropSpan>(ReferenceEqualityComparer.Instance);
+        var actual = new HashSet<BoundDropSpan>(ReferenceEqualityComparer.Instance);
+        var pending = new Stack<(BoundStatement Statement, int Depth)>();
+        pending.Push((function.Body, 0));
+        var remaining = MaximumAnalysisVisits;
+        while (pending.TryPop(out var item))
+        {
+            Count(ref remaining, item.Depth);
+            switch (item.Statement)
+            {
+                case BoundBlock block:
+                    for (var index = 0; index < block.Statements.Length; index++)
+                    {
+                        var child = block.Statements[index];
+                        if (child is BoundLocal { Initializer.Type: PrimitiveType.TokenSpan } local)
+                        {
+                            if (index + 1 >= block.Statements.Length
+                                || block.Statements[index + 1] is not BoundTryFinally region
+                                || region.Finally.Statements is not [BoundDropSpan drop]
+                                || drop.Variable != local.Variable || !allowed.Add(drop)
+                                || index + 2 != block.Statements.Length
+                                    && !(index + 3 == block.Statements.Length
+                                        && block.Statements[^1] is BoundReturn terminal
+                                        && (function.ReturnType == PrimitiveType.Void && terminal.Value is null
+                                            || function.IsConstructor && terminal.Value is BoundRead { Variable: 0 })))
+                            {
+                                throw InvalidEffect(local.Span, "Ownership");
+                            }
+                        }
+                        pending.Push((child, item.Depth + 1));
+                    }
+                    break;
+                case BoundDropSpan drop:
+                    if (!actual.Add(drop))
+                    {
+                        throw InvalidEffect(drop.Span, "Ownership");
+                    }
+                    break;
+                case BoundTryFinally region:
+                    pending.Push((region.Body, item.Depth + 1));
+                    pending.Push((region.Finally, item.Depth + 1));
+                    break;
+                case BoundTryCatch region:
+                    pending.Push((region.Body, item.Depth + 1));
+                    pending.Push((region.Catch, item.Depth + 1));
+                    if (region.Finally is not null)
+                    {
+                        pending.Push((region.Finally, item.Depth + 1));
+                    }
+                    break;
+                case BoundUnsafe region:
+                    pending.Push((region.Body, item.Depth + 1));
+                    break;
+                case BoundViewScope region:
+                    pending.Push((region.Body, item.Depth + 1));
+                    break;
+                case BoundIf conditional:
+                    pending.Push((conditional.Then, item.Depth + 1));
+                    if (conditional.Else is not null)
+                    {
+                        pending.Push((conditional.Else, item.Depth + 1));
+                    }
+                    break;
+                case BoundWhile loop:
+                    pending.Push((loop.Body, item.Depth + 1));
+                    if (loop.Iterator is not null)
+                    {
+                        pending.Push((loop.Iterator, item.Depth + 1));
+                    }
+                    break;
+            }
+        }
+        if (!allowed.SetEquals(actual))
+        {
+            throw InvalidEffect(function.Span, "Ownership");
+        }
+    }
+}

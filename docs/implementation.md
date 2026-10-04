@@ -2362,6 +2362,26 @@ the first snapshot: do not interpret every multi-source diagnostic against it.
 Ambiguous entry points reject. These APIs provide bounded analysis/build
 operations, not general semantic queries, analyzers, generators or refactoring.
 
+### Compilation-local token cursor
+
+The hosted compiler supports readonly `Span<Token>` values only through the
+compiler-owned projection from a validated `TokenSnapshot`. The 16-byte
+Windows x64 descriptor carries an address and count; `uint64` supplies
+unsigned native-width index semantics for this slice without adding
+source-level `nuint` or general native-sized arithmetic. The compiler verifies
+the fixed 12-byte `Token` layout, the owned-buffer extent and alignment, and
+the snapshot's scanner-record and source-range invariants before publishing a
+view or reading a token.
+
+`[Captures(nameof(tokens))]` is limited to the `TokenCursor` constructor. Its
+stored dependency facts follow copies, moves, joins, staged arguments and
+exceptional cleanup; the mandatory verifier rejects owner invalidation while
+any dependent view or cursor remains live. Span values cannot escape through
+returns, outputs, arbitrary fields, semantic modules or native exports.
+General `Span<T>`, mutable/writable views, slicing, parser integration and
+source-level `nuint` remain unsupported. These hosted verifier/emitter
+capabilities do not extend the separate Terrum-authored scalar frontend.
+
 ## Executable TRRM scalar interchange
 
 `TrRmExecutableCompiler.Emit(BoundProgram, moduleIdentity)` produces actual

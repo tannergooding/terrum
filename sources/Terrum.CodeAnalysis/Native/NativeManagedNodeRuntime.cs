@@ -225,6 +225,16 @@ internal sealed partial class PeCompiler
                 case BoundViewRead view:
                     CollectExpression(view.Index, spill);
                     break;
+                case BoundSpanLength length:
+                    CollectExpression(length.View, spill);
+                    break;
+                case BoundSpanRead read:
+                    CollectExpression(read.View, spill);
+                    CollectExpression(read.Index, spill + 1);
+                    break;
+                case BoundSpanAdvance advance:
+                    CollectExpression(advance.View, spill);
+                    break;
                 case BoundBinary binary:
                     CollectExpression(binary.Left, spill);
                     if (ManagedClassTypes.IsManaged(binary.Left.Type))

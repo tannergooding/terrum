@@ -5,10 +5,36 @@ public unique struct TokenSnapshot
     private OwnedInt32Buffer _records;
     private int32 _count;
 
-    internal TokenSnapshot(OwnedInt32Buffer records, int32 count)
+    private TokenSnapshot(OwnedInt32Buffer records, int32 count)
     {
         _records = move records;
         _count = count;
+    }
+
+    internal static bool TryCreateValidated(OwnedInt32Buffer records, int32 count,
+        init ref<TokenSnapshot> result)
+    {
+        if (count < 1 || count > int32.MaxValue / 3 || records.Count != count * 3)
+        {
+            return false;
+        }
+
+        mut int32 previousEnd = 0;
+        for (mut int32 index = 0; index < count; index = index + 1)
+        {
+            int32 offset = index * 3;
+            int32 kind = records.Read(offset);
+            int32 start = records.Read(offset + 1);
+            int32 length = records.Read(offset + 2);
+            if (!IsValidScannerToken(index, count, previousEnd, kind, start, length))
+            {
+                return false;
+            }
+            previousEnd = start + length;
+        }
+
+        result = new TokenSnapshot(move records, count);
+        return true;
     }
 
     public int32 GetCount()
@@ -206,26 +232,18 @@ public unique struct TokenSnapshot
         }
 
         mut OwnedInt32Buffer records = move created;
-        mut int32 previousEnd = 0;
         for (mut int32 index = 0; index < count; index = index + 1)
         {
             int32 offset = index * 3;
             int32 kind = Host.Tokens[offset];
             int32 start = Host.Tokens[offset + 1];
             int32 length = Host.Tokens[offset + 2];
-            if (!IsValidScannerToken(index, count, previousEnd, kind, start, length))
-            {
-                return false;
-            }
-
             require records.TryAppend(kind);
             require records.TryAppend(start);
             require records.TryAppend(length);
-            previousEnd = start + length;
         }
 
-        result = new TokenSnapshot(move records, count);
-        return true;
+        return TryCreateValidated(move records, count, init result);
     }
 
     public static bool TryScan(init ref<TokenSnapshot> result)
