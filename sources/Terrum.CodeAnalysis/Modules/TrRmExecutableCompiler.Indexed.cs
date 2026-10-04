@@ -1219,9 +1219,40 @@ public static partial class TrRmExecutableCompiler
             return selected;
         }
 
-        private static int[] Arguments(int[] slots, int[] visible, int result = 0)
+        private static int[] Arguments(int[] slots, int[] visible, int result = 0,
+            int? expectedArgumentCount = null)
         {
-            var argumentCount = result != 0 ? 1 : 0;
+            var argumentCount = expectedArgumentCount ?? (result != 0 ? 1 : 0);
+            if (expectedArgumentCount is null)
+            {
+                for (var index = 0; index < visible.Length; index++)
+                {
+                    if (visible[index] != 0)
+                    {
+                        if (slots[index] == 0)
+                        {
+                            throw Unsupported("A target-visible scalar local is uninitialized.");
+                        }
+                        argumentCount++;
+                    }
+                }
+            }
+
+            if (argumentCount < 0)
+            {
+                throw Unsupported("Indexed edge argument inventory changed.");
+            }
+
+            var arguments = new int[argumentCount];
+            var argumentIndex = 0;
+            if (result != 0)
+            {
+                if (argumentIndex >= arguments.Length)
+                {
+                    throw Unsupported("Indexed edge argument inventory changed.");
+                }
+                arguments[argumentIndex++] = result;
+            }
             for (var index = 0; index < visible.Length; index++)
             {
                 if (visible[index] != 0)
@@ -1230,22 +1261,16 @@ public static partial class TrRmExecutableCompiler
                     {
                         throw Unsupported("A target-visible scalar local is uninitialized.");
                     }
-                    argumentCount++;
-                }
-            }
-
-            var arguments = new int[argumentCount];
-            var argumentIndex = 0;
-            if (result != 0)
-            {
-                arguments[argumentIndex++] = result;
-            }
-            for (var index = 0; index < visible.Length; index++)
-            {
-                if (visible[index] != 0)
-                {
+                    if (argumentIndex >= arguments.Length)
+                    {
+                        throw Unsupported("Indexed edge argument inventory changed.");
+                    }
                     arguments[argumentIndex++] = slots[index];
                 }
+            }
+            if (argumentIndex != arguments.Length)
+            {
+                throw Unsupported("Indexed edge argument inventory changed.");
             }
             return arguments;
         }
@@ -1256,7 +1281,9 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Unsupported("Unreachable source transfer cannot be represented in a compact Body.");
             }
-            _current.True = new IndexedEdge(target, Arguments(slots, visible));
+            int? expectedArgumentCount = target.Creation < 0 ? null : target.Parameters.Count;
+            _current.True = new IndexedEdge(target,
+                Arguments(slots, visible, expectedArgumentCount: expectedArgumentCount));
             _current = null;
         }
 
@@ -1303,11 +1330,13 @@ public static partial class TrRmExecutableCompiler
             _slots = Parameters(join, before, resultType);
             if (trueEnd is not null)
             {
-                trueEnd.True = new IndexedEdge(join, Arguments(trueSlots, before, trueResult));
+                trueEnd.True = new IndexedEdge(join, Arguments(trueSlots, before, trueResult,
+                    join.Parameters.Count));
             }
             if (falseEnd is not null)
             {
-                falseEnd.True = new IndexedEdge(join, Arguments(falseSlots, before, falseResult));
+                falseEnd.True = new IndexedEdge(join, Arguments(falseSlots, before, falseResult,
+                    join.Parameters.Count));
             }
             _current = join;
             return resultType is null ? 0 : join.Parameters[0];
@@ -1535,15 +1564,22 @@ public static partial class TrRmExecutableCompiler
                         var conditionBlock = _current ?? throw Unsupported("Post-tested condition did not produce a branch.");
                         var conditionSlots = (int[])_slots.Clone();
                         conditionBlock.Condition = postCondition;
-                        conditionBlock.True = new IndexedEdge(header, Arguments(conditionSlots, entrySlots));
-                        conditionBlock.False = new IndexedEdge(exit, Arguments(conditionSlots, entrySlots));
+                        conditionBlock.True = new IndexedEdge(header,
+                            Arguments(conditionSlots, entrySlots,
+                                expectedArgumentCount: header.Parameters.Count));
+                        conditionBlock.False = new IndexedEdge(exit,
+                            Arguments(conditionSlots, entrySlots,
+                                expectedArgumentCount: exit.Parameters.Count
+                                    - (loopRegion.Transfers.Count == 0 ? 0 : 1)));
                         loopRegion.ExitEdges.Add((conditionBlock, conditionBlock.False, 0));
                     }
                     else
                     {
                         var preTest = testBlock ?? throw Unsupported("Pre-tested condition block is missing.");
                         var falseEdge = new IndexedEdge(exit, Arguments(testSlots
-                            ?? throw Unsupported("Pre-tested condition slots are missing."), entrySlots));
+                            ?? throw Unsupported("Pre-tested condition slots are missing."), entrySlots,
+                            expectedArgumentCount: exit.Parameters.Count
+                                - (loopRegion.Transfers.Count == 0 ? 0 : 1)));
                         preTest.False = falseEdge;
                         loopRegion.ExitEdges.Add((preTest, falseEdge, 0));
                     }
