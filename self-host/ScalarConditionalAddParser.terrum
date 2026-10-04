@@ -1,7 +1,7 @@
 namespace Terrum.CodeAnalysis;
 
 bool TryParseScalarConditionalAddReturn(TokenSnapshot tokens,
-    out int32 scalarType, out SourceRange name)
+    init ref<int32> scalarType, init ref<SourceRange> name)
 {
     var spacing = tokens.GetScalarOperatorSpacingError();
     if (spacing.Length != 0)
@@ -86,9 +86,9 @@ bool TryParseScalarConditionalAddReturn(TokenSnapshot tokens,
 }
 
 bool TryEvaluateInt32ScalarConditionalAddReturn(TokenSnapshot tokens, bool condition,
-    int32 first, int32 second, out SourceRange name, out int32 result)
+    int32 first, int32 second, init ref<SourceRange> name, init ref<int32> result)
 {
-    if (!TryParseScalarConditionalAddReturn(move tokens, out var selected, out var foundName)
+    if (!TryParseScalarConditionalAddReturn(move tokens, init var selected, init var foundName)
         || selected != 1)
     {
         return false;
@@ -110,9 +110,9 @@ bool TryEvaluateInt32ScalarConditionalAddReturn(TokenSnapshot tokens, bool condi
 }
 
 bool TryEvaluateUInt32ScalarConditionalAddReturn(TokenSnapshot tokens, bool condition,
-    uint32 first, uint32 second, out SourceRange name, out uint32 result)
+    uint32 first, uint32 second, init ref<SourceRange> name, init ref<uint32> result)
 {
-    if (!TryParseScalarConditionalAddReturn(move tokens, out var selected, out var foundName)
+    if (!TryParseScalarConditionalAddReturn(move tokens, init var selected, init var foundName)
         || selected != 2)
     {
         return false;
@@ -134,9 +134,9 @@ bool TryEvaluateUInt32ScalarConditionalAddReturn(TokenSnapshot tokens, bool cond
 }
 
 bool TryEvaluateInt64ScalarConditionalAddReturn(TokenSnapshot tokens, bool condition,
-    int64 first, int64 second, out SourceRange name, out int64 result)
+    int64 first, int64 second, init ref<SourceRange> name, init ref<int64> result)
 {
-    if (!TryParseScalarConditionalAddReturn(move tokens, out var selected, out var foundName)
+    if (!TryParseScalarConditionalAddReturn(move tokens, init var selected, init var foundName)
         || selected != 3)
     {
         return false;
@@ -158,9 +158,9 @@ bool TryEvaluateInt64ScalarConditionalAddReturn(TokenSnapshot tokens, bool condi
 }
 
 bool TryEvaluateUInt64ScalarConditionalAddReturn(TokenSnapshot tokens, bool condition,
-    uint64 first, uint64 second, out SourceRange name, out uint64 result)
+    uint64 first, uint64 second, init ref<SourceRange> name, init ref<uint64> result)
 {
-    if (!TryParseScalarConditionalAddReturn(move tokens, out var selected, out var foundName)
+    if (!TryParseScalarConditionalAddReturn(move tokens, init var selected, init var foundName)
         || selected != 4)
     {
         return false;
