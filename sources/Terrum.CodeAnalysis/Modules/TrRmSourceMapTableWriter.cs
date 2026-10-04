@@ -24,21 +24,31 @@ public static class TrRmSourceMapTableWriter
         }
 
         var seen = new HashSet<(int Body, int Block, int Ordinal)>();
-        var fileSlots = new Dictionary<int, int>();
+        var fileSlots = new Dictionary<int, (int Slot, int OwnerModule)>();
         var fileRows = new List<int>();
         foreach (var mapping in mappings)
         {
             if (mapping.Block <= 0 || mapping.Ordinal < 0
-                || (ulong)mapping.StartUtf16 + mapping.LengthUtf16 > uint.MaxValue
-                || methods.GetOwnerModule(methods.GetBodyOwnerMethod(mapping.BodyRow))
-                    != files.GetOwnerModule(mapping.SourceFileRow)
+                || (ulong)mapping.StartUtf16 + mapping.LengthUtf16 > uint.MaxValue)
+            {
+                throw new InvalidDataException("Invalid TRRM SourceMap mapping.");
+            }
+
+            var bodyOwnerModule = methods.GetOwnerModule(
+                methods.GetBodyOwnerMethod(mapping.BodyRow));
+            var hasFileSlot = fileSlots.TryGetValue(mapping.SourceFileRow, out var fileSlot);
+            var fileOwnerModule = hasFileSlot
+                ? fileSlot.OwnerModule
+                : files.GetOwnerModule(mapping.SourceFileRow);
+            if (bodyOwnerModule != fileOwnerModule
                 || !seen.Add((mapping.BodyRow, mapping.Block, mapping.Ordinal)))
             {
                 throw new InvalidDataException("Invalid TRRM SourceMap mapping.");
             }
 
-            if (fileSlots.TryAdd(mapping.SourceFileRow, fileRows.Count))
+            if (!hasFileSlot)
             {
+                fileSlots.Add(mapping.SourceFileRow, (fileRows.Count, fileOwnerModule));
                 fileRows.Add(mapping.SourceFileRow);
             }
         }
@@ -64,7 +74,8 @@ public static class TrRmSourceMapTableWriter
             Write(result, bodySlot + 12, (uint)mapping.Ordinal);
             var row = rowsStart + index * 16;
             Write(result, row, (uint)index + 1);
-            Write(result, row + 4, (uint)(mappings.Count + fileSlots[mapping.SourceFileRow] + 1));
+            Write(result, row + 4,
+                (uint)(mappings.Count + fileSlots[mapping.SourceFileRow].Slot + 1));
             Write(result, row + 8, mapping.StartUtf16);
             Write(result, row + 12, mapping.LengthUtf16);
         }
