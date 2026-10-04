@@ -378,6 +378,7 @@ public static partial class TrRmExecutableCompiler
                 var terminators = new List<int>(ordered.Count);
                 var data = new List<byte>(checked(ordered.Count * (width + 3)));
                 var overflowedDefinition = false;
+                int[]? sortedLiveValues = null;
                 for (var index = 0; index < width; index++)
                 {
                     offsets.Add(0);
@@ -408,21 +409,25 @@ public static partial class TrRmExecutableCompiler
                     }
                     if (blockLiveIns is { Count: > 0 } liveInSet)
                     {
-                        var orderedLiveIns = liveInSet.ToArray();
-                        if (orderedLiveIns.Length > 1)
+                        var liveInCount = liveInSet.Count;
+                        sortedLiveValues ??= new int[sourceTypes.Count];
+                        liveInSet.CopyTo(sortedLiveValues);
+                        if (liveInCount > 1)
                         {
-                            Array.Sort(orderedLiveIns);
+                            Array.Sort(sortedLiveValues, 0, liveInCount);
                         }
-                        WriteList(data, orderedLiveIns, width);
+                        WriteList(data, sortedLiveValues.AsSpan(0, liveInCount), width);
                     }
                     if (blockLiveOuts is { Count: > 0 } liveOutSet)
                     {
-                        var orderedLiveOuts = liveOutSet.ToArray();
-                        if (orderedLiveOuts.Length > 1)
+                        var liveOutCount = liveOutSet.Count;
+                        sortedLiveValues ??= new int[sourceTypes.Count];
+                        liveOutSet.CopyTo(sortedLiveValues);
+                        if (liveOutCount > 1)
                         {
-                            Array.Sort(orderedLiveOuts);
+                            Array.Sort(sortedLiveValues, 0, liveOutCount);
                         }
-                        WriteList(data, orderedLiveOuts, width);
+                        WriteList(data, sortedLiveValues.AsSpan(0, liveOutCount), width);
                     }
                     if (blockLastUses is { Count: > 0 } blockLastUseSet)
                     {
@@ -577,7 +582,7 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        private static void WriteList(List<byte> bytes, int[] values, int width)
+        private static void WriteList(List<byte> bytes, ReadOnlySpan<int> values, int width)
         {
             Write(bytes, (ulong)values.Length, width);
             foreach (var value in values)
