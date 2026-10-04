@@ -82,6 +82,7 @@ public static partial class NativeModuleCompiler
         }
 
         var selected = new Dictionary<string, CatalogCandidate>(StringComparer.Ordinal);
+        GraphPackage[]?[] providerBuffers = new GraphPackage[MaximumGraphProviderCount + 1][];
         // Candidate search backtracks synchronously, so cycle checks can share these traversal sets.
         var visiting = new HashSet<string>(StringComparer.Ordinal);
         var visited = new HashSet<string>(StringComparer.Ordinal);
@@ -125,8 +126,19 @@ public static partial class NativeModuleCompiler
             }
             if (next is null)
             {
-                var providers = selected.Values.Select(static item => item.Package)
-                    .OrderBy(static item => item.Identity, StringComparer.OrdinalIgnoreCase).ToArray();
+                var providers = providerBuffers[selected.Count];
+                if (providers is null)
+                {
+                    providers = new GraphPackage[selected.Count];
+                    providerBuffers[selected.Count] = providers;
+                }
+                var providerIndex = 0;
+                foreach (var candidate in selected.Values)
+                {
+                    providers[providerIndex++] = candidate.Package;
+                }
+                Array.Sort(providers, static (left, right) =>
+                    StringComparer.OrdinalIgnoreCase.Compare(left.Identity, right.Identity));
                 try
                 {
                     _ = CheckGraph(root, providers);
@@ -160,7 +172,7 @@ public static partial class NativeModuleCompiler
             {
                 throw new ModuleContractException($"Case-ambiguous graph catalog identity '{next}'.");
             }
-            if (selected.Count == 16)
+            if (selected.Count == MaximumGraphProviderCount)
             {
                 incompatible = true;
                 return;

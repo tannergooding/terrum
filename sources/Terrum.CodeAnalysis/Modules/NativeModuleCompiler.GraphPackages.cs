@@ -14,6 +14,7 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class NativeModuleCompiler
 {
+    private const int MaximumGraphProviderCount = 16;
     private const int GraphHeaderSize = 19;
     private const int GraphMaximumBytes = 16 * 1024 * 1024;
 
@@ -54,7 +55,7 @@ public static partial class NativeModuleCompiler
 
     private static void ValidateGraphProviderCount(int count)
     {
-        if (count is < 1 or > 16)
+        if (count is < 1 or > MaximumGraphProviderCount)
         {
             throw new ModuleContractException("Native graphs require 1 to 16 selected producers.");
         }
@@ -94,7 +95,7 @@ public static partial class NativeModuleCompiler
         var contractLength = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(11));
         var imageLength = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(15));
         if ((consumer && identityLength != 0) || (!consumer && identityLength is < 1 or > 64)
-            || dependencyCount is < 1 or > 16 || exportCount > 1024
+            || dependencyCount is < 1 or > MaximumGraphProviderCount || exportCount > 1024
             || (consumer ? exportCount != 0 : exportCount == 0)
             || contractLength is < 1 or > MaximumContractBytes || imageLength < 1
             || (long)GraphHeaderSize + identityLength + contractLength + imageLength + HashSize > bytes.Length)
