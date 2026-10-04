@@ -2239,7 +2239,9 @@ introduce `unchecked` source syntax or change existing type-call conversion.
 The [StringLiteral candidate](../self-host/StringLiteral.terrum) decodes
 validated quoted spelling from the immutable source grant. Its ASCII and
 ISO-8859-1 (Latin-1) length queries return false for unrepresentable scalars;
-their owned-buffer encoders fail rather than substitute, with exact-capacity
+construction and scalar/cursor reads publish only through vacancy-only
+`init ref` outputs, leaving destinations unpublished on invalid requests.
+Its owned-buffer encoders fail rather than substitute, with exact-capacity
 and cleanup coverage under native execution. Explicit UTF-16BE and UTF-32BE
 byte encoders share the existing endian-independent length queries and emit
 no byte-order mark, with host/native parity and undersized-storage coverage.

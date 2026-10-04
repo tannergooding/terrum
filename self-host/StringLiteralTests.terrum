@@ -10,13 +10,10 @@ int32 CheckStringLiterals()
         int32 count = Host.ExpectedLiterals[fixture * 4 + 2];
         int32 firstScalar = Host.ExpectedLiterals[fixture * 4 + 3];
         require SourceRange.TryCreate(start, length, init var spelling);
-        if (StringLiteral.TryCreateInit(spelling, init var created))
+        if (StringLiteral.TryCreate(spelling, init var literal))
         {
-            require StringLiteral.TryCreate(spelling, out var literal);
             if (count < 0 || literal.ScalarCount != count
-                || literal.Spelling.Start != start || literal.Spelling.Length != length
-                || created.ScalarCount != count || created.Spelling.Start != start
-                || created.Spelling.Length != length)
+                || literal.Spelling.Start != start || literal.Spelling.Length != length)
             {
                 return 1;
             }
@@ -166,9 +163,9 @@ int32 CheckStringLiterals()
             mut int32 at = start - 1;
             while (at <= spelling.End)
             {
-                if (literal.TryReadScalar(at, out var scalar, out var next))
+                if (literal.TryReadScalar(at, init var scalar, init var next))
                 {
-                    require literal.TryReadScalarInit(at, init var initScalar, init var initNext);
+                    require literal.TryReadScalar(at, init var initScalar, init var initNext);
                     if (seen >= count) { return 2; }
                     int32 record = (firstScalar + seen) * 3;
                     if (at != Host.ExpectedScalars[record]
@@ -180,21 +177,21 @@ int32 CheckStringLiterals()
                     }
                     seen = seen + 1;
                 }
-                else if (literal.TryReadScalarInit(at, init var unexpectedScalar, init var unexpectedNext))
+                else if (literal.TryReadScalar(at, init var unexpectedScalar, init var unexpectedNext))
                 {
                     return 15;
                 }
                 at = at + 1;
             }
             if (seen != count) { return 4; }
-            if (literal.TryReadScalar(int32.MinValue, out var before, out var beforeNext)
-                || literal.TryReadScalar(int32.MaxValue, out var after, out var afterNext))
+            if (literal.TryReadScalar(int32.MinValue, init var before, init var beforeNext)
+                || literal.TryReadScalar(int32.MaxValue, init var after, init var afterNext))
             {
                 return 5;
             }
             mut StringLiteralCursor cursor = StringLiteralCursor.Create(literal);
             mut int32 streamed = 0;
-            while (cursor.TryRead(out var scalar, out var next))
+            while (cursor.TryRead(init var scalar, init var next))
             {
                 if (streamed >= count) { return 8; }
                 int32 record = (firstScalar + streamed) * 3;
@@ -213,7 +210,7 @@ int32 CheckStringLiterals()
             }
             cursor = StringLiteralCursor.Create(literal);
             streamed = 0;
-            while (cursor.TryReadInit(init var streamScalar, init var streamNext))
+            while (cursor.TryRead(init var streamScalar, init var streamNext))
             {
                 if (streamed >= count) { return 12; }
                 int32 record = (firstScalar + streamed) * 3;
@@ -231,7 +228,7 @@ int32 CheckStringLiterals()
                 return 14;
             }
         }
-        else if (count >= 0 || StringLiteral.TryCreate(spelling, out var unexpected))
+        else if (count >= 0 || StringLiteral.TryCreate(spelling, init var unexpected))
         {
             return 6;
         }
@@ -241,12 +238,9 @@ int32 CheckStringLiterals()
     require SourceRange.TryCreate(int32.MaxValue, 0, init var distant);
     require SourceRange.TryCreate(0, int32.MaxValue, init var excessive);
     require SourceRange.TryCreate(Host.Source.Length, 2, init var past);
-    if (StringLiteral.TryCreate(distant, out var distantLiteral)
-        || StringLiteral.TryCreate(excessive, out var excessiveLiteral)
-        || StringLiteral.TryCreate(past, out var pastLiteral)
-        || StringLiteral.TryCreateInit(distant, init var distantInit)
-        || StringLiteral.TryCreateInit(excessive, init var excessiveInit)
-        || StringLiteral.TryCreateInit(past, init var pastInit))
+    if (StringLiteral.TryCreate(distant, init var distantLiteral)
+        || StringLiteral.TryCreate(excessive, init var excessiveLiteral)
+        || StringLiteral.TryCreate(past, init var pastLiteral))
     {
         return 7;
     }

@@ -170,7 +170,7 @@ public sealed class StringLiteralComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, out var literal);
+                require StringLiteral.TryCreate(spelling, init var literal);
                 require literal.{{measure}}(init var unitLength);
                 if (unitLength != {{expected.Length}}) { return 1; }
                 require OwnedInt32Buffer.TryCreate(unitLength - 1, out var small);
@@ -209,7 +209,7 @@ public sealed class StringLiteralComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, out var literal);
+                require StringLiteral.TryCreate(spelling, init var literal);
                 if (literal.{{measure}}(init var length)) { return 1; }
                 require OwnedInt32Buffer.TryCreate(2, out var workspace);
                 unsafe {
@@ -256,7 +256,7 @@ public sealed class StringLiteralComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, out var literal);
+                require StringLiteral.TryCreate(spelling, init var literal);
                 require TryGetStringRowByteLength(literal, {{flags}}, init var byteLength);
                 if (byteLength != {{expected.Length}}) { return 1; }
                 require OwnedInt32Buffer.TryCreate(byteLength, out var workspace);
@@ -298,7 +298,7 @@ public sealed class StringLiteralComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, out var literal);
+                require StringLiteral.TryCreate(spelling, init var literal);
                 require TryGetStringNamespaceRowByteLength(literal, {{encoding}}, init var length);
                 if (length != {{expected.Length}}) { return 1; }
                 require OwnedInt32Buffer.TryCreate(length, out var workspace);
@@ -335,7 +335,7 @@ public sealed class StringLiteralComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, out var literal);
+                require StringLiteral.TryCreate(spelling, init var literal);
                 require TryGetStringNameRowByteLength(literal, {{flags}}, init var byteLength);
                 if (byteLength != {{expected.Length}}) { return 1; }
                 require OwnedInt32Buffer.TryCreate(byteLength, out var workspace);
@@ -365,7 +365,7 @@ public sealed class StringLiteralComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, out var literal);
+                require StringLiteral.TryCreate(spelling, init var literal);
                 if (TryGetStringNameRowByteLength(literal, 0, init var ascii)
                     || TryGetStringNameRowByteLength(literal, 1, init var utf8)
                     || TryGetStringNameRowByteLength(literal, 2, init var utf16)
@@ -399,7 +399,7 @@ public sealed class StringLiteralComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, out var literal);
+                require StringLiteral.TryCreate(spelling, init var literal);
                 if (TryGetStringNameRowByteLength(literal, {{flags}}, init var nameLength)) { return 1; }
                 require TryGetStringNamespaceRowByteLength(literal, {{flags}}, init var length);
                 if (length != 8) { return 2; }
@@ -431,7 +431,7 @@ public sealed class StringLiteralComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, out var literal);
+                require StringLiteral.TryCreate(spelling, init var literal);
                 if (TryGetStringNamespaceRowByteLength(literal, 0, init var ascii)
                     || TryGetStringNamespaceRowByteLength(literal, 1, init var utf8)
                     || TryGetStringNamespaceRowByteLength(literal, 2, init var utf16)
@@ -471,8 +471,8 @@ public sealed class StringLiteralComponentTests
             int32 Main() {
                 require SourceRange.TryCreate(0, {{left.Length}}, init var firstSpelling);
                 require SourceRange.TryCreate({{left.Length}}, {{right.Length}}, init var secondSpelling);
-                require StringLiteral.TryCreate(firstSpelling, out var first);
-                require StringLiteral.TryCreate(secondSpelling, out var second);
+                require StringLiteral.TryCreate(firstSpelling, init var first);
+                require StringLiteral.TryCreate(secondSpelling, init var second);
                 {{assertion}}
                 return 0;
             }
@@ -508,8 +508,8 @@ public sealed class StringLiteralComponentTests
             int32 Main() {
                 require SourceRange.TryCreate(0, {{left.Length}}, init var firstSpelling);
                 require SourceRange.TryCreate({{left.Length}}, {{right.Length}}, init var secondSpelling);
-                require StringLiteral.TryCreate(firstSpelling, out var first);
-                require StringLiteral.TryCreate(secondSpelling, out var second);
+                require StringLiteral.TryCreate(firstSpelling, init var first);
+                require StringLiteral.TryCreate(secondSpelling, init var second);
                 {{assertion}}
                 return 0;
             }
@@ -534,9 +534,9 @@ public sealed class StringLiteralComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceRange.TryCreate(0, {{invalid.Length}}, init var badSpelling);
-                require StringLiteral.TryCreate(badSpelling, out var bad);
+                require StringLiteral.TryCreate(badSpelling, init var bad);
                 require SourceRange.TryCreate({{invalid.Length}}, 4, init var goodSpelling);
-                require StringLiteral.TryCreate(goodSpelling, out var good);
+                require StringLiteral.TryCreate(goodSpelling, init var good);
                 require OwnedInt32Buffer.TryCreate(8, out var workspace);
                 unsafe {
                     try {
@@ -576,7 +576,7 @@ public sealed class StringLiteralComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, out var literal);
+                require StringLiteral.TryCreate(spelling, init var literal);
                 require TryGetStringRowByteLength(literal, 0, init var length);
                 if (length != {{rowLength}}) { return 1; }
                 require OwnedInt32Buffer.TryCreate(length, out var workspace);
@@ -617,7 +617,7 @@ public sealed class StringLiteralComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                require StringLiteral.TryCreate(spelling, out var literal);
+                require StringLiteral.TryCreate(spelling, init var literal);
                 if (TryGetStringRowByteLength(literal, -1, init var negative)
                     || TryGetStringRowByteLength(literal, 4, init var reserved)
                     || TryGetStringRowByteLength(literal, 255, init var extended)
@@ -676,15 +676,11 @@ public sealed class StringLiteralComponentTests
     }
 
     [Theory]
-    [InlineData("bool success = StringLiteral.TryCreate(range, out var literal); return literal.ScalarCount;")]
-    [InlineData("require StringLiteral.TryCreate(range, out var literal); bool success = literal.TryReadScalar(0, out var scalar, out var next); return scalar;")]
-    [InlineData("require StringLiteral.TryCreate(range, out var literal); bool success = literal.TryReadScalar(0, out var scalar, out var next); return next;")]
-    [InlineData("require StringLiteral.TryCreate(range, out var literal); StringLiteralCursor cursor = StringLiteralCursor.Create(literal); bool success = cursor.TryRead(out var scalar, out var next); return next.Position;")]
-    [InlineData("bool success = StringLiteral.TryCreateInit(range, init var literal); return literal.ScalarCount;")]
-    [InlineData("require StringLiteral.TryCreate(range, out var literal); bool success = literal.TryReadScalarInit(0, init var scalar, init var next); return scalar;")]
-    [InlineData("require StringLiteral.TryCreate(range, out var literal); bool success = literal.TryReadScalarInit(0, init var scalar, init var next); return next;")]
-    [InlineData("require StringLiteral.TryCreate(range, out var literal); StringLiteralCursor cursor = StringLiteralCursor.Create(literal); bool success = cursor.TryReadInit(init var scalar, init var next); return next.Position;")]
-    [InlineData("require StringLiteral.TryCreate(range, out var literal); bool success = literal.TryGetAsciiLength(init var length); return length;")]
+    [InlineData("bool success = StringLiteral.TryCreate(range, init var literal); return literal.ScalarCount;")]
+    [InlineData("require StringLiteral.TryCreate(range, init var literal); bool success = literal.TryReadScalar(0, init var scalar, init var next); return scalar;")]
+    [InlineData("require StringLiteral.TryCreate(range, init var literal); bool success = literal.TryReadScalar(0, init var scalar, init var next); return next;")]
+    [InlineData("require StringLiteral.TryCreate(range, init var literal); StringLiteralCursor cursor = StringLiteralCursor.Create(literal); bool success = cursor.TryRead(init var scalar, init var next); return next.Position;")]
+    [InlineData("require StringLiteral.TryCreate(range, init var literal); bool success = literal.TryGetAsciiLength(init var length); return length;")]
     public async Task FailedValidationAndReadsDoNotPublishOutputsAsync(string body)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);

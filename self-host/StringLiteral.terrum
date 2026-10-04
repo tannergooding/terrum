@@ -11,7 +11,7 @@ public struct StringLiteral
         ScalarCount = scalarCount;
     }
 
-    public static bool TryCreate(SourceRange spelling, out StringLiteral literal)
+    public static bool TryCreate(SourceRange spelling, init ref<StringLiteral> literal)
     {
         if (spelling.Length < 2 || spelling.Start > Host.Source.Length
             || spelling.Length > Host.Source.Length - spelling.Start)
@@ -41,17 +41,7 @@ public struct StringLiteral
         return true;
     }
 
-    public static bool TryCreateInit(SourceRange spelling, init ref<StringLiteral> literal)
-    {
-        if (!TryCreate(spelling, out var created))
-        {
-            return false;
-        }
-        literal = created;
-        return true;
-    }
-
-    public bool TryReadScalar(int32 position, out int32 scalar, out int32 next)
+    public bool TryReadScalar(int32 position, init ref<int32> scalar, init ref<int32> next)
     {
         int32 end = Spelling.End - 1;
         if (position <= Spelling.Start || position >= end)
@@ -78,22 +68,11 @@ public struct StringLiteral
         return false;
     }
 
-    public bool TryReadScalarInit(int32 position, init ref<int32> scalar, init ref<int32> next)
-    {
-        if (!TryReadScalar(position, out var value, out var following))
-        {
-            return false;
-        }
-        scalar = value;
-        next = following;
-        return true;
-    }
-
     public bool TryGetUtf8Length(init ref<int32> byteLength)
     {
         mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
         mut int32 count = 0;
-        while (cursor.TryRead(out var scalar, out var next))
+        while (cursor.TryRead(init var scalar, init var next))
         {
             mut int32 width = 1;
             if (scalar >= 65536) { width = 4; }
@@ -115,7 +94,7 @@ public struct StringLiteral
         mut OwnedInt32Buffer bytes = move workspace;
         bytes.Clear();
         mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
-        while (cursor.TryRead(out var scalar, out var next))
+        while (cursor.TryRead(init var scalar, init var next))
         {
             if (scalar < 128)
             {
@@ -148,7 +127,7 @@ public struct StringLiteral
     {
         mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
         mut int32 count = 0;
-        while (cursor.TryRead(out var scalar, out var next))
+        while (cursor.TryRead(init var scalar, init var next))
         {
             mut int32 width = 1;
             if (scalar >= 65536) { width = 2; }
@@ -168,7 +147,7 @@ public struct StringLiteral
         mut OwnedInt32Buffer units = move workspace;
         units.Clear();
         mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
-        while (cursor.TryRead(out var scalar, out var next))
+        while (cursor.TryRead(init var scalar, init var next))
         {
             if (scalar >= 65536)
             {
@@ -200,7 +179,7 @@ public struct StringLiteral
         mut OwnedInt32Buffer bytes = move workspace;
         bytes.Clear();
         mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
-        while (cursor.TryRead(out var scalar, out var next))
+        while (cursor.TryRead(init var scalar, init var next))
         {
             mut int32 first = scalar;
             if (scalar >= 65536)
@@ -228,7 +207,7 @@ public struct StringLiteral
         mut OwnedInt32Buffer bytes = move workspace;
         bytes.Clear();
         mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
-        while (cursor.TryRead(out var scalar, out var next))
+        while (cursor.TryRead(init var scalar, init var next))
         {
             mut int32 first = scalar;
             if (scalar >= 65536)
@@ -265,7 +244,7 @@ public struct StringLiteral
     {
         mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
         mut int32 count = 0;
-        while (cursor.TryRead(out var scalar, out var next))
+        while (cursor.TryRead(init var scalar, init var next))
         {
             if (scalar >= limit || count == int32.MaxValue)
             {
@@ -293,7 +272,7 @@ public struct StringLiteral
         mut OwnedInt32Buffer bytes = move workspace;
         bytes.Clear();
         mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
-        while (cursor.TryRead(out var scalar, out var next))
+        while (cursor.TryRead(init var scalar, init var next))
         {
             require scalar < limit;
             require bytes.TryAppend(scalar);
@@ -306,7 +285,7 @@ public struct StringLiteral
     {
         mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
         mut int32 count = 0;
-        while (cursor.TryRead(out var scalar, out var next))
+        while (cursor.TryRead(init var scalar, init var next))
         {
             if (count > int32.MaxValue - 4)
             {
@@ -324,7 +303,7 @@ public struct StringLiteral
         mut OwnedInt32Buffer bytes = move workspace;
         bytes.Clear();
         mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
-        while (cursor.TryRead(out var scalar, out var next))
+        while (cursor.TryRead(init var scalar, init var next))
         {
             require bytes.TryAppend(scalar % 256);
             require bytes.TryAppend((scalar / 256) % 256);
@@ -340,7 +319,7 @@ public struct StringLiteral
         mut OwnedInt32Buffer bytes = move workspace;
         bytes.Clear();
         mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
-        while (cursor.TryRead(out var scalar, out var next))
+        while (cursor.TryRead(init var scalar, init var next))
         {
             require bytes.TryAppend(scalar / 16777216);
             require bytes.TryAppend((scalar / 65536) % 256);
@@ -368,7 +347,7 @@ public struct StringLiteralCursor
         return new StringLiteralCursor(literal, literal.Spelling.Start + 1);
     }
 
-    public bool TryRead(out int32 scalar, out StringLiteralCursor next)
+    public bool TryRead(init ref<int32> scalar, init ref<StringLiteralCursor> next)
     {
         int32 end = Literal.Spelling.End - 1;
         if (Position >= end)
@@ -381,16 +360,6 @@ public struct StringLiteralCursor
         return true;
     }
 
-    public bool TryReadInit(init ref<int32> scalar, init ref<StringLiteralCursor> next)
-    {
-        if (!TryRead(out var value, out var following))
-        {
-            return false;
-        }
-        scalar = value;
-        next = following;
-        return true;
-    }
 }
 
 bool TryReadLiteralScalarAt(int32 at, int32 end, out int32 scalar, out int32 next)

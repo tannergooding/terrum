@@ -63,7 +63,7 @@ bool IsValidStringText(StringLiteral literal, bool allowEmpty)
     }
 
     mut StringLiteralCursor cursor = StringLiteralCursor.Create(literal);
-    while (cursor.TryRead(out var scalar, out var next))
+    while (cursor.TryRead(init var scalar, init var next))
     {
         if (scalar == 0)
         {
@@ -125,9 +125,9 @@ bool TryCompareStringText(StringLiteral left, StringLiteral right, bool allowEmp
 
     mut StringLiteralCursor leftCursor = StringLiteralCursor.Create(left);
     mut StringLiteralCursor rightCursor = StringLiteralCursor.Create(right);
-    while (leftCursor.TryRead(out var leftScalar, out var leftNext))
+    while (leftCursor.TryRead(init var leftScalar, init var leftNext))
     {
-        if (!rightCursor.TryRead(out var rightScalar, out var rightNext)
+        if (!rightCursor.TryRead(init var rightScalar, init var rightNext)
             || leftScalar != rightScalar)
         {
             equal = false;
@@ -136,7 +136,7 @@ bool TryCompareStringText(StringLiteral left, StringLiteral right, bool allowEmp
         leftCursor = leftNext;
         rightCursor = rightNext;
     }
-    equal = !rightCursor.TryRead(out var remaining, out var following);
+    equal = !rightCursor.TryRead(init var remaining, init var following);
     return true;
 }
 
