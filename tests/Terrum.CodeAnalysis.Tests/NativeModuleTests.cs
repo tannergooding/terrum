@@ -145,6 +145,23 @@ public sealed class NativeModuleTests
     }
 
     [Fact]
+    public async Task NativeConsumerAcceptsCompatibleProviderWithReorderedTypesAsync()
+    {
+        const string typeA = "public struct A { public int32 Value; public A() { Value = 5; } }";
+        const string typeB = "struct B { public int32 Number; public B() { Number = 2; } }";
+        const string functions = "public int32 Read() { A value = new A(); return value.Value; }";
+        var original = NativeModuleCompiler.CreateProducer(CompileLibrary(typeA + typeB + functions),
+            ["Read"], "Reordered", NativeRuntimePolicy.FailFast);
+        var consumer = ConsumerPackage(original, "int32 Main() { return Read(); }");
+        var replacement = NativeModuleCompiler.CreateProducer(CompileLibrary(typeB + typeA + functions),
+            ["Read"], "Reordered", NativeRuntimePolicy.FailFast);
+
+        NativeModuleCompiler.Validate(consumer, replacement);
+        Assert.Equal(5, await NativeModuleCompiler.RunAsync(consumer, replacement,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true));
+    }
+
+    [Fact]
     public async Task PersistedConsumerExecutesReplacementCleanupFuncletsAsync()
     {
         const string Source = """
