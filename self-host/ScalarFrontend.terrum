@@ -508,19 +508,21 @@ mut class ScalarFrontendState
         return kind + group * 100 + signedOffset + extra;
     }
 
-    private mut bool BeginUnaryOperand(out Token operand, out int32 groups)
+    private mut bool BeginUnaryOperand(
+        init ref<Token> operand, init ref<int32> groups)
     {
         require _tokens.TryGet(_at, init var first);
         mut Token current = first;
-        groups = 0;
+        mut int32 foundGroups = 0;
         while (current.Kind == 46)
         {
             _at = _at + 1;
-            groups = groups + 1;
+            foundGroups = foundGroups + 1;
             require _tokens.TryGet(_at, init var nested);
             current = nested;
         }
         operand = current;
+        groups = foundGroups;
         return true;
     }
 
@@ -662,7 +664,9 @@ mut class ScalarFrontendState
         mut int32 prefixGroups = 0;
         if (first.Kind == 46)
         {
-            require BeginUnaryOperand(out var grouped, out prefixGroups);
+            require BeginUnaryOperand(
+                init var grouped, init var parsedPrefixGroups);
+            prefixGroups = parsedPrefixGroups;
             literal = grouped;
         }
         if (literal.Kind == 62)
@@ -733,7 +737,7 @@ mut class ScalarFrontendState
                 }
                 _at = start;
             }
-            require BeginUnaryOperand(out var operand, out var groups);
+            require BeginUnaryOperand(init var operand, init var groups);
             mut int32 parameter = 0;
             mut int32 booleanKind = 0;
             if (operand.Kind == 20 || operand.Kind == 21)
@@ -869,7 +873,7 @@ mut class ScalarFrontendState
                 }
                 _at = start;
             }
-            require BeginUnaryOperand(out var operand, out var groups);
+            require BeginUnaryOperand(init var operand, init var groups);
             mut int32 operation = 63;
             mut int32 left = 0;
             mut int32 right = 0;
@@ -1027,7 +1031,7 @@ mut class ScalarFrontendState
                     && !StartsSignedGroupedBinary(prefixGroups))))
         {
             _at = _at + 1;
-            require BeginUnaryOperand(out var unaryOperand, out var groups);
+            require BeginUnaryOperand(init var unaryOperand, init var groups);
             if (unaryOperand.Kind == 3
                 && (literal.Kind == 57 || literal.Kind == 58))
             {
@@ -1122,7 +1126,7 @@ mut class ScalarFrontendState
         else if ((negative || positive) && StartsSignedGroupedBinary(prefixGroups))
         {
             _at = _at + 1;
-            require BeginUnaryOperand(out var groupedNumber, out var signedGroups);
+            require BeginUnaryOperand(init var groupedNumber, init var signedGroups);
             numberToken = groupedNumber;
             prefixGroups = prefixGroups + signedGroups;
             signedGrouped = true;
@@ -1144,7 +1148,7 @@ mut class ScalarFrontendState
                 && following.Kind >= 65 && following.Kind <= 70)
             {
                 _at = _at + 1;
-                require BeginUnaryOperand(out var right, out var groups);
+                require BeginUnaryOperand(init var right, init var groups);
                 if (right.Kind != 2)
                 {
                     FailAt(1, right.Range);
@@ -1210,7 +1214,7 @@ mut class ScalarFrontendState
                 && HasOperandKind(_at + 1, 3))
             {
                 _at = _at + 1;
-                require BeginUnaryOperand(out var secondLiteral, out var groups);
+                require BeginUnaryOperand(init var secondLiteral, init var groups);
                 if (!TryReadMagnitude(secondLiteral, _at, expectedType, false,
                     secondLiteral.Range, init var secondLow, init var secondHigh)
                     || !FinishUnaryOperand(secondLiteral, groups, init var end))
@@ -1236,7 +1240,7 @@ mut class ScalarFrontendState
                     return false;
                 }
                 _at = _at + 1;
-                require BeginUnaryOperand(out var right, out var groups);
+                require BeginUnaryOperand(init var right, init var groups);
                 if (right.Kind != 2)
                 {
                     FailAt(1, right.Range);
@@ -1289,7 +1293,7 @@ mut class ScalarFrontendState
                     || booleanOperator.Kind == 65 || booleanOperator.Kind == 66))
             {
                 _at = _at + 1;
-                require BeginUnaryOperand(out var booleanRight, out var groups);
+                require BeginUnaryOperand(init var booleanRight, init var groups);
                 if (booleanRight.Kind == 20 || booleanRight.Kind == 21)
                 {
                     if (!FinishUnaryOperand(booleanRight, groups, init var end))
@@ -1368,7 +1372,7 @@ mut class ScalarFrontendState
         {
             operation = next.Kind;
             _at = _at + 1;
-            require BeginUnaryOperand(out var right, out var groups);
+            require BeginUnaryOperand(init var right, init var groups);
             mut Token number = right;
             mut int32 unaryKind = 0;
             mut bool rightSignedGrouped = false;
@@ -1384,7 +1388,7 @@ mut class ScalarFrontendState
                 else if (_tokens.TryGet(_at + 1, init var open) && open.Kind == 46)
                 {
                     _at = _at + 1;
-                    require BeginUnaryOperand(out var groupedNumber, out var signedGroups);
+                    require BeginUnaryOperand(init var groupedNumber, init var signedGroups);
                     if (groupedNumber.Kind == 3)
                     {
                         number = groupedNumber;
