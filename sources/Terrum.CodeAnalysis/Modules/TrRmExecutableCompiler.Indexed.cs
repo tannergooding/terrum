@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Runtime.InteropServices;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 
@@ -795,7 +796,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     variables.Add(new BoundVariable($"value{value + 1}", valueTypes[value], false, default));
                 }
-                var statements = DecodeBody(synthetic.ToArray(), variables.Count,
+                var statements = DecodeBody(CollectionsMarshal.AsSpan(synthetic), variables.Count,
                     variables, noThrow, types, functions);
                 var operations = ImmutableArray.CreateBuilder<BoundStatement>(countOperations);
                 foreach (var statement in statements)
