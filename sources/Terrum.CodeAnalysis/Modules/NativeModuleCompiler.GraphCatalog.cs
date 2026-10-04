@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 
 namespace Terrum.CodeAnalysis.Modules;
 
@@ -20,7 +21,10 @@ public static partial class NativeModuleCompiler
     private const int MaximumCatalogBytes = 64 * 1024 * 1024;
     private const int MaximumCatalogAssignments = 4096;
 
-    private sealed record CatalogCandidate(byte[] Bytes, GraphPackage Package, int Index);
+    private sealed record CatalogCandidate(byte[] Bytes, GraphPackage Package, int Index)
+    {
+        public byte[]? Fingerprint { get; set; }
+    }
 
     /// <summary>Selects exactly one complete compatible native graph from explicitly supplied local packages.</summary>
     /// <remarks>All inputs are snapshotted and validated before selection. Byte-identical catalog entries are one
@@ -89,9 +93,29 @@ public static partial class NativeModuleCompiler
                     catalogIdentities.Add(identity, identity);
                 }
             }
-            if (!choices.Any(choice => choice.Bytes.AsSpan().SequenceEqual(snapshot)))
+            if (choices.Count == 0)
             {
                 choices.Add(new CatalogCandidate(snapshot, package, index));
+                continue;
+            }
+            var fingerprint = SHA256.HashData(snapshot);
+            var duplicate = false;
+            foreach (var choice in choices)
+            {
+                var choiceFingerprint = choice.Fingerprint ??= SHA256.HashData(choice.Bytes);
+                // Keep the full comparison authoritative in case two distinct packages share a digest.
+                if (choiceFingerprint.AsSpan().SequenceEqual(fingerprint)
+                    && choice.Bytes.AsSpan().SequenceEqual(snapshot))
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate)
+            {
+                choices.Add(new CatalogCandidate(snapshot, package, index) {
+                    Fingerprint = fingerprint,
+                });
             }
         }
 
