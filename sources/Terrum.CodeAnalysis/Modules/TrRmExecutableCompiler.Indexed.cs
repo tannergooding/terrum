@@ -160,9 +160,12 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
             }
-            if (remap.Skip(1).Any(static id => id == 0))
+            for (var id = 1; id < remap.Length; id++)
             {
-                throw Unsupported("Indexed value inventory is incomplete.");
+                if (remap[id] == 0)
+                {
+                    throw Unsupported("Indexed value inventory is incomplete.");
+                }
             }
 
             var lastUses = new SortedDictionary<int, int>[ordered.Count];
@@ -205,8 +208,13 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
             }
-            var liveIns = external.Select(static set => new HashSet<int>(set)).ToArray();
-            var liveOuts = ordered.Select(static _ => new HashSet<int>()).ToArray();
+            var liveIns = new HashSet<int>[ordered.Count];
+            var liveOuts = new HashSet<int>[ordered.Count];
+            for (var block = 0; block < ordered.Count; block++)
+            {
+                liveIns[block] = new HashSet<int>(external[block]);
+                liveOuts[block] = [];
+            }
             for (var iteration = 0; iteration <= ordered.Count; iteration++)
             {
                 var changed = false;
