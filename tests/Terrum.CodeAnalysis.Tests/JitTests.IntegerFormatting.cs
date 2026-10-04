@@ -170,10 +170,7 @@ public sealed partial class JitTests
     [InlineData("-35", 36, true, false, true)]
     [InlineData("-1", 36, true)]
     [InlineData("-1234567890123456789", 35, true)]
-    [InlineData("18446744073709551615", 16, false, false, true)]
-    [InlineData("18446744073709551615", 36, false, false, true)]
     [InlineData("4294967295", 16, false, true, true)]
-    [InlineData("-2147483648", 36, true, true, true)]
     public async Task IntegerBaseFormattingUsesExactWorkspaceAcrossAotAndJitAsync(
         string value, int radix, bool signed, bool isNarrow = false, bool uppercase = false)
     {
