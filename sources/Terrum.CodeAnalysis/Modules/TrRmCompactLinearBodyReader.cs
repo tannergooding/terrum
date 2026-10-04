@@ -125,6 +125,10 @@ public readonly ref struct TrRmCompactLinearBodyReader
         }
 
         var valueCount = parameterCount;
+        var hasMethodRange = false;
+        var callerModule = 0;
+        var firstMethod = 0;
+        var lastMethod = 0;
         for (var ordinal = 0; ordinal < operationCount; ordinal++)
         {
             var offset = position;
@@ -247,8 +251,13 @@ public readonly ref struct TrRmCompactLinearBodyReader
             else if (opcode == 0x12)
             {
                 var method = ReadLocal(body, ref position, referenceWidth);
-                var callerModule = methods.GetOwnerModule(methodRow);
-                var (firstMethod, lastMethod) = modules.GetMethodDefRange(callerModule);
+                if (!hasMethodRange)
+                {
+                    callerModule = methods.GetOwnerModule(methodRow);
+                    (firstMethod, lastMethod) = modules.GetMethodDefRange(callerModule);
+                    hasMethodRange = true;
+                }
+
                 int target;
                 if (method == 0)
                 {
