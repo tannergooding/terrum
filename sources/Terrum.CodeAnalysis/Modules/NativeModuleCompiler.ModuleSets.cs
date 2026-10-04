@@ -431,11 +431,9 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native set and semantic runtime policies differ.");
         }
-        var declaredImports = ModuleCompiler.GetConsumerSetDeclarations(contract)
-            .ToHashSet(StringComparer.Ordinal);
         var allMachineImports = dependencies.SelectMany(static item => item.MachineImports)
             .ToHashSet(StringComparer.Ordinal);
-        if (!declaredImports.SetEquals(dependencies.SelectMany(static item => item.Imports))
+        if (!symbols.SetEquals(ModuleCompiler.GetConsumerSetDeclarations(contract))
             || !ModuleCompiler.GetConsumerCallImports(contract).All(allMachineImports.Contains))
         {
             throw new ModuleFormatException("Native set declaration or machine imports differ from semantic contract.");

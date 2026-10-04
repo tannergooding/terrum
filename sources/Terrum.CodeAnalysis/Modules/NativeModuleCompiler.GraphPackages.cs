@@ -228,8 +228,7 @@ public static partial class NativeModuleCompiler
         };
         var imported = consumer ? ModuleCompiler.GetConsumerSetDeclarations(contract)
             : ModuleCompiler.GetGraphImports(contract);
-        if (!imported.ToHashSet(StringComparer.Ordinal)
-            .SetEquals(dependencies.SelectMany(static item => item.Declarations)))
+        if (!seenImports.SetEquals(imported))
         {
             throw new ModuleFormatException("Graph declaration mapping differs from semantic declarations.");
         }
