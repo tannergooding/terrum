@@ -75,6 +75,29 @@ public sealed class CompilationTests
     }
 
     [Fact]
+    public void RepeatedAliasImportsResolveToOneCandidate()
+    {
+        var entry = SyntaxTree.Parse("using Demo; using Demo; int32 Main() { Count value = 42; return value; }");
+        var aliases = SyntaxTree.Parse("namespace Demo; alias Count = int32;");
+        var compilation = Compilation.Create([entry, aliases]);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.NotNull(compilation.Program);
+        SemanticVerifier.Verify(compilation.Program);
+    }
+
+    [Fact]
+    public void AliasImportsRemainAmbiguousWhenTheyResolveToDifferentCandidates()
+    {
+        var entry = SyntaxTree.Parse(
+            "using First; using Second; int32 Main() { Count value = 42; return value; }");
+        var first = SyntaxTree.Parse("namespace First; alias Count = int32;");
+        var second = SyntaxTree.Parse("namespace Second; alias Count = bool;");
+        var compilation = Compilation.Create([entry, first, second]);
+        Assert.Contains(compilation.Diagnostics, static diagnostic =>
+            diagnostic.Code == "TRM3005" && diagnostic.Message.Contains("ambiguous", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void PublicAliasesPreserveTheResolvedTypeInExecutableSource()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(

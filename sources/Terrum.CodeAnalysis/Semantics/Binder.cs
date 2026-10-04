@@ -1010,35 +1010,50 @@ internal sealed partial class Binder
 
     private AliasDefinition? FindAliasDefinition(string name)
     {
-        var candidates = new HashSet<string>(StringComparer.Ordinal);
         if (name.Contains('.', StringComparison.Ordinal))
         {
-            Add(name);
+            return _aliases.TryGetValue(name, out var alias) ? alias : null;
         }
-        else
-        {
-            Add(name);
-            Add(Qualify(name));
-            var parent = _namespace;
-            while (parent.Contains('.', StringComparison.Ordinal))
-            {
-                parent = parent[..parent.LastIndexOf('.', StringComparison.Ordinal)];
-                Add(parent + "." + name);
-            }
-            foreach (var imported in _usings)
-            {
-                Add(imported + "." + name);
-            }
-        }
-        return candidates.Count == 1 ? _aliases[candidates.Single()] : null;
 
-        void Add(string qualified)
+        string? candidateName = null;
+        AliasDefinition? candidate = null;
+        if (!TryAddAliasCandidate(name, ref candidateName, ref candidate)
+            || !TryAddAliasCandidate(Qualify(name), ref candidateName, ref candidate))
         {
-            if (_aliases.ContainsKey(qualified))
+            return null;
+        }
+        var parent = _namespace;
+        while (parent.Contains('.', StringComparison.Ordinal))
+        {
+            parent = parent[..parent.LastIndexOf('.', StringComparison.Ordinal)];
+            if (!TryAddAliasCandidate(parent + "." + name, ref candidateName, ref candidate))
             {
-                _ = candidates.Add(qualified);
+                return null;
             }
         }
+        foreach (var imported in _usings)
+        {
+            if (!TryAddAliasCandidate(imported + "." + name, ref candidateName, ref candidate))
+            {
+                return null;
+            }
+        }
+        return candidate;
+    }
+
+    private bool TryAddAliasCandidate(string qualified, ref string? candidateName, ref AliasDefinition? candidate)
+    {
+        if (!_aliases.TryGetValue(qualified, out var alias))
+        {
+            return true;
+        }
+        if (candidateName is not null && candidateName != qualified)
+        {
+            return false;
+        }
+        candidateName = qualified;
+        candidate = alias;
+        return true;
     }
 
     private static IEnumerable<SyntaxNode> DescendantTypeNames(SyntaxNode node)
