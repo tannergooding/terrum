@@ -1729,8 +1729,24 @@ internal sealed partial class Binder
         var lower = (SyntaxNode)range.Children[0];
         var connector = ((SyntaxTokenElement)range.Children[1]).Token;
         var upper = (SyntaxNode)range.Children[2];
-        var valid = true;
         var fromEndLower = lower.Kind == SyntaxKind.EndRelativeIndexBound;
+        if (!fromEndLower && connector.Kind == TokenKind.DotDot && upper.Kind != SyntaxKind.EndRelativeIndexBound)
+        {
+            var rangeOwner = BindReceiverLoan((SyntaxNode)initializer.Children[0], PrimitiveType.OwnedInt32Buffer);
+            var dynamicStart = lower.Kind == SyntaxKind.OmittedIndexBound
+                ? new BoundConstant(0, PrimitiveType.Int32, lower.Span)
+                : BindExpression(lower, PrimitiveType.Int32);
+            var rangeEnd = upper.Kind == SyntaxKind.OmittedIndexBound
+                ? BindBufferCount(rangeOwner, upper.Span)
+                : BindExpression(upper, PrimitiveType.Int32);
+            var viewVariable = AddVariable(name.Name, viewType, false, name.Span);
+            return new BoundViewScope(viewVariable, rangeOwner, dynamicStart,
+                new BoundConstant(0, PrimitiveType.Int32, upper.Span), new BoundBlock([], span), span) {
+                RangeEnd = rangeEnd,
+            };
+        }
+
+        var valid = true;
         var lowerValue = lower.Kind == SyntaxKind.OmittedIndexBound
             ? 0
             : BindRangeConstant(fromEndLower ? (SyntaxNode)lower.Children[1] : lower,

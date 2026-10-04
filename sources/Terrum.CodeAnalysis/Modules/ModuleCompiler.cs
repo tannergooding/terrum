@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static partial class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 50;
+    private const int Version = 51;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -846,7 +846,7 @@ public static partial class ModuleCompiler
                     visitView?.Invoke(view);
                     VisitExpression(view.Owner);
                     VisitExpression(view.Start);
-                    VisitExpression(view.Length);
+                    VisitExpression(view.RangeEnd ?? view.Length);
                     VisitStatement(view.Body);
                     break;
                 case BoundViewSet write:
@@ -1491,6 +1491,8 @@ public static partial class ModuleCompiler
                 Owner = RemapExpression(view.Owner, source, destination, classOffset),
                 Start = RemapExpression(view.Start, source, destination, classOffset),
                 Length = RemapExpression(view.Length, source, destination, classOffset),
+                RangeEnd = view.RangeEnd is null ? null
+                    : RemapExpression(view.RangeEnd, source, destination, classOffset),
                 Body = (BoundBlock)RemapStatement(view.Body, source, destination, classOffset),
             },
             BoundViewSet write => write with {
@@ -2020,6 +2022,11 @@ public static partial class ModuleCompiler
                 PutExpression(writer, view.Owner, names, ref remaining, depth + 1);
                 PutExpression(writer, view.Start, names, ref remaining, depth + 1);
                 PutExpression(writer, view.Length, names, ref remaining, depth + 1);
+                writer.Write(view.RangeEnd is not null);
+                if (view.RangeEnd is not null)
+                {
+                    PutExpression(writer, view.RangeEnd, names, ref remaining, depth + 1);
+                }
                 PutStatement(writer, view.Body, names, ref remaining, depth + 1);
                 break;
             case BoundViewSet write:
@@ -2246,10 +2253,12 @@ public static partial class ModuleCompiler
                 var viewOwner = GetExpression(reader, ref remaining, depth + 1);
                 var start = GetExpression(reader, ref remaining, depth + 1);
                 var length = GetExpression(reader, ref remaining, depth + 1);
+                var rangeEnd = GetBool(reader) ? GetExpression(reader, ref remaining, depth + 1) : null;
                 var viewBody = GetStatement(reader, ref remaining, depth + 1) as BoundBlock
                     ?? throw new ModuleFormatException("Expected lexical view block.");
                 return new BoundViewScope(viewVariable, viewOwner, start, length, viewBody, span) {
                     IsMutable = mutable,
+                    RangeEnd = rangeEnd,
                 };
             case 17:
                 return new BoundViewSet(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1),
@@ -2593,6 +2602,7 @@ public static partial class ModuleCompiler
             Owner = ResolveExpression(view.Owner, names),
             Start = ResolveExpression(view.Start, names),
             Length = ResolveExpression(view.Length, names),
+            RangeEnd = view.RangeEnd is null ? null : ResolveExpression(view.RangeEnd, names),
             Body = (BoundBlock)ResolveStatement(view.Body, names),
         },
         BoundViewSet write => write with {

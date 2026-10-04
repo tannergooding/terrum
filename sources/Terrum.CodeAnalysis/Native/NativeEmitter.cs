@@ -1027,7 +1027,7 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(local.Initializer, ref maximumArguments);
             case BoundViewScope view:
                 return Math.Max(2, Math.Max(ExpressionSpills(view.Start, ref maximumArguments),
-                    Math.Max(1 + ExpressionSpills(view.Length, ref maximumArguments),
+                    Math.Max(1 + ExpressionSpills(view.RangeEnd ?? view.Length, ref maximumArguments),
                         StatementSpills(view.Body, ref maximumArguments))));
             case BoundViewSet write:
                 return Math.Max(2, Math.Max(ExpressionSpills(write.Index, ref maximumArguments),
@@ -1232,7 +1232,7 @@ internal sealed partial class PeCompiler
                 case BoundViewScope view:
                     VisitExpression(view.Owner);
                     VisitExpression(view.Start);
-                    VisitExpression(view.Length);
+                    VisitExpression(view.RangeEnd ?? view.Length);
                     VisitStatement(view.Body);
                     break;
                 case BoundViewSet write:
@@ -2119,7 +2119,7 @@ internal sealed partial class PeCompiler
             case BoundViewScope view:
                 Expression(view.Start, 0);
                 _code.Store(Spill(0));
-                Expression(view.Length, 1);
+                Expression(view.RangeEnd ?? view.Length, 1);
                 _code.Store(Spill(1));
                 Expression(view.Owner, 2);
                 _code.Bytes(0x48, 0x8B, 0x10); // rdx = heap header through the reserved owner place
@@ -2128,13 +2128,31 @@ internal sealed partial class PeCompiler
                 RuntimeBranch(0x88, 2);
                 _code.Bytes(0x3B, 0x02); // start <= initialized count
                 RuntimeBranch(0x87, 2);
-                _code.Bytes(0x89, 0xC1); // rcx = checked start
-                _code.Load(Spill(1));
-                _code.Bytes(0x85, 0xC0);
-                RuntimeBranch(0x88, 2);
-                _code.Bytes(0x44, 0x8B, 0x02, 0x41, 0x29, 0xC8); // r8d = count - start
-                _code.Bytes(0x44, 0x39, 0xC0); // length <= remaining initialized elements
-                RuntimeBranch(0x87, 2);
+                if (view.RangeEnd is null)
+                {
+                    _code.Bytes(0x89, 0xC1); // rcx = checked start
+                    _code.Load(Spill(1));
+                    _code.Bytes(0x85, 0xC0);
+                    RuntimeBranch(0x88, 2);
+                    _code.Bytes(0x44, 0x8B, 0x02, 0x41, 0x29, 0xC8); // r8d = count - start
+                    _code.Bytes(0x44, 0x39, 0xC0); // length <= remaining initialized elements
+                    RuntimeBranch(0x87, 2);
+                }
+                else
+                {
+                    _code.Load(Spill(1));
+                    _code.Bytes(0x85, 0xC0);
+                    RuntimeBranch(0x88, 2);
+                    _code.Bytes(0x3B, 0x02); // end <= initialized count
+                    RuntimeBranch(0x87, 2);
+                    _code.Load(Spill(0));
+                    _code.Bytes(0x89, 0xC1); // rcx = start
+                    _code.Load(Spill(1));
+                    _code.Bytes(0x39, 0xC1); // start <= end
+                    RuntimeBranch(0x8F, 2);
+                    _code.Bytes(0x29, 0xC8); // length = end - start after both are checked
+                    _code.Store(Spill(1));
+                }
                 _code.Bytes(0x48, 0x8D, 0x44, 0x8A, 0x08); // pointer to first element of the slice
                 _code.Store64(Slot(view.Variable));
                 _code.Load(Spill(1));

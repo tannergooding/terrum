@@ -773,7 +773,7 @@ public static class SemanticVerifier
                     break;
                 case BoundViewScope view:
                     Expression(view.Start, scope, depth + 1);
-                    Expression(view.Length, scope, depth + 1);
+                    Expression(view.RangeEnd ?? view.Length, scope, depth + 1);
                     Statement(view.Body, scope, depth + 1);
                     break;
                 case BoundTryCatch recovery:
@@ -1282,7 +1282,7 @@ public static class SemanticVerifier
                         roots[root]++;
                     }
                     Expression(view.Start, depth + 1, view.IsMutable ? root : -1);
-                    Expression(view.Length, depth + 1, view.IsMutable ? root : -1);
+                    Expression(view.RangeEnd ?? view.Length, depth + 1, view.IsMutable ? root : -1);
                     active[view.Variable] = true;
                     Statement(view.Body, depth + 1);
                     active[view.Variable] = false;
@@ -2139,8 +2139,11 @@ public static class SemanticVerifier
                     throw InvalidEffect(view.Owner.Span, "Ownership");
                 }
                 Expression(view.Start, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
-                Expression(view.Length, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
-                if (view.Start.Type != PrimitiveType.Int32 || view.Length.Type != PrimitiveType.Int32)
+                var rangeBound = view.RangeEnd ?? view.Length;
+                Expression(rangeBound, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                if (view.Start.Type != PrimitiveType.Int32 || rangeBound.Type != PrimitiveType.Int32
+                    || (view.RangeEnd is not null && (view.IsMutable
+                        || view.Length is not BoundConstant { Type: PrimitiveType.Int32, Value: 0 })))
                 {
                     throw Invalid();
                 }

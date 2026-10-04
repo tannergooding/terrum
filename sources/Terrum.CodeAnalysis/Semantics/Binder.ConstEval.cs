@@ -242,6 +242,8 @@ internal sealed partial class Binder
                     Owner = ResolveConstExpression(view.Owner, locals, functions, variableCount),
                     Start = ResolveConstExpression(view.Start, locals, functions, variableCount),
                     Length = ResolveConstExpression(view.Length, locals, functions, variableCount),
+                    RangeEnd = view.RangeEnd is null ? null
+                        : ResolveConstExpression(view.RangeEnd, locals, functions, variableCount),
                     Body = (BoundBlock)ResolveConstStatement(view.Body, locals, functions, variableCount),
                 };
             case BoundAssignment assignment:

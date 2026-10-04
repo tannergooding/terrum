@@ -453,6 +453,10 @@ public sealed record BoundViewScope(int Variable, BoundExpression Owner, BoundEx
 {
     /// <summary>Whether the view holds exclusive writable access to its named mutable owner.</summary>
     public bool IsMutable { get; init; }
+
+    /// <summary>An absolute exclusive upper bound, evaluated once after <see cref="Start"/>; its length sentinel is
+    /// zero.</summary>
+    public BoundExpression? RangeEnd { get; init; }
 }
 
 /// <summary>Writes a checked element through an active exclusive lexical view.</summary>

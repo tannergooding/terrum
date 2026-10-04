@@ -129,12 +129,12 @@ public sealed class NativeReadonlyBufferViewTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task DynamicRangeUpperSurvivesSemanticModuleRoundTripAsync(BoundRuntimePolicy policy)
+    public async Task DynamicRangeEndpointsSurviveSemanticModuleRoundTripAsync(BoundRuntimePolicy policy)
     {
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            public int32 Read(OwnedInt32Buffer owner, int32 end) {
-                ReadonlyInt32BufferView prefix = owner[..end];
-                return prefix.Read(0);
+            public int32 Read(OwnedInt32Buffer owner, int32 start, int32 end) {
+                ReadonlyInt32BufferView view = owner[start..end];
+                return view.Read(0);
             }
             """), policy);
         Assert.False(provider.HasErrors, string.Join(Environment.NewLine, provider.Diagnostics));
@@ -145,12 +145,78 @@ public sealed class NativeReadonlyBufferViewTests
                 mut OwnedInt32Buffer value = move raw;
                 require value.TryAppend(20);
                 require value.TryAppend(22);
-                return Read(move value, 1);
+                return Read(move value, 1, 2);
             }
             """), ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
         Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), producer);
-        Assert.Equal(20, await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true));
+        Assert.Equal(22, await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task DynamicRangeBoundsEvaluateOnceInSourceOrderAsync(BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            int32 Start() { Host.Trace[0] = Host.Trace[0] + 1; return 1; }
+            int32 End() { Host.Trace[1] = Host.Trace[0] + Host.Trace[1]; return 3; }
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(3, out var raw);
+                mut OwnedInt32Buffer buffer = move raw;
+                require buffer.TryAppend(10);
+                require buffer.TryAppend(20);
+                require buffer.TryAppend(30);
+                ReadonlyInt32BufferView view = buffer[Start()..End()];
+                return view.Read(0) + view.Length + Host.Trace[0] + Host.Trace[1];
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source),
+            [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)], policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(24, await RunAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task DynamicLowerWithOmittedUpperUsesInitializedCountAsync(BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            int32 Start() { return 1; }
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                mut OwnedInt32Buffer buffer = move raw;
+                require buffer.TryAppend(20);
+                require buffer.TryAppend(22);
+                ReadonlyInt32BufferView tail = buffer[Start()..];
+                return tail.Length + tail.Read(0);
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source), runtimePolicy: policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(23, await RunAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(1, 0)]
+    [InlineData(0, 2)]
+    public async Task DynamicRangeBoundsRejectInvalidRangesAsync(int start, int end)
+    {
+        var source = $$"""
+            int32 Start() { return {{start}}; }
+            int32 End() { return {{end}}; }
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                mut OwnedInt32Buffer buffer = move raw;
+                require buffer.TryAppend(42);
+                ReadonlyInt32BufferView view = buffer[Start()..End()];
+                return view.Length;
+            }
+            """;
+        Assert.Equal(unchecked((int)0xE0540003),
+            await RunAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
     }
 
     [Theory]
@@ -410,33 +476,8 @@ public sealed class NativeReadonlyBufferViewTests
     }
 
     [Fact]
-    public void RangeViewsRejectDynamicLowerBoundsAndMutableLocals()
+    public void RangeViewsRejectDynamicEndRelativeBoundsAndMutableLocals()
     {
-        var dynamicBound = Compilation.Create(SyntaxTree.Parse("""
-            int32 Start() { return 0; }
-            int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
-                OwnedInt32Buffer owner = move raw;
-                ReadonlyInt32BufferView view = owner[Start()..];
-                return view.Length;
-            }
-            """));
-        Assert.Contains(dynamicBound.Diagnostics, static diagnostic => diagnostic.Code == "TRM3001");
-        Assert.Null(dynamicBound.Program);
-
-        var dynamicUpperAfterNonzeroStart = Compilation.Create(SyntaxTree.Parse("""
-            int32 End() { return 1; }
-            int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
-                OwnedInt32Buffer owner = move raw;
-                ReadonlyInt32BufferView view = owner[1..End()];
-                return view.Length;
-            }
-            """));
-        Assert.Contains(dynamicUpperAfterNonzeroStart.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3001");
-        Assert.Null(dynamicUpperAfterNonzeroStart.Program);
-
         var dynamicEndRelativeUpper = Compilation.Create(SyntaxTree.Parse("""
             int32 End() { return 1; }
             int32 Main() {

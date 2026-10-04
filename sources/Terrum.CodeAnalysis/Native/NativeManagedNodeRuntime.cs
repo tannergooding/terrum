@@ -82,7 +82,7 @@ internal sealed partial class PeCompiler
                     break;
                 case BoundViewScope view:
                     CollectExpression(view.Start, 0);
-                    CollectExpression(view.Length, 1);
+                    CollectExpression(view.RangeEnd ?? view.Length, 1);
                     CollectExpression(view.Owner, 2);
                     CollectStatement(view.Body);
                     break;

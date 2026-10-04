@@ -319,7 +319,7 @@ public sealed class Compilation
                     case BoundViewScope view:
                         expressions.Push(view.Owner);
                         expressions.Push(view.Start);
-                        expressions.Push(view.Length);
+                        expressions.Push(view.RangeEnd ?? view.Length);
                         statements.Push(view.Body);
                         break;
                     case BoundUnsafe unsafeBlock:
