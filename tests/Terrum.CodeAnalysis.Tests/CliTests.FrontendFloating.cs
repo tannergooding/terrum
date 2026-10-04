@@ -218,6 +218,24 @@ public sealed partial class CliTests
         }
     }
 
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task ScalarFrontendExecutesChar16FloatingConversionsAsync(string policy)
+    {
+        const string Source = """
+            int32 Main() { return
+                (int32(float32(char16(55296))) == 55296
+                    && int32(float64(char16(65535))) == 65535) ? 42 : 1;
+            }
+            """;
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
+            "frontend-run", directory, "-", "--runtime", policy);
+        Assert.True(exit == 42, $"{policy}: {output}{error}");
+        Assert.Empty(error);
+    }
+
     [Fact]
     public async Task ScalarFrontendFloatingConversionsMatchHostedLibrariesAsync()
     {
@@ -238,8 +256,9 @@ public sealed partial class CliTests
                         : ["float32", "float64"];
                     foreach (var targetType in targetTypes)
                     {
-                        var source = Encoding.UTF8.GetBytes(
-                            $"public {targetType} Convert({sourceType} value) => {targetType}(value);");
+                            var noThrow = sourceType == "char16" ? "[NoThrow] " : string.Empty;
+                            var source = Encoding.UTF8.GetBytes(
+                                $"{noThrow}public {targetType} Convert({sourceType} value) => {targetType}(value);");
                         var output = Path.Combine(outputDirectory, "scalar.dll");
                         var hosted = Path.Combine(outputDirectory, "hosted.dll");
                         var (componentExit, componentJson, componentError) = await RunAsync(source,
