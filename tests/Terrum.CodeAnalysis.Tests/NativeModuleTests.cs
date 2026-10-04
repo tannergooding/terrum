@@ -300,6 +300,7 @@ public sealed class NativeModuleTests
     {
         var original = Producer();
         var consumer = ConsumerPackage(original);
+        var boundConsumer = CompileConsumer(Consumer, original);
         foreach (var at in new[] { 0, 4, 5, 6, 7, 8, 9, 10, original.Length - 1 })
         {
             var mutated = (byte[])original.Clone();
@@ -322,6 +323,9 @@ public sealed class NativeModuleTests
         wrongImage[image + pe + 24 + 16] = 1; // DLL must have no entry point
         Rehash(wrongImage);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(consumer, wrongImage));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongImage));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateConsumer(boundConsumer, wrongImage,
+            (NativeRuntimePolicy)255));
         var wrongExport = (byte[])original.Clone();
         var exportName = wrongExport.AsSpan(image, BinaryPrimitives.ReadInt32LittleEndian(wrongExport.AsSpan(14, 4)))
             .IndexOf("Evaluate\0"u8);

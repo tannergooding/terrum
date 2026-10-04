@@ -61,11 +61,11 @@ public static partial class NativeModuleCompiler
     public static byte[] CreateConsumer(BoundProgram program, byte[] producer, NativeRuntimePolicy runtimePolicy)
     {
         ArgumentNullException.ThrowIfNull(program);
-        var provider = Read(producer);
-        ValidateProducer(provider);
+        var provider = ReadAndValidateProducer(producer);
+        var package = provider.Package;
         CheckPolicy(runtimePolicy);
-        var contract = ModuleCompiler.CreateConsumer(program, provider.Contract);
-        var dll = DllName(provider.Identity);
+        var contract = ModuleCompiler.CreateConsumer(program, package.Contract);
+        var dll = DllName(package.Identity);
         var bindings = program.Functions.Where(static function => function.IsExternal)
             .Select(function => new NativeImportBinding(function.Name, dll, function.Name)).ToArray();
         var imports = ModuleCompiler.GetConsumerCallImports(contract);
@@ -74,7 +74,7 @@ public static partial class NativeModuleCompiler
             throw new ModuleContractException("Persisted consumer calls differ from native import bindings.");
         }
         var (image, used) = NativeEmitter.EmitWithImportUsage(program, bindings, runtimePolicy);
-        var consumer = Write(isConsumer: true, provider.Identity, runtimePolicy, contract, image,
+        var consumer = Write(isConsumer: true, package.Identity, runtimePolicy, contract, image,
             [.. used.Select(static item => item.FunctionName)]);
         ValidatePair(Read(consumer), provider);
         return consumer;
@@ -214,6 +214,20 @@ public static partial class NativeModuleCompiler
 
     private static void ValidatePair(Package consumer, Package producer)
     {
+        var producerReference = ValidatePairContracts(consumer, producer);
+        var exports = producerReference.Functions.Select(static function => function.Name).ToArray();
+        ValidateProducerImage(producer, exports);
+        ValidateConsumerImage(consumer);
+    }
+
+    private static void ValidatePair(Package consumer, ValidatedProducer producer)
+    {
+        _ = ValidatePairContracts(consumer, producer.Package);
+        ValidateConsumerImage(consumer);
+    }
+
+    private static CompilationReference ValidatePairContracts(Package consumer, Package producer)
+    {
         if (!consumer.IsConsumer || producer.IsConsumer)
         {
             throw new ModuleFormatException("Native module package kinds do not form a consumer/producer pair.");
@@ -230,13 +244,15 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native package and linked semantic policies differ.");
         }
-        var exports = ModuleCompiler.CreateReference(producer.Contract).Functions.Select(static function => function.Name)
-            .ToArray();
+        return ModuleCompiler.CreateReference(producer.Contract);
+    }
+
+    private static void ValidateProducerImage(Package producer, IReadOnlyList<string> exports)
+    {
         var profile = ModuleCompiler.GetNativeProfileVersion(producer.Contract, false);
         NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity), exports,
             producer.Policy, allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
             allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
-        ValidateConsumerImage(consumer);
     }
 
     private static void ValidateConsumerImage(Package consumer)
@@ -264,12 +280,15 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native package and semantic contract policies differ.");
         }
-        var profile = ModuleCompiler.GetNativeProfileVersion(producer.Contract, false);
-        NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity),
-            [.. reference.Functions.Select(static function => function.Name)], producer.Policy,
-            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
-            allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
+        ValidateProducerImage(producer, [.. reference.Functions.Select(static function => function.Name)]);
         return reference;
+    }
+
+    private static ValidatedProducer ReadAndValidateProducer(byte[] producer)
+    {
+        var package = Read(producer);
+        ValidateProducer(package);
+        return new ValidatedProducer(package);
     }
 
     private static byte[] Write(bool isConsumer, string identity, NativeRuntimePolicy policy, byte[] contract,
@@ -428,4 +447,6 @@ public static partial class NativeModuleCompiler
     {
         public string[] MachineImports { get; init; } = [];
     }
+
+    private sealed record ValidatedProducer(Package Package);
 }
