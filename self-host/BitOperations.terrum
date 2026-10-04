@@ -1,0 +1,230 @@
+namespace Terrum.CodeAnalysis.Numerics64;
+
+public int32 LeadingZeroCountUInt32(uint32 value)
+{
+    mut uint32 mask = 0x80000000;
+    mut int32 count = 0;
+    while (mask != 0 && (value & mask) == 0)
+    {
+        count = count + 1;
+        mask = mask >>> 1;
+    }
+    return count;
+}
+
+public int32 TrailingZeroCountUInt32(uint32 value)
+{
+    if (value == 0)
+    {
+        return 32;
+    }
+    mut uint32 remaining = value;
+    mut int32 count = 0;
+    while ((remaining & 1) == 0)
+    {
+        remaining = remaining >>> 1;
+        count = count + 1;
+    }
+    return count;
+}
+
+public int32 PopCountUInt32(uint32 value)
+{
+    mut uint32 remaining = value;
+    mut int32 count = 0;
+    while (remaining != 0)
+    {
+        remaining = remaining & (remaining - 1);
+        count = count + 1;
+    }
+    return count;
+}
+
+public uint32 RotateLeftUInt32(uint32 value, int32 count)
+{
+    mut int32 distance = count % 32;
+    if (distance == 0)
+    {
+        return value;
+    }
+    if (distance < 0)
+    {
+        distance = -distance;
+        return (value >>> distance) | (value << (32 - distance));
+    }
+    return (value << distance) | (value >>> (32 - distance));
+}
+
+public uint32 RotateRightUInt32(uint32 value, int32 count)
+{
+    mut int32 distance = count % 32;
+    if (distance == 0)
+    {
+        return value;
+    }
+    if (distance < 0)
+    {
+        distance = -distance;
+        return (value << distance) | (value >>> (32 - distance));
+    }
+    return (value >>> distance) | (value << (32 - distance));
+}
+
+public uint32 ReverseBitsUInt32(uint32 value)
+{
+    mut uint32 remaining = value;
+    mut uint32 reversed = 0;
+    for (mut int32 index = 0; index < 32; index = index + 1)
+    {
+        reversed = (reversed << 1) | (remaining & 1);
+        remaining = remaining >>> 1;
+    }
+    return reversed;
+}
+
+public uint32 ReverseEndiannessUInt32(uint32 value)
+{
+    return ((value & 0x000000FF) << 24)
+        | ((value & 0x0000FF00) << 8)
+        | ((value & 0x00FF0000) >>> 8)
+        | ((value & 0xFF000000) >>> 24);
+}
+
+public bool IsPow2UInt32(uint32 value)
+{
+    return value != 0 && (value & (value - 1)) == 0;
+}
+
+public bool TryRoundUpToPowerOfTwoUInt32(uint32 value, init ref<uint32> result)
+{
+    if (value == 0 || value > 0x80000000)
+    {
+        return false;
+    }
+
+    mut uint32 rounded = value - 1;
+    rounded = rounded | (rounded >>> 1);
+    rounded = rounded | (rounded >>> 2);
+    rounded = rounded | (rounded >>> 4);
+    rounded = rounded | (rounded >>> 8);
+    rounded = rounded | (rounded >>> 16);
+    result = rounded + 1;
+    return true;
+}
+
+public int32 LeadingZeroCountUInt64(uint64 value)
+{
+    mut uint64 mask = 0x8000000000000000;
+    mut int32 count = 0;
+    while (mask != 0 && (value & mask) == 0)
+    {
+        count = count + 1;
+        mask = mask >>> 1;
+    }
+    return count;
+}
+
+public int32 TrailingZeroCountUInt64(uint64 value)
+{
+    if (value == 0)
+    {
+        return 64;
+    }
+    mut uint64 remaining = value;
+    mut int32 count = 0;
+    while ((remaining & 1) == 0)
+    {
+        remaining = remaining >>> 1;
+        count = count + 1;
+    }
+    return count;
+}
+
+public int32 PopCountUInt64(uint64 value)
+{
+    mut uint64 remaining = value;
+    mut int32 count = 0;
+    while (remaining != 0)
+    {
+        remaining = remaining & (remaining - 1);
+        count = count + 1;
+    }
+    return count;
+}
+
+public uint64 RotateLeftUInt64(uint64 value, int32 count)
+{
+    mut int32 distance = count % 64;
+    if (distance == 0)
+    {
+        return value;
+    }
+    if (distance < 0)
+    {
+        distance = -distance;
+        return (value >>> distance) | (value << (64 - distance));
+    }
+    return (value << distance) | (value >>> (64 - distance));
+}
+
+public uint64 RotateRightUInt64(uint64 value, int32 count)
+{
+    mut int32 distance = count % 64;
+    if (distance == 0)
+    {
+        return value;
+    }
+    if (distance < 0)
+    {
+        distance = -distance;
+        return (value << distance) | (value >>> (64 - distance));
+    }
+    return (value >>> distance) | (value << (64 - distance));
+}
+
+public uint64 ReverseBitsUInt64(uint64 value)
+{
+    mut uint64 remaining = value;
+    mut uint64 reversed = 0;
+    for (mut int32 index = 0; index < 64; index = index + 1)
+    {
+        reversed = (reversed << 1) | (remaining & 1);
+        remaining = remaining >>> 1;
+    }
+    return reversed;
+}
+
+public uint64 ReverseEndiannessUInt64(uint64 value)
+{
+    return ((value & 0x00000000000000FF) << 56)
+        | ((value & 0x000000000000FF00) << 40)
+        | ((value & 0x0000000000FF0000) << 24)
+        | ((value & 0x00000000FF000000) << 8)
+        | ((value & 0x000000FF00000000) >>> 8)
+        | ((value & 0x0000FF0000000000) >>> 24)
+        | ((value & 0x00FF000000000000) >>> 40)
+        | ((value & 0xFF00000000000000) >>> 56);
+}
+
+public bool IsPow2UInt64(uint64 value)
+{
+    return value != 0 && (value & (value - 1)) == 0;
+}
+
+public bool TryRoundUpToPowerOfTwoUInt64(uint64 value, init ref<uint64> result)
+{
+    if (value == 0 || value > 0x8000000000000000)
+    {
+        return false;
+    }
+
+    mut uint64 rounded = value - 1;
+    rounded = rounded | (rounded >>> 1);
+    rounded = rounded | (rounded >>> 2);
+    rounded = rounded | (rounded >>> 4);
+    rounded = rounded | (rounded >>> 8);
+    rounded = rounded | (rounded >>> 16);
+    rounded = rounded | (rounded >>> 32);
+    result = rounded + 1;
+    return true;
+}
