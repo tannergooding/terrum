@@ -21,6 +21,8 @@ public static partial class TrRmExecutableCompiler
         PrimitiveType.Float32, PrimitiveType.Float64,
     ];
     private static readonly byte[] s_codes = [0, 1, 3, 8, 0x0D, 9, 0x0E, 0x14, 0x15];
+    private static readonly ReadOnlyMemory<byte>[] s_typeRows = CreateTypeRows(s_codes);
+    private static readonly ReadOnlyMemory<byte>[] s_nonFloatTypeRows = CreateTypeRows(s_codes[..^2]);
 
     public static byte[] Emit(BoundProgram program, string moduleIdentity)
     {
@@ -136,8 +138,7 @@ public static partial class TrRmExecutableCompiler
             [new TrRmModuleRow(1, 1, 0, program.EntryPoint + 1, 1, 1, 1, 1)],
             strings, 0, 0, methods.Count, 0);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 0, 0, methods.Count, 0);
-        var typeCodes = hasFloatingTypes ? s_codes : s_codes[..^2];
-        var typeRows = typeCodes.Select(static code => (ReadOnlyMemory<byte>)TrRmTypeSpecTableWriter.Builtin(code)).ToArray();
+        var typeRows = hasFloatingTypes ? s_typeRows : s_nonFloatTypeRows;
         var typeBytes = TrRmTypeSpecTableWriter.Encode(typeRows, 0, 0, 0, 0);
         var types = new TrRmTypeSpecTableReader(typeBytes, typeRows.Length, 0, 0, 0, 0);
         var sigBytes = TrRmMethodSigTableWriter.Encode(signatures, types, parameters.Count, 0);
@@ -178,6 +179,16 @@ public static partial class TrRmExecutableCompiler
         var artifact = TrRmArtifactWriter.Encode(sections);
         _ = Load(artifact);
         return artifact;
+    }
+
+    private static ReadOnlyMemory<byte>[] CreateTypeRows(byte[] codes)
+    {
+        var rows = new ReadOnlyMemory<byte>[codes.Length];
+        for (var index = 0; index < codes.Length; index++)
+        {
+            rows[index] = TrRmTypeSpecTableWriter.Builtin(codes[index]);
+        }
+        return rows;
     }
 
     public static BoundProgram Load(ReadOnlySpan<byte> artifact)
