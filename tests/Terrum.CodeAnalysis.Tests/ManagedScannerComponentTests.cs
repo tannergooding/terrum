@@ -2986,6 +2986,7 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("'\\\\'", true)]
     [InlineData("'\\0'", true)]
     [InlineData("'😀'", false)]
+    [InlineData("'\\U0001F600'", false)]
     public async Task ScalarFrontendDecodesCharacterLiteralScalarsAsync(
         string literal, bool valid)
     {
