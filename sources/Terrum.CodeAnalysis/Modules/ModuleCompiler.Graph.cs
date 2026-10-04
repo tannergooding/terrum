@@ -174,7 +174,12 @@ public static partial class ModuleCompiler
     internal static CompilationReference CreateGraphReference(byte[] contract, IReadOnlyList<string> exports,
         bool allowImportedCleanup = false)
     {
-        var module = ReadGraphLibrary(contract);
+        return CreateGraphReference(ReadGraphLibrary(contract), exports, allowImportedCleanup);
+    }
+
+    private static CompilationReference CreateGraphReference(Module module, IReadOnlyList<string> exports,
+        bool allowImportedCleanup)
+    {
         var names = exports.ToHashSet(StringComparer.Ordinal);
         if (names.Count == 0 || names.Count != exports.Count)
         {
@@ -220,7 +225,7 @@ public static partial class ModuleCompiler
         CompilationReference dependencies, bool allowImportedCleanup = false)
     {
         var module = ReadGraphLibrary(contract);
-        _ = CreateGraphReference(contract, exports, allowImportedCleanup);
+        _ = CreateGraphReference(module, exports, allowImportedCleanup);
         var dependencyFunctions = dependencies.Functions.ToDictionary(static item => item.Name,
             StringComparer.Ordinal);
         ValidateGraphImports(module, dependencies, dependencyFunctions);
