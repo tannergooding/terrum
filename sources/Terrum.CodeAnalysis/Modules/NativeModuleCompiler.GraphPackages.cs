@@ -122,12 +122,11 @@ public static partial class NativeModuleCompiler
         }
         at += identityLength;
         var dependencies = new GraphDependency[dependencyCount];
-        var seenIdentities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var seenImports = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < dependencies.Length; i++)
         {
             var dependencyName = ReadGraphString(bytes, ref at, 64);
-            if (!ValidIdentity(dependencyName) || !seenIdentities.Add(dependencyName)
+            if (!ValidIdentity(dependencyName)
                 || (i != 0 && StringComparer.OrdinalIgnoreCase.Compare(dependencies[i - 1].Identity, dependencyName) >= 0))
             {
                 throw new ModuleFormatException("Duplicate or unordered graph dependency identity.");
