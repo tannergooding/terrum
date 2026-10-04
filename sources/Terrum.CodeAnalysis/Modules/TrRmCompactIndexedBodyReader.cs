@@ -522,6 +522,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                             callerModule);
                     }
                     int target;
+                    var targetBodyRow = 0;
                     if (method == 0)
                     {
                         var definition = Read(extent, ref cursor, 4);
@@ -535,7 +536,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         var targetModule = methods.GetOwnerModule(target);
                         var (callerTarget, callerPolicy) = modules.GetRequirements(callerModule);
                         var (targetRequirement, targetPolicy) = modules.GetRequirements(targetModule);
-                        if (targetModule == callerModule || methods.GetBodyRow(target) == 0
+                        if (targetModule == callerModule
+                            || (targetBodyRow = methods.GetBodyRow(target)) == 0
                             || targetPolicy != callerPolicy || targetRequirement > callerTarget)
                         {
                             throw InvalidBody();
@@ -549,7 +551,9 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     {
                         target = localMethodStart + method - 1;
                     }
-                    var imported = methods.GetBodyRow(target) == 0;
+                    var imported = method == 0
+                        ? targetBodyRow == 0
+                        : methods.GetBodyRow(target) == 0;
                     var targetOwner = methods.GetOwnerType(target);
                     if ((method == 0 || imported)
                         && (methods.GetFlags(target) != 2
