@@ -292,12 +292,14 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     externalUses[block].Add(value);
                 }
 
-                if (!observedLastUses.ContainsKey(value))
+                if (observedLastUses.TryAdd(value, ordinal))
                 {
                     actualUses[value]++;
                 }
-
-                observedLastUses[value] = ordinal;
+                else
+                {
+                    observedLastUses[value] = ordinal;
+                }
             }
 
             for (var ordinal = 0; ordinal < operations; ordinal++)
