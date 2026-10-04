@@ -620,11 +620,11 @@ public sealed partial class ManagedScannerComponentTests
         var expression = ((SyntaxNode)result.Children[1]).Span;
         var assertion = accepted
             ? FormattableString.Invariant($$"""
-                require TryParseScalarReturnFunction(move tokens, out var name, out var value);
+                require TryParseScalarReturnFunction(move tokens, init var name, init var value);
                 if (name.Start != {{name.Start}} || name.Length != {{name.Length}}
                     || value.Start != {{expression.Start}} || value.Length != {{expression.Length}}) { return 1; }
                 """)
-            : "if (TryParseScalarReturnFunction(move tokens, out var name, out var value)) { return 1; }";
+            : "if (TryParseScalarReturnFunction(move tokens, init var name, init var value)) { return 1; }";
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
@@ -669,15 +669,15 @@ public sealed partial class ManagedScannerComponentTests
         var expression = ((SyntaxNode)result.Children[1]).Span;
         var assertion = type != 0
             ? FormattableString.Invariant($$"""
-                require TryParseScalarReturnFunctionTyped(move tokens, out var kind,
-                    out var name, out var expression);
+                require TryParseScalarReturnFunctionTyped(move tokens, init var kind,
+                    init var name, init var expression);
                 if (kind != {{type}} || name.Start != {{name.Start}} || name.Length != {{name.Length}}
                     || expression.Start != {{expression.Start}}
                     || expression.Length != {{expression.Length}}) { return 1; }
                 """)
             : """
-                if (TryParseScalarReturnFunctionTyped(move tokens, out var kind,
-                    out var name, out var expression)) { return 1; }
+                if (TryParseScalarReturnFunctionTyped(move tokens, init var kind,
+                    init var name, init var expression)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
@@ -690,6 +690,38 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    public async Task TypedScalarParserKeepsOutputsVacantWhenTypeFilterRejectsAsync()
+    {
+        const string Text = "uint32 Value() { return 42; }";
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                if (TryParseScalarReturnFunction(move tokens, init var name, init var expression))
+                {
+                    return 1;
+                }
+                require TokenSnapshot.TryScan(init var retryTokens);
+                require TryParseScalarReturnFunctionTyped(
+                    move retryTokens, init var scalarType, init name, init expression);
+                if (scalarType != 2 || name.Start != 7 || name.Length != 5
+                    || expression.Length != 2)
+                {
+                    return 2;
+                }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileParserAsync(Text, Entry, (BoundRuntimePolicy)policy)
+                .ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -2038,14 +2070,14 @@ public sealed partial class ManagedScannerComponentTests
         var assertion = accepted
             ? FormattableString.Invariant($$"""
                 require TryParseScalarReturnInteger(move tokens, move integers,
-                    out var name, out var expression, out var low, out var high);
+                    init var name, init var expression, init var low, init var high);
                 if (name.Start != {{name.Start}} || name.Length != {{name.Length}}
                     || expression.Start != {{expression.Start}} || expression.Length != {{expression.Length}}
                     || low != {{low}} || high != {{high}}) { return 1; }
                 """)
             : """
                 if (TryParseScalarReturnInteger(move tokens, move integers,
-                    out var name, out var expression, out var low, out var high)) { return 1; }
+                    init var name, init var expression, init var low, init var high)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
@@ -2620,7 +2652,7 @@ public sealed partial class ManagedScannerComponentTests
 
     [Theory]
     [InlineData("int32 Value() { return -#42; }", true, "ScalarFunctionParser",
-        "TryParseScalarReturnFunctionTyped(move tokens, out var scalarType, out var name, out var expression)")]
+        "TryParseScalarReturnFunctionTyped(move tokens, init var scalarType, init var name, init var expression)")]
     [InlineData("int32 Value(int32 x, int32 y) { return x#+#y; }", false, "ScalarParameterPairParser",
         "TryEvaluateInt32TwoParameterAddReturn(move tokens, 20, 22, init var name, init var value)")]
     [InlineData("int32 Value(bool c, int32 x, int32 y) { if (c) { return x#+#y; } else { return x; } }",
