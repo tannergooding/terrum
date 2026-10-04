@@ -2220,7 +2220,7 @@ mut class ScalarFrontendState
             type = 5;
             _hasStructuredStatement = true;
         }
-        if (!ParseTreeTerminatedExpression(keyword.Kind, type, out var root)
+        if (!ParseTreeTerminatedExpression(keyword.Kind, type, init var root)
             || !AddTreeStatement(kind, 0, root, keyword.Range.Start, TreeReturnEnd()))
         {
             return false;
@@ -3829,7 +3829,8 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private mut bool ParseTreeTerminatedExpression(int32 kind, int32 type, out int32 root)
+    private mut bool ParseTreeTerminatedExpression(
+        int32 kind, int32 type, init ref<int32> root)
     {
         if (!Take(kind, init var keyword)
             || !ParseTreeExpression(type, 1, 0, out var expression))
@@ -3838,8 +3839,8 @@ mut class ScalarFrontendState
         }
         if (!ResolveTreeLiteral(expression, type, false))
         {
-            root = -1;
-            return FailTreeType(expression);
+            FailTreeType(expression);
+            return false;
         }
         if (!Take(52, init var semicolon))
         {
@@ -3936,7 +3937,7 @@ mut class ScalarFrontendState
                     }
                     if (_error == 0 && Take(47, init var closeCondition)
                         && Take(48, init var openTrue)
-                        && ParseTreeTerminatedExpression(19, returnType, out var first)
+                        && ParseTreeTerminatedExpression(19, returnType, init var first)
                         && Take(49, init var closeTrue))
                     {
                         whenTrue = first;
@@ -3945,20 +3946,21 @@ mut class ScalarFrontendState
                         {
                             _at = _at + 1;
                             if (Take(48, init var openFalse)
-                                && ParseTreeTerminatedExpression(19, returnType, out var second)
+                                && ParseTreeTerminatedExpression(19, returnType, init var second)
                                 && Take(49, init var closeFalse))
                             {
                                 whenFalse = second;
                             }
                         }
-                        else if (ParseTreeTerminatedExpression(19, returnType, out var trailing))
+                        else if (ParseTreeTerminatedExpression(19, returnType, init var trailing))
                         {
                             whenFalse = trailing;
                             hasFallthrough = true;
                         }
                     }
                 }
-                else if (_error == 0 && ParseTreeTerminatedExpression(19, returnType, out var found))
+                else if (_error == 0
+                    && ParseTreeTerminatedExpression(19, returnType, init var found))
                 {
                     whenTrue = found;
                 }
