@@ -3403,7 +3403,8 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private mut bool ParseTreePrefix(int32 expected, int32 depth, out int32 node)
+    private mut bool ParseTreePrefix(
+        int32 expected, int32 depth, init ref<int32> node)
     {
         if (depth >= 16)
         {
@@ -3524,7 +3525,7 @@ mut class ScalarFrontendState
         if (token.Kind == 86 || token.Kind == 87)
         {
             _at = _at + 1;
-            if (!ParseTreePrefix(0, depth + 1, out var place)
+            if (!ParseTreePrefix(0, depth + 1, init var place)
                 || !TryTreeUpdatePlace(place))
             {
                 return false;
@@ -3548,7 +3549,7 @@ mut class ScalarFrontendState
             {
                 operandExpected = 0;
             }
-            if (!ParseTreePrefix(operandExpected, depth + 1, out var operand))
+            if (!ParseTreePrefix(operandExpected, depth + 1, init var operand))
             {
                 return false;
             }
@@ -3658,10 +3659,11 @@ mut class ScalarFrontendState
         int32 depth, out int32 node)
     {
         mut int32 left = 0;
-        if (!ParseTreePrefix(expected, depth, out left))
+        if (!ParseTreePrefix(expected, depth, init var firstNode))
         {
             return false;
         }
+        left = firstNode;
         while (_tokens.TryGet(_at, init var operation))
         {
             bool initializationTest = IsInitializationTestOperator(operation)
