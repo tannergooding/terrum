@@ -195,19 +195,20 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleContractException("Missing, extra or policy-incompatible native dependency.");
         }
+        var providerExports = new HashSet<string>[providers.Length];
         for (var i = 0; i < providers.Length; i++)
         {
             if (set.Dependencies[i].Identity != providers[i].Identity)
             {
                 throw new ModuleContractException("Missing, extra or identity-incompatible native dependency.");
             }
-            var exports = ModuleCompiler.CreateReference(providers[i].Contract).Functions
-                .Select(static item => item.Name).ToArray();
+            var functions = ModuleCompiler.CreateReference(providers[i].Contract).Functions;
+            var exports = functions.Select(static item => item.Name).ToArray();
+            providerExports[i] = exports.ToHashSet(StringComparer.Ordinal);
+            var profile = ModuleCompiler.GetNativeProfileVersion(providers[i].Contract, false);
             NativeModuleImageValidator.Validate(providers[i].Image, false, DllName(providers[i].Identity),
-                exports, providers[i].Policy, allowOwnedBufferRuntime:
-                    AllowsOwnedBufferRuntime(ModuleCompiler.GetNativeProfileVersion(providers[i].Contract, false)),
-                allowManagedRuntimeData:
-                    AllowsManagedRuntimeData(ModuleCompiler.GetNativeProfileVersion(providers[i].Contract, false)));
+                exports, providers[i].Policy, allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
+                allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
         }
         ModuleCompiler.ValidateConsumerSet(set.Contract, [.. providers.Select(static item => item.Contract)]);
         var actual = ModuleCompiler.GetConsumerSetDeclarations(set.Contract).ToHashSet(StringComparer.Ordinal);
@@ -218,10 +219,10 @@ public static partial class NativeModuleCompiler
         }
         var declarations = ModuleCompiler.CreateReferenceSet([.. providers.Select(static item => item.Contract)]);
         var declarationNames = declarations.Functions.Select(static item => item.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var (dependency, provider) in set.Dependencies.Zip(providers))
+        for (var i = 0; i < providers.Length; i++)
         {
-            var exported = ModuleCompiler.CreateReference(provider.Contract).Functions
-                .Select(static item => item.Name).ToHashSet(StringComparer.Ordinal);
+            var dependency = set.Dependencies[i];
+            var exported = providerExports[i];
             if (dependency.Imports.Length == 0 || dependency.Imports.Any(name =>
                 !exported.Contains(name) || !declarationNames.Contains(name)))
             {
