@@ -2978,6 +2978,38 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("'é'", true)]
+    [InlineData("'\\u00E9'", true)]
+    [InlineData("'\\U000000E9'", true)]
+    [InlineData("'\\''", true)]
+    [InlineData("'\\\"'", true)]
+    [InlineData("'\\\\'", true)]
+    [InlineData("'\\0'", true)]
+    [InlineData("'😀'", false)]
+    public async Task ScalarFrontendDecodesCharacterLiteralScalarsAsync(
+        string literal, bool valid)
+    {
+        var text = "char16 Value() { return " + literal + "; }";
+        var validLiteral = valid ? "true" : "false";
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (!TokenSnapshot.TryScan(init var tokens)) { return 1; }
+                if (!TryParseScalarFrontend(move tokens, init var result)) { return 2; }
+                if (result.IsValid != {{validLiteral}}) { return 3; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy, "ScalarFrontend")
+                .ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Value(int32 x) { return x; }", true, 0, 1, 0)]
     [InlineData("int32 Value() { return 42; }", true, 0, 0, 3)]
     [InlineData("int32 Value(int32 x, int32 y) { return x + ((y)); }", true, 0, 2, 57)]
@@ -4416,9 +4448,11 @@ public sealed partial class ManagedScannerComponentTests
         if (parserName is not null)
         {
             names = parserName == "ScalarFrontendProjection"
-                ? [.. names, "ScalarParserTypes", "ScalarFrontend", "ScalarFrontendProgram", parserName]
+                ? [.. names, "ScalarParserTypes", "CharacterLiteral",
+                    "ScalarFrontend", "ScalarFrontendProgram", parserName]
                 : parserName == "ScalarFrontend"
-                    ? [.. names, "ScalarParserTypes", parserName, "ScalarFrontendProgram", "ScalarFrontendProjection"]
+                    ? [.. names, "ScalarParserTypes", "CharacterLiteral", parserName,
+                        "ScalarFrontendProgram", "ScalarFrontendProjection"]
                     : [.. names, "ScalarParserTypes", parserName];
         }
         var trees = new List<SyntaxTree>(names.Length + 1);

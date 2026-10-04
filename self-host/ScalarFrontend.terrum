@@ -326,100 +326,6 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private mut bool TryReadCharacterScalar(Token token, init ref<int32> scalar)
-    {
-        int32 start = token.Range.Start;
-        int32 end = token.Range.End - 1;
-        if (token.Kind != 103 || token.Range.Length < 3
-            || Host.Source[start] != char16(39) || Host.Source[end] != char16(39))
-        {
-            return false;
-        }
-
-        mut int32 at = start + 1;
-        mut int32 value = 0;
-        if (Host.Source[at] == char16(92))
-        {
-            at = at + 1;
-            if (at >= end) { return false; }
-            int32 escape = int32(Host.Source[at]);
-            at = at + 1;
-            if (escape == 110) { value = 10; }
-            else if (escape == 114) { value = 13; }
-            else if (escape == 116) { value = 9; }
-            else if (escape == 92) { value = 92; }
-            else if (escape == 34) { value = 34; }
-            else if (escape == 39) { value = 39; }
-            else if (escape == 48) { value = 0; }
-            else if (escape == 117 || escape == 85)
-            {
-                int32 digits = escape == 117 ? 4 : 8;
-                mut uint32 decoded = 0;
-                for (mut int32 index = 0; index < digits; index = index + 1)
-                {
-                    if (at >= end
-                        || !TryCharacterHexDigit(Host.Source[at], init var digit))
-                    {
-                        return false;
-                    }
-                    decoded = (decoded << 4) | uint32(digit);
-                    at = at + 1;
-                }
-                if (decoded > uint32(0x10FFFF)
-                    || (decoded >= uint32(0xD800) && decoded <= uint32(0xDFFF)))
-                {
-                    return false;
-                }
-                value = int32(decoded);
-            }
-            else
-            {
-                return false;
-            }
-        }
-        else
-        {
-            value = int32(Host.Source[at]);
-            at = at + 1;
-            if (value >= 55296 && value <= 56319)
-            {
-                if (at >= end) { return false; }
-                int32 second = int32(Host.Source[at]);
-                if (second < 56320 || second > 57343) { return false; }
-                value = 65536 + (value - 55296) * 1024 + second - 56320;
-                at = at + 1;
-            }
-            else if (value >= 56320 && value <= 57343)
-            {
-                return false;
-            }
-        }
-        if (at != end) { return false; }
-        scalar = value;
-        return true;
-    }
-
-    private bool TryCharacterHexDigit(char16 character, init ref<int32> digit)
-    {
-        if (character >= char16(48) && character <= char16(57))
-        {
-            digit = int32(character) - 48;
-            return true;
-        }
-        if (character >= char16(97) && character <= char16(102))
-        {
-            digit = int32(character) - 87;
-            return true;
-        }
-        if (character >= char16(65) && character <= char16(70))
-        {
-            digit = int32(character) - 55;
-            return true;
-        }
-        digit = 0;
-        return false;
-    }
-
     private bool TryResolveSignatureParameter(Token token,
         init ref<int32> index, init ref<int32> type)
     {
@@ -2999,7 +2905,7 @@ mut class ScalarFrontendState
             if (literal.Kind == 103)
             {
                 if (type != 6
-                    || !TryReadCharacterScalar(literal, init var decodedScalar)
+                    || !TryDecodeCharacterLiteral(literal.Range, init var decodedScalar)
                     || decodedScalar > 65535)
                 {
                     FailAt(2, literal.Range);
@@ -3631,7 +3537,7 @@ mut class ScalarFrontendState
             if (type != 0 && type != 5)
             {
                 if (type != 6
-                    || !TryReadCharacterScalar(token, init var decodedScalar)
+                    || !TryDecodeCharacterLiteral(token.Range, init var decodedScalar)
                     || decodedScalar > 65535)
                 {
                     FailAt(2, token.Range);

@@ -2099,8 +2099,10 @@ and signed `-` over a named integer parameter or grouped contextual integer
 literal (with grouped named operands),
 context-typed unsuffixed integer literals (including signed unary minus and
 decimal signed minima) in return expressions; single-scalar character literals
-only in representable `char16` contexts; and at most one binary operation per
-expression, including either order of
+only in representable `char16` contexts, decoded by the shared Terrum
+[CharacterLiteral](../self-host/CharacterLiteral.terrum) component and
+independently validated by the host reader; and at most one binary operation
+per expression, including either order of
 parameter/literal arithmetic or bitwise operations for integer widths
 (including parentheses between a literal's unary sign and magnitude),
 comparison for integer widths and `char16`, and Boolean parameter/parameter,

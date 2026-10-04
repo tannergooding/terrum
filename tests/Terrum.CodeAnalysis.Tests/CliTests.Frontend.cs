@@ -780,34 +780,34 @@ public sealed partial class CliTests
     }
 
     [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
-    public async Task FrontendExecutesRepresentableCharacterLiteralsAsync(string policy)
+    [InlineData("'é'", 233)]
+    [InlineData("'\\u00E9'", 233)]
+    [InlineData("'\\U000000E9'", 233)]
+    [InlineData("'\\''", 39)]
+    [InlineData("'\\\"'", 34)]
+    [InlineData("'\\\\'", 92)]
+    [InlineData("'\\0'", 0)]
+    public async Task FrontendExecutesRepresentableCharacterLiteralsAsync(string literal, int expected)
     {
-        const string source = """
-            int32 Main() {
-                char16 direct = 'é';
-                char16 shortEscape = '\u00E9';
-                char16 longEscape = '\U000000E9';
-                return (direct == shortEscape && shortEscape == longEscape
-                    && int32(direct) == 233) ? 42 : 1;
-            }
-            """;
+        var source = $"int32 Main() {{ char16 value = {literal}; return int32(value); }}";
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", "..")), "self-host");
         var input = Encoding.UTF8.GetBytes(source);
 
-        var (frontendExit, frontendOutput, frontendError) = await RunAsync(input,
-            "frontend-run", directory, "-", "--runtime", policy);
-        Assert.Equal(42, frontendExit);
-        Assert.Empty(frontendOutput);
-        Assert.Empty(frontendError);
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (frontendExit, frontendOutput, frontendError) = await RunAsync(input,
+                "frontend-run", directory, "-", "--runtime", policy);
+            Assert.Equal(expected, frontendExit);
+            Assert.Empty(frontendOutput);
+            Assert.Empty(frontendError);
 
-        var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
-            "jit", "-", "--runtime", policy, "--json");
-        Assert.Equal(42, hostedExit);
-        Assert.Empty(hostedOutput);
-        Assert.Empty(hostedError);
+            var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
+                "jit", "-", "--runtime", policy, "--json");
+            Assert.Equal(expected, hostedExit);
+            Assert.Empty(hostedOutput);
+            Assert.Empty(hostedError);
+        }
     }
 
     [Theory]

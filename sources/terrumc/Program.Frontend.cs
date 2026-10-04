@@ -41,7 +41,7 @@ internal static partial class Program
         string[] names = ["SourceRange", "Token", "ManagedTokenChain", "Scanner",
             "ManagedScanner", "TokenSnapshot", "TokenTriviaSnapshot",
             "TokenIntegerSnapshot", "TokenDiagnosticSnapshot", "ScalarParserTypes",
-            "ScalarFrontend", "ScalarFrontendProgram", "ScalarFrontendProjection"];
+            "CharacterLiteral", "ScalarFrontend", "ScalarFrontendProgram", "ScalarFrontendProjection"];
         try
         {
             if (build)
