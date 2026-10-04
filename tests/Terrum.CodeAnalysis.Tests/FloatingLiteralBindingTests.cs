@@ -43,6 +43,30 @@ public sealed class FloatingLiteralBindingTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Int64ToFloat64(long value);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Float64ToInt32(long value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint Float64ToUInt32(long value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Float64ToInt64(long value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong Float64ToUInt64(long value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Float32ToInt32(int value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint Float32ToUInt32(int value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Float32ToInt64(int value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong Float32ToUInt64(int value);
+
     [Theory]
     [InlineData("float32", "0.1", 0x3DCCCCCDL)]
     [InlineData("float64", "0.1", 0x3FB999999999999AL)]
@@ -155,6 +179,52 @@ public sealed class FloatingLiteralBindingTests
         Assert.Equal(bits, constant.Value);
     }
 
+    [Theory]
+    [InlineData("int32", "int32(float64(2147483647.9))", int.MaxValue)]
+    [InlineData("int32", "int32(float64(-2147483648.5))", int.MinValue)]
+    [InlineData("uint32", "uint32(float64(-0.5))", 0L)]
+    [InlineData("uint32", "uint32(float64(4294967295.9))", -1L)]
+    [InlineData("int64", "int64(float64(-0x1p+63))", long.MinValue)]
+    [InlineData("uint64", "uint64(float64(18446744073709549568))", unchecked((long)0xFFFFFFFFFFFFF800UL))]
+    public void ConvertsFloatingConstantsToIntegerTargetFormat(string type, string expression, long bits)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($"public {type} Read() {{ return {expression}; }}"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var result = Assert.IsType<BoundReturn>(Assert.Single(program.Functions[0].Body.Statements));
+        var constant = Assert.IsType<BoundConstant>(result.Value);
+        Assert.Equal(type switch {
+            "int32" => PrimitiveType.Int32,
+            "uint32" => PrimitiveType.UInt32,
+            "int64" => PrimitiveType.Int64,
+            _ => PrimitiveType.UInt64,
+        }, constant.Type);
+        Assert.Equal(bits, constant.Value);
+    }
+
+    [Theory]
+    [InlineData("int32", "float64(0x1p+31)")]
+    [InlineData("uint32", "float64(-1.0)")]
+    [InlineData("int64", "float64(0x1p+63)")]
+    [InlineData("uint64", "float64(0x1p+64)")]
+    [InlineData("int32", "float64(0x1p+1024)")]
+    public void LeavesOutOfRangeFloatingConstantsAsCheckedCasts(string type, string expression)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($"public {type} Read() {{ return {type}({expression}); }}"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var result = Assert.IsType<BoundReturn>(Assert.Single(program.Functions[0].Body.Statements));
+        var cast = Assert.IsType<BoundCast>(result.Value);
+        Assert.Equal(type switch {
+            "int32" => PrimitiveType.Int32,
+            "uint32" => PrimitiveType.UInt32,
+            "int64" => PrimitiveType.Int64,
+            _ => PrimitiveType.UInt64,
+        }, cast.Type);
+    }
+
     [Fact]
     public void FloatingFormatConversionsPersistThroughSemanticModules()
     {
@@ -206,6 +276,31 @@ public sealed class FloatingLiteralBindingTests
     }
 
     [Fact]
+    public void FloatingToIntegerConversionsPersistThroughSemanticModules()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Convert(float64 value) { return int32(value); }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+
+        var producer = ModuleCompiler.CreateProducer(program, ["Convert"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return Convert(41.9); }"), reference);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        var convert = Assert.Single(linked.Functions, static function => function.Name == "Convert");
+        var cast = Assert.IsType<BoundCast>(
+            Assert.IsType<BoundReturn>(Assert.Single(convert.Body.Statements)).Value);
+        Assert.Equal(PrimitiveType.Float64, cast.Operand.Type);
+        Assert.Equal(PrimitiveType.Int32, cast.Type);
+        Assert.NotEmpty(NativeEmitter.EmitLibrary(program, ["Convert"], NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
     public void RejectsUntypedFloatingLiteralWithoutTargetContext()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("public int32 Read() { return 0.1; }"));
@@ -227,7 +322,7 @@ public sealed class FloatingLiteralBindingTests
     [InlineData("public bool Equal(float32 left, float32 right) { return left == right; }")]
     [InlineData("public bool Less(float64 left, float64 right) { return left < right; }")]
     [InlineData("public float32 Convert(char16 value) { return float32(value); }")]
-    [InlineData("public int32 Convert(float32 value) { return int32(value); }")]
+    [InlineData("public char16 Convert(float32 value) { return char16(value); }")]
     public void KeepsFloatingOperationsAndMixedConversionsUnsupported(string source)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
@@ -341,5 +436,152 @@ public sealed class FloatingLiteralBindingTests
             }
             File.Delete(path);
         }
+    }
+
+    [Fact]
+    public void RuntimeFloatingToIntegerConversionsTruncateTowardZero()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 FromFloat64ToInt32(float64 value) { return int32(value); } "
+            + "public uint32 FromFloat64ToUInt32(float64 value) { return uint32(value); } "
+            + "public int64 FromFloat64ToInt64(float64 value) { return int64(value); } "
+            + "public uint64 FromFloat64ToUInt64(float64 value) { return uint64(value); } "
+            + "public int32 FromFloat32ToInt32(float32 value) { return int32(value); } "
+            + "public uint32 FromFloat32ToUInt32(float32 value) { return uint32(value); } "
+            + "public int64 FromFloat32ToInt64(float32 value) { return int64(value); } "
+            + "public uint64 FromFloat32ToUInt64(float32 value) { return uint64(value); }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-float-to-integer-{Guid.NewGuid():N}.dll");
+        var library = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path,
+                NativeEmitter.EmitLibrary(program,
+                    ["FromFloat64ToInt32", "FromFloat64ToUInt32", "FromFloat64ToInt64",
+                        "FromFloat64ToUInt64", "FromFloat32ToInt32", "FromFloat32ToUInt32",
+                        "FromFloat32ToInt64", "FromFloat32ToUInt64"],
+                    NativeRuntimePolicy.FailFast));
+            library = NativeLibrary.Load(path);
+
+            var fromFloat64ToInt32 = Marshal.GetDelegateForFunctionPointer<Float64ToInt32>(
+                NativeLibrary.GetExport(library, "FromFloat64ToInt32"));
+            var fromFloat64ToUInt32 = Marshal.GetDelegateForFunctionPointer<Float64ToUInt32>(
+                NativeLibrary.GetExport(library, "FromFloat64ToUInt32"));
+            var fromFloat64ToInt64 = Marshal.GetDelegateForFunctionPointer<Float64ToInt64>(
+                NativeLibrary.GetExport(library, "FromFloat64ToInt64"));
+            var fromFloat64ToUInt64 = Marshal.GetDelegateForFunctionPointer<Float64ToUInt64>(
+                NativeLibrary.GetExport(library, "FromFloat64ToUInt64"));
+            var fromFloat32ToInt32 = Marshal.GetDelegateForFunctionPointer<Float32ToInt32>(
+                NativeLibrary.GetExport(library, "FromFloat32ToInt32"));
+            var fromFloat32ToUInt32 = Marshal.GetDelegateForFunctionPointer<Float32ToUInt32>(
+                NativeLibrary.GetExport(library, "FromFloat32ToUInt32"));
+            var fromFloat32ToInt64 = Marshal.GetDelegateForFunctionPointer<Float32ToInt64>(
+                NativeLibrary.GetExport(library, "FromFloat32ToInt64"));
+            var fromFloat32ToUInt64 = Marshal.GetDelegateForFunctionPointer<Float32ToUInt64>(
+                NativeLibrary.GetExport(library, "FromFloat32ToUInt64"));
+
+            Assert.Equal(1, fromFloat64ToInt32(BitConverter.DoubleToInt64Bits(1.9)));
+            Assert.Equal(-1, fromFloat64ToInt32(BitConverter.DoubleToInt64Bits(-1.9)));
+            Assert.Equal(0, fromFloat64ToInt32(BitConverter.DoubleToInt64Bits(-0.0)));
+            Assert.Equal(int.MinValue,
+                fromFloat64ToInt32(BitConverter.DoubleToInt64Bits(-2147483648.9)));
+            Assert.Equal(int.MaxValue,
+                fromFloat64ToInt32(BitConverter.DoubleToInt64Bits(2147483647.9)));
+            Assert.Equal(0u, fromFloat64ToUInt32(BitConverter.DoubleToInt64Bits(-0.5)));
+            Assert.Equal(0u, fromFloat64ToUInt32(BitConverter.DoubleToInt64Bits(-0.0)));
+            Assert.Equal(uint.MaxValue,
+                fromFloat64ToUInt32(BitConverter.DoubleToInt64Bits(4294967295.75)));
+            Assert.Equal(long.MinValue, fromFloat64ToInt64(BitConverter.DoubleToInt64Bits(long.MinValue)));
+            Assert.Equal(9_223_372_036_854_774_784L,
+                fromFloat64ToInt64(BitConverter.DoubleToInt64Bits(Math.BitDecrement(9223372036854775808.0))));
+            Assert.Equal(18_446_744_073_709_549_568UL,
+                fromFloat64ToUInt64(BitConverter.DoubleToInt64Bits(Math.BitDecrement(18446744073709551616.0))));
+            Assert.Equal(0UL, fromFloat64ToUInt64(BitConverter.DoubleToInt64Bits(-0.5)));
+            Assert.Equal(0UL, fromFloat64ToUInt64(BitConverter.DoubleToInt64Bits(-0.0)));
+            Assert.Equal(3, fromFloat32ToInt32(BitConverter.SingleToInt32Bits(3.75f)));
+            Assert.Equal(0, fromFloat32ToInt32(BitConverter.SingleToInt32Bits(-0.0f)));
+            Assert.Equal(0u, fromFloat32ToUInt32(BitConverter.SingleToInt32Bits(-0.5f)));
+            Assert.Equal(4_294_967_040u, fromFloat32ToUInt32(unchecked((int)0x4F7FFFFF)));
+            Assert.Equal(long.MinValue, fromFloat32ToInt64(unchecked((int)0xDF000000)));
+            Assert.Equal(9_223_372_036_854_775_808UL,
+                fromFloat32ToUInt64(0x5F000000));
+            Assert.Equal(1UL, fromFloat32ToUInt64(BitConverter.SingleToInt32Bits(1.9f)));
+        }
+        finally
+        {
+            if (library != IntPtr.Zero)
+            {
+                NativeLibrary.Free(library);
+            }
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32(float64(0x1p+31))")]
+    [InlineData("int32(float64(-2147483649.0))")]
+    [InlineData("uint32(float64(-1.0))")]
+    [InlineData("uint32(float64(0x1p+32))")]
+    [InlineData("int64(float64(0x1p+63))")]
+    [InlineData("int64(float64(-9223372036854777856))")]
+    [InlineData("uint64(float64(-1.0))")]
+    [InlineData("uint64(float64(0x1p+64))")]
+    [InlineData("int32(float64(0x1p+1024))")]
+    [InlineData("uint32(float64(0x1p+1024))")]
+    [InlineData("int64(float64(-0x1p+1024))")]
+    [InlineData("uint64(float64(0x1p+1024))")]
+    [InlineData("int32(float32(0x1p+128))")]
+    [InlineData("uint64(float32(0x1p+128))")]
+    public void CheckedFloatingToIntegerRangeFailuresCanBeCaught(string expression)
+    {
+        var source = $"int32 Main() {{ unsafe {{ try {{ _ = {expression}; }} catch {{ return 42; }} }} return 0; }}";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+    }
+
+    [Fact]
+    public void CheckedFloatingToIntegerRejectsNanAndInfinities()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Catch(float64 value) { unsafe { try { return int32(value); } catch { return 42; } } }"),
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-float-to-integer-nonfinite-{Guid.NewGuid():N}.dll");
+        var library = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path,
+                NativeEmitter.EmitLibrary(program, ["Catch"], NativeRuntimePolicy.CheckedExceptions));
+            library = NativeLibrary.Load(path);
+            var catchConversion = Marshal.GetDelegateForFunctionPointer<Float64ToInt32>(
+                NativeLibrary.GetExport(library, "Catch"));
+
+            Assert.Equal(42, catchConversion(BitConverter.DoubleToInt64Bits(double.NaN)));
+            Assert.Equal(42, catchConversion(BitConverter.DoubleToInt64Bits(double.PositiveInfinity)));
+            Assert.Equal(42, catchConversion(BitConverter.DoubleToInt64Bits(double.NegativeInfinity)));
+        }
+        finally
+        {
+            if (library != IntPtr.Zero)
+            {
+                NativeLibrary.Free(library);
+            }
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void FloatingToIntegerConversionsRemainCheckedOperations()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "[NoThrow] public int32 Convert(float64 value) { return int32(value); }"));
+
+        Assert.True(compilation.HasErrors);
     }
 }

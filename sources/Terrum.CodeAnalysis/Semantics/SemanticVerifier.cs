@@ -2900,9 +2900,13 @@ public static class SemanticVerifier
                 var integerToFloatingConversion = (cast.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
                     or PrimitiveType.Int64 or PrimitiveType.UInt64)
                     && (cast.Type is PrimitiveType.Float32 or PrimitiveType.Float64);
+                var floatingToIntegerConversion = (cast.Operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
+                    && (cast.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64);
                 var floatingConversion = (cast.Operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
                     && (cast.Type is PrimitiveType.Float32 or PrimitiveType.Float64);
-                if (!integerConversion && !integerToFloatingConversion && !floatingConversion)
+                if (!integerConversion && !integerToFloatingConversion
+                    && !floatingToIntegerConversion && !floatingConversion)
                 {
                     throw Invalid();
                 }

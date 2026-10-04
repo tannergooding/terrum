@@ -758,9 +758,11 @@ tokens, while valid integer records are untagged. Larger integer magnitudes
 are reported as beyond the decoder's range, not lexical errors. The compiled
 scanner preserves decimal and valid hexadecimal floating tokens without
 publishing integer magnitudes; the hosted binder constructs target-typed
-`float32`/`float64` values and converts between those formats. Floating
-arithmetic/comparisons, integer/floating conversions, the Terrum-authored
-scalar frontend and custom literal parsers remain unsupported; bounded scalar
+`float32`/`float64` values and performs the supported numeric conversions,
+including provisional checked conversions to fixed-width integers. Floating
+arithmetic/comparisons, floating conversions in the Terrum-authored scalar
+frontend, and custom literal parsers remain unsupported; those authored
+components still rely on the hosted verifier/emitter. Bounded scalar
 `[ConstEval]` is implemented separately from literal registration.
 Contextual integer literal typing/range checks
 and parser routines remain hosted, while

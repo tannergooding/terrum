@@ -35,9 +35,12 @@ decimal and hexadecimal floating spellings are rounded directly to the target
 format, based integers construct directly in that format, and unary signs
 preserve IEEE bit patterns. Explicit `float32`/`float64` conversions follow
 IEEE-754 target-format conversion, as do typed `int32`, `uint32`, `int64` and
-`uint64` conversions to either floating format. Floating-to-integer conversion,
-floating arithmetic and comparisons, and scalar-frontend support remain
-outside this implementation.
+`uint64` conversions to either floating format. The hosted implementation also
+provisionally supports checked conversion from either floating format to
+`int32`, `uint32`, `int64` and `uint64`, truncating before the range check;
+the exact pair eligibility remains an unapproved proposal. Floating arithmetic
+and comparisons, and these conversions in the Terrum-authored scalar frontend,
+remain outside this implementation.
 
 The bounded Terrum-authored scalar source frontend supports v85 complete
 global-function snapshots and source-order scalar call targets, including

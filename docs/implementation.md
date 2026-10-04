@@ -1174,8 +1174,16 @@ target-width bit patterns, while decimal integers retain numeric range
 semantics. Typed conversions between `float32` and `float64`, and from
 `int32`, `uint32`, `int64` or `uint64` to either floating format, follow
 IEEE-754 nearest/ties-to-even behavior, including overflow to infinity and
-underflow to subnormal or zero. Floating-to-integer conversions, floating
-arithmetic/comparisons and floating `[ConstEval]` remain unsupported.
+underflow to subnormal or zero. The hosted binder and emitter provisionally
+implement checked conversions from `float32` and `float64` to `int32`,
+`uint32`, `int64` and `uint64`: they truncate toward zero, then range-check;
+NaN, infinities and out-of-range truncated results fail. Direct conversion to
+`char16` is excluded. This pair matrix follows an unapproved
+[eligibility proposal](proposals/checked-float-to-integer-eligibility.md) and
+is not an accepted language-contract change. The Terrum-authored scalar
+frontend still does not support these conversions and remains dependent on the
+hosted verifier/emitter. Floating arithmetic/comparisons and floating
+`[ConstEval]` remain unsupported.
 Existing source function and local shadowing keeps its ordinary call-binding
 precedence. Top-level generic function templates support multiple independently
 constrained type parameters over eligible `Copy` structs, scalar value types,

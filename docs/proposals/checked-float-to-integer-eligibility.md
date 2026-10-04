@@ -1,8 +1,9 @@
 # Checked floating-to-integer pair eligibility
 
 **Status: unapproved.** This proposal recommends a bounded source/destination
-matrix for the already specified checked floating-to-integer value policy. It
-does not change accepted conversion semantics or current compiler support.
+matrix for the already specified checked floating-to-integer value policy. The
+recommended pairs have provisional hosted compiler support, but implementation
+does not approve the eligibility choice or change the accepted contract.
 
 ## Current boundary
 
@@ -10,9 +11,11 @@ The [conversion policy](../conversions.md#conversion-policies) defines checked
 floating-to-integer conversion as truncation toward zero followed by a range
 check. The truncated result must be representable by the destination; NaN and
 out-of-range values, including infinities, fail. Exact source/destination
-eligibility remains open. The hosted compiler currently supports floating
-format conversion and the four fixed-width integer sources to either floating
-format, but not floating-to-integer conversion.
+eligibility remains open. The hosted compiler supports floating format
+conversion and the four fixed-width integer sources to either floating format.
+It now also provisionally implements the recommended floating-to-fixed-integer
+pairs; the Terrum-authored scalar frontend remains unsupported for these
+conversions.
 
 ## Question for direction
 
@@ -32,11 +35,13 @@ truncated value, with NaN and infinities failing. Do not add implicit
 conversions, alternate rounding modes, or unchecked/saturating syntax as part
 of this slice.
 
-If accepted, regression coverage should include fractional values on both
-sides of zero, truncated values at each destination boundary, just-outside
-values, signed zero, NaN, and both infinities under each supported runtime
-policy. Constant folding must match runtime conversion outcomes without
+Regression coverage for the provisional implementation includes fractional
+values on both sides of zero, truncated values at destination boundaries,
+just-outside values, signed zero, and NaN/infinities through checked exception
+recovery. Successful compiled-scanner execution is checked under both runtime
+policies. Constant folding must match runtime conversion outcomes without
 turning a failing checked conversion into a successful constant.
 
-Until this pair matrix is approved, keep the existing implementation boundary
-and do not infer support from the policy table alone.
+Keep the implementation status distinct from approval: do not infer that this
+pair matrix has been accepted as a language contract from its implementation
+or from the general conversion policy alone.

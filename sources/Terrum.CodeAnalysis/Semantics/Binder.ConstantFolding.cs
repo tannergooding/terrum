@@ -73,6 +73,10 @@ internal sealed partial class Binder
                 when TryConvertToFloatingConstant(operand, cast.Type, out var floatingBits):
                 return new BoundConstant(floatingBits, cast.Type, expression.Span);
 
+            case BoundCast { Operand: BoundConstant operand } cast
+                when TryConvertFloatingToIntegerConstant(operand, cast.Type, out var integerBits):
+                return new BoundConstant(integerBits, cast.Type, expression.Span);
+
             case BoundCast { Operand: BoundConstant operand }
                 when TryScalarValue(operand, out var input):
                 value = input;
@@ -211,6 +215,26 @@ internal sealed partial class Binder
             return true;
         }
         return false;
+    }
+
+    private static bool TryConvertFloatingToIntegerConstant(BoundConstant source, PrimitiveType destination,
+        out long value)
+    {
+        value = 0;
+        if (destination is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64))
+        {
+            return false;
+        }
+        var floatingValue = source.Type switch {
+            PrimitiveType.Float32 => BitConverter.Int32BitsToSingle(unchecked((int)source.Value)),
+            PrimitiveType.Float64 => BitConverter.Int64BitsToDouble(source.Value),
+            _ => double.NaN,
+        };
+        if (!double.IsFinite(floatingValue))
+        {
+            return false;
+        }
+        return TryEncodeScalar(new BigInteger(Math.Truncate(floatingValue)), destination, out value);
     }
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Other types cannot be folded.")]

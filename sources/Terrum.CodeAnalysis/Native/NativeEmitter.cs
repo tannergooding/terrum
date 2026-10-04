@@ -3511,6 +3511,12 @@ internal sealed partial class PeCompiler
 
     private void Cast(PrimitiveType source, PrimitiveType target)
     {
+        if (source is PrimitiveType.Float32 or PrimitiveType.Float64
+            && target is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
+        {
+            EmitFloatingToInteger(source, target);
+            return;
+        }
         if (target is PrimitiveType.Float32 or PrimitiveType.Float64
             && source is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
         {
@@ -3577,6 +3583,74 @@ internal sealed partial class PeCompiler
             _code.Bytes(0x48, 0x39, 0xC8); // cmp rax,rcx
             RuntimeBranch(0x85, 0);
         }
+    }
+
+    private void EmitFloatingToInteger(PrimitiveType source, PrimitiveType target)
+    {
+        if (source == PrimitiveType.Float32)
+        {
+            _code.Bytes(0x66, 0x0F, 0x6E, 0xC0); // movd xmm0,eax
+            _code.Bytes(0xF3, 0x0F, 0x5A, 0xC0); // cvtss2sd xmm0,xmm0
+        }
+        else
+        {
+            _code.Bytes(0x66, 0x48, 0x0F, 0x6E, 0xC0); // movq xmm0,rax
+        }
+
+        _code.Bytes(0x66, 0x0F, 0x2E, 0xC0); // ucomisd xmm0,xmm0 rejects NaN
+        RuntimeBranch(0x8A, 0);
+        switch (target)
+        {
+            case PrimitiveType.Int32:
+                CompareFloat64(-2147483649.0);
+                RuntimeBranch(0x86, 0);
+                CompareFloat64(2147483648.0);
+                RuntimeBranch(0x83, 0);
+                break;
+            case PrimitiveType.UInt32:
+                CompareFloat64(-1.0);
+                RuntimeBranch(0x86, 0);
+                CompareFloat64(4294967296.0);
+                RuntimeBranch(0x83, 0);
+                break;
+            case PrimitiveType.Int64:
+                CompareFloat64(-9223372036854775808.0);
+                RuntimeBranch(0x82, 0);
+                CompareFloat64(9223372036854775808.0);
+                RuntimeBranch(0x83, 0);
+                break;
+            case PrimitiveType.UInt64:
+                CompareFloat64(-1.0);
+                RuntimeBranch(0x86, 0);
+                CompareFloat64(18446744073709551616.0);
+                RuntimeBranch(0x83, 0);
+                CompareFloat64(9223372036854775808.0);
+                var belowSignedLimit = _code.JumpIf(0x82);
+                _code.Bytes(0xF2, 0x0F, 0x5C, 0xC1); // subtract 2^63 before the signed conversion
+                _code.Bytes(0xF2, 0x48, 0x0F, 0x2C, 0xC0);
+                _code.Bytes(0x48, 0xBA);
+                _code.Int64(long.MinValue);
+                _code.Bytes(0x48, 0x09, 0xD0); // restore the unsigned high bit
+                var completedUnsigned = _code.Jump();
+                _code.PatchRelative(belowSignedLimit, _code.Position);
+                _code.Bytes(0xF2, 0x48, 0x0F, 0x2C, 0xC0);
+                _code.PatchRelative(completedUnsigned, _code.Position);
+                break;
+            default:
+                throw new InvalidOperationException("Floating-to-integer target was not verified.");
+        }
+        if (target != PrimitiveType.UInt64)
+        {
+            _code.Bytes(0xF2, 0x48, 0x0F, 0x2C, 0xC0); // cvttsd2si rax,xmm0
+        }
+    }
+
+    private void CompareFloat64(double value)
+    {
+        _code.Bytes(0x48, 0xB8);
+        _code.Int64(BitConverter.DoubleToInt64Bits(value));
+        _code.Bytes(0x66, 0x48, 0x0F, 0x6E, 0xC8); // movq xmm1,rax
+        _code.Bytes(0x66, 0x0F, 0x2E, 0xC1); // ucomisd xmm0,xmm1
     }
 
     private void EmitIntegerToFloating(PrimitiveType source, PrimitiveType target)
