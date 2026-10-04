@@ -26,6 +26,9 @@ public readonly ref struct TrRmImportTableReader
         }
 
         _expected = new Dictionary<uint, (uint TargetRequirement, uint RuntimePolicy)>();
+        var lastModuleRefRow = 0;
+        var lastRequirements = default((int OwnerModule,
+            uint TargetRequirement, uint RuntimePolicy));
         for (var row = 0; row < recordCount; row++)
         {
             var data = section.Slice(row * RowSize, RowSize);
@@ -40,9 +43,29 @@ public readonly ref struct TrRmImportTableReader
 
             var (module, _, _, body) = TrRmDefinitionResolver.Resolve(expected,
                 types, methods, properties);
-            if (references.GetOwnerModule((int)moduleRef) != module
-                || (expected >> 24 is 0x16 or 0x1E && body != 0)
-                || !_expected.TryAdd(expected, references.GetRequirements((int)moduleRef)))
+            var moduleRefRow = (int)moduleRef;
+            if (moduleRefRow != lastModuleRefRow)
+            {
+                var ownerModule = references.GetOwnerModule(moduleRefRow);
+                if (ownerModule != module
+                    || (expected >> 24 is 0x16 or 0x1E && body != 0))
+                {
+                    throw InvalidImport();
+                }
+
+                var (targetRequirement, runtimePolicy) =
+                    references.GetRequirements(moduleRefRow);
+                lastRequirements = (ownerModule, targetRequirement, runtimePolicy);
+                lastModuleRefRow = moduleRefRow;
+            }
+            else if (lastRequirements.OwnerModule != module
+                || (expected >> 24 is 0x16 or 0x1E && body != 0))
+            {
+                throw InvalidImport();
+            }
+
+            if (!_expected.TryAdd(expected,
+                (lastRequirements.TargetRequirement, lastRequirements.RuntimePolicy)))
             {
                 throw InvalidImport();
             }

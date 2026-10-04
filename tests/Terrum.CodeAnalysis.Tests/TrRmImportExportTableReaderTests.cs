@@ -17,6 +17,11 @@ public sealed class TrRmImportExportTableReaderTests
         Assert.True(Read(Import(), Export(0x1600_0001)));
         Assert.True(Read(Import(), Export(0x1300_0001)));
         Assert.True(Read(Import(), Export(0x1300_0001, 0x1300_0002)));
+        var sharedModuleRef = new byte[24];
+        Import(0x1300_0002).CopyTo(sharedModuleRef, 0);
+        Import().CopyTo(sharedModuleRef, 12);
+        Write(sharedModuleRef, 16, 8);
+        Assert.True(Read(sharedModuleRef, [], additionalExpected: 0x1300_0002));
         var twoProducers = Export(0x1300_0001, 0x1300_0002);
         Write(twoProducers, 12, 8);
         Assert.True(Read(Import(), twoProducers));
@@ -114,7 +119,7 @@ public sealed class TrRmImportExportTableReaderTests
     private static bool Read(byte[] importRows, byte[] exportRows,
         uint producerVisibility = 2, uint producerTypeVisibility = 2, uint propertyFlags = 0,
         bool producerOwnsRef = false, bool producerMethodOwned = false,
-        bool frameArtifact = false, bool writeRows = false)
+        bool frameArtifact = false, bool writeRows = false, uint? additionalExpected = null)
     {
         var nameBytes = TrRmStringTableWriter.EncodeTextRows(
             [("", 0), ("Producer", 0), ("Consumer", 0), ("Widget", 0),
@@ -207,7 +212,9 @@ public sealed class TrRmImportExportTableReaderTests
             TrRmStructuralMetadataValidator.Validate(Artifact(sections));
         }
 
-        return imports.IsExpectedDefinition(0x1600_0002);
+        return imports.IsExpectedDefinition(0x1600_0002)
+            && (additionalExpected is null
+                || imports.IsExpectedDefinition(additionalExpected.Value));
     }
 
     private static byte[] Artifact(List<(ushort Kind, byte[] Bytes, int Count)> sections)
