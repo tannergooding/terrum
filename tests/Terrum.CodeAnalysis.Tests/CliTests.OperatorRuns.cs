@@ -19,7 +19,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var frontend = Path.Combine(root, "self-host");
-        var scanner = Path.Combine(frontend, "Scanner.terrum");
+        var scanner = frontend;
         var prefix = Path.Combine(root, "artifacts", $"operator-run-{Guid.NewGuid():N}");
         var paths = new[] { prefix + ".hosted.exe", prefix + ".component.exe", prefix + ".native.exe" };
         const string source = "int32 Main() { mut int32 x = 20; return x++ + ++x; }";

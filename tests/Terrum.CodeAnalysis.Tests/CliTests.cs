@@ -309,7 +309,7 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         const string Source = "0 9223372036854775808 18446744073709551615 18446744073709551616 256 1.0 2e3 3.0";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "scan-component",
-            Path.Combine(root, "self-host", "Scanner.terrum"), "-", "--runtime", "fail-fast", "--json");
+            Path.Combine(root, "self-host"), "-", "--runtime", "fail-fast", "--json");
         Assert.Equal(0, exit);
         Assert.Empty(error);
         using var document = JsonDocument.Parse(output);
@@ -341,7 +341,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("\u03B12 + 42 \U00010400 \U0001F600"),
-            "scan-component", Path.Combine(root, "self-host", "Scanner.terrum"), "-", "--runtime", "fail-fast", "--json");
+            "scan-component", Path.Combine(root, "self-host"), "-", "--runtime", "fail-fast", "--json");
         Assert.Equal(1, exit);
         Assert.Equal("", error);
         using var document = JsonDocument.Parse(output);
@@ -369,7 +369,7 @@ public sealed partial class CliTests
         var path = Path.Combine(Path.GetTempPath(), $"terrum-cli-{Guid.NewGuid():N}.exe");
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         string[] arguments = nativeScanner
-            ? ["build-component", Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", path, "--runtime", "fail-fast", "--json"]
+            ? ["build-component", Path.Combine(root, "self-host"), "-", "-o", path, "--runtime", "fail-fast", "--json"]
             : ["build", "-", "-o", path, "--runtime", "fail-fast", "--json"];
 
         try
@@ -455,7 +455,7 @@ public sealed partial class CliTests
             Assert.Equal(0, hostExit);
             Assert.Empty(hostError);
             var (nativeExit, nativeOutput, nativeError) = await RunAsync(bytes, "build-component",
-                Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", scanned, "--runtime", "fail-fast", "--json");
+                Path.Combine(root, "self-host"), "-", "-o", scanned, "--runtime", "fail-fast", "--json");
             Assert.Equal(0, nativeExit);
             Assert.Empty(nativeError);
             using var host = JsonDocument.Parse(hostOutput);
@@ -485,7 +485,7 @@ public sealed partial class CliTests
         {
             await File.WriteAllBytesAsync(artifact, previous);
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "build-component",
-                Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", artifact, "--runtime", "fail-fast", "--json");
+                Path.Combine(root, "self-host"), "-", "-o", artifact, "--runtime", "fail-fast", "--json");
             Assert.Equal(1, exit);
             Assert.Empty(error);
             using var document = JsonDocument.Parse(output);

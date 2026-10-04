@@ -1,10 +1,14 @@
 # Compiled Terrum scanner component
 
-`self-host/Scanner.terrum` is an executable lossless scanner component, not a
-bootstrapped compiler. It implements scalar decoding, Unicode identifier
+The `self-host` source bundle (`SourceRange.terrum`,
+`CharacterLiteral.terrum`, then `Scanner.terrum`) contains an executable
+lossless scanner component, not a bootstrapped compiler. `Scanner.terrum`
+implements scalar decoding, Unicode identifier
 classification, keyword and operator selection, numeric token boundaries,
-quoted strings and single-scalar character literals with escapes, leading
-trivia and lexical diagnostics in Terrum.
+quoted strings, leading trivia and lexical diagnostics in Terrum. Character
+literal validation and its diagnostic spans come from the shared
+`CharacterLiteralDecodeResult`; the scanner retains responsibility for finding
+the token boundary.
 The C# host supplies buffers and pinned lexical data; it does not pretokenize
 or make source-dependent classification decisions for the component.
 `_` remains a distinct token, while underscore-prefixed names remain
@@ -78,9 +82,14 @@ validates one scalar but leaves target-type representability to the hosted
 binder.
 
 ```powershell
-dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll scan-component self-host\Scanner.terrum input.txt --runtime fail-fast --json
-dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-component self-host\Scanner.terrum samples\native\factorial.terrum -o artifacts\scanned-factorial.exe --runtime fail-fast --json
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll scan-component self-host input.txt --runtime fail-fast --json
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-component self-host samples\native\factorial.terrum -o artifacts\scanned-factorial.exe --runtime fail-fast --json
 ```
+
+For these commands a directory argument explicitly selects the ordered
+`SourceRange.terrum`, `CharacterLiteral.terrum`, and `Scanner.terrum` bundle.
+Single-file `scan-component`/`build-component` inputs remain available for
+self-contained scanner components; `Scanner.terrum` itself requires the bundle.
 
 Both are execution-worker commands: compiled scanner code runs inside that CLI
 process. Supervising clients must launch a bounded subprocess and treat abnormal

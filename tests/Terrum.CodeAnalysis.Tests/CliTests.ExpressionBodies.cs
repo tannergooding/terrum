@@ -67,7 +67,7 @@ public sealed partial class CliTests
                 "--runtime", policy, "--json");
             Assert.True(result == 0, output + error);
             (result, output, error) = await RunAsync(bytes, "build-component",
-                Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", scannedImage,
+                Path.Combine(root, "self-host"), "-", "-o", scannedImage,
                 "--runtime", policy, "--json");
             Assert.True(result == 0, output + error);
             Assert.Equal(await File.ReadAllBytesAsync(hostedImage), await File.ReadAllBytesAsync(scannedImage));

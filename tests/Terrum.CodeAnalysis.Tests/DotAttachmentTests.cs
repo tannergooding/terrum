@@ -105,7 +105,7 @@ public sealed class DotAttachmentTests
     public async Task CompiledScannerAdapterPreservesEveryRoleAndBoundaryAsync(NativeRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var scanner = await File.ReadAllTextAsync(Path.Combine(root, "self-host", "Scanner.terrum"));
+        var scanner = await ScannerTests.ReadScannerSourceAsync(root);
         var chunk = new StringBuilder();
         var chunks = new List<string>();
         var expectedFailures = 0;

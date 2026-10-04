@@ -47,7 +47,7 @@ public sealed partial class CliTests
                 foreach (var mode in new[] { "build", "build-component", "frontend-build" })
                 {
                     var args = mode == "build" ? new[] { "-", "-o", path, "--runtime", policy, "--json" }
-                        : new[] { Path.Combine(root, mode == "build-component" ? "self-host\\Scanner.terrum" : "self-host"),
+                        : new[] { Path.Combine(root, "self-host"),
                             "-", "-o", path, "--runtime", policy, "--json" };
                     var source = Encoding.UTF8.GetBytes($"int32 Main() {{ {valid} return 42; }}");
                     var (exit, output, error) = await RunAsync(source, [mode, .. args]);

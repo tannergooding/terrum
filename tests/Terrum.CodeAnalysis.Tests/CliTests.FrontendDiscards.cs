@@ -60,7 +60,7 @@ public sealed partial class CliTests
                     "build", "-", "-o", hosted, "--runtime", policy, "--json");
                 Assert.True(hostExit == 0, $"{policy}: {hostOutput}{hostError}");
                 var (scanExit, scanOutput, scanError) = await RunAsync(input, "build-component",
-                    Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", scanner,
+                    Path.Combine(root, "self-host"), "-", "-o", scanner,
                     "--runtime", policy, "--json");
                 Assert.True(scanExit == 0, $"{policy}: {scanOutput}{scanError}");
                 Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));

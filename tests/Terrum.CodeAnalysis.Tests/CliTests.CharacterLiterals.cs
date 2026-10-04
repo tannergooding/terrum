@@ -33,7 +33,7 @@ public sealed partial class CliTests
     public async Task CompiledScannerCharacterLiteralsMatchHostedBuildAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var scanner = Path.Combine(root, "self-host", "Scanner.terrum");
+        var scanner = Path.Combine(root, "self-host");
         var prefix = Path.Combine(Path.GetTempPath(), $"terrum-character-literal-{Guid.NewGuid():N}");
         var hosted = prefix + ".exe";
         var compiled = prefix + ".compiled.exe";

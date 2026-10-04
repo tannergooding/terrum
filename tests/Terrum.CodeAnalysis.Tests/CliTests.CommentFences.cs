@@ -20,7 +20,7 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         const string Source = "/// line\n//* block *// /** ordinary **/ int32 Main() { return 42; }";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "scan-component",
-            Path.Combine(root, "self-host", "Scanner.terrum"), "-", "--runtime", policy, "--json");
+            Path.Combine(root, "self-host"), "-", "--runtime", policy, "--json");
         Assert.Equal(0, exit);
         Assert.Empty(error);
         using var document = JsonDocument.Parse(output);
@@ -57,7 +57,7 @@ public sealed partial class CliTests
         {
             var (exit, output, error) = await RunAsync(
                 Encoding.UTF8.GetBytes("/// heading\nint32 Main() { //** block **// return 42; }"),
-                "build-component", Path.Combine(root, "self-host", "Scanner.terrum"), "-",
+                "build-component", Path.Combine(root, "self-host"), "-",
                 "-o", image, "--runtime", policy, "--json");
             Assert.Equal(0, exit);
             Assert.Empty(error);
@@ -82,7 +82,7 @@ public sealed partial class CliTests
         {
             var (exit, output, error) = await RunAsync(
                 Encoding.UTF8.GetBytes("int32 Main() { /* **/ */ return 42; }"),
-                "build-component", Path.Combine(root, "self-host", "Scanner.terrum"), "-",
+                "build-component", Path.Combine(root, "self-host"), "-",
                 "-o", image, "--runtime", policy, "--json");
             Assert.Equal(1, exit);
             Assert.Empty(error);

@@ -27,7 +27,7 @@ public sealed partial class CliTests
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                "scan-component", Path.Combine(RepositoryRoot(), "self-host", "Scanner.terrum"),
+                "scan-component", Path.Combine(RepositoryRoot(), "self-host"),
                 "-", "--runtime", policy, "--json");
             Assert.Equal(codes.Length == 0 ? 0 : 1, exit);
             Assert.Empty(error);

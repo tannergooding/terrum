@@ -192,7 +192,7 @@ public sealed class OperatorSpacingTests
     public async Task CompiledScannerPreservesEveryOperatorRoleAndBoundaryAsync(NativeRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var scanner = await File.ReadAllTextAsync(Path.Combine(root, "self-host", "Scanner.terrum"));
+        var scanner = await ScannerTests.ReadScannerSourceAsync(root);
         var inputs = new List<string>();
         foreach (var row in SeparatedOperators)
         {

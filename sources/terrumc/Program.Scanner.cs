@@ -31,22 +31,24 @@ internal static partial class Program
         }
 
         string scanner;
+        string scannerPath;
         SourceText source;
         string? outputPath = null;
         try
         {
+            scannerPath = Path.GetFullPath(args[1]);
             if (build)
             {
                 outputPath = Path.GetFullPath(args[4]);
                 if (!string.Equals(Path.GetExtension(outputPath), ".exe", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(outputPath, Path.GetFullPath(args[1]), StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(outputPath, scannerPath, StringComparison.OrdinalIgnoreCase)
                     || (args[2] != "-" && string.Equals(outputPath, Path.GetFullPath(args[2]), StringComparison.OrdinalIgnoreCase)))
                 {
                     WriteInputError(json, "TRM2002", "Output must be a distinct .exe path, not scanner or input source.");
                     return 2;
                 }
             }
-            scanner = ReadSource(args[1]);
+            scanner = ReadScannerSource(scannerPath);
             source = SourceText.From(ReadSource(args[2]), args[2] == "-" ? "<stdin>" : args[2]);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or DecoderFallbackException or ArgumentException or NotSupportedException)
@@ -61,7 +63,9 @@ internal static partial class Program
             return 2;
         }
 
-        var tree = SyntaxTree.Parse(scanner + "\nint32 Main() { return Scan(); }\n", args[1]);
+        var scannerSourcePath = Directory.Exists(scannerPath)
+            ? Path.Combine(scannerPath, "Scanner.terrum") : args[1];
+        var tree = SyntaxTree.Parse(scanner + "\nint32 Main() { return Scan(); }\n", scannerSourcePath);
         var policy = args[runtime + 1] == "fail-fast"
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
         var compilation = Compilation.Create(tree, ScannerHost.CreateBuffers(source), (BoundRuntimePolicy)policy);
@@ -211,5 +215,40 @@ internal static partial class Program
         }
 
         return diagnostics.IsEmpty ? 0 : 1;
+    }
+
+    private static string ReadScannerSource(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        if (!Directory.Exists(fullPath))
+        {
+            return ReadSource(fullPath);
+        }
+
+        return ReadSource(Path.Combine(fullPath, "SourceRange.terrum"))
+            + RemoveFileScopedNamespace(ReadSource(Path.Combine(fullPath, "CharacterLiteral.terrum")))
+            + RemoveFileScopedNamespace(ReadSource(Path.Combine(fullPath, "Scanner.terrum")));
+    }
+
+    private static string RemoveFileScopedNamespace(string source)
+    {
+        const string NamespaceDeclaration = "namespace Terrum.CodeAnalysis;";
+        if (!source.StartsWith(NamespaceDeclaration, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Scanner bundle components must use the Terrum.CodeAnalysis namespace.",
+                nameof(source));
+        }
+
+        var lineEnd = source.IndexOfAny(['\r', '\n']);
+        if (lineEnd < 0)
+        {
+            return string.Empty;
+        }
+
+        if (source[lineEnd] == '\r' && lineEnd + 1 < source.Length && source[lineEnd + 1] == '\n')
+        {
+            lineEnd++;
+        }
+        return source[(lineEnd + 1)..];
     }
 }

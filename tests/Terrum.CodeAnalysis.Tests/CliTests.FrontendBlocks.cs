@@ -69,7 +69,7 @@ public sealed partial class CliTests
                 Assert.True(hostedExit == 0, $"{policy}: {hostedOutput}{hostedError}");
                 Assert.Equal(await File.ReadAllBytesAsync(hostedPath), await File.ReadAllBytesAsync(nativePath));
                 var (scannerExit, scannerOutput, scannerError) = await RunAsync(input,
-                    "build-component", Path.Combine(frontend, "Scanner.terrum"), "-", "-o", scannerPath,
+                    "build-component", frontend, "-", "-o", scannerPath,
                     "--runtime", policy, "--json");
                 Assert.True(scannerExit == 0, $"{policy}: {scannerOutput}{scannerError}");
                 Assert.Equal(await File.ReadAllBytesAsync(hostedPath), await File.ReadAllBytesAsync(scannerPath));

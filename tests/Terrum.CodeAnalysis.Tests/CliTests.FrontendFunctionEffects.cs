@@ -53,7 +53,7 @@ public sealed partial class CliTests
                 Assert.Equal(85, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
                 var (hostExit, hostOutput, hostError) = await RunAsync(source, "build", "-", "-o", hosted, "--runtime", policy, "--json");
                 Assert.True(hostExit == 0, $"{hostOutput}{hostError}");
-                var (scanExit, scanOutput, scanError) = await RunAsync(source, "build-component", Path.Combine(root, "self-host", "Scanner.terrum"),
+                var (scanExit, scanOutput, scanError) = await RunAsync(source, "build-component", Path.Combine(root, "self-host"),
                     "-", "-o", scanner, "--runtime", policy, "--json");
                 Assert.True(scanExit == 0, $"{scanOutput}{scanError}");
                 Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));

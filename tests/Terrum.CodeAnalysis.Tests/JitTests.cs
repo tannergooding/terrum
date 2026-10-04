@@ -359,7 +359,7 @@ public sealed partial class JitTests
     public async Task ScannerWorkerReturnsCopiedWritableTokenDataAsync(string source, int identifierLength, int integerStart, int sourceLength)
     {
         AssertWindowsX64();
-        var scanner = Path.Combine(RepositoryRoot(), "self-host", "Scanner.terrum");
+        var scanner = Path.Combine(RepositoryRoot(), "self-host");
         (var exit, var output, var error) = await RunAsync(
             CliStart("scan-component", scanner, "-", "--runtime", "fail-fast", "--json"),
             Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);
@@ -393,7 +393,7 @@ public sealed partial class JitTests
     public async Task ScannerWorkerReportsLexicalDiagnosticsAndTokenSpansAsync(string source)
     {
         var expected = Lexer.Lex(SourceText.From(source));
-        var scanner = Path.Combine(RepositoryRoot(), "self-host", "Scanner.terrum");
+        var scanner = Path.Combine(RepositoryRoot(), "self-host");
         var (exit, output, error) = await RunAsync(
             CliStart("scan-component", scanner, "-", "--runtime", "fail-fast", "--json"),
             Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);

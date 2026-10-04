@@ -22,7 +22,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var frontend = Path.Combine(root, "self-host");
-        var scanner = Path.Combine(frontend, "Scanner.terrum");
+        var scanner = frontend;
         var prefix = Path.Combine(root, "artifacts", $"contextual-punctuation-{Guid.NewGuid():N}");
         var hosted = prefix + ".hosted.exe";
         var component = prefix + ".component.exe";

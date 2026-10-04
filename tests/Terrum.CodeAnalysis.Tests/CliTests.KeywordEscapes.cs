@@ -21,7 +21,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var frontend = Path.Combine(root, "self-host");
-        var scanner = Path.Combine(frontend, "Scanner.terrum");
+        var scanner = frontend;
         const string Source = "/// heading\nint32 Main() { mut int32 @const = 0; while (const < 42) { @const += 1; } return const; }";
         foreach (var arguments in new[] {
             new[] { "jit", "-", "--runtime", policy, "--json" },
@@ -100,7 +100,7 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         const string Source = "/* heading */ @await @const @union @via @out @int32 @ await";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "scan-component",
-            Path.Combine(root, "self-host", "Scanner.terrum"), "-", "--runtime", policy, "--json");
+            Path.Combine(root, "self-host"), "-", "--runtime", policy, "--json");
         Assert.Equal(1, exit);
         Assert.Empty(error);
         using var document = JsonDocument.Parse(output);

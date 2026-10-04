@@ -18,7 +18,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var frontend = Path.Combine(root, "self-host");
-        var scanner = Path.Combine(frontend, "Scanner.terrum");
+        var scanner = frontend;
         const string Source = "int32 Main(\n) { return int32(\n ( /* grouping */ 42 )\n); }";
         foreach (var arguments in new[] {
             new[] { "jit", "-", "--runtime", policy, "--json" },

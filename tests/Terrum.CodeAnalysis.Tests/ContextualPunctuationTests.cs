@@ -328,7 +328,7 @@ public sealed class ContextualPunctuationTests
     public async Task CompiledScannerPreservesAllCurrentPunctuationRolesAsync(NativeRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var scanner = await File.ReadAllTextAsync(Path.Combine(root, "self-host", "Scanner.terrum"));
+        var scanner = await ScannerTests.ReadScannerSourceAsync(root);
         var chunks = new List<string>();
         var chunk = new StringBuilder();
         foreach (var row in Boundaries)

@@ -49,7 +49,7 @@ public sealed partial class CliTests
                     "--runtime", policy, "--json");
                 Assert.True(exit == 0, $"build {policy} exited {exit}: {output}{error}");
                 (exit, output, error) = await RunAsync(input, "build-component",
-                    Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", scanned,
+                    Path.Combine(root, "self-host"), "-", "-o", scanned,
                     "--runtime", policy, "--json");
                 Assert.True(exit == 0, $"build-component {policy} exited {exit}: {output}{error}");
                 Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(scanned));
@@ -111,7 +111,7 @@ public sealed partial class CliTests
                     "--runtime", policy, "--json");
                 Assert.True(exit == 0, $"build {policy} exited {exit}: {output}{error}");
                 (exit, output, error) = await RunAsync(input, "build-component",
-                    Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", scanned,
+                    Path.Combine(root, "self-host"), "-", "-o", scanned,
                     "--runtime", policy, "--json");
                 Assert.True(exit == 0, $"build-component {policy} exited {exit}: {output}{error}");
                 Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(scanned));

@@ -17,7 +17,7 @@ public sealed partial class CliTests
     public async Task DotAttachmentMatchesHostedAndScannerComponentWithAtomicRetentionAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var scanner = Path.Combine(root, "self-host", "Scanner.terrum");
+        var scanner = Path.Combine(root, "self-host");
         var prefix = Path.Combine(root, "artifacts", $"dot-attachment-{Guid.NewGuid():N}");
         var hosted = prefix + ".hosted.exe";
         var component = prefix + ".component.exe";

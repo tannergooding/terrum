@@ -1,79 +1,150 @@
 namespace Terrum.CodeAnalysis;
 
+public struct CharacterLiteralDecodeResult
+{
+    public int32 ErrorCode;
+    public int32 Scalar;
+    public SourceRange ErrorSpan;
+
+    private CharacterLiteralDecodeResult(int32 errorCode, int32 scalar, SourceRange errorSpan)
+    {
+        ErrorCode = errorCode;
+        Scalar = scalar;
+        ErrorSpan = errorSpan;
+    }
+
+    public static bool TryAnalyze(SourceRange spelling, init ref<CharacterLiteralDecodeResult> result)
+    {
+        if (spelling.Start < 0 || spelling.Length < 0 || spelling.Start > Host.Source.Length
+            || spelling.Length > Host.Source.Length - spelling.Start)
+        {
+            return false;
+        }
+
+        if (spelling.Length < 2)
+        {
+            return TryPublishError(1, spelling.Start, spelling.Length, init result);
+        }
+
+        int32 start = spelling.Start;
+        int32 end = spelling.End - 1;
+        if (Host.Source[start] != char16(39) || Host.Source[end] != char16(39))
+        {
+            return TryPublishError(1, start, spelling.Length, init result);
+        }
+
+        mut int32 at = start + 1;
+        mut int32 scalarCount = 0;
+        mut int32 scalar = 0;
+        while (at < end)
+        {
+            int32 scalarStart = at;
+            mut int32 decoded = 0;
+            if (Host.Source[at] == char16(92))
+            {
+                at = at + 1;
+                if (at >= end)
+                {
+                    return TryPublishError(5, scalarStart, at - scalarStart, init result);
+                }
+
+                int32 escape = int32(Host.Source[at]);
+                at = at + 1;
+                if (escape == 110) { decoded = 10; }
+                else if (escape == 114) { decoded = 13; }
+                else if (escape == 116) { decoded = 9; }
+                else if (escape == 92) { decoded = 92; }
+                else if (escape == 34) { decoded = 34; }
+                else if (escape == 39) { decoded = 39; }
+                else if (escape == 48) { decoded = 0; }
+                else if (escape == 117 || escape == 85)
+                {
+                    int32 required = escape == 117 ? 4 : 8;
+                    mut int32 digits = 0;
+                    mut uint32 value = 0;
+                    while (digits < required && at < end
+                        && TryCharacterHexDigit(Host.Source[at], init var digit))
+                    {
+                        value = (value << 4) | uint32(digit);
+                        at = at + 1;
+                        digits = digits + 1;
+                    }
+
+                    if (digits != required || value > uint32(0x10FFFF)
+                        || (value >= uint32(0xD800) && value <= uint32(0xDFFF)))
+                    {
+                        return TryPublishError(5, scalarStart, at - scalarStart, init result);
+                    }
+                    decoded = int32(value);
+                }
+                else
+                {
+                    return TryPublishError(5, scalarStart, at - scalarStart, init result);
+                }
+            }
+            else
+            {
+                decoded = int32(Host.Source[at]);
+                at = at + 1;
+                if (decoded >= 55296 && decoded <= 56319)
+                {
+                    if (at >= end)
+                    {
+                        return TryPublishError(1, scalarStart, 1, init result);
+                    }
+
+                    int32 second = int32(Host.Source[at]);
+                    if (second < 56320 || second > 57343)
+                    {
+                        return TryPublishError(1, scalarStart, 1, init result);
+                    }
+                    decoded = 65536 + (decoded - 55296) * 1024 + second - 56320;
+                    at = at + 1;
+                }
+                else if (decoded >= 56320 && decoded <= 57343)
+                {
+                    return TryPublishError(1, scalarStart, 1, init result);
+                }
+            }
+
+            if (scalarCount != 0)
+            {
+                return TryPublishError(1, scalarStart, at - scalarStart, init result);
+            }
+            scalar = decoded;
+            scalarCount = 1;
+        }
+
+        if (scalarCount == 0)
+        {
+            return TryPublishError(1, start, spelling.Length, init result);
+        }
+
+        require SourceRange.TryCreate(0, 0, init var empty);
+        result = new CharacterLiteralDecodeResult(0, scalar, empty);
+        return true;
+    }
+
+    private static bool TryPublishError(int32 errorCode, int32 start, int32 length,
+        init ref<CharacterLiteralDecodeResult> result)
+    {
+        if (!SourceRange.TryCreate(start, length, init var errorSpan))
+        {
+            return false;
+        }
+        result = new CharacterLiteralDecodeResult(errorCode, 0, errorSpan);
+        return true;
+    }
+}
+
 bool TryDecodeCharacterLiteral(SourceRange spelling, init ref<int32> scalar)
 {
-    if (spelling.Length < 3 || spelling.Start < 0 || spelling.Start > Host.Source.Length
-        || spelling.Length > Host.Source.Length - spelling.Start)
+    if (!CharacterLiteralDecodeResult.TryAnalyze(spelling, init var decoded)
+        || decoded.ErrorCode != 0)
     {
         return false;
     }
-
-    int32 start = spelling.Start;
-    int32 end = spelling.End - 1;
-    if (Host.Source[start] != char16(39) || Host.Source[end] != char16(39))
-    {
-        return false;
-    }
-
-    mut int32 at = start + 1;
-    mut int32 value = 0;
-    if (Host.Source[at] == char16(92))
-    {
-        at = at + 1;
-        if (at >= end) { return false; }
-        int32 escape = int32(Host.Source[at]);
-        at = at + 1;
-        if (escape == 110) { value = 10; }
-        else if (escape == 114) { value = 13; }
-        else if (escape == 116) { value = 9; }
-        else if (escape == 92) { value = 92; }
-        else if (escape == 34) { value = 34; }
-        else if (escape == 39) { value = 39; }
-        else if (escape == 48) { value = 0; }
-        else if (escape == 117 || escape == 85)
-        {
-            int32 digits = escape == 117 ? 4 : 8;
-            mut uint32 decoded = 0;
-            for (mut int32 index = 0; index < digits; index = index + 1)
-            {
-                if (at >= end || !TryCharacterHexDigit(Host.Source[at], init var digit))
-                {
-                    return false;
-                }
-                decoded = (decoded << 4) | uint32(digit);
-                at = at + 1;
-            }
-            if (decoded > uint32(0x10FFFF)
-                || (decoded >= uint32(0xD800) && decoded <= uint32(0xDFFF)))
-            {
-                return false;
-            }
-            value = int32(decoded);
-        }
-        else
-        {
-            return false;
-        }
-    }
-    else
-    {
-        value = int32(Host.Source[at]);
-        at = at + 1;
-        if (value >= 55296 && value <= 56319)
-        {
-            if (at >= end) { return false; }
-            int32 second = int32(Host.Source[at]);
-            if (second < 56320 || second > 57343) { return false; }
-            value = 65536 + (value - 55296) * 1024 + second - 56320;
-            at = at + 1;
-        }
-        else if (value >= 56320 && value <= 57343)
-        {
-            return false;
-        }
-    }
-    if (at != end) { return false; }
-    scalar = value;
+    scalar = decoded.Scalar;
     return true;
 }
 

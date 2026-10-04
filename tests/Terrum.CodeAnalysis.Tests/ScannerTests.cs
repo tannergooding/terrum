@@ -462,7 +462,7 @@ public sealed class ScannerTests
     internal static async Task CheckScannerAsync(string source, bool repeat = false)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var scanner = await File.ReadAllTextAsync(Path.Combine(root, "self-host", "Scanner.terrum")).ConfigureAwait(true);
+        var scanner = await ReadScannerSourceAsync(root).ConfigureAwait(true);
         var lexed = Lexer.Lex(SourceText.From(source));
         var expected = ImmutableArray.CreateBuilder<int>();
         var expectedTrivia = ImmutableArray.CreateBuilder<int>();
@@ -650,6 +650,35 @@ public sealed class ScannerTests
         var compilation = Compilation.Create(SyntaxTree.Parse(scanner + Harness + (repeat ? Twice : Once)), buffers);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), 0).ConfigureAwait(true);
+    }
+
+    internal static async Task<string> ReadScannerSourceAsync(string root)
+    {
+        var selfHostDirectory = Path.Combine(root, "self-host");
+        var sourceRange = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "SourceRange.terrum"))
+            .ConfigureAwait(true);
+        var characterLiteral = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "CharacterLiteral.terrum"))
+            .ConfigureAwait(true);
+        var scanner = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "Scanner.terrum"))
+            .ConfigureAwait(true);
+        return sourceRange + RemoveFileScopedNamespace(characterLiteral) + RemoveFileScopedNamespace(scanner);
+    }
+
+    private static string RemoveFileScopedNamespace(string source)
+    {
+        const string NamespaceDeclaration = "namespace Terrum.CodeAnalysis;";
+        Assert.StartsWith(NamespaceDeclaration, source, StringComparison.Ordinal);
+        var lineEnd = source.IndexOfAny(['\r', '\n']);
+        if (lineEnd < 0)
+        {
+            return string.Empty;
+        }
+
+        if (source[lineEnd] == '\r' && lineEnd + 1 < source.Length && source[lineEnd + 1] == '\n')
+        {
+            lineEnd++;
+        }
+        return source[(lineEnd + 1)..];
     }
 
     private static byte[] EncodeWords(ImmutableArray<int> words)

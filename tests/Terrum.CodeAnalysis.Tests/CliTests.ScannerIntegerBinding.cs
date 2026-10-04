@@ -30,7 +30,7 @@ public sealed partial class CliTests
     public async Task CompiledIntegerValuesEmitTheSameImageAsHostBuildAsync(string source)
     {
         var scanner = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host", "Scanner.terrum");
+            "..", "..", "..", "..", "..", "..")), "self-host");
         var prefix = Path.Combine(Path.GetTempPath(), $"terrum-decoded-integer-{Guid.NewGuid():N}");
         var ordinary = prefix + ".exe";
         var compiled = prefix + ".compiled.exe";
@@ -95,7 +95,7 @@ public sealed partial class CliTests
     public async Task CompiledIntegerFailuresRetainHostDiagnosticCodesAndSpansAsync(string source)
     {
         var scanner = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host", "Scanner.terrum");
+            "..", "..", "..", "..", "..", "..")), "self-host");
         var prefix = Path.Combine(Path.GetTempPath(), $"terrum-decoded-error-{Guid.NewGuid():N}");
         var ordinary = prefix + ".exe";
         var compiled = prefix + ".compiled.exe";

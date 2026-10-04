@@ -334,7 +334,7 @@ public sealed class OperatorRunTests
     public async Task CompiledScannerIndependentlyPublishesFullRunRecordsAndDiagnostics(NativeRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var scanner = await File.ReadAllTextAsync(Path.Combine(root, "self-host", "Scanner.terrum"));
+        var scanner = await ScannerTests.ReadScannerSourceAsync(root);
         var text = string.Join(" \n", InvalidRuns.Select(row => (string)row[0])
             .Concat(DefinedSpellings.Select(row => (string)row[0])))
             + "\n\U00010400 !! @await +/* comment */+ \"!!+++..^?.\" 1e-2 2e+3 >>>>? >?>"

@@ -64,7 +64,7 @@ public sealed partial class CliTests
                     "-", "-o", hosted, "--runtime", policy, "--json");
                 Assert.True(hostExit == 0, $"{hostOutput}{hostError}");
                 var (scanExit, scanOutput, scanError) = await RunAsync(input, "build-component",
-                    Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", scanner,
+                    Path.Combine(root, "self-host"), "-", "-o", scanner,
                     "--runtime", policy, "--json");
                 Assert.True(scanExit == 0, $"{scanOutput}{scanError}");
                 Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
@@ -120,7 +120,7 @@ public sealed partial class CliTests
                     "-", "-o", hosted, "--runtime", policy, "--json");
                 Assert.True(hostExit == 0, $"{hostOutput}{hostError}");
                 var (scanExit, scanOutput, scanError) = await RunAsync(input, "build-component",
-                    Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", scanner,
+                    Path.Combine(root, "self-host"), "-", "-o", scanner,
                     "--runtime", policy, "--json");
                 Assert.True(scanExit == 0, $"{scanOutput}{scanError}");
                 Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
