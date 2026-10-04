@@ -170,25 +170,28 @@ public static partial class TrRmExecutableCompiler
 
             var lastUses = new SortedDictionary<int, int>?[ordered.Count];
             var liveIns = new HashSet<int>?[ordered.Count];
+            var currentBlockIndex = 0;
+            var operationOrdinal = 0;
+            void Use(int id, int ordinal)
+            {
+                if (id <= 0)
+                {
+                    return;
+                }
+                var mapped = remap[id];
+                (lastUses[currentBlockIndex] ??= new SortedDictionary<int, int>())[mapped] = ordinal;
+                if (owner[mapped] != ordered[currentBlockIndex].Id)
+                {
+                    (liveIns[currentBlockIndex] ??= new HashSet<int>()).Add(mapped);
+                }
+            }
+            void UseAtOperation(int id) => Use(id, operationOrdinal);
+            Action<int> operationVisitor = UseAtOperation;
             for (var b = 0; b < ordered.Count; b++)
             {
+                currentBlockIndex = b;
                 var block = ordered[b];
-                void Use(int id, int ordinal)
-                {
-                    if (id <= 0)
-                    {
-                        return;
-                    }
-                    var mapped = remap[id];
-                    (lastUses[b] ??= new SortedDictionary<int, int>())[mapped] = ordinal;
-                    if (owner[mapped] != block.Id)
-                    {
-                        (liveIns[b] ??= new HashSet<int>()).Add(mapped);
-                    }
-                }
-                var operationOrdinal = 0;
-                void UseAtOperation(int id) => Use(id, operationOrdinal);
-                Action<int> operationVisitor = UseAtOperation;
+                operationOrdinal = 0;
                 for (; operationOrdinal < block.Operations.Count; operationOrdinal++)
                 {
                     VisitReads(block.Operations[operationOrdinal].Expression, operationVisitor);
