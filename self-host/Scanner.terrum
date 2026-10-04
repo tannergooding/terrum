@@ -302,6 +302,7 @@ int32 KeywordKind(int32 start, int32 length)
 // Three low bits hold widths through four code units (>>>=); retain the longest match.
 int32 OperatorMatch(int32 start)
 {
+    int32 firstUnit = int32(Host.Source[start]);
     mut int32 entry = 0;
     mut int32 best = -1;
     mut int32 width = 0;
@@ -309,9 +310,10 @@ int32 OperatorMatch(int32 start)
     {
         int32 kind = Host.Operators[entry];
         int32 size = Host.Operators[entry + 1];
-        if (size > width && size <= Host.Source.Length - start)
+        if (size > width && size <= Host.Source.Length - start
+            && firstUnit == Host.Operators[entry + 2])
         {
-            mut int32 offset = 0;
+            mut int32 offset = 1;
             while (offset < size && int32(Host.Source[start + offset]) == Host.Operators[entry + 2 + offset])
             {
                 offset = offset + 1;
