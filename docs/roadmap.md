@@ -51,8 +51,11 @@ signs, target-typed decimal and hexadecimal floating literals, based integer
 literals directly targeting `float32`/`float64`, `+`, `-`, `*`, `/` and IEEE
 comparisons through v85. The hosted reader validates token spans and
 reconstructs exact target-format literal bits; verification and emission
-remain hosted. Floating conversions are not yet projected, and source-free
-TRRM still does not support floating operators.
+remain hosted. V85 also projects conversions between `float32`/`float64` and
+from `int32`, `uint32`, `int64` and `uint64` to either format. `char16`-to-
+floating and floating-to-integer conversions remain outside this projection
+while their eligibility is unapproved. Source-free TRRM still does not
+support floating operators.
 
 The bounded Terrum-authored scalar source frontend supports v85 complete
 global-function snapshots and source-order scalar call targets, including

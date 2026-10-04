@@ -1203,7 +1203,10 @@ literals, based integer literals directly targeting either floating format,
 `+`, `-`, `*`, `/` and IEEE comparisons through v85. Its authored parser
 publishes literal types and source spans; the hosted reader validates the
 token spans and reconstructs exact target-format bits. Floating conversions
-remain unprojected, and source-free TRRM still does not support floating
+between `float32`/`float64` and from `int32`, `uint32`, `int64` and `uint64`
+to either format are also projected through v85. `char16`-to-floating and
+floating-to-integer conversions remain outside this projection while their
+eligibility is unapproved. Source-free TRRM still does not support floating
 operators. Frontend verification/emission remains hosted.
 Existing source function and local shadowing keeps its ordinary call-binding
 precedence. Top-level generic function templates support multiple independently

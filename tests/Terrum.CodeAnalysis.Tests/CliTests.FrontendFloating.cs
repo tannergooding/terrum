@@ -80,8 +80,9 @@ public sealed partial class CliTests
     }
 
     [Theory]
-    [InlineData("public float32 Convert(float64 value) { return float32(value); }")]
-    public async Task ScalarFrontendRejectsFloatingLiteralsAndConversionsAsync(string source)
+    [InlineData("public float32 Convert(char16 value) { return float32(value); }")]
+    [InlineData("public int32 Convert(float64 value) { return int32(value); }")]
+    public async Task ScalarFrontendRejectsUnapprovedFloatingConversionsAsync(string source)
     {
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
@@ -215,6 +216,50 @@ public sealed partial class CliTests
         {
             File.Delete(output);
             File.Delete(hosted);
+        }
+    }
+
+    [Fact]
+    public async Task ScalarFrontendApprovedFloatingConversionsMatchHostedLibrariesAsync()
+    {
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var outputDirectory = Path.Combine(Path.GetTempPath(),
+            $"terrum-scalar-float-conversions-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outputDirectory);
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                foreach (var sourceType in new[] {
+                    "int32", "uint32", "int64", "uint64", "float32", "float64",
+                })
+                {
+                    foreach (var targetType in new[] { "float32", "float64" })
+                    {
+                        var source = Encoding.UTF8.GetBytes(
+                            $"public {targetType} Convert({sourceType} value) => {targetType}(value);");
+                        var output = Path.Combine(outputDirectory, "scalar.dll");
+                        var hosted = Path.Combine(outputDirectory, "hosted.dll");
+                        var (componentExit, componentJson, componentError) = await RunAsync(source,
+                            "frontend-component", directory, "-", "--runtime", policy, "--json");
+                        Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+                        var (exit, json, error) = await RunAsync(source,
+                            "frontend-build-library", directory, "-", "-o", output,
+                            "--runtime", policy, "--json");
+                        Assert.True(exit == 0, $"{policy}: {json}{error}");
+                        var (hostedExit, hostedJson, hostedError) = await RunAsync(source,
+                            "build-library", "-", "--export", "Convert", "-o", hosted,
+                            "--runtime", policy, "--json");
+                        Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
+                        Assert.Equal(await File.ReadAllBytesAsync(hosted),
+                            await File.ReadAllBytesAsync(output));
+                    }
+                }
+            }
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
         }
     }
 }

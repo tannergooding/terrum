@@ -34,10 +34,12 @@ The bounded Terrum-authored scalar frontend now projects same-format
 `float32`/`float64` unary signs, target-typed decimal and hexadecimal floating
 literals, based integer literals directly targeting either format, `+`, `-`,
 `*`, `/` and IEEE comparisons. The hosted reader validates token spans and
-reconstructs exact target-format literal bits; floating conversions remain
-outside its subset. Source-free TRRM still has no floating operators. The
-frontend candidates continue to depend on the hosted
-verifier/emitter for supported executions.
+reconstructs exact target-format literal bits. It also projects conversions
+between the floating formats and from `int32`, `uint32`, `int64` and `uint64`
+to either format. `char16`-to-floating and floating-to-integer conversions
+remain outside while their eligibility is unapproved. Source-free TRRM still
+has no floating operators. The frontend candidates continue to depend on the
+hosted verifier/emitter for supported executions.
 The provisional hosted `char16`-to-floating conversion likewise remains
 outside both paths; it treats the code unit as an unsigned numeric value and
 follows an unapproved eligibility proposal.
@@ -775,9 +777,10 @@ floating arithmetic/comparisons are projected by the Terrum-authored scalar
 frontend for typed values, as are target-typed decimal/hexadecimal floating
 literals and based integer literals directly targeting those formats. The
 hosted reader validates literal token spans and reconstructs their target
-bits. Floating conversions and custom literal parsers remain unsupported
-there; those authored components still rely on the hosted verifier/emitter.
-Bounded scalar
+bits. Conversion projection covers the two floating formats and the four
+fixed-width integer types. `char16`-to-floating, floating-to-integer and
+custom literal parser support remain outside this subset; those authored
+components still rely on the hosted verifier/emitter. Bounded scalar
 `[ConstEval]` is implemented separately from literal registration.
 Contextual integer literal typing/range checks
 and parser routines remain hosted, while

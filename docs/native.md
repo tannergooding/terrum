@@ -232,8 +232,11 @@ The same v85 scalar frontend projections also carry same-format `float32` and
 `float64` unary signs, target-typed decimal and hexadecimal floating literals,
 based integer literals directly targeting either format, `+`, `-`, `*`, `/`
 and IEEE comparisons. The hosted reader validates source token spans and
-reconstructs exact target-format literal bits; conversions remain outside
-this subset. Source-free TRRM still has no floating operators.
+reconstructs exact target-format literal bits. It also projects conversions
+between the floating formats and from `int32`, `uint32`, `int64` and `uint64`
+to either format. `char16`-to-floating and
+floating-to-integer conversions remain outside while their eligibility is
+unapproved. Source-free TRRM still has no floating operators.
 Verification and emission continue through the hosted implementation; this
 adds no projection layout or native ABI change.
 

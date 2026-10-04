@@ -378,8 +378,7 @@ public static partial class ScalarFrontendHost
                         if ((node.Operation is not (83 or 109) && node.Type != operand.Type)
                             || node.Operation == 109
                                 && (node.Type != BooleanTypeCode || operand.Operation != 0)
-                            || node.Operation == 83 && (node.Type is not (1 or 2 or 3 or 4 or 6)
-                                || operand.Type is not (1 or 2 or 3 or 4 or 6)
+                            || node.Operation == 83 && (!SupportedScalarConversion(operand.Type, node.Type)
                                 || intrinsicTypes[node.Left] == 0 && node.Type != operand.Type)
                             || node.Operation is not (46 or 83 or 110)
                                 && node.Operation is not (86 or 87)
@@ -2431,6 +2430,12 @@ public static partial class ScalarFrontendHost
 
     private static bool ScalarType(int type) => type is >= 1 and <= 8;
 
+    private static bool SupportedScalarConversion(int sourceType, int targetType)
+        => (sourceType is 1 or 2 or 3 or 4 or 6)
+            && (targetType is 1 or 2 or 3 or 4 or 6)
+            || (sourceType is 1 or 2 or 3 or 4 or 7 or 8)
+                && targetType is 7 or 8;
+
     private static bool TryParseFloatingLiteral(ReadOnlySpan<char> text, int type, out long value)
     {
         value = 0;
@@ -2703,8 +2708,10 @@ public static partial class ScalarFrontendHost
                 }
                 else if (node.Operation == 83)
                 {
-                    bound = Binder.FoldScalarConstant(new BoundCast(
-                        treeExpressions[node.Left], type, node.Span));
+                    bound = node.Type == result.Nodes[node.Left].Type
+                        ? treeExpressions[node.Left]
+                        : Binder.FoldScalarConstant(new BoundCast(
+                            treeExpressions[node.Left], type, node.Span));
                 }
                 else if (node.Operation == 84)
                 {
