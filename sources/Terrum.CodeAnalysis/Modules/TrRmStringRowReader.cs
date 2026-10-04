@@ -29,12 +29,13 @@ public static class TrRmStringRowReader
             throw InvalidRow();
         }
 
+        var isAscii = row[0] == 0;
         string name;
         try
         {
             name = row[0] switch
             {
-                0 when IsAscii(content) => Encoding.ASCII.GetString(content),
+                0 when IsValidAsciiText(content) => Encoding.ASCII.GetString(content),
                 1 => s_utf8.GetString(content),
                 2 => s_utf16.GetString(content),
                 3 => s_utf32.GetString(content),
@@ -46,7 +47,7 @@ public static class TrRmStringRowReader
             throw new InvalidDataException("Invalid TRRM String name encoding.", exception);
         }
 
-        if (name.IndexOf('\0') >= 0)
+        if (!isAscii && name.IndexOf('\0') >= 0)
         {
             throw InvalidRow();
         }
@@ -87,11 +88,11 @@ public static class TrRmStringRowReader
         return row.Slice(4, (int)contentBytes);
     }
 
-    private static bool IsAscii(ReadOnlySpan<byte> content)
+    private static bool IsValidAsciiText(ReadOnlySpan<byte> content)
     {
         foreach (var value in content)
         {
-            if (value >= 0x80)
+            if (value == 0 || value >= 0x80)
             {
                 return false;
             }
