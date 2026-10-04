@@ -100,9 +100,10 @@ public static partial class ModuleCompiler
         }
         var allNames = program.Functions.Select(static item => item.Name).ToHashSet(StringComparer.Ordinal);
         var available = dependencies.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
+        var hasPrivateManagedState = HasPrivateManagedState(program);
         foreach (var function in program.Functions)
         {
-            if (HasPrivateManagedState(program) && (function.IsExternal || names.Contains(function.Name))
+            if (hasPrivateManagedState && (function.IsExternal || names.Contains(function.Name))
                 && !ManagedExportShape.Supported(function, program.Structures))
             {
                 throw new ModuleContractException($"Managed graph boundary '{function.Name}' requires public Copy values.");
@@ -187,6 +188,7 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("Graph library requires distinct exported declarations.");
         }
+        var hasPrivateManagedState = HasPrivateManagedState(module);
         var declarations = ImmutableArray.CreateBuilder<BoundFunction>();
         foreach (var item in module.Functions)
         {
@@ -194,7 +196,7 @@ public static partial class ModuleCompiler
             {
                 if (item.Import || item.Function is not BoundFunction function
                     || !Exportable(function, module.Structures)
-                    || (HasPrivateManagedState(module) && !ManagedExportShape.Supported(function, module.Structures)))
+                    || (hasPrivateManagedState && !ManagedExportShape.Supported(function, module.Structures)))
                 {
                     throw new ModuleFormatException($"Graph export '{item.Name}' has no public implementation.");
                 }
