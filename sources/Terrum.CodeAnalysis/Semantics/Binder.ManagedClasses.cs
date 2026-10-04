@@ -114,7 +114,7 @@ internal sealed partial class Binder
                 parent = parent[..parent.LastIndexOf('.', StringComparison.Ordinal)];
                 AddCandidate(parent + "." + name);
             }
-            foreach (var imported in _usings.ToArray())
+            foreach (var imported in _contexts[_tree].Usings)
             {
                 AddCandidate(imported + "." + name);
             }
