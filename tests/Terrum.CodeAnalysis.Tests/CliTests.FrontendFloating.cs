@@ -81,8 +81,7 @@ public sealed partial class CliTests
 
     [Theory]
     [InlineData("public float32 Convert(char16 value) { return float32(value); }")]
-    [InlineData("public int32 Convert(float64 value) { return int32(value); }")]
-    public async Task ScalarFrontendRejectsUnapprovedFloatingConversionsAsync(string source)
+    public async Task ScalarFrontendRejectsUnapprovedChar16ConversionsAsync(string source)
     {
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
@@ -220,7 +219,7 @@ public sealed partial class CliTests
     }
 
     [Fact]
-    public async Task ScalarFrontendApprovedFloatingConversionsMatchHostedLibrariesAsync()
+    public async Task ScalarFrontendFloatingConversionsMatchHostedLibrariesAsync()
     {
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var outputDirectory = Path.Combine(Path.GetTempPath(),
@@ -234,7 +233,10 @@ public sealed partial class CliTests
                     "int32", "uint32", "int64", "uint64", "float32", "float64",
                 })
                 {
-                    foreach (var targetType in new[] { "float32", "float64" })
+                    string[] targetTypes = sourceType is "float32" or "float64"
+                        ? ["int32", "uint32", "int64", "uint64", "float32", "float64"]
+                        : ["float32", "float64"];
+                    foreach (var targetType in targetTypes)
                     {
                         var source = Encoding.UTF8.GetBytes(
                             $"public {targetType} Convert({sourceType} value) => {targetType}(value);");

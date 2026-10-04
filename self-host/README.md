@@ -36,8 +36,10 @@ literals, based integer literals directly targeting either format, `+`, `-`,
 `*`, `/` and IEEE comparisons. The hosted reader validates token spans and
 reconstructs exact target-format literal bits. It also projects conversions
 between the floating formats and from `int32`, `uint32`, `int64` and `uint64`
-to either format. `char16`-to-floating and floating-to-integer conversions
-remain outside while their eligibility is unapproved. Source-free TRRM
+to either format. `char16`-to-floating conversion remains outside while its
+eligibility is unapproved. Float-to-integer conversions are now provisionally
+projected through v85 under the still-unapproved pair-matrix proposal; the
+hosted verifier and emitter remain authoritative. Source-free TRRM
 same-format comparisons and exact-bit constants are provisionally implemented
 under the unapproved
 [TRRM floating-comparison proposal](../docs/proposals/floating-trrm-comparisons.md);

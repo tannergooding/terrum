@@ -2,8 +2,9 @@
 
 **Status: unapproved.** This proposal recommends a bounded source/destination
 matrix for the already specified checked floating-to-integer value policy. The
-recommended pairs have provisional hosted compiler support, but implementation
-does not approve the eligibility choice or change the accepted contract.
+recommended pairs have provisional hosted implementation and v85 projection
+support, but implementation does not approve the eligibility choice or change
+the accepted contract.
 
 ## Current boundary
 
@@ -13,9 +14,10 @@ check. The truncated result must be representable by the destination; NaN and
 out-of-range values, including infinities, fail. Exact source/destination
 eligibility remains open. The hosted compiler supports floating format
 conversion and the four fixed-width integer sources to either floating format.
-It now also provisionally implements the recommended floating-to-fixed-integer
-pairs; the Terrum-authored scalar frontend remains unsupported for these
-conversions.
+It provisionally implements the recommended floating-to-fixed-integer pairs
+both in the hosted compiler and as v85 scalar-frontend projections; the hosted
+verifier and emitter remain authoritative for the projection. This does not
+approve the pair eligibility.
 
 ## Question for direction
 
