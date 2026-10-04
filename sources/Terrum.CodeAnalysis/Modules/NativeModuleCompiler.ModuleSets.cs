@@ -258,6 +258,16 @@ public static partial class NativeModuleCompiler
         IReadOnlyList<NativeImportBinding> used)
     {
         var imports = ModuleCompiler.GetConsumerSetDeclarations(contract).ToHashSet(StringComparer.Ordinal);
+        var usedByDll = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var import in used)
+        {
+            if (!usedByDll.TryGetValue(import.DllName, out var names))
+            {
+                names = [];
+                usedByDll.Add(import.DllName, names);
+            }
+            names.Add(import.FunctionName);
+        }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         writer.Write("TNSP"u8);
@@ -266,6 +276,7 @@ public static partial class NativeModuleCompiler
         writer.Write((ushort)providers.Length);
         writer.Write(contract.Length);
         writer.Write(image.Length);
+        var matchedImportCount = 0;
         foreach (var provider in providers)
         {
             var names = provider.Reference.Functions
@@ -287,8 +298,9 @@ public static partial class NativeModuleCompiler
                 writer.Write((ushort)bytes.Length);
                 writer.Write(bytes);
             }
-            var actual = used.Where(item => item.DllName == DllName(provider.Package.Identity))
-                .Select(static item => item.FunctionName).Order(StringComparer.Ordinal).ToArray();
+            var actual = usedByDll.TryGetValue(DllName(provider.Package.Identity), out var providerImports)
+                ? providerImports.Order(StringComparer.Ordinal).ToArray() : [];
+            matchedImportCount += actual.Length;
             if (actual.Any(name => Array.BinarySearch(names, name, StringComparer.Ordinal) < 0))
             {
                 throw new ModuleFormatException("Native set machine import has no declaration owner.");
@@ -299,7 +311,7 @@ public static partial class NativeModuleCompiler
                 PutGraphString(writer, name);
             }
         }
-        if (used.Count != providers.Sum(provider => used.Count(item => item.DllName == DllName(provider.Package.Identity))))
+        if (used.Count != matchedImportCount)
         {
             throw new ModuleFormatException("Native set machine import has no selected provider.");
         }
