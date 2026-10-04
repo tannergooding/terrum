@@ -3136,11 +3136,13 @@ mut class ScalarFrontendState
                     FailAt(1, labelColon.Range);
                     return false;
                 }
-                if (!TryResolveCallParameter(callee, program, argumentName, out parameter))
+                if (!TryResolveCallParameter(callee, program, argumentName,
+                    init var resolvedParameter))
                 {
                     FailAt(3, argumentName.Range);
                     return false;
                 }
+                parameter = resolvedParameter;
                 if ((assignedParameters & (1 << parameter)) != 0)
                 {
                     FailAt(1, argumentName.Range);
@@ -3319,9 +3321,8 @@ mut class ScalarFrontendState
     }
 
     private mut bool TryResolveCallParameter(int32 callee, bool program, Token name,
-        out int32 parameter)
+        init ref<int32> parameter)
     {
-        parameter = -1;
         if (program)
         {
             int32 header = 4 + callee * 428 + 4;
