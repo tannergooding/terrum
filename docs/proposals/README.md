@@ -35,6 +35,9 @@ approved.
 - [Static initialization metadata and attribute schema](static-initialization-metadata.md)
   recommends how to persist the accepted static-storage contract without
   changing its initialization or failure semantics.
+- [Checked float-to-integer eligibility](checked-float-to-integer-eligibility.md)
+  recommends a bounded pair matrix for the accepted checked value policy;
+  exact conversion eligibility remains unapproved.
 
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,
