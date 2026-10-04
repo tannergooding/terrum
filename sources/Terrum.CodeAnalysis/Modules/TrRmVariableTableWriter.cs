@@ -15,9 +15,6 @@ public static class TrRmVariableTableWriter
     public static byte[] EncodeBodies(IReadOnlyList<ReadOnlyMemory<byte>> rows)
         => Encode(rows, 1);
 
-    internal static byte[] EncodeContracts(IReadOnlyList<ReadOnlyMemory<byte>> rows)
-        => Encode(rows, 8);
-
     private static byte[] Encode(IReadOnlyList<ReadOnlyMemory<byte>> rows, int minimumRowBytes)
     {
         ArgumentNullException.ThrowIfNull(rows);
