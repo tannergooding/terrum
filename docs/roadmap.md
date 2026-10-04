@@ -39,8 +39,11 @@ IEEE-754 target-format conversion, as do typed `int32`, `uint32`, `int64` and
 provisionally supports checked conversion from either floating format to
 `int32`, `uint32`, `int64` and `uint64`, truncating before the range check;
 the exact pair eligibility remains an unapproved proposal. Floating arithmetic
-and comparisons, and these conversions in the Terrum-authored scalar frontend,
-remain outside this implementation.
+(`+`, `-`, `*`, `/`) and IEEE comparisons are now supported for same-format
+`float32`/`float64` values by the hosted binder, verifier and native emitter.
+Arithmetic NaN bit encodings remain provisional under an unapproved proposal.
+These operations and the conversions above remain outside the Terrum-authored
+scalar frontend.
 
 The bounded Terrum-authored scalar source frontend supports v85 complete
 global-function snapshots and source-order scalar call targets, including

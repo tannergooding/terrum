@@ -3208,19 +3208,28 @@ public static class SemanticVerifier
                     Expression(binary.Right, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 }
                 var operands = binary.Left.Type == binary.Right.Type && binary.Left.Type != PrimitiveType.Void;
+                var integerOperands = binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
+                    or PrimitiveType.Int64 or PrimitiveType.UInt64;
+                var floatingOperands = binary.Left.Type is PrimitiveType.Float32 or PrimitiveType.Float64;
+                var floatingArithmetic = floatingOperands && (binary.Operator is TokenKind.Plus or TokenKind.Minus
+                    or TokenKind.Star or TokenKind.Slash);
+                var integerArithmetic = integerOperands && (binary.Operator is TokenKind.Plus or TokenKind.Minus
+                    or TokenKind.Star or TokenKind.Slash or TokenKind.Percent);
+                var checkedIntegerOperation = integerArithmetic || integerOperands
+                    && (binary.Operator is TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned);
                 var binaryValid = binary.Operator switch {
                     TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent =>
-                        operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                        operands && (integerArithmetic || floatingArithmetic)
                             && binary.Type == binary.Left.Type,
                     TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned =>
-                        binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
-                            or PrimitiveType.Int64 or PrimitiveType.UInt64
+                        integerOperands
                             && binary.Right.Type == PrimitiveType.Int32 && binary.Type == binary.Left.Type,
                     TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals =>
-                        operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16
+                        operands && (integerOperands || binary.Left.Type == PrimitiveType.Char16 || floatingOperands)
                             && binary.Type == PrimitiveType.Bool,
                     TokenKind.EqualsEquals or TokenKind.BangEquals =>
-                        operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool
+                        operands && (integerOperands || binary.Left.Type is PrimitiveType.Char16 or PrimitiveType.Bool
+                            || floatingOperands)
                             && binary.Type == PrimitiveType.Bool,
                     TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret =>
                         operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Bool
@@ -3233,15 +3242,11 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                if (function.IsNoThrow && binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star
-                    or TokenKind.Slash or TokenKind.Percent or TokenKind.ShiftLeft
-                    or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned)
+                if (function.IsNoThrow && checkedIntegerOperation)
                 {
                     throw InvalidEffect(binary.Span);
                 }
-                if (binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash
-                    or TokenKind.Percent or TokenKind.ShiftLeft or TokenKind.ShiftRight
-                    or TokenKind.ShiftRightUnsigned)
+                if (checkedIntegerOperation)
                 {
                     failures?.Add(initialized, fieldMasks);
                 }

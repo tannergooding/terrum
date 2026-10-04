@@ -1138,8 +1138,8 @@ internal sealed partial class PeCompiler
             case BoundViewRead view:
                 return ExpressionSpills(view.Index, ref maximumArguments);
             case BoundBinary binary:
-                return Math.Max(ExpressionSpills(binary.Left, ref maximumArguments),
-                    1 + ExpressionSpills(binary.Right, ref maximumArguments));
+                return Math.Max(3, Math.Max(ExpressionSpills(binary.Left, ref maximumArguments),
+                    1 + ExpressionSpills(binary.Right, ref maximumArguments)));
             case BoundConditional conditional:
                 return Math.Max(ExpressionSpills(conditional.Condition, ref maximumArguments),
                     Math.Max(ExpressionSpills(conditional.WhenTrue, ref maximumArguments),
@@ -3221,23 +3221,31 @@ internal sealed partial class PeCompiler
                     _code.PatchRelative(skip, _code.Position);
                     return;
                 }
+                var floating = binary.Left.Type is PrimitiveType.Float32 or PrimitiveType.Float64;
                 Expression(binary.Left, spill);
-                if (TryEmitUnsignedPowerOfTwoBinary(binary) || TryEmitSignedPowerOfTwoBinary(binary))
+                if (!floating && (TryEmitUnsignedPowerOfTwoBinary(binary) || TryEmitSignedPowerOfTwoBinary(binary)))
                 {
                     break;
                 }
                 StoreValue(Spill(spill), binary.Left.Type);
                 Expression(binary.Right, spill + 1);
-                if (IsWide(binary.Left.Type))
+                if (floating)
                 {
-                    _code.Bytes(0x48, 0x89, 0xC1); // mov rcx,rax
+                    FloatingBinary(binary.Operator, binary.Left.Type, spill);
                 }
                 else
                 {
-                    _code.Bytes(0x89, 0xC1); // mov ecx,eax
+                    if (IsWide(binary.Left.Type))
+                    {
+                        _code.Bytes(0x48, 0x89, 0xC1); // mov rcx,rax
+                    }
+                    else
+                    {
+                        _code.Bytes(0x89, 0xC1); // mov ecx,eax
+                    }
+                    LoadValue(Spill(spill), binary.Left.Type);
+                    Binary(binary.Operator, binary.Left.Type);
                 }
-                LoadValue(Spill(spill), binary.Left.Type);
-                Binary(binary.Operator, binary.Left.Type);
                 break;
             case BoundConditional conditional:
             {
@@ -4062,6 +4070,118 @@ internal sealed partial class PeCompiler
         return true;
     }
 
+    private void FloatingBinary(TokenKind op, PrimitiveType type, int spill)
+    {
+        var isSingle = type == PrimitiveType.Float32;
+        if (isSingle)
+        {
+            _code.Bytes(0x66, 0x0F, 0x6E, 0xC8); // movd xmm1,eax
+        }
+        else
+        {
+            _code.Bytes(0x66, 0x48, 0x0F, 0x6E, 0xC8); // movq xmm1,rax
+        }
+
+        var savedMxcsr = Spill(spill + 1);
+        var controlledMxcsr = Spill(spill + 2);
+        _code.StoreMxcsr(savedMxcsr);
+        _code.Load(savedMxcsr);
+        _code.Byte(0x25); // and eax,~(RC[14:13] | DAZ[6] | FTZ[15])
+        _code.Int32(unchecked((int)0xFFFF1FBF));
+        _code.Byte(0x0D); // or eax,all six SSE exception masks
+        _code.Int32(0x1F80);
+        _code.Store(controlledMxcsr);
+        _code.LoadMxcsr(controlledMxcsr);
+
+        LoadValue(Spill(spill), type);
+        if (isSingle)
+        {
+            _code.Bytes(0x66, 0x0F, 0x6E, 0xC0); // movd xmm0,eax
+        }
+        else
+        {
+            _code.Bytes(0x66, 0x48, 0x0F, 0x6E, 0xC0); // movq xmm0,rax
+        }
+
+        if (op is TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash)
+        {
+            _code.Bytes(isSingle ? (byte)0xF3 : (byte)0xF2, 0x0F,
+                op switch {
+                    TokenKind.Plus => (byte)0x58,
+                    TokenKind.Minus => (byte)0x5C,
+                    TokenKind.Star => (byte)0x59,
+                    TokenKind.Slash => (byte)0x5E,
+                    _ => throw new InvalidOperationException(),
+                }, 0xC1);
+            if (isSingle)
+            {
+                _code.Bytes(0x0F, 0x2E, 0xC0); // ucomiss xmm0,xmm0
+            }
+            else
+            {
+                _code.Bytes(0x66, 0x0F, 0x2E, 0xC0); // ucomisd xmm0,xmm0
+            }
+            var notNaN = _code.JumpIf(0x8B);
+            if (isSingle)
+            {
+                _code.Byte(0xB8);
+                _code.Int32(unchecked((int)0x7FC00000));
+            }
+            else
+            {
+                _code.Bytes(0x48, 0xB8);
+                _code.Int64(unchecked((long)0x7FF8000000000000UL));
+            }
+            var done = _code.Jump();
+            _code.PatchRelative(notNaN, _code.Position);
+            if (isSingle)
+            {
+                _code.Bytes(0x66, 0x0F, 0x7E, 0xC0); // movd eax,xmm0
+            }
+            else
+            {
+                _code.Bytes(0x66, 0x48, 0x0F, 0x7E, 0xC0); // movq rax,xmm0
+            }
+            _code.PatchRelative(done, _code.Position);
+        }
+        else
+        {
+            if (isSingle)
+            {
+                _code.Bytes(0x0F, 0x2E, 0xC1); // ucomiss xmm0,xmm1
+            }
+            else
+            {
+                _code.Bytes(0x66, 0x0F, 0x2E, 0xC1); // ucomisd xmm0,xmm1
+            }
+            switch (op)
+            {
+                case TokenKind.EqualsEquals:
+                    _code.Bytes(0x0F, 0x94, 0xC0, 0x0F, 0x9B, 0xC1, 0x20, 0xC8);
+                    break;
+                case TokenKind.BangEquals:
+                    _code.Bytes(0x0F, 0x95, 0xC0, 0x0F, 0x9A, 0xC1, 0x08, 0xC8);
+                    break;
+                case TokenKind.Less:
+                    _code.Bytes(0x0F, 0x92, 0xC0, 0x0F, 0x9B, 0xC1, 0x20, 0xC8);
+                    break;
+                case TokenKind.LessEquals:
+                    _code.Bytes(0x0F, 0x96, 0xC0, 0x0F, 0x9B, 0xC1, 0x20, 0xC8);
+                    break;
+                case TokenKind.Greater:
+                    _code.Bytes(0x0F, 0x97, 0xC0);
+                    break;
+                case TokenKind.GreaterEquals:
+                    _code.Bytes(0x0F, 0x93, 0xC0);
+                    break;
+                default:
+                    throw new InvalidOperationException();
+            }
+            _code.Bytes(0x0F, 0xB6, 0xC0); // movzx eax,al
+        }
+        _code.LoadMxcsr(savedMxcsr);
+    }
+
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier restricts binary operators to the supported native profile.")]
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "The verifier excludes other token kinds before reaching the comparison encoder.")]
     private void Binary(TokenKind op, PrimitiveType type)
@@ -4344,6 +4464,24 @@ internal sealed class MachineCode
         else
         {
             Bytes(0x8B, 0x84, 0x24);
+        }
+        Int32(offset);
+    }
+    internal void StoreMxcsr(int offset)
+    {
+        Bytes(0x0F, 0xAE, UseFramePointer ? (byte)0x9D : (byte)0x9C);
+        if (!UseFramePointer)
+        {
+            Byte(0x24);
+        }
+        Int32(offset);
+    }
+    internal void LoadMxcsr(int offset)
+    {
+        Bytes(0x0F, 0xAE, UseFramePointer ? (byte)0x95 : (byte)0x94);
+        if (!UseFramePointer)
+        {
+            Byte(0x24);
         }
         Int32(offset);
     }

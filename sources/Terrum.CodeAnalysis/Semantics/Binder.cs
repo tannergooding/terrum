@@ -3345,11 +3345,17 @@ internal sealed partial class Binder
             case TokenKind.Star:
             case TokenKind.Slash:
             case TokenKind.Percent:
-                operandType = leftKnown ?? rightKnown ?? (expected is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 ? expected : null);
+                operandType = leftKnown ?? rightKnown
+                    ?? (expected is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+                        or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64 ? expected : null);
                 resultType = operandType ?? PrimitiveType.Int32;
-                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64))
+                var floatingArithmetic = operandType is (PrimitiveType.Float32 or PrimitiveType.Float64)
+                    && op.Kind is (TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash);
+                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+                    or PrimitiveType.UInt64) && !floatingArithmetic)
                 {
-                    Report("TRM3007", "Arithmetic requires int32 or uint32 operands with a known context.", op.Span);
+                    Report("TRM3007", "Arithmetic requires same-type integer operands or float32/float64 operands "
+                        + "for +, -, * and /.", op.Span);
                 }
                 break;
 
@@ -3372,7 +3378,8 @@ internal sealed partial class Binder
             case TokenKind.GreaterEquals:
                 operandType = leftKnown ?? rightKnown;
                 resultType = PrimitiveType.Bool;
-                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16))
+                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+                    or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Float32 or PrimitiveType.Float64))
                 {
                     Report("TRM3007", "Comparison requires numeric operands with a known context.", op.Span);
                 }
@@ -3399,9 +3406,11 @@ internal sealed partial class Binder
             case TokenKind.BangEquals:
                 operandType = leftKnown ?? rightKnown;
                 resultType = PrimitiveType.Bool;
-                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool))
+                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+                    or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool
+                    or PrimitiveType.Float32 or PrimitiveType.Float64))
                 {
-                    Report("TRM3007", "Equality requires two operands of the same known int32 or bool type.", op.Span);
+                    Report("TRM3007", "Equality requires operands of the same supported numeric, bool or char16 type.", op.Span);
                 }
                 break;
 

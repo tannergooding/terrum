@@ -67,6 +67,24 @@ public sealed class FloatingLiteralBindingTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate ulong Float32ToUInt64(int value);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Float32Binary(int left, int right);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Float64Binary(long left, long right);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Float32FourOperands(int a, int b, int c, int d);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Float64FourOperands(long a, long b, long c, long d);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Float32Comparison(int left, int right);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Float64Comparison(long left, long right);
+
     [Theory]
     [InlineData("float32", "0.1", 0x3DCCCCCDL)]
     [InlineData("float64", "0.1", 0x3FB999999999999AL)]
@@ -318,16 +336,192 @@ public sealed class FloatingLiteralBindingTests
     }
 
     [Theory]
-    [InlineData("public float32 Add(float32 left, float32 right) { return left + right; }")]
-    [InlineData("public bool Equal(float32 left, float32 right) { return left == right; }")]
-    [InlineData("public bool Less(float64 left, float64 right) { return left < right; }")]
     [InlineData("public float32 Convert(char16 value) { return float32(value); }")]
     [InlineData("public char16 Convert(float32 value) { return char16(value); }")]
-    public void KeepsFloatingOperationsAndMixedConversionsUnsupported(string source)
+    [InlineData("public float32 Remainder(float32 left, float32 right) { return left % right; }")]
+    [InlineData("public bool Mixed(float32 left, float64 right) { return left == right; }")]
+    [InlineData("public float32 Mixed(float32 left, int32 right) { return left + right; }")]
+    [InlineData("public float32 Compound(float32 value) { mut float32 current = value; current += 1.0; return current; }")]
+    public void KeepsUnspecifiedFloatingOperationsUnsupported(string source)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
 
         Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3007");
+    }
+
+    [Fact]
+    public void EmitsFloatingArithmeticAndIeeeComparisons()
+    {
+        var source = """
+            [NoThrow] public float32 Add32(float32 left, float32 right) { return left + right; }
+            [NoThrow] public float32 Subtract32(float32 left, float32 right) { return left - right; }
+            [NoThrow] public float32 Multiply32(float32 left, float32 right) { return left * right; }
+            [NoThrow] public float32 Divide32(float32 left, float32 right) { return left / right; }
+            [NoThrow] public float32 Nested32(float32 a, float32 b, float32 c, float32 d) { return (a + b) * c - d; }
+            [NoThrow] public bool Equal32(float32 left, float32 right) { return left == right; }
+            [NoThrow] public bool NotEqual32(float32 left, float32 right) { return left != right; }
+            [NoThrow] public bool Less32(float32 left, float32 right) { return left < right; }
+            [NoThrow] public bool LessEqual32(float32 left, float32 right) { return left <= right; }
+            [NoThrow] public bool Greater32(float32 left, float32 right) { return left > right; }
+            [NoThrow] public bool GreaterEqual32(float32 left, float32 right) { return left >= right; }
+            [NoThrow] public float64 Add64(float64 left, float64 right) { return left + right; }
+            [NoThrow] public float64 Subtract64(float64 left, float64 right) { return left - right; }
+            [NoThrow] public float64 Multiply64(float64 left, float64 right) { return left * right; }
+            [NoThrow] public float64 Divide64(float64 left, float64 right) { return left / right; }
+            [NoThrow] public float64 Nested64(float64 a, float64 b, float64 c, float64 d) { return (a + b) * c - d; }
+            [NoThrow] public bool Equal64(float64 left, float64 right) { return left == right; }
+            [NoThrow] public bool NotEqual64(float64 left, float64 right) { return left != right; }
+            [NoThrow] public bool Less64(float64 left, float64 right) { return left < right; }
+            [NoThrow] public bool LessEqual64(float64 left, float64 right) { return left <= right; }
+            [NoThrow] public bool Greater64(float64 left, float64 right) { return left > right; }
+            [NoThrow] public bool GreaterEqual64(float64 left, float64 right) { return left >= right; }
+            int32 Main() {
+                if (Add32(1.5, 2.25) != 3.75 || Subtract64(4.0, 1.5) != 2.5) { return 1; }
+                if (!Less32(1.0, 2.0) || !GreaterEqual64(2.0, 2.0)) { return 2; }
+                return 42;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var executableCompilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.False(executableCompilation.HasErrors,
+            string.Join(Environment.NewLine, executableCompilation.Diagnostics));
+        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(executableCompilation.Program),
+            NativeRuntimePolicy.FailFast));
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-float-operators-{Guid.NewGuid():N}.dll");
+        var library = IntPtr.Zero;
+        try
+        {
+            var exports = new[]
+            {
+                "Add32", "Subtract32", "Multiply32", "Divide32", "Nested32", "Equal32", "NotEqual32",
+                "Less32", "LessEqual32", "Greater32", "GreaterEqual32", "Add64", "Subtract64",
+                "Multiply64", "Divide64", "Nested64", "Equal64", "NotEqual64", "Less64", "LessEqual64",
+                "Greater64", "GreaterEqual64",
+            };
+            File.WriteAllBytes(path, NativeEmitter.EmitLibrary(program, exports, NativeRuntimePolicy.FailFast));
+            library = NativeLibrary.Load(path);
+
+            var add32 = Export<Float32Binary>(library, "Add32");
+            var subtract32 = Export<Float32Binary>(library, "Subtract32");
+            var multiply32 = Export<Float32Binary>(library, "Multiply32");
+            var divide32 = Export<Float32Binary>(library, "Divide32");
+            var nested32 = Export<Float32FourOperands>(library, "Nested32");
+            var equal32 = Export<Float32Comparison>(library, "Equal32");
+            var notEqual32 = Export<Float32Comparison>(library, "NotEqual32");
+            var less32 = Export<Float32Comparison>(library, "Less32");
+            var lessEqual32 = Export<Float32Comparison>(library, "LessEqual32");
+            var greater32 = Export<Float32Comparison>(library, "Greater32");
+            var greaterEqual32 = Export<Float32Comparison>(library, "GreaterEqual32");
+            var add64 = Export<Float64Binary>(library, "Add64");
+            var subtract64 = Export<Float64Binary>(library, "Subtract64");
+            var multiply64 = Export<Float64Binary>(library, "Multiply64");
+            var divide64 = Export<Float64Binary>(library, "Divide64");
+            var nested64 = Export<Float64FourOperands>(library, "Nested64");
+            var equal64 = Export<Float64Comparison>(library, "Equal64");
+            var notEqual64 = Export<Float64Comparison>(library, "NotEqual64");
+            var less64 = Export<Float64Comparison>(library, "Less64");
+            var lessEqual64 = Export<Float64Comparison>(library, "LessEqual64");
+            var greater64 = Export<Float64Comparison>(library, "Greater64");
+            var greaterEqual64 = Export<Float64Comparison>(library, "GreaterEqual64");
+
+            Assert.Equal(0x40700000, add32(0x3FC00000, 0x40100000));
+            Assert.Equal(0x40200000, subtract32(0x40800000, 0x3FC00000));
+            Assert.Equal(0x40400000, multiply32(0x3FC00000, 0x40000000));
+            Assert.Equal(0x40400000, divide32(0x40C00000, 0x40000000));
+            Assert.Equal(0x40D00000, nested32(0x3FC00000, 0x40100000, 0x40000000, 0x3F800000));
+            Assert.Equal(0x7FC00000, divide32(0, 0));
+            Assert.Equal(0x7FC00000, add32(unchecked((int)0xFFC12345), 0x3F800000));
+            Assert.Equal(1, equal32(unchecked((int)0x80000000), 0));
+            Assert.Equal(0, equal32(0x7F800001, 0x3F800000));
+            Assert.Equal(1, notEqual32(0x7F800001, 0x3F800000));
+            Assert.Equal(0, less32(0x7F800001, 0x3F800000));
+            Assert.Equal(0, lessEqual32(0x7F800001, 0x3F800000));
+            Assert.Equal(0, greater32(0x7F800001, 0x3F800000));
+            Assert.Equal(0, greaterEqual32(0x7F800001, 0x3F800000));
+            Assert.Equal(1, less32(0x3F800000, 0x40000000));
+            Assert.Equal(1, lessEqual32(0x3F800000, 0x3F800000));
+            Assert.Equal(1, greater32(0x40000000, 0x3F800000));
+            Assert.Equal(1, greaterEqual32(0x3F800000, 0x3F800000));
+
+            Assert.Equal(0x400E000000000000L, add64(0x3FF8000000000000L, 0x4002000000000000L));
+            Assert.Equal(0x4004000000000000L, subtract64(0x4010000000000000L, 0x3FF8000000000000L));
+            Assert.Equal(0x4008000000000000L, multiply64(0x3FF8000000000000L, 0x4000000000000000L));
+            Assert.Equal(0x4008000000000000L, divide64(0x4018000000000000L, 0x4000000000000000L));
+            Assert.Equal(0x401A000000000000L,
+                nested64(0x3FF8000000000000L, 0x4002000000000000L, 0x4000000000000000L,
+                    0x3FF0000000000000L));
+            Assert.Equal(unchecked((long)0x7FF8000000000000UL), divide64(0, 0));
+            Assert.Equal(unchecked((long)0x7FF8000000000000UL),
+                add64(unchecked((long)0xFFF8123456789ABCUL), 0x3FF0000000000000L));
+            Assert.Equal(1, equal64(long.MinValue, 0));
+            Assert.Equal(0, equal64(0x7FF0000000000001L, 0x3FF0000000000000L));
+            Assert.Equal(1, notEqual64(0x7FF0000000000001L, 0x3FF0000000000000L));
+            Assert.Equal(0, less64(0x7FF0000000000001L, 0x3FF0000000000000L));
+            Assert.Equal(0, lessEqual64(0x7FF0000000000001L, 0x3FF0000000000000L));
+            Assert.Equal(0, greater64(0x7FF0000000000001L, 0x3FF0000000000000L));
+            Assert.Equal(0, greaterEqual64(0x7FF0000000000001L, 0x3FF0000000000000L));
+            Assert.Equal(1, less64(0x3FF0000000000000L, 0x4000000000000000L));
+            Assert.Equal(1, lessEqual64(0x3FF0000000000000L, 0x3FF0000000000000L));
+            Assert.Equal(1, greater64(0x4000000000000000L, 0x3FF0000000000000L));
+            Assert.Equal(1, greaterEqual64(0x3FF0000000000000L, 0x3FF0000000000000L));
+        }
+        finally
+        {
+            if (library != IntPtr.Zero)
+            {
+                NativeLibrary.Free(library);
+            }
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void FloatingArithmeticIgnoresAndRestoresAmbientMxcsr()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "[NoThrow] public float32 Add(float32 left, float32 right) { return left + right; } "
+            + "[NoThrow] public float32 Multiply(float32 left, float32 right) { return left * right; } "
+            + "[NoThrow] public float64 Add64(float64 left, float64 right) { return left + right; } "
+            + "[NoThrow] public float64 Multiply64(float64 left, float64 right) { return left * right; }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-float-mxcsr-{Guid.NewGuid():N}.dll");
+        var library = IntPtr.Zero;
+        const uint floatingControlMask = 0x03000300;
+        var originalControl = ReadFloatingControl();
+        try
+        {
+            File.WriteAllBytes(path, NativeEmitter.EmitLibrary(program, ["Add", "Multiply", "Add64", "Multiply64"],
+                NativeRuntimePolicy.FailFast));
+            library = NativeLibrary.Load(path);
+            var add = Export<Float32Binary>(library, "Add");
+            var multiply = Export<Float32Binary>(library, "Multiply");
+            var add64 = Export<Float64Binary>(library, "Add64");
+            var multiply64 = Export<Float64Binary>(library, "Multiply64");
+            var alteredControl = (originalControl & ~floatingControlMask) | 0x01000200;
+            WriteFloatingControl(alteredControl, floatingControlMask);
+
+            Assert.Equal(0x3F800000, add(0x3F800000, 0x33800000));
+            Assert.Equal(0x00400000, multiply(0x00800000, 0x3F000000));
+            Assert.Equal(0x3FF0000000000000L,
+                add64(0x3FF0000000000000L, 0x3CA0000000000000L));
+            Assert.Equal(0x0008000000000000L,
+                multiply64(0x0010000000000000L, 0x3FE0000000000000L));
+            Assert.Equal(alteredControl & floatingControlMask,
+                ReadFloatingControl() & floatingControlMask);
+        }
+        finally
+        {
+            WriteFloatingControl(originalControl, floatingControlMask);
+            if (library != IntPtr.Zero)
+            {
+                NativeLibrary.Free(library);
+            }
+            File.Delete(path);
+        }
     }
 
     [Theory]
@@ -360,6 +554,32 @@ public sealed class FloatingLiteralBindingTests
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
         Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void FloatingArithmeticPersistsThroughSemanticModules()
+    {
+        var producerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "[NoThrow] public float64 Add(float64 left, float64 right) { return left + right; } "
+            + "[NoThrow] public bool Less(float64 left, float64 right) { return left < right; }"));
+        Assert.False(producerCompilation.HasErrors,
+            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        var producerProgram = Assert.IsType<BoundProgram>(producerCompilation.Program);
+        var producer = ModuleCompiler.CreateProducer(producerProgram, ["Add", "Less"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var clientCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                float64 sum = Add(1.5, 2.25);
+                return sum == 3.75 && Less(1.0, 2.0) ? 42 : 1;
+            }
+            """), reference);
+        Assert.False(clientCompilation.HasErrors,
+            string.Join(Environment.NewLine, clientCompilation.Diagnostics));
+
+        var consumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(clientCompilation.Program), producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.Equal(42, NativeJit.Execute(linked, NativeRuntimePolicy.FailFast));
     }
 
     [Fact]
@@ -584,4 +804,29 @@ public sealed class FloatingLiteralBindingTests
 
         Assert.True(compilation.HasErrors);
     }
+
+    private static T Export<T>(IntPtr library, string name) where T : Delegate =>
+        Marshal.GetDelegateForFunctionPointer<T>(NativeLibrary.GetExport(library, name));
+
+    private static uint ReadFloatingControl()
+    {
+        var error = ControlFloatingPointEnvironment(out var current, 0, 0);
+        if (error != 0)
+        {
+            throw new InvalidOperationException($"_controlfp_s failed with error {error}.");
+        }
+        return current;
+    }
+
+    private static void WriteFloatingControl(uint value, uint mask)
+    {
+        var error = ControlFloatingPointEnvironment(out _, value, mask);
+        if (error != 0)
+        {
+            throw new InvalidOperationException($"_controlfp_s failed with error {error}.");
+        }
+    }
+
+    [DllImport("ucrtbase.dll", EntryPoint = "_controlfp_s", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int ControlFloatingPointEnvironment(out uint current, uint value, uint mask);
 }
