@@ -202,15 +202,20 @@ public static partial class ModuleCompiler
                 throw new ModuleContractException($"Incompatible or missing provider contract for '{imported.Name}'.");
             }
         }
-        if (consumer.ImportedStructures.Any(name => !reference.Structures.Any(item => item.Name == name)))
+        var providerStructures = new Dictionary<string, BoundStruct>(StringComparer.Ordinal);
+        foreach (var structure in reference.Structures)
+        {
+            _ = providerStructures.TryAdd(structure.Name, structure);
+        }
+        if (consumer.ImportedStructures.Any(name => !providerStructures.ContainsKey(name)))
         {
             throw new ModuleContractException("Missing imported value layout.");
         }
         var importedNames = consumer.ImportedStructures.ToHashSet(StringComparer.Ordinal);
         foreach (var expected in consumer.Structures)
         {
-            var actual = reference.Structures.FirstOrDefault(item => item.Name == expected.Name);
-            if (actual is not null && (!importedNames.Contains(expected.Name)
+            if (providerStructures.TryGetValue(expected.Name, out var actual)
+                && (!importedNames.Contains(expected.Name)
                 || !SameStructure(expected, actual, consumer.Structures, reference.Structures)))
             {
                 throw new ModuleContractException($"Incompatible provider value layout '{expected.Name}'.");
