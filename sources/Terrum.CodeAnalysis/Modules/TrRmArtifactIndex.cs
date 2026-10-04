@@ -45,6 +45,9 @@ public readonly ref struct TrRmArtifactIndex
         _directory = artifact.Slice(32, (int)directoryEnd - 32);
         _entryCount = (int)entryCount;
         var extents = new (uint Start, uint End)[_entryCount];
+        // Reference slots target only kinds 1 through 0x20, so validated counts fit a direct index.
+        Span<uint> sectionCounts = stackalloc uint[0x20 + 1];
+        sectionCounts.Clear();
         var previousKind = 0;
         var moduleFound = false;
         for (var entry = 0; entry < _entryCount; entry++)
@@ -74,6 +77,11 @@ public readonly ref struct TrRmArtifactIndex
                 || (kind == 0x0002 && (start & 3) != 0))
             {
                 throw InvalidArtifact();
+            }
+
+            if (kind <= 0x0020)
+            {
+                sectionCounts[kind] = count;
             }
 
             extents[entry] = (start, start + length);
@@ -116,7 +124,8 @@ public readonly ref struct TrRmArtifactIndex
                 var start = ReadU32(_directory, entry * 16 + 8);
                 var length = ReadU32(_directory, entry * 16 + 12);
                 var count = ReadU32(_directory, entry * 16 + 4);
-                ValidateSlots(artifact.Slice((int)start, (int)length), Kind(entry), count);
+                ValidateSlots(artifact.Slice((int)start, (int)length), Kind(entry), count,
+                    sectionCounts);
             }
         }
     }
@@ -172,7 +181,8 @@ public readonly ref struct TrRmArtifactIndex
     private int Kind(int entry)
         => ReadU16(_directory, entry * 16);
 
-    private void ValidateSlots(ReadOnlySpan<byte> section, int kind, uint recordCount)
+    private void ValidateSlots(ReadOnlySpan<byte> section, int kind, uint recordCount,
+        ReadOnlySpan<uint> sectionCounts)
     {
         if (section.Length < 4)
         {
@@ -198,7 +208,7 @@ public readonly ref struct TrRmArtifactIndex
             if (row is 0 or > 0xFF_FFFF
                 || targetKind is < 0x0001 or > 0x0020 or 0x0004
                 || FixedStride(targetKind) == -1
-                || !TryGetSection(targetKind, out _, out var targetCount) || row > targetCount
+                || sectionCounts[targetKind] == 0 || row > sectionCounts[targetKind]
                 || (selector == 0 && (block != 0 || ordinal != 0))
                 || (selector == 1 && (targetKind != 0x0020 || block == 0))
                 || (kind == 0x7F00 && !((selector == 0 && targetKind == 0x001F)

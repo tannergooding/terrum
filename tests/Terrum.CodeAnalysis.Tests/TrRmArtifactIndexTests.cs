@@ -236,6 +236,10 @@ public sealed class TrRmArtifactIndexTests
         Write(missingTarget, 144 + 4, 2);
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(missingTarget));
 
+        var absentTarget = WithReferenceSlottedExtension();
+        WriteU16(absentTarget, 144, 0x0010);
+        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(absentTarget));
+
         var danglingBody = WithReferenceSlottedExtension();
         WriteU16(danglingBody, 144, 0x0020);
         WriteU16(danglingBody, 146, 1);
