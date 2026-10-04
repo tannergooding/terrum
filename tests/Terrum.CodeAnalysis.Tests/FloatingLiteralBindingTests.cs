@@ -34,6 +34,15 @@ public sealed class FloatingLiteralBindingTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Int64ToFloat32(long value);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Int32ToFloat64(int value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int UInt32ToFloat32(uint value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Int64ToFloat64(long value);
+
     [Theory]
     [InlineData("float32", "0.1", 0x3DCCCCCDL)]
     [InlineData("float64", "0.1", 0x3FB999999999999AL)]
@@ -127,8 +136,12 @@ public sealed class FloatingLiteralBindingTests
 
     [Theory]
     [InlineData("float32", "float32(int32(16777217))", 0x4B800000L)]
+    [InlineData("float64", "float64(int32(16777217))", 0x4170000010000000L)]
     [InlineData("float32", "float32(uint32(4294967295))", 0x4F800000L)]
+    [InlineData("float64", "float64(uint32(4294967295))", 0x41EFFFFFFFE00000L)]
+    [InlineData("float32", "float32(int64(-9007199254740993))", 0xDA000000L)]
     [InlineData("float64", "float64(int64(-9007199254740993))", unchecked((long)0xC340000000000000UL))]
+    [InlineData("float32", "float32(uint64(18446744073709551615))", 0x5F800000L)]
     [InlineData("float64", "float64(uint64(18446744073709551615))", 0x43F0000000000000L)]
     public void ConvertsIntegerConstantsToFloatingTargetFormat(string type, string expression, long bits)
     {
@@ -264,7 +277,10 @@ public sealed class FloatingLiteralBindingTests
             + "[NoThrow] public float64 FromUInt64(uint64 value) { return float64(value); } "
             + "[NoThrow] public float32 FromUInt64Single(uint64 value) { return float32(value); } "
             + "[NoThrow] public float64 FromUInt32(uint32 value) { return float64(value); } "
-            + "[NoThrow] public float32 FromInt64(int64 value) { return float32(value); }"));
+            + "[NoThrow] public float32 FromInt64(int64 value) { return float32(value); } "
+            + "[NoThrow] public float64 FromInt32Wide(int32 value) { return float64(value); } "
+            + "[NoThrow] public float32 FromUInt32Single(uint32 value) { return float32(value); } "
+            + "[NoThrow] public float64 FromInt64Wide(int64 value) { return float64(value); }"));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
 
@@ -274,7 +290,8 @@ public sealed class FloatingLiteralBindingTests
         {
             File.WriteAllBytes(path,
                 NativeEmitter.EmitLibrary(program,
-                    ["Widen", "Narrow", "FromInt32", "FromUInt64", "FromUInt64Single", "FromUInt32", "FromInt64"],
+                    ["Widen", "Narrow", "FromInt32", "FromUInt64", "FromUInt64Single", "FromUInt32", "FromInt64",
+                        "FromInt32Wide", "FromUInt32Single", "FromInt64Wide"],
                     NativeRuntimePolicy.FailFast));
             library = NativeLibrary.Load(path);
 
@@ -292,6 +309,12 @@ public sealed class FloatingLiteralBindingTests
                 NativeLibrary.GetExport(library, "FromUInt32"));
             var fromInt64 = Marshal.GetDelegateForFunctionPointer<Int64ToFloat32>(
                 NativeLibrary.GetExport(library, "FromInt64"));
+            var fromInt32Wide = Marshal.GetDelegateForFunctionPointer<Int32ToFloat64>(
+                NativeLibrary.GetExport(library, "FromInt32Wide"));
+            var fromUInt32Single = Marshal.GetDelegateForFunctionPointer<UInt32ToFloat32>(
+                NativeLibrary.GetExport(library, "FromUInt32Single"));
+            var fromInt64Wide = Marshal.GetDelegateForFunctionPointer<Int64ToFloat64>(
+                NativeLibrary.GetExport(library, "FromInt64Wide"));
 
             Assert.Equal(0x3FB99999A0000000L, widen(unchecked((int)0x3DCCCCCD)));
             Assert.Equal(0x3F800000, narrow(0x3FF0000010000000L));
@@ -305,6 +328,10 @@ public sealed class FloatingLiteralBindingTests
             Assert.Equal(0x5F800000, fromUInt64Single(ulong.MaxValue));
             Assert.Equal(0x41EFFFFFFFE00000L, fromUInt32(uint.MaxValue));
             Assert.Equal(unchecked((int)0xDA000000), fromInt64(-9_007_199_254_740_993));
+            Assert.Equal(0x4170000010000000L, fromInt32Wide(16_777_217));
+            Assert.Equal(0x4F800000, fromUInt32Single(uint.MaxValue));
+            Assert.Equal(unchecked((long)0xC340000000000000UL),
+                fromInt64Wide(-9_007_199_254_740_993));
         }
         finally
         {
