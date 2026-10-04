@@ -357,7 +357,8 @@ public static partial class NativeModuleCompiler
         var result = new List<GraphDependency>();
         foreach (var provider in providers)
         {
-            var imports = provider.Exports.Where(unmatched.Remove).Order(StringComparer.Ordinal).ToArray();
+            // Every leaf and graph package exposes ordinally sorted exports.
+            var imports = provider.Exports.Where(unmatched.Remove).ToArray();
             result.Add(new GraphDependency(provider.Identity
                 ?? throw new ModuleFormatException("Graph dependency has no identity."), imports, []));
         }
