@@ -1871,8 +1871,9 @@ internal sealed partial class Binder
                 PrimitiveType.Int32, span);
     }
 
-    private BoundExpression BindBufferIndex(SyntaxNode index, int buffer)
+    private BoundExpression BindBufferIndex(SyntaxNode index, int buffer, out bool isEndRelative)
     {
+        isEndRelative = false;
         if (index.Kind != SyntaxKind.EndRelativeIndexBound)
         {
             return BindExpression(index, PrimitiveType.Int32);
@@ -1885,9 +1886,8 @@ internal sealed partial class Binder
             if (offset is not BoundConstant { Type: PrimitiveType.Int32 } constant
                 || constant.Value is < int.MinValue or > int.MaxValue)
             {
-                Report("TRM3001", "An end-relative host-buffer index requires a compile-time int32 offset.",
-                    index.Span);
-                return ErrorExpression(index.Span);
+                isEndRelative = true;
+                return offset;
             }
             offsetValue = (int)constant.Value;
         }
@@ -2224,9 +2224,13 @@ internal sealed partial class Binder
                     {
                         Report("TRM3008", "A read-only host buffer cannot be modified.", target.Span);
                     }
-                    return new BoundBufferAssignment(buffer,
-                        BindBufferIndex((SyntaxNode)target.Children[2], buffer),
-                        BindExpression(valueNode, _buffers[buffer].ElementType), node.Span);
+                    var indexExpression = BindBufferIndex((SyntaxNode)target.Children[2], buffer,
+                        out var isEndRelative);
+                    return new BoundBufferAssignment(buffer, indexExpression,
+                        BindExpression(valueNode, _buffers[buffer].ElementType), node.Span)
+                    {
+                        IsEndRelativeOffset = isEndRelative,
+                    };
                 }
                 if (target.Kind == SyntaxKind.MemberAccessExpression)
                 {
@@ -3279,9 +3283,13 @@ internal sealed partial class Binder
                 }
                 if (TryFindBuffer((SyntaxNode)node.Children[0], out var buffer))
                 {
-                    expression = new BoundBufferRead(buffer,
-                        BindBufferIndex((SyntaxNode)node.Children[2], buffer),
-                        _buffers[buffer].ElementType, node.Span);
+                    var indexExpression = BindBufferIndex((SyntaxNode)node.Children[2], buffer,
+                        out var isEndRelative);
+                    expression = new BoundBufferRead(buffer, indexExpression,
+                        _buffers[buffer].ElementType, node.Span)
+                    {
+                        IsEndRelativeOffset = isEndRelative,
+                    };
                 }
                 else
                 {

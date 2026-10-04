@@ -399,7 +399,11 @@ public sealed record BoundFieldAssignment(int Variable, int Field, BoundExpressi
 }
 
 /// <summary>A checked write to a compiler-supplied writable buffer.</summary>
-public sealed record BoundBufferAssignment(int Buffer, BoundExpression Index, BoundExpression Value, TextSpan Span) : BoundStatement(Span);
+public sealed record BoundBufferAssignment(int Buffer, BoundExpression Index, BoundExpression Value, TextSpan Span) : BoundStatement(Span)
+{
+    /// <summary>Whether <see cref="Index"/> stores an end-relative offset instead of an absolute index.</summary>
+    internal bool IsEndRelativeOffset { get; init; }
+}
 
 /// <summary>Evaluates a call for its effects, discarding its result.</summary>
 /// <param name="Expression">The call.</param>
@@ -630,4 +634,8 @@ public sealed record BoundOutArgument(int Variable, bool DeclaresVariable, Primi
 }
 
 /// <summary>A checked read from a compiler-supplied buffer.</summary>
-public sealed record BoundBufferRead(int Buffer, BoundExpression Index, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+public sealed record BoundBufferRead(int Buffer, BoundExpression Index, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    /// <summary>Whether <see cref="Index"/> stores an end-relative offset instead of an absolute index.</summary>
+    internal bool IsEndRelativeOffset { get; init; }
+}

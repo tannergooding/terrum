@@ -1466,8 +1466,7 @@ internal sealed partial class PeCompiler
                 }
                 return false;
             case BoundBufferRead buffer:
-                Expression(buffer.Index, spill);
-                CheckBufferIndex(buffer.Buffer);
+                EmitBufferIndex(buffer.Buffer, buffer.Index, buffer.IsEndRelativeOffset, spill);
                 _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _bufferOffsets[buffer.Buffer]));
                 _code.Bytes(0x48, 0x8D, 0x04, 0x82); // lea rax,[rdx+rax*4]
                 return false;
@@ -2432,8 +2431,7 @@ internal sealed partial class PeCompiler
                 }
                 break;
             case BoundBufferAssignment bufferWrite:
-                Expression(bufferWrite.Index, 0);
-                CheckBufferIndex(bufferWrite.Buffer);
+                EmitBufferIndex(bufferWrite.Buffer, bufferWrite.Index, bufferWrite.IsEndRelativeOffset, 0);
                 _code.Store(Spill(0));
                 Expression(bufferWrite.Value, 1);
                 _code.Bytes(0x89, 0xC1); // mov ecx,eax
@@ -2726,6 +2724,29 @@ internal sealed partial class PeCompiler
         RuntimeBranch(0x83, 3); // unsigned >= length rejects negative indexes too
     }
 
+    private void EmitBufferIndex(int buffer, BoundExpression index, bool isEndRelative, int spill)
+    {
+        Expression(index, spill);
+        if (isEndRelative)
+        {
+            _code.Bytes(0x85, 0xC0); // test eax,eax
+            var negativeOffset = _code.JumpIf(0x88);
+            _code.Byte(0x3D); // cmp eax,length
+            _code.Int32(_program.Buffers[buffer].Values.Length);
+            var outOfRange = _code.JumpIf(0x83);
+            _code.Byte(0xB9); // mov ecx,length
+            _code.Int32(_program.Buffers[buffer].Values.Length);
+            _code.Bytes(0x29, 0xC1, 0x89, 0xC8); // ecx = length - eax; eax = ecx
+            var converted = _code.Jump();
+            _code.PatchRelative(negativeOffset, _code.Position);
+            _code.PatchRelative(outOfRange, _code.Position);
+            _code.Bytes(0xB8); // mov eax,-1
+            _code.Int32(-1);
+            _code.PatchRelative(converted, _code.Position);
+        }
+        CheckBufferIndex(buffer);
+    }
+
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier excludes unsupported expression variants and unary operators.")]
     private void Expression(BoundExpression expression, int spill)
     {
@@ -2932,8 +2953,7 @@ internal sealed partial class PeCompiler
                 }
                 break;
             case BoundBufferRead bufferRead:
-                Expression(bufferRead.Index, spill);
-                CheckBufferIndex(bufferRead.Buffer);
+                EmitBufferIndex(bufferRead.Buffer, bufferRead.Index, bufferRead.IsEndRelativeOffset, spill);
                 _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _bufferOffsets[bufferRead.Buffer]));
                 _code.Bytes(0x8B, 0x04, 0x82); // mov eax,[rdx+rax*4]
                 break;

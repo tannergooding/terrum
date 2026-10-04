@@ -147,8 +147,9 @@ Scanner-10/schema-10 appends `DotDot`, `DotDotCaret`, and `QuestionDot` token
 kinds 104–106 after Scanner-9/schema-9 added `CharacterLiteral` kind 103.
 Scanner-8/schema-8 diagnostic identities 11/12 for invalid and
 defined-but-unsupported maximal runs remain unchanged. The hosted parser and
-binder consume constant `^offset` bounds for compiler-supplied host-buffer
-indexing and `..`/`..^` ranges for readonly `OwnedInt32Buffer` lexical views;
+binder consume constant and dynamic `^offset` bounds for compiler-supplied
+host-buffer indexing and `..`/`..^` ranges for readonly `OwnedInt32Buffer`
+lexical views;
 `?.` remains token-only. Scanner tokens do not imply support in the native
 scalar frontend or general indexer/slice contracts. See the
 [scanner contract](scanner.md) for spans and current record shapes. Hosted

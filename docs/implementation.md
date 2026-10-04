@@ -1448,9 +1448,9 @@ end-relative lower and upper bounds are supported, while dynamic bounds are
 not. The existing checked view-scope operation
 validates the resulting range against the initialized prefix without clamping.
 For the existing compiler-supplied `Host` buffers, indexed reads and writes
-also accept constant `^offset` bounds, lowered to the ordinary checked buffer
-index path; `^0` and other out-of-range positions fail there. Dynamic
-end-relative element indices remain unsupported. This does not add indexing
+also accept constant and dynamic `^offset` bounds, lowered to the ordinary
+checked buffer index path; dynamic offsets evaluate once, and `^0` and other
+out-of-range positions fail there. This does not add indexing
 to `OwnedInt32Buffer` or authorize arbitrary indexer contracts.
 Range syntax does not add mutable slicing, general indexer contracts,
 first-class range values or optional access. `mut MutableInt32BufferView window =
