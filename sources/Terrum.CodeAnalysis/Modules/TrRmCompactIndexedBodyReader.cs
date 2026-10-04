@@ -216,10 +216,10 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         var localMethodStart = 0;
         var localMethodEnd = 0;
         var callerModule = 0;
-        var lastUses = new Dictionary<int, (int Declared, int Observed)>();
+        Dictionary<int, (int Declared, int Observed)>? lastUses = null;
         for (var block = 1; block <= BlockCount; block++)
         {
-            lastUses.Clear();
+            lastUses?.Clear();
             var extent = blockData[(int)offsets[block - 1]..(int)offsets[block]];
             var cursor = 0;
             var presence = Read(extent, ref cursor, 1);
@@ -249,7 +249,9 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     throw InvalidBody();
                 }
 
-                lastUses.EnsureCapacity(count);
+                var blockLastUses = lastUses
+                    ??= new Dictionary<int, (int Declared, int Observed)>();
+                blockLastUses.EnsureCapacity(count);
                 var previous = 0;
                 for (var item = 0; item < count; item++)
                 {
@@ -260,7 +262,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         throw InvalidBody();
                     }
 
-                    lastUses.Add(value, (lastUse, -1));
+                    blockLastUses.Add(value, (lastUse, -1));
                     previous = value;
                 }
             }
@@ -316,13 +318,14 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     }
                 }
 
-                if (lastUses.TryGetValue(value, out var lastUse))
+                var blockLastUses = lastUses;
+                if (blockLastUses is not null && blockLastUses.TryGetValue(value, out var lastUse))
                 {
                     if (lastUse.Observed < 0)
                     {
                         actualUses[value]++;
                     }
-                    lastUses[value] = (lastUse.Declared, ordinal);
+                    blockLastUses[value] = (lastUse.Declared, ordinal);
                 }
                 else
                 {
@@ -847,11 +850,14 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 throw InvalidBody();
             }
 
-            foreach (var (value, lastUse) in lastUses)
+            if (lastUses is not null)
             {
-                if (lastUse.Observed != lastUse.Declared)
+                foreach (var (value, lastUse) in lastUses)
                 {
-                    throw InvalidBody();
+                    if (lastUse.Observed != lastUse.Declared)
+                    {
+                        throw InvalidBody();
+                    }
                 }
             }
 
