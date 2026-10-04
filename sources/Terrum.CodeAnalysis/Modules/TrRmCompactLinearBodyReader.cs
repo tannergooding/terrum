@@ -127,6 +127,9 @@ public readonly ref struct TrRmCompactLinearBodyReader
         var valueCount = parameterCount;
         var hasMethodRange = false;
         var callerModule = 0;
+        uint callerTargetRequirement = 0;
+        uint callerRuntimePolicy = 0;
+        var callerRequirementsLoaded = false;
         var firstMethod = 0;
         var lastMethod = 0;
         for (var ordinal = 0; ordinal < operationCount; ordinal++)
@@ -271,11 +274,17 @@ public readonly ref struct TrRmCompactLinearBodyReader
                     }
 
                     var targetModule = methods.GetOwnerModule(target);
-                    var (callerTarget, callerPolicy) = modules.GetRequirements(callerModule);
+                    if (!callerRequirementsLoaded)
+                    {
+                        (callerTargetRequirement, callerRuntimePolicy) =
+                            modules.GetRequirements(callerModule);
+                        callerRequirementsLoaded = true;
+                    }
                     var (targetRequirement, targetPolicy) = modules.GetRequirements(targetModule);
                     if (targetModule == callerModule
                         || (targetBodyRow = methods.GetBodyRow(target)) == 0
-                        || targetPolicy != callerPolicy || targetRequirement > callerTarget)
+                        || targetPolicy != callerRuntimePolicy
+                        || targetRequirement > callerTargetRequirement)
                     {
                         throw InvalidBody();
                     }
@@ -310,9 +319,15 @@ public readonly ref struct TrRmCompactLinearBodyReader
                         throw InvalidBody();
                     }
 
-                    var (callerTarget, callerPolicy) = modules.GetRequirements(callerModule);
+                    if (!callerRequirementsLoaded)
+                    {
+                        (callerTargetRequirement, callerRuntimePolicy) =
+                            modules.GetRequirements(callerModule);
+                        callerRequirementsLoaded = true;
+                    }
                     var (targetRequirement, targetPolicy) = requirements;
-                    if (targetPolicy != callerPolicy || targetRequirement > callerTarget)
+                    if (targetPolicy != callerRuntimePolicy
+                        || targetRequirement > callerTargetRequirement)
                     {
                         throw InvalidBody();
                     }
