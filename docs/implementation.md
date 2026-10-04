@@ -2006,8 +2006,9 @@ operands), and unary `+` over a contextual integer literal or named parameter
 and signed `-` over a named integer parameter or grouped contextual integer
 literal (with grouped named operands),
 context-typed unsuffixed integer literals (including signed unary minus and
-decimal signed minima) in return expressions, and
-at most one binary operation per expression, including either order of
+decimal signed minima) in return expressions; single-scalar character literals
+only in representable `char16` contexts; and at most one binary operation per
+expression, including either order of
 parameter/literal arithmetic or bitwise operations for integer widths
 (including parentheses between a literal's unary sign and magnitude),
 comparison for integer widths and `char16`, and Boolean parameter/parameter,

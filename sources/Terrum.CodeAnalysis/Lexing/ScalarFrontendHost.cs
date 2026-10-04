@@ -1459,7 +1459,17 @@ public static partial class ScalarFrontendHost
                 }
                 else if (node.Operation == 3)
                 {
-                    if (!Take(TokenKind.NumericLiteral)
+                    if (at < tokens.Length && tokens[at].Kind == TokenKind.CharacterLiteral)
+                    {
+                        if (node.Type != 6 || !Take(TokenKind.CharacterLiteral)
+                            || !CharacterLiteralDecoder.TryDecode(tokens[at - 1].Text.AsSpan(),
+                                out var scalar)
+                            || scalar > ushort.MaxValue || node.Low != scalar || node.High != 0)
+                        {
+                            return false;
+                        }
+                    }
+                    else if (!Take(TokenKind.NumericLiteral)
                         || !ValidMagnitude(tokens[at - 1].Text.AsSpan(), node.Type,
                             tree.Any(parent => parent.Operation == 58 && parent.Left == index
                                 && parent.Right == -1), node.Low, node.High))

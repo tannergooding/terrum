@@ -41,6 +41,11 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { if (true || false) { return 42; } return 0; }", 42)]
     [InlineData("int32 Main() { if (false && (true || false)) { return 0; } return 6 * (3 + 4); }", 42)]
     [InlineData("int32 Main() { if (true == true) { return 42; } return 0; }", 42)]
+    [InlineData("int32 Main() { char16 value = 'A'; return int32(value); }", 65)]
+    [InlineData("int32 Main() { char16 value = '\\u0041'; return int32(value); }", 65)]
+    [InlineData("int32 Main() { char16 value = '\\n'; return int32(value); }", 10)]
+    [InlineData("int32 Main() { if ('A' == char16(65)) { return 42; } return 0; }", 42)]
+    [InlineData("int32 Main() { return Select('A'); } int32 Select(char16 value) { return int32(value); }", 65)]
     public async Task FrontendRunMatchesHostedJitAsync(string source, int expected)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -752,6 +757,26 @@ public sealed partial class CliTests
         Assert.False(result.GetProperty("public").GetBoolean());
         Assert.Equal(2, result.GetProperty("errorCode").GetInt32());
         Assert.Equal(30, result.GetProperty("errorSpan").GetProperty("start").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("int32 Main() { int32 value = 'A'; return value; }")]
+    [InlineData("int32 Main() { var value = 'A'; return 0; }")]
+    [InlineData("int32 Main() { char16 value = '\\U0001F600'; return int32(value); }")]
+    [InlineData("int32 Main() { char16 value = '\U0001F600'; return int32(value); }")]
+    public async Task FrontendComponentRejectsCharacterLiteralsWithoutChar16ContextAsync(
+        string source)
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+            "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        var result = document.RootElement.GetProperty("result");
+        Assert.False(result.GetProperty("valid").GetBoolean());
+        Assert.Equal(2, result.GetProperty("errorCode").GetInt32());
     }
 
     [Theory]

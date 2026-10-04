@@ -310,6 +310,101 @@ mut class ScalarFrontendState
         return true;
     }
 
+    private mut bool TryReadCharacterScalar(Token token, out int32 scalar)
+    {
+        scalar = 0;
+        int32 start = token.Range.Start;
+        int32 end = token.Range.End - 1;
+        if (token.Kind != 103 || token.Range.Length < 3
+            || Host.Source[start] != char16(39) || Host.Source[end] != char16(39))
+        {
+            return false;
+        }
+
+        mut int32 at = start + 1;
+        mut int32 value = 0;
+        if (Host.Source[at] == char16(92))
+        {
+            at = at + 1;
+            if (at >= end) { return false; }
+            int32 escape = int32(Host.Source[at]);
+            at = at + 1;
+            if (escape == 110) { value = 10; }
+            else if (escape == 114) { value = 13; }
+            else if (escape == 116) { value = 9; }
+            else if (escape == 92) { value = 92; }
+            else if (escape == 34) { value = 34; }
+            else if (escape == 39) { value = 39; }
+            else if (escape == 48) { value = 0; }
+            else if (escape == 117 || escape == 85)
+            {
+                int32 digits = escape == 117 ? 4 : 8;
+                mut uint32 decoded = 0;
+                for (mut int32 index = 0; index < digits; index = index + 1)
+                {
+                    if (at >= end
+                        || !TryCharacterHexDigit(Host.Source[at], out var digit))
+                    {
+                        return false;
+                    }
+                    decoded = (decoded << 4) | uint32(digit);
+                    at = at + 1;
+                }
+                if (decoded > uint32(0x10FFFF)
+                    || (decoded >= uint32(0xD800) && decoded <= uint32(0xDFFF)))
+                {
+                    return false;
+                }
+                value = int32(decoded);
+            }
+            else
+            {
+                return false;
+            }
+        }
+        else
+        {
+            value = int32(Host.Source[at]);
+            at = at + 1;
+            if (value >= 55296 && value <= 56319)
+            {
+                if (at >= end) { return false; }
+                int32 second = int32(Host.Source[at]);
+                if (second < 56320 || second > 57343) { return false; }
+                value = 65536 + (value - 55296) * 1024 + second - 56320;
+                at = at + 1;
+            }
+            else if (value >= 56320 && value <= 57343)
+            {
+                return false;
+            }
+        }
+        if (at != end) { return false; }
+        scalar = value;
+        return true;
+    }
+
+    private bool TryCharacterHexDigit(char16 character, out int32 digit)
+    {
+        if (character >= char16(48) && character <= char16(57))
+        {
+            digit = int32(character) - 48;
+            return true;
+        }
+        if (character >= char16(97) && character <= char16(102))
+        {
+            digit = int32(character) - 87;
+            return true;
+        }
+        if (character >= char16(65) && character <= char16(70))
+        {
+            digit = int32(character) - 55;
+            return true;
+        }
+        digit = 0;
+        return false;
+    }
+
     private bool TryResolveSignatureParameter(Token token, out int32 index, out int32 type)
     {
         if (_parameterCount > 0 && SameTokenSpelling(_first, token))
@@ -2816,10 +2911,23 @@ mut class ScalarFrontendState
             {
                 tokenIndex = tokenIndex + 1;
             }
-            if (!_tokens.TryGet(tokenIndex, out var literal)
-                || literal.Kind != 3
+            if (!_tokens.TryGet(tokenIndex, out var literal))
+            {
+                return false;
+            }
+            mut int32 low = 0;
+            mut int32 high = 0;
+            if (literal.Kind == 103)
+            {
+                if (type != 6 || !TryReadCharacterScalar(literal, out low) || low > 65535)
+                {
+                    FailAt(2, literal.Range);
+                    return false;
+                }
+            }
+            else if (literal.Kind != 3
                 || !TryReadMagnitude(literal, tokenIndex, type, minimum,
-                    literal.Range, out var low, out var high))
+                    literal.Range, out low, out high))
             {
                 return false;
             }
@@ -3399,6 +3507,21 @@ mut class ScalarFrontendState
         {
             return AddTreeNode(token.Kind, 5, token.Range.Start, token.Range.End,
                 -1, -1, 0, 0, out node);
+        }
+        if (token.Kind == 103)
+        {
+            mut int32 type = expected;
+            mut int32 scalar = 0;
+            if (type != 0 && type != 5
+                && (type != 6 || !TryReadCharacterScalar(token, out scalar)
+                    || scalar > 65535))
+            {
+                FailAt(2, token.Range);
+                return false;
+            }
+            if (type == 5) { type = 0; }
+            return AddTreeNode(3, type, token.Range.Start, token.Range.End,
+                -1, -1, scalar, 0, out node);
         }
         if (token.Kind == 3)
         {
