@@ -119,6 +119,8 @@ Based integers can also construct directly as floating values. Float-format
 conversions follow IEEE-754 nearest/ties-to-even behavior; integer/floating
 conversions, floating arithmetic/comparisons, custom literal parsing and
 registered literal targets remain outside this executable profile.
+The provisional hosted `char16`-to-floating conversion is also outside this
+profile and does not expand the native scalar frontend or source-free TRRM.
 
 The hosted compiler supports internal scalar `[ConstEval]` functions,
 required `const T name = expression;` locals and nested scalar `const`

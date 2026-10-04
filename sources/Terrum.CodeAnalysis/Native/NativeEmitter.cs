@@ -3558,7 +3558,8 @@ internal sealed partial class PeCompiler
             return;
         }
         if (target is PrimitiveType.Float32 or PrimitiveType.Float64
-            && source is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
+            && source is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+                or PrimitiveType.UInt64 or PrimitiveType.Char16)
         {
             if (source == PrimitiveType.UInt64)
             {
@@ -3566,6 +3567,10 @@ internal sealed partial class PeCompiler
             }
             else
             {
+                if (source == PrimitiveType.Char16)
+                {
+                    _code.Bytes(0x0F, 0xB7, 0xC0); // movzx eax,ax
+                }
                 EmitIntegerToFloating(source, target);
             }
             return;

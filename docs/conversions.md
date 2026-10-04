@@ -69,8 +69,13 @@ The decimal, hexadecimal, binary, and checked integer type-call examples above
 illustrate the selected semantics. Target-typed floating literals,
 `float32`/`float64` conversions, and conversions from `int32`, `uint32`,
 `int64`, and `uint64` to either floating format are implemented. Conversions
-from either floating format to an integer type, and `char16`-to-floating
-conversions, remain unsupported. Current executable coverage is documented in
+from either floating format to an integer type are implemented provisionally
+per an unapproved eligibility proposal. The hosted implementation also
+provisionally converts `char16` to either floating format as its unsigned
+code-unit value; this is not Unicode scalar decoding and its exact eligibility
+remains unapproved in the
+[eligibility proposal](proposals/char16-floating-conversion-eligibility.md).
+Current executable coverage is documented in
 [implementation](implementation.md). A value-based
 conversion still range-checks its source: `int32(uint32(0xFFFF_FFFF))` fails,
 while `int64(int32(0xFFFF_FFFF))` sign-extends the typed value to `-1`.

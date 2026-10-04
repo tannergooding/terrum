@@ -2898,7 +2898,7 @@ public static class SemanticVerifier
                     && (cast.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
                         or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16);
                 var integerToFloatingConversion = (cast.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
-                    or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                    or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16)
                     && (cast.Type is PrimitiveType.Float32 or PrimitiveType.Float64);
                 var floatingToIntegerConversion = (cast.Operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
                     && (cast.Type is PrimitiveType.Int32 or PrimitiveType.UInt32

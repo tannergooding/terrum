@@ -34,6 +34,9 @@ Hosted numeric floating conversions, same-format floating arithmetic and IEEE
 comparisons do not expand either native scalar frontend projection or
 source-free TRRM; those candidates still depend on the hosted
 verifier/emitter for their supported executions.
+The provisional hosted `char16`-to-floating conversion likewise remains
+outside both paths; it treats the code unit as an unsigned numeric value and
+follows an unapproved eligibility proposal.
 Both current v85 projections carry
 scalar non-Boolean/void `init ref<T>` declarations; definite-publication
 verification and emission remain hosted. V85 includes

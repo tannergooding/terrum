@@ -195,7 +195,8 @@ internal sealed partial class Binder
         value = 0;
         if (destination is PrimitiveType.Float32 or PrimitiveType.Float64
             && TryScalarValue(source, out var integer)
-            && (source.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64))
+            && (source.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+                or PrimitiveType.UInt64 or PrimitiveType.Char16))
         {
             value = destination == PrimitiveType.Float32
                 ? unchecked((uint)BitConverter.SingleToInt32Bits((float)integer))

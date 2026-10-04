@@ -44,6 +44,12 @@ public sealed class FloatingLiteralBindingTests
     private delegate long Int64ToFloat64(long value);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Char16ToFloat32(ushort value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Char16ToFloat64(ushort value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Float64ToInt32(long value);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -198,6 +204,25 @@ public sealed class FloatingLiteralBindingTests
     }
 
     [Theory]
+    [InlineData("float32")]
+    [InlineData("float64")]
+    public void ConvertsChar16ConstantsAsUnsignedCodeUnits(string type)
+    {
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse($"public {type} Read() {{ return {type}(char16(65535)); }}"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var result = Assert.IsType<BoundReturn>(Assert.Single(program.Functions[0].Body.Statements));
+        var constant = Assert.IsType<BoundConstant>(result.Value);
+        Assert.Equal(type == "float32" ? PrimitiveType.Float32 : PrimitiveType.Float64, constant.Type);
+        var expected = type == "float32"
+            ? unchecked((uint)BitConverter.SingleToInt32Bits(65535.0f))
+            : BitConverter.DoubleToInt64Bits(65535.0);
+        Assert.Equal(unchecked((long)expected), constant.Value);
+    }
+
+    [Theory]
     [InlineData("int32", "int32(float64(2147483647.9))", int.MaxValue)]
     [InlineData("int32", "int32(float64(-2147483648.5))", int.MinValue)]
     [InlineData("uint32", "uint32(float64(-0.5))", 0L)]
@@ -294,6 +319,86 @@ public sealed class FloatingLiteralBindingTests
     }
 
     [Fact]
+    public void Char16ToFloatingConversionsPersistThroughSemanticModules()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "[NoThrow] public float32 Narrow(char16 value) { return float32(value); } "
+            + "[NoThrow] public float64 Widen(char16 value) { return float64(value); }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+
+        var producer = ModuleCompiler.CreateProducer(program, ["Narrow", "Widen"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { _ = Narrow(char16(65535)); _ = Widen(char16(65535)); return 42; }"), reference);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        foreach (var name in new[] { "Narrow", "Widen" })
+        {
+            var function = Assert.Single(linked.Functions, item => item.Name == name);
+            var cast = Assert.IsType<BoundCast>(
+                Assert.IsType<BoundReturn>(Assert.Single(function.Body.Statements)).Value);
+            Assert.Equal(PrimitiveType.Char16, cast.Operand.Type);
+            Assert.Equal(name == "Narrow" ? PrimitiveType.Float32 : PrimitiveType.Float64, cast.Type);
+        }
+        Assert.NotEmpty(NativeEmitter.EmitLibrary(program, ["Narrow", "Widen"], NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void Char16ToFloatingConversionsTreatValuesAsUnsignedCodeUnits()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "[NoThrow] public float32 Narrow(char16 value) { return float32(value); } "
+            + "[NoThrow] public float64 Widen(char16 value) { return float64(value); }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-char16-float-{Guid.NewGuid():N}.dll");
+        var library = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path,
+                NativeEmitter.EmitLibrary(program, ["Narrow", "Widen"], NativeRuntimePolicy.FailFast));
+            library = NativeLibrary.Load(path);
+            var narrow = Export<Char16ToFloat32>(library, "Narrow");
+            var widen = Export<Char16ToFloat64>(library, "Widen");
+            foreach (var value in new ushort[] { 0, 0x8000, 0xD800, ushort.MaxValue })
+            {
+                Assert.Equal(BitConverter.SingleToInt32Bits(value), narrow(value));
+                Assert.Equal(BitConverter.DoubleToInt64Bits(value), widen(value));
+            }
+        }
+        finally
+        {
+            if (library != IntPtr.Zero)
+            {
+                NativeLibrary.Free(library);
+            }
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void EmitsRuntimeChar16ToFloatingConversions()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [NoThrow] float32 Narrow(char16 value) { return float32(value); }
+            [NoThrow] float64 Widen(char16 value) { return float64(value); }
+            int32 Main() {
+                char16 codeUnit = char16(55296);
+                return Narrow(codeUnit) == 55296.0 && Widen(codeUnit) == 55296.0 ? 42 : 0;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
     public void FloatingToIntegerConversionsPersistThroughSemanticModules()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
@@ -336,7 +441,6 @@ public sealed class FloatingLiteralBindingTests
     }
 
     [Theory]
-    [InlineData("public float32 Convert(char16 value) { return float32(value); }")]
     [InlineData("public char16 Convert(float32 value) { return char16(value); }")]
     [InlineData("public float32 Remainder(float32 left, float32 right) { return left % right; }")]
     [InlineData("public bool Mixed(float32 left, float64 right) { return left == right; }")]
