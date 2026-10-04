@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Runtime.InteropServices;
 
 namespace Terrum.CodeAnalysis.Modules;
 
@@ -119,9 +120,19 @@ public static partial class NativeModuleCompiler
                 ? "Native graph catalog has no compatible complete closure."
                 : "Native graph catalog has no complete closure.");
         }
-        return new NativeGraphCatalogSelection([.. rootBytes],
-            [.. resolved.Select(static candidate => (ImmutableArray<byte>)[.. candidate.Bytes])],
-            [.. resolved.Select(static candidate => candidate.Index)]);
+        // These private snapshots have no remaining writers, so wrap them without copying payload bytes again.
+        var producerSnapshots = new ImmutableArray<byte>[resolved.Length];
+        var candidateIndexes = new int[resolved.Length];
+        for (var index = 0; index < resolved.Length; index++)
+        {
+            var candidate = resolved[index];
+            producerSnapshots[index] = ImmutableCollectionsMarshal.AsImmutableArray(candidate.Bytes);
+            candidateIndexes[index] = candidate.Index;
+        }
+        return new NativeGraphCatalogSelection(
+            ImmutableCollectionsMarshal.AsImmutableArray(rootBytes),
+            ImmutableCollectionsMarshal.AsImmutableArray(producerSnapshots),
+            ImmutableCollectionsMarshal.AsImmutableArray(candidateIndexes));
 
         void Search()
         {
