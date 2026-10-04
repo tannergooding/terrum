@@ -29,7 +29,7 @@ public struct StringLiteral
         mut int32 count = 0;
         while (at < end)
         {
-            if (!TryReadLiteralScalarAt(at, end, out var scalar, out var next))
+            if (!TryReadLiteralScalarAt(at, end, init var scalar, init var next))
             {
                 return false;
             }
@@ -53,7 +53,7 @@ public struct StringLiteral
         mut int32 at = Spelling.Start + 1;
         while (at <= position)
         {
-            if (!TryReadLiteralScalarAt(at, end, out var value, out var following))
+            if (!TryReadLiteralScalarAt(at, end, init var value, init var following))
             {
                 return false;
             }
@@ -354,7 +354,7 @@ public struct StringLiteralCursor
         {
             return false;
         }
-        require TryReadLiteralScalarAt(Position, end, out var value, out var following);
+        require TryReadLiteralScalarAt(Position, end, init var value, init var following);
         scalar = value;
         next = new StringLiteralCursor(Literal, following);
         return true;
@@ -362,7 +362,7 @@ public struct StringLiteralCursor
 
 }
 
-bool TryReadLiteralScalarAt(int32 at, int32 end, out int32 scalar, out int32 next)
+bool TryReadLiteralScalarAt(int32 at, int32 end, init ref<int32> scalar, init ref<int32> next)
 {
     int32 first = int32(Host.Source[at]);
     if (first == 34 || IsLineBreak(Host.Source[at]))
@@ -396,7 +396,7 @@ bool TryReadLiteralScalarAt(int32 at, int32 end, out int32 scalar, out int32 nex
             mut int32 index = 0;
             while (index < digits)
             {
-                if (!TryGetLiteralHexDigit(Host.Source[at + 2 + index], out var digit))
+                if (!TryGetLiteralHexDigit(Host.Source[at + 2 + index], init var digit))
                 {
                     return false;
                 }
@@ -444,7 +444,7 @@ bool TryReadLiteralScalarAt(int32 at, int32 end, out int32 scalar, out int32 nex
     return true;
 }
 
-bool TryGetLiteralHexDigit(char16 unit, out uint32 digit)
+bool TryGetLiteralHexDigit(char16 unit, init ref<uint32> digit)
 {
     if (IsAsciiDigit(unit))
     {
