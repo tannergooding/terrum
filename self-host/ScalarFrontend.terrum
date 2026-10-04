@@ -3072,7 +3072,8 @@ mut class ScalarFrontendState
         return false;
     }
 
-    private mut bool ParseTreeSelfCall(Token functionName, int32 depth, out int32 node)
+    private mut bool ParseTreeSelfCall(Token functionName, int32 depth,
+        init ref<int32> node)
     {
         bool program = Host.FrontendProgram[0] == 85;
         mut int32 callee = -1;
@@ -3293,7 +3294,6 @@ mut class ScalarFrontendState
             }
             else if (TreeWord(argument, 1) != expectedType)
             {
-                node = -1;
                 FailTreeType(argument);
                 return false;
             }
@@ -3428,14 +3428,24 @@ mut class ScalarFrontendState
             }
             if (Host.FrontendProgram[0] == 85 && FindScalarProgramFunction(token) >= 0)
             {
-                return ParseTreeSelfCall(token, depth, out node);
+                if (!ParseTreeSelfCall(token, depth, init var callNode))
+                {
+                    return false;
+                }
+                node = callNode;
+                return true;
             }
             if (!TryGetScalarType(token, init var target)
                 || target == 5)
             {
                 if (SameTokenSpelling(_function, token))
                 {
-                    return ParseTreeSelfCall(token, depth, out node);
+                    if (!ParseTreeSelfCall(token, depth, init var callNode))
+                    {
+                        return false;
+                    }
+                    node = callNode;
+                    return true;
                 }
                 FailAt(1, token.Range);
                 return false;
