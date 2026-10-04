@@ -18,7 +18,10 @@ public static class TrRmStructuralMetadataValidator
     }
 
     public static void Validate(ReadOnlySpan<byte> artifact)
-        => ValidateCore(artifact, BodyInspection.None);
+        => ValidateCore(new TrRmArtifactIndex(artifact), BodyInspection.None);
+
+    internal static void Validate(TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None);
 
     public static void ValidateCompactLinear(ReadOnlySpan<byte> artifact)
         => ValidateCore(artifact, BodyInspection.CompactLinear);
@@ -30,8 +33,10 @@ public static class TrRmStructuralMetadataValidator
         => ValidateCore(artifact, BodyInspection.CompactMixed);
 
     private static void ValidateCore(ReadOnlySpan<byte> artifact, BodyInspection inspection)
+        => ValidateCore(new TrRmArtifactIndex(artifact), inspection);
+
+    private static void ValidateCore(TrRmArtifactIndex index, BodyInspection inspection)
     {
-        var index = new TrRmArtifactIndex(artifact);
         if (!index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount)
             || !index.TryGetSection(0x0002, out var stringBytes, out var stringCount))
         {
