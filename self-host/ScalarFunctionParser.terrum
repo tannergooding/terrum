@@ -118,7 +118,7 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
 }
 
 bool TryEvaluateBoolScalarReturn(TokenSnapshot tokens,
-    out SourceRange name, out bool result)
+    init ref<SourceRange> name, init ref<bool> result)
 {
     int32 count = tokens.GetCount();
     if (count != 10 && count != 11 && count != 12 && count != 13)
@@ -217,7 +217,7 @@ bool TryParseScalarReturnInteger(TokenSnapshot tokens, TokenIntegerSnapshot inte
 }
 
 bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int32 result)
+    init ref<SourceRange> name, init ref<int32> result)
 {
     int32 count = tokens.GetCount();
     if (count != 10 && count != 11 && count != 12 && count != 13)
@@ -300,7 +300,7 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
 }
 
 bool TryEvaluateUInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint32 result)
+    init ref<SourceRange> name, init ref<uint32> result)
 {
     int32 count = tokens.GetCount();
     if (count != 10 && count != 11 && count != 12 && count != 13)
@@ -351,7 +351,7 @@ bool TryEvaluateUInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
 }
 
 bool TryEvaluateUInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out uint64 result)
+    init ref<SourceRange> name, init ref<uint64> result)
 {
     int32 count = tokens.GetCount();
     if (count != 10 && count != 11 && count != 12 && count != 13)
@@ -395,7 +395,7 @@ bool TryEvaluateUInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
 }
 
 bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int64 result)
+    init ref<SourceRange> name, init ref<int64> result)
 {
     int32 count = tokens.GetCount();
     if (count != 10 && count != 11 && count != 12 && count != 13)

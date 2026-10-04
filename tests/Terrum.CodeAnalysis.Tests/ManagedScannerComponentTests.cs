@@ -745,11 +745,11 @@ public sealed partial class ManagedScannerComponentTests
         var expected = value ? "true" : "false";
         var assertion = evaluable
             ? $$"""
-                require TryEvaluateBoolScalarReturn(move tokens, out var name, out var bound);
+                require TryEvaluateBoolScalarReturn(move tokens, init var name, init var bound);
                 if (name.Start != 5 || name.Length != 5 || bound != {{expected}}) { return 1; }
                 """
             : """
-                if (TryEvaluateBoolScalarReturn(move tokens, out var name, out var bound)) { return 1; }
+                if (TryEvaluateBoolScalarReturn(move tokens, init var name, init var bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
@@ -2122,12 +2122,12 @@ public sealed partial class ManagedScannerComponentTests
     {
         var assertion = evaluable
             ? FormattableString.Invariant($$"""
-                require TryEvaluateInt32ScalarReturn(move tokens, move integers, out var name, out var bound);
+                require TryEvaluateInt32ScalarReturn(move tokens, move integers, init var name, init var bound);
                 if (name.Start != 6 || name.Length != 4 || bound != {{value}}) { return 1; }
                 """)
             : """
                 if (TryEvaluateInt32ScalarReturn(move tokens, move integers,
-                    out var name, out var bound)) { return 1; }
+                    init var name, init var bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
@@ -2173,12 +2173,12 @@ public sealed partial class ManagedScannerComponentTests
         var assertion = evaluable
             ? FormattableString.Invariant($$"""
                 require TryEvaluateUInt32ScalarReturn(move tokens, move integers,
-                    out var name, out var bound);
+                    init var name, init var bound);
                 if (name.Start != 7 || name.Length != 5 || bound != {{value}}) { return 1; }
                 """)
             : """
                 if (TryEvaluateUInt32ScalarReturn(move tokens, move integers,
-                    out var name, out var bound)) { return 1; }
+                    init var name, init var bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
@@ -2225,12 +2225,12 @@ public sealed partial class ManagedScannerComponentTests
         var assertion = evaluable
             ? FormattableString.Invariant($$"""
                 require TryEvaluateUInt64ScalarReturn(move tokens, move integers,
-                    out var name, out var bound);
+                    init var name, init var bound);
                 if (name.Start != 7 || name.Length != 5 || bound != {{value}}) { return 1; }
                 """)
             : """
                 if (TryEvaluateUInt64ScalarReturn(move tokens, move integers,
-                    out var name, out var bound)) { return 1; }
+                    init var name, init var bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
@@ -2286,12 +2286,12 @@ public sealed partial class ManagedScannerComponentTests
         var assertion = evaluable
             ? $$"""
                 require TryEvaluateInt64ScalarReturn(move tokens, move integers,
-                    out var name, out var bound);
+                    init var name, init var bound);
                 if (name.Start != 6 || name.Length != 5 || bound != {{expected}}) { return 1; }
                 """
             : """
                 if (TryEvaluateInt64ScalarReturn(move tokens, move integers,
-                    out var name, out var bound)) { return 1; }
+                    init var name, init var bound)) { return 1; }
                 """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
