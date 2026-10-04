@@ -242,16 +242,16 @@ public sealed partial class ManagedScannerComponentTests
             using Terrum.CodeAnalysis;
             int32 Main() {
                 require TokenSnapshot.TryScan(init var tokens);
-                if (tokens.GetCount() != 129 || tokens.TryGet(-1, out var negative)
-                    || tokens.TryGet(129, out var beyond)) { return 1; }
+                if (tokens.GetCount() != 129 || tokens.TryGet(-1, init var negative)
+                    || tokens.TryGet(129, init var beyond)) { return 1; }
                 mut int32 index = 0;
                 while (index < 128) {
-                    require tokens.TryGetInit(index, init var token);
+                    require tokens.TryGet(index, init var token);
                     if (token.Kind != 2 || token.Range.Start != index * 2
                         || token.Range.Length != 1) { return 2; }
                     index = index + 1;
                 }
-                require tokens.TryGet(128, out var eof);
+                require tokens.TryGet(128, init var eof);
                 if (eof.Kind != 0 || eof.Range.Start != 255
                     || eof.Range.Length != 0) { return 3; }
                 return 42;
@@ -276,12 +276,12 @@ public sealed partial class ManagedScannerComponentTests
                 if (TokenSnapshot.TryBuild(int32.MaxValue, init var oversized)) { return 4; }
                 require TokenSnapshot.TryBuild(count, init var snapshot);
                 Host.Tokens[0] = -1;
-                require snapshot.TryGet(0, out var first);
+                require snapshot.TryGet(0, init var first);
                 if (first.Kind != 2 || first.Range.Start != 0) { return 1; }
                 Host.Tokens[0] = 2;
                 Host.Tokens[3] = -1;
                 if (TokenSnapshot.TryBuild(count, init var invalid)) { return 2; }
-                if (!snapshot.TryGet(1, out var second) || second.Kind != 2
+                if (!snapshot.TryGet(1, init var second) || second.Kind != 2
                     || second.Range.Start != 6) { return 3; }
                 return 42;
             }

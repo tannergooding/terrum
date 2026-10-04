@@ -16,7 +16,7 @@ public unique struct TokenSnapshot
         return _count;
     }
 
-    public bool TryGet(int32 index, out Token token)
+    public bool TryGet(int32 index, init ref<Token> token)
     {
         if (index < 0 || index >= _count)
         {
@@ -30,16 +30,6 @@ public unique struct TokenSnapshot
         return true;
     }
 
-    public bool TryGetInit(int32 index, init ref<Token> token)
-    {
-        if (!TryGet(index, out var found))
-        {
-            return false;
-        }
-        token = found;
-        return true;
-    }
-
     // Scalar input only treats init-ref's type delimiters as generic punctuation.
     // Its operand-ending token kinds determine unary versus binary/update roles.
     // A colon attached to an identifier before a same-line loop keyword introduces its label.
@@ -50,12 +40,12 @@ public unique struct TokenSnapshot
         {
             return run;
         }
-        require TryGet(0, out var first);
+        require TryGet(0, init var first);
         mut Token previous = first;
         for (mut int32 index = 1; index < _count - 1; index = index + 1)
         {
-            require TryGet(index, out var op);
-            require TryGet(index + 1, out var next);
+            require TryGet(index, init var op);
+            require TryGet(index + 1, init var next);
             int32 kind = op.Kind;
             bool operandEnd = IsScalarOperandEnd(previous.Kind);
             mut bool prefix = kind == 62 || kind == 63;
@@ -75,7 +65,7 @@ public unique struct TokenSnapshot
             if (kind == 55 || kind == 56) { separated = true; }
             if (kind == 55 && previous.Kind == 2
                 && previous.Range.End == op.Range.Start && index >= 2
-                && TryGet(index - 2, out var argumentStart)
+                && TryGet(index - 2, init var argumentStart)
                 && (argumentStart.Kind == 46 || argumentStart.Kind == 53))
             {
                 separated = false;
@@ -124,15 +114,15 @@ public unique struct TokenSnapshot
     {
         if (operation.Kind == 67 && previous.Kind == 14 && index >= 2)
         {
-            if (!TryGet(index - 2, out var mode))
+            if (!TryGet(index - 2, init var mode))
             {
                 return false;
             }
             return IsInitKeyword(mode);
         }
         if (operation.Kind != 69 || previous.Kind != 2 || index < 4
-            || !TryGet(index - 2, out var less) || !TryGet(index - 3, out var refKeyword)
-            || !TryGet(index - 4, out var mode))
+            || !TryGet(index - 2, init var less) || !TryGet(index - 3, init var refKeyword)
+            || !TryGet(index - 4, init var mode))
         {
             return false;
         }
@@ -155,7 +145,7 @@ public unique struct TokenSnapshot
         mut int32 index = 0;
         while (index < _count - 1)
         {
-            require TryGet(index, out var first);
+            require TryGet(index, init var first);
             if (!IsPunctuationGlyph(PeekUnit(first.Range.Start)))
             {
                 index = index + 1;
@@ -167,7 +157,7 @@ public unique struct TokenSnapshot
             index = index + 1;
             while (index < _count - 1)
             {
-                require TryGet(index, out var next);
+                require TryGet(index, init var next);
                 if (next.Range.Start != end
                     || !IsPunctuationGlyph(PeekUnit(next.Range.Start)))
                 {
