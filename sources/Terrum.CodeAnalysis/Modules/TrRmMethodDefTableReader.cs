@@ -42,14 +42,26 @@ public readonly ref struct TrRmMethodDefTableReader
         _bodyOwners = new int[bodyCount + 1];
         var usedGenericSignatures = new bool[signatures.Count + 1];
         var module = 1;
+        // Method rows are ordered, so reuse each module range until its end.
+        var moduleRange = default((int Start, int End));
+        var hasModuleRange = false;
         for (var row = 1; row <= recordCount; row++)
         {
-            while (module <= modules.Count && row >= modules.GetMethodDefRange(module).End)
+            while (!hasModuleRange || row >= moduleRange.End)
             {
-                module++;
+                if (hasModuleRange)
+                {
+                    module++;
+                }
+                if (module > modules.Count)
+                {
+                    throw InvalidMethod();
+                }
+                moduleRange = modules.GetMethodDefRange(module);
+                hasModuleRange = true;
             }
 
-            if (module > modules.Count || row < modules.GetMethodDefRange(module).Start)
+            if (row < moduleRange.Start)
             {
                 throw InvalidMethod();
             }
