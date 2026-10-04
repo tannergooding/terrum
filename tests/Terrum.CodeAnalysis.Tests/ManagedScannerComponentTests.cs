@@ -62,6 +62,7 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("//* *// /// heading\nalpha", false)]
     [InlineData("//* */", true)]
     [InlineData("/* **/ */", true)]
+    [InlineData(".. ..^ ?.", false)]
     [InlineData("\U00010400 42", false)]
     [InlineData("\uD800", true)]
     [InlineData("a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a", true)]
