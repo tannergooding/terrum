@@ -169,12 +169,12 @@ public static partial class TrRmExecutableCompiler
             }
 
             var lastUses = new SortedDictionary<int, int>[ordered.Count];
-            var external = new HashSet<int>[ordered.Count];
+            var liveIns = new HashSet<int>[ordered.Count];
             for (var b = 0; b < ordered.Count; b++)
             {
                 var block = ordered[b];
                 lastUses[b] = new SortedDictionary<int, int>();
-                external[b] = [];
+                liveIns[b] = [];
                 void Use(int id, int ordinal)
                 {
                     if (id <= 0)
@@ -185,7 +185,7 @@ public static partial class TrRmExecutableCompiler
                     lastUses[b][mapped] = ordinal;
                     if (owner[mapped] != block.Id)
                     {
-                        external[b].Add(mapped);
+                        liveIns[b].Add(mapped);
                     }
                 }
                 var operationOrdinal = 0;
@@ -211,11 +211,9 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
             }
-            var liveIns = new HashSet<int>[ordered.Count];
             var liveOuts = new HashSet<int>[ordered.Count];
             for (var block = 0; block < ordered.Count; block++)
             {
-                liveIns[block] = new HashSet<int>(external[block]);
                 liveOuts[block] = [];
             }
             for (var iteration = 0; iteration <= ordered.Count; iteration++)
