@@ -1069,10 +1069,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
         }
 
-        var changed = true;
-        for (var iteration = 0; changed && iteration <= BlockCount; iteration++)
+        if (regionCount == 0)
         {
-            changed = false;
             for (var block = BlockCount; block > 0; block--)
             {
                 var neededOut = neededOuts[block];
@@ -1083,7 +1081,6 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 }
 
                 var neededIn = neededIns[block];
-                var before = neededIn.Count;
                 foreach (var value in neededOut)
                 {
                     if (owner[value] != block)
@@ -1091,19 +1088,69 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         neededIn.Add(value);
                     }
                 }
-
-                changed |= neededIn.Count != before;
-            }
-
-            if (regionCount == 0)
-            {
-                changed = false;
             }
         }
-
-        if (changed)
+        else
         {
-            throw InvalidBody();
+            var predecessorCounts = new int[BlockCount + 1];
+            var seeds = new List<int>?[ValueCount + 1];
+            for (var block = 1; block <= BlockCount; block++)
+            {
+                foreach (var edge in successors[block])
+                {
+                    predecessorCounts[edge.Target]++;
+                    neededOuts[block].UnionWith(edge.Arguments);
+                }
+                foreach (var value in neededIns[block])
+                {
+                    (seeds[value] ??= []).Add(block);
+                }
+            }
+
+            var predecessorStarts = new int[BlockCount + 2];
+            for (var block = 1; block <= BlockCount; block++)
+            {
+                predecessorStarts[block + 1] = predecessorStarts[block] + predecessorCounts[block];
+                predecessorCounts[block] = 0;
+            }
+            var predecessors = new int[predecessorStarts[BlockCount + 1]];
+            for (var block = 1; block <= BlockCount; block++)
+            {
+                foreach (var edge in successors[block])
+                {
+                    predecessors[predecessorStarts[edge.Target] + predecessorCounts[edge.Target]++] = block;
+                }
+            }
+
+            // Each block enters the queue once per value, bounding propagation by V * (B + E).
+            // External edge arguments already seed In; locally owned arguments seed only Out.
+            var pendingBlocks = new int[BlockCount];
+            for (var value = 1; value <= ValueCount; value++)
+            {
+                if (seeds[value] is not List<int> valueSeeds)
+                {
+                    continue;
+                }
+
+                var pendingCount = 0;
+                foreach (var block in valueSeeds)
+                {
+                    pendingBlocks[pendingCount++] = block;
+                }
+                for (var next = 0; next < pendingCount; next++)
+                {
+                    var block = pendingBlocks[next];
+                    for (var index = predecessorStarts[block]; index < predecessorStarts[block + 1]; index++)
+                    {
+                        var predecessor = predecessors[index];
+                        neededOuts[predecessor].Add(value);
+                        if (owner[value] != predecessor && neededIns[predecessor].Add(value))
+                        {
+                            pendingBlocks[pendingCount++] = predecessor;
+                        }
+                    }
+                }
+            }
         }
 
         for (var block = 1; block <= BlockCount; block++)

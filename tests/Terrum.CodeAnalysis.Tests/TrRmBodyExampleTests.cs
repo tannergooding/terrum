@@ -1189,8 +1189,30 @@ public sealed class TrRmBodyExampleTests
             parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
     }
 
-    internal static byte[] IndexedNestedLoop()
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void CompactIndexedReaderRejectsMissingNestedLoopPropagation(
+        bool omitLiveIn, bool omitLiveOut)
+        => Assert.Throws<InvalidDataException>(() => InspectIndexed(
+            IndexedNestedLoop(omitPropagatedLiveIn: omitLiveIn, omitPropagatedLiveOut: omitLiveOut),
+            parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
+
+    [Fact]
+    public void CompactIndexedReaderRejectsUnusedLivenessCirculatingThroughNestedLoops()
     {
+        Assert.Equal((6, 2), InspectIndexed(IndexedNestedLoop(unusedValue: true),
+            parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(
+            IndexedNestedLoop(ghostLiveness: true), parameterCount: 1,
+            resultTypeSpec: 1, parameterTypeIds: [1]));
+    }
+
+    internal static byte[] IndexedNestedLoop(bool ghostLiveness = false,
+        bool omitPropagatedLiveIn = false, bool omitPropagatedLiveOut = false,
+        bool unusedValue = false)
+    {
+        unusedValue |= ghostLiveness;
         byte[][] blocks =
         [
             [0x1B, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0x81, 1, 2, 0, 6, 0],
@@ -1200,17 +1222,48 @@ public sealed class TrRmBodyExampleTests
             [0x1D, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0x80, 1, 1, 1],
             [0x14, 1, 1, 1, 1, 0, 0, 0x83, 1],
         ];
+        if (unusedValue)
+        {
+            blocks[0] = [0x1B, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 0, 0x81, 1, 2, 0, 6, 0];
+        }
+        if (ghostLiveness)
+        {
+            // Value 2 is an unused entry constant: advertised cyclic liveness has no use seed.
+            blocks[0] = [0x1B, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 2, 1, 0, 0x81, 1, 2, 0, 6, 0];
+            blocks[1] = [0x1D, 2, 2, 1, 2, 2, 1, 2, 1, 1, 0, 0, 0x81, 1, 3, 0, 4, 0];
+            blocks[2] = [0x0D, 2, 2, 1, 2, 2, 1, 2, 0, 0x80, 2, 0];
+        }
+        if (omitPropagatedLiveIn)
+        {
+            blocks[2] = [0x09, 2, 1, 1, 0, 0x80, 2, 0];
+        }
+        if (omitPropagatedLiveOut)
+        {
+            blocks[2] = [0x05, 2, 1, 1, 0, 0x80, 2, 0];
+        }
         var row = new List<byte>
         {
-            0x08, 6, 1, 2, 1,
+            0x08, 6, (byte)(unusedValue ? 2 : 1), 2, 1,
             1, 0, 0, 0,
             1, 0, 1, 6, 0,
             1, 1, 2, 4, 0,
             1, 4,
-            0, 1, 1, 1, 1, 1, 1,
-            0xFF,
-            0,
         };
+        if (unusedValue)
+        {
+            row.AddRange([1, 0]);
+        }
+        row.Add(0);
+        for (var block = 0; block < blocks.Length; block++)
+        {
+            row.Add((byte)(unusedValue ? 2 : 1));
+        }
+        row.Add(0xFF);
+        if (unusedValue)
+        {
+            row.Add((byte)(ghostLiveness ? 11 : 10));
+        }
+        row.Add(0);
         var offset = 0;
         foreach (var block in blocks)
         {

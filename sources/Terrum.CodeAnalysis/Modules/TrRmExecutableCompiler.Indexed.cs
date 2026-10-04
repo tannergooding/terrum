@@ -216,9 +216,9 @@ public static partial class TrRmExecutableCompiler
             {
                 liveOuts[block] = [];
             }
-            for (var iteration = 0; iteration <= ordered.Count; iteration++)
+            if (regions.Count == 0)
             {
-                var changed = false;
+                // Without loop headers, ordering includes every edge, so successors are already final.
                 for (var b = ordered.Count - 1; b >= 0; b--)
                 {
                     var block = ordered[b];
@@ -242,17 +242,95 @@ public static partial class TrRmExecutableCompiler
                     {
                         if (owner[id] != block.Id)
                         {
-                            changed |= liveIns[b].Add(id);
+                            liveIns[b].Add(id);
                         }
                     }
                 }
-                if (!changed)
+            }
+            else
+            {
+                var predecessorCounts = new int[ordered.Count];
+                var seeds = new List<int>?[types.Length];
+                for (var block = 0; block < ordered.Count; block++)
                 {
-                    break;
+                    foreach (var id in liveIns[block])
+                    {
+                        (seeds[id] ??= []).Add(block);
+                    }
                 }
-                if (iteration == ordered.Count)
+                for (var b = 0; b < ordered.Count; b++)
                 {
-                    throw Unsupported("Indexed scalar liveness does not converge.");
+                    var block = ordered[b];
+                    void AddEdge(IndexedEdge edge)
+                    {
+                        predecessorCounts[edge.Target.Id - 1]++;
+                        foreach (var argument in edge.Arguments)
+                        {
+                            liveOuts[b].Add(remap[argument]);
+                        }
+                    }
+                    if (block.True is { } trueEdge)
+                    {
+                        AddEdge(trueEdge);
+                    }
+                    if (block.False is { } falseEdge)
+                    {
+                        AddEdge(falseEdge);
+                    }
+                }
+                var predecessorStarts = new int[ordered.Count + 1];
+                for (var b = 0; b < ordered.Count; b++)
+                {
+                    predecessorStarts[b + 1] = predecessorStarts[b] + predecessorCounts[b];
+                    predecessorCounts[b] = 0;
+                }
+                var predecessors = new int[predecessorStarts[ordered.Count]];
+                for (var b = 0; b < ordered.Count; b++)
+                {
+                    var block = ordered[b];
+                    void AddPredecessor(IndexedEdge edge)
+                    {
+                        var target = edge.Target.Id - 1;
+                        predecessors[predecessorStarts[target] + predecessorCounts[target]++] = b;
+                    }
+                    if (block.True is { } trueEdge)
+                    {
+                        AddPredecessor(trueEdge);
+                    }
+                    if (block.False is { } falseEdge)
+                    {
+                        AddPredecessor(falseEdge);
+                    }
+                }
+
+                // Each block enters the queue once per value, bounding propagation by V * (B + E).
+                // External edge arguments already seed In; locally owned arguments seed only Out.
+                var pendingBlocks = new int[ordered.Count];
+                for (var id = 1; id < types.Length; id++)
+                {
+                    if (seeds[id] is not List<int> valueSeeds)
+                    {
+                        continue;
+                    }
+
+                    var pendingCount = 0;
+                    foreach (var b in valueSeeds)
+                    {
+                        pendingBlocks[pendingCount++] = b;
+                    }
+                    for (var next = 0; next < pendingCount; next++)
+                    {
+                        var b = pendingBlocks[next];
+                        for (var index = predecessorStarts[b]; index < predecessorStarts[b + 1]; index++)
+                        {
+                            var predecessor = predecessors[index];
+                            liveOuts[predecessor].Add(id);
+                            if (owner[id] != predecessor + 1 && liveIns[predecessor].Add(id))
+                            {
+                                pendingBlocks[pendingCount++] = predecessor;
+                            }
+                        }
+                    }
                 }
             }
             var useCounts = new int[types.Length];
