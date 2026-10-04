@@ -14,8 +14,18 @@ public static partial class TrRmExecutableCompiler
 {
     private sealed class IndexedEdge(IndexedBlock target, int[] arguments)
     {
-        internal IndexedBlock Target = target;
+        internal IndexedBlock Target = ValidateTarget(target, arguments);
         internal int[] Arguments = arguments;
+
+        private static IndexedBlock ValidateTarget(IndexedBlock target, int[] arguments)
+        {
+            if (target.IsLoopHeader && arguments.Length != target.Parameters.Count)
+            {
+                throw Unsupported("Loop-carried scalar inventory changed across an edge.");
+            }
+
+            return target;
+        }
     }
 
     private sealed class IndexedBlock(int creation, int region)
@@ -1536,14 +1546,6 @@ public static partial class TrRmExecutableCompiler
                             ?? throw Unsupported("Pre-tested condition slots are missing."), entrySlots));
                         preTest.False = falseEdge;
                         loopRegion.ExitEdges.Add((preTest, falseEdge, 0));
-                    }
-                    foreach (var block in _blocks)
-                    {
-                        if (block.True is { Target: var target } && target == header
-                            && block != header && block.True.Arguments.Length != header.Parameters.Count)
-                        {
-                            throw Unsupported("Loop-carried scalar inventory changed across an edge.");
-                        }
                     }
                     _current = exit;
                     _slots = exitSlots;
