@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `a548580` | Reduce repeated graph-origin scans and per-type allocations |
 | `6239fcc` | Index graph cleanup validation lookups to avoid repeated function scans |
 | `feccab4` | Reuse a decoded graph contract during export validation |
 | `b33fde4` | Index graph type and import lookups to avoid repeated linear scans |
