@@ -500,6 +500,49 @@ public sealed partial class CliTests
         }
     }
 
+    [Fact]
+    public async Task ScannerBundleCompilationDiagnosticsKeepTheirSourceFileAsync()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var selfHost = Path.Combine(root, "self-host");
+        var bundle = Path.Combine(Path.GetTempPath(), $"terrum-scanner-bundle-{Guid.NewGuid():N}");
+        var artifact = bundle + ".exe";
+        var characterLiterals = Path.Combine(bundle, "CharacterLiteral.terrum");
+        try
+        {
+            Directory.CreateDirectory(bundle);
+            foreach (var name in new[] { "SourceRange.terrum", "CharacterLiteral.terrum", "StringEscape.terrum", "Scanner.terrum" })
+            {
+                var source = await File.ReadAllTextAsync(Path.Combine(selfHost, name)).ConfigureAwait(true);
+                if (name == "CharacterLiteral.terrum")
+                {
+                    source += "\nint32 Broken() { return 0 }\n";
+                }
+                await File.WriteAllTextAsync(Path.Combine(bundle, name), source).ConfigureAwait(true);
+            }
+
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
+                "build-component", bundle, "-", "-o", artifact, "--runtime", "fail-fast", "--json");
+            Assert.Equal(1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+            var sources = document.RootElement.GetProperty("sources");
+            var characterSourceIndex = Enumerable.Range(0, sources.GetArrayLength())
+                .Single(index => sources[index].GetProperty("path").GetString() == characterLiterals);
+            Assert.Contains(document.RootElement.GetProperty("diagnostics").EnumerateArray(),
+                diagnostic => diagnostic.GetProperty("sourceIndex").GetInt32() == characterSourceIndex);
+        }
+        finally
+        {
+            if (Directory.Exists(bundle))
+            {
+                Directory.Delete(bundle, recursive: true);
+            }
+            File.Delete(artifact);
+        }
+    }
+
     [Theory]
     [InlineData("int32 Scan() { return 0; }", 1)]
     [InlineData("int32 Scan() { require false; return 0; }", unchecked((int)0xE0540003))]

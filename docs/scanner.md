@@ -90,7 +90,8 @@ dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-component s
 
 For these commands a directory argument explicitly selects the ordered
 `SourceRange.terrum`, `CharacterLiteral.terrum`, `StringEscape.terrum`, and
-`Scanner.terrum` bundle.
+`Scanner.terrum` bundle. The files compile as separate syntax trees so
+component diagnostics retain their owning file paths and source indexes.
 Single-file `scan-component`/`build-component` inputs remain available for
 self-contained scanner components; `Scanner.terrum` itself requires the bundle.
 

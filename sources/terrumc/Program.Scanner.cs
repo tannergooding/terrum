@@ -30,7 +30,7 @@ internal static partial class Program
             return 2;
         }
 
-        string scanner;
+        ImmutableArray<SyntaxTree> scannerTrees;
         string scannerPath;
         SourceText source;
         string? outputPath = null;
@@ -48,7 +48,7 @@ internal static partial class Program
                     return 2;
                 }
             }
-            scanner = ReadScannerSource(scannerPath);
+            scannerTrees = ReadScannerTrees(args[1]);
             source = SourceText.From(ReadSource(args[2]), args[2] == "-" ? "<stdin>" : args[2]);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or DecoderFallbackException or ArgumentException or NotSupportedException)
@@ -63,24 +63,33 @@ internal static partial class Program
             return 2;
         }
 
-        var scannerSourcePath = Directory.Exists(scannerPath)
-            ? Path.Combine(scannerPath, "Scanner.terrum") : args[1];
-        var tree = SyntaxTree.Parse(scanner + "\nint32 Main() { return Scan(); }\n", scannerSourcePath);
         var policy = args[runtime + 1] == "fail-fast"
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
-        var compilation = Compilation.Create(tree, ScannerHost.CreateBuffers(source), (BoundRuntimePolicy)policy);
+        var compilation = Compilation.Create(scannerTrees, ScannerHost.CreateBuffers(source), (BoundRuntimePolicy)policy);
         if (compilation.HasErrors)
         {
             if (json)
             {
-                WriteCompilationJson(args[0], tree, compilation.Diagnostics, false, null, null, policy,
-                    compilation.NativeProfileVersion ?? Profile(policy));
+                if (scannerTrees.Length == 1)
+                {
+                    WriteCompilationJson(args[0], scannerTrees[0], compilation.Diagnostics, false, null, null,
+                        policy, compilation.NativeProfileVersion ?? Profile(policy));
+                }
+                else
+                {
+                    WriteCompilationJson(args[0], compilation, compilation.SourceDiagnostics, false, null, null,
+                        policy, compilation.NativeProfileVersion ?? Profile(policy));
+                }
             }
             else
             {
-                foreach (var diagnostic in compilation.Diagnostics)
+                foreach (var located in compilation.SourceDiagnostics)
                 {
-                    Console.Error.WriteLine($"{diagnostic.Code}: {diagnostic.Message}");
+                    var diagnostic = located.Diagnostic;
+                    var tree = located.SyntaxTree;
+                    var position = tree.Source.GetLinePosition(diagnostic.Span.Start);
+                    Console.Error.WriteLine(FormattableString.Invariant(
+                        $"{tree.Source.Path}({position.Line + 1},{position.Character + 1}): {GetSeverityText(diagnostic.Severity)} {diagnostic.Code}: {diagnostic.Message}"));
                 }
             }
             return 1;
@@ -217,39 +226,34 @@ internal static partial class Program
         return diagnostics.IsEmpty ? 0 : 1;
     }
 
-    private static string ReadScannerSource(string path)
+    private static ImmutableArray<SyntaxTree> ReadScannerTrees(string path)
     {
         var fullPath = Path.GetFullPath(path);
         if (!Directory.Exists(fullPath))
         {
-            return ReadSource(fullPath);
+            return [SyntaxTree.Parse(ReadSource(fullPath) + "\nint32 Main() { return Scan(); }\n", path)];
         }
 
-        return ReadSource(Path.Combine(fullPath, "SourceRange.terrum"))
-            + RemoveFileScopedNamespace(ReadSource(Path.Combine(fullPath, "CharacterLiteral.terrum")))
-            + RemoveFileScopedNamespace(ReadSource(Path.Combine(fullPath, "StringEscape.terrum")))
-            + RemoveFileScopedNamespace(ReadSource(Path.Combine(fullPath, "Scanner.terrum")));
-    }
-
-    private static string RemoveFileScopedNamespace(string source)
-    {
+        string[] componentNames = ["SourceRange.terrum", "CharacterLiteral.terrum", "StringEscape.terrum", "Scanner.terrum"];
+        var trees = ImmutableArray.CreateBuilder<SyntaxTree>(componentNames.Length);
         const string NamespaceDeclaration = "namespace Terrum.CodeAnalysis;";
-        if (!source.StartsWith(NamespaceDeclaration, StringComparison.Ordinal))
+        foreach (var componentName in componentNames)
         {
-            throw new ArgumentException("Scanner bundle components must use the Terrum.CodeAnalysis namespace.",
-                nameof(source));
+            var componentPath = Path.Combine(fullPath, componentName);
+            var componentSource = ReadSource(componentPath);
+            if (componentName != "SourceRange.terrum"
+                && !componentSource.StartsWith(NamespaceDeclaration, StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    "Scanner bundle components must use the Terrum.CodeAnalysis namespace.", nameof(path));
+            }
+            if (componentName == "Scanner.terrum")
+            {
+                componentSource += "\nint32 Main() { return Scan(); }\n";
+            }
+            trees.Add(SyntaxTree.Parse(componentSource, componentPath));
         }
 
-        var lineEnd = source.IndexOfAny(['\r', '\n']);
-        if (lineEnd < 0)
-        {
-            return string.Empty;
-        }
-
-        if (source[lineEnd] == '\r' && lineEnd + 1 < source.Length && source[lineEnd + 1] == '\n')
-        {
-            lineEnd++;
-        }
-        return source[(lineEnd + 1)..];
+        return trees.MoveToImmutable();
     }
 }
