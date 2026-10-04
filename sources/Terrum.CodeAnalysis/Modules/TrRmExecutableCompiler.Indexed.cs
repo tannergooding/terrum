@@ -236,7 +236,10 @@ public static partial class TrRmExecutableCompiler
                 var terminators = new List<int>();
                 var data = new List<byte>();
                 var overflowedDefinition = false;
-                offsets.AddRange(BitConverter.GetBytes(0u).AsSpan(0, width).ToArray());
+                for (var index = 0; index < width; index++)
+                {
+                    offsets.Add(0);
+                }
                 foreach (var block in ordered)
                 {
                     var blockStart = data.Count;
