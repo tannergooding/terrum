@@ -1,7 +1,7 @@
 namespace Terrum.CodeAnalysis;
 
 bool TryParseScalarComparisonConditionalReturn(TokenSnapshot tokens,
-    out int32 scalarType, out int32 operation, out SourceRange name)
+    init ref<int32> scalarType, init ref<int32> operation, init ref<SourceRange> name)
 {
     var spacing = tokens.GetScalarOperatorSpacingError();
     if (spacing.Length != 0)
@@ -74,10 +74,10 @@ bool TryParseScalarComparisonConditionalReturn(TokenSnapshot tokens,
 }
 
 bool TryEvaluateInt32ComparisonConditionalReturn(TokenSnapshot tokens,
-    int32 first, int32 second, out SourceRange name, out int32 result)
+    int32 first, int32 second, init ref<SourceRange> name, init ref<int32> result)
 {
     if (!TryParseScalarComparisonConditionalReturn(move tokens,
-            out var selected, out var operation, out var foundName)
+            init var selected, init var operation, init var foundName)
         || selected != 1)
     {
         return false;
@@ -95,10 +95,10 @@ bool TryEvaluateInt32ComparisonConditionalReturn(TokenSnapshot tokens,
 }
 
 bool TryEvaluateUInt32ComparisonConditionalReturn(TokenSnapshot tokens,
-    uint32 first, uint32 second, out SourceRange name, out uint32 result)
+    uint32 first, uint32 second, init ref<SourceRange> name, init ref<uint32> result)
 {
     if (!TryParseScalarComparisonConditionalReturn(move tokens,
-            out var selected, out var operation, out var foundName)
+            init var selected, init var operation, init var foundName)
         || selected != 2)
     {
         return false;
@@ -116,10 +116,10 @@ bool TryEvaluateUInt32ComparisonConditionalReturn(TokenSnapshot tokens,
 }
 
 bool TryEvaluateInt64ComparisonConditionalReturn(TokenSnapshot tokens,
-    int64 first, int64 second, out SourceRange name, out int64 result)
+    int64 first, int64 second, init ref<SourceRange> name, init ref<int64> result)
 {
     if (!TryParseScalarComparisonConditionalReturn(move tokens,
-            out var selected, out var operation, out var foundName)
+            init var selected, init var operation, init var foundName)
         || selected != 3)
     {
         return false;
@@ -137,10 +137,10 @@ bool TryEvaluateInt64ComparisonConditionalReturn(TokenSnapshot tokens,
 }
 
 bool TryEvaluateUInt64ComparisonConditionalReturn(TokenSnapshot tokens,
-    uint64 first, uint64 second, out SourceRange name, out uint64 result)
+    uint64 first, uint64 second, init ref<SourceRange> name, init ref<uint64> result)
 {
     if (!TryParseScalarComparisonConditionalReturn(move tokens,
-            out var selected, out var operation, out var foundName)
+            init var selected, init var operation, init var foundName)
         || selected != 4)
     {
         return false;
@@ -158,10 +158,10 @@ bool TryEvaluateUInt64ComparisonConditionalReturn(TokenSnapshot tokens,
 }
 
 bool TryEvaluateChar16ComparisonConditionalReturn(TokenSnapshot tokens,
-    char16 first, char16 second, out SourceRange name, out char16 result)
+    char16 first, char16 second, init ref<SourceRange> name, init ref<char16> result)
 {
     if (!TryParseScalarComparisonConditionalReturn(move tokens,
-            out var selected, out var operation, out var foundName)
+            init var selected, init var operation, init var foundName)
         || selected != 6)
     {
         return false;
