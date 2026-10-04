@@ -23,6 +23,7 @@ public static partial class TrRmExecutableCompiler
         internal int Creation = creation;
         internal int Id;
         internal int Region = region;
+        internal bool IsLoopHeader;
         internal readonly List<int> Parameters = [];
         internal readonly List<(int Result, BoundExpression Expression)> Operations = [];
         internal int Condition;
@@ -75,13 +76,15 @@ public static partial class TrRmExecutableCompiler
             List<IndexedRegion> regions, List<PrimitiveType> sourceTypes, BoundProgram program,
             bool hasFloatingTypes)
         {
+            static bool IsBackEdge(IndexedBlock block, IndexedEdge edge)
+                => edge.Target.IsLoopHeader && block.Region == edge.Target.Region && block != edge.Target;
+
             var indegree = new int[source.Count];
             foreach (var block in source)
             {
                 foreach (var edge in Edges(block))
                 {
-                    if (!regions.Any(region => region.Header == edge.Target
-                        && block.Region == region.Id && block != region.Header))
+                    if (!IsBackEdge(block, edge))
                     {
                         indegree[edge.Target.Creation]++;
                     }
@@ -109,8 +112,7 @@ public static partial class TrRmExecutableCompiler
                 ordered.Add(next);
                 foreach (var edge in Edges(next))
                 {
-                    if (!regions.Any(region => region.Header == edge.Target
-                        && next.Region == region.Id && next != region.Header))
+                    if (!IsBackEdge(next, edge))
                     {
                         if (--indegree[edge.Target.Creation] == 0)
                         {
@@ -1290,6 +1292,7 @@ public static partial class TrRmExecutableCompiler
                 case BoundWhile loop:
                     var parent = _current.Region;
                     var header = NewBlock(_regions.Count + 1);
+                    header.IsLoopHeader = true;
                     var entrySlots = (int[])_slots.Clone();
                     var loopRegion = new IndexedRegion(_regions.Count + 1, parent, header, entrySlots);
                     _regions.Add(loopRegion);
