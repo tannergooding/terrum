@@ -50,12 +50,14 @@ public static partial class NativeModuleCompiler
             allowManagedParticipant: true);
         ModuleCompiler.ValidateConsumerAgainstReference(semantic, referenceSet);
         var imports = ModuleCompiler.GetConsumerSetDeclarations(semantic).ToHashSet(StringComparer.Ordinal);
+        var externalFunctionNames = program.Functions.Where(static item => item.IsExternal)
+            .Select(static item => item.Name).ToHashSet(StringComparer.Ordinal);
         var bindings = new List<NativeImportBinding>();
         foreach (var provider in providers)
         {
             foreach (var function in provider.Reference.Functions)
             {
-                if (program.Functions.Any(item => item.IsExternal && item.Name == function.Name))
+                if (externalFunctionNames.Contains(function.Name))
                 {
                     bindings.Add(new NativeImportBinding(function.Name, DllName(provider.Package.Identity), function.Name));
                 }
