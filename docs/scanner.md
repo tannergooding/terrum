@@ -7,8 +7,9 @@ lossless scanner component, not a bootstrapped compiler. `Scanner.terrum`
 implements scalar decoding, Unicode identifier
 classification, keyword and operator selection, numeric token boundaries,
 quoted strings, leading trivia and lexical diagnostics in Terrum. Character
-literal validation and its diagnostic spans come from the shared
-`CharacterLiteralDecodeResult`; string escapes use the shared
+literal validation and string-escape parsing reuse `Utf16Scalar.terrum`.
+Character literal diagnostics come from the shared
+`CharacterLiteralDecodeResult`; string-escape diagnostics come from
 `StringEscapeDecodeResult`. The scanner retains responsibility for finding
 token boundaries and reports each malformed escape in source order.
 The C# host supplies buffers and pinned lexical data; it does not pretokenize
