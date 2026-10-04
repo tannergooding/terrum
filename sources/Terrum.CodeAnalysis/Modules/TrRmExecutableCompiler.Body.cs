@@ -330,6 +330,8 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid("Call target is not a module-local definition.");
             }
             var argumentCount = opcode == 0x12 ? ReadInt(body, ref position, countWidth) : 0;
+            var maximum = Math.Max(Math.Max(Math.Max(result, typeId), method),
+                Math.Max(Math.Max(Math.Max(left, right), third), secondResult));
             var arguments = ImmutableArray.CreateBuilder<BoundExpression>(argumentCount);
             for (var argument = 0; argument < argumentCount; argument++)
             {
@@ -338,13 +340,8 @@ public static partial class TrRmExecutableCompiler
                 {
                     throw Invalid("Undefined call operand.");
                 }
+                maximum = Math.Max(maximum, id);
                 arguments.Add(new BoundRead(id - 1, variables[id - 1].Type, default));
-            }
-            var maximum = Math.Max(Math.Max(Math.Max(result, typeId), method),
-                Math.Max(Math.Max(Math.Max(left, right), third), secondResult));
-            foreach (var argument in arguments)
-            {
-                maximum = Math.Max(maximum, ((BoundRead)argument).Variable + 1);
             }
             if (width != Width((ulong)maximum) || countWidth != Width((ulong)argumentCount)
                 || opcode == 1 && dataWidth != Width(bits)
