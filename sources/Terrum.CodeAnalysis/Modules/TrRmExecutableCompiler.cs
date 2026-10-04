@@ -68,7 +68,8 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported("Executable entry must return int32 and take no parameters.");
         }
 
-        var functionFeatures = new (bool HasFloatingTypes, bool HasIndexedFlow)[program.Functions.Length];
+        var functionFeatures = new (bool HasFloatingTypes, bool HasIndexedFlow,
+            bool HasNonScalarStorage)[program.Functions.Length];
         var hasFloatingTypes = false;
         var parameterCount = 0;
         var effectCount = 0;
@@ -106,8 +107,7 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Unsupported($"Function '{function.Name}' has an unsupported declaration or effect.");
             }
-            if (function.Variables.Any(static variable => !Scalar(variable.Type)
-                || variable.Type == PrimitiveType.Void))
+            if (functionFeatures[index].HasNonScalarStorage)
             {
                 throw Unsupported($"Function '{function.Name}' contains non-scalar storage.");
             }
@@ -442,17 +442,20 @@ public static partial class TrRmExecutableCompiler
     private static bool IsFloat(PrimitiveType type)
         => type is PrimitiveType.Float32 or PrimitiveType.Float64;
 
-    private static (bool HasFloatingTypes, bool HasIndexedFlow) AnalyzeFunction(BoundFunction function)
+    private static (bool HasFloatingTypes, bool HasIndexedFlow, bool HasNonScalarStorage) AnalyzeFunction(
+        BoundFunction function)
     {
         var hasFloatingTypes = IsFloat(function.ReturnType);
+        var hasNonScalarStorage = false;
         foreach (var variable in function.Variables)
         {
             hasFloatingTypes |= IsFloat(variable.Type);
+            hasNonScalarStorage |= !Scalar(variable.Type) || variable.Type == PrimitiveType.Void;
         }
 
         var hasIndexedFlow = false;
         AnalyzeStatement(function.Body, false, ref hasFloatingTypes, ref hasIndexedFlow);
-        return (hasFloatingTypes, hasIndexedFlow);
+        return (hasFloatingTypes, hasIndexedFlow, hasNonScalarStorage);
     }
 
     private static void AnalyzeStatement(BoundStatement statement, bool nested,
