@@ -11,7 +11,7 @@ public unique struct SourceLineIndex
         _length = length;
     }
 
-    public static bool TryCreate(out SourceLineIndex index)
+    public static bool TryCreate(init ref<SourceLineIndex> index)
     {
         mut int32 lineCount = 0;
         mut int32 position = 0;
@@ -68,24 +68,13 @@ public unique struct SourceLineIndex
         return true;
     }
 
-    public static bool TryCreateInit(init ref<SourceLineIndex> index)
-    {
-        if (!TryCreate(out var created))
-        {
-            return false;
-        }
-
-        index = move created;
-        return true;
-    }
-
     [NoThrow]
     public int32 GetLineCount()
     {
         return _starts.Count;
     }
 
-    public bool TryGetPosition(int32 position, out int32 line, out int32 character)
+    public bool TryGetPosition(int32 position, init ref<int32> line, init ref<int32> character)
     {
         if (position < 0 || position > _length)
         {
@@ -114,19 +103,7 @@ public unique struct SourceLineIndex
         return true;
     }
 
-    public bool TryGetPositionInit(int32 position, init ref<int32> line, init ref<int32> character)
-    {
-        if (!TryGetPosition(position, out var resolvedLine, out var resolvedCharacter))
-        {
-            return false;
-        }
-
-        line = resolvedLine;
-        character = resolvedCharacter;
-        return true;
-    }
-
-    public bool TryGetOffset(int32 line, int32 character, out int32 offset)
+    public bool TryGetOffset(int32 line, int32 character, init ref<int32> offset)
     {
         if (line < 0 || line >= _starts.Count || character < 0)
         {
@@ -151,18 +128,7 @@ public unique struct SourceLineIndex
         return true;
     }
 
-    public bool TryGetOffsetInit(int32 line, int32 character, init ref<int32> offset)
-    {
-        if (!TryGetOffset(line, character, out var resolved))
-        {
-            return false;
-        }
-
-        offset = resolved;
-        return true;
-    }
-
-    public bool TryGetLineExtent(int32 line, out SourceRange includingBreak)
+    public bool TryGetLineExtent(int32 line, init ref<SourceRange> includingBreak)
     {
         if (line < 0 || line >= _starts.Count)
         {
@@ -180,20 +146,9 @@ public unique struct SourceLineIndex
         return true;
     }
 
-    public bool TryGetLineExtentInit(int32 line, init ref<SourceRange> includingBreak)
+    public bool TryGetLineContentExtent(int32 line, init ref<SourceRange> content)
     {
-        if (!TryGetLineExtent(line, out var resolved))
-        {
-            return false;
-        }
-
-        includingBreak = resolved;
-        return true;
-    }
-
-    public bool TryGetLineContentExtent(int32 line, out SourceRange content)
-    {
-        if (!TryGetLineExtent(line, out var includingBreak))
+        if (!TryGetLineExtent(line, init var includingBreak))
         {
             return false;
         }
@@ -213,14 +168,4 @@ public unique struct SourceLineIndex
         return true;
     }
 
-    public bool TryGetLineContentExtentInit(int32 line, init ref<SourceRange> content)
-    {
-        if (!TryGetLineContentExtent(line, out var resolved))
-        {
-            return false;
-        }
-
-        content = resolved;
-        return true;
-    }
 }

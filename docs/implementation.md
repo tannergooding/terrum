@@ -1682,14 +1682,11 @@ and fills unknown starts in a second scan; already known endpoints and fully
 dense single-unit breaks need no second source scan.
 It also returns a line's full UTF-16 extent (including its break) by ordinal
 from adjacent starts without rereading source; the streaming candidate walks
-line ranges to provide the same extent without owning a table. Invalid
-ordinals leave the conditional output vacant. Vacancy-only `init ref`
-construction and position, offset and extent lookups reuse the original
-`out` paths without changing their contracts. Invalid requests publish no
-value, while a later valid request may fill the same vacant destination.
-The streaming `SourceLines` entry points expose range and coordinate results
-only through vacancy-only `init ref` outputs; invalid queries leave every
-result vacant.
+line ranges to provide the same extent without owning a table. `SourceLineIndex`
+construction and position, offset and extent lookups, and the streaming
+`SourceLines` range and coordinate queries, expose vacancy-only `init ref`
+outputs. Invalid construction or queries publish no value, while a later valid
+request may fill the same vacant destination.
 `SourceRange.TryCreate` uses `init ref<SourceRange>` as its sole output mode:
 invalid bounds leave the destination vacant, while valid empty ranges publish
 normally.

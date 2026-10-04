@@ -49,55 +49,55 @@ public sealed partial class SourceLineComponentTests
         const string Entry = """
             namespace Terrum.CodeAnalysis;
             int32 CheckIndex() {
-                require SourceLineIndex.TryCreate(out var index);
-                require SourceLineIndex.TryCreateInit(init var initialized);
+                require SourceLineIndex.TryCreate(init var index);
+                require SourceLineIndex.TryCreate(init var initialized);
                 if (index.GetLineCount() != Host.LineCount[0]) { return 1; }
                 if (initialized.GetLineCount() != index.GetLineCount()) { return 11; }
-                if (initialized.TryGetPositionInit(-1, init var initLine, init var initCharacter)
-                    || initialized.TryGetOffsetInit(-1, 0, init var initOffset)
-                    || initialized.TryGetLineExtentInit(-1, init var initExtent)
-                    || initialized.TryGetLineContentExtentInit(-1, init var initContent)) { return 12; }
-                require initialized.TryGetPositionInit(Host.Source.Length, init initLine, init initCharacter);
-                require initialized.TryGetOffsetInit(initLine, initCharacter, init initOffset);
-                require initialized.TryGetLineExtentInit(initLine, init initExtent);
-                require initialized.TryGetLineContentExtentInit(initLine, init initContent);
+                if (initialized.TryGetPosition(-1, init var initLine, init var initCharacter)
+                    || initialized.TryGetOffset(-1, 0, init var initOffset)
+                    || initialized.TryGetLineExtent(-1, init var initExtent)
+                    || initialized.TryGetLineContentExtent(-1, init var initContent)) { return 12; }
+                require initialized.TryGetPosition(Host.Source.Length, init initLine, init initCharacter);
+                require initialized.TryGetOffset(initLine, initCharacter, init initOffset);
+                require initialized.TryGetLineExtent(initLine, init initExtent);
+                require initialized.TryGetLineContentExtent(initLine, init initContent);
                 if (initOffset != Host.Source.Length || initLine != Host.LineCount[0] - 1
                     || initExtent.Start != Host.ExpectedExtents[initLine * 2]
                     || initExtent.Length != Host.ExpectedExtents[initLine * 2 + 1]
                     || initContent.Start != Host.ExpectedContentExtents[initLine * 2]
                     || initContent.Length != Host.ExpectedContentExtents[initLine * 2 + 1]) { return 13; }
-                if (index.TryGetPosition(-1, out var beforeLine, out var beforeCharacter)) { return 2; }
-                if (index.TryGetPosition(Host.Source.Length + 1, out var afterLine, out var afterCharacter)) { return 3; }
-                if (index.TryGetOffset(-1, 0, out var beforeOffset)
-                    || index.TryGetOffset(Host.LineCount[0], 0, out var afterOffset)
-                    || index.TryGetOffset(0, -1, out var negativeCharacter)
-                    || index.TryGetOffset(0, int32.MaxValue, out var hugeCharacter)) { return 5; }
-                if (index.TryGetLineExtent(-1, out var beforeExtent)
-                    || index.TryGetLineExtent(Host.LineCount[0], out var afterExtent)
-                    || index.TryGetLineExtent(int32.MaxValue, out var hugeExtent)
-                    || index.TryGetLineContentExtent(-1, out var beforeContent)
-                    || index.TryGetLineContentExtent(Host.LineCount[0], out var afterContent)
-                    || index.TryGetLineContentExtent(int32.MaxValue, out var hugeContent)) { return 9; }
+                if (index.TryGetPosition(-1, init var beforeLine, init var beforeCharacter)) { return 2; }
+                if (index.TryGetPosition(Host.Source.Length + 1, init var afterLine, init var afterCharacter)) { return 3; }
+                if (index.TryGetOffset(-1, 0, init var beforeOffset)
+                    || index.TryGetOffset(Host.LineCount[0], 0, init var afterOffset)
+                    || index.TryGetOffset(0, -1, init var negativeCharacter)
+                    || index.TryGetOffset(0, int32.MaxValue, init var hugeCharacter)) { return 5; }
+                if (index.TryGetLineExtent(-1, init var beforeExtent)
+                    || index.TryGetLineExtent(Host.LineCount[0], init var afterExtent)
+                    || index.TryGetLineExtent(int32.MaxValue, init var hugeExtent)
+                    || index.TryGetLineContentExtent(-1, init var beforeContent)
+                    || index.TryGetLineContentExtent(Host.LineCount[0], init var afterContent)
+                    || index.TryGetLineContentExtent(int32.MaxValue, init var hugeContent)) { return 9; }
                 for (mut int32 current = 0; current < Host.LineCount[0]; current = current + 1) {
-                    require index.TryGetLineExtent(current, out var extent);
-                    require index.TryGetLineContentExtent(current, out var content);
+                    require index.TryGetLineExtent(current, init var extent);
+                    require index.TryGetLineContentExtent(current, init var content);
                     if (extent.Start != Host.ExpectedExtents[current * 2]
                         || extent.Length != Host.ExpectedExtents[current * 2 + 1]
                         || content.Start != Host.ExpectedContentExtents[current * 2]
                         || content.Length != Host.ExpectedContentExtents[current * 2 + 1]) { return 10; }
                 }
                 for (mut int32 position = 0; position <= Host.Source.Length; position = position + 1) {
-                    require index.TryGetPosition(position, out var line, out var character);
+                    require index.TryGetPosition(position, init var line, init var character);
                     if (line != Host.ExpectedPositions[position * 2]
                         || character != Host.ExpectedPositions[position * 2 + 1]) { return 4; }
-                    if (!index.TryGetOffset(line, character, out var offset)
+                    if (!index.TryGetOffset(line, character, init var offset)
                         || offset != position) { return 6; }
                     if (position < Host.Source.Length
                         && Host.ExpectedPositions[(position + 1) * 2] != line
-                        && index.TryGetOffset(line, character + 1, out var nextLineStart)) { return 7; }
+                        && index.TryGetOffset(line, character + 1, init var nextLineStart)) { return 7; }
                 }
-                require index.TryGetPosition(Host.Source.Length, out var lastLine, out var lastCharacter);
-                if (index.TryGetOffset(lastLine, lastCharacter + 1, out var pastEnd)) { return 8; }
+                require index.TryGetPosition(Host.Source.Length, init var lastLine, init var lastCharacter);
+                if (index.TryGetOffset(lastLine, lastCharacter + 1, init var pastEnd)) { return 8; }
                 return 0;
             }
             int32 Main() {
@@ -140,12 +140,12 @@ public sealed partial class SourceLineComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceLineIndex.TryCreate(out var index);
+                require SourceLineIndex.TryCreate(init var index);
                 if (index.GetLineCount() != {{expectedCount}}
                     || index.GetCapacityForTest() != {{expectedCount}}) { return 1; }
-                require index.TryGetPosition(Host.Source.Length, out var line, out var character);
+                require index.TryGetPosition(Host.Source.Length, init var line, init var character);
                 if (line != {{last.Line}} || character != {{last.Character}}) { return 2; }
-                if (!index.TryGetOffset(line, character, out var offset)
+                if (!index.TryGetOffset(line, character, init var offset)
                     || offset != Host.Source.Length) { return 3; }
                 return 0;
             }
@@ -174,15 +174,15 @@ public sealed partial class SourceLineComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                if (!SourceLineIndex.TryCreate(out var index)) { return 1; }
+                if (!SourceLineIndex.TryCreate(init var index)) { return 1; }
                 if (index.GetLineCount() != {{(fewLines ? 2 : 1)}}) { return 2; }
                 if (index.GetCapacityForTest() != {{(fewLines ? 2 : 1)}}) { return 4; }
-                require index.TryGetPosition(Host.Source.Length, out var line, out var character);
+                require index.TryGetPosition(Host.Source.Length, init var line, init var character);
                 if (line != {{(fewLines ? 1 : 0)}}
                     || character != {{(fewLines ? 1 : MaximumCapacity)}}) { return 3; }
-                if (!index.TryGetOffset(line, character, out var offset)
+                if (!index.TryGetOffset(line, character, init var offset)
                     || offset != Host.Source.Length
-                    || index.TryGetOffset(line, int32.MaxValue, out var excessive)) { return 5; }
+                    || index.TryGetOffset(line, int32.MaxValue, init var excessive)) { return 5; }
                 return 0;
             }
             """, "sparse-index-entry.terrum");
@@ -208,7 +208,7 @@ public sealed partial class SourceLineComponentTests
             int32 Main() {
                 unsafe {
                     try {
-                        SourceLineIndex.TryCreate(out var index);
+                        SourceLineIndex.TryCreate(init var index);
                         return 1;
                     } catch {
                         if (!OwnedInt32Buffer.TryCreate(1, out var raw)) { return 2; }
@@ -221,20 +221,20 @@ public sealed partial class SourceLineComponentTests
             """ : overflow ? """
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                SourceLineIndex.TryCreate(out var index);
+                SourceLineIndex.TryCreate(init var index);
                 return 1;
             }
             """ : """
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                if (!SourceLineIndex.TryCreate(out var index)) { return 1; }
+                if (!SourceLineIndex.TryCreate(init var index)) { return 1; }
                 if (index.GetLineCount() != Host.Source.Length + 1) { return 2; }
                 if (index.GetCapacityForTest() != Host.Source.Length + 1) { return 4; }
-                require index.TryGetPosition(Host.Source.Length, out var line, out var character);
+                require index.TryGetPosition(Host.Source.Length, init var line, init var character);
                 if (line != Host.Source.Length || character != 0) { return 3; }
-                if (!index.TryGetOffset(line, character, out var offset)
+                if (!index.TryGetOffset(line, character, init var offset)
                     || offset != Host.Source.Length
-                    || index.TryGetOffset(line - 1, 1, out var nextLineStart)) { return 5; }
+                    || index.TryGetOffset(line - 1, 1, init var nextLineStart)) { return 5; }
                 return 0;
             }
             """, "dense-index-entry.terrum");
@@ -256,15 +256,15 @@ public sealed partial class SourceLineComponentTests
         const string Entry = """
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceLineIndex.TryCreate(out var index);
+                require SourceLineIndex.TryCreate(init var index);
                 Host.Source[0] = char16(10);
                 if (index.GetLineCount() != 1) { return 1; }
                 for (mut int32 position = 0; position <= 3; position = position + 1) {
-                    require index.TryGetPosition(position, out var line, out var character);
+                    require index.TryGetPosition(position, init var line, init var character);
                     if (line != 0 || character != position) { return 2; }
-                    if (!index.TryGetOffset(line, character, out var offset)
+                    if (!index.TryGetOffset(line, character, init var offset)
                         || offset != position) { return 3; }
-                    require index.TryGetLineExtent(0, out var extent);
+                    require index.TryGetLineExtent(0, init var extent);
                     if (extent.Start != 0 || extent.Length != 3) { return 4; }
                 }
                 return 0;
@@ -277,19 +277,19 @@ public sealed partial class SourceLineComponentTests
     }
 
     [Theory]
-    [InlineData("index.TryGetPosition(-1, out var line, out var character); return line;")]
-    [InlineData("index.TryGetPosition(2, out var line, out var character); return character;")]
-    [InlineData("index.TryGetOffset(-1, 0, out var position); return position;")]
-    [InlineData("index.TryGetOffset(0, 2, out var position); return position;")]
-    [InlineData("index.TryGetLineExtent(-1, out var extent); return extent.Start;")]
-    [InlineData("index.TryGetLineExtent(1, out var extent); return extent.Length;")]
+    [InlineData("index.TryGetPosition(-1, init var line, init var character); return line;")]
+    [InlineData("index.TryGetPosition(2, init var line, init var character); return character;")]
+    [InlineData("index.TryGetOffset(-1, 0, init var position); return position;")]
+    [InlineData("index.TryGetOffset(0, 2, init var position); return position;")]
+    [InlineData("index.TryGetLineExtent(-1, init var extent); return extent.Start;")]
+    [InlineData("index.TryGetLineExtent(1, init var extent); return extent.Length;")]
     [InlineData("SourceLineIndex copy = index; return copy.GetLineCount();")]
     [InlineData("SourceLineIndex moved = move index; return index.GetLineCount();")]
     public async Task OwnedLineIndexRejectsUnpublishedOutputsAndCopiesAsync(string body)
     {
         var trees = await ReadIndexComponentsAsync().ConfigureAwait(true);
         var entry = SyntaxTree.Parse("namespace Terrum.CodeAnalysis; int32 Main() { "
-            + "require SourceLineIndex.TryCreate(out var index); " + body + " }", "invalid-index-entry.terrum");
+            + "require SourceLineIndex.TryCreate(init var index); " + body + " }", "invalid-index-entry.terrum");
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [65], false)]);
         Assert.True(compilation.HasErrors);
@@ -304,7 +304,7 @@ public sealed partial class SourceLineComponentTests
         var entry = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                SourceLineIndex.TryCreate(out var index);
+                SourceLineIndex.TryCreate(init var index);
                 return index.GetLineCount();
             }
             """, "unpublished-index-entry.terrum");
