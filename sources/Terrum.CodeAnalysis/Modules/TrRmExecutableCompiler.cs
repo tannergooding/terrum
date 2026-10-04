@@ -18,8 +18,9 @@ public static partial class TrRmExecutableCompiler
     [
         PrimitiveType.Void, PrimitiveType.Bool, PrimitiveType.Char16,
         PrimitiveType.Int32, PrimitiveType.UInt32, PrimitiveType.Int64, PrimitiveType.UInt64,
+        PrimitiveType.Float32, PrimitiveType.Float64,
     ];
-    private static readonly byte[] s_codes = [0, 1, 3, 8, 0x0D, 9, 0x0E];
+    private static readonly byte[] s_codes = [0, 1, 3, 8, 0x0D, 9, 0x0E, 0x14, 0x15];
 
     public static byte[] Emit(BoundProgram program, string moduleIdentity)
     {
@@ -58,6 +59,12 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported("Executable entry must return int32 and take no parameters.");
         }
 
+        var functionUsesFloatingTypes = new bool[program.Functions.Length];
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            functionUsesFloatingTypes[index] = UsesFloatingType(program.Functions[index]);
+        }
+        var hasFloatingTypes = functionUsesFloatingTypes.Any(static usesFloatingTypes => usesFloatingTypes);
         var names = new List<(string Text, int Encoding)> { (moduleIdentity, 1) };
         var nameRows = new int[program.Functions.Length];
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -102,7 +109,8 @@ public static partial class TrRmExecutableCompiler
             signatures.Add(new TrRmMethodSigRow(TypeRow(function.ReturnType), 0,
                 first, function.ParameterCount, 0, 0));
             bodies.Add(ContainsIndexedFlow(function.Body)
-                ? new IndexedBuilder(function, program).Encode() : EncodeBody(function));
+                ? new IndexedBuilder(function, program, functionUsesFloatingTypes[index]).Encode()
+                : EncodeBody(function, functionUsesFloatingTypes[index]));
             var effectMask = (function.IsNoThrow ? 1u : 0u)
                 | (function.DoesNotReturn ? 2u : 0u);
             var contractFirst = effectMask != 0 ? effects.Count + 1 : 0;
@@ -128,7 +136,8 @@ public static partial class TrRmExecutableCompiler
             [new TrRmModuleRow(1, 1, 0, program.EntryPoint + 1, 1, 1, 1, 1)],
             strings, 0, 0, methods.Count, 0);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 0, 0, methods.Count, 0);
-        var typeRows = s_codes.Select(static code => (ReadOnlyMemory<byte>)TrRmTypeSpecTableWriter.Builtin(code)).ToArray();
+        var typeCodes = hasFloatingTypes ? s_codes : s_codes[..^2];
+        var typeRows = typeCodes.Select(static code => (ReadOnlyMemory<byte>)TrRmTypeSpecTableWriter.Builtin(code)).ToArray();
         var typeBytes = TrRmTypeSpecTableWriter.Encode(typeRows, 0, 0, 0, 0);
         var types = new TrRmTypeSpecTableReader(typeBytes, typeRows.Length, 0, 0, 0, 0);
         var sigBytes = TrRmMethodSigTableWriter.Encode(signatures, types, parameters.Count, 0);
@@ -397,6 +406,45 @@ public static partial class TrRmExecutableCompiler
     private static bool IsInteger(PrimitiveType type)
         => type is PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Int64 or PrimitiveType.UInt64;
+
+    private static bool IsFloat(PrimitiveType type)
+        => type is PrimitiveType.Float32 or PrimitiveType.Float64;
+
+    private static bool UsesFloatingType(BoundFunction function)
+        => IsFloat(function.ReturnType)
+            || function.Variables.Any(static variable => IsFloat(variable.Type))
+            || UsesFloatingType(function.Body);
+
+    private static bool UsesFloatingType(BoundStatement statement)
+        => statement switch
+        {
+            BoundBlock block => block.Statements.Any(UsesFloatingType),
+            BoundLocal local => UsesFloatingType(local.Initializer),
+            BoundAssignment assignment => UsesFloatingType(assignment.Value),
+            BoundExpressionStatement expression => UsesFloatingType(expression.Expression),
+            BoundReturn { Value: BoundExpression value } => UsesFloatingType(value),
+            BoundIf conditional => UsesFloatingType(conditional.Condition)
+                || UsesFloatingType(conditional.Then)
+                || conditional.Else is not null && UsesFloatingType(conditional.Else),
+            BoundWhile loop => UsesFloatingType(loop.Condition)
+                || UsesFloatingType(loop.Body)
+                || loop.Iterator is not null && UsesFloatingType(loop.Iterator),
+            BoundRequire require => UsesFloatingType(require.Condition),
+            _ => false,
+        };
+
+    private static bool UsesFloatingType(BoundExpression expression)
+        => IsFloat(expression.Type) || expression switch
+        {
+            BoundBinary binary => UsesFloatingType(binary.Left) || UsesFloatingType(binary.Right),
+            BoundUnary unary => UsesFloatingType(unary.Operand),
+            BoundCast cast => UsesFloatingType(cast.Operand),
+            BoundConditional conditional => UsesFloatingType(conditional.Condition)
+                || UsesFloatingType(conditional.WhenTrue)
+                || UsesFloatingType(conditional.WhenFalse),
+            BoundCall call => call.Arguments.Any(UsesFloatingType),
+            _ => false,
+        };
 
     private static bool ContainsIndexedFlow(BoundStatement statement, bool nested = false)
     {

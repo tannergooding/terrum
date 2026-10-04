@@ -41,6 +41,10 @@ approved.
 - [Char16-to-floating eligibility](char16-floating-conversion-eligibility.md)
   recommends treating `char16` as an unsigned code-unit value for explicit
   floating conversion; exact pair eligibility remains unapproved.
+- [Floating comparisons in executable TRRM](floating-trrm-comparisons.md)
+  recommends a separately assigned IEEE comparison opcode and raw-bit
+  constants in the unreleased `(1, 0)` profile; it does not add floating
+  arithmetic or conversion support.
 
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,

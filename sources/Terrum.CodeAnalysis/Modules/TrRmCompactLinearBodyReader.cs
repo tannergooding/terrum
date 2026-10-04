@@ -129,7 +129,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
             var (opcode, referenceWidth, countWidth, dataWidth) =
                 ReadInstruction(body, ref position);
             if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 0x0A
-                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18))
+                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18 or 0x19))
             {
                 throw InvalidBody();
             }
@@ -407,6 +407,18 @@ public readonly ref struct TrRmCompactLinearBodyReader
 
                 resultType = left;
             }
+            else if (opcode == 0x19)
+            {
+                var kind = ReadByte(body, ref position);
+                var left = Use(body, ref position, referenceWidth, result, ordinal);
+                var right = Use(body, ref position, referenceWidth, result, ordinal);
+                if (kind is < 1 or > 6 || left != right || !IsFloat(left))
+                {
+                    throw InvalidBody();
+                }
+
+                resultType = 1;
+            }
             else
             {
                 var kind = ReadByte(body, ref position);
@@ -544,7 +556,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
 
             var inner = types.GetRow((int)innerRow);
             if (inner.Length != 3 || inner[0] != 1 || inner[1] != 0
-                || !IsSupportedAtom(inner[2]))
+                || !IsSupportedOptionalAtom(inner[2]))
             {
                 throw InvalidBody();
             }
@@ -562,6 +574,9 @@ public readonly ref struct TrRmCompactLinearBodyReader
     }
 
     private static bool IsSupportedAtom(byte type)
+        => IsSupportedOptionalAtom(type) || type is 0x14 or 0x15;
+
+    private static bool IsSupportedOptionalAtom(byte type)
         => type is 1 or 3 or 8 or 9 or 0x0D or 0x0E;
 
     private ushort Use(ReadOnlySpan<byte> body, ref int position, int width, int result, int ordinal)
@@ -655,10 +670,13 @@ public readonly ref struct TrRmCompactLinearBodyReader
     }
 
     private static int BitWidth(ushort type)
-        => type switch { 1 => 1, 3 => 16, 8 or 0x0D => 32, _ => 64 };
+        => type switch { 1 => 1, 3 => 16, 8 or 0x0D or 0x14 => 32, _ => 64 };
 
     private static bool IsInteger(ushort type)
         => type is 8 or 9 or 0x0D or 0x0E;
+
+    private static bool IsFloat(ushort type)
+        => type is 0x14 or 0x15;
 
     private static InvalidDataException InvalidBody()
         => new("Invalid or unsupported TRRM compact-linear Body.");

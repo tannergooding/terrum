@@ -37,9 +37,13 @@ literals, based integer literals directly targeting either format, `+`, `-`,
 reconstructs exact target-format literal bits. It also projects conversions
 between the floating formats and from `int32`, `uint32`, `int64` and `uint64`
 to either format. `char16`-to-floating and floating-to-integer conversions
-remain outside while their eligibility is unapproved. Source-free TRRM still
-has no floating operators. The frontend candidates continue to depend on the
-hosted verifier/emitter for supported executions.
+remain outside while their eligibility is unapproved. Source-free TRRM
+same-format comparisons and exact-bit constants are provisionally implemented
+under the unapproved
+[TRRM floating-comparison proposal](../docs/proposals/floating-trrm-comparisons.md);
+floating arithmetic and numeric conversions remain unsupported there. The
+frontend candidates continue to depend on the hosted verifier/emitter for
+supported executions.
 The provisional hosted `char16`-to-floating conversion likewise remains
 outside both paths; it treats the code unit as an unsigned numeric value and
 follows an unapproved eligibility proposal.

@@ -42,6 +42,170 @@ public sealed class TrRmExecutableCompilerTests
         Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
     }
 
+    [Theory]
+    [InlineData("float32", "1.5", "<", "2.0")]
+    [InlineData("float32", "2.0", "<=", "2.0")]
+    [InlineData("float32", "2.0", ">", "1.5")]
+    [InlineData("float32", "2.0", ">=", "2.0")]
+    [InlineData("float32", "1.5", "==", "1.5")]
+    [InlineData("float32", "1.5", "!=", "2.0")]
+    [InlineData("float64", "1.5", "<", "2.0")]
+    [InlineData("float64", "2.0", "<=", "2.0")]
+    [InlineData("float64", "2.0", ">", "1.5")]
+    [InlineData("float64", "2.0", ">=", "2.0")]
+    [InlineData("float64", "1.0", "==", "1.0")]
+    [InlineData("float64", "1.5", "!=", "2.0")]
+    public void FloatingComparisonsRoundTripThroughLinearBodies(
+        string type, string left, string operation, string right)
+    {
+        var source = $$"""
+            int32 Main() { return Compare({{left}}, {{right}}) ? 42 : 0; }
+            bool Compare({{type}} left, {{type}} right) { return left {{operation}} right; }
+            """;
+        var original = Compile(source);
+        var artifact = TrRmExecutableCompiler.Emit(original, "float-comparison");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+
+        Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData("float32")]
+    [InlineData("float64")]
+    public void FloatingComparisonRoundTripsThroughIndexedBodies(string type)
+    {
+        var source = $$"""
+            int32 Main() {
+                {{type}} negativeZero = -0.0;
+                {{type}} positiveZero = 0.0;
+                if (negativeZero == positiveZero) { return 42; }
+                return 0;
+            }
+            """;
+        var original = Compile(source);
+        var artifact = TrRmExecutableCompiler.Emit(original, "indexed-float-comparison");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+
+        Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData("float32", "==", 0)]
+    [InlineData("float32", "!=", 42)]
+    [InlineData("float32", "<", 0)]
+    [InlineData("float32", "<=", 0)]
+    [InlineData("float32", ">", 0)]
+    [InlineData("float32", ">=", 0)]
+    [InlineData("float64", "==", 0)]
+    [InlineData("float64", "!=", 42)]
+    [InlineData("float64", "<", 0)]
+    [InlineData("float64", "<=", 0)]
+    [InlineData("float64", ">", 0)]
+    [InlineData("float64", ">=", 0)]
+    public void FloatingNaNComparisonsFollowIeee(string type, string operation, int expected)
+    {
+        var source = $$"""
+            int32 Main() {
+                {{type}} value = 1.0;
+                if (value {{operation}} value) { return 42; }
+                return 0;
+            }
+            """;
+        var oneBits = type == "float32"
+            ? new byte[] { 0x00, 0x00, 0x80, 0x3F }
+            : new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x3F };
+        var nanBits = type == "float32"
+            ? new byte[] { 0x01, 0x00, 0xC0, 0x7F }
+            : new byte[] { 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8, 0x7F };
+        var artifact = TrRmExecutableCompiler.Emit(Compile(source), "float-nan");
+        var loaded = TrRmExecutableCompiler.Load(
+            ReplaceBodyConstant(artifact, 1, oneBits, nanBits));
+
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void FloatingArithmeticRemainsOutsideExecutableTrRm()
+    {
+        var program = Compile("int32 Main() { float32 left = 1.0; float32 right = 2.0; "
+            + "return int32(left + right); }");
+
+        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "float-arithmetic"));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(7)]
+    public void InvalidFloatingComparisonKindsAreRejected(byte kind)
+    {
+        const string source = """
+            int32 Main() { return Compare(1.5, 2.0) ? 42 : 0; }
+            bool Compare(float32 left, float32 right) { return left < right; }
+            """;
+        var artifact = TrRmExecutableCompiler.Emit(Compile(source), "invalid-float-compare");
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount));
+        var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
+        var body = bodies.GetRow(2).ToArray();
+        var opcodeOffset = body.AsSpan().IndexOf((byte)0x19);
+        Assert.True(opcodeOffset >= 0);
+        body[opcodeOffset + 2] = kind;
+
+        var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
+        for (var row = 1; row <= bodyCount; row++)
+        {
+            bodyRows[row - 1] = row == 2 ? body : bodies.GetRow(row).ToArray();
+        }
+        var rewrittenBodies = TrRmVariableTableWriter.EncodeBodies(bodyRows);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var sectionKind, out var flags, out var bytes, out var count);
+            sections.Add(new TrRmSection(sectionKind, flags, (uint)count,
+                sectionKind == 0x20 ? rewrittenBodies : bytes.ToArray()));
+        }
+        var malformed = TrRmArtifactWriter.Encode(sections);
+
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
+    [Fact]
+    public void OptionalFloatingTypesRemainOutsideExecutableTrRm()
+    {
+        var artifact = OptionalScalarArtifact(
+            IndexedOptionalPresenceBody(8, true, 9),
+            optionalChar16: false,
+            optionalInt32: false,
+            optionalFloat32: true);
+
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+    }
+
+    [Fact]
+    public void IntegerBodyBytesRemainStableInMixedFloatModules()
+    {
+        var integerOnly = TrRmExecutableCompiler.Emit(
+            Compile("int32 Main() { return 42; }"), "integer-only");
+        const string mixedSource = """
+            int32 Main() { return Integer(); }
+            int32 Integer() { return 42; }
+            float32 Identity(float32 value) { return value; }
+            """;
+        var mixed = TrRmExecutableCompiler.Emit(Compile(mixedSource), "mixed-float");
+
+        var integerOnlyIndex = new TrRmArtifactIndex(integerOnly);
+        Assert.True(integerOnlyIndex.TryGetSection(0x20, out var integerOnlyBodies, out var integerOnlyCount));
+        var integerOnlyBody = new TrRmBodyTableReader(integerOnlyBodies, integerOnlyCount).GetRow(1);
+        var mixedIndex = new TrRmArtifactIndex(mixed);
+        Assert.True(mixedIndex.TryGetSection(0x20, out var mixedBodies, out var mixedCount));
+        var integerMethodBody = new TrRmBodyTableReader(mixedBodies, mixedCount).GetRow(2);
+
+        Assert.Equal(integerOnlyBody.ToArray(), integerMethodBody.ToArray());
+    }
+
     [Fact]
     public void LibraryPreservesScalarSignaturesVisibilityAndExportIdentity()
     {
@@ -169,11 +333,13 @@ public sealed class TrRmExecutableCompilerTests
             public uint32 U(uint32 left, uint32 right) { uint32 result = left ^ right; return result; }
             public int64 L(int64 left, int64 right) { int64 result = left % right; return result; }
             public uint64 W(uint64 left, uint64 right) { uint64 result = left / right; return result; }
+            public float32 F(float32 value) { return value; }
+            public float64 D(float64 value) { return value; }
             public void V() { }
             """;
         var original = Compile(source, true);
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "native-parity"));
-        string[] names = ["B", "C", "I", "U", "L", "W", "V"];
+        string[] names = ["B", "C", "I", "U", "L", "W", "F", "D", "V"];
         var expected = NativeEmitter.EmitLibrary(original, names, NativeRuntimePolicy.FailFast);
         var actual = NativeEmitter.EmitLibrary(loaded, names, NativeRuntimePolicy.FailFast);
         Assert.Equal(expected, actual);
@@ -694,13 +860,13 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     private static byte[] IndexedOptionalPresenceBody(int payloadTypeSpecRow,
-        bool selectPresent)
+        bool selectPresent, int optionalTypeSpecRow = 8)
     {
-        var typeRows = new SortedSet<int> { 2, 4, payloadTypeSpecRow, 8 }.ToArray();
+        var typeRows = new SortedSet<int> { 2, 4, payloadTypeSpecRow, optionalTypeSpecRow }.ToArray();
         var booleanTypeId = (byte)(Array.IndexOf(typeRows, 2) + 1);
         var integerTypeId = (byte)(Array.IndexOf(typeRows, 4) + 1);
         var payloadTypeId = (byte)(Array.IndexOf(typeRows, payloadTypeSpecRow) + 1);
-        var optionalTypeId = (byte)(Array.IndexOf(typeRows, 8) + 1);
+        var optionalTypeId = (byte)(Array.IndexOf(typeRows, optionalTypeSpecRow) + 1);
         byte[] valueTypeIds =
         [
             payloadTypeId, optionalTypeId, optionalTypeId, booleanTypeId, optionalTypeId,
@@ -758,7 +924,7 @@ public sealed class TrRmExecutableCompilerTests
 
     private static byte[] OptionalScalarArtifact(byte[] body, bool optionalChar16,
         bool optionalInt32, bool optionalInt64 = false, bool optionalBool = false,
-        bool optionalUInt32 = false, bool optionalUInt64 = false)
+        bool optionalUInt32 = false, bool optionalUInt64 = false, bool optionalFloat32 = false)
     {
         var original = TrRmExecutableCompiler.Emit(
             Compile("int32 Main() { return 0; }"), "optional-body");
@@ -794,6 +960,11 @@ public sealed class TrRmExecutableCompilerTests
         {
             rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, 7));
         }
+        if (optionalFloat32)
+        {
+            rows.Add(TrRmTypeSpecTableWriter.Builtin(0x14));
+            rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, (uint)rows.Count));
+        }
         var rewrittenTypes = TrRmTypeSpecTableWriter.Encode(rows, 0, 0, 0, 0);
         var rewrittenBody = TrRmVariableTableWriter.EncodeBodies([body]);
         var sections = new List<TrRmSection>(index.SectionCount);
@@ -810,6 +981,35 @@ public sealed class TrRmExecutableCompilerTests
                 0x20 => rewrittenBody,
                 _ => bytes.ToArray(),
             }));
+        }
+        return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static byte[] ReplaceBodyConstant(byte[] artifact, int bodyRow,
+        byte[] originalBits, byte[] replacementBits)
+    {
+        Assert.Equal(originalBits.Length, replacementBits.Length);
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount));
+        var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
+        var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
+        for (var row = 1; row <= bodyCount; row++)
+        {
+            bodyRows[row - 1] = bodies.GetRow(row).ToArray();
+        }
+
+        var body = bodyRows[bodyRow - 1].ToArray();
+        var offset = body.AsSpan().IndexOf(originalBits);
+        Assert.True(offset >= 0);
+        replacementBits.CopyTo(body.AsSpan(offset));
+        bodyRows[bodyRow - 1] = body;
+        var rewrittenBodies = TrRmVariableTableWriter.EncodeBodies(bodyRows);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags, out var bytes, out var count);
+            sections.Add(new TrRmSection(kind, flags, (uint)count,
+                kind == 0x20 ? rewrittenBodies : bytes.ToArray()));
         }
         return TrRmArtifactWriter.Encode(sections);
     }

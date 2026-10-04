@@ -406,6 +406,19 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         throw InvalidBody();
                     }
                 }
+                else if (opcode == 0x19)
+                {
+                    var kind = Read(extent, ref cursor, 1);
+                    var left = ReadCount(extent, ref cursor, referenceWidth);
+                    var right = ReadCount(extent, ref cursor, referenceWidth);
+                    Use(left, ordinal);
+                    Use(right, ordinal);
+                    if (kind is < 1 or > 6 || valueTypes[left] != valueTypes[right]
+                        || valueTypes[left] is not (0x14 or 0x15) || valueTypes[result] != 1)
+                    {
+                        throw InvalidBody();
+                    }
+                }
                 else if (opcode == 6)
                 {
                     var typeId = ReadCount(extent, ref cursor, referenceWidth);
@@ -1043,8 +1056,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         {
             1 => bits <= 1,
             3 => bits <= ushort.MaxValue,
-            8 or 0x0D => bits <= uint.MaxValue,
-            9 or 0x0E => true,
+            8 or 0x0D or 0x14 => bits <= uint.MaxValue,
+            9 or 0x0E or 0x15 => true,
             _ => false,
         };
 

@@ -48,6 +48,7 @@ public static partial class TrRmExecutableCompiler
     {
         private readonly BoundFunction _function;
         private readonly BoundProgram _program;
+        private readonly bool _hasFloatingTypes;
         private readonly List<IndexedBlock> _blocks = [];
         private readonly List<IndexedRegion> _regions = [];
         private readonly List<PrimitiveType> _types = [];
@@ -55,10 +56,11 @@ public static partial class TrRmExecutableCompiler
         private IndexedBlock? _current;
         private int[] _slots;
 
-        internal IndexedBuilder(BoundFunction function, BoundProgram program)
+        internal IndexedBuilder(BoundFunction function, BoundProgram program, bool hasFloatingTypes)
         {
             _function = function;
             _program = program;
+            _hasFloatingTypes = hasFloatingTypes;
             _slots = new int[function.Variables.Length];
             _current = NewBlock(0);
             for (var index = 0; index < function.ParameterCount; index++)
@@ -69,7 +71,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         private static byte[] EncodeIndexed(BoundFunction function, List<IndexedBlock> source,
-            List<IndexedRegion> regions, List<PrimitiveType> sourceTypes, BoundProgram program)
+            List<IndexedRegion> regions, List<PrimitiveType> sourceTypes, BoundProgram program,
+            bool hasFloatingTypes)
         {
             var indegree = new int[source.Count];
             foreach (var block in source)
@@ -288,8 +291,9 @@ public static partial class TrRmExecutableCompiler
                 Write(body, (ulong)ordered.Count, width);
                 Write(body, (ulong)sourceTypes.Count, width);
                 Write(body, (ulong)regions.Count, width);
-                Write(body, 6, width);
-                for (var row = 2; row <= 7; row++)
+                var typeCount = hasFloatingTypes ? 8 : 6;
+                Write(body, (ulong)typeCount, width);
+                for (var row = 2; row <= typeCount + 1; row++)
                 {
                     Write(body, (ulong)row, 4);
                 }
@@ -510,6 +514,22 @@ public static partial class TrRmExecutableCompiler
                     target = TypeRow(reinterpret.Type) - 1;
                     break;
                 case BoundBinary binary:
+                    if (IsFloat(binary.Left.Type))
+                    {
+                        (opcode, kind) = binary.Operator switch
+                        {
+                            TokenKind.EqualsEquals => (0x19, 1),
+                            TokenKind.BangEquals => (0x19, 2),
+                            TokenKind.Less => (0x19, 3),
+                            TokenKind.LessEquals => (0x19, 4),
+                            TokenKind.Greater => (0x19, 5),
+                            TokenKind.GreaterEquals => (0x19, 6),
+                            _ => throw Unsupported($"Floating operator {binary.Operator} has no executable TRRM encoding."),
+                        };
+                        left = ReadOperand(binary.Left);
+                        right = ReadOperand(binary.Right);
+                        break;
+                    }
                     if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe
                         || binary.Operator is TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret
                             && binary.Left.Type == PrimitiveType.Bool
@@ -599,7 +619,7 @@ public static partial class TrRmExecutableCompiler
             {
                 bytes.Add(3);
             }
-            if (opcode is 4 or 5 or 0x15)
+            if (opcode is 4 or 5 or 0x15 or 0x19)
             {
                 bytes.Add((byte)kind);
             }
@@ -611,7 +631,7 @@ public static partial class TrRmExecutableCompiler
             {
                 Write(bytes, (ulong)left, referenceWidth);
             }
-            if (opcode is 5 or 0x15)
+            if (opcode is 5 or 0x15 or 0x19)
             {
                 Write(bytes, (ulong)left, referenceWidth);
                 Write(bytes, (ulong)right, referenceWidth);
@@ -1411,7 +1431,7 @@ public static partial class TrRmExecutableCompiler
                     throw Unsupported("An indexed loop requires a reachable header backedge.");
                 }
             }
-            return EncodeIndexed(_function, _blocks, _regions, _types, _program);
+            return EncodeIndexed(_function, _blocks, _regions, _types, _program, _hasFloatingTypes);
         }
     }
 }
