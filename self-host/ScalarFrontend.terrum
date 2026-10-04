@@ -1790,7 +1790,7 @@ mut class ScalarFrontendState
             && _tokens.TryGet(_at + 1, init var callOpen)
             && callOpen.Kind == 46)
         {
-            if (!ParseTreeExpression(0, 1, 0, out var call))
+            if (!ParseTreeExpression(0, 1, 0, init var call))
             {
                 return false;
             }
@@ -1834,7 +1834,7 @@ mut class ScalarFrontendState
             mut int32 rightType = type;
             if (equals.Kind >= 99) { rightType = 1; }
             mut int32 valueType = rightType;
-            if (!ParseTreeExpression(rightType, 1, 0, out var value))
+            if (!ParseTreeExpression(rightType, 1, 0, init var value))
             {
                 return false;
             }
@@ -1876,7 +1876,7 @@ mut class ScalarFrontendState
             || first.Kind == 2 && _tokens.TryGet(_at + 1, init var postfix)
                 && (postfix.Kind == 86 || postfix.Kind == 87))
         {
-            if (!ParseTreeExpression(0, 1, 0, out var update))
+            if (!ParseTreeExpression(0, 1, 0, init var update))
             {
                 return false;
             }
@@ -1890,7 +1890,7 @@ mut class ScalarFrontendState
                 int32 type = TreeWord(update, 1);
                 int32 rightType = compound.Kind >= 99 ? 1 : type;
                 _at = _at + 1;
-                if (!ParseTreeExpression(rightType, 1, 0, out var value)
+                if (!ParseTreeExpression(rightType, 1, 0, init var value)
                     || !ResolveTreeLiteral(value, rightType, false)
                     || semicolon && !Take(52, init var end))
                 {
@@ -2067,7 +2067,7 @@ mut class ScalarFrontendState
             return false;
         }
         if (!Take(64, init var assignment)
-            || !ParseTreeExpression(expected, 1, 0, out var initializer))
+            || !ParseTreeExpression(expected, 1, 0, init var initializer))
         {
             return false;
         }
@@ -2833,7 +2833,7 @@ mut class ScalarFrontendState
             FailAt(1, proofKeyword.Range);
             return false;
         }
-        if (!ParseTreeExpression(5, 1, 0, out var condition)
+        if (!ParseTreeExpression(5, 1, 0, init var condition)
             || TreeWord(condition, 1) != 5
             || !Take(52, init var semicolon))
         {
@@ -2878,7 +2878,7 @@ mut class ScalarFrontendState
     private mut bool ParseTreeCondition(init ref<int32> condition)
     {
         if (!Take(46, init var open)
-            || !ParseTreeExpression(5, 1, 0, out var parsedCondition))
+            || !ParseTreeExpression(5, 1, 0, init var parsedCondition))
         {
             return false;
         }
@@ -2917,7 +2917,7 @@ mut class ScalarFrontendState
         require _tokens.TryGet(_at, init var next);
         if (next.Kind != 52)
         {
-            if (!ParseTreeExpression(5, 1, 0, out var condition))
+            if (!ParseTreeExpression(5, 1, 0, init var condition))
             {
                 return false;
             }
@@ -3295,14 +3295,19 @@ mut class ScalarFrontendState
                 }
                 argument = createdArgument;
             }
-            else if (!ParseTreeExpression(expectedType, 1, depth + 1, out argument))
+            else
             {
-                return false;
-            }
-            else if (TreeWord(argument, 1) != expectedType)
-            {
-                FailTreeType(argument);
-                return false;
+                if (!ParseTreeExpression(expectedType, 1, depth + 1,
+                    init var parsedArgument))
+                {
+                    return false;
+                }
+                argument = parsedArgument;
+                if (TreeWord(argument, 1) != expectedType)
+                {
+                    FailTreeType(argument);
+                    return false;
+                }
             }
             if (ordinal == 0) { first = argument; }
             else if (ordinal == 1) { second = argument; }
@@ -3417,7 +3422,7 @@ mut class ScalarFrontendState
             && unsafeOpening.Kind == 46)
         {
             _at = _at + 2;
-            if (!ParseTreeExpression(expected, 1, depth + 1, out var operand)
+            if (!ParseTreeExpression(expected, 1, depth + 1, init var operand)
                 || !Take(47, init var unsafeClose))
             {
                 return false;
@@ -3478,7 +3483,7 @@ mut class ScalarFrontendState
             _at = _at + 2;
             // Resolve destination context only after the operand's own type is known.
             // A conditional predicate does not establish the type of its result arms.
-            if (!ParseTreeExpression(0, 1, depth + 1, out var operand)
+            if (!ParseTreeExpression(0, 1, depth + 1, init var operand)
                 || (TreeWord(operand, 1) == 0
                     && !ResolveTreeLiteral(operand, target, false))
                 || !Take(47, init var close))
@@ -3497,7 +3502,7 @@ mut class ScalarFrontendState
         if (token.Kind == 46)
         {
             _at = _at + 1;
-            if (!ParseTreeExpression(expected, 1, depth + 1, out var inner)
+            if (!ParseTreeExpression(expected, 1, depth + 1, init var inner)
                 || !Take(47, init var close))
             {
                 return false;
@@ -3656,7 +3661,7 @@ mut class ScalarFrontendState
     }
 
     private mut bool ParseTreeExpression(int32 expected, int32 precedence,
-        int32 depth, out int32 node)
+        int32 depth, init ref<int32> node)
     {
         mut int32 left = 0;
         if (!ParseTreePrefix(expected, depth, init var firstNode))
@@ -3694,7 +3699,7 @@ mut class ScalarFrontendState
             {
                 rightContext = 0;
             }
-            if (!ParseTreeExpression(rightContext, rank + 1, depth + 1, out var right))
+            if (!ParseTreeExpression(rightContext, rank + 1, depth + 1, init var right))
             {
                 return false;
             }
@@ -3763,7 +3768,7 @@ mut class ScalarFrontendState
             _at = _at + 1;
             mut int32 armContext = expected;
             if (armContext == 5) { armContext = 0; }
-            if (!ParseTreeExpression(armContext, 1, depth + 1, out var whenTrue)
+            if (!ParseTreeExpression(armContext, 1, depth + 1, init var whenTrue)
                 || !Take(55, init var colon))
             {
                 return false;
@@ -3771,7 +3776,7 @@ mut class ScalarFrontendState
             int32 trueType = TreeWord(whenTrue, 1);
             mut int32 falseContext = armContext;
             if (falseContext == 0) { falseContext = trueType; }
-            if (!ParseTreeExpression(falseContext, 1, depth + 1, out var whenFalse))
+            if (!ParseTreeExpression(falseContext, 1, depth + 1, init var whenFalse))
             {
                 return false;
             }
@@ -3842,7 +3847,7 @@ mut class ScalarFrontendState
         int32 kind, int32 type, init ref<int32> root)
     {
         if (!Take(kind, init var keyword)
-            || !ParseTreeExpression(type, 1, 0, out var expression))
+            || !ParseTreeExpression(type, 1, 0, init var expression))
         {
             return false;
         }
@@ -3880,7 +3885,7 @@ mut class ScalarFrontendState
             {
                 expressionBody = true;
                 _at = _at + 1;
-                if (ParseTreeExpression(returnType, 1, 0, out var root))
+                if (ParseTreeExpression(returnType, 1, 0, init var root))
                 {
                     if (!ResolveTreeLiteral(root, returnType, false))
                     {
@@ -3934,7 +3939,7 @@ mut class ScalarFrontendState
                     hasCondition = true;
                     _at = _at + 1;
                     if (Take(46, init var openCondition)
-                        && ParseTreeExpression(5, 1, 0, out var predicate))
+                        && ParseTreeExpression(5, 1, 0, init var predicate))
                     {
                         if (TreeWord(predicate, 1) != 5)
                         {
