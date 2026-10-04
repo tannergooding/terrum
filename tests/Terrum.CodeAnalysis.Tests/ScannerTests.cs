@@ -119,6 +119,22 @@ public sealed class ScannerTests
     }
 
     [Fact]
+    public async Task IntegerMagnitudeOverflowBoundariesMatchAcrossRadicesAsync()
+    {
+        string binaryMaximum = "0b" + new string('1', 64);
+        string binaryOverflow = "0b1" + new string('0', 64);
+        string source = string.Join(' ',
+            "18446744073709551615",
+            "18446744073709551616",
+            "0xFFFFFFFFFFFFFFFF",
+            "0x10000000000000000",
+            binaryMaximum,
+            binaryOverflow);
+
+        await CheckScannerAsync(source).ConfigureAwait(true);
+    }
+
+    [Fact]
     public async Task CharacterLiteralsRetainTokenKindsAndDiagnosticParityAsync()
     {
         await CheckScannerAsync("'A' '\\'' '\\u0041' '\\U0001F600' '😀' '' 'ab' '\\q' '\\uD800' 'unterminated\nnext")

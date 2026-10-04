@@ -65,13 +65,14 @@ existing integer-record field for diagnostic fidelity. For example,
 width-suffixed token. This error metadata is not valid target syntax or a type
 selector. The five-word integer record shape is unchanged; component and
 schema identifiers advance to scanner-5/schema-5. The executable numeric
-decoder handles decimal, hexadecimal and
-binary integers with digit separators. The hosted binder separately constructs
-`float32`/`float64` literals; decimal and valid hexadecimal floating tokens
-retain their source spelling in the compiled scanner but produce no integer
-value record. Floating arithmetic/comparisons, typed floating conversions,
-custom literal parsing, registered string targets and `[ConstEval]` remain
-unsupported.
+decoder handles decimal, hexadecimal and binary integers with digit
+separators. It precomputes each token's `uint64` overflow cutoff by radix, so
+digit accumulation does not repeat a division. The hosted binder separately
+constructs `float32`/`float64` literals; decimal and valid hexadecimal
+floating tokens retain their source spelling in the compiled scanner but
+produce no integer value record. Floating arithmetic/comparisons, typed
+floating conversions, custom literal parsing, registered string targets and
+`[ConstEval]` remain unsupported.
 
 Scanner-10/schema-10 appends `DotDot`, `DotDotCaret`, and `QuestionDot` as
 token kinds 104–106 after Scanner-9/schema-9 added `CharacterLiteral` as kind
