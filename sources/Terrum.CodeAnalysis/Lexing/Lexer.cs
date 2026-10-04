@@ -557,9 +557,14 @@ public sealed class Lexer
     private int ReadNumericTag()
     {
         var remaining = _source.Text.AsSpan(_position);
+        if (remaining.IsEmpty || remaining[0] is not ('i' or 'u' or 'f'))
+        {
+            return 0;
+        }
+        var first = remaining[0];
         foreach (var tag in s_numericTags)
         {
-            if (!remaining.StartsWith(tag, StringComparison.Ordinal))
+            if (tag[0] != first || !remaining.StartsWith(tag, StringComparison.Ordinal))
             {
                 continue;
             }
