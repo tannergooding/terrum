@@ -487,16 +487,17 @@ void PublishInteger(int32 tokenIndex, bool overflow, uint64 magnitude, int32 tag
         payload = 0;
     }
 
-    // Each half fits uint32 before converting its bit pattern into an int32 buffer word.
-    uint64 base = 4294967296;
+    // The low half is masked and the shifted high half is already uint32-bounded.
+    uint32 low = uint32(payload & uint64(uint32.MaxValue));
+    uint32 high = uint32(payload >> 32);
     Host.IntegerValues[count * 5 + 1] = tokenIndex;
     Host.IntegerValues[count * 5 + 2] = 0;
     if (overflow)
     {
         Host.IntegerValues[count * 5 + 2] = 1;
     }
-    Host.IntegerValues[count * 5 + 3] = EncodeWord(uint32(payload % base));
-    Host.IntegerValues[count * 5 + 4] = EncodeWord(uint32(payload / base));
+    Host.IntegerValues[count * 5 + 3] = EncodeWord(low);
+    Host.IntegerValues[count * 5 + 4] = EncodeWord(high);
     Host.IntegerValues[count * 5 + 5] = tag;
     Host.IntegerValues[0] = count + 1;
 }
