@@ -1026,11 +1026,7 @@ public static partial class TrRmExecutableCompiler
 
         private static int[] Arguments(int[] slots, int[] visible, int result = 0)
         {
-            var arguments = new List<int>();
-            if (result != 0)
-            {
-                arguments.Add(result);
-            }
+            var argumentCount = result != 0 ? 1 : 0;
             for (var index = 0; index < visible.Length; index++)
             {
                 if (visible[index] != 0)
@@ -1039,10 +1035,24 @@ public static partial class TrRmExecutableCompiler
                     {
                         throw Unsupported("A target-visible scalar local is uninitialized.");
                     }
-                    arguments.Add(slots[index]);
+                    argumentCount++;
                 }
             }
-            return arguments.ToArray();
+
+            var arguments = new int[argumentCount];
+            var argumentIndex = 0;
+            if (result != 0)
+            {
+                arguments[argumentIndex++] = result;
+            }
+            for (var index = 0; index < visible.Length; index++)
+            {
+                if (visible[index] != 0)
+                {
+                    arguments[argumentIndex++] = slots[index];
+                }
+            }
+            return arguments;
         }
 
         private void Jump(IndexedBlock target, int[] slots, int[] visible)
