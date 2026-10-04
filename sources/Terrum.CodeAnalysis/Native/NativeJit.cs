@@ -116,12 +116,14 @@ public static unsafe class NativeJit
                 throw new ArgumentException("Native buffer order does not match the bound program.", nameof(code));
             }
 
+            var bufferData = buffer.Values.Length == 0 ? Span<byte>.Empty : code.Data.AsSpan(expected);
             foreach (var value in buffer.Values)
             {
-                if (BinaryPrimitives.ReadInt32LittleEndian(code.Data.AsSpan(expected, sizeof(int))) != value)
+                if (BinaryPrimitives.ReadInt32LittleEndian(bufferData[..sizeof(int)]) != value)
                 {
                     throw new ArgumentException("Native buffer contents do not match the bound program.", nameof(code));
                 }
+                bufferData = bufferData[sizeof(int)..];
                 expected += sizeof(int);
             }
 
