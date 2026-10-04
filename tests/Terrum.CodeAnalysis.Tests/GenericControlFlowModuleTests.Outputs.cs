@@ -106,6 +106,51 @@ public sealed partial class GenericControlFlowModuleTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CopyOutVarDestinationsPublishForNonBooleanAndVoidCallsAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string providerSource = """
+            public struct Pair {
+                public int64 First;
+                public int64 Second;
+                public Pair(int64 first, int64 second) { First = first; Second = second; }
+            }
+            public int32 Fill(out Pair result) {
+                result = new Pair(20, 22);
+                return 7;
+            }
+            public void FillVoid(out Pair result) {
+                result = new Pair(18, 24);
+            }
+            """;
+        const string consumerSource = """
+            int32 Main() {
+                int32 status = Fill(out var first);
+                FillVoid(out var second);
+                return int32(first.First + first.Second + second.First + second.Second) + status - 7;
+            }
+            """;
+        var providerProgram = Compile(providerSource, policy);
+        var producer = ModuleCompiler.CreateProducer(providerProgram, ["Fill", "FillVoid"]);
+        var consumerProgram = Compile(consumerSource, policy,
+            ModuleCompiler.CreateReference(producer), library: false);
+        var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.Equal(84, NativeJit.Execute(linked, policy));
+        Assert.Equal(84, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+
+        var nativeProducer = NativeModuleCompiler.CreateProducer(providerProgram,
+            ["Fill", "FillVoid"], "CopyOutputProvider", policy);
+        var nativeConsumerProgram = Compile(consumerSource, policy,
+            NativeModuleCompiler.CreateReference(nativeProducer), library: false);
+        var nativeConsumer = NativeModuleCompiler.CreateConsumer(nativeConsumerProgram, nativeProducer, policy);
+        Assert.Equal(84, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ScalarCopySpecializationsPersistPrivatelyAcrossSemanticAndNativeModulesAsync(
         NativeRuntimePolicy policy)
     {

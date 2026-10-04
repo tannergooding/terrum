@@ -26,7 +26,8 @@ internal static class ManagedExportShape
         {
             var parameter = function.Variables[index];
             if (!Value(parameter.Type, structures, 0)
-                || (parameter.IsOut && !parameter.IsInit && function.ReturnType != PrimitiveType.Bool))
+                || (parameter.IsOut && !parameter.IsInit && function.ReturnType != PrimitiveType.Bool
+                    && !CopyStruct(parameter.Type, structures)))
             {
                 return false;
             }
@@ -57,6 +58,12 @@ internal static class ManagedExportShape
     private static bool Scalar(PrimitiveType type) => type is PrimitiveType.Bool or PrimitiveType.Int32
         or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16
         or PrimitiveType.Float32 or PrimitiveType.Float64;
+
+    private static bool CopyStruct(PrimitiveType type, IReadOnlyList<BoundStruct> structures)
+    {
+        var index = (int)type - 100;
+        return index >= 0 && index < structures.Count && !structures[index].IsUnique;
+    }
 
     private static bool Value(PrimitiveType type, IReadOnlyList<BoundStruct> structures, int depth)
     {

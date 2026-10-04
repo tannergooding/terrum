@@ -105,6 +105,43 @@ public sealed class StaticProtocolOutputTests
         Assert.Null(compilation.Program);
     }
 
+    [Fact]
+    public void NonBooleanCopyOutStillRequiresNormalReturnPublication()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Pair {
+                public int64 First;
+                public Pair(int64 first) { First = first; }
+            }
+            int32 Fill(bool publish, out Pair result) {
+                if (publish) { result = new Pair(42); }
+                return 1;
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.Contains(compilation.Diagnostics, error => error.Code == "TRM3016");
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void NonBooleanUniqueOutRemainsUnsupported()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unique struct Owner {
+                public int32 Value;
+                public Owner(int32 value) { Value = value; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            int32 Fill(out Owner result) {
+                result = new Owner(42);
+                return 1;
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.Contains(compilation.Diagnostics, error => error.Code == "TRM3011");
+        Assert.Null(compilation.Program);
+    }
+
     [Theory]
     [InlineData("return result.First;")]
     [InlineData("Pick<Value>(new Value(40), out result); return result.First;")]

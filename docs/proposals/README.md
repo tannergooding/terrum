@@ -25,6 +25,9 @@ approved.
 - [Reference-call metadata](reference-call-metadata.md) records the proposed
   first dependency and caller-safety metadata slice for general cross-call
   references; it does not change the accepted source contracts.
+- [Copy outputs for non-Boolean calls](non-boolean-copy-out.md) recommends a
+  bounded hosted `out` extension using the existing normal-return publication
+  contract; it does not add unique or managed outputs.
 - [Span-backed token cursor](span-backed-token-cursor.md) records the open
   backing, capture, indexing and construction contracts needed for the
   existing zero-copy self-host cursor candidate.

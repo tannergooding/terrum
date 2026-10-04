@@ -1443,9 +1443,11 @@ internal sealed partial class Binder
             }
             if (isOut && returnType != PrimitiveType.Bool
                 && type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
-                    or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64))
+                    or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                && (!IsStruct(type) || IsUnique(type)))
             {
-                Report("TRM3011", "A non-boolean output parameter requires a scalar type.", parameter.Span);
+                Report("TRM3011",
+                    "A non-boolean output parameter requires a scalar or Copy struct type.", parameter.Span);
             }
             if (isInit && type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
                 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)

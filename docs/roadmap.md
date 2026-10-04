@@ -117,6 +117,15 @@ remain limited to handle-free Copy outputs; the bounded scalar projections
 project scalar non-Boolean/void init-ref declarations to the hosted verifier
 and emitter through the current v85 layouts.
 
+Hosted non-Boolean and void `out` declarations and calls also support
+non-unique struct outputs, including `out var` across public semantic and
+native module boundaries when the established Copy export shape permits it.
+The hosted verifier retains the every-normal-return publication rule;
+Boolean `out` keeps conditional publication. Unique outputs and scalar
+frontend projections beyond scalar output types remain unsupported here.
+This is implemented hosted support, not a proposal approval or a general
+`out`/`init ref<T>` migration.
+
 Single-function v85 extends the same bounded self-call
 frontend with source-audited `unsafe(expr)` scopes and caller-unsafe callable
 declarations. Both projection families use only v85; verification and emission
@@ -246,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `TBD` | Support hosted non-Boolean/void Copy-struct `out` outputs through semantic and native modules |
 | `7183c25` | Provisionally persist top-level caller-unsafe contracts and explicit unsafe-block call scopes in semantic modules |
 | `db6fdb5` | Implement a bounded readonly `TokenCursor` over validated snapshots without general stored-view support |
 | `ba2e36e` | Project named scalar `out`/`init ref<T>` arguments through bounded v85 calls |

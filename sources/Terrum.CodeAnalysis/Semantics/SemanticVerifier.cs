@@ -327,10 +327,12 @@ public static partial class SemanticVerifier
                             && !function.IsPrivate && !function.IsInternal)))
                         || (variable.IsOut && (variableIndex >= function.ParameterCount + (function.IsConstructor ? 1 : 0)
                             || (function.ReturnType != PrimitiveType.Bool
-                                && (!variable.IsInit && variable.Type is not (PrimitiveType.Bool
+                                && !variable.IsInit
+                                && variable.Type is not (PrimitiveType.Bool
                                     or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
                                     or PrimitiveType.Int64 or PrimitiveType.UInt64
-                                    or PrimitiveType.Float32 or PrimitiveType.Float64))))))
+                                    or PrimitiveType.Float32 or PrimitiveType.Float64)
+                                && !IsCopyStruct(program, variable.Type)))))
                     {
                         throw Invalid();
                     }
@@ -3670,6 +3672,10 @@ public static partial class SemanticVerifier
         type == PrimitiveType.OwnedInt32Buffer
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length
                 && program.Structures[(int)type - 100].IsUnique);
+
+    private static bool IsCopyStruct(BoundProgram program, PrimitiveType type) =>
+        (int)type >= 100 && (int)type - 100 < program.Structures.Length
+            && !program.Structures[(int)type - 100].IsUnique;
 
     private static void VerifyClassFactory(BoundProgram program, BoundFunction function, int index)
     {

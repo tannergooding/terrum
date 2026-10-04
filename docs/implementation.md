@@ -1721,6 +1721,14 @@ return. Exceptional paths do not publish. This hosted result contract does not
 make the bounded scalar source projections standalone: single-function v81
 and complete-program v82 now carry this contract for scalar `init ref<T>`
 declarations through the same hosted verifier and emitter.
+The distinct `out` mode now also accepts ordinary non-unique struct values
+for non-Boolean and void functions, provided the output is initialized on
+every normal return. Public semantic and native module exports admit these
+outputs only when their existing value-shape checks establish public,
+handle-free Copy layout. Boolean `out` retains conditional publication;
+unique outputs and non-scalar `out` in the bounded scalar frontend remain
+outside this extension. This does not migrate `out` to `init ref<T>` or make
+the scalar frontend standalone.
 Compilation-private `init ref<T>` also supports qualified managed handles.
 The call's checked scratch and exact temporary roots retain the handle until
 successful publication; false and exceptional completion retire the scratch
