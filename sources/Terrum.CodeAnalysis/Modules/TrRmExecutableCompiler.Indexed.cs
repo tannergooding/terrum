@@ -267,9 +267,9 @@ public static partial class TrRmExecutableCompiler
             byte[] EncodeWidth(int width)
             {
                 var sentinel = width == 1 ? byte.MaxValue : width == 2 ? ushort.MaxValue : uint.MaxValue;
-                var offsets = new List<byte>();
+                var offsets = new List<byte>(checked(width * (ordered.Count + 1)));
                 var definitions = new uint[sourceTypes.Count];
-                var terminators = new List<int>();
+                var terminators = new List<int>(ordered.Count);
                 var data = new List<byte>();
                 var overflowedDefinition = false;
                 for (var index = 0; index < width; index++)
@@ -351,11 +351,19 @@ public static partial class TrRmExecutableCompiler
                 {
                     return [];
                 }
-                var body = new List<byte> { (byte)(0x08 | WidthCode(width)) };
+                var typeCount = hasFloatingTypes ? 8 : 6;
+                var bodyCapacity = checked(1 + (4 * width) + (4 * typeCount)
+                    + (regions.Count * (1 + (4 * width)))
+                    + (sourceTypes.Count * (2 * width))
+                    + (starts.Length * width)
+                    + (definitions.Length * width)
+                    + offsets.Count
+                    + (terminators.Count * width)
+                    + data.Count);
+                var body = new List<byte>(bodyCapacity) { (byte)(0x08 | WidthCode(width)) };
                 Write(body, (ulong)ordered.Count, width);
                 Write(body, (ulong)sourceTypes.Count, width);
                 Write(body, (ulong)regions.Count, width);
-                var typeCount = hasFloatingTypes ? 8 : 6;
                 Write(body, (ulong)typeCount, width);
                 for (var row = 2; row <= typeCount + 1; row++)
                 {
