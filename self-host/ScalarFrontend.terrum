@@ -322,9 +322,8 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private mut bool TryReadCharacterScalar(Token token, out int32 scalar)
+    private mut bool TryReadCharacterScalar(Token token, init ref<int32> scalar)
     {
-        scalar = 0;
         int32 start = token.Range.Start;
         int32 end = token.Range.End - 1;
         if (token.Kind != 103 || token.Range.Length < 3
@@ -355,7 +354,7 @@ mut class ScalarFrontendState
                 for (mut int32 index = 0; index < digits; index = index + 1)
                 {
                     if (at >= end
-                        || !TryCharacterHexDigit(Host.Source[at], out var digit))
+                        || !TryCharacterHexDigit(Host.Source[at], init var digit))
                     {
                         return false;
                     }
@@ -396,7 +395,7 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private bool TryCharacterHexDigit(char16 character, out int32 digit)
+    private bool TryCharacterHexDigit(char16 character, init ref<int32> digit)
     {
         if (character >= char16(48) && character <= char16(57))
         {
@@ -2950,11 +2949,14 @@ mut class ScalarFrontendState
             mut int32 high = 0;
             if (literal.Kind == 103)
             {
-                if (type != 6 || !TryReadCharacterScalar(literal, out low) || low > 65535)
+                if (type != 6
+                    || !TryReadCharacterScalar(literal, init var decodedScalar)
+                    || decodedScalar > 65535)
                 {
                     FailAt(2, literal.Range);
                     return false;
                 }
+                low = decodedScalar;
             }
             else if (literal.Kind != 3
                 || !TryReadMagnitude(literal, tokenIndex, type, minimum,
@@ -3545,12 +3547,16 @@ mut class ScalarFrontendState
         {
             mut int32 type = expected;
             mut int32 scalar = 0;
-            if (type != 0 && type != 5
-                && (type != 6 || !TryReadCharacterScalar(token, out scalar)
-                    || scalar > 65535))
+            if (type != 0 && type != 5)
             {
-                FailAt(2, token.Range);
-                return false;
+                if (type != 6
+                    || !TryReadCharacterScalar(token, init var decodedScalar)
+                    || decodedScalar > 65535)
+                {
+                    FailAt(2, token.Range);
+                    return false;
+                }
+                scalar = decodedScalar;
             }
             if (type == 5) { type = 0; }
             return AddTreeNode(3, type, token.Range.Start, token.Range.End,
