@@ -261,12 +261,26 @@ public static partial class TrRmExecutableCompiler
                             Write(data, (ulong)remap[parameter], width);
                         }
                     }
-                    var orderedLiveIns = liveIns[block.Id - 1].ToArray();
-                    Array.Sort(orderedLiveIns);
-                    WriteList(data, orderedLiveIns, width);
-                    var orderedLiveOuts = liveOuts[block.Id - 1].ToArray();
-                    Array.Sort(orderedLiveOuts);
-                    WriteList(data, orderedLiveOuts, width);
+                    var liveInSet = liveIns[block.Id - 1];
+                    if (liveInSet.Count != 0)
+                    {
+                        var orderedLiveIns = liveInSet.ToArray();
+                        if (orderedLiveIns.Length > 1)
+                        {
+                            Array.Sort(orderedLiveIns);
+                        }
+                        WriteList(data, orderedLiveIns, width);
+                    }
+                    var liveOutSet = liveOuts[block.Id - 1];
+                    if (liveOutSet.Count != 0)
+                    {
+                        var orderedLiveOuts = liveOutSet.ToArray();
+                        if (orderedLiveOuts.Length > 1)
+                        {
+                            Array.Sort(orderedLiveOuts);
+                        }
+                        WriteList(data, orderedLiveOuts, width);
+                    }
                     if (lastUses[block.Id - 1].Count != 0)
                     {
                         Write(data, (ulong)lastUses[block.Id - 1].Count, width);
@@ -415,10 +429,6 @@ public static partial class TrRmExecutableCompiler
 
         private static void WriteList(List<byte> bytes, int[] values, int width)
         {
-            if (values.Length == 0)
-            {
-                return;
-            }
             Write(bytes, (ulong)values.Length, width);
             foreach (var value in values)
             {
