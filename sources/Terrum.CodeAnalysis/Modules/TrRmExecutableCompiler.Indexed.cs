@@ -495,6 +495,7 @@ public static partial class TrRmExecutableCompiler
                         TokenKind.Bang => (4, 1),
                         TokenKind.Tilde => (4, 2),
                         TokenKind.Plus => (4, 3),
+                        TokenKind.Minus when unary.Type is PrimitiveType.Float32 or PrimitiveType.Float64 => (0x1C, 0),
                         TokenKind.Minus when unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64 => (0x17, 0),
                         _ => throw Unsupported($"Unary operator {unary.Operator} has no executable TRRM encoding."),
                     };
@@ -644,7 +645,7 @@ public static partial class TrRmExecutableCompiler
             {
                 Write(bytes, bits, dataWidth);
             }
-            if (opcode is 4 or 6 or 0x16 or 0x17 or 0x1A or 0x1B)
+            if (opcode is 4 or 6 or 0x16 or 0x17 or 0x1A or 0x1B or 0x1C)
             {
                 Write(bytes, (ulong)left, referenceWidth);
             }

@@ -58,6 +58,7 @@ public static partial class TrRmExecutableCompiler
                         TokenKind.Bang => (4, 1),
                         TokenKind.Tilde => (4, 2),
                         TokenKind.Plus => (4, 3),
+                        TokenKind.Minus when unary.Type is PrimitiveType.Float32 or PrimitiveType.Float64 => (0x1C, 0),
                         TokenKind.Minus when unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64 => (0x17, 0),
                         _ => throw Unsupported($"Unary operator {unary.Operator} has no executable TRRM encoding."),
                     };
@@ -159,7 +160,7 @@ public static partial class TrRmExecutableCompiler
             {
                 Write(instructions, data, dataWidth);
             }
-            if (opcode is 4 or 0x16 or 0x17 or 0x1A or 0x1B)
+            if (opcode is 4 or 0x16 or 0x17 or 0x1A or 0x1B or 0x1C)
             {
                 Write(instructions, (ulong)left, referenceWidth);
             }
@@ -268,7 +269,7 @@ public static partial class TrRmExecutableCompiler
         {
             var (opcode, width, countWidth, dataWidth) = ReadInstruction(body, ref position);
             if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 0x0A
-                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18 or 0x19 or 0x1A or 0x1B))
+                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18 or 0x19 or 0x1A or 0x1B or 0x1C))
             {
                 throw Invalid($"Operation 0x{opcode:X2} is not executable.");
             }
@@ -292,7 +293,7 @@ public static partial class TrRmExecutableCompiler
             var policy = opcode == 6 ? ReadByte(body, ref position) : (byte)0;
             var kind = opcode is 4 or 5 or 0x15 or 0x19 ? ReadByte(body, ref position) : (byte)0;
             var bits = opcode is 1 or 2 ? ReadBits(body, ref position, dataWidth) : 0;
-            var left = opcode is 3 or 4 or 6 or 7 or 8 or 0x0A or 0x16 or 0x17 or 5 or 0x15 or 0x18 or 0x19 or 0x1A or 0x1B
+            var left = opcode is 3 or 4 or 6 or 7 or 8 or 0x0A or 0x16 or 0x17 or 5 or 0x15 or 0x18 or 0x19 or 0x1A or 0x1B or 0x1C
                 ? ReadInt(body, ref position, width) : 0;
             var right = opcode is 5 or 7 or 0x15 or 0x18 or 0x19 ? ReadInt(body, ref position, width) : 0;
             var third = opcode == 7 ? ReadInt(body, ref position, width) : 0;
@@ -510,6 +511,15 @@ public static partial class TrRmExecutableCompiler
             else if (opcode == 0x17)
             {
                 var operand = Operand(left);
+                expression = new BoundUnary(TokenKind.Minus, operand, operand.Type, default);
+            }
+            else if (opcode == 0x1C)
+            {
+                var operand = Operand(left);
+                if (!IsFloat(operand.Type))
+                {
+                    throw Invalid("FloatNegate requires a float32 or float64 operand.");
+                }
                 expression = new BoundUnary(TokenKind.Minus, operand, operand.Type, default);
             }
             else if (opcode == 4)

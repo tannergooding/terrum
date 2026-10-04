@@ -61,7 +61,8 @@ four fixed-width integer types are provisionally implemented under separate
 unapproved [comparison](proposals/floating-trrm-comparisons.md),
 [float-format conversion](proposals/floating-trrm-format-conversions.md) and
 [integer-to-floating conversion](proposals/integer-to-floating-trrm-conversions.md)
-proposals; they are not part of the approved `(1, 0)` Body profile.
+and [floating-negation](proposals/floating-trrm-negation.md) proposals; these
+are not part of the approved `(1, 0)` Body profile.
 
 The bounded Terrum-authored scalar source frontend supports v85 complete
 global-function snapshots and source-order scalar call targets, including

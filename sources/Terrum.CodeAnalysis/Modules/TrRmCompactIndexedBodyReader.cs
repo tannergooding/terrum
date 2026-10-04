@@ -389,6 +389,16 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         throw InvalidBody();
                     }
                 }
+                else if (opcode == 0x1C)
+                {
+                    var source = ReadCount(extent, ref cursor, referenceWidth);
+                    Use(source, ordinal);
+                    if (valueTypes[source] != valueTypes[result]
+                        || valueTypes[source] is not (0x14 or 0x15))
+                    {
+                        throw InvalidBody();
+                    }
+                }
                 else if (opcode == 5)
                 {
                     var kind = Read(extent, ref cursor, 1);

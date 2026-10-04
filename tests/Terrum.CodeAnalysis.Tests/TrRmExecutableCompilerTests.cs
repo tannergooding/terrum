@@ -320,6 +320,105 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Fact]
+    public void FloatingNegationPreservesPayloadBitsThroughLinearAndIndexedBodies()
+    {
+        const string source = """
+            public float32 Negate32(float32 value) { return -value; }
+            public float64 Negate64(float64 value) { return -value; }
+            public float32 Negate32If(float32 value) {
+                if (value == 0.0) { return -value; }
+                return -1.0;
+            }
+            public float64 Negate64If(float64 value) {
+                if (value == 0.0) { return -value; }
+                return -1.0;
+            }
+            """;
+        var original = Compile(source, true);
+        var artifact = TrRmExecutableCompiler.Emit(original, "float-negation");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        string[] names = ["Negate32", "Negate64", "Negate32If", "Negate64If"];
+        var images = new[]
+        {
+            NativeEmitter.EmitLibrary(original, names, NativeRuntimePolicy.FailFast),
+            NativeEmitter.EmitLibrary(loaded, names, NativeRuntimePolicy.FailFast),
+        };
+        var paths = new string[images.Length];
+        var handles = new IntPtr[images.Length];
+        try
+        {
+            for (var index = 0; index < images.Length; index++)
+            {
+                paths[index] = Path.Combine(Directory.GetCurrentDirectory(),
+                    $"trrm-float-negation-{Guid.NewGuid():N}-{index}.dll");
+                File.WriteAllBytes(paths[index], images[index]);
+                handles[index] = NativeLibrary.Load(paths[index]);
+            }
+
+            foreach (var handle in handles)
+            {
+                var negate32 = Marshal.GetDelegateForFunctionPointer<Float32Unary>(
+                    NativeLibrary.GetExport(handle, "Negate32"));
+                var negate64 = Marshal.GetDelegateForFunctionPointer<Float64Unary>(
+                    NativeLibrary.GetExport(handle, "Negate64"));
+                var negate32If = Marshal.GetDelegateForFunctionPointer<Float32Unary>(
+                    NativeLibrary.GetExport(handle, "Negate32If"));
+                var negate64If = Marshal.GetDelegateForFunctionPointer<Float64Unary>(
+                    NativeLibrary.GetExport(handle, "Negate64If"));
+
+                Assert.Equal(unchecked((int)0x80000000), negate32(0));
+                Assert.Equal(0, negate32(unchecked((int)0x80000000)));
+                Assert.Equal(unchecked((int)0xFF800000), negate32(0x7F800000));
+                Assert.Equal(0x7F800000, negate32(unchecked((int)0xFF800000)));
+                Assert.Equal(unchecked((int)0xFFC12345), negate32(unchecked((int)0x7FC12345)));
+                Assert.Equal(unchecked((int)0x7FC54321), negate32(unchecked((int)0xFFC54321)));
+                Assert.Equal(long.MinValue, negate64(0));
+                Assert.Equal(0L, negate64(long.MinValue));
+                Assert.Equal(unchecked((long)0xFFF0000000000000UL),
+                    negate64(unchecked((long)0x7FF0000000000000UL)));
+                Assert.Equal(0x7FF0000000000000L,
+                    negate64(unchecked((long)0xFFF0000000000000UL)));
+                Assert.Equal(unchecked((long)0xFFF8123456789ABCUL),
+                    negate64(unchecked((long)0x7FF8123456789ABCUL)));
+                Assert.Equal(unchecked((long)0x7FF8ABCDEF012345UL),
+                    negate64(unchecked((long)0xFFF8ABCDEF012345UL)));
+                Assert.Equal(unchecked((int)0x80000000), negate32If(0));
+                Assert.Equal(unchecked((int)0xBF800000), negate32If(0x3F800000));
+                Assert.Equal(long.MinValue, negate64If(0));
+                Assert.Equal(unchecked((long)0xBFF0000000000000UL),
+                    negate64If(0x3FF0000000000000L));
+            }
+        }
+        finally
+        {
+            foreach (var handle in handles)
+            {
+                if (handle != IntPtr.Zero)
+                {
+                    NativeLibrary.Free(handle);
+                }
+            }
+            foreach (var path in paths)
+            {
+                if (path is not null)
+                {
+                    File.Delete(path);
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void FloatNegateRejectsIntegerOperands()
+    {
+        const string source = "public int32 Negate(int32 value) { return -value; }";
+        var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-float-negate");
+        var malformed = ReplaceBodyOperationByte(artifact, 1, 0x17, 0, 0x1C);
+
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
+    [Fact]
     public void LibraryPreservesScalarSignaturesVisibilityAndExportIdentity()
     {
         var source = """
@@ -506,6 +605,10 @@ public sealed class TrRmExecutableCompilerTests
     private delegate long Float32ToFloat64(int value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Float64ToFloat32(long value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Float32Unary(int value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Float64Unary(long value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate void VoidAction();
 

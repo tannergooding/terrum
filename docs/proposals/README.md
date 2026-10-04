@@ -51,6 +51,9 @@ approved.
 - [Integer-to-floating conversions in executable TRRM](integer-to-floating-trrm-conversions.md)
   recommends a distinct opcode for the eight accepted fixed-width
   integer-to-floating conversion pairs.
+- [Floating negation in executable TRRM](floating-trrm-negation.md)
+  recommends a total sign-bit operation that preserves the remaining payload
+  bits without defining floating arithmetic NaN encodings.
 
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,
