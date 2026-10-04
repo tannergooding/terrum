@@ -456,43 +456,54 @@ public static partial class TrRmExecutableCompiler
                     + offsets.Count
                     + (terminators.Count * width)
                     + data.Count);
-                var body = new List<byte>(bodyCapacity) { (byte)(0x08 | WidthCode(width)) };
-                Write(body, (ulong)ordered.Count, width);
-                Write(body, (ulong)sourceTypes.Count, width);
-                Write(body, (ulong)regions.Count, width);
-                Write(body, (ulong)typeCount, width);
+                var body = new byte[bodyCapacity];
+                var bodyPosition = 0;
+                var destination = body.AsSpan();
+                destination[bodyPosition++] = (byte)(0x08 | WidthCode(width));
+                WriteToSpan(destination, ref bodyPosition, (ulong)ordered.Count, width);
+                WriteToSpan(destination, ref bodyPosition, (ulong)sourceTypes.Count, width);
+                WriteToSpan(destination, ref bodyPosition, (ulong)regions.Count, width);
+                WriteToSpan(destination, ref bodyPosition, (ulong)typeCount, width);
                 for (var row = 2; row <= typeCount + 1; row++)
                 {
-                    Write(body, (ulong)row, 4);
+                    WriteToSpan(destination, ref bodyPosition, (ulong)row, 4);
                 }
                 foreach (var region in regions)
                 {
-                    body.Add(1);
-                    Write(body, (ulong)region.Parent, width);
-                    Write(body, (ulong)region.Header.Id, width);
-                    Write(body, (ulong)(region.Exit ?? throw Unsupported("Loop exit is missing.")).Id, width);
-                    Write(body, 0, width);
+                    destination[bodyPosition++] = 1;
+                    WriteToSpan(destination, ref bodyPosition, (ulong)region.Parent, width);
+                    WriteToSpan(destination, ref bodyPosition, (ulong)region.Header.Id, width);
+                    WriteToSpan(destination, ref bodyPosition,
+                        (ulong)(region.Exit ?? throw Unsupported("Loop exit is missing.")).Id, width);
+                    WriteToSpan(destination, ref bodyPosition, 0, width);
                 }
                 for (var id = 1; id < types.Length; id++)
                 {
-                    Write(body, (ulong)(TypeRow(types[id]) - 1), width);
-                    Write(body, (ulong)useCounts[id], width);
+                    WriteToSpan(destination, ref bodyPosition, (ulong)(TypeRow(types[id]) - 1), width);
+                    WriteToSpan(destination, ref bodyPosition, (ulong)useCounts[id], width);
                 }
                 foreach (var start in starts)
                 {
-                    Write(body, (ulong)start, width);
+                    WriteToSpan(destination, ref bodyPosition, (ulong)start, width);
                 }
                 foreach (var definition in definitions)
                 {
-                    Write(body, definition, width);
+                    WriteToSpan(destination, ref bodyPosition, definition, width);
                 }
-                body.AddRange(offsets);
+                offsets.CopyTo(body, bodyPosition);
+                bodyPosition += offsets.Count;
                 foreach (var terminator in terminators)
                 {
-                    Write(body, (ulong)terminator, width);
+                    WriteToSpan(destination, ref bodyPosition, (ulong)terminator, width);
                 }
-                body.AddRange(data);
-                return body.ToArray();
+                data.CopyTo(body, bodyPosition);
+                bodyPosition += data.Count;
+                if (bodyPosition != body.Length)
+                {
+                    throw new InvalidOperationException("Indexed TRRM Body capacity did not match its encoded length.");
+                }
+
+                return body;
             }
 
             for (var width = 1; width <= 4; width *= 2)
