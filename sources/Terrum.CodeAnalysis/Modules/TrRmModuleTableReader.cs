@@ -181,7 +181,7 @@ public readonly ref struct TrRmModuleTableReader
     public bool TryFindModule(string identity, out int row)
     {
         ArgumentNullException.ThrowIfNull(identity);
-        if (identity.Length == 0 || identity.Contains('\0') || !IsWellFormed(identity))
+        if (identity.Length == 0 || !IsValidIdentity(identity))
         {
             throw new ArgumentException("A module identity must be nonempty, NUL-free scalar text.", nameof(identity));
         }
@@ -206,12 +206,18 @@ public readonly ref struct TrRmModuleTableReader
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
 
-    private static bool IsWellFormed(string value)
+    private static bool IsValidIdentity(string value)
     {
         var position = 0;
         while (position < value.Length)
         {
-            if (!char.IsSurrogate(value[position]))
+            var unit = value[position];
+            if (unit == '\0')
+            {
+                return false;
+            }
+
+            if (!char.IsSurrogate(unit))
             {
                 position++;
                 continue;
