@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `51ce7d0` | Index graph package dependency and type-origin owner lookups |
 | `9392340` | Fingerprint duplicate graph catalog candidates before byte comparison |
 | `a548580` | Reduce repeated graph-origin scans and per-type allocations |
 | `6239fcc` | Index graph cleanup validation lookups to avoid repeated function scans |
