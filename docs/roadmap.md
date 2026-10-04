@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f9f7729` | Exercise non-Boolean/void Copy outputs through managed native graph exports |
 | `3f7f4ed` | Cover compatible native provider replacement with reordered type declarations |
 | `bc0fe0a` | Support hosted non-Boolean/void Copy-struct `out` outputs through semantic and native modules |
 | `7183c25` | Provisionally persist top-level caller-unsafe contracts and explicit unsafe-block call scopes in semantic modules |
