@@ -168,13 +168,11 @@ public static partial class TrRmExecutableCompiler
                 }
             }
 
-            var lastUses = new SortedDictionary<int, int>[ordered.Count];
-            var liveIns = new HashSet<int>[ordered.Count];
+            var lastUses = new SortedDictionary<int, int>?[ordered.Count];
+            var liveIns = new HashSet<int>?[ordered.Count];
             for (var b = 0; b < ordered.Count; b++)
             {
                 var block = ordered[b];
-                lastUses[b] = new SortedDictionary<int, int>();
-                liveIns[b] = [];
                 void Use(int id, int ordinal)
                 {
                     if (id <= 0)
@@ -182,10 +180,10 @@ public static partial class TrRmExecutableCompiler
                         return;
                     }
                     var mapped = remap[id];
-                    lastUses[b][mapped] = ordinal;
+                    (lastUses[b] ??= new SortedDictionary<int, int>())[mapped] = ordinal;
                     if (owner[mapped] != block.Id)
                     {
-                        liveIns[b].Add(mapped);
+                        (liveIns[b] ??= new HashSet<int>()).Add(mapped);
                     }
                 }
                 var operationOrdinal = 0;
@@ -211,11 +209,7 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
             }
-            var liveOuts = new HashSet<int>[ordered.Count];
-            for (var block = 0; block < ordered.Count; block++)
-            {
-                liveOuts[block] = [];
-            }
+            var liveOuts = new HashSet<int>?[ordered.Count];
             if (regions.Count == 0)
             {
                 // Without loop headers, ordering includes every edge, so successors are already final.
@@ -224,25 +218,34 @@ public static partial class TrRmExecutableCompiler
                     var block = ordered[b];
                     if (block.True is { } trueEdge)
                     {
-                        liveOuts[b].UnionWith(liveIns[trueEdge.Target.Id - 1]);
+                        if (liveIns[trueEdge.Target.Id - 1] is HashSet<int> targetLiveIn)
+                        {
+                            (liveOuts[b] ??= new HashSet<int>()).UnionWith(targetLiveIn);
+                        }
                         foreach (var argument in trueEdge.Arguments)
                         {
-                            liveOuts[b].Add(remap[argument]);
+                            (liveOuts[b] ??= new HashSet<int>()).Add(remap[argument]);
                         }
                     }
                     if (block.False is { } falseEdge)
                     {
-                        liveOuts[b].UnionWith(liveIns[falseEdge.Target.Id - 1]);
+                        if (liveIns[falseEdge.Target.Id - 1] is HashSet<int> targetLiveIn)
+                        {
+                            (liveOuts[b] ??= new HashSet<int>()).UnionWith(targetLiveIn);
+                        }
                         foreach (var argument in falseEdge.Arguments)
                         {
-                            liveOuts[b].Add(remap[argument]);
+                            (liveOuts[b] ??= new HashSet<int>()).Add(remap[argument]);
                         }
                     }
-                    foreach (var id in liveOuts[b])
+                    if (liveOuts[b] is HashSet<int> liveOut)
                     {
-                        if (owner[id] != block.Id)
+                        foreach (var id in liveOut)
                         {
-                            liveIns[b].Add(id);
+                            if (owner[id] != block.Id)
+                            {
+                                (liveIns[b] ??= new HashSet<int>()).Add(id);
+                            }
                         }
                     }
                 }
@@ -253,9 +256,12 @@ public static partial class TrRmExecutableCompiler
                 var seeds = new List<int>?[types.Length];
                 for (var block = 0; block < ordered.Count; block++)
                 {
-                    foreach (var id in liveIns[block])
+                    if (liveIns[block] is HashSet<int> liveIn)
                     {
-                        (seeds[id] ??= []).Add(block);
+                        foreach (var id in liveIn)
+                        {
+                            (seeds[id] ??= []).Add(block);
+                        }
                     }
                 }
                 for (var b = 0; b < ordered.Count; b++)
@@ -266,7 +272,7 @@ public static partial class TrRmExecutableCompiler
                         predecessorCounts[edge.Target.Id - 1]++;
                         foreach (var argument in edge.Arguments)
                         {
-                            liveOuts[b].Add(remap[argument]);
+                            (liveOuts[b] ??= new HashSet<int>()).Add(remap[argument]);
                         }
                     }
                     if (block.True is { } trueEdge)
@@ -324,10 +330,15 @@ public static partial class TrRmExecutableCompiler
                         for (var index = predecessorStarts[b]; index < predecessorStarts[b + 1]; index++)
                         {
                             var predecessor = predecessors[index];
-                            liveOuts[predecessor].Add(id);
-                            if (owner[id] != predecessor + 1 && liveIns[predecessor].Add(id))
+                            (liveOuts[predecessor] ??= new HashSet<int>()).Add(id);
+                            if (owner[id] != predecessor + 1)
                             {
-                                pendingBlocks[pendingCount++] = predecessor;
+                                var predecessorLiveIn = liveIns[predecessor]
+                                    ??= new HashSet<int>();
+                                if (predecessorLiveIn.Add(id))
+                                {
+                                    pendingBlocks[pendingCount++] = predecessor;
+                                }
                             }
                         }
                     }
@@ -336,9 +347,12 @@ public static partial class TrRmExecutableCompiler
             var useCounts = new int[types.Length];
             foreach (var uses in lastUses)
             {
-                foreach (var id in uses.Keys)
+                if (uses is not null)
                 {
-                    useCounts[id]++;
+                    foreach (var id in uses.Keys)
+                    {
+                        useCounts[id]++;
+                    }
                 }
             }
 
@@ -357,11 +371,14 @@ public static partial class TrRmExecutableCompiler
                 foreach (var block in ordered)
                 {
                     var blockStart = data.Count;
+                    var blockLiveIns = liveIns[block.Id - 1];
+                    var blockLiveOuts = liveOuts[block.Id - 1];
+                    var blockLastUses = lastUses[block.Id - 1];
                     var presence = (block.Region != 0 ? 1 : 0)
                         | (block.Parameters.Count != 0 ? 2 : 0)
-                        | (liveIns[block.Id - 1].Count != 0 ? 4 : 0)
-                        | (liveOuts[block.Id - 1].Count != 0 ? 8 : 0)
-                        | (lastUses[block.Id - 1].Count != 0 ? 16 : 0);
+                        | (blockLiveIns is { Count: > 0 } ? 4 : 0)
+                        | (blockLiveOuts is { Count: > 0 } ? 8 : 0)
+                        | (blockLastUses is { Count: > 0 } ? 16 : 0);
                     data.Add((byte)presence);
                     if (block.Region != 0)
                     {
@@ -375,8 +392,7 @@ public static partial class TrRmExecutableCompiler
                             Write(data, (ulong)remap[parameter], width);
                         }
                     }
-                    var liveInSet = liveIns[block.Id - 1];
-                    if (liveInSet.Count != 0)
+                    if (blockLiveIns is { Count: > 0 } liveInSet)
                     {
                         var orderedLiveIns = liveInSet.ToArray();
                         if (orderedLiveIns.Length > 1)
@@ -385,8 +401,7 @@ public static partial class TrRmExecutableCompiler
                         }
                         WriteList(data, orderedLiveIns, width);
                     }
-                    var liveOutSet = liveOuts[block.Id - 1];
-                    if (liveOutSet.Count != 0)
+                    if (blockLiveOuts is { Count: > 0 } liveOutSet)
                     {
                         var orderedLiveOuts = liveOutSet.ToArray();
                         if (orderedLiveOuts.Length > 1)
@@ -395,10 +410,10 @@ public static partial class TrRmExecutableCompiler
                         }
                         WriteList(data, orderedLiveOuts, width);
                     }
-                    if (lastUses[block.Id - 1].Count != 0)
+                    if (blockLastUses is { Count: > 0 } blockLastUseSet)
                     {
-                        Write(data, (ulong)lastUses[block.Id - 1].Count, width);
-                        foreach (var (value, ordinal) in lastUses[block.Id - 1])
+                        Write(data, (ulong)blockLastUseSet.Count, width);
+                        foreach (var (value, ordinal) in blockLastUseSet)
                         {
                             Write(data, (ulong)value, width);
                             Write(data, (ulong)ordinal, width);
