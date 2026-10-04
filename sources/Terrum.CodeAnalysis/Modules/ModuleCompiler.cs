@@ -16,6 +16,7 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <summary>A bounded semantic module artifact; linking never reads source text.</summary>
 public static partial class ModuleCompiler
 {
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
     private const int Version = 54;
     private const int MaximumBytes = 4 * 1024 * 1024;
@@ -1735,7 +1736,7 @@ public static partial class ModuleCompiler
         try
         {
             using var stream = new MemoryStream(bytes, writable: false);
-            using var reader = new BinaryReader(stream, new UTF8Encoding(false, true), leaveOpen: true);
+            using var reader = new BinaryReader(stream, StrictUtf8, leaveOpen: true);
             var (policy, profile) = ReadModuleHeader(reader, expectedConsumer);
             var entry = reader.ReadInt32();
             var (structures, structureNames) = ReadStructures(reader);
@@ -2858,7 +2859,7 @@ public static partial class ModuleCompiler
     }
     private static void PutString(BinaryWriter writer, string value)
     {
-        var bytes = new UTF8Encoding(false, true).GetBytes(value);
+        var bytes = StrictUtf8.GetBytes(value);
         if (bytes.Length > MaximumStringBytes)
         {
             throw new ModuleFormatException("Module string exceeds limits.");
@@ -2874,7 +2875,7 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("Truncated module string.");
         }
-        return new UTF8Encoding(false, true).GetString(bytes);
+        return StrictUtf8.GetString(bytes);
     }
 
     private sealed record Module(bool Consumer, int EntryPoint, ImmutableArray<BoundStruct> Structures, ImmutableArray<ModuleFunction> Functions)

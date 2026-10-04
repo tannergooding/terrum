@@ -342,7 +342,7 @@ public static partial class ModuleCompiler
         try
         {
             using var stream = new MemoryStream(bytes, writable: false);
-            using var reader = new BinaryReader(stream, new UTF8Encoding(false, true), leaveOpen: true);
+            using var reader = new BinaryReader(stream, StrictUtf8, leaveOpen: true);
             var (policy, profile) = ReadModuleHeader(reader, expectedConsumer: true);
             if (reader.ReadInt32() != -1)
             {
