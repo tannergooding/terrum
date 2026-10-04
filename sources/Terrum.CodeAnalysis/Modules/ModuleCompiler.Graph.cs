@@ -125,11 +125,13 @@ public static partial class ModuleCompiler
         var required = RequiredStructures(program.Functions.Select(static item =>
             item.IsExternal ? Declaration(item) : item), program.Structures);
         var structures = SelectStructures(program.Structures, required);
+        var dependencyTypes = dependencies.Structures.ToDictionary(static item => item.Name,
+            StringComparer.Ordinal);
         var importedTypes = ImmutableArray.CreateBuilder<string>();
+        var importedTypeNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var structure in structures)
         {
-            var actual = dependencies.Structures.FirstOrDefault(item => item.Name == structure.Name);
-            if (actual is not null)
+            if (dependencyTypes.TryGetValue(structure.Name, out var actual))
             {
                 if (structure.IsPrivate || structure.IsInternal
                     || !SameStructure(structure, actual, structures, dependencies.Structures))
@@ -137,6 +139,7 @@ public static partial class ModuleCompiler
                     throw new ModuleContractException($"Incompatible imported value layout '{structure.Name}'.");
                 }
                 importedTypes.Add(structure.Name);
+                _ = importedTypeNames.Add(structure.Name);
             }
         }
         var publicTypes = RequiredStructures(program.Functions.Where(item => names.Contains(item.Name))
@@ -144,7 +147,7 @@ public static partial class ModuleCompiler
         foreach (var structure in structures)
         {
             if (publicTypes.Contains(structure.Name) && structure.CleanupMethod is string cleanup
-                && !importedTypes.Contains(structure.Name) && !names.Contains(cleanup))
+                && !importedTypeNames.Contains(structure.Name) && !names.Contains(cleanup))
             {
                 throw new ModuleContractException($"Graph-owned type requires exported cleanup '{cleanup}'.");
             }
@@ -196,11 +199,12 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Graph export is missing from its semantic library.");
         }
         var required = RequiredStructures(declarations, module.Structures);
+        var importedTypes = module.ImportedStructures.ToHashSet(StringComparer.Ordinal);
         foreach (var structure in module.Structures)
         {
             if (required.Contains(structure.Name) && structure.CleanupMethod is string cleanup
                 && !names.Contains(cleanup)
-                && (!allowImportedCleanup || !module.ImportedStructures.Contains(structure.Name)))
+                && (!allowImportedCleanup || !importedTypes.Contains(structure.Name)))
             {
                 throw new ModuleContractException($"Graph export requires cleanup '{cleanup}'.");
             }
@@ -217,10 +221,12 @@ public static partial class ModuleCompiler
     {
         var module = ReadGraphLibrary(contract);
         _ = CreateGraphReference(contract, exports, allowImportedCleanup);
-        ValidateGraphImports(module, dependencies);
+        var dependencyFunctions = dependencies.Functions.ToDictionary(static item => item.Name,
+            StringComparer.Ordinal);
+        ValidateGraphImports(module, dependencies, dependencyFunctions);
         if (HasPrivateManagedState(module) && module.Functions.Any(item => item.Import
-            && (!dependencies.Functions.Any(function => function.Name == item.Name
-                && ManagedExportShape.Supported(function, dependencies.Structures)))))
+            && (!dependencyFunctions.TryGetValue(item.Name, out var function)
+                || !ManagedExportShape.Supported(function, dependencies.Structures))))
         {
             throw new ModuleContractException("Managed graph import crosses a non-Copy boundary.");
         }
@@ -283,16 +289,18 @@ public static partial class ModuleCompiler
         };
     }
 
-    private static void ValidateGraphImports(Module module, CompilationReference dependencies)
+    private static void ValidateGraphImports(Module module, CompilationReference dependencies,
+        IReadOnlyDictionary<string, BoundFunction> dependencyFunctions)
     {
         if (module.RuntimePolicy != dependencies.RuntimePolicy)
         {
             throw new ModuleContractException("Graph library and dependency runtime policies differ.");
         }
-        var functions = dependencies.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
+        var dependencyTypes = dependencies.Structures.ToDictionary(static item => item.Name,
+            StringComparer.Ordinal);
         foreach (var item in module.Functions.Where(static item => item.Import))
         {
-            if (!functions.TryGetValue(item.Name, out var actual)
+            if (!dependencyFunctions.TryGetValue(item.Name, out var actual)
                 || !CompatibleContract(item.Contract, Contract(actual, dependencies.Structures))
                 || item.HasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, dependencies.Structures))
             {
@@ -302,14 +310,14 @@ public static partial class ModuleCompiler
         var imported = module.ImportedStructures.ToHashSet(StringComparer.Ordinal);
         foreach (var structure in module.Structures)
         {
-            var actual = dependencies.Structures.FirstOrDefault(item => item.Name == structure.Name);
-            if (actual is not null && (!imported.Contains(structure.Name)
+            if (dependencyTypes.TryGetValue(structure.Name, out var actual)
+                && (!imported.Contains(structure.Name)
                 || !SameStructure(structure, actual, module.Structures, dependencies.Structures)))
             {
                 throw new ModuleContractException($"Incompatible graph dependency layout '{structure.Name}'.");
             }
         }
-        if (imported.Any(name => !dependencies.Structures.Any(item => item.Name == name)))
+        if (imported.Any(name => !dependencyTypes.ContainsKey(name)))
         {
             throw new ModuleContractException("Graph dependency type is missing.");
         }
