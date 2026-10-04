@@ -241,9 +241,8 @@ public static partial class ModuleCompiler
         }
         var indexes = module.Functions.Select((item, index) => (item.Name, index))
             .ToDictionary(static item => item.Name, static item => item.index, StringComparer.Ordinal);
-        var external = dependencies.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
         var program = new BoundProgram([.. module.Functions.Select(item => item.Import
-            ? RemapFunction(RecordedImportPromises(item.Contract, external[item.Name]),
+            ? RemapFunction(RecordedImportPromises(item.Contract, dependencyFunctions[item.Name]),
                 dependencies.Structures, module.Structures)
             : item.Function ?? throw new ModuleFormatException("Graph library implementation is missing."))], -1) {
             Structures = module.Structures,
