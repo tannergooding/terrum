@@ -545,7 +545,8 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private mut bool ParseExpression(int32 expectedType, out ScalarFrontendExpression expression)
+    private mut bool ParseExpression(
+        int32 expectedType, init ref<ScalarFrontendExpression> expression)
     {
         mut int32 depth = 0;
         require _tokens.TryGet(_at, init var first);
@@ -686,7 +687,7 @@ mut class ScalarFrontendState
                     || firstOperand.Kind == 62))
             {
                 int32 start = _at;
-                if (!ParseExpression(5, out var nested))
+                if (!ParseExpression(5, init var nested))
                 {
                     return false;
                 }
@@ -796,7 +797,7 @@ mut class ScalarFrontendState
                     || firstOperand.Kind == 63))
             {
                 int32 start = _at;
-                if (!ParseExpression(expectedType, out var nested))
+                if (!ParseExpression(expectedType, init var nested))
                 {
                     return false;
                 }
@@ -945,7 +946,7 @@ mut class ScalarFrontendState
                     || firstOperand.Kind == 57 || firstOperand.Kind == 58
                     || firstOperand.Kind == 63))
             {
-                if (!ParseExpression(expectedType, out var nested))
+                if (!ParseExpression(expectedType, init var nested))
                 {
                     return false;
                 }
@@ -1514,7 +1515,7 @@ mut class ScalarFrontendState
     private mut bool ParseReturn(
         int32 returnType, init ref<ScalarFrontendExpression> expression)
     {
-        if (!Take(19, init var keyword) || !ParseExpression(returnType, out var found))
+        if (!Take(19, init var keyword) || !ParseExpression(returnType, init var found))
         {
             return false;
         }
@@ -4038,7 +4039,7 @@ mut class ScalarFrontendState
                 hasCondition = true;
                 _at = _at + 1;
                 if (Take(46, init var openCondition)
-                    && ParseExpression(5, out var predicate))
+                    && ParseExpression(5, init var predicate))
                 {
                     if (predicate.Type != 5)
                     {
