@@ -255,7 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
-| `TBD` | Support hosted non-Boolean/void Copy-struct `out` outputs through semantic and native modules |
+| `bc0fe0a` | Support hosted non-Boolean/void Copy-struct `out` outputs through semantic and native modules |
 | `7183c25` | Provisionally persist top-level caller-unsafe contracts and explicit unsafe-block call scopes in semantic modules |
 | `db6fdb5` | Implement a bounded readonly `TokenCursor` over validated snapshots without general stored-view support |
 | `ba2e36e` | Project named scalar `out`/`init ref<T>` arguments through bounded v85 calls |
