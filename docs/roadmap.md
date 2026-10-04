@@ -258,6 +258,7 @@ boundaries remain in the [implementation reference](implementation.md).
 | `33fa5b5` | Aggregate sparse graph type origins only when repeated provider probes outweigh a bounded entry pass |
 | `7a53bb9` | Index native module-set machine imports once when validating semantic call coverage |
 | `3149b1b` | Group native module-set machine imports by DLL before serialization |
+| `6da56e9` | Group emitted graph imports by dependency before validating ownership |
 | `ef83b3c` | Replace indexed TRRM per-use tree updates with dictionary updates and final key sorting |
 | `ae4ceea` | Cache managed-state detection outside per-function module-set boundary checks |
 | `3bb7cc7` | Cache graph managed-state checks outside per-function boundary validation |
