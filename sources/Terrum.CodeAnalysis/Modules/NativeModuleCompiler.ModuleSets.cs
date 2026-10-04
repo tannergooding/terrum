@@ -280,7 +280,7 @@ public static partial class NativeModuleCompiler
             }
             var actual = used.Where(item => item.DllName == DllName(provider.Identity))
                 .Select(static item => item.FunctionName).Order(StringComparer.Ordinal).ToArray();
-            if (actual.Any(name => !names.Contains(name, StringComparer.Ordinal)))
+            if (actual.Any(name => Array.BinarySearch(names, name, StringComparer.Ordinal) < 0))
             {
                 throw new ModuleFormatException("Native set machine import has no declaration owner.");
             }
@@ -386,7 +386,7 @@ public static partial class NativeModuleCompiler
             for (var j = 0; j < actualCount; j++)
             {
                 var name = ReadGraphString(bytes, ref at, 256);
-                if (!ValidGraphSymbol(name) || !imports.Contains(name, StringComparer.Ordinal)
+                if (!ValidGraphSymbol(name) || Array.BinarySearch(imports, name, StringComparer.Ordinal) < 0
                     || (j != 0 && StringComparer.Ordinal.Compare(machineImports[j - 1], name) >= 0))
                 {
                     throw new ModuleFormatException("Invalid or unordered native set machine import.");
@@ -410,7 +410,8 @@ public static partial class NativeModuleCompiler
         if (!ModuleCompiler.GetConsumerSetDeclarations(contract).ToHashSet(StringComparer.Ordinal)
                 .SetEquals(dependencies.SelectMany(static item => item.Imports))
             || !ModuleCompiler.GetConsumerCallImports(contract).All(
-                name => dependencies.Any(item => item.MachineImports.Contains(name, StringComparer.Ordinal))))
+                name => dependencies.Any(item =>
+                    Array.BinarySearch(item.MachineImports, name, StringComparer.Ordinal) >= 0)))
         {
             throw new ModuleFormatException("Native set declaration or machine imports differ from semantic contract.");
         }
