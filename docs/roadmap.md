@@ -34,9 +34,10 @@ Hosted contextual construction also supports `float32` and `float64` literals:
 decimal and hexadecimal floating spellings are rounded directly to the target
 format, based integers construct directly in that format, and unary signs
 preserve IEEE bit patterns. Explicit `float32`/`float64` conversions follow
-IEEE-754 target-format conversion, as do typed `int32`, `uint32`, `int64` and
-`uint64` conversions to either floating format. The hosted implementation also
-provisionally supports checked conversion from either floating format to
+IEEE-754 target-format conversion with ties-to-even rounding independent of
+ambient rounding and flush settings, as do typed `int32`, `uint32`, `int64`
+and `uint64` conversions to either floating format. The hosted implementation
+also provisionally supports checked conversion from either floating format to
 `int32`, `uint32`, `int64` and `uint64`, truncating before the range check;
 the exact pair eligibility remains an unapproved proposal. Floating arithmetic
 (`+`, `-`, `*`, `/`) and IEEE comparisons are now supported for same-format

@@ -1180,12 +1180,15 @@ implement checked conversions from `float32` and `float64` to `int32`,
 NaN, infinities and out-of-range truncated results fail. Direct conversion to
 `char16` is excluded. This pair matrix follows an unapproved
 [eligibility proposal](proposals/checked-float-to-integer-eligibility.md) and
-is not an accepted language-contract change. Hosted binding, semantic
-verification, semantic-module persistence and native lowering support
-same-format `float32`/`float64` `+`, `-`, `*`, `/` and IEEE comparisons.
-Operations temporarily select round-to-nearest, gradual underflow and masked
-floating exceptions, then restore the caller's floating control state.
-These operations add no checked failure edge and are valid in `[NoThrow]`.
+is not an accepted language-contract change. Native lowering isolates every
+supported conversion involving a floating format from ambient MXCSR rounding,
+flush and exception-mask settings, restoring the caller's MXCSR after
+successful conversion and before checked float-to-integer failure dispatch.
+Hosted binding, semantic verification, semantic-module persistence and native
+lowering support same-format `float32`/`float64` `+`, `-`, `*`, `/` and IEEE
+comparisons. Operations temporarily select round-to-nearest, gradual underflow
+and masked floating exceptions, then restore the caller's floating control
+state. These operations add no checked failure edge and are valid in `[NoThrow]`.
 Arithmetic NaNs currently use positive quiet encodings `0x7FC00000` and
 `0x7FF8000000000000` provisionally; the exact encoding remains an
 [unapproved proposal](proposals/floating-arithmetic-nan-encoding.md).

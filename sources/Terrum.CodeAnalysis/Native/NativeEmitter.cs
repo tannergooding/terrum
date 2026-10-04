@@ -1102,7 +1102,8 @@ internal sealed partial class PeCompiler
                 return Math.Max(4, update.Place is BoundFieldRead nominalField
                     ? ExpressionSpills(nominalField.Receiver, ref maximumArguments) : 0);
             case BoundCast cast:
-                return ExpressionSpills(cast.Operand, ref maximumArguments);
+                return Math.Max(RequiresFloatingEnvironment(cast.Operand.Type, cast.Type) ? 3 : 0,
+                    ExpressionSpills(cast.Operand, ref maximumArguments));
             case TrRmScalarConvert conversion:
                 return ExpressionSpills(conversion.Operand, ref maximumArguments);
             case TrRmScalarWrappingBinary wrapping:
@@ -1413,6 +1414,9 @@ internal sealed partial class PeCompiler
 
     private static bool IsStruct(PrimitiveType type) =>
         (int)type is >= 100 and < ManagedClassTypes.First;
+    private static bool RequiresFloatingEnvironment(PrimitiveType source, PrimitiveType target) =>
+        source is PrimitiveType.Float32 or PrimitiveType.Float64
+            || target is PrimitiveType.Float32 or PrimitiveType.Float64;
     private static bool IsWide(PrimitiveType type) =>
         type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.OwnedInt32Buffer
             || ManagedClassTypes.IsManaged(type);
@@ -1822,6 +1826,15 @@ internal sealed partial class PeCompiler
         // Windows entry alignment (rsp == 8 mod 16) and a valid unwind chain.
         var skip = _code.JumpIf((byte)(condition ^ 1));
         _runtimeCalls.Add((_code.RelativeCall(), target));
+        _code.PatchRelative(skip, _code.Position);
+    }
+
+    private void FloatingRuntimeBranch(byte condition, int target, int savedMxcsr, int controlledMxcsr)
+    {
+        var skip = _code.JumpIf((byte)(condition ^ 1));
+        _code.LoadMxcsr(savedMxcsr);
+        _runtimeCalls.Add((_code.RelativeCall(), target));
+        _code.LoadMxcsr(controlledMxcsr);
         _code.PatchRelative(skip, _code.Position);
     }
 
@@ -3150,7 +3163,7 @@ internal sealed partial class PeCompiler
             }
             case BoundCast cast:
                 Expression(cast.Operand, spill);
-                Cast(cast.Operand.Type, cast.Type);
+                Cast(cast.Operand.Type, cast.Type, spill);
                 break;
             case TrRmScalarConvert conversion:
                 Expression(conversion.Operand, spill);
@@ -3517,12 +3530,31 @@ internal sealed partial class PeCompiler
         }
     }
 
-    private void Cast(PrimitiveType source, PrimitiveType target)
+    private void Cast(PrimitiveType source, PrimitiveType target, int spill)
+    {
+        if (!RequiresFloatingEnvironment(source, target))
+        {
+            CastPrimitive(source, target, 0, 0);
+            return;
+        }
+
+        var operand = Spill(spill + 2);
+        // MXCSR setup uses EAX, so preserve the conversion payload before changing the control state.
+        StoreValue(operand, source);
+        var savedMxcsr = Spill(spill);
+        var controlledMxcsr = Spill(spill + 1);
+        BeginFloatingEnvironment(savedMxcsr, controlledMxcsr);
+        LoadValue(operand, source);
+        CastPrimitive(source, target, savedMxcsr, controlledMxcsr);
+        _code.LoadMxcsr(savedMxcsr);
+    }
+
+    private void CastPrimitive(PrimitiveType source, PrimitiveType target, int savedMxcsr, int controlledMxcsr)
     {
         if (source is PrimitiveType.Float32 or PrimitiveType.Float64
             && target is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
         {
-            EmitFloatingToInteger(source, target);
+            EmitFloatingToInteger(source, target, savedMxcsr, controlledMxcsr);
             return;
         }
         if (target is PrimitiveType.Float32 or PrimitiveType.Float64
@@ -3593,7 +3625,7 @@ internal sealed partial class PeCompiler
         }
     }
 
-    private void EmitFloatingToInteger(PrimitiveType source, PrimitiveType target)
+    private void EmitFloatingToInteger(PrimitiveType source, PrimitiveType target, int savedMxcsr, int controlledMxcsr)
     {
         if (source == PrimitiveType.Float32)
         {
@@ -3606,32 +3638,32 @@ internal sealed partial class PeCompiler
         }
 
         _code.Bytes(0x66, 0x0F, 0x2E, 0xC0); // ucomisd xmm0,xmm0 rejects NaN
-        RuntimeBranch(0x8A, 0);
+        FloatingRuntimeBranch(0x8A, 0, savedMxcsr, controlledMxcsr);
         switch (target)
         {
             case PrimitiveType.Int32:
                 CompareFloat64(-2147483649.0);
-                RuntimeBranch(0x86, 0);
+                FloatingRuntimeBranch(0x86, 0, savedMxcsr, controlledMxcsr);
                 CompareFloat64(2147483648.0);
-                RuntimeBranch(0x83, 0);
+                FloatingRuntimeBranch(0x83, 0, savedMxcsr, controlledMxcsr);
                 break;
             case PrimitiveType.UInt32:
                 CompareFloat64(-1.0);
-                RuntimeBranch(0x86, 0);
+                FloatingRuntimeBranch(0x86, 0, savedMxcsr, controlledMxcsr);
                 CompareFloat64(4294967296.0);
-                RuntimeBranch(0x83, 0);
+                FloatingRuntimeBranch(0x83, 0, savedMxcsr, controlledMxcsr);
                 break;
             case PrimitiveType.Int64:
                 CompareFloat64(-9223372036854775808.0);
-                RuntimeBranch(0x82, 0);
+                FloatingRuntimeBranch(0x82, 0, savedMxcsr, controlledMxcsr);
                 CompareFloat64(9223372036854775808.0);
-                RuntimeBranch(0x83, 0);
+                FloatingRuntimeBranch(0x83, 0, savedMxcsr, controlledMxcsr);
                 break;
             case PrimitiveType.UInt64:
                 CompareFloat64(-1.0);
-                RuntimeBranch(0x86, 0);
+                FloatingRuntimeBranch(0x86, 0, savedMxcsr, controlledMxcsr);
                 CompareFloat64(18446744073709551616.0);
-                RuntimeBranch(0x83, 0);
+                FloatingRuntimeBranch(0x83, 0, savedMxcsr, controlledMxcsr);
                 CompareFloat64(9223372036854775808.0);
                 var belowSignedLimit = _code.JumpIf(0x82);
                 _code.Bytes(0xF2, 0x0F, 0x5C, 0xC1); // subtract 2^63 before the signed conversion
@@ -4070,6 +4102,18 @@ internal sealed partial class PeCompiler
         return true;
     }
 
+    private void BeginFloatingEnvironment(int savedMxcsr, int controlledMxcsr)
+    {
+        _code.StoreMxcsr(savedMxcsr);
+        _code.Load(savedMxcsr);
+        _code.Byte(0x25); // and eax,~(RC[14:13] | DAZ[6] | FTZ[15])
+        _code.Int32(unchecked((int)0xFFFF1FBF));
+        _code.Byte(0x0D); // or eax,all six SSE exception masks
+        _code.Int32(0x1F80);
+        _code.Store(controlledMxcsr);
+        _code.LoadMxcsr(controlledMxcsr);
+    }
+
     private void FloatingBinary(TokenKind op, PrimitiveType type, int spill)
     {
         var isSingle = type == PrimitiveType.Float32;
@@ -4084,14 +4128,7 @@ internal sealed partial class PeCompiler
 
         var savedMxcsr = Spill(spill + 1);
         var controlledMxcsr = Spill(spill + 2);
-        _code.StoreMxcsr(savedMxcsr);
-        _code.Load(savedMxcsr);
-        _code.Byte(0x25); // and eax,~(RC[14:13] | DAZ[6] | FTZ[15])
-        _code.Int32(unchecked((int)0xFFFF1FBF));
-        _code.Byte(0x0D); // or eax,all six SSE exception masks
-        _code.Int32(0x1F80);
-        _code.Store(controlledMxcsr);
-        _code.LoadMxcsr(controlledMxcsr);
+        BeginFloatingEnvironment(savedMxcsr, controlledMxcsr);
 
         LoadValue(Spill(spill), type);
         if (isSingle)
