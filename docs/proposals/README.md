@@ -45,6 +45,9 @@ approved.
   recommends a separately assigned IEEE comparison opcode and raw-bit
   constants in the unreleased `(1, 0)` profile; it does not add floating
   arithmetic or conversion support.
+- [Floating format conversions in executable TRRM](floating-trrm-format-conversions.md)
+  recommends a distinct opcode for the accepted `float32`/`float64` conversion
+  pair without extending integer conversion policies or adding other pairs.
 
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,

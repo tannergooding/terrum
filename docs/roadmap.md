@@ -55,10 +55,12 @@ remain hosted. V85 also projects conversions between `float32`/`float64` and
 from `int32`, `uint32`, `int64` and `uint64` to either format. `char16`-to-
 floating and floating-to-integer conversions remain outside this projection
 while their eligibility is unapproved. Source-free TRRM still does not
-support floating arithmetic or numeric conversions. Same-format floating
-comparisons and exact-bit constants are provisionally implemented under the
-unapproved [TRRM floating-comparison proposal](proposals/floating-trrm-comparisons.md);
-they are not part of the approved `(1, 0)` Body profile.
+support floating arithmetic or conversion pairs other than `float32`/`float64`.
+Same-format comparisons and exact-bit constants, plus explicit conversion
+between the two floating formats, are provisionally implemented under
+separate unapproved [comparison](proposals/floating-trrm-comparisons.md) and
+[conversion](proposals/floating-trrm-format-conversions.md) proposals; they are
+not part of the approved `(1, 0)` Body profile.
 
 The bounded Terrum-authored scalar source frontend supports v85 complete
 global-function snapshots and source-order scalar call targets, including

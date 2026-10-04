@@ -579,6 +579,20 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         throw InvalidBody();
                     }
                 }
+                else if (opcode == 0x1A)
+                {
+                    var typeId = ReadCount(extent, ref cursor, referenceWidth);
+                    var source = ReadCount(extent, ref cursor, referenceWidth);
+                    Use(source, ordinal);
+                    if (typeId == 0 || typeId > typeCount
+                        || mappedTypes[typeId] != valueTypes[result]
+                        || valueTypes[source] is not (0x14 or 0x15)
+                        || valueTypes[result] is not (0x14 or 0x15)
+                        || valueTypes[source] == valueTypes[result])
+                    {
+                        throw InvalidBody();
+                    }
+                }
                 else if (opcode == 0x17)
                 {
                     var source = ReadCount(extent, ref cursor, referenceWidth);

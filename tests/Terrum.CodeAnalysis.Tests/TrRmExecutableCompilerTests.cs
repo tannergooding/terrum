@@ -146,28 +146,17 @@ public sealed class TrRmExecutableCompilerTests
             bool Compare(float32 left, float32 right) { return left < right; }
             """;
         var artifact = TrRmExecutableCompiler.Emit(Compile(source), "invalid-float-compare");
-        var index = new TrRmArtifactIndex(artifact);
-        Assert.True(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount));
-        var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
-        var body = bodies.GetRow(2).ToArray();
-        var opcodeOffset = body.AsSpan().IndexOf((byte)0x19);
-        Assert.True(opcodeOffset >= 0);
-        body[opcodeOffset + 2] = kind;
+        var malformed = ReplaceBodyOperationByte(artifact, 2, 0x19, 2, kind);
 
-        var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
-        for (var row = 1; row <= bodyCount; row++)
-        {
-            bodyRows[row - 1] = row == 2 ? body : bodies.GetRow(row).ToArray();
-        }
-        var rewrittenBodies = TrRmVariableTableWriter.EncodeBodies(bodyRows);
-        var sections = new List<TrRmSection>(index.SectionCount);
-        for (var section = 0; section < index.SectionCount; section++)
-        {
-            index.GetSection(section, out var sectionKind, out var flags, out var bytes, out var count);
-            sections.Add(new TrRmSection(sectionKind, flags, (uint)count,
-                sectionKind == 0x20 ? rewrittenBodies : bytes.ToArray()));
-        }
-        var malformed = TrRmArtifactWriter.Encode(sections);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
+    [Fact]
+    public void IdentityFloatConvertIsRejectedFromArtifacts()
+    {
+        const string source = "public float64 Widen(float32 value) { return float64(value); }";
+        var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-float-convert");
+        var malformed = ReplaceBodyOperationByte(artifact, 1, 0x1A, 2, 7);
 
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
@@ -204,6 +193,83 @@ public sealed class TrRmExecutableCompilerTests
         var integerMethodBody = new TrRmBodyTableReader(mixedBodies, mixedCount).GetRow(2);
 
         Assert.Equal(integerOnlyBody.ToArray(), integerMethodBody.ToArray());
+    }
+
+    [Fact]
+    public void FloatingFormatConversionsExecuteThroughLinearAndIndexedBodies()
+    {
+        const string source = """
+            public float64 Widen(float32 value) { return float64(value); }
+            public float32 Narrow(float64 value) { return float32(value); }
+            public float64 WidenIf(float32 value) {
+                float64 widened = float64(value);
+                if (widened == 1.0) { return widened; }
+                return 0.0;
+            }
+            public float32 NarrowIf(float64 value) {
+                float32 narrowed = float32(value);
+                if (narrowed == 1.0) { return narrowed; }
+                return 0.0;
+            }
+            """;
+        var original = Compile(source, true);
+        var artifact = TrRmExecutableCompiler.Emit(original, "float-conversions");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        string[] names = ["Widen", "Narrow", "WidenIf", "NarrowIf"];
+        var actual = NativeEmitter.EmitLibrary(loaded, names, NativeRuntimePolicy.FailFast);
+
+        var path = Path.Combine(Directory.GetCurrentDirectory(),
+            $"trrm-float-conversion-{Guid.NewGuid():N}.dll");
+        try
+        {
+            File.WriteAllBytes(path, actual);
+            var handle = NativeLibrary.Load(path);
+            try
+            {
+                var widen = Marshal.GetDelegateForFunctionPointer<Float32ToFloat64>(
+                    NativeLibrary.GetExport(handle, "Widen"));
+                var narrow = Marshal.GetDelegateForFunctionPointer<Float64ToFloat32>(
+                    NativeLibrary.GetExport(handle, "Narrow"));
+                var widenIf = Marshal.GetDelegateForFunctionPointer<Float32ToFloat64>(
+                    NativeLibrary.GetExport(handle, "WidenIf"));
+                var narrowIf = Marshal.GetDelegateForFunctionPointer<Float64ToFloat32>(
+                    NativeLibrary.GetExport(handle, "NarrowIf"));
+
+                Assert.Equal(0x3FB99999A0000000L, widen(0x3DCCCCCD));
+                Assert.Equal(long.MinValue, widen(int.MinValue));
+                Assert.Equal(0x3F800000, narrow(0x3FF0000010000000L));
+                Assert.Equal(0x7F800000, narrow(BitConverter.DoubleToInt64Bits(double.MaxValue)));
+                Assert.Equal(0, narrow(BitConverter.DoubleToInt64Bits(double.Epsilon)));
+                Assert.Equal(int.MinValue, narrow(long.MinValue | 1));
+                Assert.True(float.IsNaN(BitConverter.Int32BitsToSingle(narrow(
+                    BitConverter.DoubleToInt64Bits(double.NaN)))));
+                Assert.Equal(0x7F800000,
+                    narrow(BitConverter.DoubleToInt64Bits(double.PositiveInfinity)));
+                Assert.Equal(0x3FF0000000000000L, widenIf(0x3F800000));
+                Assert.Equal(0L, widenIf(0x40000000));
+                Assert.Equal(0x3F800000, narrowIf(0x3FF0000000000000L));
+                Assert.Equal(0, narrowIf(0x4000000000000000L));
+            }
+            finally
+            {
+                NativeLibrary.Free(handle);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 ToInt(float32 value) { return int32(value); }")]
+    [InlineData("float32 FromInt(int32 value) { return float32(value); }")]
+    [InlineData("float32 FromChar(char16 value) { return float32(value); }")]
+    public void OtherFloatingConversionPairsRemainOutsideExecutableTrRm(string function)
+    {
+        var program = Compile(function, true);
+
+        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "float-conversion"));
     }
 
     [Fact]
@@ -389,6 +455,10 @@ public sealed class TrRmExecutableCompilerTests
     private delegate long LongBinary(long left, long right);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate ulong ULongBinary(ulong left, ulong right);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Float32ToFloat64(int value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Float64ToFloat32(long value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate void VoidAction();
 
@@ -1002,6 +1072,34 @@ public sealed class TrRmExecutableCompilerTests
         var offset = body.AsSpan().IndexOf(originalBits);
         Assert.True(offset >= 0);
         replacementBits.CopyTo(body.AsSpan(offset));
+        bodyRows[bodyRow - 1] = body;
+        var rewrittenBodies = TrRmVariableTableWriter.EncodeBodies(bodyRows);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags, out var bytes, out var count);
+            sections.Add(new TrRmSection(kind, flags, (uint)count,
+                kind == 0x20 ? rewrittenBodies : bytes.ToArray()));
+        }
+        return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static byte[] ReplaceBodyOperationByte(byte[] artifact, int bodyRow,
+        byte opcode, int fieldOffset, byte replacement)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount));
+        var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
+        var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
+        for (var row = 1; row <= bodyCount; row++)
+        {
+            bodyRows[row - 1] = bodies.GetRow(row).ToArray();
+        }
+
+        var body = bodyRows[bodyRow - 1].ToArray();
+        var opcodeOffset = body.AsSpan().IndexOf(opcode);
+        Assert.True(opcodeOffset >= 0);
+        body[opcodeOffset + fieldOffset] = replacement;
         bodyRows[bodyRow - 1] = body;
         var rewrittenBodies = TrRmVariableTableWriter.EncodeBodies(bodyRows);
         var sections = new List<TrRmSection>(index.SectionCount);

@@ -501,8 +501,20 @@ public static partial class TrRmExecutableCompiler
                     break;
                 case BoundCast cast:
                     left = ReadOperand(cast.Operand);
-                    opcode = 0x16;
-                    target = TypeRow(cast.Type) - 1;
+                    if (IsFloat(cast.Operand.Type) && IsFloat(cast.Type))
+                    {
+                        opcode = cast.Operand.Type == cast.Type ? 3 : 0x1A;
+                        target = opcode == 0x1A ? TypeRow(cast.Type) - 1 : 0;
+                    }
+                    else if (IsFloat(cast.Operand.Type) || IsFloat(cast.Type))
+                    {
+                        throw Unsupported("Float conversions to or from non-floating types are outside executable TRRM.");
+                    }
+                    else
+                    {
+                        opcode = 0x16;
+                        target = TypeRow(cast.Type) - 1;
+                    }
                     break;
                 case TrRmScalarReinterpret reinterpret:
                     left = ReadOperand(reinterpret.Operand);
@@ -611,7 +623,7 @@ public static partial class TrRmExecutableCompiler
             }
             WriteInstruction(bytes, opcode, referenceWidth, dataWidth);
             Write(bytes, (ulong)result, referenceWidth);
-            if (opcode is 1 or 6 or 0x16)
+            if (opcode is 1 or 6 or 0x16 or 0x1A)
             {
                 Write(bytes, (ulong)target, referenceWidth);
             }
@@ -627,7 +639,7 @@ public static partial class TrRmExecutableCompiler
             {
                 Write(bytes, bits, dataWidth);
             }
-            if (opcode is 4 or 6 or 0x16 or 0x17)
+            if (opcode is 4 or 6 or 0x16 or 0x17 or 0x1A)
             {
                 Write(bytes, (ulong)left, referenceWidth);
             }

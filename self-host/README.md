@@ -41,7 +41,10 @@ remain outside while their eligibility is unapproved. Source-free TRRM
 same-format comparisons and exact-bit constants are provisionally implemented
 under the unapproved
 [TRRM floating-comparison proposal](../docs/proposals/floating-trrm-comparisons.md);
-floating arithmetic and numeric conversions remain unsupported there. The
+explicit conversion between the floating formats is separately provisional
+under the unapproved
+[TRRM floating-conversion proposal](../docs/proposals/floating-trrm-format-conversions.md).
+Floating arithmetic and other conversion pairs remain unsupported there. The
 frontend candidates continue to depend on the hosted verifier/emitter for
 supported executions.
 The provisional hosted `char16`-to-floating conversion likewise remains
