@@ -144,17 +144,28 @@ public sealed class SyntaxTree
     {
         var parser = new Parser(lexResult.Source, lexResult.Tokens, cancellationToken);
         var root = parser.ParseCompilationUnit();
-        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
-        diagnostics.AddRange(lexResult.Diagnostics);
-        diagnostics.AddRange(parser.Diagnostics);
-        diagnostics.Sort(static (left, right) => {
-            var position = left.Span.Start.CompareTo(right.Span.Start);
+        var parserDiagnostics = parser.Diagnostics;
+        var diagnosticCount = lexResult.Diagnostics.Length + parserDiagnostics.Count;
+        ImmutableArray<Diagnostic> diagnostics;
+        if (diagnosticCount == 0)
+        {
+            diagnostics = ImmutableArray<Diagnostic>.Empty;
+        }
+        else
+        {
+            var builder = ImmutableArray.CreateBuilder<Diagnostic>(diagnosticCount);
+            builder.AddRange(lexResult.Diagnostics);
+            builder.AddRange(parserDiagnostics);
+            builder.Sort(static (left, right) => {
+                var position = left.Span.Start.CompareTo(right.Span.Start);
 
-            return position != 0 ? position : string.CompareOrdinal(left.Code, right.Code);
-        });
+                return position != 0 ? position : string.CompareOrdinal(left.Code, right.Code);
+            });
+            diagnostics = builder.ToImmutable();
+        }
         cancellationToken.ThrowIfCancellationRequested();
 
-        return new SyntaxTree(lexResult.Source, lexResult, root, diagnostics.ToImmutable(), integerValues, cancellationToken);
+        return new SyntaxTree(lexResult.Source, lexResult, root, diagnostics, integerValues, cancellationToken);
     }
 
     private static void ValidateLexResult(LexResult lexResult, CancellationToken cancellationToken)

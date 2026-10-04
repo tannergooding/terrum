@@ -204,7 +204,7 @@ internal sealed class Parser
         return Node(SyntaxKind.TypeParameterList, children);
     }
 
-    internal IEnumerable<Diagnostic> Diagnostics => _diagnostics;
+    internal IReadOnlyList<Diagnostic> Diagnostics => _diagnostics;
 
     private SyntaxToken Current => Peek(0);
 
