@@ -324,6 +324,7 @@ public sealed class ScannerTests
         }
 
         await CheckScannerAsync(source.ToString()).ConfigureAwait(true);
+        await CheckScannerAsync("@\U00010400\U00010428").ConfigureAwait(true);
     }
 
     [Fact]

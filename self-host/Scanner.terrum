@@ -993,14 +993,25 @@ int32 Scan()
             int32 scalar = ReadUtf16Scalar(position, Host.Source.Length);
             mut int32 kind = 1;
             position = position + Utf16ScalarWidth(scalar);
-            if (scalar == 64 && position < Host.Source.Length
-                && IsIdentifierStart(ReadUtf16Scalar(position, Host.Source.Length)))
+            mut int32 escapedStart = -1;
+            if (scalar == 64 && position < Host.Source.Length)
             {
-                position = position + Utf16ScalarWidth(ReadUtf16Scalar(position, Host.Source.Length));
-                while (position < Host.Source.Length
-                    && IsIdentifierContinue(ReadUtf16Scalar(position, Host.Source.Length)))
+                escapedStart = ReadUtf16Scalar(position, Host.Source.Length);
+            }
+            if (scalar == 64 && IsIdentifierStart(escapedStart))
+            {
+                position = position + Utf16ScalarWidth(escapedStart);
+                while (position < Host.Source.Length)
                 {
-                    position = position + Utf16ScalarWidth(ReadUtf16Scalar(position, Host.Source.Length));
+                    int32 next = ReadUtf16Scalar(position, Host.Source.Length);
+                    if (IsIdentifierContinue(next))
+                    {
+                        position = position + Utf16ScalarWidth(next);
+                    }
+                    else
+                    {
+                        break;
+                    }
                 }
                 if (IsEscapeKeyword(start + 1, position - start - 1))
                 {
