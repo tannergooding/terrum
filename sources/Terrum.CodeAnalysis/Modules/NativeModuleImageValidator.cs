@@ -197,25 +197,26 @@ internal static class NativeModuleImageValidator
                 return (int)value;
             }
 
-            string Name(int rva, int limit = 256)
+            string Name(int rva)
             {
-                var bytes = new List<byte>();
-                for (var index = 0; index <= limit; index++)
+                const int maximumLength = 256;
+                Span<byte> bytes = stackalloc byte[maximumLength];
+                for (var index = 0; index <= maximumLength; index++)
                 {
                     var character = image[Offset(checked(rva + index), 1)];
                     if (character == 0)
                     {
-                        if (bytes.Count == 0)
+                        if (index == 0)
                         {
                             throw Invalid();
                         }
-                        return Encoding.ASCII.GetString([.. bytes]);
+                        return Encoding.ASCII.GetString(bytes[..index]);
                     }
-                    if (character is < 33 or > 126 || index == limit)
+                    if (character is < 33 or > 126 || index == maximumLength)
                     {
                         throw Invalid();
                     }
-                    bytes.Add(character);
+                    bytes[index] = character;
                 }
                 throw Invalid();
             }
