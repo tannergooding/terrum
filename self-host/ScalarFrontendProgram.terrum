@@ -55,7 +55,7 @@ bool ScalarProgramError(int32 code, SourceRange span, out bool handled)
 }
 
 bool CopyScalarProgramTokens(ManagedTokenChain tokens, int32 start, int32 end,
-    out ManagedTokenChain chain)
+    init ref<ManagedTokenChain> chain)
 {
     if (!ManagedTokenChain.TryCreate(out var created)) { return false; }
     for (mut int32 index = start; index < end; index = index + 1)
@@ -92,7 +92,7 @@ bool TryPublishScalarFrontendProgram(out bool handled)
     mut int32 functions = 0;
     while (start < count - 1)
     {
-        if (!CopyScalarProgramTokens(sourceTokens, start, count - 1, out var remaining)
+        if (!CopyScalarProgramTokens(sourceTokens, start, count - 1, init var remaining)
             || !ScalarFrontendState.TryCreate(remaining, empty, out var probe)
             || !probe.TryInventoryHeader(init var header, out var headerEnd))
         {
@@ -198,7 +198,7 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         Host.FrontendProgram[3] = index;
         for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
         if (!CopyScalarProgramTokens(sourceTokens, Host.FrontendProgram[frame],
-                Host.FrontendProgram[frame + 1], out var chain)
+                Host.FrontendProgram[frame + 1], init var chain)
             || !ScalarFrontendState.TryCreate(chain, empty, out var tree)
             || !tree.TryParseTree(init var treeResult))
         {
