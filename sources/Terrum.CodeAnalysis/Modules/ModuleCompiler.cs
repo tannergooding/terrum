@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static partial class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 51;
+    private const int Version = 52;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -2027,6 +2027,8 @@ public static partial class ModuleCompiler
                 {
                     PutExpression(writer, view.RangeEnd, names, ref remaining, depth + 1);
                 }
+                writer.Write(view.IsStartEndRelative);
+                writer.Write(view.IsRangeEndRelative);
                 PutStatement(writer, view.Body, names, ref remaining, depth + 1);
                 break;
             case BoundViewSet write:
@@ -2254,11 +2256,15 @@ public static partial class ModuleCompiler
                 var start = GetExpression(reader, ref remaining, depth + 1);
                 var length = GetExpression(reader, ref remaining, depth + 1);
                 var rangeEnd = GetBool(reader) ? GetExpression(reader, ref remaining, depth + 1) : null;
+                var startEndRelative = GetBool(reader);
+                var rangeEndRelative = GetBool(reader);
                 var viewBody = GetStatement(reader, ref remaining, depth + 1) as BoundBlock
                     ?? throw new ModuleFormatException("Expected lexical view block.");
                 return new BoundViewScope(viewVariable, viewOwner, start, length, viewBody, span) {
                     IsMutable = mutable,
                     RangeEnd = rangeEnd,
+                    IsStartEndRelative = startEndRelative,
+                    IsRangeEndRelative = rangeEndRelative,
                 };
             case 17:
                 return new BoundViewSet(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1),

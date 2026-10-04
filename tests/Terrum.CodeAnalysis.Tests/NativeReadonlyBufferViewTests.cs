@@ -156,6 +156,36 @@ public sealed class NativeReadonlyBufferViewTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task DynamicEndRelativeEndpointsSurviveSemanticModuleRoundTripAsync(BoundRuntimePolicy policy)
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Read(OwnedInt32Buffer owner, int32 startOffset, int32 endOffset) {
+                ReadonlyInt32BufferView view = owner[^startOffset..^endOffset];
+                return view.Read(0);
+            }
+            """), policy);
+        Assert.False(provider.HasErrors, string.Join(Environment.NewLine, provider.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(provider.Program), ["Read"]);
+        var client = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(5, out var raw);
+                mut OwnedInt32Buffer value = move raw;
+                require value.TryAppend(10);
+                require value.TryAppend(20);
+                require value.TryAppend(30);
+                require value.TryAppend(40);
+                require value.TryAppend(50);
+                return Read(move value, 3, 1);
+            }
+            """), ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
+        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), producer);
+        Assert.Equal(30, await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public async Task DynamicRangeBoundsEvaluateOnceInSourceOrderAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -199,6 +229,32 @@ public sealed class NativeReadonlyBufferViewTests
     }
 
     [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task DynamicEndRelativeBoundsEvaluateOnceInSourceOrderAsync(BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            int32 StartOffset() { Host.Trace[0] = Host.Trace[0] + 1; return 3; }
+            int32 EndOffset() { Host.Trace[1] = Host.Trace[0] + Host.Trace[1]; return 1; }
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(5, out var raw);
+                mut OwnedInt32Buffer buffer = move raw;
+                require buffer.TryAppend(10);
+                require buffer.TryAppend(20);
+                require buffer.TryAppend(30);
+                require buffer.TryAppend(40);
+                require buffer.TryAppend(50);
+                ReadonlyInt32BufferView view = buffer[^StartOffset()..^EndOffset()];
+                return view.Read(0) + view.Length + Host.Trace[0] + Host.Trace[1];
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source),
+            [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)], policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(34, await RunAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true));
+    }
+
+    [Theory]
     [InlineData(-1, 0)]
     [InlineData(1, 0)]
     [InlineData(0, 2)]
@@ -212,6 +268,32 @@ public sealed class NativeReadonlyBufferViewTests
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(42);
                 ReadonlyInt32BufferView view = buffer[Start()..End()];
+                return view.Length;
+            }
+            """;
+        Assert.Equal(unchecked((int)0xE0540003),
+            await RunAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(0, -1)]
+    [InlineData(0, 2)]
+    [InlineData(0, 6)]
+    public async Task DynamicEndRelativeBoundsRejectInvalidOffsetsAndOrderingAsync(int startOffset, int endOffset)
+    {
+        var source = $$"""
+            int32 Start() { return {{startOffset}}; }
+            int32 End() { return {{endOffset}}; }
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(5, out var raw);
+                mut OwnedInt32Buffer buffer = move raw;
+                require buffer.TryAppend(10);
+                require buffer.TryAppend(20);
+                require buffer.TryAppend(30);
+                require buffer.TryAppend(40);
+                require buffer.TryAppend(42);
+                ReadonlyInt32BufferView view = buffer[^Start()..^End()];
                 return view.Length;
             }
             """;
@@ -476,21 +558,8 @@ public sealed class NativeReadonlyBufferViewTests
     }
 
     [Fact]
-    public void RangeViewsRejectDynamicEndRelativeBoundsAndMutableLocals()
+    public void RangeViewsRejectMutableLocals()
     {
-        var dynamicEndRelativeUpper = Compilation.Create(SyntaxTree.Parse("""
-            int32 End() { return 1; }
-            int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
-                OwnedInt32Buffer owner = move raw;
-                ReadonlyInt32BufferView view = owner[..^End()];
-                return view.Length;
-            }
-            """));
-        Assert.Contains(dynamicEndRelativeUpper.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3001");
-        Assert.Null(dynamicEndRelativeUpper.Program);
-
         var mutableView = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 require OwnedInt32Buffer.TryCreate(1, out var raw);
@@ -501,19 +570,6 @@ public sealed class NativeReadonlyBufferViewTests
             """));
         Assert.Contains(mutableView.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
         Assert.Null(mutableView.Program);
-
-        var dynamicEndRelativeLower = Compilation.Create(SyntaxTree.Parse("""
-            int32 Start() { return 0; }
-            int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
-                OwnedInt32Buffer owner = move raw;
-                ReadonlyInt32BufferView view = owner[^Start()..];
-                return view.Length;
-            }
-            """));
-        Assert.Contains(dynamicEndRelativeLower.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3001");
-        Assert.Null(dynamicEndRelativeLower.Program);
 
         var mutation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {

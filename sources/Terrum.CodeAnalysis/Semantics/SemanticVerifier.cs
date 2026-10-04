@@ -2141,9 +2141,11 @@ public static class SemanticVerifier
                 Expression(view.Start, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 var rangeBound = view.RangeEnd ?? view.Length;
                 Expression(rangeBound, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                var invalidRangeShape = view.RangeEnd is null
+                    ? view.IsStartEndRelative || view.IsRangeEndRelative
+                    : view.IsMutable || view.Length is not BoundConstant { Type: PrimitiveType.Int32, Value: 0 };
                 if (view.Start.Type != PrimitiveType.Int32 || rangeBound.Type != PrimitiveType.Int32
-                    || (view.RangeEnd is not null && (view.IsMutable
-                        || view.Length is not BoundConstant { Type: PrimitiveType.Int32, Value: 0 })))
+                    || invalidRangeShape)
                 {
                     throw Invalid();
                 }

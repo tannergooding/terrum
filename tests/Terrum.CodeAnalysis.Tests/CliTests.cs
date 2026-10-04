@@ -439,6 +439,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { mut int32 sum = 0; for (mut int32 i = 0; i < 10; i = i + 1) { sum = sum + i; } return sum; }")]
     [InlineData("int32 End() { return 1; } int32 Main() { require OwnedInt32Buffer.TryCreate(1, out var raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); ReadonlyInt32BufferView prefix = buffer[..End()]; return prefix.Read(0) + 1; }")]
     [InlineData("int32 Start() { return 1; } int32 End() { return 2; } int32 Main() { require OwnedInt32Buffer.TryCreate(2, out var raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); require buffer.TryAppend(41); ReadonlyInt32BufferView view = buffer[Start()..End()]; return view.Read(0); }")]
+    [InlineData("int32 Start() { return 1; } int32 End() { return 0; } int32 Main() { require OwnedInt32Buffer.TryCreate(2, out var raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); require buffer.TryAppend(41); ReadonlyInt32BufferView view = buffer[^Start()..^End()]; return view.Read(0); }")]
     public async Task NativeScannerFeedsTheOfficialCompilerWithoutChangingEmissionAsync(string source)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));

@@ -2140,11 +2140,21 @@ internal sealed partial class PeCompiler
                 }
                 else
                 {
+                    if (view.IsStartEndRelative)
+                    {
+                        _code.Bytes(0x8B, 0x0A, 0x29, 0xC1, 0x89, 0xC8); // start = count - checked offset
+                        _code.Store(Spill(0));
+                    }
                     _code.Load(Spill(1));
                     _code.Bytes(0x85, 0xC0);
                     RuntimeBranch(0x88, 2);
                     _code.Bytes(0x3B, 0x02); // end <= initialized count
                     RuntimeBranch(0x87, 2);
+                    if (view.IsRangeEndRelative)
+                    {
+                        _code.Bytes(0x8B, 0x0A, 0x29, 0xC1, 0x89, 0xC8); // end = count - checked offset
+                        _code.Store(Spill(1));
+                    }
                     _code.Load(Spill(0));
                     _code.Bytes(0x89, 0xC1); // rcx = start
                     _code.Load(Spill(1));

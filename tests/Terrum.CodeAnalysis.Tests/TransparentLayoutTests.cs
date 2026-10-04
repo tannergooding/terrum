@@ -35,7 +35,7 @@ public sealed class TransparentLayoutTests
         Assert.True(structure.IsTransparent);
         Assert.Equal(4, structure.Size);
         var producer = ModuleCompiler.CreateProducer(program, ["Wrap", "Unwrap"]);
-        Assert.Equal(51, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(52, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.True(Assert.Single(reference.Structures).IsTransparent);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer(Consumer, reference, policy), producer);
@@ -69,7 +69,7 @@ public sealed class TransparentLayoutTests
 
         var autoProgram = CompileLibrary(Library.Replace("[Layout(Transparent)] ", "", StringComparison.Ordinal), policy);
         var autoProducer = ModuleCompiler.CreateProducer(autoProgram, ["Wrap", "Unwrap"]);
-        Assert.Equal(51, BinaryPrimitives.ReadInt32LittleEndian(autoProducer.AsSpan(4, 4)));
+        Assert.Equal(52, BinaryPrimitives.ReadInt32LittleEndian(autoProducer.AsSpan(4, 4)));
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, autoProducer));
         var nativeAuto = NativeModuleCompiler.CreateProducer(autoProgram, ["Wrap", "Unwrap"], "NodeB", policy);
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(nativeConsumer, [nativeAuto]));
@@ -129,7 +129,7 @@ public sealed class TransparentLayoutTests
             public int32 Read() { Hidden value = new Hidden(42); return value.Read(); }
             """;
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(Source, NativeRuntimePolicy.FailFast), ["Read"]);
-        Assert.Equal(51, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(52, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         Assert.Empty(ModuleCompiler.CreateReference(producer).Structures);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer("int32 Main() { return Read(); }",
             ModuleCompiler.CreateReference(producer), NativeRuntimePolicy.FailFast), producer);

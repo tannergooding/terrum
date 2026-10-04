@@ -65,9 +65,8 @@ Scanner-8/schema-8 diagnostic identities 11/12 for invalid and unsupported
 maximal runs remain unchanged. These punctuation tokens do not imply parser
 consumption or binding in the native scalar frontend. The hosted parser and
 binder consume constant and dynamic `^offset` bounds for compiler-supplied
-host-buffer indexing and absolute dynamic or constant `..`/`..^` ranges for
-readonly `OwnedInt32Buffer` lexical views; dynamic end-relative range bounds
-remain unsupported;
+host-buffer indexing and dynamic absolute or end-relative `..`/`..^` ranges for
+readonly `OwnedInt32Buffer` lexical views;
 `?.` remains token-only. Hosted
 generic closers and optional suffixes require parser consumption; native
 scalar spacing permits only the `init ref<T>` parameter delimiters, not
