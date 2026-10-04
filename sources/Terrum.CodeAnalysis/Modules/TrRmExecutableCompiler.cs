@@ -274,6 +274,7 @@ public static partial class TrRmExecutableCompiler
         var functions = ImmutableArray.CreateBuilder<BoundFunction>(methodCount);
         var seen = new HashSet<string>(methodCount, StringComparer.Ordinal);
         var usedSignatures = new bool[sigCount + 1];
+        var usedSignatureCount = 0;
         for (var row = 1; row <= methodCount; row++)
         {
             var flags = defs.GetFlags(row);
@@ -290,7 +291,11 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Invalid("Every public method requires its matching named export.");
             }
-            usedSignatures[signature] = true;
+            if (!usedSignatures[signature])
+            {
+                usedSignatures[signature] = true;
+                usedSignatureCount++;
+            }
 
             var (first, count) = sigs.GetParamRange(signature);
             var variables = ImmutableArray.CreateBuilder<BoundVariable>(count);
@@ -335,6 +340,11 @@ public static partial class TrRmExecutableCompiler
                 IsInternal = flags == 1,
             });
         }
+        if (usedSignatureCount != sigCount)
+        {
+            throw Invalid("Orphan MethodSig is not part of a defined function.");
+        }
+
         for (var row = 1; row <= methodCount; row++)
         {
             var declaration = functions[row - 1];
@@ -387,14 +397,6 @@ public static partial class TrRmExecutableCompiler
                 IndexedBody = indexed,
             };
         }
-        for (var signature = 1; signature <= sigCount; signature++)
-        {
-            if (!usedSignatures[signature])
-            {
-                throw Invalid("Orphan MethodSig is not part of a defined function.");
-            }
-        }
-
         var entry = (int)BinaryPrimitives.ReadUInt32LittleEndian(moduleBytes.Slice(12, 4)) - 1;
         if (entry >= 0 && (entry >= methodCount || functions[entry].ReturnType != PrimitiveType.Int32
             || functions[entry].ParameterCount != 0))
