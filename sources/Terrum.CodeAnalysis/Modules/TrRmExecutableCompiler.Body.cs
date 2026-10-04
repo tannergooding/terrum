@@ -233,7 +233,11 @@ public static partial class TrRmExecutableCompiler
         }
         var typeCount = hasFloatingTypes ? 8 : 6;
         var localWidth = Width((ulong)Math.Max(next, typeCount));
-        var body = new List<byte> { (byte)(0x04 | WidthCode(localWidth)) };
+        var terminatorWidth = Width((ulong)returnValue);
+        var terminatorInstructionLength = terminatorWidth == 1 ? 1 : 3;
+        var bodyCapacity = checked(1 + (2 * localWidth) + (4 * typeCount)
+            + instructions.Count + terminatorInstructionLength + terminatorWidth);
+        var body = new List<byte>(bodyCapacity) { (byte)(0x04 | WidthCode(localWidth)) };
         Write(body, (ulong)typeCount, localWidth);
         for (var row = 2; row <= typeCount + 1; row++)
         {
@@ -241,7 +245,6 @@ public static partial class TrRmExecutableCompiler
         }
         Write(body, (ulong)(next - function.ParameterCount), localWidth);
         body.AddRange(instructions);
-        var terminatorWidth = Width((ulong)returnValue);
         WriteInstruction(body, 0x83, terminatorWidth, 0);
         Write(body, (ulong)returnValue, terminatorWidth);
         return body.ToArray();
