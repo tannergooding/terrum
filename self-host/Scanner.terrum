@@ -991,13 +991,20 @@ int32 ScanString(int32 initial)
         }
         else if (current != 92)
         {
-            int32 scalar = ReadUtf16Scalar(at, Host.Source.Length);
-            if (scalar == -1)
+            if (current < 55296 || current > 57343)
             {
-                Report(1, at, 1);
+                at = at + 1;
             }
+            else
+            {
+                int32 scalar = ReadUtf16Scalar(at, Host.Source.Length);
+                if (scalar == -1)
+                {
+                    Report(1, at, 1);
+                }
 
-            at = at + Utf16ScalarWidth(scalar);
+                at = at + Utf16ScalarWidth(scalar);
+            }
         }
         else
         {
@@ -1060,13 +1067,29 @@ int32 ScanCharacter(int32 initial)
                 break;
             }
 
-            int32 escapedScalar = ReadUtf16Scalar(at, Host.Source.Length);
-            at = at + Utf16ScalarWidth(escapedScalar);
+            int32 escapedUnit = PeekUnit(at);
+            if (escapedUnit < 55296 || escapedUnit > 57343)
+            {
+                at = at + 1;
+            }
+            else
+            {
+                int32 escapedScalar = ReadUtf16Scalar(at, Host.Source.Length);
+                at = at + Utf16ScalarWidth(escapedScalar);
+            }
         }
         else
         {
-            int32 scalar = ReadUtf16Scalar(at, Host.Source.Length);
-            at = at + Utf16ScalarWidth(scalar);
+            int32 unit = PeekUnit(at);
+            if (unit < 55296 || unit > 57343)
+            {
+                at = at + 1;
+            }
+            else
+            {
+                int32 scalar = ReadUtf16Scalar(at, Host.Source.Length);
+                at = at + Utf16ScalarWidth(scalar);
+            }
         }
     }
 
