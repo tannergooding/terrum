@@ -65,6 +65,47 @@ public sealed class NativeGraphTests
         return result;
     }
 
+    private static byte[] ReplaceRecordedGraphImport(byte[] artifact, string dependencyIdentity,
+        string oldName, string newName)
+    {
+        Assert.Equal(oldName.Length, newName.Length);
+        var result = (byte[])artifact.Clone();
+        var at = 19 + result[7];
+        var replaced = false;
+        for (var i = 0; i < result[8]; i++)
+        {
+            var identityLength = BinaryPrimitives.ReadUInt16LittleEndian(result.AsSpan(at));
+            at += 2;
+            var identity = Encoding.UTF8.GetString(result, at, identityLength);
+            at += identityLength;
+            var declarationCount = BinaryPrimitives.ReadUInt16LittleEndian(result.AsSpan(at));
+            at += 2;
+            for (var j = 0; j < declarationCount; j++)
+            {
+                var length = BinaryPrimitives.ReadUInt16LittleEndian(result.AsSpan(at));
+                at += 2 + length;
+            }
+            var importCount = BinaryPrimitives.ReadUInt16LittleEndian(result.AsSpan(at));
+            at += 2;
+            for (var j = 0; j < importCount; j++)
+            {
+                var length = BinaryPrimitives.ReadUInt16LittleEndian(result.AsSpan(at));
+                at += 2;
+                if (identity == dependencyIdentity
+                    && Encoding.UTF8.GetString(result, at, length) == oldName)
+                {
+                    Assert.False(replaced);
+                    Encoding.UTF8.GetBytes(newName).CopyTo(result, at);
+                    replaced = true;
+                }
+                at += length;
+            }
+        }
+        Assert.True(replaced);
+        SHA256.HashData(result.AsSpan(0, result.Length - 32)).CopyTo(result, result.Length - 32);
+        return result;
+    }
+
     [Fact]
     public void GraphPackagesUseCurrentVersionAndRejectPreviousVersion()
     {
@@ -219,6 +260,37 @@ public sealed class NativeGraphTests
         var replacement = Leaf("public int32 Leaf() { return 41; }");
         Assert.Equal(83, await NativeModuleCompiler.RunGraphAsync(root, [replacement, top, middle],
             TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void GraphImportsMustBeDeclaredByTheirOwnDependency()
+    {
+        var leafCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Bravo() { return 40; }"));
+        Assert.False(leafCompilation.HasErrors, string.Join(Environment.NewLine, leafCompilation.Diagnostics));
+        var leaf = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(leafCompilation.Program),
+            ["Bravo"], "NodeB", NativeRuntimePolicy.FailFast);
+        var middleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Alpha() { return Bravo(); }"), NativeModuleCompiler.CreateGraphReference([leaf]));
+        Assert.False(middleCompilation.HasErrors, string.Join(Environment.NewLine, middleCompilation.Diagnostics));
+        var middle = NativeModuleCompiler.CreateGraphProducer(Assert.IsType<BoundProgram>(middleCompilation.Program),
+            ["Alpha"], "NodeA", [leaf], NativeRuntimePolicy.FailFast);
+        var topCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Top() { return Alpha() + Bravo(); }"),
+            NativeModuleCompiler.CreateGraphReference([middle, leaf]));
+        Assert.False(topCompilation.HasErrors, string.Join(Environment.NewLine, topCompilation.Diagnostics));
+        var top = NativeModuleCompiler.CreateGraphProducer(Assert.IsType<BoundProgram>(topCompilation.Program),
+            ["Top"], "NodeC", [middle, leaf], NativeRuntimePolicy.FailFast);
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Top(); }"),
+            NativeModuleCompiler.CreateGraphReference([top]));
+        Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
+            [top], NativeRuntimePolicy.FailFast);
+
+        NativeModuleCompiler.ValidateGraph(root, [top, middle, leaf]);
+        var crossDependencyImport = ReplaceRecordedGraphImport(top, "NodeA", "Alpha", "Bravo");
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            NativeModuleCompiler.ValidateGraph(root, [crossDependencyImport, middle, leaf]));
     }
 
     [Fact]
