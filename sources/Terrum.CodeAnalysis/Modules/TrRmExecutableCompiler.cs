@@ -68,12 +68,14 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported("Executable entry must return int32 and take no parameters.");
         }
 
-        var functionUsesFloatingTypes = new bool[program.Functions.Length];
+        var functionFeatures = new (bool HasFloatingTypes, bool HasIndexedFlow)[program.Functions.Length];
+        var hasFloatingTypes = false;
         for (var index = 0; index < program.Functions.Length; index++)
         {
-            functionUsesFloatingTypes[index] = UsesFloatingType(program.Functions[index]);
+            var features = AnalyzeFunction(program.Functions[index]);
+            functionFeatures[index] = features;
+            hasFloatingTypes |= features.HasFloatingTypes;
         }
-        var hasFloatingTypes = functionUsesFloatingTypes.Any(static usesFloatingTypes => usesFloatingTypes);
         var names = new List<(string Text, int Encoding)> { (moduleIdentity, 1) };
         var nameRows = new int[program.Functions.Length];
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -117,9 +119,9 @@ public static partial class TrRmExecutableCompiler
 
             signatures.Add(new TrRmMethodSigRow(TypeRow(function.ReturnType), 0,
                 first, function.ParameterCount, 0, 0));
-            bodies.Add(ContainsIndexedFlow(function.Body)
-                ? new IndexedBuilder(function, program, functionUsesFloatingTypes[index]).Encode()
-                : EncodeBody(function, functionUsesFloatingTypes[index]));
+            bodies.Add(functionFeatures[index].HasIndexedFlow
+                ? new IndexedBuilder(function, program, functionFeatures[index].HasFloatingTypes).Encode()
+                : EncodeBody(function, functionFeatures[index].HasFloatingTypes));
             var effectMask = (function.IsNoThrow ? 1u : 0u)
                 | (function.DoesNotReturn ? 2u : 0u);
             var contractFirst = effectMask != 0 ? effects.Count + 1 : 0;
@@ -427,80 +429,137 @@ public static partial class TrRmExecutableCompiler
     private static bool IsFloat(PrimitiveType type)
         => type is PrimitiveType.Float32 or PrimitiveType.Float64;
 
-    private static bool UsesFloatingType(BoundFunction function)
-        => IsFloat(function.ReturnType)
-            || function.Variables.Any(static variable => IsFloat(variable.Type))
-            || UsesFloatingType(function.Body);
-
-    private static bool UsesFloatingType(BoundStatement statement)
-        => statement switch
-        {
-            BoundBlock block => block.Statements.Any(UsesFloatingType),
-            BoundLocal local => UsesFloatingType(local.Initializer),
-            BoundAssignment assignment => UsesFloatingType(assignment.Value),
-            BoundExpressionStatement expression => UsesFloatingType(expression.Expression),
-            BoundReturn { Value: BoundExpression value } => UsesFloatingType(value),
-            BoundIf conditional => UsesFloatingType(conditional.Condition)
-                || UsesFloatingType(conditional.Then)
-                || conditional.Else is not null && UsesFloatingType(conditional.Else),
-            BoundWhile loop => UsesFloatingType(loop.Condition)
-                || UsesFloatingType(loop.Body)
-                || loop.Iterator is not null && UsesFloatingType(loop.Iterator),
-            BoundRequire require => UsesFloatingType(require.Condition),
-            _ => false,
-        };
-
-    private static bool UsesFloatingType(BoundExpression expression)
-        => IsFloat(expression.Type) || expression switch
-        {
-            BoundBinary binary => UsesFloatingType(binary.Left) || UsesFloatingType(binary.Right),
-            BoundUnary unary => UsesFloatingType(unary.Operand),
-            BoundCast cast => UsesFloatingType(cast.Operand),
-            BoundConditional conditional => UsesFloatingType(conditional.Condition)
-                || UsesFloatingType(conditional.WhenTrue)
-                || UsesFloatingType(conditional.WhenFalse),
-            BoundCall call => call.Arguments.Any(UsesFloatingType),
-            _ => false,
-        };
-
-    private static bool ContainsIndexedFlow(BoundStatement statement, bool nested = false)
+    private static (bool HasFloatingTypes, bool HasIndexedFlow) AnalyzeFunction(BoundFunction function)
     {
+        var hasFloatingTypes = IsFloat(function.ReturnType);
+        foreach (var variable in function.Variables)
+        {
+            hasFloatingTypes |= IsFloat(variable.Type);
+        }
+
+        var hasIndexedFlow = false;
+        AnalyzeStatement(function.Body, false, ref hasFloatingTypes, ref hasIndexedFlow);
+        return (hasFloatingTypes, hasIndexedFlow);
+    }
+
+    private static void AnalyzeStatement(BoundStatement statement, bool nested,
+        ref bool hasFloatingTypes, ref bool hasIndexedFlow)
+    {
+        if (hasFloatingTypes && hasIndexedFlow)
+        {
+            return;
+        }
+
         switch (statement)
         {
-            case BoundIf or BoundWhile:
-                return true;
             case BoundBlock block:
-                return nested && block.Statements.Any(static child => child is BoundLocal)
-                    || block.Statements.Any(child => ContainsIndexedFlow(child, true));
+                if (nested && !hasIndexedFlow)
+                {
+                    foreach (var child in block.Statements)
+                    {
+                        if (child is BoundLocal)
+                        {
+                            hasIndexedFlow = true;
+                            break;
+                        }
+                    }
+                }
+                foreach (var child in block.Statements)
+                {
+                    AnalyzeStatement(child, true, ref hasFloatingTypes, ref hasIndexedFlow);
+                    if (hasFloatingTypes && hasIndexedFlow)
+                    {
+                        return;
+                    }
+                }
+                break;
             case BoundLocal local:
-                return ContainsIndexedFlow(local.Initializer);
+                AnalyzeExpression(local.Initializer, ref hasFloatingTypes, ref hasIndexedFlow);
+                break;
             case BoundAssignment assignment:
-                return ContainsIndexedFlow(assignment.Value);
+                AnalyzeExpression(assignment.Value, ref hasFloatingTypes, ref hasIndexedFlow);
+                break;
+            case BoundExpressionStatement expression:
+                AnalyzeExpression(expression.Expression, ref hasFloatingTypes, ref hasIndexedFlow);
+                break;
             case BoundReturn { Value: BoundExpression value }:
-                return ContainsIndexedFlow(value);
-            case BoundExpressionStatement discarded:
-                return ContainsIndexedFlow(discarded.Expression);
-            case BoundRequire:
-                return true;
-            default:
-                return false;
+                AnalyzeExpression(value, ref hasFloatingTypes, ref hasIndexedFlow);
+                break;
+            case BoundIf conditional:
+                hasIndexedFlow = true;
+                AnalyzeExpression(conditional.Condition, ref hasFloatingTypes, ref hasIndexedFlow);
+                AnalyzeStatement(conditional.Then, true, ref hasFloatingTypes, ref hasIndexedFlow);
+                if (conditional.Else is not null)
+                {
+                    AnalyzeStatement(conditional.Else, true, ref hasFloatingTypes, ref hasIndexedFlow);
+                }
+                break;
+            case BoundWhile loop:
+                hasIndexedFlow = true;
+                AnalyzeExpression(loop.Condition, ref hasFloatingTypes, ref hasIndexedFlow);
+                AnalyzeStatement(loop.Body, true, ref hasFloatingTypes, ref hasIndexedFlow);
+                if (loop.Iterator is not null)
+                {
+                    AnalyzeStatement(loop.Iterator, true, ref hasFloatingTypes, ref hasIndexedFlow);
+                }
+                break;
+            case BoundRequire require:
+                hasIndexedFlow = true;
+                AnalyzeExpression(require.Condition, ref hasFloatingTypes, ref hasIndexedFlow);
+                break;
         }
     }
 
-    private static bool ContainsIndexedFlow(BoundExpression expression)
-        => expression switch
+    private static void AnalyzeExpression(BoundExpression expression,
+        ref bool hasFloatingTypes, ref bool hasIndexedFlow)
+    {
+        if (hasFloatingTypes && hasIndexedFlow)
         {
-            BoundConditional or BoundUpdate or BoundCompoundAssignment => true,
-            BoundBinary { Operator: TokenKind.ShiftLeft or TokenKind.ShiftRight
-                or TokenKind.ShiftRightUnsigned } => true,
-            BoundBinary { Operator: TokenKind.AmpersandAmpersand or TokenKind.PipePipe }
-                => true,
-            BoundBinary binary => ContainsIndexedFlow(binary.Left) || ContainsIndexedFlow(binary.Right),
-            BoundUnary unary => ContainsIndexedFlow(unary.Operand),
-            BoundCast cast => ContainsIndexedFlow(cast.Operand),
-            BoundCall => true,
-            _ => false,
-        };
+            return;
+        }
+        hasFloatingTypes |= IsFloat(expression.Type);
+        if (hasFloatingTypes && hasIndexedFlow)
+        {
+            return;
+        }
+
+        switch (expression)
+        {
+            case BoundBinary binary:
+                hasIndexedFlow |= binary.Operator is TokenKind.ShiftLeft or TokenKind.ShiftRight
+                    or TokenKind.ShiftRightUnsigned or TokenKind.AmpersandAmpersand or TokenKind.PipePipe;
+                AnalyzeExpression(binary.Left, ref hasFloatingTypes, ref hasIndexedFlow);
+                AnalyzeExpression(binary.Right, ref hasFloatingTypes, ref hasIndexedFlow);
+                break;
+            case BoundUnary unary:
+                AnalyzeExpression(unary.Operand, ref hasFloatingTypes, ref hasIndexedFlow);
+                break;
+            case BoundCast cast:
+                AnalyzeExpression(cast.Operand, ref hasFloatingTypes, ref hasIndexedFlow);
+                break;
+            case BoundConditional conditional:
+                hasIndexedFlow = true;
+                AnalyzeExpression(conditional.Condition, ref hasFloatingTypes, ref hasIndexedFlow);
+                AnalyzeExpression(conditional.WhenTrue, ref hasFloatingTypes, ref hasIndexedFlow);
+                AnalyzeExpression(conditional.WhenFalse, ref hasFloatingTypes, ref hasIndexedFlow);
+                break;
+            case BoundCall call:
+                hasIndexedFlow = true;
+                foreach (var argument in call.Arguments)
+                {
+                    AnalyzeExpression(argument, ref hasFloatingTypes, ref hasIndexedFlow);
+                    if (hasFloatingTypes && hasIndexedFlow)
+                    {
+                        return;
+                    }
+                }
+                break;
+            case BoundUpdate or BoundCompoundAssignment:
+                hasIndexedFlow = true;
+                break;
+        }
+    }
+
     private static int TypeRow(PrimitiveType type)
     {
         var row = Array.IndexOf(s_types, type) + 1;

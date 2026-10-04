@@ -72,6 +72,22 @@ public sealed class TrRmExecutableCompilerTests
         Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
     }
 
+    [Fact]
+    public void FloatingExpressionOnlyHelperKeepsFloatingTypesInIndexedModule()
+    {
+        const string source = """
+            int32 Main() { return IsLess() ? 42 : 0; }
+            bool IsLess() { return Less(1.5, 2.0); }
+            bool Less(float64 left, float64 right) { return left < right; }
+            """;
+        var original = Compile(source);
+        var artifact = TrRmExecutableCompiler.Emit(original, "indexed-float-expression");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+
+        Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+    }
+
     [Theory]
     [InlineData("float32")]
     [InlineData("float64")]
