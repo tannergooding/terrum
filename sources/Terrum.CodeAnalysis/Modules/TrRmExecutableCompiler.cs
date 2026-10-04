@@ -355,11 +355,11 @@ public static partial class TrRmExecutableCompiler
         for (var row = 1; row <= methodCount; row++)
         {
             var declaration = functions[row - 1];
-            var variables = declaration.Variables.ToBuilder();
             var count = declaration.ParameterCount;
             var noThrow = declaration.IsNoThrow;
             var body = bodies.GetRow(defs.GetBodyRow(row));
             TrRmScalarGraph? indexed = null;
+            ImmutableArray<BoundVariable>.Builder variables;
             ImmutableArray<BoundStatement> statements;
             if ((body[0] & 0x0C) == 0x08)
             {
@@ -367,6 +367,8 @@ public static partial class TrRmExecutableCompiler
                     parameters, types);
                 indexed = IndexedBuilder.DecodeIndexedBody(body, count,
                     declaration.ReturnType, noThrow, declaration.DoesNotReturn, types, functions);
+                variables = ImmutableArray.CreateBuilder<BoundVariable>(indexed.Types.Length);
+                variables.AddRange(declaration.Variables);
                 for (var value = count; value < indexed.Types.Length; value++)
                 {
                     variables.Add(new BoundVariable($"value{value + 1}", indexed.Types[value], false, default));
@@ -375,6 +377,7 @@ public static partial class TrRmExecutableCompiler
             }
             else
             {
+                variables = declaration.Variables.ToBuilder();
                 _ = new TrRmCompactLinearBodyReader(bodies, row, modules, defs, sigs, parameters, types);
                 statements = DecodeBody(body, count, variables, noThrow, types, functions);
                 if (statements.Any(static statement => statement is BoundLocal
