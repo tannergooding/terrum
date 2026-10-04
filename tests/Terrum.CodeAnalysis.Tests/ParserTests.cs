@@ -71,14 +71,15 @@ public sealed class ParserTests
                 var suffix = items[1..];
                 var tail = items[1..^0];
                 var separated = items[1.. ^1];
+                var fromEnd = items[^1..];
                 return 0;
             }
             """;
         var tree = SyntaxTree.Parse(Source);
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal(5, tree.Root.DescendantNodes().Count(
+        Assert.Equal(6, tree.Root.DescendantNodes().Count(
             static node => node.Kind == SyntaxKind.SliceRangeExpression));
-        Assert.Equal(1, tree.Root.DescendantNodes().Count(
+        Assert.Equal(2, tree.Root.DescendantNodes().Count(
             static node => node.Kind == SyntaxKind.EndRelativeIndexBound));
         AssertLossless(tree);
 

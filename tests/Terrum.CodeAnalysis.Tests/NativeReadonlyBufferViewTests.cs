@@ -106,7 +106,7 @@ public sealed class NativeReadonlyBufferViewTests
     {
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public int32 Read(OwnedInt32Buffer owner) {
-                ReadonlyInt32BufferView view = owner[1..^0];
+                ReadonlyInt32BufferView view = owner[^1..];
                 return view.Read(0);
             }
             """), policy);
@@ -164,7 +164,16 @@ public sealed class NativeReadonlyBufferViewTests
             ReadonlyInt32BufferView tail = buffer[1..^0];
             ReadonlyInt32BufferView beforeLast = buffer[..^1];
             ReadonlyInt32BufferView separated = buffer[0.. ^1];
-            return all.Read(0) + middle.Read(0) + suffix.Read(1) - 81;
+            var fromEnd = buffer[^2..];
+            var fromEndToEnd = buffer[^2..2];
+            var betweenEndRelative = buffer[^2..^1];
+            if (fromEnd.Length == 2 && fromEndToEnd.Length == 1
+                && fromEndToEnd.Read(0) == 41 && betweenEndRelative.Read(0) == 41
+                && prefix.Length == 2 && beforeLast.Length == 2 && separated.Length == 2
+                && tail.Length == 2) {
+                return all.Read(0) + middle.Read(0) + suffix.Read(1) - 81;
+            }
+            return 0;
         }
         """;
         Assert.Equal(42, await RunAsync(Source, policy).ConfigureAwait(true));
@@ -318,6 +327,7 @@ public sealed class NativeReadonlyBufferViewTests
     [InlineData("buffer[-1..]")]
     [InlineData("buffer[2..1]")]
     [InlineData("buffer[..^4]")]
+    [InlineData("buffer[^4..]")]
     public async Task SliceRejectsOutOfPrefixOrOverflowingRangeAsync(string range)
     {
         var source = $$"""
@@ -358,17 +368,18 @@ public sealed class NativeReadonlyBufferViewTests
         Assert.Contains(mutableView.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
         Assert.Null(mutableView.Program);
 
-        var endRelativeLower = Compilation.Create(SyntaxTree.Parse("""
+        var dynamicEndRelativeLower = Compilation.Create(SyntaxTree.Parse("""
+            int32 Start() { return 0; }
             int32 Main() {
                 require OwnedInt32Buffer.TryCreate(1, out var raw);
                 OwnedInt32Buffer owner = move raw;
-                ReadonlyInt32BufferView view = owner[^0..];
+                ReadonlyInt32BufferView view = owner[^Start()..];
                 return view.Length;
             }
             """));
-        Assert.Contains(endRelativeLower.Diagnostics,
+        Assert.Contains(dynamicEndRelativeLower.Diagnostics,
             static diagnostic => diagnostic.Code == "TRM3001");
-        Assert.Null(endRelativeLower.Program);
+        Assert.Null(dynamicEndRelativeLower.Program);
 
         var mutation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {

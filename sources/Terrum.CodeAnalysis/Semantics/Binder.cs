@@ -1727,18 +1727,13 @@ internal sealed partial class Binder
         var lower = (SyntaxNode)range.Children[0];
         var connector = ((SyntaxTokenElement)range.Children[1]).Token;
         var upper = (SyntaxNode)range.Children[2];
-        if (lower.Kind == SyntaxKind.EndRelativeIndexBound)
-        {
-            Report("TRM3001", "End-relative lower bounds are not supported for native buffer views.", lower.Span);
-            var invalid = AddVariable(name.Name, viewType, false, name.Span);
-            return new BoundViewScope(invalid, ErrorExpression(span), ErrorExpression(span), ErrorExpression(span),
-                new BoundBlock([], span), span);
-        }
-
         var valid = true;
-        var startValue = lower.Kind == SyntaxKind.OmittedIndexBound
+        var fromEndLower = lower.Kind == SyntaxKind.EndRelativeIndexBound;
+        var lowerValue = lower.Kind == SyntaxKind.OmittedIndexBound
             ? 0
-            : BindRangeConstant(lower, "lower", ref valid);
+            : BindRangeConstant(fromEndLower ? (SyntaxNode)lower.Children[1] : lower,
+                fromEndLower ? "end-relative lower" : "lower", ref valid);
+        var startValue = fromEndLower ? 0 : lowerValue;
         var owner = BindReceiverLoan((SyntaxNode)initializer.Children[0], PrimitiveType.OwnedInt32Buffer);
         BoundExpression length;
         if (connector.Kind == TokenKind.DotDotCaret || upper.Kind == SyntaxKind.EndRelativeIndexBound)
@@ -1746,34 +1741,73 @@ internal sealed partial class Binder
             var offsetNode = upper.Kind == SyntaxKind.EndRelativeIndexBound
                 ? (SyntaxNode)upper.Children[1] : upper;
             var offset = BindRangeConstant(offsetNode, "end-relative upper", ref valid);
-            var totalOffset = (long)startValue + offset;
-            if (startValue < 0 || offset < 0 || totalOffset > int.MaxValue)
+            if (fromEndLower)
             {
-                length = new BoundConstant(-1, PrimitiveType.Int32, upper.Span);
+                var lengthValue = (long)lowerValue - offset;
+                length = lowerValue < 0 || offset < 0 || lowerValue > NativeBufferIntrinsics.MaximumCapacity
+                    ? new BoundConstant(-1, PrimitiveType.Int32, upper.Span)
+                    : new BoundConstant(lengthValue, PrimitiveType.Int32, upper.Span);
             }
             else
             {
-                length = BindBufferRemaining(owner, (int)totalOffset, upper.Span);
+                var totalOffset = (long)startValue + offset;
+                if (startValue < 0 || offset < 0 || totalOffset > int.MaxValue)
+                {
+                    length = new BoundConstant(-1, PrimitiveType.Int32, upper.Span);
+                }
+                else
+                {
+                    length = BindBufferRemaining(owner, (int)totalOffset, upper.Span);
+                }
             }
         }
         else if (upper.Kind == SyntaxKind.OmittedIndexBound)
         {
-            length = startValue < 0
-                ? new BoundConstant(-1, PrimitiveType.Int32, upper.Span)
-                : BindBufferRemaining(owner, startValue, upper.Span);
+            length = fromEndLower
+                ? lowerValue < 0 || lowerValue > NativeBufferIntrinsics.MaximumCapacity
+                    ? new BoundConstant(-1, PrimitiveType.Int32, upper.Span)
+                    : new BoundConstant(lowerValue, PrimitiveType.Int32, upper.Span)
+                : startValue < 0
+                    ? new BoundConstant(-1, PrimitiveType.Int32, upper.Span)
+                    : BindBufferRemaining(owner, startValue, upper.Span);
         }
         else
         {
             var endValue = BindRangeConstant(upper, "upper", ref valid);
-            var lengthValue = (long)endValue - startValue;
-            length = lengthValue is < int.MinValue or > int.MaxValue
-                ? new BoundConstant(-1, PrimitiveType.Int32, upper.Span)
-                : new BoundConstant(lengthValue, PrimitiveType.Int32, upper.Span);
+            if (fromEndLower)
+            {
+                var lengthBase = (long)endValue + lowerValue;
+                length = lowerValue < 0 || lowerValue > NativeBufferIntrinsics.MaximumCapacity
+                    || endValue < 0 || endValue > NativeBufferIntrinsics.MaximumCapacity
+                    ? new BoundConstant(-1, PrimitiveType.Int32, upper.Span)
+                    : new BoundBinary(TokenKind.Minus,
+                        new BoundConstant(lengthBase, PrimitiveType.Int32, upper.Span),
+                        BindBufferCount(owner, upper.Span), PrimitiveType.Int32, upper.Span);
+            }
+            else
+            {
+                var lengthValue = (long)endValue - startValue;
+                length = lengthValue is < int.MinValue or > int.MaxValue
+                    ? new BoundConstant(-1, PrimitiveType.Int32, upper.Span)
+                    : new BoundConstant(lengthValue, PrimitiveType.Int32, upper.Span);
+            }
         }
 
-        var start = valid
-            ? new BoundConstant(startValue, PrimitiveType.Int32, lower.Span)
-            : new BoundConstant(-1, PrimitiveType.Int32, lower.Span);
+        BoundExpression start;
+        if (!valid || fromEndLower && (lowerValue < 0
+            || lowerValue > NativeBufferIntrinsics.MaximumCapacity))
+        {
+            start = new BoundConstant(-1, PrimitiveType.Int32, lower.Span);
+        }
+        else if (fromEndLower)
+        {
+            start = BindBufferRemaining(owner, lowerValue, lower.Span);
+        }
+        else
+        {
+            start = new BoundConstant(startValue, PrimitiveType.Int32, lower.Span);
+        }
+
         var variable = AddVariable(name.Name, viewType, false, name.Span);
         return new BoundViewScope(variable, owner, start, length, new BoundBlock([], span), span);
     }

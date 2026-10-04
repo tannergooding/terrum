@@ -1444,8 +1444,8 @@ range to initialize a readonly lexical view, for example
 `ReadonlyInt32BufferView tail = buffer[1..^0];` or `var all = buffer[..];`.
 This first range binding is limited to `OwnedInt32Buffer` receivers, readonly
 views, and compile-time `int32` bounds; omitted bounds and constant
-end-relative upper bounds are supported, while dynamic bounds and
-end-relative lower bounds are not. The existing checked view-scope operation
+end-relative lower and upper bounds are supported, while dynamic bounds are
+not. The existing checked view-scope operation
 validates the resulting range against the initialized prefix without clamping.
 Range syntax does not add mutable slicing, general indexer contracts,
 first-class range values or optional access. `mut MutableInt32BufferView window =
