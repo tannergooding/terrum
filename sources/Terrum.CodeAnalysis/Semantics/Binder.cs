@@ -4006,8 +4006,13 @@ internal sealed partial class Binder
             return ErrorExpression(token.Span);
         }
         var digits = text.AsSpan();
+        var hasDecodedIntegers = _tree.HasDecodedIntegers;
+        ulong parsed = 0;
+        var overflow = false;
 
-        if (digits.IsEmpty || ScannerHost.IntegerDigitCount(digits) != digits.Length)
+        if (digits.IsEmpty || (hasDecodedIntegers
+            ? ScannerHost.IntegerDigitCount(digits) != digits.Length
+            : !ScannerHost.TryParseIntegerMagnitude(digits, out parsed, out overflow)))
         {
             Report("TRM3013", "Floating-point literals require a float32 or float64 target context; unsupported numeric tags are not supported.", token.Span);
             return ErrorExpression(token.Span);
@@ -4030,7 +4035,7 @@ internal sealed partial class Binder
             PrimitiveType.Char16 => ushort.MaxValue,
             _ => int.MaxValue,
         };
-        if (!TryIntegerMagnitude(token, out var parsed))
+        if ((hasDecodedIntegers && !TryIntegerMagnitude(token, out parsed)) || overflow)
         {
             Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
             return ErrorExpression(token.Span);
@@ -4058,7 +4063,7 @@ internal sealed partial class Binder
 
         var digits = _tree.Source.GetSubText(token.Span).AsSpan();
         if (digits.IsEmpty || ScannerHost.IntegerRadix(digits) != 10
-            || ScannerHost.IntegerDigitCount(digits) != digits.Length)
+            || (_tree.HasDecodedIntegers && ScannerHost.IntegerDigitCount(digits) != digits.Length))
         {
             return false;
         }

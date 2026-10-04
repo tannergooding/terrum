@@ -367,9 +367,14 @@ public static class ScannerHost
     }
 
     internal static bool TryParseIntegerMagnitude(ReadOnlySpan<char> text, out ulong magnitude)
+        => TryParseIntegerMagnitude(text, out magnitude, out var overflow) && !overflow;
+
+    internal static bool TryParseIntegerMagnitude(ReadOnlySpan<char> text, out ulong magnitude,
+        out bool overflow)
     {
         var radix = IntegerRadix(text);
         magnitude = 0;
+        overflow = false;
         var hasDigit = false;
         var index = radix == 10 ? 0 : 2;
         while (index < text.Length)
@@ -402,11 +407,14 @@ public static class ScannerHost
                 >= 'a' and <= 'f' => character - 'a' + 10,
                 _ => character - 'A' + 10,
             };
-            if (magnitude > (ulong.MaxValue - (uint)digit) / (uint)radix)
+            if (!overflow && magnitude > (ulong.MaxValue - (uint)digit) / (uint)radix)
             {
-                return false;
+                overflow = true;
             }
-            magnitude = (magnitude * (uint)radix) + (uint)digit;
+            else if (!overflow)
+            {
+                magnitude = (magnitude * (uint)radix) + (uint)digit;
+            }
             hasDigit = true;
             index++;
         }

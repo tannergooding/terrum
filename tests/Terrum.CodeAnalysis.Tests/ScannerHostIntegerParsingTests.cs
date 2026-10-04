@@ -32,4 +32,17 @@ public sealed class ScannerHostIntegerParsingTests
         var compilation = Compilation.Create(SyntaxTree.Parse(lexical));
         Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3013");
     }
+
+    [Theory]
+    [InlineData("public int32 Read() { return -2147483648; }", int.MinValue)]
+    [InlineData("public int64 Read() { return -9223372036854775808; }", long.MinValue)]
+    public void BindsSignedMinimumWithoutDecodedScannerValues(string source, long expected)
+    {
+        var lexical = Lexer.Lex(SourceText.From(source));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(lexical));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var function = Assert.IsType<BoundProgram>(compilation.Program).Functions[0];
+        var statement = Assert.IsType<BoundReturn>(Assert.Single(function.Body.Statements));
+        Assert.Equal(expected, Assert.IsType<BoundConstant>(statement.Value).Value);
+    }
 }
