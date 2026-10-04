@@ -1217,8 +1217,11 @@ unary sign negation are also provisional under separate unapproved
 [negation](proposals/floating-trrm-negation.md) and
 [arithmetic](proposals/floating-trrm-arithmetic.md) proposals.
 `char16`-to-floating conversion is also provisional under separate unapproved
-eligibility and TRRM proposals. These are not part of the approved `(1, 0)`
-Body profile.
+eligibility and TRRM proposals. Float-to-integer conversion is provisionally
+encoded as a distinct fail-fast operation under its unapproved
+[TRRM proposal](proposals/floating-to-integer-trrm-conversions.md); checked-
+exception TRRM remains unsupported. These are not part of the approved
+`(1, 0)` Body profile.
 Frontend verification/emission remains hosted.
 Existing source function and local shadowing keeps its ordinary call-binding
 precedence. Top-level generic function templates support multiple independently
@@ -2507,10 +2510,14 @@ to the separate unapproved encoding proposal. Explicit conversion between the
 two floating formats is separately provisional via `FloatConvert` opcode
 `0x1A`; conversion from the four fixed-width integer types is provisionally
 implemented via `IntToFloat` opcode `0x1B`; `char16`-to-floating conversion
-uses the distinct `Char16ToFloat` opcode `0x1E`; and unary sign negation is
+uses the distinct `Char16ToFloat` opcode `0x1E`; unary sign negation is
 provisionally implemented via `FloatNegate` opcode `0x1C`, which toggles only
-the sign bit. These remain unapproved; remainder and other numeric conversion
-pairs remain unsupported.
+the sign bit; and `FloatToInteger` opcode `0x1F` converts to `int32`, `uint32`,
+`int64` and `uint64` by truncating toward zero before range checking and
+failing with the existing overflow status. Float-to-integer conversion cannot
+satisfy `NoThrow`, and checked-exception TRRM remains unsupported. These
+operations remain unapproved; remainder and other numeric conversion pairs
+remain unsupported.
 Body-local optional scalar values support `MakeOptional`, `None`, `IsPresent`,
 `Copy` and eager `Select`, preserving presence independently from payload bits.
 Optional `char16` also supports equality and inequality; optional equality for
@@ -2675,9 +2682,9 @@ Param and TypeSpec rows and checks the fail-fast scalar subset of `ConstBits`,
 `CheckedNegate`, `CheckedDivRem`, static `Call`, `Return` and `Fail`.
 Provisionally, this reader also recognizes float TypeSpecs, float `ConstBits`,
 `FloatCompare` `0x19`, `FloatConvert` `0x1A`, `IntToFloat` `0x1B`,
-`FloatNegate` `0x1C`, `FloatBinary` `0x1D` and `Char16ToFloat` `0x1E` under
-their unapproved TRRM proposals; this is not approved executable-profile
-support.
+`FloatNegate` `0x1C`, `FloatBinary` `0x1D`, `Char16ToFloat` `0x1E` and
+`FloatToInteger` `0x1F` under their unapproved TRRM proposals; this is not
+approved executable-profile support.
 Calls inspect authored local MethodDefs, packed direct references to public
 global or public type-owned static MethodDefs in another included module with
 a Body row, and retained imports of public global or public type-owned static
@@ -2720,8 +2727,9 @@ reader also recognizes float `ConstBits` and same-format `FloatCompare` under
 the unapproved comparison proposal, `FloatConvert` and `IntToFloat` under
 their separate unapproved conversion proposals, `FloatNegate` under its
 unapproved proposal, `FloatBinary` under the arithmetic and arithmetic-NaN
-proposals, and `Char16ToFloat` under its unapproved conversion proposal; the
-approved `(1, 0)` profile does not.
+proposals, `Char16ToFloat` under its unapproved conversion proposal, and
+`FloatToInteger` for the eight proposed fail-fast pairs under its unapproved
+conversion proposal; the approved `(1, 0)` profile does not.
 The bounded call inspection
 rejects receiver/generic calls and generic owners for external members.
 Packed direct MethodDef `DefId` calls require

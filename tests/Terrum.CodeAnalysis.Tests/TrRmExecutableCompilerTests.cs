@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -128,12 +129,12 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Fact]
-    public void FloatingArithmeticRemainsOutsideExecutableTrRm()
+    public void FloatingRemainderRemainsUnsupported()
     {
-        var program = Compile("int32 Main() { float32 left = 1.0; float32 right = 2.0; "
-            + "return int32(left + right); }");
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public float32 Remainder(float32 left, float32 right) { return left % right; }"));
 
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "float-arithmetic"));
+        Assert.True(compilation.HasErrors);
     }
 
     [Theory]
@@ -300,11 +301,254 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Fact]
-    public void FloatingToIntegerRemainsOutsideExecutableTrRm()
+    public void FloatingToIntegerConversionsExecuteThroughLinearAndIndexedBodies()
     {
-        var program = Compile("int32 ToInt(float32 value) { return int32(value); }", true);
+        const string source = """
+            public int32 Float64ToInt32(float64 value) { return int32(value); }
+            public uint32 Float64ToUInt32(float64 value) { return uint32(value); }
+            public int64 Float64ToInt64(float64 value) { return int64(value); }
+            public uint64 Float64ToUInt64(float64 value) { return uint64(value); }
+            public int32 Float32ToInt32(float32 value) { return int32(value); }
+            public uint32 Float32ToUInt32(float32 value) { return uint32(value); }
+            public int64 Float32ToInt64(float32 value) { return int64(value); }
+            public uint64 Float32ToUInt64(float32 value) { return uint64(value); }
+            public int32 Float64ToInt32IfZero(float64 value) {
+                if (value == 0.0) { return int32(value); }
+                return 42;
+            }
+            public uint32 Float64ToUInt32IfZero(float64 value) {
+                if (value == 0.0) { return uint32(value); }
+                return 42;
+            }
+            public int64 Float64ToInt64IfZero(float64 value) {
+                if (value == 0.0) { return int64(value); }
+                return 42;
+            }
+            public uint64 Float64ToUInt64IfZero(float64 value) {
+                if (value == 0.0) { return uint64(value); }
+                return 42;
+            }
+            public int32 Float32ToInt32IfZero(float32 value) {
+                if (value == 0.0) { return int32(value); }
+                return 42;
+            }
+            public uint32 Float32ToUInt32IfZero(float32 value) {
+                if (value == 0.0) { return uint32(value); }
+                return 42;
+            }
+            public int64 Float32ToInt64IfZero(float32 value) {
+                if (value == 0.0) { return int64(value); }
+                return 42;
+            }
+            public uint64 Float32ToUInt64IfZero(float32 value) {
+                if (value == 0.0) { return uint64(value); }
+                return 42;
+            }
+            """;
+        var original = Compile(source, true);
+        var artifact = TrRmExecutableCompiler.Emit(original, "float-integer-conversions");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        string[] names =
+        [
+            "Float64ToInt32", "Float64ToUInt32", "Float64ToInt64", "Float64ToUInt64",
+            "Float32ToInt32", "Float32ToUInt32", "Float32ToInt64", "Float32ToUInt64",
+            "Float64ToInt32IfZero", "Float64ToUInt32IfZero", "Float64ToInt64IfZero",
+            "Float64ToUInt64IfZero", "Float32ToInt32IfZero", "Float32ToUInt32IfZero",
+            "Float32ToInt64IfZero", "Float32ToUInt64IfZero",
+        ];
+        var images = new[]
+        {
+            NativeEmitter.EmitLibrary(original, names, NativeRuntimePolicy.FailFast),
+            NativeEmitter.EmitLibrary(loaded, names, NativeRuntimePolicy.FailFast),
+        };
+        var paths = new string[images.Length];
+        var handles = new IntPtr[images.Length];
+        try
+        {
+            for (var index = 0; index < images.Length; index++)
+            {
+                paths[index] = Path.Combine(Directory.GetCurrentDirectory(),
+                    $"trrm-float-to-integer-{Guid.NewGuid():N}-{index}.dll");
+                File.WriteAllBytes(paths[index], images[index]);
+                handles[index] = NativeLibrary.Load(paths[index]);
+            }
 
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "float-conversion"));
+            foreach (var handle in handles)
+            {
+                var float64ToInt32 = Marshal.GetDelegateForFunctionPointer<Float64ToInt32>(
+                    NativeLibrary.GetExport(handle, "Float64ToInt32"));
+                var float64ToUInt32 = Marshal.GetDelegateForFunctionPointer<Float64ToUInt32>(
+                    NativeLibrary.GetExport(handle, "Float64ToUInt32"));
+                var float64ToInt64 = Marshal.GetDelegateForFunctionPointer<Float64ToInt64>(
+                    NativeLibrary.GetExport(handle, "Float64ToInt64"));
+                var float64ToUInt64 = Marshal.GetDelegateForFunctionPointer<Float64ToUInt64>(
+                    NativeLibrary.GetExport(handle, "Float64ToUInt64"));
+                var float32ToInt32 = Marshal.GetDelegateForFunctionPointer<Float32ToInt32>(
+                    NativeLibrary.GetExport(handle, "Float32ToInt32"));
+                var float32ToUInt32 = Marshal.GetDelegateForFunctionPointer<Float32ToUInt32>(
+                    NativeLibrary.GetExport(handle, "Float32ToUInt32"));
+                var float32ToInt64 = Marshal.GetDelegateForFunctionPointer<Float32ToInt64>(
+                    NativeLibrary.GetExport(handle, "Float32ToInt64"));
+                var float32ToUInt64 = Marshal.GetDelegateForFunctionPointer<Float32ToUInt64>(
+                    NativeLibrary.GetExport(handle, "Float32ToUInt64"));
+                var float64ToInt32IfZero = Marshal.GetDelegateForFunctionPointer<Float64ToInt32>(
+                    NativeLibrary.GetExport(handle, "Float64ToInt32IfZero"));
+                var float64ToUInt32IfZero = Marshal.GetDelegateForFunctionPointer<Float64ToUInt32>(
+                    NativeLibrary.GetExport(handle, "Float64ToUInt32IfZero"));
+                var float64ToInt64IfZero = Marshal.GetDelegateForFunctionPointer<Float64ToInt64>(
+                    NativeLibrary.GetExport(handle, "Float64ToInt64IfZero"));
+                var float64ToUInt64IfZero = Marshal.GetDelegateForFunctionPointer<Float64ToUInt64>(
+                    NativeLibrary.GetExport(handle, "Float64ToUInt64IfZero"));
+                var float32ToInt32IfZero = Marshal.GetDelegateForFunctionPointer<Float32ToInt32>(
+                    NativeLibrary.GetExport(handle, "Float32ToInt32IfZero"));
+                var float32ToUInt32IfZero = Marshal.GetDelegateForFunctionPointer<Float32ToUInt32>(
+                    NativeLibrary.GetExport(handle, "Float32ToUInt32IfZero"));
+                var float32ToInt64IfZero = Marshal.GetDelegateForFunctionPointer<Float32ToInt64>(
+                    NativeLibrary.GetExport(handle, "Float32ToInt64IfZero"));
+                var float32ToUInt64IfZero = Marshal.GetDelegateForFunctionPointer<Float32ToUInt64>(
+                    NativeLibrary.GetExport(handle, "Float32ToUInt64IfZero"));
+
+                Assert.Equal(1, float64ToInt32(BitConverter.DoubleToInt64Bits(1.9)));
+                Assert.Equal(-1, float64ToInt32(BitConverter.DoubleToInt64Bits(-1.9)));
+                Assert.Equal(0, float64ToInt32(BitConverter.DoubleToInt64Bits(-0.0)));
+                Assert.Equal(int.MinValue,
+                    float64ToInt32(BitConverter.DoubleToInt64Bits(-2147483648.9)));
+                Assert.Equal(int.MaxValue,
+                    float64ToInt32(BitConverter.DoubleToInt64Bits(2147483647.9)));
+                Assert.Equal(0u, float64ToUInt32(BitConverter.DoubleToInt64Bits(-0.5)));
+                Assert.Equal(0u, float64ToUInt32(BitConverter.DoubleToInt64Bits(-0.0)));
+                Assert.Equal(uint.MaxValue,
+                    float64ToUInt32(BitConverter.DoubleToInt64Bits(4294967295.75)));
+                Assert.Equal(long.MinValue,
+                    float64ToInt64(BitConverter.DoubleToInt64Bits(long.MinValue)));
+                Assert.Equal(9_223_372_036_854_774_784L,
+                    float64ToInt64(BitConverter.DoubleToInt64Bits(
+                        Math.BitDecrement(9223372036854775808.0))));
+                Assert.Equal(18_446_744_073_709_549_568UL,
+                    float64ToUInt64(BitConverter.DoubleToInt64Bits(
+                        Math.BitDecrement(18446744073709551616.0))));
+                Assert.Equal(0UL, float64ToUInt64(BitConverter.DoubleToInt64Bits(-0.5)));
+                Assert.Equal(0UL, float64ToUInt64(BitConverter.DoubleToInt64Bits(-0.0)));
+                Assert.Equal(3, float32ToInt32(BitConverter.SingleToInt32Bits(3.75F)));
+                Assert.Equal(0, float32ToInt32(BitConverter.SingleToInt32Bits(-0.0F)));
+                Assert.Equal(0U, float32ToUInt32(BitConverter.SingleToInt32Bits(-0.5F)));
+                Assert.Equal(4_294_967_040U, float32ToUInt32(unchecked((int)0x4F7FFFFF)));
+                Assert.Equal(long.MinValue, float32ToInt64(unchecked((int)0xDF000000)));
+                Assert.Equal(9_223_372_036_854_775_808UL, float32ToUInt64(0x5F000000));
+                Assert.Equal(1UL,
+                    float32ToUInt64(BitConverter.SingleToInt32Bits(1.9F)));
+                Assert.Equal(0, float64ToInt32IfZero(BitConverter.DoubleToInt64Bits(-0.0)));
+                Assert.Equal(42, float64ToInt32IfZero(BitConverter.DoubleToInt64Bits(1.0)));
+                Assert.Equal(0U, float64ToUInt32IfZero(BitConverter.DoubleToInt64Bits(-0.0)));
+                Assert.Equal(42U, float64ToUInt32IfZero(BitConverter.DoubleToInt64Bits(1.0)));
+                Assert.Equal(0L, float64ToInt64IfZero(BitConverter.DoubleToInt64Bits(-0.0)));
+                Assert.Equal(42L, float64ToInt64IfZero(BitConverter.DoubleToInt64Bits(1.0)));
+                Assert.Equal(0UL, float64ToUInt64IfZero(BitConverter.DoubleToInt64Bits(-0.0)));
+                Assert.Equal(42UL, float64ToUInt64IfZero(BitConverter.DoubleToInt64Bits(1.0)));
+                Assert.Equal(0, float32ToInt32IfZero(BitConverter.SingleToInt32Bits(-0.0F)));
+                Assert.Equal(42, float32ToInt32IfZero(BitConverter.SingleToInt32Bits(1.0F)));
+                Assert.Equal(0U, float32ToUInt32IfZero(BitConverter.SingleToInt32Bits(-0.0F)));
+                Assert.Equal(42U, float32ToUInt32IfZero(BitConverter.SingleToInt32Bits(1.0F)));
+                Assert.Equal(0L, float32ToInt64IfZero(BitConverter.SingleToInt32Bits(-0.0F)));
+                Assert.Equal(42L, float32ToInt64IfZero(BitConverter.SingleToInt32Bits(1.0F)));
+                Assert.Equal(0UL, float32ToUInt64IfZero(BitConverter.SingleToInt32Bits(-0.0F)));
+                Assert.Equal(42UL, float32ToUInt64IfZero(BitConverter.SingleToInt32Bits(1.0F)));
+            }
+        }
+        finally
+        {
+            foreach (var handle in handles)
+            {
+                if (handle != IntPtr.Zero)
+                {
+                    NativeLibrary.Free(handle);
+                }
+            }
+            foreach (var path in paths)
+            {
+                if (path is not null)
+                {
+                    File.Delete(path);
+                }
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(0x7FF8000000000001UL)]
+    [InlineData(0x7FF0000000000000UL)]
+    [InlineData(0xFFF0000000000000UL)]
+    [InlineData(0x41E0000000000000UL)]
+    [InlineData(0xC1E0000000200000UL)]
+    public async Task FloatingToIntegerFailuresUseTheOverflowFailFastStatusAsync(ulong replacementBits)
+    {
+        const string source = """
+            int32 Main() { return int32(Value()); }
+            float64 Value() { return 1.0; }
+            """;
+        var artifact = TrRmExecutableCompiler.Emit(Compile(source), "float-to-integer-failure");
+        var oneBits = new byte[sizeof(ulong)];
+        var failureBits = new byte[sizeof(ulong)];
+        BinaryPrimitives.WriteUInt64LittleEndian(oneBits,
+            unchecked((ulong)BitConverter.DoubleToInt64Bits(1.0)));
+        BinaryPrimitives.WriteUInt64LittleEndian(failureBits, replacementBits);
+        var malformed = ReplaceBodyConstant(artifact, 2, oneBits, failureBits);
+        var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-float-to-integer-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            File.WriteAllBytes(path, malformed);
+            var (exitCode, output, error) = await RunTrRmAsync(path);
+
+            Assert.Equal(unchecked((int)0xE0540001), exitCode);
+            Assert.Empty(output);
+            Assert.Empty(error);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void FloatToIntegerRejectsAnInvalidDestinationTypeSpec()
+    {
+        const string source = "public int32 Convert(float64 value) { return int32(value); }";
+        var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-float-integer");
+        var malformed = ReplaceBodyOperationByte(artifact, 1, 0x1F, 2, 0);
+
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
+    [Fact]
+    public void FloatingToIntegerConversionsCannotPromiseNoThrow()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "[NoThrow] public int32 Convert(float64 value) { return int32(value); }"));
+
+        Assert.True(compilation.HasErrors);
+    }
+
+    [Fact]
+    public void NoThrowArtifactsCannotRetainFloatToIntegerOperations()
+    {
+        const string source = """
+            [NoThrow] public int32 Convert(float64 value) { return 0; }
+            public int32 ConvertChecked(float64 value) { return int32(value); }
+            [NoThrow] public int32 ConvertIf(float64 value) {
+                if (value == 0.0) { return 0; }
+                return 42;
+            }
+            public int32 ConvertIfChecked(float64 value) {
+                if (value == 0.0) { return int32(value); }
+                return 42;
+            }
+            """;
+        var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "float-to-integer-no-throw");
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(ReplaceBodyRow(artifact, 1, 2)));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(ReplaceBodyRow(artifact, 3, 4)));
     }
 
     [Fact]
@@ -838,6 +1082,22 @@ public sealed class TrRmExecutableCompilerTests
     private delegate int Char16ToFloat32(ushort value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Char16ToFloat64(ushort value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Float64ToInt32(long value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint Float64ToUInt32(long value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Float64ToInt64(long value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong Float64ToUInt64(long value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Float32ToInt32(int value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint Float32ToUInt32(int value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Float32ToInt64(int value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong Float32ToUInt64(int value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate void VoidAction();
 
@@ -1434,6 +1694,28 @@ public sealed class TrRmExecutableCompilerTests
         return TrRmArtifactWriter.Encode(sections);
     }
 
+    private static byte[] ReplaceBodyRow(byte[] artifact, int destinationRow, int sourceRow)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount));
+        var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
+        var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
+        for (var row = 1; row <= bodyCount; row++)
+        {
+            bodyRows[row - 1] = bodies.GetRow(row).ToArray();
+        }
+        bodyRows[destinationRow - 1] = bodies.GetRow(sourceRow).ToArray();
+        var rewrittenBodies = TrRmVariableTableWriter.EncodeBodies(bodyRows);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags, out var bytes, out var count);
+            sections.Add(new TrRmSection(kind, flags, (uint)count,
+                kind == 0x20 ? rewrittenBodies : bytes.ToArray()));
+        }
+        return TrRmArtifactWriter.Encode(sections);
+    }
+
     private static byte[] ReplaceBodyConstant(byte[] artifact, int bodyRow,
         byte[] originalBits, byte[] replacementBits)
     {
@@ -1489,5 +1771,35 @@ public sealed class TrRmExecutableCompilerTests
                 kind == 0x20 ? rewrittenBodies : bytes.ToArray()));
         }
         return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static async Task<(int ExitCode, string Output, string Error)> RunTrRmAsync(string artifact)
+    {
+        var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = frameworkDirectory.Parent?.Name
+            ?? throw new InvalidOperationException("Test configuration directory is missing.");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", ".."));
+        var cli = Path.Combine(root, "artifacts", "bin", "sources", "terrumc",
+            configuration, frameworkDirectory.Name, "terrumc.dll");
+        var start = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        start.ArgumentList.Add(cli);
+        start.ArgumentList.Add("run-trrm");
+        start.ArgumentList.Add(artifact);
+        start.ArgumentList.Add("--runtime");
+        start.ArgumentList.Add("fail-fast");
+        start.ArgumentList.Add("--json");
+        using var process = Process.Start(start)
+            ?? throw new InvalidOperationException("TRRM runner process was not started.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        return (process.ExitCode, await output, await error);
     }
 }

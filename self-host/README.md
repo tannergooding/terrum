@@ -53,8 +53,10 @@ Same-format floating add, subtract, multiply and divide are separately
 provisional under the unapproved
 [TRRM arithmetic proposal](../docs/proposals/floating-trrm-arithmetic.md) and
 its separate [arithmetic-NaN proposal](../docs/proposals/floating-arithmetic-nan-encoding.md).
-Remainder, mixed-format arithmetic and floating-to-integer conversions remain
-unsupported there. `char16`-to-floating conversion is provisionally encoded
+Float-to-integer conversion is separately provisional under the unapproved
+[TRRM float-to-integer proposal](../docs/proposals/floating-to-integer-trrm-conversions.md).
+Remainder and mixed-format arithmetic remain unsupported there.
+`char16`-to-floating conversion is provisionally encoded
 under the unapproved
 [TRRM char16 conversion proposal](../docs/proposals/char16-to-floating-trrm-conversions.md),
 which follows the separate unsigned code-unit

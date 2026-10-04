@@ -59,8 +59,11 @@ supports same-format floating add, subtract, multiply and divide under an
 unapproved proposal. Same-format comparisons and exact-bit constants,
 explicit conversion between the two floating formats, conversion from the
 four fixed-width integer types, `char16`-to-floating conversion and unary
-negation are separately provisional under their unapproved proposals; none is
-part of the approved `(1, 0)` Body profile.
+negation are separately provisional under their unapproved proposals.
+Floating-to-integer conversion is also provisionally encoded as a distinct
+fail-fast operation under its unapproved proposal; checked-exception TRRM
+remains unsupported. None of these floating operations is part of the approved
+`(1, 0)` Body profile.
 
 The bounded Terrum-authored scalar source frontend supports v85 complete
 global-function snapshots and source-order scalar call targets, including
