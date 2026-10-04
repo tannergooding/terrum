@@ -69,12 +69,36 @@ cursor. This is a proposal, not approval to expose a view or claim support.
 Do not add a cursor-specific adapter that silently treats `HostBuffer` or
 `ManagedTokenChain` as a span.
 
-Before implementation, independently verify the native layout and alignment
-of `Token` and `OwnedInt32Buffer`, the snapshot's post-scan validation and
-publication conditions, and that owner dependency forwarding does not extend
-or duplicate ownership. Keep the bridge readonly and limited to the
-`TokenSnapshot` record prefix; no mutable access, arbitrary span construction,
-general slicing, parser integration, or new public ABI is implied.
+## Verified implementation boundary
+
+The candidate record layout is compatible with the proposed readonly view:
+[`Token`](../../self-host/Token.terrum) contains one `int32` kind and a
+[`SourceRange`](../../self-host/SourceRange.terrum) of two `int32` values, so
+each record is 12 bytes, matching the three-word prefix copied by
+[`TokenSnapshot.TryBuild`](../../self-host/TokenSnapshot.terrum). The snapshot
+validates each scanner record before appending it and publishes the output
+only after the complete prefix has been copied. On the current Windows x64
+profile, the owned buffer's eight-byte header follows 16-byte-aligned
+`HeapAlloc` storage, so the record base and each four-byte field remain
+naturally aligned; the bounded buffer implementation documents that guarantee
+in [`native.md`](../native.md).
+
+The unresolved part is dependency preservation, not record layout. The
+`OwnedInt32Buffer` is an eight-byte unique handle and does not expose its data
+pointer. The existing `ReadonlyInt32BufferView` uses a 16-byte local
+descriptor whose owner root remains in structured semantic IR; it cannot be
+stored or returned and does not extend owner lifetime. The current
+implementation therefore has no checked representation for forwarding the
+snapshot owner's lifetime through a stored `Span<Token>` field and
+`[Captures]` relationship. A raw pointer/length bridge would lose that
+obligation and is not safe to implement as a mechanical adapter.
+
+**Recommendation:** Keep the bridge and cursor unsupported until the bounded
+stored-dependency proof is implemented. If that proof is advanced, keep the
+bridge readonly and limited to the validated `TokenSnapshot` prefix; do not
+add mutable access, arbitrary span construction, general slicing, parser
+integration, or a new public ABI. This evidence does not approve the bridge
+or block independent roadmap work.
 
 ## Decisions and rationale
 
