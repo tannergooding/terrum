@@ -1955,8 +1955,23 @@ internal sealed partial class Binder
     {
         if (expressionNode.Kind != SyntaxKind.InvocationExpression
             || expressionNode.Children[0] is not SyntaxNode { Kind: SyntaxKind.MemberAccessExpression } member
-            || ((SyntaxTokenElement)member.Children[2]).Token.Text != "Set"
-            || KnownType((SyntaxNode)member.Children[0]) != PrimitiveType.MutableInt32BufferView)
+            || ((SyntaxTokenElement)member.Children[2]).Token.Text != "Set")
+        {
+            return null;
+        }
+
+        var receiver = (SyntaxNode)member.Children[0];
+        var variableReceiver = receiver;
+        while (variableReceiver.Kind == SyntaxKind.ParenthesizedExpression)
+        {
+            variableReceiver = (SyntaxNode)variableReceiver.Children[1];
+        }
+        var viewSlot = variableReceiver.Kind == SyntaxKind.NameExpression
+            && TryFindVariable(((SyntaxTokenElement)variableReceiver.Children[0]).Token.Name, out var slot)
+            && !_unresolvedVacantLocals.Contains(slot)
+            && _variables[slot].Type == PrimitiveType.MutableInt32BufferView
+                ? slot : -1;
+        if (viewSlot < 0 && KnownType(receiver) != PrimitiveType.MutableInt32BufferView)
         {
             return null;
         }
@@ -1964,7 +1979,7 @@ internal sealed partial class Binder
         var arguments = ((SyntaxNode)expressionNode.Children[1]).Children.OfType<SyntaxNode>().ToArray();
         if (arguments.Length == 2 && arguments.All(static argument => argument.Children is [SyntaxNode]))
         {
-            return new BoundViewSet(BindViewVariable((SyntaxNode)member.Children[0]),
+            return new BoundViewSet(viewSlot >= 0 ? viewSlot : BindViewVariable(receiver),
                 BindExpression((SyntaxNode)arguments[0].Children[0], PrimitiveType.Int32),
                 BindExpression((SyntaxNode)arguments[1].Children[0], PrimitiveType.Int32), span);
         }
