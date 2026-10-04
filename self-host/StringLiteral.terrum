@@ -102,21 +102,21 @@ public struct StringLiteral
             }
             else if (scalar < 2048)
             {
-                require bytes.TryAppend(192 + scalar / 64);
-                require bytes.TryAppend(128 + scalar % 64);
+                require bytes.TryAppend(192 + (scalar >> 6));
+                require bytes.TryAppend(128 + (scalar & 63));
             }
             else if (scalar < 65536)
             {
-                require bytes.TryAppend(224 + scalar / 4096);
-                require bytes.TryAppend(128 + (scalar / 64) % 64);
-                require bytes.TryAppend(128 + scalar % 64);
+                require bytes.TryAppend(224 + (scalar >> 12));
+                require bytes.TryAppend(128 + ((scalar >> 6) & 63));
+                require bytes.TryAppend(128 + (scalar & 63));
             }
             else
             {
-                require bytes.TryAppend(240 + scalar / 262144);
-                require bytes.TryAppend(128 + (scalar / 4096) % 64);
-                require bytes.TryAppend(128 + (scalar / 64) % 64);
-                require bytes.TryAppend(128 + scalar % 64);
+                require bytes.TryAppend(240 + (scalar >> 18));
+                require bytes.TryAppend(128 + ((scalar >> 12) & 63));
+                require bytes.TryAppend(128 + ((scalar >> 6) & 63));
+                require bytes.TryAppend(128 + (scalar & 63));
             }
             cursor = next;
         }
@@ -152,8 +152,8 @@ public struct StringLiteral
             if (scalar >= 65536)
             {
                 int32 supplementary = scalar - 65536;
-                require units.TryAppend(55296 + supplementary / 1024);
-                require units.TryAppend(56320 + supplementary % 1024);
+                require units.TryAppend(55296 + (supplementary >> 10));
+                require units.TryAppend(56320 + (supplementary & 1023));
             }
             else
             {
@@ -185,17 +185,17 @@ public struct StringLiteral
             if (scalar >= 65536)
             {
                 int32 supplementary = scalar - 65536;
-                first = 55296 + supplementary / 1024;
-                int32 second = 56320 + supplementary % 1024;
-                require bytes.TryAppend(first % 256);
-                require bytes.TryAppend(first / 256);
-                require bytes.TryAppend(second % 256);
-                require bytes.TryAppend(second / 256);
+                first = 55296 + (supplementary >> 10);
+                int32 second = 56320 + (supplementary & 1023);
+                require bytes.TryAppend(first & 255);
+                require bytes.TryAppend(first >> 8);
+                require bytes.TryAppend(second & 255);
+                require bytes.TryAppend(second >> 8);
             }
             else
             {
-                require bytes.TryAppend(first % 256);
-                require bytes.TryAppend(first / 256);
+                require bytes.TryAppend(first & 255);
+                require bytes.TryAppend(first >> 8);
             }
             cursor = next;
         }
@@ -213,17 +213,17 @@ public struct StringLiteral
             if (scalar >= 65536)
             {
                 int32 supplementary = scalar - 65536;
-                first = 55296 + supplementary / 1024;
-                int32 second = 56320 + supplementary % 1024;
-                require bytes.TryAppend(first / 256);
-                require bytes.TryAppend(first % 256);
-                require bytes.TryAppend(second / 256);
-                require bytes.TryAppend(second % 256);
+                first = 55296 + (supplementary >> 10);
+                int32 second = 56320 + (supplementary & 1023);
+                require bytes.TryAppend(first >> 8);
+                require bytes.TryAppend(first & 255);
+                require bytes.TryAppend(second >> 8);
+                require bytes.TryAppend(second & 255);
             }
             else
             {
-                require bytes.TryAppend(first / 256);
-                require bytes.TryAppend(first % 256);
+                require bytes.TryAppend(first >> 8);
+                require bytes.TryAppend(first & 255);
             }
             cursor = next;
         }
@@ -305,10 +305,10 @@ public struct StringLiteral
         mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
         while (cursor.TryRead(init var scalar, init var next))
         {
-            require bytes.TryAppend(scalar % 256);
-            require bytes.TryAppend((scalar / 256) % 256);
-            require bytes.TryAppend((scalar / 65536) % 256);
-            require bytes.TryAppend(scalar / 16777216);
+            require bytes.TryAppend(scalar & 255);
+            require bytes.TryAppend((scalar >> 8) & 255);
+            require bytes.TryAppend((scalar >> 16) & 255);
+            require bytes.TryAppend(scalar >> 24);
             cursor = next;
         }
         return move bytes;
@@ -321,10 +321,10 @@ public struct StringLiteral
         mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
         while (cursor.TryRead(init var scalar, init var next))
         {
-            require bytes.TryAppend(scalar / 16777216);
-            require bytes.TryAppend((scalar / 65536) % 256);
-            require bytes.TryAppend((scalar / 256) % 256);
-            require bytes.TryAppend(scalar % 256);
+            require bytes.TryAppend(scalar >> 24);
+            require bytes.TryAppend((scalar >> 16) & 255);
+            require bytes.TryAppend((scalar >> 8) & 255);
+            require bytes.TryAppend(scalar & 255);
             cursor = next;
         }
         return move bytes;

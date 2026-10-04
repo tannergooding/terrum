@@ -769,6 +769,8 @@ consume caller-provided `OwnedInt32Buffer` storage and write bytes or code
 units as integer words. UTF-16 and UTF-32 byte encoders support both LE and BE
 without a byte-order mark. Their shared byte-length queries
 count bytes; `TryGetUtf16Length` instead counts UTF-16 code units.
+UTF encoders extract power-of-two fields with shifts and masks rather than
+repeated division and remainder.
 ASCII refuses non-ASCII scalars; UTF-16 supplementary scalars become surrogate
 pairs, while escaped surrogates remain invalid.
 Exact capacity works for empty and nonempty literals; invalid ASCII and
