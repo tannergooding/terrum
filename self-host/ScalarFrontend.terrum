@@ -416,7 +416,8 @@ mut class ScalarFrontendState
         return false;
     }
 
-    private bool TryResolveSignatureParameter(Token token, out int32 index, out int32 type)
+    private bool TryResolveSignatureParameter(Token token,
+        init ref<int32> index, init ref<int32> type)
     {
         if (_parameterCount > 0 && SameTokenSpelling(_first, token))
         {
@@ -437,8 +438,6 @@ mut class ScalarFrontendState
             type = _thirdType;
             return true;
         }
-        index = 0;
-        type = 0;
         return false;
     }
 
@@ -459,9 +458,10 @@ mut class ScalarFrontendState
         return IsOutParameter(slot) || IsInitRefParameter(slot);
     }
 
-    private mut bool TryResolveParameter(Token token, out int32 index, out int32 type)
+    private mut bool TryResolveParameter(Token token,
+        init ref<int32> index, init ref<int32> type)
     {
-        if (TryResolveSignatureParameter(token, out index, out type)) { return true; }
+        if (TryResolveSignatureParameter(token, init index, init type)) { return true; }
         for (mut int32 local = 0; local < _localCount; local = local + 1)
         {
             if (!IsActiveLocal(local)) { continue; }
@@ -739,11 +739,13 @@ mut class ScalarFrontendState
             }
             else if (operand.Kind == 2)
             {
-                if (!TryResolveSignatureParameter(operand, out parameter, out var type))
+                if (!TryResolveSignatureParameter(operand,
+                    init var resolvedParameter, init var type))
                 {
                     FailAt(3, operand.Range);
                     return false;
                 }
+                parameter = resolvedParameter;
                 if (type != 5)
                 {
                     FailAt(2, operand.Range);
@@ -879,10 +881,12 @@ mut class ScalarFrontendState
             }
             else if (operand.Kind == 2)
             {
-                if (!TryResolveParameter(operand, out left, out var parameterType))
+                if (!TryResolveParameter(operand,
+                    init var resolvedLeft, init var parameterType))
                 {
                     return false;
                 }
+                left = resolvedLeft;
                 if (parameterType != expectedType)
                 {
                     FailAt(2, operand.Range);
@@ -1053,7 +1057,8 @@ mut class ScalarFrontendState
                 FailAt(1, unaryOperand.Range);
                 return false;
             }
-            if (!TryResolveParameter(unaryOperand, out var parameter, out var parameterType))
+            if (!TryResolveParameter(unaryOperand,
+                init var parameter, init var parameterType))
             {
                 return false;
             }
@@ -1140,7 +1145,8 @@ mut class ScalarFrontendState
                     FailAt(1, right.Range);
                     return false;
                 }
-                if (!TryResolveParameter(right, out var parameter, out var parameterType))
+                if (!TryResolveParameter(right,
+                    init var parameter, init var parameterType))
                 {
                     return false;
                 }
@@ -1231,7 +1237,8 @@ mut class ScalarFrontendState
                     FailAt(1, right.Range);
                     return false;
                 }
-                if (!TryResolveParameter(right, out var parameter, out var parameterType))
+                if (!TryResolveParameter(right,
+                    init var parameter, init var parameterType))
                 {
                     return false;
                 }
@@ -1297,7 +1304,8 @@ mut class ScalarFrontendState
                     FailAt(1, booleanRight.Range);
                     return false;
                 }
-                if (!TryResolveParameter(booleanRight, out var parameter, out var parameterType))
+                if (!TryResolveParameter(booleanRight,
+                    init var parameter, init var parameterType))
                 {
                     return false;
                 }
@@ -1336,11 +1344,14 @@ mut class ScalarFrontendState
         }
         mut int32 leftIndex = 0;
         mut int32 selected = 0;
-        if (!TryResolveSignatureParameter(left, out leftIndex, out selected))
+        if (!TryResolveSignatureParameter(left,
+            init var resolvedLeftIndex, init var resolvedSelected))
         {
             FailAt(3, left.Range);
             return false;
         }
+        leftIndex = resolvedLeftIndex;
+        selected = resolvedSelected;
 
         mut int32 operation = 0;
         mut int32 rightIndex = 0;
@@ -1454,11 +1465,13 @@ mut class ScalarFrontendState
                 FailAt(1, right.Range);
                 return false;
             }
-            if (!TryResolveSignatureParameter(right, out rightIndex, out var rightType))
+            if (!TryResolveSignatureParameter(right,
+                init var resolvedRightIndex, init var rightType))
             {
                 FailAt(3, right.Range);
                 return false;
             }
+            rightIndex = resolvedRightIndex;
             if (selected != rightType || ((operation >= 57 && operation <= 61)
                 && (selected == 5 || selected == 6))
                 || (operation >= 67 && operation <= 70 && selected == 5)
@@ -1733,7 +1746,8 @@ mut class ScalarFrontendState
             && _tokens.TryGet(_at + 2, init var lifetimeValue)
             && lifetimeValue.Kind == 81)
         {
-            if (!TryResolveParameter(first, out var slot, out var lifetimeType))
+            if (!TryResolveParameter(first,
+                init var slot, init var lifetimeType))
             {
                 return false;
             }
@@ -1779,10 +1793,13 @@ mut class ScalarFrontendState
         {
             mut int32 slot = 0;
             mut int32 type = 0;
-            if (!TryResolveParameter(first, out slot, out type))
+            if (!TryResolveParameter(first,
+                init var resolvedSlot, init var resolvedType))
             {
                 return false;
             }
+            slot = resolvedSlot;
+            type = resolvedType;
             if (slot <= _parameterCount
                     ? !IsOutputParameter(slot)
                     : (Host.Frontend[300 + (slot - _parameterCount - 1) * 4 + 1] & 3) == 0)
@@ -1989,7 +2006,8 @@ mut class ScalarFrontendState
 
     private bool IsParameterName(Token name)
     {
-        return TryResolveSignatureParameter(name, out var index, out var type);
+        return TryResolveSignatureParameter(name,
+            init var index, init var type);
     }
 
     private mut bool ParseTreeVacantLocal(Token first, Token name, int32 type,
@@ -3208,10 +3226,13 @@ mut class ScalarFrontendState
                 }
                 else
                 {
-                    if (!TryResolveParameter(outputName, out slot, out type))
+                    if (!TryResolveParameter(outputName,
+                        init var resolvedSlot, init var resolvedType))
                     {
                         return false;
                     }
+                    slot = resolvedSlot;
+                    type = resolvedType;
                     if (slot <= _parameterCount)
                     {
                         writable = IsOutputParameter(slot);
@@ -3510,7 +3531,8 @@ mut class ScalarFrontendState
         _at = _at + 1;
         if (token.Kind == 2)
         {
-            if (!TryResolveParameter(token, out var parameter, out var type))
+            if (!TryResolveParameter(token,
+                init var parameter, init var type))
             {
                 return false;
             }
