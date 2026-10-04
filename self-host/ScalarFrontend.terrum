@@ -524,18 +524,20 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private mut bool FinishUnaryOperand(Token operand, int32 groups, out int32 end)
+    private mut bool FinishUnaryOperand(Token operand, int32 groups,
+        init ref<int32> end)
     {
         _at = _at + 1;
-        end = operand.Range.End;
+        mut int32 foundEnd = operand.Range.End;
         for (mut int32 index = 0; index < groups; index = index + 1)
         {
             if (!Take(47, init var close))
             {
                 return false;
             }
-            end = close.Range.End;
+            foundEnd = close.Range.End;
         }
+        end = foundEnd;
         return true;
     }
 
@@ -758,7 +760,7 @@ mut class ScalarFrontendState
                 FailAt(1, operand.Range);
                 return false;
             }
-            if (!FinishUnaryOperand(operand, groups, out var end))
+            if (!FinishUnaryOperand(operand, groups, init var end))
             {
                 return false;
             }
@@ -901,7 +903,7 @@ mut class ScalarFrontendState
                 FailAt(1, operand.Range);
                 return false;
             }
-            if (!FinishUnaryOperand(operand, groups, out var end))
+            if (!FinishUnaryOperand(operand, groups, init var end))
             {
                 return false;
             }
@@ -1039,7 +1041,7 @@ mut class ScalarFrontendState
                 }
                 if (!TryReadMagnitude(unaryOperand, _at, expectedType, false,
                     unaryOperand.Range, init var low, init var high)
-                    || !FinishUnaryOperand(unaryOperand, groups, out var signedEnd))
+                    || !FinishUnaryOperand(unaryOperand, groups, init var signedEnd))
                 {
                     return false;
                 }
@@ -1074,7 +1076,7 @@ mut class ScalarFrontendState
                 FailAt(2, literal.Range);
                 return false;
             }
-            if (!FinishUnaryOperand(unaryOperand, groups, out var end))
+            if (!FinishUnaryOperand(unaryOperand, groups, init var end))
             {
                 return false;
             }
@@ -1133,7 +1135,7 @@ mut class ScalarFrontendState
                 tokenIndex = tokenIndex + 1;
             }
             _at = tokenIndex;
-            if (!FinishUnaryOperand(numberToken, prefixGroups, out var leftEnd))
+            if (!FinishUnaryOperand(numberToken, prefixGroups, init var leftEnd))
             {
                 return false;
             }
@@ -1165,7 +1167,7 @@ mut class ScalarFrontendState
                 {
                     return false;
                 }
-                if (!FinishUnaryOperand(right, groups, out var end))
+                if (!FinishUnaryOperand(right, groups, init var end))
                 {
                     return false;
                 }
@@ -1211,7 +1213,7 @@ mut class ScalarFrontendState
                 require BeginUnaryOperand(out var secondLiteral, out var groups);
                 if (!TryReadMagnitude(secondLiteral, _at, expectedType, false,
                     secondLiteral.Range, init var secondLow, init var secondHigh)
-                    || !FinishUnaryOperand(secondLiteral, groups, out var end))
+                    || !FinishUnaryOperand(secondLiteral, groups, init var end))
                 {
                     return false;
                 }
@@ -1250,7 +1252,7 @@ mut class ScalarFrontendState
                     FailAt(2, next.Range);
                     return false;
                 }
-                if (!FinishUnaryOperand(right, groups, out var end))
+                if (!FinishUnaryOperand(right, groups, init var end))
                 {
                     return false;
                 }
@@ -1278,7 +1280,7 @@ mut class ScalarFrontendState
         }
         if (literal.Kind == 20 || literal.Kind == 21)
         {
-            if (!FinishUnaryOperand(literal, prefixGroups, out var leftEnd))
+            if (!FinishUnaryOperand(literal, prefixGroups, init var leftEnd))
             {
                 return false;
             }
@@ -1290,7 +1292,7 @@ mut class ScalarFrontendState
                 require BeginUnaryOperand(out var booleanRight, out var groups);
                 if (booleanRight.Kind == 20 || booleanRight.Kind == 21)
                 {
-                    if (!FinishUnaryOperand(booleanRight, groups, out var end))
+                    if (!FinishUnaryOperand(booleanRight, groups, init var end))
                     {
                         return false;
                     }
@@ -1317,7 +1319,7 @@ mut class ScalarFrontendState
                     FailAt(2, booleanRight.Range);
                     return false;
                 }
-                if (!FinishUnaryOperand(booleanRight, groups, out var end))
+                if (!FinishUnaryOperand(booleanRight, groups, init var end))
                 {
                     return false;
                 }
@@ -1341,7 +1343,7 @@ mut class ScalarFrontendState
             FailAt(1, left.Range);
             return false;
         }
-        if (!FinishUnaryOperand(left, leftGroups, out var leftEnd))
+        if (!FinishUnaryOperand(left, leftGroups, init var leftEnd))
         {
             return false;
         }
@@ -1401,10 +1403,11 @@ mut class ScalarFrontendState
                     FailAt(2, next.Range);
                     return false;
                 }
-                if (!FinishUnaryOperand(right, groups, out end))
+                if (!FinishUnaryOperand(right, groups, init var rightEnd))
                 {
                     return false;
                 }
+                end = rightEnd;
                 require SourceRange.TryCreate(first.Range.Start,
                     end - first.Range.Start, init var span);
                 require ScalarFrontendExpression.TryCreate(5,
@@ -1437,10 +1440,11 @@ mut class ScalarFrontendState
                 if (!TryReadMagnitude(number, index, selected,
                     unaryKind == 58 && !rightSignedGrouped,
                     number.Range, init var low, init var high)
-                    || !FinishUnaryOperand(number, numericGroups, out end))
+                    || !FinishUnaryOperand(number, numericGroups, init var literalEnd))
                 {
                     return false;
                 }
+                end = literalEnd;
                 require SourceRange.TryCreate(first.Range.Start,
                     end - first.Range.Start, init var literalSpan);
                 mut int32 resultType = selected;
@@ -1484,10 +1488,11 @@ mut class ScalarFrontendState
                 FailAt(2, next.Range);
                 return false;
             }
-            if (!FinishUnaryOperand(right, groups, out end))
+            if (!FinishUnaryOperand(right, groups, init var rightEnd))
             {
                 return false;
             }
+            end = rightEnd;
         }
         require SourceRange.TryCreate(first.Range.Start, end - first.Range.Start, init var span);
         if (operation >= 65 && operation <= 70)
