@@ -26,6 +26,9 @@ public static class TrRmSourceMapTableWriter
         var seen = new HashSet<(int Body, int Block, int Ordinal)>();
         var fileSlots = new Dictionary<int, (int Slot, int OwnerModule)>();
         var fileRows = new List<int>();
+        var hasLastBody = false;
+        var lastBodyRow = 0;
+        var lastBodyOwnerModule = 0;
         foreach (var mapping in mappings)
         {
             if (mapping.Block <= 0 || mapping.Ordinal < 0
@@ -34,13 +37,19 @@ public static class TrRmSourceMapTableWriter
                 throw new InvalidDataException("Invalid TRRM SourceMap mapping.");
             }
 
-            var bodyOwnerModule = methods.GetOwnerModule(
-                methods.GetBodyOwnerMethod(mapping.BodyRow));
+            if (!hasLastBody || mapping.BodyRow != lastBodyRow)
+            {
+                lastBodyOwnerModule = methods.GetOwnerModule(
+                    methods.GetBodyOwnerMethod(mapping.BodyRow));
+                lastBodyRow = mapping.BodyRow;
+                hasLastBody = true;
+            }
+
             var hasFileSlot = fileSlots.TryGetValue(mapping.SourceFileRow, out var fileSlot);
             var fileOwnerModule = hasFileSlot
                 ? fileSlot.OwnerModule
                 : files.GetOwnerModule(mapping.SourceFileRow);
-            if (bodyOwnerModule != fileOwnerModule
+            if (lastBodyOwnerModule != fileOwnerModule
                 || !seen.Add((mapping.BodyRow, mapping.Block, mapping.Ordinal)))
             {
                 throw new InvalidDataException("Invalid TRRM SourceMap mapping.");
