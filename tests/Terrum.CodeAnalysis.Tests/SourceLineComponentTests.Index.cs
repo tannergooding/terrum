@@ -132,17 +132,22 @@ public sealed partial class SourceLineComponentTests
     [InlineData("\r\nx\n", 3)]
     [InlineData("\n\n\n\n", 5)]
     [InlineData("a\r\nb\rc\nd\u0085e\u2028f\u2029", 7)]
-    public async Task OwnedLineIndexReservesOnlyActualStartsAsync(string text, int expectedCount)
+    public async Task OwnedLineIndexReservesStartsAndNeededBreakMetadataAsync(string text, int expectedCount)
     {
         ArgumentNullException.ThrowIfNull(text);
         var last = SourceText.From(text).GetLinePosition(text.Length);
+        var capacity = expectedCount;
+        if (text.Contains("\r\n", StringComparison.Ordinal))
+        {
+            capacity += (expectedCount - 1 + 31) / 32;
+        }
         var trees = await ReadIndexComponentsWithCapacityAsync().ConfigureAwait(true);
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceLineIndex.TryCreate(init var index);
                 if (index.GetLineCount() != {{expectedCount}}
-                    || index.GetCapacityForTest() != {{expectedCount}}) { return 1; }
+                    || index.GetCapacityForTest() != {{capacity}}) { return 1; }
                 require index.TryGetPosition(Host.Source.Length, init var line, init var character);
                 if (line != {{last.Line}} || character != {{last.Character}}) { return 2; }
                 if (!index.TryGetOffset(line, character, init var offset)
@@ -176,7 +181,7 @@ public sealed partial class SourceLineComponentTests
             int32 Main() {
                 if (!SourceLineIndex.TryCreate(init var index)) { return 1; }
                 if (index.GetLineCount() != {{(fewLines ? 2 : 1)}}) { return 2; }
-                if (index.GetCapacityForTest() != {{(fewLines ? 2 : 1)}}) { return 4; }
+                if (index.GetCapacityForTest() != {{(fewLines ? 3 : 1)}}) { return 4; }
                 require index.TryGetPosition(Host.Source.Length, init var line, init var character);
                 if (line != {{(fewLines ? 1 : 0)}}
                     || character != {{(fewLines ? 1 : MaximumCapacity)}}) { return 3; }
@@ -257,21 +262,54 @@ public sealed partial class SourceLineComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceLineIndex.TryCreate(init var index);
-                Host.Source[0] = char16(10);
-                if (index.GetLineCount() != 1) { return 1; }
-                for (mut int32 position = 0; position <= 3; position = position + 1) {
-                    require index.TryGetPosition(position, init var line, init var character);
-                    if (line != 0 || character != position) { return 2; }
-                    if (!index.TryGetOffset(line, character, init var offset)
-                        || offset != position) { return 3; }
-                    require index.TryGetLineExtent(0, init var extent);
-                    if (extent.Start != 0 || extent.Length != 3) { return 4; }
-                }
+                Host.Source[1] = char16(120);
+                if (index.GetLineCount() != 2) { return 1; }
+                require index.TryGetPosition(3, init var line, init var character);
+                if (line != 1 || character != 0) { return 2; }
+                if (!index.TryGetOffset(line, character, init var offset) || offset != 3) { return 3; }
+                require index.TryGetLineExtent(0, init var firstExtent);
+                if (firstExtent.Start != 0 || firstExtent.Length != 3) { return 4; }
+                require index.TryGetLineContentExtent(0, init var firstContent);
+                if (firstContent.Start != 0 || firstContent.Length != 1) { return 5; }
+                require index.TryGetLineExtent(1, init var secondExtent);
+                if (secondExtent.Start != 3 || secondExtent.Length != 1) { return 6; }
+                require index.TryGetLineContentExtent(1, init var secondContent);
+                if (secondContent.Start != 3 || secondContent.Length != 1) { return 7; }
                 return 0;
             }
             """;
         var compilation = Compilation.Create(trees.Add(SyntaxTree.Parse(Entry, "index-snapshot-entry.terrum")),
-            [new HostBuffer("Source", PrimitiveType.Char16, [97, 98, 99], true)], (BoundRuntimePolicy)policy);
+            [new HostBuffer("Source", PrimitiveType.Char16, [97, 13, 10, 98], true)], (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task OwnedLineIndexPacksCrLfWidthsAcrossWordBoundariesAsync(NativeRuntimePolicy policy)
+    {
+        var trees = await ReadIndexComponentsAsync().ConfigureAwait(true);
+        const string Entry = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceLineIndex.TryCreate(init var index);
+                Host.Source[94] = char16(120);
+                Host.Source[97] = char16(120);
+                if (index.GetLineCount() != 34) { return 1; }
+                require index.TryGetLineContentExtent(31, init var thirtyFirst);
+                if (thirtyFirst.Start != 93 || thirtyFirst.Length != 1) { return 2; }
+                require index.TryGetLineContentExtent(32, init var thirtySecond);
+                if (thirtySecond.Start != 96 || thirtySecond.Length != 1) { return 3; }
+                require index.TryGetLineContentExtent(33, init var final);
+                if (final.Start != 99 || final.Length != 1) { return 4; }
+                return 0;
+            }
+            """;
+        var text = string.Concat(Enumerable.Repeat("x\r\n", 33)) + "z";
+        var compilation = Compilation.Create(trees.Add(SyntaxTree.Parse(Entry, "index-packed-break-entry.terrum")),
+            [new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], true)],
+            (BoundRuntimePolicy)policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true);
     }

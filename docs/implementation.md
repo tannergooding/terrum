@@ -1679,13 +1679,15 @@ replacement under AOT and root-only JIT.
 The [source-line index candidate](../self-host/SourceLineIndex.terrum) uses `OwnedInt32Buffer`
 to build and own a line-start table, with binary-searched UTF-16 positions checked
 against host fixtures under both native failure policies. It reserves one word
-per actual line start rather than per source code unit, preserving maximum-sized
-sparse inputs within the existing buffer capacity. Construction counts first
-and fills unknown starts in a second scan; already known endpoints and fully
-dense single-unit breaks need no second source scan.
+per actual line start and, only when needed, one 32-bit packed CRLF-width word
+per 32 non-final lines rather than one word per source code unit, preserving
+maximum-sized sparse inputs within the existing buffer capacity. Construction
+counts first and fills unknown starts in a second scan; already known endpoints
+and fully dense single-unit breaks need no second source scan.
 It also returns a line's full UTF-16 extent (including its break) by ordinal
-from adjacent starts without rereading source; the streaming candidate walks
-line ranges to provide the same extent without owning a table. `SourceLineIndex`
+from adjacent starts and its content extent using construction-captured CRLF
+width bits, without rereading source; the streaming candidate walks line ranges
+to provide the same extent without owning a table. `SourceLineIndex`
 construction and position, offset and extent lookups, and the streaming
 `SourceLines` range and coordinate queries, expose vacancy-only `init ref`
 outputs. Invalid construction or queries publish no value, while a later valid

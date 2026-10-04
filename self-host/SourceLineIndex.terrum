@@ -3,11 +3,13 @@ namespace Terrum.CodeAnalysis;
 public unique struct SourceLineIndex
 {
     private OwnedInt32Buffer _starts;
+    private int32 _lineCount;
     private int32 _length;
 
-    private SourceLineIndex(OwnedInt32Buffer starts, int32 length)
+    private SourceLineIndex(OwnedInt32Buffer starts, int32 lineCount, int32 length)
     {
         _starts = move starts;
+        _lineCount = lineCount;
         _length = length;
     }
 
@@ -15,9 +17,11 @@ public unique struct SourceLineIndex
     {
         mut int32 lineCount = 0;
         mut int32 position = 0;
+        mut bool hasCrLf = false;
         while (true)
         {
             require TryReadSourceLine(position, init var content, init var includingBreak);
+            hasCrLf = hasCrLf || includingBreak.Length - content.Length == 2;
             if (lineCount == int32.MaxValue)
             {
                 return false;
@@ -32,7 +36,17 @@ public unique struct SourceLineIndex
 
         int32 finalStart = position;
         // No code can modify the source between counting and filling the starts.
-        if (!OwnedInt32Buffer.TryCreate(lineCount, out var created))
+        mut int32 breakWordCount = 0;
+        if (hasCrLf)
+        {
+            breakWordCount = (lineCount - 1) / 32;
+            if ((lineCount - 1) % 32 != 0)
+            {
+                breakWordCount = breakWordCount + 1;
+            }
+        }
+        if (lineCount > int32.MaxValue - breakWordCount
+            || !OwnedInt32Buffer.TryCreate(lineCount + breakWordCount, out var created))
         {
             return false;
         }
@@ -64,14 +78,41 @@ public unique struct SourceLineIndex
                 require starts.TryAppend(finalStart);
             }
         }
-        index = new SourceLineIndex(move starts, Host.Source.Length);
+        // One packed bit per non-final line preserves whether its break was CRLF.
+        if (hasCrLf)
+        {
+            mut int32 packedBreaks = 0;
+            mut int32 bit = 0;
+            mut int32 line = 0;
+            while (line + 1 < lineCount)
+            {
+                int32 next = starts.Read(line + 1);
+                if (next >= 2 && Host.Source[next - 2] == 13 && Host.Source[next - 1] == 10)
+                {
+                    packedBreaks = packedBreaks | (1 << bit);
+                }
+                bit = bit + 1;
+                if (bit == 32)
+                {
+                    require starts.TryAppend(packedBreaks);
+                    packedBreaks = 0;
+                    bit = 0;
+                }
+                line = line + 1;
+            }
+            if (bit != 0)
+            {
+                require starts.TryAppend(packedBreaks);
+            }
+        }
+        index = new SourceLineIndex(move starts, lineCount, Host.Source.Length);
         return true;
     }
 
     [NoThrow]
     public int32 GetLineCount()
     {
-        return _starts.Count;
+        return _lineCount;
     }
 
     public bool TryGetPosition(int32 position, init ref<int32> line, init ref<int32> character)
@@ -81,7 +122,7 @@ public unique struct SourceLineIndex
             return false;
         }
 
-        ReadonlyInt32BufferView starts = _starts.Slice(0, _starts.Count);
+        ReadonlyInt32BufferView starts = _starts.Slice(0, _lineCount);
         // The first start is zero; find the last start not greater than the position.
         mut int32 low = 0;
         mut int32 high = starts.Length;
@@ -105,12 +146,12 @@ public unique struct SourceLineIndex
 
     public bool TryGetOffset(int32 line, int32 character, init ref<int32> offset)
     {
-        if (line < 0 || line >= _starts.Count || character < 0)
+        if (line < 0 || line >= _lineCount || character < 0)
         {
             return false;
         }
 
-        ReadonlyInt32BufferView starts = _starts.Slice(0, _starts.Count);
+        ReadonlyInt32BufferView starts = _starts.Slice(0, _lineCount);
         int32 start = starts.Read(line);
         if (line + 1 < starts.Length)
         {
@@ -130,12 +171,12 @@ public unique struct SourceLineIndex
 
     public bool TryGetLineExtent(int32 line, init ref<SourceRange> includingBreak)
     {
-        if (line < 0 || line >= _starts.Count)
+        if (line < 0 || line >= _lineCount)
         {
             return false;
         }
 
-        ReadonlyInt32BufferView starts = _starts.Slice(0, _starts.Count);
+        ReadonlyInt32BufferView starts = _starts.Slice(0, _lineCount);
         int32 start = starts.Read(line);
         mut int32 end = _length;
         if (line + 1 < starts.Length)
@@ -154,17 +195,18 @@ public unique struct SourceLineIndex
         }
 
         int32 start = includingBreak.Start;
-        mut int32 end = includingBreak.End;
-        if (end > start && IsLineBreak(Host.Source[end - 1]))
+        mut int32 breakWidth = 0;
+        if (line + 1 < _lineCount)
         {
-            end = end - 1;
-            if (end > start && Host.Source[end - 1] == 13 && Host.Source[end] == 10)
+            breakWidth = 1;
+            if (_starts.Count > _lineCount)
             {
-                end = end - 1;
+                int32 packedBreaks = _starts.Read(_lineCount + line / 32);
+                breakWidth = breakWidth + ((packedBreaks >> (line % 32)) & 1);
             }
         }
 
-        require SourceRange.TryCreate(start, end - start, init content);
+        require SourceRange.TryCreate(start, includingBreak.Length - breakWidth, init content);
         return true;
     }
 
