@@ -207,20 +207,20 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private mut bool ParseParameter(out int32 type, out Token name, out bool isOut,
-        out bool isInitRef)
+    private mut bool ParseParameter(init ref<int32> type, init ref<Token> name,
+        init ref<bool> isOut, init ref<bool> isInitRef)
     {
         require _tokens.TryGet(_at, init var mode);
-        isOut = mode.Kind == 15;
+        bool parsedOut = mode.Kind == 15;
         // `init` can also be an identifier; recognize the mode only before `ref<`.
-        isInitRef = !isOut && IsInitKeyword(mode)
+        bool parsedInitRef = !parsedOut && IsInitKeyword(mode)
             && _tokens.TryGet(_at + 1, init var followingRef) && followingRef.Kind == 14
             && _tokens.TryGet(_at + 2, init var followingLess) && followingLess.Kind == 67;
-        if (isOut)
+        if (parsedOut)
         {
             _at = _at + 1;
         }
-        else if (isInitRef)
+        else if (parsedInitRef)
         {
             _at = _at + 1;
             if (!Take(14, init var refKeyword) || !Take(67, init var less)
@@ -238,7 +238,7 @@ mut class ScalarFrontendState
             FailAt(2, typeToken.Range);
             return false;
         }
-        if (isInitRef && !Take(69, init var greater))
+        if (parsedInitRef && !Take(69, init var greater))
         {
             return false;
         }
@@ -258,6 +258,8 @@ mut class ScalarFrontendState
         }
         type = selected;
         name = parameter;
+        isOut = parsedOut;
+        isInitRef = parsedInitRef;
         return true;
     }
 
@@ -1625,8 +1627,8 @@ mut class ScalarFrontendState
         require _tokens.TryGet(_at, init var next);
         if (next.Kind != 47)
         {
-            if (!ParseParameter(out var firstType, out var first, out var firstIsOut,
-                    out var firstIsInitRef))
+            if (!ParseParameter(init var firstType, init var first, init var firstIsOut,
+                    init var firstIsInitRef))
             {
                 return false;
             }
@@ -1639,8 +1641,8 @@ mut class ScalarFrontendState
             if (comma.Kind == 53)
             {
                 _at = _at + 1;
-                if (!ParseParameter(out var secondType, out var second, out var secondIsOut,
-                        out var secondIsInitRef))
+                if (!ParseParameter(init var secondType, init var second, init var secondIsOut,
+                        init var secondIsInitRef))
                 {
                     return false;
                 }
@@ -1653,8 +1655,8 @@ mut class ScalarFrontendState
                 if (thirdComma.Kind == 53)
                 {
                     _at = _at + 1;
-                    if (!ParseParameter(out var thirdType, out var third, out var thirdIsOut,
-                            out var thirdIsInitRef))
+                    if (!ParseParameter(init var thirdType, init var third, init var thirdIsOut,
+                            init var thirdIsInitRef))
                     {
                         return false;
                     }
