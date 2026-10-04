@@ -122,6 +122,12 @@ frontend with source-audited `unsafe(expr)` scopes and caller-unsafe callable
 declarations. Both projection families use only v85; verification and emission
 remain hosted.
 
+Separately, semantic-module revision 54 provisionally persists top-level
+caller-unsafe contracts and calls enclosed by explicit `unsafe { }` blocks,
+reconstructing authorization from that scope. Unsafe members and executable
+TRRM caller-unsafe calls remain unsupported; the broader reference-call
+metadata proposal remains unapproved.
+
 ## Planned work (priority order)
 
 The roadmap has four current areas, in area priority order. The sequence below
@@ -135,13 +141,15 @@ prerequisite has already been met.
 | 3 | General separate compilation | Priorities 5–6 and 11 |
 | 4 | Rich libraries/self-hosting | Priorities 7–8 and 12 |
 
-1. **Full runtime/structured contracts — references and safety.** Define
-   general reference/access/loan metadata and caller-unsafe declaration
-   contracts before relying on them across calls or imports. Exact syntax and
-   implementation remain pending. The unapproved
-   [reference-call metadata proposal](proposals/reference-call-metadata.md)
-   recommends a narrow first dependency registry and reuse of the assigned
-   caller-unsafe effect bit.
+1. **Full runtime/structured contracts — references and safety.** General
+   reference/access/loan metadata and caller-unsafe member contracts still
+   need definition before wider use across calls or imports. Structured
+   semantic-module revision 54 provisionally carries top-level caller-unsafe
+   obligations through explicit unsafe-block scopes; this bounded
+   implementation does not settle the general schema or approve the
+   [reference-call metadata proposal](proposals/reference-call-metadata.md),
+   which recommends a narrow first dependency registry and reuse of the
+   assigned caller-unsafe effect bit.
 2. **Full runtime/structured contracts — initialization and outputs.** Complete
    general `out`/`init ref<T>` declaration and call migration with definite
    initialization, cleanup and publication rules. Preserve their distinct
@@ -238,6 +246,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7183c25` | Provisionally persist top-level caller-unsafe contracts and explicit unsafe-block call scopes in semantic modules |
 | `db6fdb5` | Implement a bounded readonly `TokenCursor` over validated snapshots without general stored-view support |
 | `ba2e36e` | Project named scalar `out`/`init ref<T>` arguments through bounded v85 calls |
 | `f93fbfd` | Preserve source-order evaluation and formal binding for named calls in indexed TRRM |
