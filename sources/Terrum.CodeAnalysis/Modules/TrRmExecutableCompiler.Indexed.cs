@@ -925,8 +925,9 @@ public static partial class TrRmExecutableCompiler
                 }
                 synthetic.Add(0x83);
                 synthetic.Add(0);
-                var variables = ImmutableArray.CreateBuilder<BoundVariable>();
-                for (var value = 0; value < starts[b] + parameters.Length; value++)
+                var variableCount = starts[b] + parameters.Length;
+                var variables = ImmutableArray.CreateBuilder<BoundVariable>(variableCount);
+                for (var value = 0; value < variableCount; value++)
                 {
                     variables.Add(new BoundVariable($"value{value + 1}", valueTypes[value], false, default));
                 }
