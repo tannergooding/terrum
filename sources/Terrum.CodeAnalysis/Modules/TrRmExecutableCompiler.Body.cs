@@ -280,7 +280,7 @@ public static partial class TrRmExecutableCompiler
         // A void call consumes an operation ordinal, not a value identifier.
         // The structural reader has already checked every definition and use.
         var nextValue = parameterCount;
-        var statements = ImmutableArray.CreateBuilder<BoundStatement>();
+        var statements = ImmutableArray.CreateBuilder<BoundStatement>(count + 1);
         for (var ordinal = 0; ordinal < count; ordinal++)
         {
             var (opcode, width, countWidth, dataWidth) = ReadInstruction(body, ref position);
