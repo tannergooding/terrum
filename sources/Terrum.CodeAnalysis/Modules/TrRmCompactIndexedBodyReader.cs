@@ -240,7 +240,6 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             {
                 throw InvalidBody();
             }
-
             blockParameters[block] = ReadList(extent, ref cursor, width, (presence & 2) != 0, ValueCount);
             liveIns[block] = ReadList(extent, ref cursor, width, (presence & 4) != 0, ValueCount);
             liveOuts[block] = ReadList(extent, ref cursor, width, (presence & 8) != 0, ValueCount);
@@ -252,6 +251,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     throw InvalidBody();
                 }
 
+                declaredLastUses.EnsureCapacity(count);
+                observedLastUses.EnsureCapacity(count);
                 var previous = 0;
                 for (var item = 0; item < count; item++)
                 {
@@ -296,7 +297,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 _operationCounts[block] = operations;
             }
             var nextResult = (int)starts[block - 1] + blockParameters[block].Length + 1;
-            externalUses[block] = new HashSet<int>();
+            externalUses[block] = new HashSet<int>(liveIns[block].Length);
             var useOffset = cursor;
             void Use(int value, int ordinal)
             {
