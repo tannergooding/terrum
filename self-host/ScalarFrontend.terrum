@@ -262,10 +262,9 @@ mut class ScalarFrontendState
     }
 
     private mut bool TryReadMagnitude(Token token, int32 tokenIndex, int32 type,
-        bool negative, SourceRange errorSpan, out int32 low, out int32 high)
+        bool negative, SourceRange errorSpan,
+        init ref<int32> low, init ref<int32> high)
     {
-        low = 0;
-        high = 0;
         if (type == 7 || type == 8)
         {
             if (token.Kind != 3)
@@ -273,6 +272,8 @@ mut class ScalarFrontendState
                 FailAt(2, errorSpan);
                 return false;
             }
+            low = 0;
+            high = 0;
             return true;
         }
 
@@ -873,10 +874,12 @@ mut class ScalarFrontendState
             if (operand.Kind == 3)
             {
                 if (!TryReadMagnitude(operand, _at, expectedType, false,
-                    operand.Range, out left, out right))
+                    operand.Range, init var magnitudeLow, init var magnitudeHigh))
                 {
                     return false;
                 }
+                left = magnitudeLow;
+                right = magnitudeHigh;
                 operation = 163;
             }
             else if (operand.Kind == 2)
@@ -1035,7 +1038,7 @@ mut class ScalarFrontendState
                     return false;
                 }
                 if (!TryReadMagnitude(unaryOperand, _at, expectedType, false,
-                    unaryOperand.Range, out var low, out var high)
+                    unaryOperand.Range, init var low, init var high)
                     || !FinishUnaryOperand(unaryOperand, groups, out var signedEnd))
                 {
                     return false;
@@ -1093,7 +1096,7 @@ mut class ScalarFrontendState
                 return false;
             }
             if (!TryReadMagnitude(plusOperand, _at + 1, expectedType, false,
-                plusOperand.Range, out var plusLow, out var plusHigh))
+                plusOperand.Range, init var plusLow, init var plusHigh))
             {
                 return false;
             }
@@ -1158,7 +1161,7 @@ mut class ScalarFrontendState
                 }
                 if (!TryReadMagnitude(numberToken, tokenIndex, parameterType,
                     negative && !signedGrouped,
-                    numberToken.Range, out var low, out var high))
+                    numberToken.Range, init var low, init var high))
                 {
                     return false;
                 }
@@ -1194,7 +1197,7 @@ mut class ScalarFrontendState
             }
             if (!TryReadMagnitude(numberToken, tokenIndex, expectedType,
                 negative && !signedGrouped,
-                numberSpan, out var low, out var high))
+                numberSpan, init var low, init var high))
             {
                 return false;
             }
@@ -1207,7 +1210,7 @@ mut class ScalarFrontendState
                 _at = _at + 1;
                 require BeginUnaryOperand(out var secondLiteral, out var groups);
                 if (!TryReadMagnitude(secondLiteral, _at, expectedType, false,
-                    secondLiteral.Range, out var secondLow, out var secondHigh)
+                    secondLiteral.Range, init var secondLow, init var secondHigh)
                     || !FinishUnaryOperand(secondLiteral, groups, out var end))
                 {
                     return false;
@@ -1433,7 +1436,7 @@ mut class ScalarFrontendState
                 }
                 if (!TryReadMagnitude(number, index, selected,
                     unaryKind == 58 && !rightSignedGrouped,
-                    number.Range, out var low, out var high)
+                    number.Range, init var low, init var high)
                     || !FinishUnaryOperand(number, numericGroups, out end))
                 {
                     return false;
@@ -2976,11 +2979,16 @@ mut class ScalarFrontendState
                 }
                 low = decodedScalar;
             }
-            else if (literal.Kind != 3
-                || !TryReadMagnitude(literal, tokenIndex, type, minimum,
-                    literal.Range, out low, out high))
+            else
             {
-                return false;
+                if (literal.Kind != 3
+                    || !TryReadMagnitude(literal, tokenIndex, type, minimum,
+                        literal.Range, init var magnitudeLow, init var magnitudeHigh))
+                {
+                    return false;
+                }
+                low = magnitudeLow;
+                high = magnitudeHigh;
             }
             Host.Frontend[offset + 1] = type;
             Host.Frontend[offset + 6] = low;
@@ -3589,11 +3597,15 @@ mut class ScalarFrontendState
             mut int32 type = expected;
             mut int32 low = 0;
             mut int32 high = 0;
-            if (type != 0 && type != 5
-                && !TryReadMagnitude(token, _at - 1, type, false,
-                    token.Range, out low, out high))
+            if (type != 0 && type != 5)
             {
-                return false;
+                if (!TryReadMagnitude(token, _at - 1, type, false,
+                    token.Range, init var magnitudeLow, init var magnitudeHigh))
+                {
+                    return false;
+                }
+                low = magnitudeLow;
+                high = magnitudeHigh;
             }
             if (type == 5) { type = 0; }
             return AddTreeNode(3, type, token.Range.Start, token.Range.End,
