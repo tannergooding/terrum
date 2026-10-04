@@ -327,30 +327,31 @@ public sealed class Lexer
         if (Current == '0' && Peek(1) is 'x' or 'X' or 'b' or 'B')
         {
             var hex = Peek(1) is 'x' or 'X';
-            if (hex && HasHexFloatForm(start, out var exponentPosition))
+            if (hex)
             {
-                _position = exponentPosition + 1;
-                if (Current is '+' or '-')
+                if (ReadHexNumber(start, out var hasHexDigits))
                 {
-                    _position++;
+                    var hexFloatTagLength = ReadNumericTag();
+                    if (hexFloatTagLength != 0)
+                    {
+                        Report("TRM0006", "Numeric width suffixes are not supported.", _position, hexFloatTagLength);
+                        _position += hexFloatTagLength;
+                    }
+                    return TokenKind.NumericLiteral;
                 }
-                _ = ReadDigitRun(10);
-                var hexFloatTagLength = ReadNumericTag();
-                if (hexFloatTagLength != 0)
+                if (!hasHexDigits)
                 {
-                    Report("TRM0006", "Numeric width suffixes are not supported.", _position, hexFloatTagLength);
-                    _position += hexFloatTagLength;
+                    return TokenKind.NumericLiteral;
                 }
-                return TokenKind.NumericLiteral;
             }
-
-            _position += 2;
-            if (!ReadDigitRun(hex ? 16 : 2, allowInitialSeparators: true))
+            else
             {
-                Report(hex ? "TRM0007" : "TRM0008",
-                    hex ? "Hexadecimal prefix requires an ASCII hex digit."
-                        : "Binary prefix requires an ASCII binary digit.", start, 2);
-                return TokenKind.NumericLiteral;
+                _position += 2;
+                if (!ReadDigitRun(2, allowInitialSeparators: true))
+                {
+                    Report("TRM0008", "Binary prefix requires an ASCII binary digit.", start, 2);
+                    return TokenKind.NumericLiteral;
+                }
             }
         }
         else
@@ -400,63 +401,121 @@ public sealed class Lexer
         return TokenKind.NumericLiteral;
     }
 
-    private bool HasHexFloatForm(int start, out int exponentPosition)
+    private bool ReadHexNumber(int start, out bool hasHexDigits)
     {
-        exponentPosition = 0;
+        hasHexDigits = false;
         var index = start + 2;
-        var digitCount = 0;
-        var hasPoint = false;
-        var segmentHasDigit = false;
+        var integerEnd = index;
+        var integerDigitCount = 0;
+        var invalidSeparatorStart = -1;
+        var invalidSeparatorLength = 0;
+        var validFloatMantissa = true;
         while (index < _source.Length)
         {
             _cancellationToken.ThrowIfCancellationRequested();
             var character = _source[index];
-            if (IsRadixDigit(character, 16))
+            if (IsHex(character))
             {
-                digitCount++;
-                segmentHasDigit = true;
+                integerDigitCount++;
                 index++;
+                integerEnd = index;
             }
             else if (character == '_')
             {
+                var separatorStart = index;
                 while (index < _source.Length && _source[index] == '_')
                 {
                     index++;
                 }
-                if ((hasPoint && !segmentHasDigit) || index >= _source.Length
-                    || !IsRadixDigit(_source[index], 16))
+                if (index < _source.Length && IsHex(_source[index]))
                 {
-                    return false;
+                    continue;
                 }
-            }
-            else if (character == '.' && !hasPoint)
-            {
-                hasPoint = true;
-                segmentHasDigit = false;
-                index++;
+                validFloatMantissa = false;
+                if (integerDigitCount != 0)
+                {
+                    invalidSeparatorStart = separatorStart;
+                    invalidSeparatorLength = index - separatorStart;
+                }
+                break;
             }
             else
             {
                 break;
             }
         }
-        if (digitCount == 0 || index >= _source.Length || _source[index] is not ('p' or 'P'))
-        {
-            return false;
-        }
 
-        var markerPosition = index;
-        index++;
-        if (index < _source.Length && _source[index] is '+' or '-')
+        hasHexDigits = integerDigitCount != 0;
+        var floatIndex = index;
+        var digitCount = integerDigitCount;
+        if (validFloatMantissa && index < _source.Length && _source[index] == '.')
         {
             index++;
+            var segmentHasDigit = false;
+            while (index < _source.Length)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                var character = _source[index];
+                if (IsHex(character))
+                {
+                    digitCount++;
+                    segmentHasDigit = true;
+                    index++;
+                }
+                else if (character == '_')
+                {
+                    while (index < _source.Length && _source[index] == '_')
+                    {
+                        index++;
+                    }
+                    if (!segmentHasDigit || index >= _source.Length || !IsHex(_source[index]))
+                    {
+                        validFloatMantissa = false;
+                        break;
+                    }
+                }
+                else
+                {
+                    break;
+                }
+            }
+            floatIndex = index;
         }
-        if (index >= _source.Length || !IsDigit(_source[index]))
+
+        if (validFloatMantissa && digitCount != 0 && floatIndex < _source.Length
+            && _source[floatIndex] is ('p' or 'P'))
         {
+            var exponentIndex = floatIndex + 1;
+            if (exponentIndex < _source.Length && _source[exponentIndex] is '+' or '-')
+            {
+                exponentIndex++;
+            }
+            if (exponentIndex < _source.Length && IsDigit(_source[exponentIndex]))
+            {
+                _position = floatIndex + 1;
+                if (Current is '+' or '-')
+                {
+                    _position++;
+                }
+                _ = ReadDigitRun(10);
+                return true;
+            }
+        }
+
+        _position = integerEnd;
+        if (invalidSeparatorStart >= 0)
+        {
+            Report("TRM0009", "Digit separators must appear between digits.",
+                invalidSeparatorStart, invalidSeparatorLength);
+        }
+        if (integerDigitCount == 0)
+        {
+            Report("TRM0007", "Hexadecimal prefix requires an ASCII hex digit.", start, 2);
+            hasHexDigits = false;
             return false;
         }
-        exponentPosition = markerPosition;
-        return true;
+        hasHexDigits = true;
+        return false;
     }
 
     private bool ReadDigitRun(int radix, bool allowInitialSeparators = false)

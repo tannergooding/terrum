@@ -638,62 +638,141 @@ int32 ScanBasedNumber(int32 initial, int32 tokenIndex, int32 radix)
     return at;
 }
 
-bool HasHexFloatForm(int32 initial, init ref<int32> exponentPosition)
+int32 ScanHexNumber(int32 initial, int32 tokenIndex)
 {
     mut int32 at = initial + 2;
-    mut int32 digits = 0;
-    mut bool hasPoint = false;
-    mut bool segmentHasDigit = false;
-    while (at < Host.Source.Length)
+    mut int32 integerEnd = at;
+    mut int32 integerDigits = 0;
+    mut int32 invalidSeparatorStart = -1;
+    mut int32 invalidSeparatorLength = 0;
+    mut bool validFloatMantissa = true;
+    mut uint64 magnitude = 0;
+    mut bool overflow = false;
+    uint64 cutoff = uint64.MaxValue / 16;
+    uint64 finalDigit = uint64.MaxValue - cutoff * 16;
+    while (true)
     {
         int32 unit = PeekUnit(at);
         if (IsHex(unit))
         {
-            digits = digits + 1;
-            segmentHasDigit = true;
+            integerDigits = integerDigits + 1;
+            mut uint64 digit = uint64(HexValue(unit));
+            if (!overflow)
+            {
+                if (magnitude > cutoff || (magnitude == cutoff && digit > finalDigit))
+                {
+                    overflow = true;
+                }
+                else
+                {
+                    magnitude = magnitude * 16 + digit;
+                }
+            }
             at = at + 1;
+            integerEnd = at;
         }
         else if (unit == 95)
         {
+            int32 separatorStart = at;
             mut int32 next = at;
             while (PeekUnit(next) == 95)
             {
                 next = next + 1;
             }
-            if ((hasPoint && !segmentHasDigit) || !IsHex(PeekUnit(next)))
+            if (IsHex(PeekUnit(next)))
             {
-                return false;
+                at = next;
+                continue;
             }
-            at = next;
-        }
-        else if (unit == 46 && !hasPoint)
-        {
-            hasPoint = true;
-            segmentHasDigit = false;
-            at = at + 1;
+            validFloatMantissa = false;
+            if (integerDigits != 0)
+            {
+                invalidSeparatorStart = separatorStart;
+                invalidSeparatorLength = next - separatorStart;
+            }
+            break;
         }
         else
         {
             break;
         }
     }
-    if (digits == 0 || (PeekUnit(at) != 112 && PeekUnit(at) != 80))
-    {
-        return false;
-    }
 
-    int32 markerPosition = at;
-    at = at + 1;
-    if (PeekUnit(at) == 43 || PeekUnit(at) == 45)
+    mut int32 floatAt = at;
+    mut int32 floatDigits = integerDigits;
+    if (validFloatMantissa && PeekUnit(at) == 46)
     {
         at = at + 1;
+        mut bool segmentHasDigit = false;
+        while (true)
+        {
+            int32 unit = PeekUnit(at);
+            if (IsHex(unit))
+            {
+                floatDigits = floatDigits + 1;
+                segmentHasDigit = true;
+                at = at + 1;
+            }
+            else if (unit == 95)
+            {
+                mut int32 next = at;
+                while (PeekUnit(next) == 95)
+                {
+                    next = next + 1;
+                }
+                if (!segmentHasDigit || !IsHex(PeekUnit(next)))
+                {
+                    validFloatMantissa = false;
+                    break;
+                }
+                at = next;
+            }
+            else
+            {
+                break;
+            }
+        }
+        floatAt = at;
     }
-    if (!IsDigit(PeekUnit(at)))
+
+    if (validFloatMantissa && floatDigits != 0
+        && (PeekUnit(floatAt) == 112 || PeekUnit(floatAt) == 80))
     {
-        return false;
+        mut int32 exponentDigit = floatAt + 1;
+        if (PeekUnit(exponentDigit) == 43 || PeekUnit(exponentDigit) == 45)
+        {
+            exponentDigit = exponentDigit + 1;
+        }
+        if (IsDigit(PeekUnit(exponentDigit)))
+        {
+            return ScanHexFloat(floatAt);
+        }
     }
-    exponentPosition = markerPosition;
-    return true;
+
+    at = integerEnd;
+    if (invalidSeparatorStart >= 0)
+    {
+        Report(9, invalidSeparatorStart, invalidSeparatorLength);
+    }
+    if (integerDigits == 0)
+    {
+        Report(7, initial, 2);
+        return at;
+    }
+
+    mut int32 tag = 0;
+    int32 tagLength = ReadNumericTag(at);
+    if (tagLength != 0)
+    {
+        Report(6, at, tagLength);
+        tag = IntegerTag(at, tagLength);
+        at = at + tagLength;
+    }
+    if (tagLength == 0 || tag != 0)
+    {
+        PublishInteger(tokenIndex, overflow, magnitude, tag);
+    }
+    return at;
 }
 
 int32 ScanHexFloat(int32 exponentPosition)
@@ -721,11 +800,7 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
         int32 prefix = PeekUnit(initial + 1);
         if (prefix == 120 || prefix == 88)
         {
-            if (HasHexFloatForm(initial, init var exponentPosition))
-            {
-                return ScanHexFloat(exponentPosition);
-            }
-            return ScanBasedNumber(initial, tokenIndex, 16);
+            return ScanHexNumber(initial, tokenIndex);
         }
         if (prefix == 98 || prefix == 66)
         {

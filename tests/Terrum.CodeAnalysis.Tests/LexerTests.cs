@@ -67,6 +67,10 @@ public sealed class LexerTests
     [InlineData("0x 0X 0xG 0x1g", new[] { "0x", "0X", "0x", "G", "0x1", "g" })]
     [InlineData("0x1u32 0x1f32 0x1_2 0x1.2 0x1p2",
         new[] { "0x1u32", "0x1f32", "0x1_2", "0x1", ".", "2", "0x1p2" })]
+    [InlineData("0x1p2 0X.8P-1 0x1.p2 0x.p2 0x1._p2",
+        new[] { "0x1p2", "0X.8P-1", "0x1.p2", "0x", ".", "p2", "0x1", ".", "_p2" })]
+    [InlineData("0x1p 0x1p+ 0x1P- 0x1p2",
+        new[] { "0x1", "p", "0x1", "p", "+", "0x1", "P", "-", "0x1p2" })]
     [InlineData("12u32 42.3f64", new[] { "12u32", "42.3f64" })]
     [InlineData("10i32 0.1f32 2u128 4f16", new[] { "10i32", "0.1f32", "2u128", "4f16" })]
     [InlineData("1e2f32", new[] { "1e2f32" })]
@@ -99,6 +103,7 @@ public sealed class LexerTests
     [Theory]
     [InlineData("0x", "TRM0007", 0, 2)]
     [InlineData("0XG", "TRM0007", 0, 2)]
+    [InlineData("0xi32", "TRM0007", 0, 2)]
     [InlineData("0x2Ai32", "TRM0006", 4, 3)]
     [InlineData("0x2Au64", "TRM0006", 4, 3)]
     [InlineData("0b", "TRM0008", 0, 2)]
