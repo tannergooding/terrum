@@ -145,6 +145,15 @@ dependent results are not cached across states. This avoids repeating the same
 structural traversal when verifier flow revisits an expression; no visit-count
 or timing reduction is claimed, and the shared budget is unchanged.
 
+Outcome-effect and initialization-test classification now share one per-
+expression cache and recursive pass. Unknown expression forms remain
+conservative, and the resulting structural facts are shared across flow-state
+clones; flow-dependent feasibility continues to use the current state. The
+combined pass may inspect children that one classifier alone could have
+skipped, but avoids walking pure compound expressions separately for each
+classification. The shared visit limit and semantics are unchanged; no timing
+or visit-count reduction is claimed.
+
 During the v78 budget investigation, temporary visit counters measured 100,001
 semantic-analysis visits across 210 functions before the limit failure. In the
 largest function, `ParseExpressionCore`, output-vacating traversal accounted

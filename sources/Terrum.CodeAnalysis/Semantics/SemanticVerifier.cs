@@ -20,6 +20,9 @@ public static class SemanticVerifier
     private const byte OptionalPresenceAnalyzed = 0x10;
     private const byte OptionalPresencePresent = 0x20;
     private const byte OptionalPresenceAbsent = 0x40;
+    private const byte OutcomeEffectFact = 0x01;
+    private const byte InitializationTestFact = 0x02;
+    private const byte AllFlowFacts = OutcomeEffectFact | InitializationTestFact;
     internal const int MaximumFunctions = 1024;
     internal const int MaximumVariables = 256;
     internal const int MaximumArguments = 64;
@@ -2518,32 +2521,27 @@ public static class SemanticVerifier
         // call, but an inline output may still retry before its first publication.
         private readonly byte[] _possibilities;
         private readonly Dictionary<BoundExpression, byte> _canBeFacts;
-        private readonly Dictionary<BoundExpression, bool> _outcomeEffectFacts;
-        private readonly Dictionary<BoundExpression, bool> _initializationTestFacts;
+        private readonly Dictionary<BoundExpression, byte> _flowFacts;
         internal Dictionary<BoundStatement, InitializationState>? StatementInputs { get; init; }
 
         internal InitializationState(int length)
             : this(length, new Dictionary<BoundExpression, byte>(ReferenceEqualityComparer.Instance),
-                new Dictionary<BoundExpression, bool>(ReferenceEqualityComparer.Instance),
-                new Dictionary<BoundExpression, bool>(ReferenceEqualityComparer.Instance))
+                new Dictionary<BoundExpression, byte>(ReferenceEqualityComparer.Instance))
         {
         }
 
         private InitializationState(int length, Dictionary<BoundExpression, byte> canBeFacts,
-            Dictionary<BoundExpression, bool> outcomeEffectFacts,
-            Dictionary<BoundExpression, bool> initializationTestFacts)
+            Dictionary<BoundExpression, byte> flowFacts)
         {
             _possibilities = new byte[length];
             _canBeFacts = canBeFacts;
-            _outcomeEffectFacts = outcomeEffectFacts;
-            _initializationTestFacts = initializationTestFacts;
+            _flowFacts = flowFacts;
             Array.Fill(_possibilities, (byte)1);
         }
 
         internal int Length => _possibilities.Length;
         internal Dictionary<BoundExpression, byte> CanBeFacts => _canBeFacts;
-        internal Dictionary<BoundExpression, bool> OutcomeEffectFacts => _outcomeEffectFacts;
-        internal Dictionary<BoundExpression, bool> InitializationTestFacts => _initializationTestFacts;
+        internal Dictionary<BoundExpression, byte> FlowFacts => _flowFacts;
 
         internal void Fill(bool value, int start, int count) =>
             Array.Fill(_possibilities, value ? (byte)2 : (byte)1, start, count);
@@ -2577,7 +2575,7 @@ public static class SemanticVerifier
 
         internal InitializationState Clone()
         {
-            var result = new InitializationState(Length, _canBeFacts, _outcomeEffectFacts, _initializationTestFacts) {
+            var result = new InitializationState(Length, _canBeFacts, _flowFacts) {
                 StatementInputs = StatementInputs,
             };
             CopyTo(result);
@@ -3703,7 +3701,7 @@ public static class SemanticVerifier
 
     private static InitializationState Outcome(BoundExpression expression, InitializationState initialized, bool result, ref int remaining)
     {
-        if (!HasOutcomeEffects(expression, initialized.OutcomeEffectFacts, ref remaining))
+        if (!HasOutcomeEffects(expression, initialized.FlowFacts, ref remaining))
         {
             return initialized.Clone();
         }
@@ -3842,7 +3840,7 @@ public static class SemanticVerifier
     private static void VacateNestedOutputs(BoundExpression expression, InitializationState state, ref int remaining)
     {
         if (expression is BoundIsInitialized
-            || !HasOutcomeEffects(expression, state.OutcomeEffectFacts, ref remaining))
+            || !HasOutcomeEffects(expression, state.FlowFacts, ref remaining))
         {
             return;
         }
@@ -3997,123 +3995,84 @@ public static class SemanticVerifier
         }
     }
 
-    // Unknown forms stay conservative; only expressions without flow-state effects may skip outcome traversal.
     private static bool HasOutcomeEffects(BoundExpression expression,
-        Dictionary<BoundExpression, bool> outcomeEffectFacts, ref int remaining)
-    {
-        Count(ref remaining, 0);
-        if (expression is null)
-        {
-            return true;
-        }
-        if (outcomeEffectFacts.TryGetValue(expression, out var hasEffects))
-        {
-            return hasEffects;
-        }
-
-        hasEffects = expression switch {
-            BoundCall call => HasOutcomeEffects(call.Arguments, outcomeEffectFacts, ref remaining),
-            BoundBinary binary => HasOutcomeEffects(binary.Left, outcomeEffectFacts, ref remaining)
-                || HasOutcomeEffects(binary.Right, outcomeEffectFacts, ref remaining),
-            BoundConditional conditional => HasOutcomeEffects(conditional.Condition, outcomeEffectFacts, ref remaining)
-                || HasOutcomeEffects(conditional.WhenTrue, outcomeEffectFacts, ref remaining)
-                || HasOutcomeEffects(conditional.WhenFalse, outcomeEffectFacts, ref remaining),
-            BoundCoalesce coalesce => HasOutcomeEffects(coalesce.Optional, outcomeEffectFacts, ref remaining)
-                || HasOutcomeEffects(coalesce.Fallback, outcomeEffectFacts, ref remaining),
-            BoundUnary unary => HasOutcomeEffects(unary.Operand, outcomeEffectFacts, ref remaining),
-            BoundUpdate update => HasOutcomeEffects(update.Place, outcomeEffectFacts, ref remaining),
-            BoundCompoundAssignment compound => HasOutcomeEffects(compound.Place, outcomeEffectFacts, ref remaining)
-                || HasOutcomeEffects(compound.Right, outcomeEffectFacts, ref remaining),
-            BoundNominalUpdate update => HasOutcomeEffects(update.Place, outcomeEffectFacts, ref remaining),
-            BoundCast cast => HasOutcomeEffects(cast.Operand, outcomeEffectFacts, ref remaining),
-            BoundOptionalLift lift => HasOutcomeEffects(lift.Value, outcomeEffectFacts, ref remaining),
-            BoundReadonlyProjection projection => HasOutcomeEffects(projection.Value, outcomeEffectFacts, ref remaining),
-            BoundIsNull test => HasOutcomeEffects(test.Value, outcomeEffectFacts, ref remaining),
-            BoundIsSome or BoundIsVariablePattern or BoundMove => true,
-            BoundFieldRead field => HasOutcomeEffects(field.Receiver, outcomeEffectFacts, ref remaining),
-            BoundBufferRead buffer => HasOutcomeEffects(buffer.Index, outcomeEffectFacts, ref remaining),
-            BoundViewRead view => HasOutcomeEffects(view.Index, outcomeEffectFacts, ref remaining),
-            BoundIsInitialized => true,
-            BoundViewLength or BoundConstant or BoundNull or BoundRead or BoundReceiverLoan
-                or BoundMutableReceiverLoan or BoundMutableFieldLoan or BoundFieldLoan => false,
-            _ => true,
-        };
-        outcomeEffectFacts.Add(expression, hasEffects);
-        return hasEffects;
-    }
-
-    private static bool HasOutcomeEffects(ImmutableArray<BoundExpression> expressions,
-        Dictionary<BoundExpression, bool> outcomeEffectFacts, ref int remaining)
-    {
-        foreach (var expression in expressions)
-        {
-            if (expression is BoundOutArgument || HasOutcomeEffects(expression, outcomeEffectFacts, ref remaining))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
+        Dictionary<BoundExpression, byte> flowFacts, ref int remaining) =>
+        (FlowFacts(expression, flowFacts, ref remaining) & OutcomeEffectFact) != 0;
 
     private static bool HasInitializationTests(BoundExpression expression,
-        Dictionary<BoundExpression, bool> initializationTestFacts, ref int remaining)
+        Dictionary<BoundExpression, byte> flowFacts, ref int remaining) =>
+        (FlowFacts(expression, flowFacts, ref remaining) & InitializationTestFact) != 0;
+
+    // These structural classifications share a tree walk and remain independent of flow-state clones.
+    // Unknown forms stay conservative for both properties.
+    private static byte FlowFacts(BoundExpression expression,
+        Dictionary<BoundExpression, byte> flowFacts, ref int remaining)
     {
         Count(ref remaining, 0);
         if (expression is null)
         {
-            return true;
+            return AllFlowFacts;
         }
-        if (initializationTestFacts.TryGetValue(expression, out var hasTests))
+        if (flowFacts.TryGetValue(expression, out var facts))
         {
-            return hasTests;
+            return facts;
         }
 
-        hasTests = expression switch {
-            BoundCall call => HasInitializationTests(call.Arguments, initializationTestFacts, ref remaining),
-            BoundBinary binary => HasInitializationTests(binary.Left, initializationTestFacts, ref remaining)
-                || HasInitializationTests(binary.Right, initializationTestFacts, ref remaining),
-            BoundConditional conditional =>
-                HasInitializationTests(conditional.Condition, initializationTestFacts, ref remaining)
-                || HasInitializationTests(conditional.WhenTrue, initializationTestFacts, ref remaining)
-                || HasInitializationTests(conditional.WhenFalse, initializationTestFacts, ref remaining),
-            BoundCoalesce coalesce => HasInitializationTests(coalesce.Optional, initializationTestFacts, ref remaining)
-                || HasInitializationTests(coalesce.Fallback, initializationTestFacts, ref remaining),
-            BoundUnary unary => HasInitializationTests(unary.Operand, initializationTestFacts, ref remaining),
-            BoundUpdate update => HasInitializationTests(update.Place, initializationTestFacts, ref remaining),
-            BoundCompoundAssignment compound =>
-                HasInitializationTests(compound.Place, initializationTestFacts, ref remaining)
-                || HasInitializationTests(compound.Right, initializationTestFacts, ref remaining),
-            BoundNominalUpdate update => HasInitializationTests(update.Place, initializationTestFacts, ref remaining),
-            BoundCast cast => HasInitializationTests(cast.Operand, initializationTestFacts, ref remaining),
-            BoundOptionalLift lift => HasInitializationTests(lift.Value, initializationTestFacts, ref remaining),
-            BoundReadonlyProjection projection =>
-                HasInitializationTests(projection.Value, initializationTestFacts, ref remaining),
-            BoundIsNull test => HasInitializationTests(test.Value, initializationTestFacts, ref remaining),
-            BoundIsSome test => HasInitializationTests(test.Value, initializationTestFacts, ref remaining),
-            BoundIsVariablePattern or BoundIsInitialized => true,
-            BoundFieldRead field => HasInitializationTests(field.Receiver, initializationTestFacts, ref remaining),
-            BoundBufferRead buffer => HasInitializationTests(buffer.Index, initializationTestFacts, ref remaining),
-            BoundViewRead view => HasInitializationTests(view.Index, initializationTestFacts, ref remaining),
-            BoundOutArgument or BoundViewLength or BoundConstant or BoundNull or BoundRead or BoundMove or BoundReceiverLoan
-                or BoundMutableReceiverLoan or BoundMutableFieldLoan or BoundFieldLoan => false,
-            _ => true,
+        facts = expression switch {
+            BoundCall call => FlowFacts(call.Arguments, flowFacts, ref remaining),
+            BoundBinary binary => AddFlowFact(AddFlowFact(0, binary.Left, flowFacts, ref remaining),
+                binary.Right, flowFacts, ref remaining),
+            BoundConditional conditional => AddFlowFact(
+                AddFlowFact(AddFlowFact(0, conditional.Condition, flowFacts, ref remaining),
+                    conditional.WhenTrue, flowFacts, ref remaining),
+                conditional.WhenFalse, flowFacts, ref remaining),
+            BoundCoalesce coalesce => AddFlowFact(AddFlowFact(0, coalesce.Optional, flowFacts, ref remaining),
+                coalesce.Fallback, flowFacts, ref remaining),
+            BoundUnary unary => FlowFacts(unary.Operand, flowFacts, ref remaining),
+            BoundUpdate update => FlowFacts(update.Place, flowFacts, ref remaining),
+            BoundCompoundAssignment compound => AddFlowFact(
+                AddFlowFact(0, compound.Place, flowFacts, ref remaining), compound.Right, flowFacts, ref remaining),
+            BoundNominalUpdate update => FlowFacts(update.Place, flowFacts, ref remaining),
+            BoundCast cast => FlowFacts(cast.Operand, flowFacts, ref remaining),
+            BoundOptionalLift lift => FlowFacts(lift.Value, flowFacts, ref remaining),
+            BoundReadonlyProjection projection => FlowFacts(projection.Value, flowFacts, ref remaining),
+            BoundIsNull test => FlowFacts(test.Value, flowFacts, ref remaining),
+            BoundIsSome test => (byte)(OutcomeEffectFact | FlowFacts(test.Value, flowFacts, ref remaining)),
+            BoundIsVariablePattern or BoundIsInitialized => AllFlowFacts,
+            BoundOutArgument or BoundMove => OutcomeEffectFact,
+            BoundFieldRead field => FlowFacts(field.Receiver, flowFacts, ref remaining),
+            BoundBufferRead buffer => FlowFacts(buffer.Index, flowFacts, ref remaining),
+            BoundViewRead view => FlowFacts(view.Index, flowFacts, ref remaining),
+            BoundViewLength or BoundConstant or BoundNull or BoundRead or BoundReceiverLoan
+                or BoundMutableReceiverLoan or BoundMutableFieldLoan or BoundFieldLoan => 0,
+            _ => AllFlowFacts,
         };
-        initializationTestFacts.Add(expression, hasTests);
-        return hasTests;
+        flowFacts.Add(expression, facts);
+        return facts;
     }
 
-    private static bool HasInitializationTests(ImmutableArray<BoundExpression> expressions,
-        Dictionary<BoundExpression, bool> initializationTestFacts, ref int remaining)
+    private static byte FlowFacts(ImmutableArray<BoundExpression> expressions,
+        Dictionary<BoundExpression, byte> flowFacts, ref int remaining)
     {
+        byte facts = 0;
         foreach (var expression in expressions)
         {
-            if (HasInitializationTests(expression, initializationTestFacts, ref remaining))
+            if (expression is BoundOutArgument)
             {
-                return true;
+                facts |= OutcomeEffectFact;
+            }
+            facts = AddFlowFact(facts, expression, flowFacts, ref remaining);
+            if (facts == AllFlowFacts)
+            {
+                break;
             }
         }
-        return false;
+        return facts;
     }
+
+    private static byte AddFlowFact(byte facts, BoundExpression expression,
+        Dictionary<BoundExpression, byte> flowFacts, ref int remaining) =>
+        facts == AllFlowFacts ? facts : (byte)(facts | FlowFacts(expression, flowFacts, ref remaining));
 
     // Ordinary expression feasibility is shared across flow-state clones; initialization-sensitive
     // compound expressions are handled above. Charge every lookup to the existing visit budget.
@@ -4144,7 +4103,7 @@ public static class SemanticVerifier
             return CanBe(unary.Operand, !result, ref remaining, initialized);
         }
         if (expression is BoundBinary { Operator: TokenKind.AmpersandAmpersand } and
-            && HasInitializationTests(and, initialized.InitializationTestFacts, ref remaining))
+            && HasInitializationTests(and, initialized.FlowFacts, ref remaining))
         {
             Count(ref remaining, 0);
             if (result)
@@ -4168,7 +4127,7 @@ public static class SemanticVerifier
             return CanBe(and.Right, false, ref remaining, leftTrueState);
         }
         if (expression is BoundBinary { Operator: TokenKind.PipePipe } or &&
-            HasInitializationTests(or, initialized.InitializationTestFacts, ref remaining))
+            HasInitializationTests(or, initialized.FlowFacts, ref remaining))
         {
             Count(ref remaining, 0);
             if (result)
@@ -4192,7 +4151,7 @@ public static class SemanticVerifier
             return CanBe(or.Right, false, ref remaining, rightFalse);
         }
         if (expression is BoundConditional conditional &&
-            HasInitializationTests(conditional, initialized.InitializationTestFacts, ref remaining))
+            HasInitializationTests(conditional, initialized.FlowFacts, ref remaining))
         {
             Count(ref remaining, 0);
             if (CanBe(conditional.Condition, true, ref remaining, initialized))
