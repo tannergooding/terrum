@@ -126,6 +126,21 @@ public sealed class ScannerTests
     }
 
     [Fact]
+    public async Task CharacterLiteralEscapeDiagnosticsMatchHostedBoundariesAsync()
+    {
+        string[] literals = [
+            "'\\n'", "'\\r'", "'\\t'", "'\\\\'", "'\\\"'", "'\\0'", "'\\''",
+            "'\\u0000'", "'\\u0041'", "'\\uD7FF'", "'\\uE000'", "'\\uFFFF'",
+            "'\\u000'", "'\\u004G'", "'\\uD800'", "'\\uDC00'", "'\\u00000'",
+            "'\\U00000000'", "'\\U0001F600'", "'\\U0010FFFF'", "'\\U00110000'",
+            "'\\U0000D800'", "'\\U12G45678'", "''", "'ab'", "'😀x'", "'\\qA'",
+            "'\\u0041\\q'",
+        ];
+        await CheckScannerAsync(string.Join(' ', literals) + " '\uD800' '\uDC00'")
+            .ConfigureAwait(true);
+    }
+
+    [Fact]
     public async Task EveryKeywordClassifiesNativelyAsync()
     {
         var keywords = Enum.GetValues<TokenKind>()
