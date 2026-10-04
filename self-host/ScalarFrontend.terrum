@@ -195,7 +195,7 @@ mut class ScalarFrontendState
         }
     }
 
-    private mut bool Take(int32 kind, out Token token)
+    private mut bool Take(int32 kind, init ref<Token> token)
     {
         if (!_tokens.TryGet(_at, init var current) || current.Kind != kind)
         {
@@ -223,13 +223,13 @@ mut class ScalarFrontendState
         else if (isInitRef)
         {
             _at = _at + 1;
-            if (!Take(14, out var refKeyword) || !Take(67, out var less)
+            if (!Take(14, init var refKeyword) || !Take(67, init var less)
                 || !TokensAttach(refKeyword, less))
             {
                 return false;
             }
         }
-        if (!Take(2, out var typeToken))
+        if (!Take(2, init var typeToken))
         {
             return false;
         }
@@ -238,11 +238,11 @@ mut class ScalarFrontendState
             FailAt(2, typeToken.Range);
             return false;
         }
-        if (isInitRef && !Take(69, out var greater))
+        if (isInitRef && !Take(69, init var greater))
         {
             return false;
         }
-        if (!Take(2, out var parameter))
+        if (!Take(2, init var parameter))
         {
             return false;
         }
@@ -530,7 +530,7 @@ mut class ScalarFrontendState
         end = operand.Range.End;
         for (mut int32 index = 0; index < groups; index = index + 1)
         {
-            if (!Take(47, out var close))
+            if (!Take(47, init var close))
             {
                 return false;
             }
@@ -557,7 +557,7 @@ mut class ScalarFrontendState
         }
         for (mut int32 index = 0; index < depth; index = index + 1)
         {
-            if (!Take(47, out var close))
+            if (!Take(47, init var close))
             {
                 return false;
             }
@@ -1502,7 +1502,7 @@ mut class ScalarFrontendState
 
     private mut bool ParseReturn(int32 returnType, out ScalarFrontendExpression expression)
     {
-        if (!Take(19, out var keyword) || !ParseExpression(returnType, out var found))
+        if (!Take(19, init var keyword) || !ParseExpression(returnType, out var found))
         {
             return false;
         }
@@ -1511,7 +1511,7 @@ mut class ScalarFrontendState
             FailAt(2, found.Span);
             return false;
         }
-        if (!Take(52, out var semicolon))
+        if (!Take(52, init var semicolon))
         {
             return false;
         }
@@ -1526,12 +1526,12 @@ mut class ScalarFrontendState
         mut Token attribute = firstAttribute;
         while (attribute.Kind == 50)
         {
-            if (!Take(50, out var openAttribute) || !Take(2, out var effect))
+            if (!Take(50, init var openAttribute) || !Take(2, init var effect))
             {
                 return false;
             }
             int32 flag = ScalarFrontendEffect(effect);
-            if (flag == 0 || (effects & flag) != 0 || !Take(51, out var closeAttribute))
+            if (flag == 0 || (effects & flag) != 0 || !Take(51, init var closeAttribute))
             {
                 FailAt(1, effect.Range);
                 return false;
@@ -1583,7 +1583,7 @@ mut class ScalarFrontendState
         }
         if (sawUnsafe) { Host.Frontend[2] = Host.Frontend[2] | 8; }
         require _tokens.TryGet(_at, init var returnToken);
-        if (!Take(returnToken.Kind == 11 ? 11 : 2, out var typeToken))
+        if (!Take(returnToken.Kind == 11 ? 11 : 2, init var typeToken))
         {
             return false;
         }
@@ -1602,7 +1602,7 @@ mut class ScalarFrontendState
             FailAt(2, typeToken.Range);
             return false;
         }
-        if (!Take(2, out var function) || !Take(46, out var openParameters))
+        if (!Take(2, init var function) || !Take(46, init var openParameters))
         {
             return false;
         }
@@ -1655,7 +1655,7 @@ mut class ScalarFrontendState
                 }
             }
         }
-        if (!Take(47, out var closeParameters))
+        if (!Take(47, init var closeParameters))
         {
             return false;
         }
@@ -1765,7 +1765,7 @@ mut class ScalarFrontendState
                 return false;
             }
             _at = _at + 3;
-            if (semicolon && !Take(52, out var end))
+            if (semicolon && !Take(52, init var end))
             {
                 return false;
             }
@@ -1784,7 +1784,7 @@ mut class ScalarFrontendState
                 FailAt(1, first.Range);
                 return false;
             }
-            if (semicolon && !Take(52, out var callEnd))
+            if (semicolon && !Take(52, init var callEnd))
             {
                 return false;
             }
@@ -1834,7 +1834,7 @@ mut class ScalarFrontendState
                 valueType = type;
             }
             if (!ResolveTreeLiteral(value, valueType, false)
-                || semicolon && !Take(52, out var end))
+                || semicolon && !Take(52, init var end))
             {
                 return false;
             }
@@ -1877,7 +1877,7 @@ mut class ScalarFrontendState
                 _at = _at + 1;
                 if (!ParseTreeExpression(rightType, 1, 0, out var value)
                     || !ResolveTreeLiteral(value, rightType, false)
-                    || semicolon && !Take(52, out var end))
+                    || semicolon && !Take(52, init var end))
                 {
                     return false;
                 }
@@ -1892,7 +1892,7 @@ mut class ScalarFrontendState
             }
             int32 operation = TreeWord(update, 0);
             if ((operation != 86 && operation != 87)
-                || semicolon && !Take(52, out var endUpdate))
+                || semicolon && !Take(52, init var endUpdate))
             {
                 return false;
             }
@@ -1954,7 +1954,7 @@ mut class ScalarFrontendState
             type = selectedType;
             _at = _at + 1;
         }
-        if (!Take(2, out var name))
+        if (!Take(2, init var name))
         {
             return false;
         }
@@ -2021,7 +2021,7 @@ mut class ScalarFrontendState
             FailAt(1, name.Range);
             return false;
         }
-        if (semicolon && !Take(52, out var endDeclaration))
+        if (semicolon && !Take(52, init var endDeclaration))
         {
             return false;
         }
@@ -2051,7 +2051,7 @@ mut class ScalarFrontendState
             FailAt(1, name.Range);
             return false;
         }
-        if (!Take(64, out var assignment)
+        if (!Take(64, init var assignment)
             || !ParseTreeExpression(expected, 1, 0, out var initializer))
         {
             return false;
@@ -2062,7 +2062,7 @@ mut class ScalarFrontendState
             return FailTreeType(initializer);
         }
         if (!ResolveTreeLiteral(initializer, type, false)
-            || semicolon && !Take(52, out var endDeclaration))
+            || semicolon && !Take(52, init var endDeclaration))
         {
             return false;
         }
@@ -2236,9 +2236,9 @@ mut class ScalarFrontendState
         }
         for (mut int32 index = 0; index < groups; index = index + 1)
         {
-            if (!Take(47, out var close)) { return false; }
+            if (!Take(47, init var close)) { return false; }
         }
-        if (!Take(52, out var semicolon)) { return false; }
+        if (!Take(52, init var semicolon)) { return false; }
         _hasStructuredStatement = true;
         _structuredReturnCount = _structuredReturnCount + 1;
         return AddTreeStatement(22, 0, -1, keyword.Range.Start, semicolon.Range.End);
@@ -2313,7 +2313,7 @@ mut class ScalarFrontendState
             kind = kind + 13;
             _at = _at + 1;
         }
-        if (!Take(52, out var semicolon)) { return false; }
+        if (!Take(52, init var semicolon)) { return false; }
         return AddTreeStatement(kind, target, -1, keyword.Range.Start, semicolon.Range.End);
     }
 
@@ -2574,12 +2574,12 @@ mut class ScalarFrontendState
             }
             Host.Frontend[41] = 1;
         }
-        else if (!Take(48, out var openBody) || !ParseTreeStructuredBody(0, -1)
-            || !Take(49, out var closeBody))
+        else if (!Take(48, init var openBody) || !ParseTreeStructuredBody(0, -1)
+            || !Take(49, init var closeBody))
         {
             return false;
         }
-        return Take(0, out var eof) && _at == _tokens.GetCount();
+        return Take(0, init var eof) && _at == _tokens.GetCount();
     }
 
     private mut bool ParseTreeBlock(int32 depth, int32 nearestLoop)
@@ -2590,7 +2590,7 @@ mut class ScalarFrontendState
             Fail(1);
             return false;
         }
-        if (!Take(48, out var open))
+        if (!Take(48, init var open))
         {
             return false;
         }
@@ -2598,7 +2598,7 @@ mut class ScalarFrontendState
         int32 enclosingLocals = _activeLocals;
         if (!AddTreeStatement(14, 0, -1, open.Range.Start, open.Range.End)
             || !ParseTreeStructuredBody(depth + 1, nearestLoop)
-            || !Take(49, out var close))
+            || !Take(49, init var close))
         {
             return false;
         }
@@ -2613,8 +2613,8 @@ mut class ScalarFrontendState
             Fail(1);
             return false;
         }
-        if (!Take(16, out var keyword) || !ParseTreeCondition(out var condition)
-            || !Take(48, out var body))
+        if (!Take(16, init var keyword) || !ParseTreeCondition(out var condition)
+            || !Take(48, init var body))
         {
             return false;
         }
@@ -2622,7 +2622,7 @@ mut class ScalarFrontendState
         int32 enclosingLocals = _activeLocals;
         if (!AddTreeStatement(4, 0, condition, keyword.Range.Start, body.Range.End)
             || !ParseTreeStructuredBody(depth + 1, nearestLoop)
-            || !Take(49, out var endTrue))
+            || !Take(49, init var endTrue))
         {
             return false;
         }
@@ -2631,7 +2631,7 @@ mut class ScalarFrontendState
         require _tokens.TryGet(_at, init var next);
         if (next.Kind == 17)
         {
-            if (_statementCount >= 12 || !Take(17, out var otherwise))
+            if (_statementCount >= 12 || !Take(17, init var otherwise))
             {
                 Fail(1);
                 return false;
@@ -2650,10 +2650,10 @@ mut class ScalarFrontendState
             }
             else
             {
-                if (!Take(48, out var openFalse)
+                if (!Take(48, init var openFalse)
                     || !AddTreeStatement(5, 0, -1, otherwise.Range.Start, openFalse.Range.End)
                     || !ParseTreeStructuredBody(depth + 1, nearestLoop)
-                    || !Take(49, out var endFalse))
+                    || !Take(49, init var endFalse))
                 {
                     return false;
                 }
@@ -2672,7 +2672,7 @@ mut class ScalarFrontendState
             Fail(1);
             return false;
         }
-        if (!Take(42, out var keyword) || !Take(48, out var openBody))
+        if (!Take(42, init var keyword) || !Take(48, init var openBody))
         {
             return false;
         }
@@ -2680,7 +2680,7 @@ mut class ScalarFrontendState
         int32 enclosingLocals = _activeLocals;
         if (!AddTreeStatement(29, 0, -1, keyword.Range.Start, openBody.Range.End)
             || !ParseTreeStructuredBody(depth + 1, nearestLoop)
-            || !Take(49, out var endBody))
+            || !Take(49, init var endBody))
         {
             return false;
         }
@@ -2689,14 +2689,14 @@ mut class ScalarFrontendState
         {
             Host.Frontend[332 + header * 5] = 32;
             int32 marker = _statementCount;
-            if (_statementCount >= 12 || !Take(43, out var catchKeyword)
-                || !Take(48, out var openCatch))
+            if (_statementCount >= 12 || !Take(43, init var catchKeyword)
+                || !Take(48, init var openCatch))
             {
                 return false;
             }
             if (!AddTreeStatement(33, 0, -1, catchKeyword.Range.Start, openCatch.Range.End)
                 || !ParseTreeStructuredBody(depth + 1, nearestLoop)
-                || !Take(49, out var endCatch))
+                || !Take(49, init var endCatch))
             {
                 return false;
             }
@@ -2704,15 +2704,15 @@ mut class ScalarFrontendState
             if (_tokens.TryGet(_at, init var followingCleanup) && followingCleanup.Kind == 44)
             {
                 if (_statementCount >= 12
-                    || !Take(44, out var finallyKeyword)
-                    || !Take(48, out var openCleanup))
+                    || !Take(44, init var finallyKeyword)
+                    || !Take(48, init var openCleanup))
                 {
                     return false;
                 }
                 int32 cleanup = _statementCount;
                 if (!AddTreeStatement(34, 0, -1, finallyKeyword.Range.Start, openCleanup.Range.End)
                     || !ParseTreeStructuredBody(depth + 1, nearestLoop)
-                    || !Take(49, out var endCleanup))
+                    || !Take(49, init var endCleanup))
                 {
                     return false;
                 }
@@ -2724,15 +2724,15 @@ mut class ScalarFrontendState
             return true;
         }
         if (_statementCount >= 12
-            || !Take(44, out var finallyKeyword)
-            || !Take(48, out var openCleanup))
+            || !Take(44, init var finallyKeyword)
+            || !Take(48, init var openCleanup))
         {
             return false;
         }
         int32 cleanup = _statementCount;
         if (!AddTreeStatement(30, 0, -1, finallyKeyword.Range.Start, openCleanup.Range.End)
             || !ParseTreeStructuredBody(depth + 1, nearestLoop)
-            || !Take(49, out var endCleanup))
+            || !Take(49, init var endCleanup))
         {
             return false;
         }
@@ -2748,7 +2748,7 @@ mut class ScalarFrontendState
             Fail(1);
             return false;
         }
-        if (!Take(76, out var keyword) || !Take(48, out var openBody))
+        if (!Take(76, init var keyword) || !Take(48, init var openBody))
         {
             return false;
         }
@@ -2756,7 +2756,7 @@ mut class ScalarFrontendState
         int32 enclosingLocals = _activeLocals;
         if (!AddTreeStatement(31, 0, -1, keyword.Range.Start, openBody.Range.End)
             || !ParseTreeStructuredBody(depth + 1, nearestLoop)
-            || !Take(49, out var endBody))
+            || !Take(49, init var endBody))
         {
             return false;
         }
@@ -2772,8 +2772,8 @@ mut class ScalarFrontendState
             Fail(1);
             return false;
         }
-        if (!Take(18, out var keyword) || !ParseTreeCondition(out var condition)
-            || !Take(48, out var body))
+        if (!Take(18, init var keyword) || !ParseTreeCondition(out var condition)
+            || !Take(48, init var body))
         {
             return false;
         }
@@ -2784,7 +2784,7 @@ mut class ScalarFrontendState
         {
             return false;
         }
-        if (!ParseTreeStructuredBody(depth + 1, header) || !Take(49, out var end))
+        if (!ParseTreeStructuredBody(depth + 1, header) || !Take(49, init var end))
         {
             return false;
         }
@@ -2794,7 +2794,7 @@ mut class ScalarFrontendState
 
     private mut bool ParseTreeStaticProof(int32 depth)
     {
-        if (!Take(10, out var keyword) || !_tokens.TryGet(_at, init var proofKeyword))
+        if (!Take(10, init var keyword) || !_tokens.TryGet(_at, init var proofKeyword))
         {
             return false;
         }
@@ -2820,7 +2820,7 @@ mut class ScalarFrontendState
         }
         if (!ParseTreeExpression(5, 1, 0, out var condition)
             || TreeWord(condition, 1) != 5
-            || !Take(52, out var semicolon))
+            || !Take(52, init var semicolon))
         {
             return false;
         }
@@ -2835,7 +2835,7 @@ mut class ScalarFrontendState
             Fail(1);
             return false;
         }
-        if (!Take(83, out var keyword) || !Take(48, out var body))
+        if (!Take(83, init var keyword) || !Take(48, init var body))
         {
             return false;
         }
@@ -2844,13 +2844,13 @@ mut class ScalarFrontendState
         int32 start = label == -1 ? keyword.Range.Start : label;
         if (!AddTreeStatement(label == -1 ? 11 : 17, 0, -1, start, body.Range.End)
             || !ParseTreeStructuredBody(depth + 1, header)
-            || !Take(49, out var closeBody))
+            || !Take(49, init var closeBody))
         {
             return false;
         }
         FinishTreeBody(header, enclosingLocals, closeBody.Range.End);
-        if (!Take(18, out var keywordWhile) || !ParseTreeCondition(out var condition)
-            || !Take(52, out var semicolon))
+        if (!Take(18, init var keywordWhile) || !ParseTreeCondition(out var condition)
+            || !Take(52, init var semicolon))
         {
             return false;
         }
@@ -2862,7 +2862,7 @@ mut class ScalarFrontendState
     private mut bool ParseTreeCondition(out int32 condition)
     {
         condition = -1;
-        if (!Take(46, out var open) || !ParseTreeExpression(5, 1, 0, out condition))
+        if (!Take(46, init var open) || !ParseTreeExpression(5, 1, 0, out condition))
         {
             return false;
         }
@@ -2870,7 +2870,7 @@ mut class ScalarFrontendState
         {
             return FailTreeType(condition);
         }
-        return Take(47, out var close);
+        return Take(47, init var close);
     }
 
     private mut bool ParseTreeFor(int32 depth, int32 label)
@@ -2880,7 +2880,7 @@ mut class ScalarFrontendState
             Fail(1);
             return false;
         }
-        if (!Take(31, out var keyword) || !Take(46, out var open))
+        if (!Take(31, init var keyword) || !Take(46, init var open))
         {
             return false;
         }
@@ -2888,7 +2888,7 @@ mut class ScalarFrontendState
         int32 enclosingLocals = _activeLocals;
         int32 start = label == -1 ? keyword.Range.Start : label;
         if (!AddTreeStatement(label == -1 ? 12 : 18, 0, -1, start, open.Range.End)
-            || !ParseTreeForClause(true) || !Take(52, out var firstEnd))
+            || !ParseTreeForClause(true) || !Take(52, init var firstEnd))
         {
             return false;
         }
@@ -2905,10 +2905,10 @@ mut class ScalarFrontendState
             }
             Host.Frontend[332 + header * 5 + 2] = condition;
         }
-        if (!Take(52, out var secondEnd) || !ParseTreeForClause(false)
-            || !Take(47, out var close) || !Take(48, out var body)
+        if (!Take(52, init var secondEnd) || !ParseTreeForClause(false)
+            || !Take(47, init var close) || !Take(48, init var body)
             || !ParseTreeStructuredBody(depth + 1, header)
-            || !Take(49, out var end))
+            || !Take(49, init var end))
         {
             return false;
         }
@@ -3105,7 +3105,7 @@ mut class ScalarFrontendState
         mut bool hasOutOfPositionNamedArgument = false;
         for (mut int32 ordinal = 0; ordinal < argumentCount; ordinal = ordinal + 1)
         {
-            if (ordinal != 0 && !Take(53, out var comma))
+            if (ordinal != 0 && !Take(53, init var comma))
             {
                 return false;
             }
@@ -3203,9 +3203,13 @@ mut class ScalarFrontendState
                     }
                     _at = _at + 1;
                 }
-                else if (!Take(15, out outputModeToken))
+                else
                 {
-                    return false;
+                    if (!Take(15, init var consumedModeToken))
+                    {
+                        return false;
+                    }
+                    outputModeToken = consumedModeToken;
                 }
                 mut bool newLocal = false;
                 if (_tokens.TryGet(_at, init var targetKind) && targetKind.Kind == 12)
@@ -3213,7 +3217,7 @@ mut class ScalarFrontendState
                     _at = _at + 1;
                     newLocal = true;
                 }
-                if (!Take(2, out var outputName))
+                if (!Take(2, init var outputName))
                 {
                     return false;
                 }
@@ -3278,7 +3282,7 @@ mut class ScalarFrontendState
             else if (ordinal == 1) { second = argument; }
             else { third = argument; }
         }
-        if (!Take(47, out var close))
+        if (!Take(47, init var close))
         {
             return false;
         }
@@ -3388,7 +3392,7 @@ mut class ScalarFrontendState
         {
             _at = _at + 2;
             if (!ParseTreeExpression(expected, 1, depth + 1, out var operand)
-                || !Take(47, out var unsafeClose))
+                || !Take(47, init var unsafeClose))
             {
                 return false;
             }
@@ -3441,7 +3445,7 @@ mut class ScalarFrontendState
             if (!ParseTreeExpression(0, 1, depth + 1, out var operand)
                 || (TreeWord(operand, 1) == 0
                     && !ResolveTreeLiteral(operand, target, false))
-                || !Take(47, out var close))
+                || !Take(47, init var close))
             {
                 return false;
             }
@@ -3458,7 +3462,7 @@ mut class ScalarFrontendState
         {
             _at = _at + 1;
             if (!ParseTreeExpression(expected, 1, depth + 1, out var inner)
-                || !Take(47, out var close))
+                || !Take(47, init var close))
             {
                 return false;
             }
@@ -3635,7 +3639,7 @@ mut class ScalarFrontendState
             if (initializationTest)
             {
                 if (TreeWord(left, 0) != 0
-                    || !Take(2, out var initKeyword)
+                    || !Take(2, init var initKeyword)
                     || !IsInitKeyword(initKeyword)
                     || !AddTreeNode(109, 5, TreeWord(left, 2), initKeyword.Range.End,
                         left, -1, 0, 0, out var test))
@@ -3723,7 +3727,7 @@ mut class ScalarFrontendState
             mut int32 armContext = expected;
             if (armContext == 5) { armContext = 0; }
             if (!ParseTreeExpression(armContext, 1, depth + 1, out var whenTrue)
-                || !Take(55, out var colon))
+                || !Take(55, init var colon))
             {
                 return false;
             }
@@ -3799,7 +3803,7 @@ mut class ScalarFrontendState
 
     private mut bool ParseTreeTerminatedExpression(int32 kind, int32 type, out int32 root)
     {
-        if (!Take(kind, out var keyword)
+        if (!Take(kind, init var keyword)
             || !ParseTreeExpression(type, 1, 0, out var expression))
         {
             return false;
@@ -3809,7 +3813,7 @@ mut class ScalarFrontendState
             root = -1;
             return FailTreeType(expression);
         }
-        if (!Take(52, out var semicolon))
+        if (!Take(52, init var semicolon))
         {
             return false;
         }
@@ -3848,9 +3852,9 @@ mut class ScalarFrontendState
                     }
                     whenTrue = root;
                 }
-                if (_error == 0) { Take(52, out var semicolon); }
+                if (_error == 0) { Take(52, init var semicolon); }
             }
-            else if (Take(48, out var openBody))
+            else if (Take(48, init var openBody))
             {
                 require _tokens.TryGet(_at, init var firstStatement);
                 mut Token next = firstStatement;
@@ -3891,7 +3895,7 @@ mut class ScalarFrontendState
                 {
                     hasCondition = true;
                     _at = _at + 1;
-                    if (Take(46, out var openCondition)
+                    if (Take(46, init var openCondition)
                         && ParseTreeExpression(5, 1, 0, out var predicate))
                     {
                         if (TreeWord(predicate, 1) != 5)
@@ -3902,19 +3906,19 @@ mut class ScalarFrontendState
                         }
                         condition = predicate;
                     }
-                    if (_error == 0 && Take(47, out var closeCondition)
-                        && Take(48, out var openTrue)
+                    if (_error == 0 && Take(47, init var closeCondition)
+                        && Take(48, init var openTrue)
                         && ParseTreeTerminatedExpression(19, returnType, out var first)
-                        && Take(49, out var closeTrue))
+                        && Take(49, init var closeTrue))
                     {
                         whenTrue = first;
                         require _tokens.TryGet(_at, init var following);
                         if (following.Kind == 17)
                         {
                             _at = _at + 1;
-                            if (Take(48, out var openFalse)
+                            if (Take(48, init var openFalse)
                                 && ParseTreeTerminatedExpression(19, returnType, out var second)
-                                && Take(49, out var closeFalse))
+                                && Take(49, init var closeFalse))
                             {
                                 whenFalse = second;
                             }
@@ -3930,9 +3934,9 @@ mut class ScalarFrontendState
                 {
                     whenTrue = found;
                 }
-                if (_error == 0) { Take(49, out var closeBody); }
+                if (_error == 0) { Take(49, init var closeBody); }
             }
-            if (_error == 0 && Take(0, out var eof)
+            if (_error == 0 && Take(0, init var eof)
                 && _at != _tokens.GetCount())
             {
                 Fail(1);
@@ -3990,7 +3994,7 @@ mut class ScalarFrontendState
             Fail(1);
         }
         else if (ParseHeader(out var selectedReturnType, out var foundName)
-            && Take(48, out var openBody))
+            && Take(48, init var openBody))
         {
             returnType = selectedReturnType;
             name = foundName;
@@ -3999,7 +4003,7 @@ mut class ScalarFrontendState
             {
                 hasCondition = true;
                 _at = _at + 1;
-                if (Take(46, out var openCondition)
+                if (Take(46, init var openCondition)
                     && ParseExpression(5, out var predicate))
                 {
                     if (predicate.Type != 5)
@@ -4011,19 +4015,19 @@ mut class ScalarFrontendState
                         condition = predicate;
                     }
                 }
-                if (_error == 0 && Take(47, out var closeCondition)
-                    && Take(48, out var openTrue)
+                if (_error == 0 && Take(47, init var closeCondition)
+                    && Take(48, init var openTrue)
                     && ParseReturn(returnType, out var firstReturn)
-                    && Take(49, out var closeTrue))
+                    && Take(49, init var closeTrue))
                 {
                     whenTrue = firstReturn;
                     require _tokens.TryGet(_at, init var followingTrue);
                     if (followingTrue.Kind == 17)
                     {
                         _at = _at + 1;
-                        if (Take(48, out var openFalse)
+                        if (Take(48, init var openFalse)
                             && ParseReturn(returnType, out var secondReturn)
-                            && Take(49, out var closeFalse))
+                            && Take(49, init var closeFalse))
                         {
                             whenFalse = secondReturn;
                         }
@@ -4039,8 +4043,8 @@ mut class ScalarFrontendState
             {
                 whenTrue = found;
             }
-            if (_error == 0 && Take(49, out var closeBody)
-                && Take(0, out var eof) && _at != _tokens.GetCount())
+            if (_error == 0 && Take(49, init var closeBody)
+                && Take(0, init var eof) && _at != _tokens.GetCount())
             {
                 Fail(1);
             }
