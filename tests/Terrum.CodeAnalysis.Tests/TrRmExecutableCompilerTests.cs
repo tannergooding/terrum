@@ -1378,6 +1378,29 @@ public sealed class TrRmExecutableCompilerTests
             NativeRuntimePolicy.FailFast));
     }
 
+    [Theory]
+    [InlineData(2147483648L)]
+    [InlineData(-2147483649L)]
+    public void CompactLinearReaderRejectsOutOfRangeInt32ConstSignedPayloads(long value)
+    {
+        var artifact = OptionalScalarArtifact(SignedInt32LinearBody(value),
+            optionalChar16: false, optionalInt32: false);
+
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+    }
+
+    [Theory]
+    [InlineData(int.MinValue)]
+    [InlineData(int.MaxValue)]
+    public void CompactLinearReaderAcceptsInt32ConstSignedExtrema(int value)
+    {
+        var artifact = OptionalScalarArtifact(SignedInt32LinearBody(value),
+            optionalChar16: false, optionalInt32: false);
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+
+        Assert.Equal(value, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+    }
+
     [Fact]
     public void TamperedPolicyAndUnknownSectionsNeverBecomeExecutable()
     {
@@ -1399,6 +1422,44 @@ public sealed class TrRmExecutableCompilerTests
             return;
         }
         throw new InvalidOperationException("Module section missing.");
+    }
+
+    private static byte[] SignedInt32LinearBody(long value)
+    {
+        var dataWidth = value is >= sbyte.MinValue and <= sbyte.MaxValue ? 1
+            : value is >= short.MinValue and <= short.MaxValue ? 2
+            : value is >= int.MinValue and <= int.MaxValue ? 4 : 8;
+        var operations = new List<byte>();
+        if (dataWidth == 1)
+        {
+            operations.Add(2);
+        }
+        else
+        {
+            operations.Add(0xF0);
+            operations.Add((byte)(dataWidth switch { 2 => 0x10, 4 => 0x20, _ => 0x30 }));
+            operations.Add(2);
+        }
+        operations.Add(1);
+        operations.Add(1);
+        var payload = new byte[dataWidth];
+        switch (dataWidth)
+        {
+            case 1:
+                payload[0] = unchecked((byte)value);
+                break;
+            case 2:
+                BinaryPrimitives.WriteUInt16LittleEndian(payload, unchecked((ushort)value));
+                break;
+            case 4:
+                BinaryPrimitives.WriteUInt32LittleEndian(payload, unchecked((uint)value));
+                break;
+            default:
+                BinaryPrimitives.WriteUInt64LittleEndian(payload, unchecked((ulong)value));
+                break;
+        }
+        operations.AddRange(payload);
+        return OptionalLinearBody([4], [.. operations], 1, 1);
     }
 
     private static byte[] OptionalLinearBody(int[] typeRows, byte[] operations,
