@@ -70,7 +70,7 @@ internal sealed partial class Binder
                 return new BoundConstant(result ? 1 : 0, PrimitiveType.Bool, expression.Span);
 
             case BoundCast { Operand: BoundConstant operand } cast
-                when TryConvertFloatingConstant(operand, cast.Type, out var floatingBits):
+                when TryConvertToFloatingConstant(operand, cast.Type, out var floatingBits):
                 return new BoundConstant(floatingBits, cast.Type, expression.Span);
 
             case BoundCast { Operand: BoundConstant operand }
@@ -186,9 +186,18 @@ internal sealed partial class Binder
             or PrimitiveType.UInt64 or PrimitiveType.Char16;
     }
 
-    private static bool TryConvertFloatingConstant(BoundConstant source, PrimitiveType destination, out long value)
+    private static bool TryConvertToFloatingConstant(BoundConstant source, PrimitiveType destination, out long value)
     {
         value = 0;
+        if (destination is PrimitiveType.Float32 or PrimitiveType.Float64
+            && TryScalarValue(source, out var integer)
+            && (source.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64))
+        {
+            value = destination == PrimitiveType.Float32
+                ? unchecked((uint)BitConverter.SingleToInt32Bits((float)integer))
+                : BitConverter.DoubleToInt64Bits((double)integer);
+            return true;
+        }
         if (source.Type == PrimitiveType.Float32 && destination == PrimitiveType.Float64)
         {
             var single = BitConverter.Int32BitsToSingle(unchecked((int)source.Value));

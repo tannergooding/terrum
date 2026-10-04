@@ -3511,6 +3511,19 @@ internal sealed partial class PeCompiler
 
     private void Cast(PrimitiveType source, PrimitiveType target)
     {
+        if (target is PrimitiveType.Float32 or PrimitiveType.Float64
+            && source is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
+        {
+            if (source == PrimitiveType.UInt64)
+            {
+                EmitUInt64ToFloating(target);
+            }
+            else
+            {
+                EmitIntegerToFloating(source, target);
+            }
+            return;
+        }
         if (source == PrimitiveType.Float32 && target == PrimitiveType.Float64)
         {
             _code.Bytes(0x66, 0x0F, 0x6E, 0xC0); // movd xmm0,eax
@@ -3563,6 +3576,88 @@ internal sealed partial class PeCompiler
             }
             _code.Bytes(0x48, 0x39, 0xC8); // cmp rax,rcx
             RuntimeBranch(0x85, 0);
+        }
+    }
+
+    private void EmitIntegerToFloating(PrimitiveType source, PrimitiveType target)
+    {
+        _code.Byte(target == PrimitiveType.Float32 ? (byte)0xF3 : (byte)0xF2);
+        if (source is PrimitiveType.UInt32 or PrimitiveType.Int64)
+        {
+            _code.Byte(0x48);
+        }
+        _code.Bytes(0x0F, 0x2A, 0xC0);
+        EmitFloatingResult(target);
+    }
+
+    private void EmitUInt64ToFloating(PrimitiveType target)
+    {
+        // CVTSI2S treats a 64-bit source as signed, so round the high unsigned half explicitly.
+        _code.Bytes(0x48, 0x85, 0xC0);
+        var highUnsigned = _code.JumpIf(0x88);
+        EmitIntegerToFloating(PrimitiveType.Int64, target);
+        var complete = _code.Jump();
+        _code.PatchRelative(highUnsigned, _code.Position);
+
+        var precision = target == PrimitiveType.Float32 ? 24 : 53;
+        var shift = 64 - precision;
+        _code.Bytes(0x48, 0x89, 0xC1); // mov rcx,rax
+        _code.Bytes(0x48, 0xC1, 0xE8, (byte)shift); // q = value >> shift
+
+        _code.Bytes(0x48, 0x89, 0xCA); // mov rdx,rcx
+        _code.Bytes(0x48, 0xC1, 0xEA, (byte)(shift - 1));
+        _code.Bytes(0x83, 0xE2, 0x01); // guard bit
+        _code.Bytes(0x85, 0xD2);
+        var noGuardBit = _code.JumpIf(0x84);
+
+        _code.Bytes(0x48, 0x89, 0xCA);
+        _code.Bytes(0x48, 0xC1, 0xE2, (byte)(64 - (shift - 1)));
+        _code.Bytes(0x48, 0x85, 0xD2); // sticky bits below the guard bit
+        var tie = _code.JumpIf(0x84);
+        _code.Bytes(0x48, 0x83, 0xC0, 0x01);
+        var roundedUp = _code.Jump();
+        _code.PatchRelative(tie, _code.Position);
+        _code.Bytes(0x48, 0xA9, 0x01, 0x00, 0x00, 0x00); // ties round to an even significand
+        var evenSignificand = _code.JumpIf(0x84);
+        _code.Bytes(0x48, 0x83, 0xC0, 0x01);
+        _code.PatchRelative(evenSignificand, _code.Position);
+        _code.PatchRelative(roundedUp, _code.Position);
+        _code.PatchRelative(noGuardBit, _code.Position);
+
+        _code.Bytes(0x48, 0x0F, 0xBA, 0xE0, (byte)precision); // test for significand carry
+        var carry = _code.JumpIf(0x82);
+        EmitUInt64FloatingBits(target, 63);
+        var packed = _code.Jump();
+        _code.PatchRelative(carry, _code.Position);
+        _code.Bytes(0x48, 0xC1, 0xE8, 0x01);
+        EmitUInt64FloatingBits(target, 64);
+        _code.PatchRelative(packed, _code.Position);
+        _code.PatchRelative(complete, _code.Position);
+    }
+
+    private void EmitUInt64FloatingBits(PrimitiveType target, int exponent)
+    {
+        var precision = target == PrimitiveType.Float32 ? 24 : 53;
+        var fractionMask = (1UL << (precision - 1)) - 1;
+        var exponentBias = target == PrimitiveType.Float32 ? 127 : 1023;
+        var exponentBits = (ulong)(exponent + exponentBias) << (precision - 1);
+        _code.Bytes(0x48, 0xBA);
+        _code.Int64(unchecked((long)fractionMask));
+        _code.Bytes(0x48, 0x21, 0xD0); // retain the fraction bits
+        _code.Bytes(0x48, 0xBA);
+        _code.Int64(unchecked((long)exponentBits));
+        _code.Bytes(0x48, 0x09, 0xD0); // add the biased exponent
+    }
+
+    private void EmitFloatingResult(PrimitiveType target)
+    {
+        if (target == PrimitiveType.Float32)
+        {
+            _code.Bytes(0x66, 0x0F, 0x7E, 0xC0); // movd eax,xmm0
+        }
+        else
+        {
+            _code.Bytes(0x66, 0x48, 0x0F, 0x7E, 0xC0); // movq rax,xmm0
         }
     }
 

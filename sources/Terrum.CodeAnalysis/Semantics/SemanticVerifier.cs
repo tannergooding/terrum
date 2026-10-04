@@ -2897,9 +2897,12 @@ public static class SemanticVerifier
                     or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16)
                     && (cast.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
                         or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16);
+                var integerToFloatingConversion = (cast.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
+                    or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                    && (cast.Type is PrimitiveType.Float32 or PrimitiveType.Float64);
                 var floatingConversion = (cast.Operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
                     && (cast.Type is PrimitiveType.Float32 or PrimitiveType.Float64);
-                if (!integerConversion && !floatingConversion)
+                if (!integerConversion && !integerToFloatingConversion && !floatingConversion)
                 {
                     throw Invalid();
                 }
@@ -3646,6 +3649,8 @@ public static class SemanticVerifier
         source == destination || source == PrimitiveType.Char16
             || (source == PrimitiveType.Int32 && destination == PrimitiveType.Int64)
             || (source == PrimitiveType.UInt32 && destination is PrimitiveType.Int64 or PrimitiveType.UInt64)
+            || ((source is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                && (destination is PrimitiveType.Float32 or PrimitiveType.Float64))
             || ((source is PrimitiveType.Float32 or PrimitiveType.Float64)
                 && (destination is PrimitiveType.Float32 or PrimitiveType.Float64));
 

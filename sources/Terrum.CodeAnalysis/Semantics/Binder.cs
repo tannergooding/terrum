@@ -3566,14 +3566,18 @@ internal sealed partial class Binder
         {
             return operand;
         }
-        if (target is PrimitiveType.Float32 or PrimitiveType.Float64
-            || operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
+        if (target is PrimitiveType.Float32 or PrimitiveType.Float64)
         {
-            if ((target is PrimitiveType.Float32 or PrimitiveType.Float64)
-                && (operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64))
+            if (operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+                or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64)
             {
                 return new BoundCast(operand, target, node.Span);
             }
+            Report("TRM3007", "This typed floating-point conversion is not supported.", operand.Span);
+            return ErrorExpression(node.Span);
+        }
+        if (operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
+        {
             Report("TRM3007", "This typed floating-point conversion is not supported.", operand.Span);
             return ErrorExpression(node.Span);
         }

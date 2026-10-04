@@ -66,9 +66,11 @@ var unknown = 1;                          // Error: no type context.
 ```
 
 The decimal, hexadecimal, binary, and checked integer type-call examples above
-illustrate the selected semantics. Target-typed floating literals and explicit
-conversions between `float32` and `float64` are implemented; integer/floating
-conversions remain unsupported. Current executable coverage is documented in
+illustrate the selected semantics. Target-typed floating literals,
+`float32`/`float64` conversions, and conversions from `int32`, `uint32`,
+`int64`, and `uint64` to either floating format are implemented. Conversions
+from either floating format to an integer type, and `char16`-to-floating
+conversions, remain unsupported. Current executable coverage is documented in
 [implementation](implementation.md). A value-based
 conversion still range-checks its source: `int32(uint32(0xFFFF_FFFF))` fails,
 while `int64(int32(0xFFFF_FFFF))` sign-extends the typed value to `-1`.
