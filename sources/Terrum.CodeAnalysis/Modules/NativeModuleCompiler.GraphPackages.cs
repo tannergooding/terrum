@@ -246,12 +246,20 @@ public static partial class NativeModuleCompiler
         }
         var importedTypes = ModuleCompiler.GetGraphImportedTypes(contract, consumer)
             .ToHashSet(StringComparer.Ordinal);
+        HashSet<string>? dependencyIdentities = null;
         foreach (var origin in origins)
         {
             var local = consumer ? "@" : identity;
-            if (importedTypes.Contains(origin.Name)
-                ? !dependencies.Any(item => item.Identity == origin.Identity)
-                : origin.Identity != local)
+            if (importedTypes.Contains(origin.Name))
+            {
+                dependencyIdentities ??= dependencies.Select(static item => item.Identity)
+                    .ToHashSet(StringComparer.Ordinal);
+                if (!dependencyIdentities.Contains(origin.Identity))
+                {
+                    throw new ModuleFormatException("Graph type origin has no declared owner.");
+                }
+            }
+            else if (origin.Identity != local)
             {
                 throw new ModuleFormatException("Graph type origin has no declared owner.");
             }
@@ -260,10 +268,15 @@ public static partial class NativeModuleCompiler
                 throw new ModuleFormatException("Graph cleanup owner differs from type origin.");
             }
         }
-        if (dependencies.Any(item => item.Declarations.Length == 0
-            && !origins.Any(origin => origin.Identity == item.Identity)))
+        if (dependencies.Any(static item => item.Declarations.Length == 0))
         {
-            throw new ModuleFormatException("Graph dependency supplies neither declarations nor types.");
+            var originIdentities = origins.Select(static item => item.Identity)
+                .ToHashSet(StringComparer.Ordinal);
+            if (dependencies.Any(item => item.Declarations.Length == 0
+                && !originIdentities.Contains(item.Identity)))
+            {
+                throw new ModuleFormatException("Graph dependency supplies neither declarations nor types.");
+            }
         }
         var profile = consumer
             ? ModuleCompiler.GetNativeProfileVersion(contract, true)
