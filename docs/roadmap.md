@@ -238,6 +238,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `db6fdb5` | Implement a bounded readonly `TokenCursor` over validated snapshots without general stored-view support |
 | `ba2e36e` | Project named scalar `out`/`init ref<T>` arguments through bounded v85 calls |
 | `f93fbfd` | Preserve source-order evaluation and formal binding for named calls in indexed TRRM |
 | `d9a94f0` | Project named by-value calls with source-order evaluation through the bounded scalar frontend |
@@ -379,7 +380,10 @@ with that compiler, and a further rebuild plus native execution against shared
 fixtures. Require byte equality only for output whose ordering, layout and
 tie-breaking are specified; explain other differences rather than normalizing
 them away. Current scanner/library components are precursors, not evidence that
-the gate passes.
+the gate passes. The hosted compiler now supports a compilation-local readonly
+`TokenCursor` over a validated `TokenSnapshot`; this does not add general
+stored views or extend the Terrum scalar frontend beyond its hosted
+verifier/emitter.
 
 Do not translate every design sample at once or build a plugin loader first.
 Extend the verified executable corpus and semantic checks in coherent slices;
