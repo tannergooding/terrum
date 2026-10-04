@@ -180,8 +180,8 @@ bool TryParseScalarReturnIntegerTyped(TokenSnapshot tokens, TokenIntegerSnapshot
         valueIndex = 8;
     }
 
-    if (!integers.TryFind(valueIndex, out var overflow, out var magnitudeLow,
-            out var magnitudeHigh)
+    if (!integers.TryFind(valueIndex, init var overflow, init var magnitudeLow,
+            init var magnitudeHigh)
         || overflow
         || !TryParseScalarReturnFunctionTyped(move tokens, out var foundType,
             out var foundName, out var foundExpression))
@@ -520,8 +520,8 @@ bool TryParseScalarBinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
     {
         return false;
     }
-    if (!integers.TryFind(6, out var leftOverflow, out var leftLow, out var leftHigh)
-        || !integers.TryFind(8, out var rightOverflow, out var rightLow, out var rightHigh)
+    if (!integers.TryFind(6, init var leftOverflow, init var leftLow, init var leftHigh)
+        || !integers.TryFind(8, init var rightOverflow, init var rightLow, init var rightHigh)
         || leftOverflow || rightOverflow)
     {
         return false;
@@ -587,8 +587,8 @@ bool TryEvaluateTypedScalarComparisonReturn(TokenSnapshot tokens, TokenIntegerSn
     {
         return false;
     }
-    if (!integers.TryFind(8, out var leftOverflow, out var leftLow, out var leftHigh)
-        || !integers.TryFind(13, out var rightOverflow, out var rightLow, out var rightHigh)
+    if (!integers.TryFind(8, init var leftOverflow, init var leftLow, init var leftHigh)
+        || !integers.TryFind(13, init var rightOverflow, init var rightLow, init var rightHigh)
         || leftOverflow || rightOverflow)
     {
         return false;
@@ -682,7 +682,7 @@ bool TryParseParameterComparisonReturn(TokenSnapshot tokens, TokenIntegerSnapsho
     {
         return false;
     }
-    if (!integers.TryFind(10, out var overflow, out var low, out var high) || overflow)
+    if (!integers.TryFind(10, init var overflow, init var low, init var high) || overflow)
     {
         return false;
     }
@@ -824,7 +824,7 @@ bool TryParseParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
     {
         return false;
     }
-    if (!integers.TryFind(10, out var overflow, out var low, out var high) || overflow)
+    if (!integers.TryFind(10, init var overflow, init var low, init var high) || overflow)
     {
         return false;
     }

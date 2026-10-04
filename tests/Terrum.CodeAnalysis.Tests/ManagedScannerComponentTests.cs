@@ -143,7 +143,7 @@ public sealed partial class ManagedScannerComponentTests
                 require TokenDiagnosticSnapshot.TryScan(init var diagnostics);
             """);
         _ = entry.Append(CultureInfo.InvariantCulture,
-            $"if (diagnostics.GetCount() != {expected.Length} || diagnostics.TryGet(-1, out var invalidCode, out var invalidSpan) || diagnostics.TryGet({expected.Length}, out var beyondCode, out var beyondSpan)) {{ return 1; }}");
+            $"if (diagnostics.GetCount() != {expected.Length} || diagnostics.TryGet(-1, init var invalidCode, init var invalidSpan) || diagnostics.TryGet({expected.Length}, init var beyondCode, init var beyondSpan)) {{ return 1; }}");
         if (expected.Length != 0)
         {
             _ = entry.Append("if (TokenSnapshot.TryBuild(1, init var invalidTokens)) { return 3; } Host.Diagnostics[1] = -1;");
@@ -153,7 +153,7 @@ public sealed partial class ManagedScannerComponentTests
             var diagnostic = expected[index];
             var code = int.Parse(diagnostic.Code.AsSpan(3), CultureInfo.InvariantCulture);
             _ = entry.Append(CultureInfo.InvariantCulture,
-                $"require diagnostics.TryGet({index}, out var code{index}, out var span{index});"
+                $"require diagnostics.TryGet({index}, init var code{index}, init var span{index});"
                 + $" if (code{index} != {code} || span{index}.Start != {diagnostic.Span.Start}"
                 + $" || span{index}.Length != {diagnostic.Span.Length}) {{ return 2; }}");
         }
@@ -325,7 +325,7 @@ public sealed partial class ManagedScannerComponentTests
                 require TryScanLossless(init var tokens, init var trivia);
             """);
         _ = entry.Append(CultureInfo.InvariantCulture,
-            $"if (trivia.GetCount() != {expected.Length} || trivia.TryGet(-1, out var negative, out var negativeOwner) || trivia.TryGet({expected.Length}, out var beyond, out var beyondOwner)) {{ return 1; }}");
+            $"if (trivia.GetCount() != {expected.Length} || trivia.TryGet(-1, init var negative, init var negativeOwner) || trivia.TryGet({expected.Length}, init var beyond, init var beyondOwner)) {{ return 1; }}");
         if (expected.Length > 0)
         {
             _ = entry.Append("Host.Trivia[1] = -1;");
@@ -334,7 +334,7 @@ public sealed partial class ManagedScannerComponentTests
         {
             var (kind, start, length, owner) = expected[index];
             _ = entry.Append(CultureInfo.InvariantCulture,
-                $"require trivia.TryGet({index}, out var part{index}, out var owner{index});"
+                $"require trivia.TryGet({index}, init var part{index}, init var owner{index});"
                 + $" if (part{index}.Kind != {kind} || part{index}.Range.Start != {start}"
                 + $" || part{index}.Range.Length != {length} || owner{index} != {owner}) {{ return 2; }}");
         }
@@ -358,9 +358,9 @@ public sealed partial class ManagedScannerComponentTests
             int32 Main() {
                 require TryScanLossless(init var tokens, init var trivia);
                 if (tokens.GetCount() != 129 || trivia.GetCount() != 128) { return 1; }
-                require trivia.TryGet(0, out var first, out var firstOwner);
-                require trivia.TryGet(63, out var middle, out var middleOwner);
-                require trivia.TryGet(127, out var last, out var lastOwner);
+                require trivia.TryGet(0, init var first, init var firstOwner);
+                require trivia.TryGet(63, init var middle, init var middleOwner);
+                require trivia.TryGet(127, init var last, init var lastOwner);
                 if (first.Kind != 0 || first.Range.Start != 1 || first.Range.Length != 1
                     || firstOwner != 1 || middle.Range.Start != 127 || middleOwner != 64
                     || last.Range.Start != 255 || lastOwner != 128) { return 2; }
@@ -428,19 +428,19 @@ public sealed partial class ManagedScannerComponentTests
             int32 Main() {
                 require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
                 if (tokens.GetCount() != 5 || trivia.GetCount() != 3
-                    || integers.GetCount() != 4 || integers.TryGet(-1, out var negativeIndex,
-                        out var negativeOverflow, out var negativeLow, out var negativeHigh)
-                    || integers.TryGet(4, out var beyondIndex, out var beyondOverflow,
-                        out var beyondLow, out var beyondHigh)) { return 1; }
+                    || integers.GetCount() != 4 || integers.TryGet(-1, init var negativeIndex,
+                        init var negativeOverflow, init var negativeLow, init var negativeHigh)
+                    || integers.TryGet(4, init var beyondIndex, init var beyondOverflow,
+                        init var beyondLow, init var beyondHigh)) { return 1; }
                 Host.IntegerValues[3] = 0;
-                require integers.TryGet(0, out var first, out var firstOverflow,
-                    out var firstLow, out var firstHigh);
-                require integers.TryGet(1, out var second, out var secondOverflow,
-                    out var secondLow, out var secondHigh);
-                require integers.TryGet(2, out var third, out var thirdOverflow,
-                    out var thirdLow, out var thirdHigh);
-                require integers.TryGet(3, out var fourth, out var fourthOverflow,
-                    out var fourthLow, out var fourthHigh);
+                require integers.TryGet(0, init var first, init var firstOverflow,
+                    init var firstLow, init var firstHigh);
+                require integers.TryGet(1, init var second, init var secondOverflow,
+                    init var secondLow, init var secondHigh);
+                require integers.TryGet(2, init var third, init var thirdOverflow,
+                    init var thirdLow, init var thirdHigh);
+                require integers.TryGet(3, init var fourth, init var fourthOverflow,
+                    init var fourthLow, init var fourthHigh);
                 if (first != 0 || firstOverflow || firstLow != -1 || firstHigh != -1
                     || second != 1 || !secondOverflow || secondLow != 0 || secondHigh != 0
                     || third != 2 || thirdOverflow || thirdLow != 2 || thirdHigh != 0
@@ -467,7 +467,7 @@ public sealed partial class ManagedScannerComponentTests
                 require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
                 if (tokens.GetCount() != 2 || trivia.GetCount() != 0
                     || integers.GetCount() != 0
-                    || integers.TryFind(0, out var overflow, out var low, out var high)) {
+                    || integers.TryFind(0, init var overflow, init var low, init var high)) {
                     return 1;
                 }
                 return 42;
@@ -489,16 +489,16 @@ public sealed partial class ManagedScannerComponentTests
             int32 Main() {
                 require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
                 if (tokens.GetCount() != 4 || integers.GetCount() != 2
-                    || integers.TryFind(-1, out var negativeOverflow, out var negativeLow,
-                        out var negativeHigh)
-                    || integers.TryFind(1, out var floatingOverflow, out var floatingLow,
-                        out var floatingHigh)
-                    || integers.TryFind(3, out var eofOverflow, out var eofLow,
-                        out var eofHigh)) { return 1; }
-                require integers.TryFind(0, out var firstOverflow, out var firstLow,
-                    out var firstHigh);
-                require integers.TryFind(2, out var lastOverflow, out var lastLow,
-                    out var lastHigh);
+                    || integers.TryFind(-1, init var negativeOverflow, init var negativeLow,
+                        init var negativeHigh)
+                    || integers.TryFind(1, init var floatingOverflow, init var floatingLow,
+                        init var floatingHigh)
+                    || integers.TryFind(3, init var eofOverflow, init var eofLow,
+                        init var eofHigh)) { return 1; }
+                require integers.TryFind(0, init var firstOverflow, init var firstLow,
+                    init var firstHigh);
+                require integers.TryFind(2, init var lastOverflow, init var lastLow,
+                    init var lastHigh);
                 if (firstOverflow || firstLow != 1 || firstHigh != 0
                     || lastOverflow || lastLow != 42 || lastHigh != 0) { return 2; }
                 return 42;
@@ -519,14 +519,14 @@ public sealed partial class ManagedScannerComponentTests
             int32 Main() {
                 require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
                 if (tokens.GetCount() != 129 || integers.GetCount() != 128
-                    || integers.TryFind(128, out var missingOverflow, out var missingLow,
-                        out var missingHigh)) { return 1; }
-                require integers.TryFind(0, out var firstOverflow, out var firstLow,
-                    out var firstHigh);
-                require integers.TryFind(64, out var middleOverflow, out var middleLow,
-                    out var middleHigh);
-                require integers.TryFind(127, out var lastOverflow, out var lastLow,
-                    out var lastHigh);
+                    || integers.TryFind(128, init var missingOverflow, init var missingLow,
+                        init var missingHigh)) { return 1; }
+                require integers.TryFind(0, init var firstOverflow, init var firstLow,
+                    init var firstHigh);
+                require integers.TryFind(64, init var middleOverflow, init var middleLow,
+                    init var middleHigh);
+                require integers.TryFind(127, init var lastOverflow, init var lastLow,
+                    init var lastHigh);
                 if (firstOverflow || middleOverflow || lastOverflow
                     || firstLow != 1 || middleLow != 1 || lastLow != 1
                     || firstHigh != 0 || middleHigh != 0 || lastHigh != 0) { return 2; }
@@ -2845,7 +2845,7 @@ public sealed partial class ManagedScannerComponentTests
                 if (TryScanScalarFrontend(out var result)) { return 1; }
                 require TokenDiagnosticSnapshot.TryBuild(init var diagnostics);
                 if (diagnostics.GetCount() != 1) { return 2; }
-                require diagnostics.TryGet(0, out var code, out var span);
+                require diagnostics.TryGet(0, init var code, init var span);
                 if (code == 0 || span.Start != 0 || span.Length != 1) { return 3; }
                 return 42;
             }

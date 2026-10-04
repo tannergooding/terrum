@@ -17,7 +17,7 @@ public unique struct TokenDiagnosticSnapshot
         return _count;
     }
 
-    public bool TryGet(int32 index, out int32 code, out SourceRange span)
+    public bool TryGet(int32 index, init ref<int32> code, init ref<SourceRange> span)
     {
         if (index < 0 || index >= _count)
         {

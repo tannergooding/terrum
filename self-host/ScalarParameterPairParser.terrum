@@ -133,7 +133,7 @@ bool TryParseTwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
         || closeBody.Kind != 49 || eof.Kind != 0
         || !TryParseTwoParameterAddPrefix(move tokens, out var selected,
             out var foundName)
-        || !integers.TryFind(15, out var overflow, out var low, out var high)
+        || !integers.TryFind(15, init var overflow, init var low, init var high)
         || overflow)
     {
         return false;

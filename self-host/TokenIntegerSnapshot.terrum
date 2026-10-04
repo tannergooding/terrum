@@ -17,8 +17,8 @@ public unique struct TokenIntegerSnapshot
         return _count;
     }
 
-    public bool TryGet(int32 index, out int32 tokenIndex,
-        out bool overflow, out int32 low, out int32 high)
+    public bool TryGet(int32 index, init ref<int32> tokenIndex,
+        init ref<bool> overflow, init ref<int32> low, init ref<int32> high)
     {
         if (index < 0 || index >= _count)
         {
@@ -33,7 +33,8 @@ public unique struct TokenIntegerSnapshot
         return true;
     }
 
-    public bool TryFind(int32 tokenIndex, out bool overflow, out int32 low, out int32 high)
+    public bool TryFind(int32 tokenIndex, init ref<bool> overflow,
+        init ref<int32> low, init ref<int32> high)
     {
         mut int32 first = 0;
         mut int32 end = _count;

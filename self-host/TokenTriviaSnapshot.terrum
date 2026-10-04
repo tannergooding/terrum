@@ -17,7 +17,7 @@ public unique struct TokenTriviaSnapshot
         return _count;
     }
 
-    public bool TryGet(int32 index, out Token trivia, out int32 owner)
+    public bool TryGet(int32 index, init ref<Token> trivia, init ref<int32> owner)
     {
         if (index < 0 || index >= _count)
         {
