@@ -148,6 +148,31 @@ mut class ScalarFrontendState
         _hasStructuredStatement = false;
     }
 
+    internal mut void ResetForAttempt(SourceRange empty)
+    {
+        // Reuse the validated token chain while restoring constructor state.
+        _at = 0;
+        _error = 0;
+        _errorSpan = empty;
+        _first = new Token(2, empty);
+        _second = new Token(2, empty);
+        _third = new Token(2, empty);
+        _function = new Token(2, empty);
+        _firstType = 0;
+        _secondType = 0;
+        _thirdType = 0;
+        _parameterCount = 0;
+        _outParameterMask = 0;
+        _functionReturnType = 0;
+        _isPublic = false;
+        _localCount = 0;
+        _activeLocals = 0;
+        _statementCount = 0;
+        _structuredReturnType = -1;
+        _structuredReturnCount = 0;
+        _hasStructuredStatement = false;
+    }
+
     public bool HasStructuredStatements()
     {
         return _hasStructuredStatement;
@@ -4105,11 +4130,8 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, init ref<ScalarFrontendResult>
         result = legacy;
         return true;
     }
-    if (!ScalarFrontendState.TryCreate(chain, empty, out var tree))
-    {
-        return false;
-    }
-    if (!tree.TryParseTree(init var modern))
+    state.ResetForAttempt(empty);
+    if (!state.TryParseTree(init var modern))
     {
         return false;
     }
@@ -4125,15 +4147,15 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, init ref<ScalarFrontendResult>
             Host.Frontend[index] = 0;
         }
     }
-    if (ScalarFrontendState.TryCreate(chain, empty, out var structured)
-        && structured.TryParseStructuredReturns(init var completed))
+    state.ResetForAttempt(empty);
+    if (state.TryParseStructuredReturns(init var completed))
     {
         if (completed.IsValid)
         {
             result = completed;
             return true;
         }
-        if (structured.HasStructuredStatements())
+        if (state.HasStructuredStatements())
         {
             result = completed;
             return true;
