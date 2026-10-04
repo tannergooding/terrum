@@ -60,6 +60,12 @@ public readonly ref struct TrRmSourceMapTableReader
         }
 
         var previousInstruction = 0u;
+        var hasLastBody = false;
+        var lastBodyRow = 0;
+        var lastBodyOwnerModule = 0;
+        var hasLastFile = false;
+        var lastFileRow = 0;
+        var lastFileOwnerModule = 0;
         for (var row = 0; row < recordCount; row++)
         {
             var data = section.Slice((int)rowStart + row * 16, 16);
@@ -75,9 +81,29 @@ public readonly ref struct TrRmSourceMapTableReader
             var instruction = slots.Slice(((int)instructionSlot - 1) * 16, 16);
             var file = slots.Slice(((int)fileSlot - 1) * 16, 16);
             if (ReadU16(instruction, 0) != 0x0020 || ReadU16(instruction, 2) != 1
-                || ReadU16(file, 0) != 0x001F || ReadU16(file, 2) != 0
-                || methods.GetOwnerModule(methods.GetBodyOwnerMethod((int)Read(instruction, 4)))
-                    != files.GetOwnerModule((int)Read(file, 4)))
+                || ReadU16(file, 0) != 0x001F || ReadU16(file, 2) != 0)
+            {
+                throw InvalidMap();
+            }
+
+            var bodyRow = (int)Read(instruction, 4);
+            if (!hasLastBody || bodyRow != lastBodyRow)
+            {
+                lastBodyOwnerModule = methods.GetOwnerModule(
+                    methods.GetBodyOwnerMethod(bodyRow));
+                lastBodyRow = bodyRow;
+                hasLastBody = true;
+            }
+
+            var fileRow = (int)Read(file, 4);
+            if (!hasLastFile || fileRow != lastFileRow)
+            {
+                lastFileOwnerModule = files.GetOwnerModule(fileRow);
+                lastFileRow = fileRow;
+                hasLastFile = true;
+            }
+
+            if (lastBodyOwnerModule != lastFileOwnerModule)
             {
                 throw InvalidMap();
             }
