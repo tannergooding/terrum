@@ -2622,7 +2622,7 @@ mut class ScalarFrontendState
             Fail(1);
             return false;
         }
-        if (!Take(16, init var keyword) || !ParseTreeCondition(out var condition)
+        if (!Take(16, init var keyword) || !ParseTreeCondition(init var condition)
             || !Take(48, init var body))
         {
             return false;
@@ -2781,7 +2781,7 @@ mut class ScalarFrontendState
             Fail(1);
             return false;
         }
-        if (!Take(18, init var keyword) || !ParseTreeCondition(out var condition)
+        if (!Take(18, init var keyword) || !ParseTreeCondition(init var condition)
             || !Take(48, init var body))
         {
             return false;
@@ -2858,7 +2858,8 @@ mut class ScalarFrontendState
             return false;
         }
         FinishTreeBody(header, enclosingLocals, closeBody.Range.End);
-        if (!Take(18, init var keywordWhile) || !ParseTreeCondition(out var condition)
+        if (!Take(18, init var keywordWhile)
+            || !ParseTreeCondition(init var condition)
             || !Take(52, init var semicolon))
         {
             return false;
@@ -2868,18 +2869,24 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private mut bool ParseTreeCondition(out int32 condition)
+    private mut bool ParseTreeCondition(init ref<int32> condition)
     {
-        condition = -1;
-        if (!Take(46, init var open) || !ParseTreeExpression(5, 1, 0, out condition))
+        if (!Take(46, init var open)
+            || !ParseTreeExpression(5, 1, 0, out var parsedCondition))
         {
             return false;
         }
-        if (TreeWord(condition, 1) != 5)
+        if (TreeWord(parsedCondition, 1) != 5)
         {
-            return FailTreeType(condition);
+            FailTreeType(parsedCondition);
+            return false;
         }
-        return Take(47, init var close);
+        if (!Take(47, init var close))
+        {
+            return false;
+        }
+        condition = parsedCondition;
+        return true;
     }
 
     private mut bool ParseTreeFor(int32 depth, int32 label)
