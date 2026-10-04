@@ -173,7 +173,9 @@ public static partial class TrRmExecutableCompiler
             : TrRmContractTableWriter.Encode(effects, typeDefs, defs, sigs, paramReader, types);
         var exportBytes = exports.Count == 0 ? []
             : TrRmExportTableWriter.Encode(exports, strings, typeDefs, defs, default, default);
-        var sections = new List<TrRmSection>
+        var sectionCount = 6 + (parameters.Count != 0 ? 1 : 0)
+            + (effects.Count != 0 ? 1 : 0) + (exports.Count != 0 ? 1 : 0);
+        var sections = new List<TrRmSection>(sectionCount)
         {
             new(1, 0, 1, moduleBytes),
             new(2, 0, (uint)names.Count, stringsBytes),
