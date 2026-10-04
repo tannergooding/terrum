@@ -75,11 +75,13 @@ mut class ManagedTokenChain {
     }
 
     public bool TryCreateCursor(out write ManagedTokenCursor cursor) {
-        return ManagedTokenCursor.TryCreate(this, _first, _version, out cursor);
+        if (!TryCreateCursorInit(init var created)) { return false; }
+        cursor = created;
+        return true;
     }
 
     internal bool TryCreateCursorInit(init ref<write ManagedTokenCursor> cursor) {
-        if (!TryCreateCursor(out var created)) { return false; }
+        if (!ManagedTokenCursor.TryCreate(this, _first, _version, out var created)) { return false; }
         cursor = created;
         return true;
     }
