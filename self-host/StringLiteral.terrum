@@ -372,51 +372,14 @@ bool TryReadLiteralScalarAt(int32 at, int32 end, init ref<int32> scalar, init re
 
     if (first == 92)
     {
-        if (end - at < 2)
+        require SourceRange.TryCreate(at, end - at, init var spelling);
+        if (!StringEscapeDecodeResult.TryAnalyze(spelling, init var decoded)
+            || decoded.ErrorCode != 0)
         {
             return false;
         }
-        int32 escape = int32(Host.Source[at + 1]);
-        mut int32 value = 0;
-        if (escape == 110) { value = 10; }
-        else if (escape == 114) { value = 13; }
-        else if (escape == 116) { value = 9; }
-        else if (escape == 92) { value = 92; }
-        else if (escape == 34) { value = 34; }
-        else if (escape == 48) { value = 0; }
-        else if (escape == 117 || escape == 85)
-        {
-            mut int32 digits = 4;
-            if (escape == 85) { digits = 8; }
-            if (end - at - 2 < digits)
-            {
-                return false;
-            }
-            mut uint32 decoded = 0;
-            mut int32 index = 0;
-            while (index < digits)
-            {
-                if (!TryGetLiteralHexDigit(Host.Source[at + 2 + index], init var digit))
-                {
-                    return false;
-                }
-                decoded = decoded * 16 + digit;
-                index = index + 1;
-            }
-            if (decoded > 1114111 || (decoded >= 55296 && decoded <= 57343))
-            {
-                return false;
-            }
-            scalar = int32(decoded);
-            next = at + 2 + digits;
-            return true;
-        }
-        else
-        {
-            return false;
-        }
-        scalar = value;
-        next = at + 2;
+        scalar = decoded.Scalar;
+        next = at + decoded.ConsumedLength;
         return true;
     }
 
@@ -442,24 +405,4 @@ bool TryReadLiteralScalarAt(int32 at, int32 end, init ref<int32> scalar, init re
     scalar = first;
     next = at + 1;
     return true;
-}
-
-bool TryGetLiteralHexDigit(char16 unit, init ref<uint32> digit)
-{
-    if (IsAsciiDigit(unit))
-    {
-        digit = uint32(GetDecimalDigit(unit));
-        return true;
-    }
-    if (unit >= 65 && unit <= 70)
-    {
-        digit = uint32(int32(unit) - 55);
-        return true;
-    }
-    if (unit >= 97 && unit <= 102)
-    {
-        digit = uint32(int32(unit) - 87);
-        return true;
-    }
-    return false;
 }

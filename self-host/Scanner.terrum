@@ -934,46 +934,18 @@ int32 ScanString(int32 initial)
             }
             else
             {
-                int32 escape = PeekUnit(at);
-                int32 scalar = ReadScalar(at);
-                if (scalar == -1)
+                require SourceRange.TryCreate(escapeStart, Host.Source.Length - escapeStart,
+                    init var spelling);
+                require StringEscapeDecodeResult.TryAnalyze(spelling, init var decoded);
+                if (decoded.Scalar < 0)
                 {
-                    Report(1, at, 1);
+                    Report(1, escapeStart + 1, 1);
                 }
-
-                at = at + ScalarWidth(scalar);
-                if (escape == 117 || escape == 85)
+                if (decoded.ErrorCode != 0)
                 {
-                    mut int32 required = 8;
-                    if (escape == 117)
-                    {
-                        required = 4;
-                    }
-
-                    mut int32 digits = 0;
-                    mut int32 value = 0;
-                    while (digits < required && IsHex(PeekUnit(at)))
-                    {
-                        if (value <= 1114111)
-                        {
-                            value = value * 16 + HexValue(PeekUnit(at));
-                        }
-
-                        at = at + 1;
-                        digits = digits + 1;
-                    }
-
-                    if (digits != required || value > 1114111
-                        || (value >= 55296 && value <= 57343))
-                    {
-                        Report(5, escapeStart, at - escapeStart);
-                    }
+                    Report(decoded.ErrorCode, escapeStart, decoded.ErrorLength);
                 }
-                else if (escape != 110 && escape != 114 && escape != 116
-                    && escape != 92 && escape != 34 && escape != 48)
-                {
-                    Report(5, escapeStart, at - escapeStart);
-                }
+                at = escapeStart + decoded.ConsumedLength;
             }
         }
     }

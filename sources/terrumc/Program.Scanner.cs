@@ -227,6 +227,7 @@ internal static partial class Program
 
         return ReadSource(Path.Combine(fullPath, "SourceRange.terrum"))
             + RemoveFileScopedNamespace(ReadSource(Path.Combine(fullPath, "CharacterLiteral.terrum")))
+            + RemoveFileScopedNamespace(ReadSource(Path.Combine(fullPath, "StringEscape.terrum")))
             + RemoveFileScopedNamespace(ReadSource(Path.Combine(fullPath, "Scanner.terrum")));
     }
 

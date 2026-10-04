@@ -141,6 +141,22 @@ public sealed class ScannerTests
     }
 
     [Fact]
+    public async Task StringEscapeDiagnosticsMatchHostedBoundariesAsync()
+    {
+        string[] literals = [
+            "\"\\n\"", "\"\\r\"", "\"\\t\"", "\"\\\\\"", "\"\\\"\"", "\"\\0\"",
+            "\"\\u0000\"", "\"\\u0041\"", "\"\\uD7FF\"", "\"\\uE000\"", "\"\\uFFFF\"",
+            "\"\\U00000000\"", "\"\\U0001F600\"", "\"\\U0010FFFF\"",
+            "\"\\u\"", "\"\\u004G\"", "\"\\uD800\"", "\"\\U0000D800\"",
+            "\"\\U00110000\"", "\"\\U1234567\"", "\"\\q\"", "\"\\u0041\\q\"",
+            "\"\\q\\U00110000\"", "\"\\q\uD800\"",
+            "\"\uD800\"", "\"\uDC00\"",
+        ];
+        await CheckScannerAsync(string.Join(' ', literals) + " \"unterminated\\")
+            .ConfigureAwait(true);
+    }
+
+    [Fact]
     public async Task EveryKeywordClassifiesNativelyAsync()
     {
         var keywords = Enum.GetValues<TokenKind>()
@@ -659,9 +675,12 @@ public sealed class ScannerTests
             .ConfigureAwait(true);
         var characterLiteral = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "CharacterLiteral.terrum"))
             .ConfigureAwait(true);
+        var stringEscape = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "StringEscape.terrum"))
+            .ConfigureAwait(true);
         var scanner = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "Scanner.terrum"))
             .ConfigureAwait(true);
-        return sourceRange + RemoveFileScopedNamespace(characterLiteral) + RemoveFileScopedNamespace(scanner);
+        return sourceRange + RemoveFileScopedNamespace(characterLiteral)
+            + RemoveFileScopedNamespace(stringEscape) + RemoveFileScopedNamespace(scanner);
     }
 
     private static string RemoveFileScopedNamespace(string source)

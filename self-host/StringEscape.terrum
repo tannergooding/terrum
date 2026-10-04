@@ -1,0 +1,137 @@
+namespace Terrum.CodeAnalysis;
+
+public struct StringEscapeDecodeResult
+{
+    public int32 ErrorCode;
+    // Error results use -1 only when the escaped unit is an unpaired UTF-16 code unit.
+    public int32 Scalar;
+    public int32 ConsumedLength;
+    public int32 ErrorLength;
+
+    private StringEscapeDecodeResult(int32 errorCode, int32 scalar, int32 consumedLength,
+        int32 errorLength)
+    {
+        ErrorCode = errorCode;
+        Scalar = scalar;
+        ConsumedLength = consumedLength;
+        ErrorLength = errorLength;
+    }
+
+    public static bool TryAnalyze(SourceRange spelling, init ref<StringEscapeDecodeResult> result)
+    {
+        if (spelling.Start < 0 || spelling.Length < 0 || spelling.Start > Host.Source.Length
+            || spelling.Length > Host.Source.Length - spelling.Start || spelling.Length == 0
+            || Host.Source[spelling.Start] != char16(92))
+        {
+            return false;
+        }
+
+        if (spelling.Length == 1)
+        {
+            return TryPublish(5, 0, 1, 1, false, init result);
+        }
+
+        int32 escapedAt = spelling.Start + 1;
+        int32 escaped = int32(Host.Source[escapedAt]);
+        mut int32 width = 1;
+        mut bool hasUnpairedUtf16 = false;
+        mut int32 scalar = escaped;
+        if (escaped >= 55296 && escaped <= 56319)
+        {
+            if (escapedAt + 1 < spelling.End)
+            {
+                int32 second = int32(Host.Source[escapedAt + 1]);
+                if (second >= 56320 && second <= 57343)
+                {
+                    scalar = 65536 + (escaped - 55296) * 1024 + second - 56320;
+                    width = 2;
+                }
+                else
+                {
+                    hasUnpairedUtf16 = true;
+                }
+            }
+            else
+            {
+                hasUnpairedUtf16 = true;
+            }
+        }
+        else if (escaped >= 56320 && escaped <= 57343)
+        {
+            hasUnpairedUtf16 = true;
+        }
+
+        if (hasUnpairedUtf16)
+        {
+            return TryPublish(5, 0, 2, 2, true, init result);
+        }
+
+        if (escaped == 110) { scalar = 10; }
+        else if (escaped == 114) { scalar = 13; }
+        else if (escaped == 116) { scalar = 9; }
+        else if (escaped == 92) { scalar = 92; }
+        else if (escaped == 34) { scalar = 34; }
+        else if (escaped == 48) { scalar = 0; }
+        else if (escaped == 117 || escaped == 85)
+        {
+            int32 required = escaped == 117 ? 4 : 8;
+            mut int32 at = escapedAt + 1;
+            mut int32 digits = 0;
+            mut uint32 value = 0;
+            while (digits < required && at < spelling.End
+                && TryStringEscapeHexDigit(Host.Source[at], init var digit))
+            {
+                value = (value << 4) | uint32(digit);
+                at = at + 1;
+                digits = digits + 1;
+            }
+
+            if (digits != required || value > uint32(0x10FFFF)
+                || (value >= uint32(0xD800) && value <= uint32(0xDFFF)))
+            {
+                return TryPublish(5, 0, at - spelling.Start, at - spelling.Start,
+                    false, init result);
+            }
+            return TryPublish(0, int32(value), at - spelling.Start, 0, false, init result);
+        }
+        else if (escaped != 110 && escaped != 114 && escaped != 116
+            && escaped != 92 && escaped != 34 && escaped != 48)
+        {
+            return TryPublish(5, 0, 1 + width, 1 + width, false, init result);
+        }
+
+        return TryPublish(0, scalar, 1 + width, 0, false, init result);
+    }
+
+    private static bool TryPublish(int32 errorCode, int32 scalar, int32 consumedLength,
+        int32 errorLength, bool hasUnpairedUtf16, init ref<StringEscapeDecodeResult> result)
+    {
+        mut int32 encodedScalar = scalar;
+        if (hasUnpairedUtf16)
+        {
+            encodedScalar = -1;
+        }
+        result = new StringEscapeDecodeResult(errorCode, encodedScalar, consumedLength, errorLength);
+        return true;
+    }
+}
+
+bool TryStringEscapeHexDigit(char16 character, init ref<int32> digit)
+{
+    if (character >= char16(48) && character <= char16(57))
+    {
+        digit = int32(character) - 48;
+        return true;
+    }
+    if (character >= char16(97) && character <= char16(102))
+    {
+        digit = int32(character) - 87;
+        return true;
+    }
+    if (character >= char16(65) && character <= char16(70))
+    {
+        digit = int32(character) - 55;
+        return true;
+    }
+    return false;
+}
