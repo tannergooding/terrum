@@ -811,11 +811,16 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported("NoThrow requires a total indexed Body.");
             }
             var maximum = Math.Max(result, target);
+            Span<int> callArguments = expression is BoundCall callForStorage
+                ? stackalloc int[callForStorage.Arguments.Length]
+                : Span<int>.Empty;
             if (expression is BoundCall callOperands)
             {
-                foreach (var argument in callOperands.Arguments)
+                for (var index = 0; index < callOperands.Arguments.Length; index++)
                 {
-                    maximum = Math.Max(maximum, ReadOperand(argument));
+                    var operand = ReadOperand(callOperands.Arguments[index]);
+                    callArguments[index] = operand;
+                    maximum = Math.Max(maximum, operand);
                 }
             }
             var referenceWidth = Width((ulong)maximum);
@@ -836,9 +841,9 @@ public static partial class TrRmExecutableCompiler
                 Write(bytes, (ulong)result, referenceWidth);
                 Write(bytes, (ulong)target, referenceWidth);
                 Write(bytes, (ulong)call.Arguments.Length, countWidth);
-                foreach (var argument in call.Arguments)
+                foreach (var argument in callArguments)
                 {
-                    Write(bytes, (ulong)ReadOperand(argument), referenceWidth);
+                    Write(bytes, (ulong)argument, referenceWidth);
                 }
                 return;
             }
