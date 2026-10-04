@@ -14,6 +14,16 @@ This proposal asks whether to add a closed `Float64Math` candidate with
 `float64`-typed `Abs`, `Min`, `Max` and `Clamp`, using the same numeric
 selection rules as the proposed `Float32Math` candidate.
 
+```terrum
+public struct Float64Math
+{
+    public static float64 Abs(float64 value);
+    public static float64 Min(float64 left, float64 right);
+    public static float64 Max(float64 left, float64 right);
+    public static float64 Clamp(float64 value, float64 minimum, float64 maximum);
+}
+```
+
 ## Recommendation
 
 Add the matching-width service candidate. Keep this as a separately reviewed

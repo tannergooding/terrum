@@ -11,6 +11,8 @@ approved.
 
 - [Core-library proposal](core-library-reference.md) records candidate
   declarations, dependency layers and unresolved API contracts.
+- [Float64 math selection](float64-math-selection.md) proposes a matching-width
+  selection service separately from the unapproved `float32` candidate.
 - [Static-proof and constant-evaluation proposal](static-proof-and-constant-evaluation.md)
   collects candidate minimum proof rules, effects and evaluator budgets;
   the portable-floor policy itself is accepted.

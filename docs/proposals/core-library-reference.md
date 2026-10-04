@@ -152,7 +152,7 @@ table. The proposed `Option<T>` alias is separately described in
 | Sampled numeric witnesses | `IAdditionOperators`, `IMultiplyOperators`, `IAdditiveIdentity`, `IScalarNumber`, `IScalarIeee754` | [Sampled declarations](#existing-sampled-declarations) |
 | Selected conversion pairs | `ICheckedConversion`, `ISaturatingConversion`, `ITruncatingConversion` | [Conversion witnesses](#existing-sampled-declarations) |
 | Sampled primitives | `int32`, `float32`, `decimal32`; `uint32`, `int8` | [Initial samples](#existing-sampled-declarations), [width-family samples](#candidate-primitive-member-families) |
-| Closed scalar services | `BitOperations`, `Int32Math`, `Int64Math`, `Float32Math` | [Scalar services](#numeric-conversion-and-scalar-service-signatures) |
+| Closed scalar services | `BitOperations`, `Int32Math`, `Int64Math`, `Float32Math`, candidate `Float64Math` | [Scalar services](#numeric-conversion-and-scalar-service-signatures), [Float64 selection candidate](float64-math-selection.md) |
 | Fixed SIMD | `simd128`, `simd128mask`, `Simd128Conversions`, `Simd128Reductions` | [Fixed SIMD](#fixed-width-simd) |
 | Tensor metadata and views | `TensorShape`, `TensorSpan`, `TensorViews` | [Tensor views](#tensor-shapes-and-views) |
 | Tensor kernels | `TensorPrimitives` | [Tensor operations](#tensor-operations) |
