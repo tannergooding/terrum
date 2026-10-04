@@ -1687,7 +1687,7 @@ mut class ScalarFrontendState
     }
 
     private mut bool AddTreeNode(int32 operation, int32 type, int32 start, int32 end,
-        int32 left, int32 right, int32 low, int32 high, out int32 node)
+        int32 left, int32 right, int32 low, int32 high, init ref<int32> node)
     {
         int32 count = Host.Frontend[37];
         if (count >= 32)
@@ -1861,10 +1861,10 @@ mut class ScalarFrontendState
                     return false;
                 }
                 if (!AddTreeNode(0, type, first.Range.Start, first.Range.End,
-                    slot, -1, 0, 0, out var old)
+                    slot, -1, 0, 0, init var old)
                     || !AddTreeNode(equals.Kind, type, first.Range.Start,
                         TreeWord(value, 2) + TreeWord(value, 3),
-                        old, value, 0, 0, out var compound))
+                        old, value, 0, 0, init var compound))
                 {
                     return false;
                 }
@@ -1898,7 +1898,7 @@ mut class ScalarFrontendState
                 }
                 if (!AddTreeNode(compound.Kind, type, first.Range.Start,
                     TreeWord(value, 2) + TreeWord(value, 3),
-                    update, value, 0, 0, out var root))
+                    update, value, 0, 0, init var root))
                 {
                     return false;
                 }
@@ -3289,10 +3289,11 @@ mut class ScalarFrontendState
                 }
                 if (!AddTreeNode(operation, expectedType, outputModeToken.Range.Start,
                     outputName.Range.End,
-                    slot, -1, 0, 0, out argument))
+                    slot, -1, 0, 0, init var createdArgument))
                 {
                     return false;
                 }
+                argument = createdArgument;
             }
             else if (!ParseTreeExpression(expectedType, 1, depth + 1, out argument))
             {
@@ -3314,7 +3315,7 @@ mut class ScalarFrontendState
         mut int32 callMetadata = argumentCount;
         if (hasNamedArguments) { callMetadata = 256 + argumentCount + parameterMapping; }
         if (!AddTreeNode(program ? 105 : 102, returnType, functionName.Range.Start,
-            close.Range.End, first, second, third, callMetadata, out var added))
+            close.Range.End, first, second, third, callMetadata, init var added))
         {
             return false;
         }
@@ -3421,7 +3422,7 @@ mut class ScalarFrontendState
                 return false;
             }
             return AddTreeNode(110, TreeWord(operand, 1), token.Range.Start,
-                unsafeClose.Range.End, operand, -1, 0, 0, out node);
+                unsafeClose.Range.End, operand, -1, 0, 0, init node);
         }
         if (token.Kind == 2
             && _tokens.TryGet(_at + 1, init var opening)
@@ -3490,7 +3491,7 @@ mut class ScalarFrontendState
                 return false;
             }
             return AddTreeNode(83, target, token.Range.Start, close.Range.End,
-                operand, -1, 0, 0, out node);
+                operand, -1, 0, 0, init node);
         }
         if (token.Kind == 46)
         {
@@ -3501,7 +3502,7 @@ mut class ScalarFrontendState
                 return false;
             }
             if (!AddTreeNode(46, TreeWord(inner, 1), token.Range.Start,
-                close.Range.End, inner, -1, 0, 0, out var grouped))
+                close.Range.End, inner, -1, 0, 0, init var grouped))
             {
                 return false;
             }
@@ -3515,7 +3516,7 @@ mut class ScalarFrontendState
                 }
                 return AddTreeNode(update.Kind, TreeWord(grouped, 1),
                     token.Range.Start, update.Range.End,
-                    grouped, -1, 0, 0, out node);
+                    grouped, -1, 0, 0, init node);
             }
             node = grouped;
             return true;
@@ -3529,7 +3530,7 @@ mut class ScalarFrontendState
                 return false;
             }
             return AddTreeNode(token.Kind, TreeWord(place, 1), token.Range.Start,
-                TreeWord(place, 2) + TreeWord(place, 3), place, -1, 1, 0, out node);
+                TreeWord(place, 2) + TreeWord(place, 3), place, -1, 1, 0, init node);
         }
         if (token.Kind == 57 || token.Kind == 58 || token.Kind == 62
             || token.Kind == 63)
@@ -3572,7 +3573,7 @@ mut class ScalarFrontendState
             }
             return AddTreeNode(token.Kind, type, token.Range.Start,
                 TreeWord(operand, 2) + TreeWord(operand, 3),
-                operand, -1, 0, 0, out node);
+                operand, -1, 0, 0, init node);
         }
         _at = _at + 1;
         if (token.Kind == 2)
@@ -3588,7 +3589,7 @@ mut class ScalarFrontendState
                 return false;
             }
             if (!AddTreeNode(0, type, token.Range.Start, token.Range.End,
-                parameter, -1, 0, 0, out var read))
+                parameter, -1, 0, 0, init var read))
             {
                 return false;
             }
@@ -3601,7 +3602,7 @@ mut class ScalarFrontendState
                     return false;
                 }
                 return AddTreeNode(update.Kind, type, token.Range.Start,
-                    update.Range.End, read, -1, 0, 0, out node);
+                    update.Range.End, read, -1, 0, 0, init node);
             }
             node = read;
             return true;
@@ -3609,7 +3610,7 @@ mut class ScalarFrontendState
         if (token.Kind == 20 || token.Kind == 21)
         {
             return AddTreeNode(token.Kind, 5, token.Range.Start, token.Range.End,
-                -1, -1, 0, 0, out node);
+                -1, -1, 0, 0, init node);
         }
         if (token.Kind == 103)
         {
@@ -3628,7 +3629,7 @@ mut class ScalarFrontendState
             }
             if (type == 5) { type = 0; }
             return AddTreeNode(3, type, token.Range.Start, token.Range.End,
-                -1, -1, scalar, 0, out node);
+                -1, -1, scalar, 0, init node);
         }
         if (token.Kind == 3)
         {
@@ -3647,7 +3648,7 @@ mut class ScalarFrontendState
             }
             if (type == 5) { type = 0; }
             return AddTreeNode(3, type, token.Range.Start, token.Range.End,
-                -1, -1, low, high, out node);
+                -1, -1, low, high, init node);
         }
         FailAt(1, token.Range);
         return false;
@@ -3676,7 +3677,7 @@ mut class ScalarFrontendState
                     || !Take(2, init var initKeyword)
                     || !IsInitKeyword(initKeyword)
                     || !AddTreeNode(109, 5, TreeWord(left, 2), initKeyword.Range.End,
-                        left, -1, 0, 0, out var test))
+                        left, -1, 0, 0, init var test))
                 {
                     return false;
                 }
@@ -3743,7 +3744,7 @@ mut class ScalarFrontendState
             if (comparison) { type = 5; }
             if (!AddTreeNode(operation.Kind, type, TreeWord(left, 2),
                 TreeWord(right, 2) + TreeWord(right, 3),
-                left, right, 0, 0, out var binary))
+                left, right, 0, 0, init var binary))
             {
                 return false;
             }
@@ -3792,7 +3793,7 @@ mut class ScalarFrontendState
             }
             if (!AddTreeNode(84, resultType, TreeWord(left, 2),
                 TreeWord(whenFalse, 2) + TreeWord(whenFalse, 3),
-                left, whenTrue, whenFalse, 0, out var conditional))
+                left, whenTrue, whenFalse, 0, init var conditional))
             {
                 return false;
             }
