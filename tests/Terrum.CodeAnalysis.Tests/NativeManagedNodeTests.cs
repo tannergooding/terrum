@@ -43,8 +43,8 @@ public sealed class NativeManagedNodeTests
         int32 Main() {
             require Retain(out var kept);
             CreateCycle();
-            write ManagedNode alias = kept;
-            return Inspect(alias);
+            write ManagedNode retained = kept;
+            return Inspect(retained);
         }
         """;
 
