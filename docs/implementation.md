@@ -2208,6 +2208,9 @@ through the same hosted emitter under both policies.
 The separate [integer-parsing candidate](../self-host/IntegerParsing.terrum)
 uses the immutable host source grant and checked wide-radix accumulation to
 parse strict ASCII slices into signed or unsigned 32- and 64-bit outputs.
+It matches the hosted integer-magnitude decoder's repeated digit separators
+for decimal, binary and hexadecimal slices, including based-literal leading
+separators; other radices remain separator-free.
 Signed and unsigned 32-bit paths bound each accumulated digit to the
 destination range rather than first parsing a 64-bit value. AOT/JIT fixtures
 cover every radix, both widths and both failure policies; malformed slices,

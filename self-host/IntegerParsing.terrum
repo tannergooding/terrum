@@ -17,6 +17,27 @@ bool TryParseMagnitude(int32 start, int32 length, uint32 radix, uint64 maximum, 
     for (mut int32 index = start; index < end; index = index + 1)
     {
         int32 codeUnit = int32(Host.Source[index]);
+        if (codeUnit == 95)
+        {
+            if ((radix != 2 && radix != 10 && radix != 16)
+                || (radix == 10 && index == start))
+            {
+                return false;
+            }
+
+            mut int32 next = index + 1;
+            while (next < end && Host.Source[next] == char16(95))
+            {
+                next = next + 1;
+            }
+            if (next == end)
+            {
+                return false;
+            }
+            index = next - 1;
+            continue;
+        }
+
         mut uint32 digit = 0;
         if (codeUnit >= 48 && codeUnit <= 57)
         {
