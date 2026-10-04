@@ -61,14 +61,14 @@ int32 decimalMin = -2147483648;           // Decimal signed-minimum exception is
 int32 negatedPattern = -0xFFFF_FFFF;      // Unary minus is checked arithmetic: +1.
 float32 fraction = float32(0.1);          // Target-format construction.
 float32 negative = -0x1.fp+2;             // Hexadecimal float, then unary sign.
-float64 converted = float64(fraction);    // Target-only typed conversion example.
+float64 converted = float64(fraction);    // IEEE-754 conversion to the target format.
 var unknown = 1;                          // Error: no type context.
 ```
 
 The decimal, hexadecimal, binary, and checked integer type-call examples above
-illustrate the selected semantics. Target-typed floating literals are
-implemented, but converting an already-typed floating value is not. Current
-executable coverage is documented in
+illustrate the selected semantics. Target-typed floating literals and explicit
+conversions between `float32` and `float64` are implemented; integer/floating
+conversions remain unsupported. Current executable coverage is documented in
 [implementation](implementation.md). A value-based
 conversion still range-checks its source: `int32(uint32(0xFFFF_FFFF))` fails,
 while `int64(int32(0xFFFF_FFFF))` sign-extends the typed value to `-1`.

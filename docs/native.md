@@ -109,13 +109,15 @@ features; they do not imply that general references/views, ownership forms, or
 managed public ABI are implemented.
 The current numeric surface accepts unsuffixed contextual decimal, hexadecimal
 and binary integers, target-typed decimal and hexadecimal floating literals,
-`float32`/`float64` unary signs, `_` digit separators, and checked `T(expression)`
+`float32`/`float64` unary signs and conversions between those formats,
+`_` digit separators, and checked `T(expression)`
 conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`. Attached
 width suffixes diagnose as `TRM0006`; missing hexadecimal/binary digits and
 malformed separators diagnose as `TRM0007`–`TRM0009`. Based literals construct
 target-width bit patterns; decimal literals retain numeric range semantics.
-Based integers can also construct directly as floating values. Floating
-arithmetic/comparisons, typed floating conversions, custom literal parsing and
+Based integers can also construct directly as floating values. Float-format
+conversions follow IEEE-754 nearest/ties-to-even behavior; integer/floating
+conversions, floating arithmetic/comparisons, custom literal parsing and
 registered literal targets remain outside this executable profile.
 
 The hosted compiler supports internal scalar `[ConstEval]` functions,

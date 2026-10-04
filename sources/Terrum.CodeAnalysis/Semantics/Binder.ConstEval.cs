@@ -106,6 +106,10 @@ internal sealed partial class Binder
     private bool CheckConstExpression(BoundExpression expression, out TextSpan unsupported)
     {
         unsupported = expression.Span;
+        if (!ConstEvalScalar(expression.Type))
+        {
+            return false;
+        }
         switch (expression)
         {
             case BoundRequiredConstant required:

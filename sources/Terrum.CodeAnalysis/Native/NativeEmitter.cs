@@ -3511,6 +3511,20 @@ internal sealed partial class PeCompiler
 
     private void Cast(PrimitiveType source, PrimitiveType target)
     {
+        if (source == PrimitiveType.Float32 && target == PrimitiveType.Float64)
+        {
+            _code.Bytes(0x66, 0x0F, 0x6E, 0xC0); // movd xmm0,eax
+            _code.Bytes(0xF3, 0x0F, 0x5A, 0xC0); // cvtss2sd xmm0,xmm0
+            _code.Bytes(0x66, 0x48, 0x0F, 0x7E, 0xC0); // movq rax,xmm0
+            return;
+        }
+        if (source == PrimitiveType.Float64 && target == PrimitiveType.Float32)
+        {
+            _code.Bytes(0x66, 0x48, 0x0F, 0x6E, 0xC0); // movq xmm0,rax
+            _code.Bytes(0xF2, 0x0F, 0x5A, 0xC0); // cvtsd2ss xmm0,xmm0
+            _code.Bytes(0x66, 0x0F, 0x7E, 0xC0); // movd eax,xmm0
+            return;
+        }
         if (source == PrimitiveType.Int32 && IsWide(target))
         {
             _code.Bytes(0x48, 0x63, 0xC0); // movsxd rax,eax

@@ -1,5 +1,6 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
+using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using Terrum.CodeAnalysis.Lexing;
@@ -67,6 +68,10 @@ internal sealed partial class Binder
                         return expression;
                 }
                 return new BoundConstant(result ? 1 : 0, PrimitiveType.Bool, expression.Span);
+
+            case BoundCast { Operand: BoundConstant operand } cast
+                when TryConvertFloatingConstant(operand, cast.Type, out var floatingBits):
+                return new BoundConstant(floatingBits, cast.Type, expression.Span);
 
             case BoundCast { Operand: BoundConstant operand }
                 when TryScalarValue(operand, out var input):
@@ -179,6 +184,24 @@ internal sealed partial class Binder
         };
         return constant.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
             or PrimitiveType.UInt64 or PrimitiveType.Char16;
+    }
+
+    private static bool TryConvertFloatingConstant(BoundConstant source, PrimitiveType destination, out long value)
+    {
+        value = 0;
+        if (source.Type == PrimitiveType.Float32 && destination == PrimitiveType.Float64)
+        {
+            var single = BitConverter.Int32BitsToSingle(unchecked((int)source.Value));
+            value = BitConverter.DoubleToInt64Bits(single);
+            return true;
+        }
+        if (source.Type == PrimitiveType.Float64 && destination == PrimitiveType.Float32)
+        {
+            var number = BitConverter.Int64BitsToDouble(source.Value);
+            value = unchecked((uint)BitConverter.SingleToInt32Bits((float)number));
+            return true;
+        }
+        return false;
     }
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Other types cannot be folded.")]
