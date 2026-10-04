@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `3bb7cc7` | Cache graph managed-state checks outside per-function boundary validation |
 | `bb928ac` | Remove redundant graph dependency identity set after ordinal-order validation |
 | `5c565b4` | Index structure type remapping across graph and module-set references |
 | `51ce7d0` | Index graph package dependency and type-origin owner lookups |
