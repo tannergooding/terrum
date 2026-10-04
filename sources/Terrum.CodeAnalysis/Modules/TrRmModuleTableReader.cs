@@ -208,15 +208,21 @@ public readonly ref struct TrRmModuleTableReader
 
     private static bool IsWellFormed(string value)
     {
-        var remaining = value.AsSpan();
-        while (!remaining.IsEmpty)
+        var position = 0;
+        while (position < value.Length)
         {
-            if (Rune.DecodeFromUtf16(remaining, out _, out var consumed) != OperationStatus.Done)
+            if (!char.IsSurrogate(value[position]))
+            {
+                position++;
+                continue;
+            }
+
+            if (Rune.DecodeFromUtf16(value.AsSpan(position), out _, out var consumed) != OperationStatus.Done)
             {
                 return false;
             }
 
-            remaining = remaining[consumed..];
+            position += consumed;
         }
 
         return true;

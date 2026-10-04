@@ -21,9 +21,12 @@ public sealed class TrRmModuleTableReaderTests
         Assert.Equal(2, row);
         Assert.False(modules.TryFindModule("b", out row));
         Assert.Equal(0, row);
+        Assert.False(modules.TryFindModule("\u00E9\U00010400", out row));
+        Assert.Equal(0, row);
         Assert.Throws<ArgumentException>(() => FindModule(TwoModules(), ""));
         Assert.Throws<ArgumentException>(() => FindModule(TwoModules(), "A\0"));
         Assert.Throws<ArgumentException>(() => FindModule(TwoModules(), "\uD800"));
+        Assert.Throws<ArgumentException>(() => FindModule(TwoModules(), "\uDC00"));
         Assert.Throws<InvalidDataException>(() => GetIdentity(TwoModules(), 0));
         Assert.Throws<InvalidDataException>(() => GetIdentity(TwoModules(), 3));
     }
