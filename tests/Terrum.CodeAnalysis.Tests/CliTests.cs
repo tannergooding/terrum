@@ -500,8 +500,10 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
-    public async Task ScannerBundleCompilationDiagnosticsKeepTheirSourceFileAsync()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ScannerBundleCompilationDiagnosticsKeepTheirSourceFileAsync(bool json)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var selfHost = Path.Combine(root, "self-host");
@@ -521,17 +523,31 @@ public sealed partial class CliTests
                 await File.WriteAllTextAsync(Path.Combine(bundle, name), source).ConfigureAwait(true);
             }
 
+            string[] arguments = ["build-component", bundle, "-", "-o", artifact, "--runtime", "fail-fast"];
+            if (json)
+            {
+                arguments = [.. arguments, "--json"];
+            }
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
-                "build-component", bundle, "-", "-o", artifact, "--runtime", "fail-fast", "--json");
+                arguments);
             Assert.Equal(1, exit);
-            Assert.Empty(error);
-            using var document = JsonDocument.Parse(output);
-            Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
-            var sources = document.RootElement.GetProperty("sources");
-            var characterSourceIndex = Enumerable.Range(0, sources.GetArrayLength())
-                .Single(index => sources[index].GetProperty("path").GetString() == characterLiterals);
-            Assert.Contains(document.RootElement.GetProperty("diagnostics").EnumerateArray(),
-                diagnostic => diagnostic.GetProperty("sourceIndex").GetInt32() == characterSourceIndex);
+            if (json)
+            {
+                Assert.Empty(error);
+                using var document = JsonDocument.Parse(output);
+                Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+                var sources = document.RootElement.GetProperty("sources");
+                var characterSourceIndex = Enumerable.Range(0, sources.GetArrayLength())
+                    .Single(index => sources[index].GetProperty("path").GetString() == characterLiterals);
+                Assert.Contains(document.RootElement.GetProperty("diagnostics").EnumerateArray(),
+                    diagnostic => diagnostic.GetProperty("sourceIndex").GetInt32() == characterSourceIndex);
+            }
+            else
+            {
+                Assert.Empty(output);
+                Assert.Contains(characterLiterals + "(", error, StringComparison.Ordinal);
+                Assert.Contains("TRM1001", error, StringComparison.Ordinal);
+            }
         }
         finally
         {
