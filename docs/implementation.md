@@ -2203,11 +2203,10 @@ parse strict ASCII slices into signed or unsigned 32- and 64-bit outputs.
 Signed and unsigned 32-bit paths bound each accumulated digit to the
 destination range rather than first parsing a 64-bit value. AOT/JIT fixtures
 cover every radix, both widths and both failure policies; malformed slices,
-invalid bounds and overflow leave outputs unpublished. Four `init ref` entry
-points reuse the existing `out` parsing paths, preserving the original APIs
-and adding vacancy-only publication for accepted values. It is not wired into
-`SyntaxTree.Parse(LexResult)` or the scanner-backed integer record: that
-record still supplies the binder's contextual literal magnitude.
+invalid bounds and overflow leave vacancy-only `init ref` outputs unpublished.
+It is not wired into `SyntaxTree.Parse(LexResult)` or the scanner-backed
+integer record: that record still supplies the binder's contextual literal
+magnitude.
 
 The [checked integer-conversion candidate](../self-host/IntegerCheckedConversions.terrum)
 provides all twelve cross-type signed/unsigned 32-/64-bit pairs as named

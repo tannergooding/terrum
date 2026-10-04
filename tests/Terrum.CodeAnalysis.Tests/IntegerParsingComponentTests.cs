@@ -105,45 +105,28 @@ public sealed class IntegerParsingComponentTests
             };
             if (test.Expected is not null)
             {
-                _ = checks.AppendLine($"if (!{method}({start}, {test.Text.Length}, {test.Radix}, out var parsed)"
+                _ = checks.AppendLine($"if (!{method}({start}, {test.Text.Length}, {test.Radix}, init var parsed)"
                     + $" || parsed != {test.Expected}) {{ return {index + 1}; }}");
             }
             else
             {
-                _ = checks.AppendLine($"if ({method}({start}, {test.Text.Length}, {test.Radix}, out var ignored))"
+                _ = checks.AppendLine($"if ({method}({start}, {test.Text.Length}, {test.Radix}, init var ignored))"
                     + $" {{ return {index + 1}; }}");
-            }
-            if (test.IsChar || index < 9 || index == cases.Count - 1)
-            {
-                var initMethod = method + "Init";
-                if (test.Expected is not null)
-                {
-                    _ = checks.AppendLine($"if (!{initMethod}({start}, {test.Text.Length}, {test.Radix}, init var initialized)"
-                        + $" || initialized != {test.Expected}) {{ return {index + 1}; }}");
-                }
-                else
-                {
-                    _ = checks.AppendLine($"if ({initMethod}({start}, {test.Text.Length}, {test.Radix}, init var vacant))"
-                        + $" {{ return {index + 1}; }}");
-                }
             }
             _ = checks.AppendLine("}");
         }
         var zeroStart = source.Length;
         _ = source.Append('0');
-        _ = checks.AppendLine($"if (TryParseUInt64BaseInit(0, 1, 10, init var reusable)) {{ return 102; }}"
-            + $" require TryParseUInt64BaseInit({zeroStart}, 1, 10, init reusable);"
+        _ = checks.AppendLine($"if (TryParseUInt64Base(0, 1, 10, init var reusable)) {{ return 102; }}"
+            + $" require TryParseUInt64Base({zeroStart}, 1, 10, init reusable);"
             + " if (reusable != 0) { return 103; }");
-        _ = checks.AppendLine("if (TryParseUInt64Base(-1, 1, 10, out var negativeStart)"
-            + " || TryParseUInt64Base(int32.MaxValue, 1, 10, out var hugeStart)"
-            + " || TryParseInt64Base(0, int32.MaxValue, 10, out var hugeLength)"
-            + " || TryParseInt64Base(0, -1, 10, out var negativeLength)"
-            + " || TryParseChar16Base(0, -1, 10, out var negativeCharLength)) { return 100; }");
-        _ = checks.AppendLine("if (TryParseUInt64BaseInit(-1, 1, 10, init var initNegativeStart)"
-            + " || TryParseUInt32BaseInit(int32.MaxValue, 1, 10, init var initHugeStart)"
-            + " || TryParseInt64BaseInit(0, int32.MaxValue, 10, init var initHugeLength)"
-            + " || TryParseInt32BaseInit(0, -1, 10, init var initNegativeLength)"
-            + " || TryParseChar16BaseInit(0, -1, 10, init var initNegativeCharLength)) { return 101; }");
+        _ = checks.AppendLine("if (TryParseUInt64Base(-1, 1, 10, init var negativeStart)"
+            + " || TryParseUInt64Base(int32.MaxValue, 1, 10, init var hugeStart)"
+            + " || TryParseUInt32Base(int32.MaxValue, 1, 10, init var initHugeStart)"
+            + " || TryParseInt64Base(0, int32.MaxValue, 10, init var hugeLength)"
+            + " || TryParseInt64Base(0, -1, 10, init var negativeLength)"
+            + " || TryParseInt32Base(0, -1, 10, init var initNegativeLength)"
+            + " || TryParseChar16Base(0, -1, 10, init var negativeCharLength)) { return 100; }");
         _ = checks.AppendLine("return 0;");
 
         var root = RepositoryRoot();
@@ -189,12 +172,11 @@ public sealed class IntegerParsingComponentTests
     }
 
     [Theory]
-    [InlineData("TryParseUInt64Base(1, 1, 10, out var value); return int32(value);")]
-    [InlineData("TryParseInt64Base(1, 1, 10, out var value); return int32(value);")]
-    [InlineData("TryParseUInt32Base(1, 1, 10, out var value); return int32(value);")]
-    [InlineData("TryParseInt32Base(1, 1, 10, out var value); return value;")]
-    [InlineData("TryParseChar16Base(1, 1, 10, out var value); return int32(value);")]
-    [InlineData("TryParseChar16BaseInit(1, 1, 10, init var value); return int32(value);")]
+    [InlineData("TryParseUInt64Base(1, 1, 10, init var value); return int32(value);")]
+    [InlineData("TryParseInt64Base(1, 1, 10, init var value); return int32(value);")]
+    [InlineData("TryParseUInt32Base(1, 1, 10, init var value); return int32(value);")]
+    [InlineData("TryParseInt32Base(1, 1, 10, init var value); return value;")]
+    [InlineData("TryParseChar16Base(1, 1, 10, init var value); return int32(value);")]
     public void FailedParseCannotPublishOutput(string body)
     {
         ArgumentNullException.ThrowIfNull(body);

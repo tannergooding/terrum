@@ -47,7 +47,7 @@ bool TryParseMagnitude(int32 start, int32 length, uint32 radix, uint64 maximum, 
     return true;
 }
 
-public static bool TryParseUInt64Base(int32 start, int32 length, uint32 radix, out uint64 result)
+public static bool TryParseUInt64Base(int32 start, int32 length, uint32 radix, init ref<uint64> result)
 {
     if (!TryParseMagnitude(start, length, radix, uint64.MaxValue, out var parsed))
     {
@@ -57,7 +57,7 @@ public static bool TryParseUInt64Base(int32 start, int32 length, uint32 radix, o
     return true;
 }
 
-public static bool TryParseUInt32Base(int32 start, int32 length, uint32 radix, out uint32 result)
+public static bool TryParseUInt32Base(int32 start, int32 length, uint32 radix, init ref<uint32> result)
 {
     if (!TryParseMagnitude(start, length, radix, uint64(uint32.MaxValue), out var parsed))
     {
@@ -67,7 +67,7 @@ public static bool TryParseUInt32Base(int32 start, int32 length, uint32 radix, o
     return true;
 }
 
-public static bool TryParseChar16Base(int32 start, int32 length, uint32 radix, out char16 result)
+public static bool TryParseChar16Base(int32 start, int32 length, uint32 radix, init ref<char16> result)
 {
     if (!TryParseMagnitude(start, length, radix, 65535, out var parsed))
     {
@@ -122,7 +122,7 @@ bool TryParseSignedBase(int32 start, int32 length, uint32 radix,
     return true;
 }
 
-public static bool TryParseInt64Base(int32 start, int32 length, uint32 radix, out int64 result)
+public static bool TryParseInt64Base(int32 start, int32 length, uint32 radix, init ref<int64> result)
 {
     if (!TryParseSignedBase(start, length, radix,
         int64.MinValue, int64.MaxValue, out var parsed))
@@ -133,7 +133,7 @@ public static bool TryParseInt64Base(int32 start, int32 length, uint32 radix, ou
     return true;
 }
 
-public static bool TryParseInt32Base(int32 start, int32 length, uint32 radix, out int32 result)
+public static bool TryParseInt32Base(int32 start, int32 length, uint32 radix, init ref<int32> result)
 {
     if (!TryParseSignedBase(start, length, radix,
         int64(int32.MinValue), int64(int32.MaxValue), out var parsed))
@@ -141,60 +141,5 @@ public static bool TryParseInt32Base(int32 start, int32 length, uint32 radix, ou
         return false;
     }
     result = int32(parsed);
-    return true;
-}
-
-public static bool TryParseUInt64BaseInit(int32 start, int32 length, uint32 radix, init ref<uint64> result)
-{
-    if (!TryParseUInt64Base(start, length, radix, out var parsed))
-    {
-        return false;
-    }
-
-    result = parsed;
-    return true;
-}
-
-public static bool TryParseUInt32BaseInit(int32 start, int32 length, uint32 radix, init ref<uint32> result)
-{
-    if (!TryParseUInt32Base(start, length, radix, out var parsed))
-    {
-        return false;
-    }
-
-    result = parsed;
-    return true;
-}
-
-public static bool TryParseChar16BaseInit(int32 start, int32 length, uint32 radix, init ref<char16> result)
-{
-    if (!TryParseChar16Base(start, length, radix, out var parsed))
-    {
-        return false;
-    }
-
-    result = parsed;
-    return true;
-}
-
-public static bool TryParseInt64BaseInit(int32 start, int32 length, uint32 radix, init ref<int64> result)
-{
-    if (!TryParseInt64Base(start, length, radix, out var parsed))
-    {
-        return false;
-    }
-
-    result = parsed;
-    return true;
-}
-
-public static bool TryParseInt32BaseInit(int32 start, int32 length, uint32 radix, init ref<int32> result)
-{
-    if (!TryParseInt32Base(start, length, radix, out var parsed))
-    {
-        return false;
-    }
-
-    result = parsed;
     return true;
 }
