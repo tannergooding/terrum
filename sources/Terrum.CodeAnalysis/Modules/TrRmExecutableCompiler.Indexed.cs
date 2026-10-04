@@ -356,7 +356,7 @@ public static partial class TrRmExecutableCompiler
                 return body.ToArray();
             }
 
-            foreach (var width in new[] { 1, 2, 4 })
+            for (var width = 1; width <= 4; width *= 2)
             {
                 if (ordered.Count > (width == 1 ? byte.MaxValue : width == 2 ? ushort.MaxValue : uint.MaxValue)
                     || sourceTypes.Count > (width == 1 ? byte.MaxValue : width == 2 ? ushort.MaxValue : uint.MaxValue))
