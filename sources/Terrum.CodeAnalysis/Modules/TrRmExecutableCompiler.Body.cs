@@ -237,17 +237,26 @@ public static partial class TrRmExecutableCompiler
         var terminatorInstructionLength = terminatorWidth == 1 ? 1 : 3;
         var bodyCapacity = checked(1 + (2 * localWidth) + (4 * typeCount)
             + instructions.Count + terminatorInstructionLength + terminatorWidth);
-        var body = new List<byte>(bodyCapacity) { (byte)(0x04 | WidthCode(localWidth)) };
-        Write(body, (ulong)typeCount, localWidth);
+        var body = new byte[bodyCapacity];
+        var bodyPosition = 0;
+        var destination = body.AsSpan();
+        destination[bodyPosition++] = (byte)(0x04 | WidthCode(localWidth));
+        WriteToSpan(destination, ref bodyPosition, (ulong)typeCount, localWidth);
         for (var row = 2; row <= typeCount + 1; row++)
         {
-            Write(body, (ulong)row, 4);
+            WriteToSpan(destination, ref bodyPosition, (ulong)row, 4);
         }
-        Write(body, (ulong)(next - function.ParameterCount), localWidth);
-        body.AddRange(instructions);
-        WriteInstruction(body, 0x83, terminatorWidth, 0);
-        Write(body, (ulong)returnValue, terminatorWidth);
-        return body.ToArray();
+        WriteToSpan(destination, ref bodyPosition, (ulong)(next - function.ParameterCount), localWidth);
+        instructions.CopyTo(body, bodyPosition);
+        bodyPosition += instructions.Count;
+        WriteInstructionToSpan(destination, ref bodyPosition, 0x83, terminatorWidth, 0);
+        WriteToSpan(destination, ref bodyPosition, (ulong)returnValue, terminatorWidth);
+        if (bodyPosition != body.Length)
+        {
+            throw new InvalidOperationException("TRRM Body capacity did not match its encoded length.");
+        }
+
+        return body;
     }
 
     private static ImmutableArray<BoundStatement> DecodeBody(ReadOnlySpan<byte> body,
@@ -695,11 +704,32 @@ public static partial class TrRmExecutableCompiler
             bytes.Add((byte)opcode);
         }
     }
+    private static void WriteInstructionToSpan(Span<byte> bytes, ref int position,
+        int opcode, int width, int dataWidth)
+    {
+        if (width == 1 && dataWidth is 0 or 1)
+        {
+            bytes[position++] = (byte)opcode;
+        }
+        else
+        {
+            bytes[position++] = 0xF0;
+            bytes[position++] = (byte)(WidthCode(width) | (dataWidth == 0 ? 0 : WidthCode(dataWidth) << 4));
+            bytes[position++] = (byte)opcode;
+        }
+    }
     private static void Write(List<byte> bytes, ulong value, int width)
     {
         for (var shift = 0; shift < width * 8; shift += 8)
         {
             bytes.Add((byte)((value >> shift) & byte.MaxValue));
+        }
+    }
+    private static void WriteToSpan(Span<byte> bytes, ref int position, ulong value, int width)
+    {
+        for (var shift = 0; shift < width * 8; shift += 8)
+        {
+            bytes[position++] = (byte)((value >> shift) & byte.MaxValue);
         }
     }
     private static byte ReadByte(ReadOnlySpan<byte> bytes, ref int position)
