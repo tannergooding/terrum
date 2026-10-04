@@ -2468,7 +2468,6 @@ public static partial class ScalarFrontendHost
     {
         if (digits.IsEmpty || type is not (1 or 2 or 3 or 4 or 6)
             || (negative && type is not (1 or 3))
-            || ScannerHost.IntegerDigitCount(digits) != digits.Length
             || !ScannerHost.TryParseIntegerMagnitude(digits, out var magnitude))
         {
             return false;

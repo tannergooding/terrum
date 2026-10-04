@@ -370,12 +370,32 @@ public static class ScannerHost
     {
         var radix = IntegerRadix(text);
         magnitude = 0;
-        for (var index = radix == 10 ? 0 : 2; index < text.Length; index++)
+        var hasDigit = false;
+        var index = radix == 10 ? 0 : 2;
+        while (index < text.Length)
         {
             var character = text[index];
             if (character == '_')
             {
+                if (!hasDigit && radix == 10)
+                {
+                    return false;
+                }
+                var next = index + 1;
+                while (next < text.Length && text[next] == '_')
+                {
+                    next++;
+                }
+                if (next == text.Length || !IsRadixDigit(text[next], radix))
+                {
+                    return false;
+                }
+                index = next;
                 continue;
+            }
+            if (!IsRadixDigit(character, radix))
+            {
+                return false;
             }
             var digit = character switch {
                 >= '0' and <= '9' => character - '0',
@@ -387,8 +407,10 @@ public static class ScannerHost
                 return false;
             }
             magnitude = (magnitude * (uint)radix) + (uint)digit;
+            hasDigit = true;
+            index++;
         }
-        return true;
+        return hasDigit;
     }
 
     internal static void ValidateIntegerValueCoverage(SourceText source,
