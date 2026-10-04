@@ -1215,8 +1215,10 @@ unary sign negation are also provisional under separate unapproved
 [float-format conversion](proposals/floating-trrm-format-conversions.md),
 [integer-to-floating conversion](proposals/integer-to-floating-trrm-conversions.md),
 [negation](proposals/floating-trrm-negation.md) and
-[arithmetic](proposals/floating-trrm-arithmetic.md) proposals. These are not
-part of the approved `(1, 0)` Body profile.
+[arithmetic](proposals/floating-trrm-arithmetic.md) proposals.
+`char16`-to-floating conversion is also provisional under separate unapproved
+eligibility and TRRM proposals. These are not part of the approved `(1, 0)`
+Body profile.
 Frontend verification/emission remains hosted.
 Existing source function and local shadowing keeps its ordinary call-binding
 precedence. Top-level generic function templates support multiple independently
@@ -2376,10 +2378,11 @@ The current envelope is one self-contained Windows x64 Module
 and by-value parameters. Callable parameters and results use `bool`, `char16`,
 `int32`, `uint32`, `int64`, `uint64`, or `void`; Body-local values also accept
 their assigned optional forms. Source-free float signatures, same-format
-comparisons and explicit float-format conversions are provisionally
-implemented under separate unapproved proposals, not as part of the approved
-`(1, 0)` Body profile. An executable entry must be a local parameterless
-`int32` function; `--library` produces a no-entry module.
+comparisons and arithmetic, unary negation, and explicit float, fixed-width
+integer and `char16` conversions are provisionally implemented under separate
+unapproved proposals, not as part of the approved `(1, 0)` Body profile. An
+executable entry must be a local parameterless `int32` function; `--library`
+produces a no-entry module.
 Every public function has one Export key equal to its full callable name;
 private/internal visibility is not promoted, and arbitrary key aliases are
 not supported by this loader. DLL exports use the existing scalar native ABI.
@@ -2503,7 +2506,8 @@ by `FloatBinary` opcode `0x1D`; any arithmetic NaN is canonicalized according
 to the separate unapproved encoding proposal. Explicit conversion between the
 two floating formats is separately provisional via `FloatConvert` opcode
 `0x1A`; conversion from the four fixed-width integer types is provisionally
-implemented via `IntToFloat` opcode `0x1B`; and unary sign negation is
+implemented via `IntToFloat` opcode `0x1B`; `char16`-to-floating conversion
+uses the distinct `Char16ToFloat` opcode `0x1E`; and unary sign negation is
 provisionally implemented via `FloatNegate` opcode `0x1C`, which toggles only
 the sign bit. These remain unapproved; remainder and other numeric conversion
 pairs remain unsupported.
@@ -2671,8 +2675,9 @@ Param and TypeSpec rows and checks the fail-fast scalar subset of `ConstBits`,
 `CheckedNegate`, `CheckedDivRem`, static `Call`, `Return` and `Fail`.
 Provisionally, this reader also recognizes float TypeSpecs, float `ConstBits`,
 `FloatCompare` `0x19`, `FloatConvert` `0x1A`, `IntToFloat` `0x1B`,
-`FloatNegate` `0x1C` and `FloatBinary` `0x1D` under their unapproved TRRM
-proposals; this is not approved executable-profile support.
+`FloatNegate` `0x1C`, `FloatBinary` `0x1D` and `Char16ToFloat` `0x1E` under
+their unapproved TRRM proposals; this is not approved executable-profile
+support.
 Calls inspect authored local MethodDefs, packed direct references to public
 global or public type-owned static MethodDefs in another included module with
 a Body row, and retained imports of public global or public type-owned static
@@ -2714,8 +2719,9 @@ retained imported MethodDefs with scalar/optional parameters and result
 reader also recognizes float `ConstBits` and same-format `FloatCompare` under
 the unapproved comparison proposal, `FloatConvert` and `IntToFloat` under
 their separate unapproved conversion proposals, `FloatNegate` under its
-unapproved proposal, and `FloatBinary` under the arithmetic and arithmetic-NaN
-proposals; the approved `(1, 0)` profile does not.
+unapproved proposal, `FloatBinary` under the arithmetic and arithmetic-NaN
+proposals, and `Char16ToFloat` under its unapproved conversion proposal; the
+approved `(1, 0)` profile does not.
 The bounded call inspection
 rejects receiver/generic calls and generic owners for external members.
 Packed direct MethodDef `DefId` calls require

@@ -512,6 +512,11 @@ public static partial class TrRmExecutableCompiler
                         opcode = 0x1B;
                         target = TypeRow(cast.Type) - 1;
                     }
+                    else if (cast.Operand.Type == PrimitiveType.Char16 && IsFloat(cast.Type))
+                    {
+                        opcode = 0x1E;
+                        target = TypeRow(cast.Type) - 1;
+                    }
                     else if (IsFloat(cast.Operand.Type) || IsFloat(cast.Type))
                     {
                         throw Unsupported("This floating conversion pair is outside executable TRRM.");
@@ -633,7 +638,7 @@ public static partial class TrRmExecutableCompiler
             }
             WriteInstruction(bytes, opcode, referenceWidth, dataWidth);
             Write(bytes, (ulong)result, referenceWidth);
-            if (opcode is 1 or 6 or 0x16 or 0x1A or 0x1B)
+            if (opcode is 1 or 6 or 0x16 or 0x1A or 0x1B or 0x1E)
             {
                 Write(bytes, (ulong)target, referenceWidth);
             }
@@ -649,7 +654,7 @@ public static partial class TrRmExecutableCompiler
             {
                 Write(bytes, bits, dataWidth);
             }
-            if (opcode is 4 or 6 or 0x16 or 0x17 or 0x1A or 0x1B or 0x1C)
+            if (opcode is 4 or 6 or 0x16 or 0x17 or 0x1A or 0x1B or 0x1C or 0x1E)
             {
                 Write(bytes, (ulong)left, referenceWidth);
             }

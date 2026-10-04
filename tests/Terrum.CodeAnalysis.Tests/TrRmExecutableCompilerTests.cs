@@ -299,12 +299,10 @@ public sealed class TrRmExecutableCompilerTests
         Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
     }
 
-    [Theory]
-    [InlineData("int32 ToInt(float32 value) { return int32(value); }")]
-    [InlineData("float32 FromChar(char16 value) { return float32(value); }")]
-    public void OtherFloatingConversionPairsRemainOutsideExecutableTrRm(string function)
+    [Fact]
+    public void FloatingToIntegerRemainsOutsideExecutableTrRm()
     {
-        var program = Compile(function, true);
+        var program = Compile("int32 ToInt(float32 value) { return int32(value); }", true);
 
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "float-conversion"));
     }
@@ -315,6 +313,94 @@ public sealed class TrRmExecutableCompilerTests
         const string source = "public float32 Convert(int32 value) { return float32(value); }";
         var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-integer-float");
         var malformed = ReplaceBodyOperationByte(artifact, 1, 0x1B, 2, 1);
+
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
+    [Fact]
+    public void Char16ToFloatingConversionsPreserveCodeUnitValues()
+    {
+        const string source = """
+            [NoThrow] public float32 ToFloat32(char16 value) { return float32(value); }
+            [NoThrow] public float64 ToFloat64(char16 value) { return float64(value); }
+            public float32 ToFloat32IfSurrogate(char16 value) {
+                if (value == char16(55296)) { return float32(value); }
+                return 0.0;
+            }
+            public float64 ToFloat64IfSurrogate(char16 value) {
+                if (value == char16(55296)) { return float64(value); }
+                return 0.0;
+            }
+            """;
+        var original = Compile(source, true);
+        var artifact = TrRmExecutableCompiler.Emit(original, "char16-float-conversions");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        string[] names = ["ToFloat32", "ToFloat64", "ToFloat32IfSurrogate", "ToFloat64IfSurrogate"];
+        var images = new[]
+        {
+            NativeEmitter.EmitLibrary(original, names, NativeRuntimePolicy.FailFast),
+            NativeEmitter.EmitLibrary(loaded, names, NativeRuntimePolicy.FailFast),
+        };
+        var paths = new string[images.Length];
+        var handles = new IntPtr[images.Length];
+        try
+        {
+            for (var index = 0; index < images.Length; index++)
+            {
+                paths[index] = Path.Combine(Directory.GetCurrentDirectory(),
+                    $"trrm-char16-float-{Guid.NewGuid():N}-{index}.dll");
+                File.WriteAllBytes(paths[index], images[index]);
+                handles[index] = NativeLibrary.Load(paths[index]);
+            }
+
+            foreach (var handle in handles)
+            {
+                var toFloat32 = Marshal.GetDelegateForFunctionPointer<Char16ToFloat32>(
+                    NativeLibrary.GetExport(handle, "ToFloat32"));
+                var toFloat64 = Marshal.GetDelegateForFunctionPointer<Char16ToFloat64>(
+                    NativeLibrary.GetExport(handle, "ToFloat64"));
+                var toFloat32If = Marshal.GetDelegateForFunctionPointer<Char16ToFloat32>(
+                    NativeLibrary.GetExport(handle, "ToFloat32IfSurrogate"));
+                var toFloat64If = Marshal.GetDelegateForFunctionPointer<Char16ToFloat64>(
+                    NativeLibrary.GetExport(handle, "ToFloat64IfSurrogate"));
+
+                Assert.Equal(0, toFloat32(0));
+                Assert.Equal(BitConverter.SingleToInt32Bits(55296.0F), toFloat32(0xD800));
+                Assert.Equal(BitConverter.SingleToInt32Bits(65535.0F), toFloat32(ushort.MaxValue));
+                Assert.Equal(0L, toFloat64(0));
+                Assert.Equal(BitConverter.DoubleToInt64Bits(55296.0), toFloat64(0xD800));
+                Assert.Equal(BitConverter.DoubleToInt64Bits(65535.0), toFloat64(ushort.MaxValue));
+                Assert.Equal(BitConverter.SingleToInt32Bits(55296.0F), toFloat32If(0xD800));
+                Assert.Equal(0, toFloat32If(0xFFFF));
+                Assert.Equal(BitConverter.DoubleToInt64Bits(55296.0), toFloat64If(0xD800));
+                Assert.Equal(0L, toFloat64If(0xFFFF));
+            }
+        }
+        finally
+        {
+            foreach (var handle in handles)
+            {
+                if (handle != IntPtr.Zero)
+                {
+                    NativeLibrary.Free(handle);
+                }
+            }
+            foreach (var path in paths)
+            {
+                if (path is not null)
+                {
+                    File.Delete(path);
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void Char16ToFloatRejectsAnIntegerDestinationTypeSpec()
+    {
+        const string source = "public float32 Convert(char16 value) { return float32(value); }";
+        var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-char16-float");
+        var malformed = ReplaceBodyOperationByte(artifact, 1, 0x1E, 2, 1);
 
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
@@ -748,6 +834,10 @@ public sealed class TrRmExecutableCompilerTests
     private delegate int Float32Binary(int left, int right);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Float64Binary(long left, long right);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Char16ToFloat32(ushort value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Char16ToFloat64(ushort value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate void VoidAction();
 

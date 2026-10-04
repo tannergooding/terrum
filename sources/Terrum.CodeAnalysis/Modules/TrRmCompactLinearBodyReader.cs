@@ -129,7 +129,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
             var (opcode, referenceWidth, countWidth, dataWidth) =
                 ReadInstruction(body, ref position);
             if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 0x0A
-                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18 or 0x19 or 0x1A or 0x1B or 0x1C or 0x1D))
+                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18 or 0x19 or 0x1A or 0x1B or 0x1C or 0x1D or 0x1E))
             {
                 throw InvalidBody();
             }
@@ -341,7 +341,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
                     }
                 }
             }
-            else if (opcode is 6 or 0x16 or 0x1A or 0x1B)
+            else if (opcode is 6 or 0x16 or 0x1A or 0x1B or 0x1E)
             {
                 var typeId = ReadLocal(body, ref position, referenceWidth);
                 if (typeId == 0 || typeId > typeCount)
@@ -356,15 +356,17 @@ public readonly ref struct TrRmCompactLinearBodyReader
                     ? IsFloat(source) && IsFloat(resultType) && source != resultType
                     : opcode == 0x1B
                         ? IsInteger(source) && IsFloat(resultType)
-                        : opcode == 0x16
-                            ? (IsInteger(source) || source == 3)
-                                && (IsInteger(resultType) || resultType == 3)
-                            : IsInteger(source) && IsInteger(resultType) && policy switch
-                        {
-                            1 or 2 => true,
-                            3 => BitWidth(source) == BitWidth(resultType),
-                            _ => false,
-                        };
+                        : opcode == 0x1E
+                            ? source == 3 && IsFloat(resultType)
+                            : opcode == 0x16
+                                ? (IsInteger(source) || source == 3)
+                                    && (IsInteger(resultType) || resultType == 3)
+                                : IsInteger(source) && IsInteger(resultType) && policy switch
+                            {
+                                1 or 2 => true,
+                                3 => BitWidth(source) == BitWidth(resultType),
+                                _ => false,
+                            };
                 if (!valid)
                 {
                     throw InvalidBody();

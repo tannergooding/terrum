@@ -53,12 +53,15 @@ Same-format floating add, subtract, multiply and divide are separately
 provisional under the unapproved
 [TRRM arithmetic proposal](../docs/proposals/floating-trrm-arithmetic.md) and
 its separate [arithmetic-NaN proposal](../docs/proposals/floating-arithmetic-nan-encoding.md).
-Remainder, mixed-format arithmetic and other conversion pairs remain
-unsupported there. The frontend candidates continue to depend on the hosted
-verifier/emitter for supported executions.
-The provisional hosted `char16`-to-floating conversion likewise remains
-outside both paths; it treats the code unit as an unsigned numeric value and
-follows an unapproved eligibility proposal.
+Remainder, mixed-format arithmetic and floating-to-integer conversions remain
+unsupported there. `char16`-to-floating conversion is provisionally encoded
+under the unapproved
+[TRRM char16 conversion proposal](../docs/proposals/char16-to-floating-trrm-conversions.md),
+which follows the separate unsigned code-unit
+[eligibility proposal](../docs/proposals/char16-floating-conversion-eligibility.md).
+The bounded scalar frontend candidate does not yet project that conversion.
+The hosted binder and emitter provisionally treat a code unit as an unsigned
+numeric value; this eligibility remains unapproved.
 Both current v85 projections carry
 scalar non-Boolean/void `init ref<T>` declarations; definite-publication
 verification and emission remain hosted. V85 includes

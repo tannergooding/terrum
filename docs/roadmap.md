@@ -58,9 +58,9 @@ while their eligibility is unapproved. Source-free TRRM provisionally
 supports same-format floating add, subtract, multiply and divide under an
 unapproved proposal. Same-format comparisons and exact-bit constants,
 explicit conversion between the two floating formats, conversion from the
-four fixed-width integer types and unary negation are separately provisional
-under their unapproved proposals; none is part of the approved `(1, 0)` Body
-profile.
+four fixed-width integer types, `char16`-to-floating conversion and unary
+negation are separately provisional under their unapproved proposals; none is
+part of the approved `(1, 0)` Body profile.
 
 The bounded Terrum-authored scalar source frontend supports v85 complete
 global-function snapshots and source-order scalar call targets, including
