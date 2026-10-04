@@ -52,9 +52,10 @@ literals directly targeting `float32`/`float64`, `+`, `-`, `*`, `/` and IEEE
 comparisons through v85. The hosted reader validates token spans and
 reconstructs exact target-format literal bits; verification and emission
 remain hosted. V85 also projects conversions between `float32`/`float64` and
-from `int32`, `uint32`, `int64` and `uint64` to either format. `char16`-to-
-floating conversion remains outside this projection while its eligibility is
-unapproved. The frontend also provisionally projects float-to-integer
+from `int32`, `uint32`, `int64` and `uint64` to either format.
+`char16`-to-floating conversion is provisionally projected through v85 under
+its still-unapproved eligibility proposal; verification and emission remain
+hosted. The frontend also provisionally projects float-to-integer
 conversions under the still-unapproved pair-matrix proposal; verification and
 emission remain hosted. Source-free TRRM provisionally
 supports same-format floating add, subtract, multiply and divide under an

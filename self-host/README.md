@@ -36,10 +36,11 @@ literals, based integer literals directly targeting either format, `+`, `-`,
 `*`, `/` and IEEE comparisons. The hosted reader validates token spans and
 reconstructs exact target-format literal bits. It also projects conversions
 between the floating formats and from `int32`, `uint32`, `int64` and `uint64`
-to either format. `char16`-to-floating conversion remains outside while its
-eligibility is unapproved. Float-to-integer conversions are now provisionally
-projected through v85 under the still-unapproved pair-matrix proposal; the
-hosted verifier and emitter remain authoritative. Source-free TRRM
+to either format. `char16`-to-floating conversion is also provisionally
+projected through v85 under its still-unapproved eligibility proposal;
+verification and emission remain hosted. Float-to-integer conversions are
+provisionally projected through v85 under the still-unapproved pair-matrix
+proposal; verification and emission remain hosted. Source-free TRRM
 same-format comparisons and exact-bit constants are provisionally implemented
 under the unapproved
 [TRRM floating-comparison proposal](../docs/proposals/floating-trrm-comparisons.md);
@@ -63,8 +64,8 @@ under the unapproved
 [TRRM char16 conversion proposal](../docs/proposals/char16-to-floating-trrm-conversions.md),
 which follows the separate unsigned code-unit
 [eligibility proposal](../docs/proposals/char16-floating-conversion-eligibility.md).
-The bounded scalar frontend candidate does not yet project that conversion.
-The hosted binder and emitter provisionally treat a code unit as an unsigned
+The bounded scalar frontend candidate also provisionally projects this
+conversion. The hosted binder and emitter treat a code unit as an unsigned
 numeric value; this eligibility remains unapproved.
 Both current v85 projections carry
 scalar non-Boolean/void `init ref<T>` declarations; definite-publication

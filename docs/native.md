@@ -234,9 +234,10 @@ based integer literals directly targeting either format, `+`, `-`, `*`, `/`
 and IEEE comparisons. The hosted reader validates source token spans and
 reconstructs exact target-format literal bits. It also projects conversions
 between the floating formats and from `int32`, `uint32`, `int64` and `uint64`
-to either format. `char16`-to-floating and
-floating-to-integer conversions remain outside while their eligibility is
-unapproved. Source-free TRRM still has no floating operators.
+to either format. V85 provisionally projects `char16`-to-floating and
+floating-to-integer conversions under separate unapproved eligibility
+proposals. Source-free TRRM floating operations are separately provisional
+under unapproved proposals and remain outside the approved Body profile.
 Verification and emission continue through the hosted implementation; this
 adds no projection layout or native ABI change.
 

@@ -1204,11 +1204,12 @@ literals, based integer literals directly targeting either floating format,
 publishes literal types and source spans; the hosted reader validates the
 token spans and reconstructs exact target-format bits. Floating conversions
 between `float32`/`float64` and from `int32`, `uint32`, `int64` and `uint64`
-to either format are also projected through v85. `char16`-to-floating and
-`char16`-to-floating conversion remains outside this projection while its
-eligibility is unapproved. Floating-to-integer conversions are now
-provisionally projected through v85 under the still-unapproved pair-matrix
-proposal; verification and emission remain hosted. Source-free TRRM
+to either format are also projected through v85. `char16`-to-floating
+conversion is provisionally projected through v85 under its still-unapproved
+eligibility proposal; verification and emission remain hosted.
+Floating-to-integer conversions are provisionally projected through v85 under
+the still-unapproved pair-matrix proposal; verification and emission remain
+hosted. Source-free TRRM
 provisionally supports same-format floating binary arithmetic under an
 unapproved proposal. Same-format
 comparisons and exact-bit constants, explicit conversion between the two

@@ -2433,7 +2433,7 @@ public static partial class ScalarFrontendHost
     private static bool SupportedScalarConversion(int sourceType, int targetType)
         => ((sourceType is 1 or 2 or 3 or 4 or 6)
                 && (targetType is 1 or 2 or 3 or 4 or 6))
-            || ((sourceType is 1 or 2 or 3 or 4 or 7 or 8)
+            || ((sourceType is 1 or 2 or 3 or 4 or 6 or 7 or 8)
                 && (targetType is 7 or 8))
             || ((sourceType is 7 or 8)
                 && (targetType is 1 or 2 or 3 or 4));

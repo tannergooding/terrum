@@ -80,8 +80,8 @@ public sealed partial class CliTests
     }
 
     [Theory]
-    [InlineData("public float32 Convert(char16 value) { return float32(value); }")]
-    public async Task ScalarFrontendRejectsUnapprovedChar16ConversionsAsync(string source)
+    [InlineData("public char16 Convert(float32 value) { return char16(value); }")]
+    public async Task ScalarFrontendRejectsUnapprovedFloatingToChar16ConversionsAsync(string source)
     {
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
@@ -230,7 +230,7 @@ public sealed partial class CliTests
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
                 foreach (var sourceType in new[] {
-                    "int32", "uint32", "int64", "uint64", "float32", "float64",
+                    "int32", "uint32", "int64", "uint64", "char16", "float32", "float64",
                 })
                 {
                     string[] targetTypes = sourceType is "float32" or "float64"

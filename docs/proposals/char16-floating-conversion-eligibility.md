@@ -1,8 +1,9 @@
 # Char16-to-floating conversion eligibility
 
-**Status: unapproved eligibility proposal.** The hosted binder, verifier and
-emitter provisionally implement the recommendation below. This proposal does
-not add Unicode scalar conversion, implicit numeric conversion, or a
+**Status: unapproved eligibility proposal.** The hosted binder, verifier,
+emitter and v85 scalar-frontend projection provisionally implement the
+recommendation below. Verification and emission remain hosted. This proposal
+does not add Unicode scalar conversion, implicit numeric conversion, or a
 language-contract approval.
 
 ## Summary
