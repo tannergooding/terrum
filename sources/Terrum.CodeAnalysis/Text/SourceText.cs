@@ -13,15 +13,24 @@ public sealed class SourceText
         Text = text;
         Path = path;
 
-        var lines = ImmutableArray.CreateBuilder<SourceLine>();
+        var lineCount = 1;
+        for (var index = 0; index < text.Length; index++)
+        {
+            var lineBreakLength = GetLineBreakLength(text, index);
+            if (lineBreakLength == 0)
+            {
+                continue;
+            }
+
+            lineCount++;
+            index += lineBreakLength - 1;
+        }
+
+        var lines = ImmutableArray.CreateBuilder<SourceLine>(lineCount);
         var start = 0;
         for (var index = 0; index < text.Length; index++)
         {
-            var lineBreakLength = text[index] switch {
-                '\r' when index + 1 < text.Length && text[index + 1] == '\n' => 2,
-                '\r' or '\n' or '\u0085' or '\u2028' or '\u2029' => 1,
-                _ => 0,
-            };
+            var lineBreakLength = GetLineBreakLength(text, index);
             if (lineBreakLength == 0)
             {
                 continue;
@@ -37,6 +46,12 @@ public sealed class SourceText
                                  new TextSpan(start, text.Length - start)));
         Lines = lines.ToImmutable();
     }
+
+    private static int GetLineBreakLength(string text, int index) => text[index] switch {
+        '\r' when index + 1 < text.Length && text[index + 1] == '\n' => 2,
+        '\r' or '\n' or '\u0085' or '\u2028' or '\u2029' => 1,
+        _ => 0,
+    };
 
     /// <summary>Creates a source snapshot without normalizing line endings or surrogate units.</summary>
     /// <param name="text">The source content.</param>

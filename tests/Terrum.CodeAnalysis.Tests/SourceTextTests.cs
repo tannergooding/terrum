@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Linq;
 using Terrum.CodeAnalysis.Text;
 using Xunit;
 
@@ -30,6 +31,18 @@ public sealed class SourceTextTests
         Assert.Equal(2, source.Lines.Length);
         Assert.Equal(new SourceLine(new TextSpan(2, 0), new TextSpan(2, 0)), source.Lines[1]);
         Assert.Equal(new LinePosition(1, 0), source.GetLinePosition(2));
+    }
+
+    [Fact]
+    public void CountsLargeCrlfInputsBeforeBuildingLines()
+    {
+        const int terminatedLineCount = 4096;
+        var source = SourceText.From(string.Concat(Enumerable.Repeat("x\r\n", terminatedLineCount)));
+
+        Assert.Equal(terminatedLineCount + 1, source.Lines.Length);
+        Assert.Equal(new SourceLine(new TextSpan(terminatedLineCount * 3, 0),
+                                    new TextSpan(terminatedLineCount * 3, 0)),
+                     source.Lines[^1]);
     }
 
     [Theory]
