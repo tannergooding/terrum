@@ -366,6 +366,7 @@ public static partial class NativeModuleCompiler
         var structures = ModuleCompiler.GetGraphRetainedTypes(contract, consumer);
         provenance ??= providers.Select(provider => ProviderOrigins(provider)).ToArray();
         var result = new List<GraphTypeOrigin>(structures.Length);
+        Dictionary<string, GraphPackage>? providersByIdentity = null;
         foreach (var structure in structures)
         {
             if (!imported.Contains(structure.Name))
@@ -375,18 +376,29 @@ public static partial class NativeModuleCompiler
                     structure.CleanupMethod is not null ? owner : null));
                 continue;
             }
-            var origins = provenance.Select(table => table.GetValueOrDefault(structure.Name))
-                .Where(static item => item is not null).ToArray();
-            if (origins.Length == 0 || origins.Any(origin => origin != origins[0]))
+            GraphTypeOrigin? origin = null;
+            foreach (var table in provenance)
+            {
+                if (!table.TryGetValue(structure.Name, out var candidate) || candidate is null)
+                {
+                    continue;
+                }
+                if (origin is not null && origin != candidate)
+                {
+                    throw new ModuleContractException($"Graph imported type '{structure.Name}' has no unambiguous origin.");
+                }
+                origin = candidate;
+            }
+            if (origin is null)
             {
                 throw new ModuleContractException($"Graph imported type '{structure.Name}' has no unambiguous origin.");
             }
-            var origin = origins[0]!;
-            if (!providers.Any(provider => provider.Identity == origin.Identity)
+            providersByIdentity ??= providers.ToDictionary(static provider => provider.Identity!,
+                StringComparer.Ordinal);
+            if (!providersByIdentity.TryGetValue(origin.Identity, out var provider)
                 || (structure.CleanupMethod is not null && (origin.CleanupIdentity != origin.Identity
-                    || !providers.Any(provider => provider.Identity == origin.Identity
-                        && Array.BinarySearch(provider.Exports, structure.CleanupMethod,
-                            StringComparer.Ordinal) >= 0))))
+                    || Array.BinarySearch(provider.Exports, structure.CleanupMethod,
+                        StringComparer.Ordinal) < 0)))
             {
                 throw new ModuleContractException($"Graph imported type '{structure.Name}' lacks its origin or cleanup.");
             }
