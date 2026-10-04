@@ -156,7 +156,7 @@ mut class ScalarFrontendState
     public mut bool TryInventoryHeader(out ScalarFrontendResult result, out int32 end)
     {
         end = 0;
-        require SourceRange.TryCreate(0, 0, out var empty);
+        require SourceRange.TryCreate(0, 0, init var empty);
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
         if (!ParseHeader(out var selected, out var name))
         {
@@ -190,7 +190,7 @@ mut class ScalarFrontendState
         }
         else
         {
-            require SourceRange.TryCreate(Host.Source.Length, 0, out var end);
+            require SourceRange.TryCreate(Host.Source.Length, 0, init var end);
             FailAt(code, end);
         }
     }
@@ -468,7 +468,7 @@ mut class ScalarFrontendState
             if (!IsActiveLocal(local)) { continue; }
             int32 offset = 300 + local * 4;
             require SourceRange.TryCreate(Host.Frontend[offset + 2],
-                Host.Frontend[offset + 3], out var name);
+                Host.Frontend[offset + 3], init var name);
             Token candidate = new Token(2, name);
             if (SameTokenSpelling(candidate, token))
             {
@@ -705,7 +705,7 @@ mut class ScalarFrontendState
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
-                        close.Range.End - literal.Range.Start, out var nestedSpan);
+                        close.Range.End - literal.Range.Start, init var nestedSpan);
                     require ScalarFrontendExpression.TryCreate(5,
                         nested.Operation + 2000, nested.LeftParameter,
                         nested.RightParameter, nestedSpan, out var negatedBinary);
@@ -721,7 +721,7 @@ mut class ScalarFrontendState
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
-                        close.Range.End - literal.Range.Start, out var composedSpan);
+                        close.Range.End - literal.Range.Start, init var composedSpan);
                     require ScalarFrontendExpression.TryCreate(5,
                         nested.Operation + 16000,
                         nested.LeftParameter, nested.RightParameter,
@@ -761,7 +761,7 @@ mut class ScalarFrontendState
                 return false;
             }
             require SourceRange.TryCreate(literal.Range.Start,
-                end - literal.Range.Start, out var span);
+                end - literal.Range.Start, init var span);
             require ScalarFrontendExpression.TryCreate(5, 62, parameter, booleanKind,
                 span, out var negated);
             expression = negated;
@@ -814,7 +814,7 @@ mut class ScalarFrontendState
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
-                        close.Range.End - literal.Range.Start, out var binarySpan);
+                        close.Range.End - literal.Range.Start, init var binarySpan);
                     require ScalarFrontendExpression.TryCreate(expectedType,
                         nested.Operation + 4000, nested.LeftParameter,
                         nested.RightParameter, binarySpan, out var complemented);
@@ -829,7 +829,7 @@ mut class ScalarFrontendState
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
-                        close.Range.End - literal.Range.Start, out var composedSpan);
+                        close.Range.End - literal.Range.Start, init var composedSpan);
                     require ScalarFrontendExpression.TryCreate(expectedType,
                         nested.Operation + 10000, nested.LeftParameter,
                         nested.RightParameter,
@@ -843,7 +843,7 @@ mut class ScalarFrontendState
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
-                        close.Range.End - literal.Range.Start, out var composedSpan);
+                        close.Range.End - literal.Range.Start, init var composedSpan);
                     require ScalarFrontendExpression.TryCreate(expectedType,
                         nested.Operation + 16000, nested.LeftParameter,
                         nested.RightParameter, composedSpan, out var composed);
@@ -856,7 +856,7 @@ mut class ScalarFrontendState
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
-                        close.Range.End - literal.Range.Start, out var composedSpan);
+                        close.Range.End - literal.Range.Start, init var composedSpan);
                     require ScalarFrontendExpression.TryCreate(expectedType,
                         nested.Operation + 34000, nested.LeftParameter,
                         nested.RightParameter, composedSpan, out var composed);
@@ -900,7 +900,7 @@ mut class ScalarFrontendState
                 return false;
             }
             require SourceRange.TryCreate(literal.Range.Start,
-                end - literal.Range.Start, out var span);
+                end - literal.Range.Start, init var span);
             require ScalarFrontendExpression.TryCreate(expectedType, operation, left, right,
                 span, out var inverted);
             expression = inverted;
@@ -959,7 +959,7 @@ mut class ScalarFrontendState
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
-                        close.Range.End - literal.Range.Start, out var binarySpan);
+                        close.Range.End - literal.Range.Start, init var binarySpan);
                     mut int32 offset = 6000;
                     if (literal.Kind == 58)
                     {
@@ -978,7 +978,7 @@ mut class ScalarFrontendState
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
-                        close.Range.End - literal.Range.Start, out var composedSpan);
+                        close.Range.End - literal.Range.Start, init var composedSpan);
                     mut int32 offset = 12000;
                     if (literal.Kind == 58)
                     {
@@ -997,7 +997,7 @@ mut class ScalarFrontendState
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
-                        close.Range.End - literal.Range.Start, out var composedSpan);
+                        close.Range.End - literal.Range.Start, init var composedSpan);
                     mut int32 offset = 26000;
                     if (literal.Kind == 58)
                     {
@@ -1038,7 +1038,7 @@ mut class ScalarFrontendState
                     return false;
                 }
                 require SourceRange.TryCreate(literal.Range.Start,
-                    signedEnd - literal.Range.Start, out var signedSpan);
+                    signedEnd - literal.Range.Start, init var signedSpan);
                 mut int32 operation = 657;
                 if (literal.Kind == 58)
                 {
@@ -1072,7 +1072,7 @@ mut class ScalarFrontendState
                 return false;
             }
             require SourceRange.TryCreate(literal.Range.Start,
-                end - literal.Range.Start, out var span);
+                end - literal.Range.Start, init var span);
             require ScalarFrontendExpression.TryCreate(expectedType, literal.Kind, parameter,
                 0, span, out var unary);
             expression = unary;
@@ -1095,7 +1095,7 @@ mut class ScalarFrontendState
             }
             _at = _at + 2;
             require SourceRange.TryCreate(literal.Range.Start,
-                plusOperand.Range.End - literal.Range.Start, out var plusSpan);
+                plusOperand.Range.End - literal.Range.Start, init var plusSpan);
             require ScalarFrontendExpression.TryCreate(expectedType, 657,
                 plusLow, plusHigh, plusSpan, out var plusLiteral);
             expression = plusLiteral;
@@ -1162,7 +1162,7 @@ mut class ScalarFrontendState
                     return false;
                 }
                 require SourceRange.TryCreate(first.Range.Start,
-                    end - first.Range.Start, out var comparisonSpan);
+                    end - first.Range.Start, init var comparisonSpan);
                 mut int32 signedOffset = 0;
                 if (negative)
                 {
@@ -1180,7 +1180,7 @@ mut class ScalarFrontendState
                 return true;
             }
             require SourceRange.TryCreate(literal.Range.Start,
-                numberToken.Range.End - literal.Range.Start, out var numberSpan);
+                numberToken.Range.End - literal.Range.Start, init var numberSpan);
             if (negative && signedGrouped && expectedType != 1 && expectedType != 3
                 && expectedType != 7 && expectedType != 8)
             {
@@ -1208,7 +1208,7 @@ mut class ScalarFrontendState
                     return false;
                 }
                 require SourceRange.TryCreate(first.Range.Start,
-                    end - first.Range.Start, out var pairSpan);
+                    end - first.Range.Start, init var pairSpan);
                 require ScalarFrontendExpression.TryCreate(expectedType,
                     pairOperator.Kind + 500, low, secondLow, pairSpan, out var foldedPair);
                 expression = foldedPair;
@@ -1246,7 +1246,7 @@ mut class ScalarFrontendState
                     return false;
                 }
                 require SourceRange.TryCreate(first.Range.Start,
-                    end - first.Range.Start, out var binarySpan);
+                    end - first.Range.Start, init var binarySpan);
                 mut int32 signedOffset = 0;
                 if (negative)
                 {
@@ -1286,7 +1286,7 @@ mut class ScalarFrontendState
                         return false;
                     }
                     require SourceRange.TryCreate(first.Range.Start,
-                        end - first.Range.Start, out var literalSpan);
+                        end - first.Range.Start, init var literalSpan);
                     require ScalarFrontendExpression.TryCreate(5,
                         booleanOperator.Kind + 1100, literal.Kind, booleanRight.Kind,
                         literalSpan, out var literals);
@@ -1312,7 +1312,7 @@ mut class ScalarFrontendState
                     return false;
                 }
                 require SourceRange.TryCreate(first.Range.Start,
-                    end - first.Range.Start, out var span);
+                    end - first.Range.Start, init var span);
                 require ScalarFrontendExpression.TryCreate(5,
                     booleanOperator.Kind + 900, parameter, literal.Kind,
                     span, out var withLiteral);
@@ -1393,7 +1393,7 @@ mut class ScalarFrontendState
                     return false;
                 }
                 require SourceRange.TryCreate(first.Range.Start,
-                    end - first.Range.Start, out var span);
+                    end - first.Range.Start, init var span);
                 require ScalarFrontendExpression.TryCreate(5,
                     operation + 700, leftIndex, right.Kind,
                     span, out var withLiteral);
@@ -1429,7 +1429,7 @@ mut class ScalarFrontendState
                     return false;
                 }
                 require SourceRange.TryCreate(first.Range.Start,
-                    end - first.Range.Start, out var literalSpan);
+                    end - first.Range.Start, init var literalSpan);
                 mut int32 resultType = selected;
                 if (operation >= 65 && operation <= 70)
                 {
@@ -1474,7 +1474,7 @@ mut class ScalarFrontendState
                 return false;
             }
         }
-        require SourceRange.TryCreate(first.Range.Start, end - first.Range.Start, out var span);
+        require SourceRange.TryCreate(first.Range.Start, end - first.Range.Start, init var span);
         if (operation >= 65 && operation <= 70)
         {
             selected = 5;
@@ -1943,7 +1943,7 @@ mut class ScalarFrontendState
             if (!IsActiveLocal(local)) { continue; }
             int32 offset = 300 + local * 4;
             require SourceRange.TryCreate(Host.Frontend[offset + 2],
-                Host.Frontend[offset + 3], out var oldName);
+                Host.Frontend[offset + 3], init var oldName);
             Token previous = new Token(2, oldName);
             if (SameTokenSpelling(previous, name))
             {
@@ -2462,7 +2462,7 @@ mut class ScalarFrontendState
 
     public mut bool TryParseStructuredReturns(out ScalarFrontendResult result)
     {
-        require SourceRange.TryCreate(0, 0, out var empty);
+        require SourceRange.TryCreate(0, 0, init var empty);
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
         mut SourceRange name = empty;
         mut int32 returnType = 0;
@@ -2993,7 +2993,7 @@ mut class ScalarFrontendState
             if (operation == 58 && type != 1 && type != 3
                 && type != 7 && type != 8)
             {
-                require SourceRange.TryCreate(TreeWord(node, 2), 1, out var sign);
+                require SourceRange.TryCreate(TreeWord(node, 2), 1, init var sign);
                 FailAt(2, sign);
                 return false;
             }
@@ -3015,7 +3015,7 @@ mut class ScalarFrontendState
     private mut bool FailTreeType(int32 node)
     {
         require SourceRange.TryCreate(TreeWord(node, 2),
-            TreeWord(node, 3), out var span);
+            TreeWord(node, 3), init var span);
         FailAt(2, span);
         return false;
     }
@@ -3045,7 +3045,7 @@ mut class ScalarFrontendState
             if (!IsActiveLocal(local)) { continue; }
             int32 offset = 300 + local * 4;
             require SourceRange.TryCreate(Host.Frontend[offset + 2],
-                Host.Frontend[offset + 3], out var localName);
+                Host.Frontend[offset + 3], init var localName);
             if (SameTokenSpelling(new Token(2, localName), functionName))
             {
                 FailAt(1, functionName.Range);
@@ -3270,7 +3270,7 @@ mut class ScalarFrontendState
             {
                 int32 field = index == 0 ? 11 : (index == 1 ? 13 : 35);
                 require SourceRange.TryCreate(Host.FrontendProgram[header + field],
-                    Host.FrontendProgram[header + field + 1], out var parameterName);
+                    Host.FrontendProgram[header + field + 1], init var parameterName);
                 if (SameTokenSpelling(new Token(2, parameterName), name))
                 {
                     parameter = index;
@@ -3310,7 +3310,7 @@ mut class ScalarFrontendState
             if (!IsActiveLocal(local)) { continue; }
             int32 offset = 300 + local * 4;
             require SourceRange.TryCreate(Host.Frontend[offset + 2],
-                Host.Frontend[offset + 3], out var localName);
+                Host.Frontend[offset + 3], init var localName);
             if (SameTokenSpelling(new Token(2, localName), name))
             {
                 FailAt(1, name.Range);
@@ -3389,7 +3389,7 @@ mut class ScalarFrontendState
                 if (!IsActiveLocal(local)) { continue; }
                 int32 offset = 300 + local * 4;
                 require SourceRange.TryCreate(Host.Frontend[offset + 2],
-                    Host.Frontend[offset + 3], out var name);
+                    Host.Frontend[offset + 3], init var name);
                 if (SameTokenSpelling(new Token(2, name), token))
                 {
                     FailAt(1, token.Range);
@@ -3771,7 +3771,7 @@ mut class ScalarFrontendState
 
     public mut bool TryParseTree(out ScalarFrontendResult result)
     {
-        require SourceRange.TryCreate(0, 0, out var empty);
+        require SourceRange.TryCreate(0, 0, init var empty);
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
         mut SourceRange name = empty;
         mut int32 returnType = 0;
@@ -3795,7 +3795,7 @@ mut class ScalarFrontendState
                     if (!ResolveTreeLiteral(root, returnType, false))
                     {
                         require SourceRange.TryCreate(TreeWord(root, 2),
-                            TreeWord(root, 3), out var mismatch);
+                            TreeWord(root, 3), init var mismatch);
                         FailAt(2, mismatch);
                     }
                     whenTrue = root;
@@ -3847,7 +3847,7 @@ mut class ScalarFrontendState
                         if (TreeWord(predicate, 1) != 5)
                         {
                             require SourceRange.TryCreate(TreeWord(predicate, 2),
-                                TreeWord(predicate, 3), out var mismatch);
+                                TreeWord(predicate, 3), init var mismatch);
                             FailAt(2, mismatch);
                         }
                         condition = predicate;
@@ -3895,7 +3895,7 @@ mut class ScalarFrontendState
                 if (Host.Frontend[300 + local * 4] == 0)
                 {
                     require SourceRange.TryCreate(Host.Frontend[302 + local * 4],
-                        Host.Frontend[303 + local * 4], out var unresolved);
+                        Host.Frontend[303 + local * 4], init var unresolved);
                     FailAt(2, unresolved);
                     break;
                 }
@@ -3925,7 +3925,7 @@ mut class ScalarFrontendState
 
     public mut bool TryParse(out ScalarFrontendResult result)
     {
-        require SourceRange.TryCreate(0, 0, out var empty);
+        require SourceRange.TryCreate(0, 0, init var empty);
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
         mut SourceRange name = empty;
         mut int32 returnType = 0;
@@ -4033,7 +4033,7 @@ bool IsScalarFrontendBinaryTypeValid(int32 operation, int32 left, int32 right)
 
 bool TryCreateScalarFrontendError(int32 code, SourceRange span, out ScalarFrontendResult result)
 {
-    require SourceRange.TryCreate(0, 0, out var empty);
+    require SourceRange.TryCreate(0, 0, init var empty);
     require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
     return ScalarFrontendResult.TryCreate(false, false, code, span, 0, 0, 0, 0, 0,
         0, empty, empty, empty, empty, false, false, absent, absent, absent, out result);
@@ -4041,7 +4041,7 @@ bool TryCreateScalarFrontendError(int32 code, SourceRange span, out ScalarFronte
 
 bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult result)
 {
-    require SourceRange.TryCreate(0, 0, out var empty);
+    require SourceRange.TryCreate(0, 0, init var empty);
     int32 count = tokens.GetCount();
     if (count > 64)
     {

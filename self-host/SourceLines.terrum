@@ -25,8 +25,8 @@ public bool TryReadSourceLine(int32 start, out SourceRange content, out SourceRa
         }
     }
 
-    require SourceRange.TryCreate(start, end - start, out content);
-    require SourceRange.TryCreate(start, next - start, out includingBreak);
+    require SourceRange.TryCreate(start, end - start, init content);
+    require SourceRange.TryCreate(start, next - start, init includingBreak);
 
     return true;
 }

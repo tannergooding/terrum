@@ -176,7 +176,7 @@ public unique struct SourceLineIndex
         {
             end = starts.Read(line + 1);
         }
-        require SourceRange.TryCreate(start, end - start, out includingBreak);
+        require SourceRange.TryCreate(start, end - start, init includingBreak);
         return true;
     }
 
@@ -209,7 +209,7 @@ public unique struct SourceLineIndex
             }
         }
 
-        require SourceRange.TryCreate(start, end - start, out content);
+        require SourceRange.TryCreate(start, end - start, init content);
         return true;
     }
 

@@ -214,7 +214,6 @@ public sealed class ModuleTests
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
             "Terrum.CodeAnalysis.SourceRange.TryCreate",
-            "Terrum.CodeAnalysis.SourceRange.TryCreateInit",
             "Terrum.CodeAnalysis.SourceRange.GetEnd",
             "Terrum.CodeAnalysis.SourceRange.#get:End",
             "Terrum.CodeAnalysis.IsAsciiDigit",
@@ -260,7 +259,7 @@ public sealed class ModuleTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                bool created = SourceRange.TryCreateInit(-1, 0, init var range);
+                bool created = SourceRange.TryCreate(-1, 0, init var range);
                 return {{read}};
             }
             """);
@@ -284,7 +283,6 @@ public sealed class ModuleTests
         {
             var arguments = new List<string> { "compile-module", "producer",
                 Path.Combine(root, "self-host", "SourceRange.terrum"), "Terrum.CodeAnalysis.SourceRange.TryCreate",
-                "--export", "Terrum.CodeAnalysis.SourceRange.TryCreateInit",
                 "--source", Path.Combine(root, "self-host", tokens ? "Token.terrum" : "CharacterFacts.terrum"),
                 "--export", "Terrum.CodeAnalysis.SourceRange.GetEnd",
                 "--export", "Terrum.CodeAnalysis.SourceRange.#get:End",

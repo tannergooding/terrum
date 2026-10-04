@@ -169,7 +169,7 @@ public sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
                 require StringLiteral.TryCreate(spelling, out var literal);
                 require literal.{{measure}}(init var unitLength);
                 if (unitLength != {{expected.Length}}) { return 1; }
@@ -208,7 +208,7 @@ public sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
                 require StringLiteral.TryCreate(spelling, out var literal);
                 if (literal.{{measure}}(init var length)) { return 1; }
                 require OwnedInt32Buffer.TryCreate(2, out var workspace);
@@ -255,7 +255,7 @@ public sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
                 require StringLiteral.TryCreate(spelling, out var literal);
                 require TryGetStringRowByteLength(literal, {{flags}}, init var byteLength);
                 if (byteLength != {{expected.Length}}) { return 1; }
@@ -297,7 +297,7 @@ public sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
                 require StringLiteral.TryCreate(spelling, out var literal);
                 require TryGetStringNamespaceRowByteLength(literal, {{encoding}}, init var length);
                 if (length != {{expected.Length}}) { return 1; }
@@ -334,7 +334,7 @@ public sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
                 require StringLiteral.TryCreate(spelling, out var literal);
                 require TryGetStringNameRowByteLength(literal, {{flags}}, init var byteLength);
                 if (byteLength != {{expected.Length}}) { return 1; }
@@ -364,7 +364,7 @@ public sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
                 require StringLiteral.TryCreate(spelling, out var literal);
                 if (TryGetStringNameRowByteLength(literal, 0, init var ascii)
                     || TryGetStringNameRowByteLength(literal, 1, init var utf8)
@@ -398,7 +398,7 @@ public sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
                 require StringLiteral.TryCreate(spelling, out var literal);
                 if (TryGetStringNameRowByteLength(literal, {{flags}}, init var nameLength)) { return 1; }
                 require TryGetStringNamespaceRowByteLength(literal, {{flags}}, init var length);
@@ -430,7 +430,7 @@ public sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
                 require StringLiteral.TryCreate(spelling, out var literal);
                 if (TryGetStringNamespaceRowByteLength(literal, 0, init var ascii)
                     || TryGetStringNamespaceRowByteLength(literal, 1, init var utf8)
@@ -469,8 +469,8 @@ public sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, {{left.Length}}, out var firstSpelling);
-                require SourceRange.TryCreate({{left.Length}}, {{right.Length}}, out var secondSpelling);
+                require SourceRange.TryCreate(0, {{left.Length}}, init var firstSpelling);
+                require SourceRange.TryCreate({{left.Length}}, {{right.Length}}, init var secondSpelling);
                 require StringLiteral.TryCreate(firstSpelling, out var first);
                 require StringLiteral.TryCreate(secondSpelling, out var second);
                 {{assertion}}
@@ -506,8 +506,8 @@ public sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, {{left.Length}}, out var firstSpelling);
-                require SourceRange.TryCreate({{left.Length}}, {{right.Length}}, out var secondSpelling);
+                require SourceRange.TryCreate(0, {{left.Length}}, init var firstSpelling);
+                require SourceRange.TryCreate({{left.Length}}, {{right.Length}}, init var secondSpelling);
                 require StringLiteral.TryCreate(firstSpelling, out var first);
                 require StringLiteral.TryCreate(secondSpelling, out var second);
                 {{assertion}}
@@ -533,9 +533,9 @@ public sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, {{invalid.Length}}, out var badSpelling);
+                require SourceRange.TryCreate(0, {{invalid.Length}}, init var badSpelling);
                 require StringLiteral.TryCreate(badSpelling, out var bad);
-                require SourceRange.TryCreate({{invalid.Length}}, 4, out var goodSpelling);
+                require SourceRange.TryCreate({{invalid.Length}}, 4, init var goodSpelling);
                 require StringLiteral.TryCreate(goodSpelling, out var good);
                 require OwnedInt32Buffer.TryCreate(8, out var workspace);
                 unsafe {
@@ -575,7 +575,7 @@ public sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
                 require StringLiteral.TryCreate(spelling, out var literal);
                 require TryGetStringRowByteLength(literal, 0, init var length);
                 if (length != {{rowLength}}) { return 1; }
@@ -616,7 +616,7 @@ public sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
                 require StringLiteral.TryCreate(spelling, out var literal);
                 if (TryGetStringRowByteLength(literal, -1, init var negative)
                     || TryGetStringRowByteLength(literal, 4, init var reserved)
@@ -691,7 +691,7 @@ public sealed class StringLiteralComponentTests
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, 2, out var range);
+                require SourceRange.TryCreate(0, 2, init var range);
                 {{body}}
             }
             """, "entry.terrum");

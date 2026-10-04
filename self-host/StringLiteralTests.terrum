@@ -9,7 +9,7 @@ int32 CheckStringLiterals()
         int32 length = Host.ExpectedLiterals[fixture * 4 + 1];
         int32 count = Host.ExpectedLiterals[fixture * 4 + 2];
         int32 firstScalar = Host.ExpectedLiterals[fixture * 4 + 3];
-        require SourceRange.TryCreate(start, length, out var spelling);
+        require SourceRange.TryCreate(start, length, init var spelling);
         if (StringLiteral.TryCreateInit(spelling, init var created))
         {
             require StringLiteral.TryCreate(spelling, out var literal);
@@ -238,9 +238,9 @@ int32 CheckStringLiterals()
         fixture = fixture + 1;
     }
 
-    require SourceRange.TryCreate(int32.MaxValue, 0, out var distant);
-    require SourceRange.TryCreate(0, int32.MaxValue, out var excessive);
-    require SourceRange.TryCreate(Host.Source.Length, 2, out var past);
+    require SourceRange.TryCreate(int32.MaxValue, 0, init var distant);
+    require SourceRange.TryCreate(0, int32.MaxValue, init var excessive);
+    require SourceRange.TryCreate(Host.Source.Length, 2, init var past);
     if (StringLiteral.TryCreate(distant, out var distantLiteral)
         || StringLiteral.TryCreate(excessive, out var excessiveLiteral)
         || StringLiteral.TryCreate(past, out var pastLiteral)

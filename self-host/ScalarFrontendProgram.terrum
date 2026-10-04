@@ -12,7 +12,7 @@ int32 FindScalarProgramFunction(Token name)
     {
         int32 header = 8 + index * 428;
         require SourceRange.TryCreate(Host.FrontendProgram[header + 9],
-            Host.FrontendProgram[header + 10], out var span);
+            Host.FrontendProgram[header + 10], init var span);
         if (SameTokenSpelling(new Token(2, span), name)) { return index; }
     }
     return -1;
@@ -87,7 +87,7 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         require tokens.TryGet(index, out var token);
         require sourceTokens.TryAppend(token.Kind, token.Range.Start, token.Range.Length);
     }
-    require SourceRange.TryCreate(0, 0, out var empty);
+    require SourceRange.TryCreate(0, 0, init var empty);
     mut int32 start = 0;
     mut int32 functions = 0;
     while (start < count - 1)
@@ -176,7 +176,7 @@ bool TryPublishScalarFrontendProgram(out bool handled)
     {
         int32 header = 8 + index * 428;
         require SourceRange.TryCreate(Host.FrontendProgram[header + 9],
-            Host.FrontendProgram[header + 10], out var name);
+            Host.FrontendProgram[header + 10], init var name);
         if ((Host.FrontendProgram[header + 2] & 4) != 0
                 && Host.FrontendProgram[header + 5] != 0)
         {

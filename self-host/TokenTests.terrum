@@ -2,14 +2,14 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public static bool CheckToken()
 {
-    if (!SourceRange.TryCreate(2, 3, out var range))
+    if (!SourceRange.TryCreate(2, 3, init var range))
     {
         return false;
     }
 
     Token token = new Token(7, range);
     mut Token copy = token;
-    require SourceRange.TryCreateInit(int32.MaxValue - 1, 1, init var end);
+    require SourceRange.TryCreate(int32.MaxValue - 1, 1, init var end);
     copy = new Token(copy.Kind, end);
 
     return token.Kind == 7 && token.Range.End == 5

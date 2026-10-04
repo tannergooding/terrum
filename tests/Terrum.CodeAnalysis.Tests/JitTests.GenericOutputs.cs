@@ -28,8 +28,8 @@ public sealed partial class JitTests
                 return TrySelectCopyInit<T>(index, first, second, init result);
             }
             int32 Main() {
-                require SourceRange.TryCreate(12, 5, out var firstRange);
-                require SourceRange.TryCreate(42, 7, out var secondRange);
+                require SourceRange.TryCreate(12, 5, init var firstRange);
+                require SourceRange.TryCreate(42, 7, init var secondRange);
                 Token first = new Token(1, firstRange);
                 Token second = new Token(2, secondRange);
                 if (Choose<Token>(-1, first, second, out var absent)) { return 1; }

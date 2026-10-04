@@ -128,8 +128,8 @@ public sealed partial class JitTests
                 return SelectCopy(false, SelectCopy(true, first, second), second);
             }
             int32 Main() {
-                require SourceRange.TryCreate(12, 5, out var firstRange);
-                require SourceRange.TryCreate(42, 7, out var secondRange);
+                require SourceRange.TryCreate(12, 5, init var firstRange);
+                require SourceRange.TryCreate(42, 7, init var secondRange);
                 mut Token first = new Token(1, firstRange);
                 mut Token second = new Token(2, secondRange);
                 var chosen = Choose(first, second);

@@ -656,6 +656,7 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("uint64 Answer() { return +(42); }", 4)]
     [InlineData("uint64 Answer() { return (~42); }", 4)]
     [InlineData("float32 Answer() { return 42; }", 0)]
+    [InlineData("float64 Answer() { return 42; }", 0)]
     [InlineData("int32 Answer () { return 42; }", 0)]
     [InlineData("int32 Answer\n() { return 42; }", 0)]
     [InlineData("int32 Answer/* boundary */() { return 42; }", 0)]

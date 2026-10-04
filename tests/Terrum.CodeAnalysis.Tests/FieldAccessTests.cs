@@ -127,7 +127,7 @@ public sealed class FieldAccessTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var range = await File.ReadAllTextAsync(Path.Combine(root, "self-host", "SourceRange.terrum"));
-        var entry = "using Terrum.CodeAnalysis; int32 Main() { require SourceRange.TryCreate(0, 1, out var range); "
+        var entry = "using Terrum.CodeAnalysis; int32 Main() { require SourceRange.TryCreate(0, 1, init var range); "
             + "mut SourceRange copy = range; copy.Start = -1; return 0; }";
         var compilation = Compilation.Create([SyntaxTree.Parse(range), SyntaxTree.Parse(entry)]);
         Assert.True(compilation.HasErrors);

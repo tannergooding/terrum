@@ -26,7 +26,7 @@ public unique struct TokenTriviaSnapshot
 
         int32 offset = index * 4;
         require SourceRange.TryCreate(_records.Read(offset + 1), _records.Read(offset + 2),
-            out var range);
+            init var range);
         trivia = new Token(_records.Read(offset), range);
         owner = _records.Read(offset + 3);
         return true;

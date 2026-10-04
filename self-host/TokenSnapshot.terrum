@@ -25,7 +25,7 @@ public unique struct TokenSnapshot
 
         int32 offset = index * 3;
         require SourceRange.TryCreate(_records.Read(offset + 1), _records.Read(offset + 2),
-            out var range);
+            init var range);
         token = new Token(_records.Read(offset), range);
         return true;
     }
@@ -116,7 +116,7 @@ public unique struct TokenSnapshot
             }
             previous = op;
         }
-        require SourceRange.TryCreate(0, 0, out var empty);
+        require SourceRange.TryCreate(0, 0, init var empty);
         return empty;
     }
 
@@ -181,11 +181,11 @@ public unique struct TokenSnapshot
             if (records != 1 || matched == -1 || matched % 8 != end - start
                 || matched / 8 != first.Kind)
             {
-                require SourceRange.TryCreate(start, end - start, out var error);
+                require SourceRange.TryCreate(start, end - start, init var error);
                 return error;
             }
         }
-        require SourceRange.TryCreate(0, 0, out var empty);
+        require SourceRange.TryCreate(0, 0, init var empty);
         return empty;
     }
 

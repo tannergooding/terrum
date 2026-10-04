@@ -17,7 +17,7 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     }
 
     require tokens.TryGet(0, out var type);
-    if (!TryGetScalarType(type, out var selected) || selected == 6)
+    if (!TryGetScalarType(type, out var selected) || selected > 5)
     {
         return false;
     }
@@ -106,7 +106,7 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
         require tokens.TryGet(6, out var prefix);
         start = prefix.Range.Start;
     }
-    require SourceRange.TryCreate(start, end - start, out var scalar);
+    require SourceRange.TryCreate(start, end - start, init var scalar);
     scalarType = selected;
     name = function.Range;
     expression = scalar;

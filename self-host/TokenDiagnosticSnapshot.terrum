@@ -26,7 +26,7 @@ public unique struct TokenDiagnosticSnapshot
 
         int32 offset = index * 3;
         require SourceRange.TryCreate(_records.Read(offset + 1), _records.Read(offset + 2),
-            out var found);
+            init var found);
         code = _records.Read(offset);
         span = found;
         return true;
