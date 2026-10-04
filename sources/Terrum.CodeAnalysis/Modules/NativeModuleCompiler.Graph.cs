@@ -279,9 +279,7 @@ public static partial class NativeModuleCompiler
 
     private static CompilationReference GraphReference(GraphPackage[] providers)
     {
-        var references = providers.Select(provider => provider.IsLeaf
-            ? ModuleCompiler.CreateReference(provider.Contract)
-            : ModuleCompiler.CreateGraphReference(provider.Contract, provider.Exports, allowImportedCleanup: true)).ToArray();
+        var references = providers.Select(GetValidatedProviderReference).ToArray();
         var provenance = providers.Select((provider, index) =>
             ProviderOrigins(provider, references[index])).ToArray();
         var origins = references.Select((reference, index) => (IReadOnlyDictionary<string, string?>)
@@ -315,6 +313,10 @@ public static partial class NativeModuleCompiler
         return result;
     }
 
+    private static CompilationReference GetValidatedProviderReference(GraphPackage provider) =>
+        provider.ValidatedReference
+            ?? throw new InvalidOperationException("Native graph provider was not semantically validated.");
+
     private static NativeImportBinding[] NativeBindings(GraphDependency[] dependencies) =>
         [.. dependencies.SelectMany(item => item.Declarations.Select(name =>
             new NativeImportBinding(name, DllName(item.Identity), name)))];
@@ -322,8 +324,7 @@ public static partial class NativeModuleCompiler
     private static Dictionary<string, GraphTypeOrigin?> ProviderOrigins(GraphPackage provider,
         CompilationReference? reference = null)
     {
-        reference ??= provider.IsLeaf ? ModuleCompiler.CreateReference(provider.Contract)
-            : ModuleCompiler.CreateGraphReference(provider.Contract, provider.Exports, allowImportedCleanup: true);
+        reference ??= GetValidatedProviderReference(provider);
         if (provider.IsLeaf)
         {
             return reference.Structures.ToDictionary(static item => item.Name,

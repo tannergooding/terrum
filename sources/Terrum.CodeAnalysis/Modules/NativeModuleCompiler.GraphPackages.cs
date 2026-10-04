@@ -24,16 +24,19 @@ public static partial class NativeModuleCompiler
     {
         public bool IsLeaf { get; init; }
         public GraphTypeOrigin[] Origins { get; init; } = [];
+        public CompilationReference? ValidatedReference { get; init; }
     }
 
     private static GraphPackage[] ReadGraphProviders(IReadOnlyList<byte[]> artifacts)
     {
         ArgumentNullException.ThrowIfNull(artifacts);
-        if (artifacts.Count is < 1 or > 16)
-        {
-            throw new ModuleContractException("Native graphs require 1 to 16 selected producers.");
-        }
-        var providers = artifacts.Select(ReadGraphPackage).ToArray();
+        ValidateGraphProviderCount(artifacts.Count);
+        return ValidateGraphProviders(artifacts.Select(ReadGraphPackage).ToArray());
+    }
+
+    private static GraphPackage[] ValidateGraphProviders(GraphPackage[] providers)
+    {
+        ValidateGraphProviderCount(providers.Length);
         var identities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var provider in providers)
         {
@@ -49,17 +52,26 @@ public static partial class NativeModuleCompiler
         return [.. providers.OrderBy(static item => item.Identity, StringComparer.OrdinalIgnoreCase)];
     }
 
+    private static void ValidateGraphProviderCount(int count)
+    {
+        if (count is < 1 or > 16)
+        {
+            throw new ModuleContractException("Native graphs require 1 to 16 selected producers.");
+        }
+    }
+
     private static GraphPackage ReadGraphPackage(byte[] artifact)
     {
         ArgumentNullException.ThrowIfNull(artifact);
         if (artifact.AsSpan().StartsWith("TNPK"u8))
         {
             var leaf = Read(artifact);
-            var reference = ValidateProducer(leaf);
+            var leafReference = ValidateProducer(leaf);
             return new GraphPackage(false, leaf.Identity, leaf.Policy,
-                [.. reference.Functions.Select(static item => item.Name)
+                [.. leafReference.Functions.Select(static item => item.Name)
                     .Order(StringComparer.Ordinal)], [], leaf.Contract, leaf.Image) {
                 IsLeaf = true,
+                ValidatedReference = leafReference,
             };
         }
         if (artifact.Length is < GraphHeaderSize + HashSize or > GraphMaximumBytes)
@@ -181,8 +193,17 @@ public static partial class NativeModuleCompiler
         }
         var contract = bytes.AsSpan(at, contractLength).ToArray();
         var policy = (NativeRuntimePolicy)bytes[6];
-        var contractPolicy = consumer ? ModuleCompiler.ReadNativeProfile(contract, true).RuntimePolicy
-            : ModuleCompiler.CreateGraphReference(contract, exports, allowImportedCleanup: true).RuntimePolicy;
+        CompilationReference? reference = null;
+        BoundRuntimePolicy contractPolicy;
+        if (consumer)
+        {
+            contractPolicy = ModuleCompiler.ReadNativeProfile(contract, true).RuntimePolicy;
+        }
+        else
+        {
+            reference = ModuleCompiler.CreateGraphReference(contract, exports, allowImportedCleanup: true);
+            contractPolicy = reference.RuntimePolicy;
+        }
         if (contractPolicy != (BoundRuntimePolicy)policy)
         {
             throw new ModuleFormatException("Graph package and semantic runtime policies differ.");
@@ -190,6 +211,7 @@ public static partial class NativeModuleCompiler
         var image = bytes.AsSpan(at + contractLength, imageLength).ToArray();
         var package = new GraphPackage(consumer, identity, policy, exports, dependencies, contract, image) {
             Origins = origins,
+            ValidatedReference = reference,
         };
         var imported = consumer ? ModuleCompiler.GetConsumerSetDeclarations(contract)
             : ModuleCompiler.GetGraphImports(contract);

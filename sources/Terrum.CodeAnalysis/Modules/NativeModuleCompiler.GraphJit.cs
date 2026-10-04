@@ -69,14 +69,16 @@ public static partial class NativeModuleCompiler
         var rootBytes = (byte[])consumer.Clone();
         var selected = inputs.Select(static bytes => (byte[])bytes.Clone()).ToArray();
         var root = ReadGraphPackage(rootBytes);
-        var providers = ReadGraphProviders(selected);
+        ValidateGraphProviderCount(selected.Length);
+        var indexed = selected.Select(bytes => (Bytes: bytes, Package: ReadGraphPackage(bytes))).ToArray();
+        var providers = ValidateGraphProviders(indexed.Select(static item => item.Package).ToArray());
         if (root.Policy != runtimePolicy)
         {
             throw new ModuleContractException("Selected graph JIT runtime policy differs from persisted consumer.");
         }
         _ = CheckGraph(root, providers);
-        var indexed = selected.Select(bytes => (Bytes: bytes, Package: ReadGraphPackage(bytes)))
-            .ToDictionary(static item => item.Package.Identity!, StringComparer.Ordinal);
+        var indexedByIdentity = indexed.ToDictionary(static item => item.Package.Identity!,
+            StringComparer.Ordinal);
         cancellationToken.ThrowIfCancellationRequested();
         var directory = Directory.CreateTempSubdirectory("terrum-graph-jit-").FullName;
         var paths = new List<string>();
@@ -92,7 +94,7 @@ public static partial class NativeModuleCompiler
                     + (provider.IsLeaf ? ".trmn" : ".trng"));
                 packagePaths.Add(artifactPath);
                 paths.Add(artifactPath);
-                await WriteNewAsync(artifactPath, indexed[provider.Identity!].Bytes, cancellationToken)
+                await WriteNewAsync(artifactPath, indexedByIdentity[provider.Identity!].Bytes, cancellationToken)
                     .ConfigureAwait(false);
                 var imagePath = Path.Combine(directory, DllName(provider.Identity!));
                 paths.Add(imagePath);
