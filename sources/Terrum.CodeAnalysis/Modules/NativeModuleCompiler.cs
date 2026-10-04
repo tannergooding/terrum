@@ -54,8 +54,7 @@ public static partial class NativeModuleCompiler
     public static CompilationReference CreateReference(byte[] producer)
     {
         var package = Read(producer);
-        ValidateProducer(package);
-        return ModuleCompiler.CreateReference(package.Contract);
+        return ValidateProducer(package);
     }
 
     /// <summary>Stores a verified semantic consumer and a native EXE bound by name to one producer DLL.</summary>
@@ -254,7 +253,7 @@ public static partial class NativeModuleCompiler
             allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
     }
 
-    private static void ValidateProducer(Package producer)
+    private static CompilationReference ValidateProducer(Package producer)
     {
         if (producer.IsConsumer)
         {
@@ -270,6 +269,7 @@ public static partial class NativeModuleCompiler
             [.. reference.Functions.Select(static function => function.Name)], producer.Policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
             allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
+        return reference;
     }
 
     private static byte[] Write(bool isConsumer, string identity, NativeRuntimePolicy policy, byte[] contract,

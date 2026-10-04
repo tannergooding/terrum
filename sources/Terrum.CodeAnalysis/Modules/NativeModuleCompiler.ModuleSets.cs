@@ -25,11 +25,13 @@ public static partial class NativeModuleCompiler
     private const int SetMaximumBytes = 16 * 1024 * 1024;
     private const int SetHeaderSize = 16;
 
+    private sealed record ValidatedProvider(Package Package, CompilationReference Reference);
+
     /// <summary>Combines independent declarations without reading or rebinding producer source.</summary>
     public static CompilationReference CreateReferenceSet(IReadOnlyList<byte[]> producers)
     {
         var packages = ReadProviders(producers);
-        return ModuleCompiler.CreateReferenceSet([.. packages.Select(static item => item.Contract)]);
+        return CreateReferenceSet(packages);
     }
 
     /// <summary>Emits the consumer once, binding its imports to checked producer identities.</summary>
@@ -43,18 +45,19 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleContractException("Consumer and selected native runtime policies differ.");
         }
-        var contracts = providers.Select(static item => item.Contract).ToArray();
-        var semantic = ModuleCompiler.CreateConsumerSet(program, contracts);
+        var referenceSet = CreateReferenceSet(providers);
+        var semantic = ModuleCompiler.CreateConsumerAgainstReference(program, referenceSet,
+            allowManagedParticipant: true);
+        ModuleCompiler.ValidateConsumerAgainstReference(semantic, referenceSet);
         var imports = ModuleCompiler.GetConsumerSetDeclarations(semantic).ToHashSet(StringComparer.Ordinal);
         var bindings = new List<NativeImportBinding>();
         foreach (var provider in providers)
         {
-            var reference = ModuleCompiler.CreateReference(provider.Contract);
-            foreach (var function in reference.Functions)
+            foreach (var function in provider.Reference.Functions)
             {
                 if (program.Functions.Any(item => item.IsExternal && item.Name == function.Name))
                 {
-                    bindings.Add(new NativeImportBinding(function.Name, DllName(provider.Identity), function.Name));
+                    bindings.Add(new NativeImportBinding(function.Name, DllName(provider.Package.Identity), function.Name));
                 }
             }
         }
@@ -123,9 +126,9 @@ public static partial class NativeModuleCompiler
             await WriteNewAsync(executable, set.Image, cancellationToken).ConfigureAwait(false);
             foreach (var provider in providers)
             {
-                var path = Path.Combine(directory, DllName(provider.Identity));
+                var path = Path.Combine(directory, DllName(provider.Package.Identity));
                 paths.Add(path);
-                await WriteNewAsync(path, provider.Image, cancellationToken).ConfigureAwait(false);
+                await WriteNewAsync(path, provider.Package.Image, cancellationToken).ConfigureAwait(false);
             }
             cancellationToken.ThrowIfCancellationRequested();
             using var process = Process.Start(new ProcessStartInfo(executable) {
@@ -164,7 +167,7 @@ public static partial class NativeModuleCompiler
         }
     }
 
-    private static Package[] ReadProviders(IReadOnlyList<byte[]> producers)
+    private static ValidatedProvider[] ReadProviders(IReadOnlyList<byte[]> producers)
     {
         ArgumentNullException.ThrowIfNull(producers);
         if (producers.Count is < 2 or > 16)
@@ -172,10 +175,12 @@ public static partial class NativeModuleCompiler
             throw new ModuleContractException("A native module set requires 2 to 16 producers.");
         }
         var packages = producers.Select(Read).ToArray();
+        var providers = new ValidatedProvider[packages.Length];
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var package in packages)
+        for (var i = 0; i < packages.Length; i++)
         {
-            ValidateProducer(package);
+            var package = packages[i];
+            var reference = ValidateProducer(package);
             if (!names.Add(package.Identity))
             {
                 throw new ModuleContractException("Duplicate or case-ambiguous provider identity.");
@@ -184,32 +189,34 @@ public static partial class NativeModuleCompiler
             {
                 throw new ModuleContractException("Native module set runtime policies differ.");
             }
+            providers[i] = new ValidatedProvider(package, reference);
         }
-        return [.. packages.OrderBy(static item => item.Identity, StringComparer.OrdinalIgnoreCase)];
+        return [.. providers.OrderBy(static item => item.Package.Identity, StringComparer.OrdinalIgnoreCase)];
     }
 
-    private static void ValidateSet(SetPackage set, Package[] providers)
+    private static void ValidateSet(SetPackage set, ValidatedProvider[] providers)
     {
-        if (set.Dependencies.Length != providers.Length || set.Policy != providers[0].Policy)
+        if (set.Dependencies.Length != providers.Length || set.Policy != providers[0].Package.Policy)
         {
             throw new ModuleContractException("Missing, extra or policy-incompatible native dependency.");
         }
         var providerExports = new HashSet<string>[providers.Length];
         for (var i = 0; i < providers.Length; i++)
         {
-            if (set.Dependencies[i].Identity != providers[i].Identity)
+            var provider = providers[i];
+            if (set.Dependencies[i].Identity != provider.Package.Identity)
             {
                 throw new ModuleContractException("Missing, extra or identity-incompatible native dependency.");
             }
-            var functions = ModuleCompiler.CreateReference(providers[i].Contract).Functions;
+            var functions = provider.Reference.Functions;
             var exports = functions.Select(static item => item.Name).ToArray();
             providerExports[i] = exports.ToHashSet(StringComparer.Ordinal);
-            var providerProfile = ModuleCompiler.GetNativeProfileVersion(providers[i].Contract, false);
-            NativeModuleImageValidator.Validate(providers[i].Image, false, DllName(providers[i].Identity),
-                exports, providers[i].Policy, allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(providerProfile),
+            var providerProfile = ModuleCompiler.GetNativeProfileVersion(provider.Package.Contract, false);
+            NativeModuleImageValidator.Validate(provider.Package.Image, false, DllName(provider.Package.Identity),
+                exports, provider.Package.Policy, allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(providerProfile),
                 allowManagedRuntimeData: AllowsManagedRuntimeData(providerProfile));
         }
-        var referenceSet = ModuleCompiler.CreateReferenceSet([.. providers.Select(static item => item.Contract)]);
+        var referenceSet = CreateReferenceSet(providers);
         ModuleCompiler.ValidateConsumerAgainstReference(set.Contract, referenceSet);
         var actual = ModuleCompiler.GetConsumerSetDeclarations(set.Contract).ToHashSet(StringComparer.Ordinal);
         var mapped = set.Dependencies.SelectMany(static item => item.Imports).ToHashSet(StringComparer.Ordinal);
@@ -245,7 +252,7 @@ public static partial class NativeModuleCompiler
                 static item => (IReadOnlyList<string>)item.MachineImports,
                 StringComparer.Ordinal);
 
-    private static byte[] WriteSet(Package[] providers, NativeRuntimePolicy policy, byte[] contract, byte[] image,
+    private static byte[] WriteSet(ValidatedProvider[] providers, NativeRuntimePolicy policy, byte[] contract, byte[] image,
         IReadOnlyList<NativeImportBinding> used)
     {
         var imports = ModuleCompiler.GetConsumerSetDeclarations(contract).ToHashSet(StringComparer.Ordinal);
@@ -259,14 +266,14 @@ public static partial class NativeModuleCompiler
         writer.Write(image.Length);
         foreach (var provider in providers)
         {
-            var names = ModuleCompiler.CreateReference(provider.Contract).Functions
+            var names = provider.Reference.Functions
                 .Select(static item => item.Name).Where(imports.Contains).Order(StringComparer.Ordinal).ToArray();
             if (names.Length == 0)
             {
                 throw new ModuleContractException("Every selected dependency must supply a called import.");
             }
-            writer.Write((byte)provider.Identity.Length);
-            writer.Write(Encoding.ASCII.GetBytes(provider.Identity));
+            writer.Write((byte)provider.Package.Identity.Length);
+            writer.Write(Encoding.ASCII.GetBytes(provider.Package.Identity));
             writer.Write((ushort)names.Length);
             foreach (var name in names)
             {
@@ -278,7 +285,7 @@ public static partial class NativeModuleCompiler
                 writer.Write((ushort)bytes.Length);
                 writer.Write(bytes);
             }
-            var actual = used.Where(item => item.DllName == DllName(provider.Identity))
+            var actual = used.Where(item => item.DllName == DllName(provider.Package.Identity))
                 .Select(static item => item.FunctionName).Order(StringComparer.Ordinal).ToArray();
             if (actual.Any(name => Array.BinarySearch(names, name, StringComparer.Ordinal) < 0))
             {
@@ -290,7 +297,7 @@ public static partial class NativeModuleCompiler
                 PutGraphString(writer, name);
             }
         }
-        if (used.Count != providers.Sum(provider => used.Count(item => item.DllName == DllName(provider.Identity))))
+        if (used.Count != providers.Sum(provider => used.Count(item => item.DllName == DllName(provider.Package.Identity))))
         {
             throw new ModuleFormatException("Native set machine import has no selected provider.");
         }
@@ -303,6 +310,9 @@ public static partial class NativeModuleCompiler
         var bytesOut = stream.ToArray();
         return [.. bytesOut, .. SHA256.HashData(bytesOut)];
     }
+
+    private static CompilationReference CreateReferenceSet(ValidatedProvider[] providers) =>
+        ModuleCompiler.CreateReferenceSetFromReferences([.. providers.Select(static item => item.Reference)]);
 
     private static SetPackage ReadSet(byte[] artifact)
     {

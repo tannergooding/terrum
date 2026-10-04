@@ -14,10 +14,28 @@ public static partial class ModuleCompiler
     public static CompilationReference CreateReferenceSet(IReadOnlyList<byte[]> producers)
     {
         var modules = ReadSet(producers);
+        var references = modules.Select(SetReference).ToArray();
+        return CreateReferenceSetFromReferences(references);
+    }
+
+    internal static CompilationReference CreateReferenceSetFromReferences(
+        IReadOnlyList<CompilationReference> references)
+    {
+        ArgumentNullException.ThrowIfNull(references);
+        if (references.Count is < 2 or > 16)
+        {
+            throw new ModuleContractException("A native module set requires 2 to 16 producers.");
+        }
+        foreach (var reference in references)
+        {
+            if (reference.RuntimePolicy != references[0].RuntimePolicy)
+            {
+                throw new ModuleContractException("Native module set runtime policies differ.");
+            }
+        }
         var types = ImmutableArray.CreateBuilder<BoundStruct>();
         var functions = ImmutableArray.CreateBuilder<BoundFunction>();
         var names = new HashSet<string>(StringComparer.Ordinal);
-        var references = modules.Select(SetReference).ToArray();
         foreach (var reference in references)
         {
             foreach (var structure in reference.Structures)
@@ -50,7 +68,7 @@ public static partial class ModuleCompiler
                 functions.Add(RemapFunction(function, reference.Structures, allTypes));
             }
         }
-        return new CompilationReference(allTypes, functions.ToImmutable(), modules[0].RuntimePolicy);
+        return new CompilationReference(allTypes, functions.ToImmutable(), references[0].RuntimePolicy);
     }
     private static CompilationReference SetReference(Module module)
     {

@@ -80,6 +80,24 @@ public sealed class NativeModuleSetsTests
     }
 
     [Fact]
+    public void ProviderIdentityOrderControlsReferenceAndPersistedDependencyOrder()
+    {
+        var firstByIdentity = Producer(Beta, "Beta", "AProvider");
+        var secondByIdentity = Producer(Alpha, "Alpha", "ZProvider");
+        var providers = new[] { secondByIdentity, firstByIdentity };
+        var reference = NativeModuleCompiler.CreateReferenceSet(providers);
+        Assert.Equal(["Beta", "Alpha"], reference.Functions.Select(static function => function.Name));
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(Consumer), reference);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumerSet(Assert.IsType<BoundProgram>(compilation.Program),
+            providers, NativeRuntimePolicy.FailFast);
+
+        Assert.Equal(["AProvider", "ZProvider"], NativeModuleCompiler.InspectConsumerSet(consumer).Dependencies);
+        NativeModuleCompiler.ValidateConsumerSet(consumer, providers);
+    }
+
+    [Fact]
     public void RejectsMissingDuplicateAmbiguousAndIncompatibleDependencies()
     {
         var alpha = Producer(Alpha, "Alpha", "First");
