@@ -71,6 +71,8 @@ public static partial class TrRmExecutableCompiler
         var functionFeatures = new (bool HasFloatingTypes, bool HasIndexedFlow)[program.Functions.Length];
         var hasFloatingTypes = false;
         var parameterCount = 0;
+        var effectCount = 0;
+        var exportCount = 0;
         for (var index = 0; index < program.Functions.Length; index++)
         {
             var function = program.Functions[index];
@@ -78,6 +80,8 @@ public static partial class TrRmExecutableCompiler
             functionFeatures[index] = features;
             hasFloatingTypes |= features.HasFloatingTypes;
             parameterCount = checked(parameterCount + function.ParameterCount);
+            effectCount += function.IsNoThrow || function.DoesNotReturn ? 1 : 0;
+            exportCount += !function.IsPrivate && !function.IsInternal ? 1 : 0;
         }
         var names = new List<(string Text, int Encoding)>(program.Functions.Length + 1)
         {
@@ -89,8 +93,8 @@ public static partial class TrRmExecutableCompiler
         var signatures = new List<TrRmMethodSigRow>(program.Functions.Length);
         var parameters = new List<TrRmParamRow>(parameterCount);
         var methods = new List<TrRmMethodDefRow>(program.Functions.Length);
-        var effects = new List<TrRmContractRow>();
-        var exports = new List<TrRmExportRow>();
+        var effects = new List<TrRmContractRow>(effectCount);
+        var exports = new List<TrRmExportRow>(exportCount);
         for (var index = 0; index < program.Functions.Length; index++)
         {
             var function = program.Functions[index];
@@ -253,7 +257,7 @@ public static partial class TrRmExecutableCompiler
         var parameters = paramCount == 0 ? default
             : new TrRmParamTableReader(paramBytes, paramCount, sigs, types);
         var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
-        var declaredExports = new HashSet<int>();
+        var declaredExports = new HashSet<int>(exportCount);
         for (var row = 0; row < exportCount; row++)
         {
             var id = BinaryPrimitives.ReadUInt32LittleEndian(exportBytes.Slice(row * 8));
@@ -268,7 +272,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var functions = ImmutableArray.CreateBuilder<BoundFunction>(methodCount);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var seen = new HashSet<string>(methodCount, StringComparer.Ordinal);
         var usedSignatures = new bool[sigCount + 1];
         for (var row = 1; row <= methodCount; row++)
         {
@@ -289,7 +293,7 @@ public static partial class TrRmExecutableCompiler
             usedSignatures[signature] = true;
 
             var (first, count) = sigs.GetParamRange(signature);
-            var variables = ImmutableArray.CreateBuilder<BoundVariable>();
+            var variables = ImmutableArray.CreateBuilder<BoundVariable>(count);
             for (var param = 0; param < count; param++)
             {
                 var type = FromRow(types, parameters.GetTypeSpec(first + param));
