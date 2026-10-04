@@ -153,23 +153,24 @@ mut class ScalarFrontendState
         return _hasStructuredStatement;
     }
 
-    public mut bool TryInventoryHeader(out ScalarFrontendResult result, out int32 end)
+    internal mut bool TryInventoryHeader(init ref<ScalarFrontendResult> result, out int32 end)
     {
         end = 0;
         require SourceRange.TryCreate(0, 0, init var empty);
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
         if (!ParseHeader(init var selected, init var name))
         {
-            return TryCreateScalarFrontendError(_error, _errorSpan, out result);
+            return TryCreateScalarFrontendError(_error, _errorSpan, init result);
         }
         end = _at;
         if (!ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
             selected, _parameterCount, _firstType, _secondType, _thirdType,
             _outParameterMask & 63, name, _first.Range, _second.Range, _third.Range,
-            false, false, absent, absent, absent, out result))
+            false, false, absent, absent, absent, out var created))
         {
             return false;
         }
+        result = created;
         return true;
     }
 
@@ -2503,7 +2504,7 @@ mut class ScalarFrontendState
         return false;
     }
 
-    public mut bool TryParseStructuredReturns(out ScalarFrontendResult result)
+    internal mut bool TryParseStructuredReturns(init ref<ScalarFrontendResult> result)
     {
         require SourceRange.TryCreate(0, 0, init var empty);
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
@@ -2541,15 +2542,20 @@ mut class ScalarFrontendState
             {
                 Host.Frontend[index] = 0;
             }
-            return TryCreateScalarFrontendError(_error, _errorSpan, out result);
+            return TryCreateScalarFrontendError(_error, _errorSpan, init result);
         }
         Host.Frontend[38] = -1;
         Host.Frontend[39] = -1;
         Host.Frontend[40] = -1;
-        return ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
+        if (!ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
             returnType, _parameterCount, _firstType, _secondType, _thirdType, _outParameterMask & 63,
             name, _first.Range, _second.Range, _third.Range,
-            false, false, absent, absent, absent, out result);
+            false, false, absent, absent, absent, out var created))
+        {
+            return false;
+        }
+        result = created;
+        return true;
     }
 
     private bool HasStructuredCompletion(int32 returnType, bool hasTerminatingStatement)
@@ -3864,7 +3870,7 @@ mut class ScalarFrontendState
         return true;
     }
 
-    public mut bool TryParseTree(out ScalarFrontendResult result)
+    internal mut bool TryParseTree(init ref<ScalarFrontendResult> result)
     {
         require SourceRange.TryCreate(0, 0, init var empty);
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
@@ -4005,7 +4011,7 @@ mut class ScalarFrontendState
             {
                 Host.Frontend[index] = 0;
             }
-            return TryCreateScalarFrontendError(_error, _errorSpan, out result);
+            return TryCreateScalarFrontendError(_error, _errorSpan, init result);
         }
         Host.Frontend[38] = condition;
         Host.Frontend[39] = whenTrue;
@@ -4014,14 +4020,15 @@ mut class ScalarFrontendState
         if (!ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
             returnType, _parameterCount, _firstType, _secondType, _thirdType, _outParameterMask & 63,
             name, _first.Range, _second.Range, _third.Range,
-            hasCondition, hasFallthrough, absent, absent, absent, out result))
+            hasCondition, hasFallthrough, absent, absent, absent, out var created))
         {
             return false;
         }
+        result = created;
         return true;
     }
 
-    public mut bool TryParse(out ScalarFrontendResult result)
+    internal mut bool TryParse(init ref<ScalarFrontendResult> result)
     {
         require SourceRange.TryCreate(0, 0, init var empty);
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
@@ -4095,11 +4102,16 @@ mut class ScalarFrontendState
         }
         if (_error != 0)
         {
-            return TryCreateScalarFrontendError(_error, _errorSpan, out result);
+            return TryCreateScalarFrontendError(_error, _errorSpan, init result);
         }
-        return ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty, returnType, _parameterCount,
+        if (!ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty, returnType, _parameterCount,
             _firstType, _secondType, _thirdType, _outParameterMask, name, _first.Range, _second.Range, _third.Range,
-            hasCondition, hasFallthrough, condition, whenTrue, whenFalse, out result);
+            hasCondition, hasFallthrough, condition, whenTrue, whenFalse, out var created))
+        {
+            return false;
+        }
+        result = created;
+        return true;
     }
 }
 
@@ -4129,27 +4141,32 @@ bool IsScalarFrontendBinaryTypeValid(int32 operation, int32 left, int32 right)
     return left >= 1 && left <= 4;
 }
 
-bool TryCreateScalarFrontendError(int32 code, SourceRange span, out ScalarFrontendResult result)
+bool TryCreateScalarFrontendError(int32 code, SourceRange span, init ref<ScalarFrontendResult> result)
 {
     require SourceRange.TryCreate(0, 0, init var empty);
     require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
-    return ScalarFrontendResult.TryCreate(false, false, code, span, 0, 0, 0, 0, 0,
-        0, empty, empty, empty, empty, false, false, absent, absent, absent, out result);
+    if (!ScalarFrontendResult.TryCreate(false, false, code, span, 0, 0, 0, 0, 0,
+        0, empty, empty, empty, empty, false, false, absent, absent, absent, out var created))
+    {
+        return false;
+    }
+    result = created;
+    return true;
 }
 
-bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult result)
+bool TryParseScalarFrontend(TokenSnapshot tokens, init ref<ScalarFrontendResult> result)
 {
     require SourceRange.TryCreate(0, 0, init var empty);
     int32 count = tokens.GetCount();
     if (count > 64)
     {
         require tokens.TryGet(64, init var excess);
-        return TryCreateScalarFrontendError(1, excess.Range, out result);
+        return TryCreateScalarFrontendError(1, excess.Range, init result);
     }
     var spacing = tokens.GetScalarOperatorSpacingError();
     if (spacing.Length != 0)
     {
-        return TryCreateScalarFrontendError(1, spacing, out result);
+        return TryCreateScalarFrontendError(1, spacing, init result);
     }
     if (count < 1 || !ManagedTokenChain.TryCreate(out var chain))
     {
@@ -4173,7 +4190,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     {
         return false;
     }
-    if (!state.TryParse(out var legacy))
+    if (!state.TryParse(init var legacy))
     {
         return false;
     }
@@ -4186,7 +4203,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     {
         return false;
     }
-    if (!tree.TryParseTree(out var modern))
+    if (!tree.TryParseTree(init var modern))
     {
         return false;
     }
@@ -4203,7 +4220,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
         }
     }
     if (ScalarFrontendState.TryCreate(chain, empty, out var structured)
-        && structured.TryParseStructuredReturns(out var completed))
+        && structured.TryParseStructuredReturns(init var completed))
     {
         if (completed.IsValid)
         {
@@ -4293,13 +4310,13 @@ bool IsScalarFrontendParameterBinary(ScalarFrontendExpression expression, int32 
     return expression.RightParameter >= 1;
 }
 
-bool TryScanScalarFrontend(out ScalarFrontendResult result)
+bool TryScanScalarFrontend(init ref<ScalarFrontendResult> result)
 {
     if (!TokenSnapshot.TryScan(init var tokens))
     {
         return false;
     }
-    return TryParseScalarFrontend(move tokens, out result);
+    return TryParseScalarFrontend(move tokens, init result);
 }
 
 // Pack at most four validated UTF16 source units, first unit in the low16bits.

@@ -26,7 +26,7 @@ bool TryPublishScalarFrontend()
     if (Host.FrontendProgram.Length != 4284) { return false; }
     if (!TryPublishScalarFrontendProgram(out var handled)) { return false; }
     if (handled) { return true; }
-    if (Host.Frontend.Length != 392 || !TryScanScalarFrontend(out var result))
+    if (Host.Frontend.Length != 392 || !TryScanScalarFrontend(init var result))
     {
         return false;
     }

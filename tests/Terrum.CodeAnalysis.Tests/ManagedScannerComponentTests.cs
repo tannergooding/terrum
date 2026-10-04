@@ -2663,7 +2663,7 @@ public sealed partial class ManagedScannerComponentTests
             _ => throw new InvalidOperationException(firstTypeText),
         };
         var assertion = $$"""
-            require TryScanScalarFrontend(out var result);
+            require TryScanScalarFrontend(init var result);
             if (!result.IsValid || result.ErrorCode != 0
                 || result.ReturnType != {{returnType}} || result.ParameterCount != {{count}}
                 || result.Name.Start != {{functionName.Start}}
@@ -2813,7 +2813,7 @@ public sealed partial class ManagedScannerComponentTests
             + $" require TokenSnapshot.TryBuild({kinds.Length + 1}, init var tokens);"
             + " var error = tokens.GetScalarOperatorSpacingError();"
             + $" if (error.Start != 0 || error.Length != {text.Length}) {{ return 1; }}"
-            + " require TryParseScalarFrontend(move tokens, out var result);"
+            + " require TryParseScalarFrontend(move tokens, init var result);"
             + $" if (result.IsValid || result.ErrorSpan.Start != 0 || result.ErrorSpan.Length != {text.Length}) {{ return 2; }}"
             + " return 42; }");
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
@@ -2844,7 +2844,7 @@ public sealed partial class ManagedScannerComponentTests
                 var spacing = tokens.GetScalarOperatorSpacingError();
                 if (spacing.Start != {{expectedStart}}) { return 1; }
                 if (spacing.Length != {{offending.Length}}) { return 2; }
-                require TryParseScalarFrontend(move tokens, out var result);
+                require TryParseScalarFrontend(move tokens, init var result);
                 if (result.IsValid != {{(offending.Length == 0 ? "true" : "false")}}) { return 3; }
                 if (result.ErrorSpan.Start != {{expectedStart}}) { return 4; }
                 if (result.ErrorSpan.Length != {{offending.Length}}) { return 5; }
@@ -2906,7 +2906,7 @@ public sealed partial class ManagedScannerComponentTests
             using Terrum.CodeAnalysis;
             int32 Main() {
                 require TokenSnapshot.TryScan(init var tokens);
-                require TryParseScalarFrontend(move tokens, out var result);
+                require TryParseScalarFrontend(move tokens, init var result);
                 if (result.IsValid || result.ErrorCode != {{code}}
                     || result.ErrorSpan.Start != {{expectedStart}}
                     || result.ErrorSpan.Length != {{expectedLength}}
@@ -2937,7 +2937,7 @@ public sealed partial class ManagedScannerComponentTests
             using Terrum.CodeAnalysis;
             int32 Main() {
                 require TokenSnapshot.TryScan(init var tokens);
-                require TryParseScalarFrontend(move tokens, out var result);
+                require TryParseScalarFrontend(move tokens, init var result);
                 if (result.IsValid || result.ErrorCode != 1
                     || result.ErrorSpan.Start != {{excess.Start}}
                     || result.ErrorSpan.Length != {{excess.Length}}
@@ -2963,7 +2963,7 @@ public sealed partial class ManagedScannerComponentTests
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                if (TryScanScalarFrontend(out var result)) { return 1; }
+                if (TryScanScalarFrontend(init var result)) { return 1; }
                 require TokenDiagnosticSnapshot.TryBuild(init var diagnostics);
                 if (diagnostics.GetCount() != 1) { return 2; }
                 require diagnostics.TryGet(0, init var code, init var span);

@@ -94,7 +94,7 @@ bool TryPublishScalarFrontendProgram(out bool handled)
     {
         if (!CopyScalarProgramTokens(sourceTokens, start, count - 1, out var remaining)
             || !ScalarFrontendState.TryCreate(remaining, empty, out var probe)
-            || !probe.TryInventoryHeader(out var header, out var headerEnd))
+            || !probe.TryInventoryHeader(init var header, out var headerEnd))
         {
             return false;
         }
@@ -200,7 +200,7 @@ bool TryPublishScalarFrontendProgram(out bool handled)
         if (!CopyScalarProgramTokens(sourceTokens, Host.FrontendProgram[frame],
                 Host.FrontendProgram[frame + 1], out var chain)
             || !ScalarFrontendState.TryCreate(chain, empty, out var tree)
-            || !tree.TryParseTree(out var treeResult))
+            || !tree.TryParseTree(init var treeResult))
         {
             return false;
         }
@@ -213,7 +213,7 @@ bool TryPublishScalarFrontendProgram(out bool handled)
                 Host.FrontendProgram[frame + 396 + node] = -1;
             }
             if (!ScalarFrontendState.TryCreate(chain, empty, out var structured)
-                || !structured.TryParseStructuredReturns(out var completed))
+                || !structured.TryParseStructuredReturns(init var completed))
             {
                 return false;
             }

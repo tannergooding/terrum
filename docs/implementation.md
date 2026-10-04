@@ -1226,7 +1226,10 @@ encoded as a distinct fail-fast operation under its unapproved
 [TRRM proposal](proposals/floating-to-integer-trrm-conversions.md); checked-
 exception TRRM remains unsupported. These are not part of the approved
 `(1, 0)` Body profile.
-Frontend verification/emission remains hosted.
+The Terrum-authored scalar frontend publishes result/error objects through
+vacancy-only `init ref` outputs: a false return publishes no object, while a
+handled parse diagnostic is carried by a constructed result. Frontend
+verification/emission remains hosted.
 Existing source function and local shadowing keeps its ordinary call-binding
 precedence. Top-level generic function templates support multiple independently
 constrained type parameters over eligible `Copy` structs, scalar value types,
