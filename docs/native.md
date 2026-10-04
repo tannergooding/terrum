@@ -229,9 +229,11 @@ persisted consumers cover the bounded component; no ABI/profile change,
 general call syntax, field mutation or nominal operation is added.
 
 The same v85 scalar frontend projections also carry same-format `float32` and
-`float64` unary signs, `+`, `-`, `*`, `/` and IEEE comparisons for typed
-values. Floating literal construction and conversions remain outside this
-frontend subset, and source-free TRRM still has no floating operators.
+`float64` unary signs, target-typed decimal and hexadecimal floating literals,
+based integer literals directly targeting either format, `+`, `-`, `*`, `/`
+and IEEE comparisons. The hosted reader validates source token spans and
+reconstructs exact target-format literal bits; conversions remain outside
+this subset. Source-free TRRM still has no floating operators.
 Verification and emission continue through the hosted implementation; this
 adds no projection layout or native ABI change.
 

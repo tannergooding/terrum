@@ -31,11 +31,13 @@ and audits are in the
 [implementation reference](../docs/implementation.md). General attributes,
 binding and broader call forms remain outside the frontend's subset.
 The bounded Terrum-authored scalar frontend now projects same-format
-`float32`/`float64` unary signs, `+`, `-`, `*`, `/` and IEEE comparisons for
-typed values.
-Floating literal construction and conversions remain outside its subset, and
-source-free TRRM still has no floating operators. The frontend candidates
-continue to depend on the hosted verifier/emitter for supported executions.
+`float32`/`float64` unary signs, target-typed decimal and hexadecimal floating
+literals, based integer literals directly targeting either format, `+`, `-`,
+`*`, `/` and IEEE comparisons. The hosted reader validates token spans and
+reconstructs exact target-format literal bits; floating conversions remain
+outside its subset. Source-free TRRM still has no floating operators. The
+frontend candidates continue to depend on the hosted
+verifier/emitter for supported executions.
 The provisional hosted `char16`-to-floating conversion likewise remains
 outside both paths; it treats the code unit as an unsigned numeric value and
 follows an unapproved eligibility proposal.
@@ -770,9 +772,12 @@ publishing integer magnitudes; the hosted binder constructs target-typed
 `float32`/`float64` values and performs the supported numeric conversions,
 including provisional checked conversions to fixed-width integers. Same-format
 floating arithmetic/comparisons are projected by the Terrum-authored scalar
-frontend for typed values, but floating literal construction/conversions and
-custom literal parsers remain unsupported there; those authored components
-still rely on the hosted verifier/emitter. Bounded scalar
+frontend for typed values, as are target-typed decimal/hexadecimal floating
+literals and based integer literals directly targeting those formats. The
+hosted reader validates literal token spans and reconstructs their target
+bits. Floating conversions and custom literal parsers remain unsupported
+there; those authored components still rely on the hosted verifier/emitter.
+Bounded scalar
 `[ConstEval]` is implemented separately from literal registration.
 Contextual integer literal typing/range checks
 and parser routines remain hosted, while

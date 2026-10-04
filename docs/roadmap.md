@@ -47,10 +47,12 @@ the exact pair eligibility remains an unapproved proposal. Floating arithmetic
 `float32`/`float64` values by the hosted binder, verifier and native emitter.
 Arithmetic NaN bit encodings remain provisional under an unapproved proposal.
 The bounded Terrum-authored scalar frontend now projects same-format unary
-signs, `+`, `-`, `*`, `/` and IEEE comparisons for typed `float32`/`float64`
-values through v85; verification and emission remain hosted. Floating literal
-construction and conversions are not yet projected, and source-free TRRM
-still does not support floating operators.
+signs, target-typed decimal and hexadecimal floating literals, based integer
+literals directly targeting `float32`/`float64`, `+`, `-`, `*`, `/` and IEEE
+comparisons through v85. The hosted reader validates token spans and
+reconstructs exact target-format literal bits; verification and emission
+remain hosted. Floating conversions are not yet projected, and source-free
+TRRM still does not support floating operators.
 
 The bounded Terrum-authored scalar source frontend supports v85 complete
 global-function snapshots and source-order scalar call targets, including

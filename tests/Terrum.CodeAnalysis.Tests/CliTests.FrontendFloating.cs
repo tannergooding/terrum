@@ -80,7 +80,6 @@ public sealed partial class CliTests
     }
 
     [Theory]
-    [InlineData("public float32 Literal() { return 0.1; }")]
     [InlineData("public float32 Convert(float64 value) { return float32(value); }")]
     public async Task ScalarFrontendRejectsFloatingLiteralsAndConversionsAsync(string source)
     {
@@ -100,6 +99,122 @@ public sealed partial class CliTests
         {
             Assert.Contains(root.GetProperty("diagnostics").EnumerateArray(),
                 static diagnostic => diagnostic.GetProperty("code").GetString() == "TRM5001");
+        }
+    }
+
+    [Theory]
+    [InlineData("fail-fast", "public float32 Literal() => 0.1;", 7, 3)]
+    [InlineData("checked-exceptions", "public float32 Literal() => 0.1;", 7, 3)]
+    [InlineData("fail-fast", "public float32 Literal() { return 0.1; }", 7, 3)]
+    [InlineData("checked-exceptions", "public float32 Literal() { return 0.1; }", 7, 3)]
+    [InlineData("fail-fast", "public float32 Literal() { return -0.0; }", 7, 3)]
+    [InlineData("checked-exceptions", "public float32 Literal() { return -0.0; }", 7, 3)]
+    [InlineData("fail-fast", "public float32 Literal() { return +0.1; }", 7, 657)]
+    [InlineData("checked-exceptions", "public float32 Literal() { return +0.1; }", 7, 657)]
+    [InlineData("fail-fast", "public float32 Literal() { return 0b101; }", 7, 3)]
+    [InlineData("checked-exceptions", "public float32 Literal() { return 0b101; }", 7, 3)]
+    [InlineData("fail-fast", "public float64 Literal() { return 0x123; }", 8, 3)]
+    [InlineData("checked-exceptions", "public float64 Literal() { return 0x123; }", 8, 3)]
+    public async Task ScalarFrontendProjectsTargetTypedFloatingLiteralAsync(string policy, string source,
+        int expectedType, int expectedOperation)
+    {
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-float-literal-{Guid.NewGuid():N}.dll");
+        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-float-literal-{Guid.NewGuid():N}.dll");
+        try
+        {
+            var input = Encoding.UTF8.GetBytes(source);
+            var (componentExit, componentJson, componentError) = await RunAsync(input,
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            using (var document = JsonDocument.Parse(componentJson))
+            {
+                var result = document.RootElement.GetProperty("result");
+                Assert.True(result.GetProperty("valid").GetBoolean());
+                if (result.TryGetProperty("projectionVersion", out var projectionVersion))
+                {
+                    Assert.Equal(85, projectionVersion.GetInt32());
+                }
+                Assert.Equal(expectedOperation,
+                    result.GetProperty("whenTrue").GetProperty("operation").GetInt32());
+                Assert.Equal(expectedType, result.GetProperty("whenTrue").GetProperty("type").GetInt32());
+            }
+
+            var (exit, json, error) = await RunAsync(input,
+                "frontend-build-library", directory, "-", "-o", output,
+                "--runtime", policy, "--json");
+            Assert.True(exit == 0, $"{policy}: {json}{error}");
+            var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
+                "build-library", "-", "--export", "Literal", "-o", hosted,
+                "--runtime", policy, "--json");
+            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
+            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+        }
+        finally
+        {
+            File.Delete(output);
+            File.Delete(hosted);
+        }
+    }
+
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task ScalarFrontendProjectsFloatingLiteralsIntoCompleteProgramsAsync(string policy)
+    {
+        const string Source = """
+            public float32 Decimal32() { return 0.1; }
+            public float32 NegativeZero32() { return -0.0; }
+            public float64 Hex64() { return 0x1.fp+2; }
+            public float32 AddLiteral32(float32 value) { return value + 0.1; }
+            public bool CompareLiteral32(float32 value) { return 0.1 < value; }
+            """;
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-floats-{Guid.NewGuid():N}.dll");
+        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-floats-{Guid.NewGuid():N}.dll");
+        try
+        {
+            var input = Encoding.UTF8.GetBytes(Source);
+            var (componentExit, componentJson, componentError) = await RunAsync(input,
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            using (var document = JsonDocument.Parse(componentJson))
+            {
+                var functions = document.RootElement.GetProperty("result")
+                    .GetProperty("functions");
+                Assert.Equal(5, functions.GetArrayLength());
+                Assert.Contains(functions[0].GetProperty("nodes").EnumerateArray(),
+                    static node => node.GetProperty("operation").GetInt32() == 3
+                        && node.GetProperty("type").GetInt32() == 7);
+                Assert.Contains(functions[1].GetProperty("nodes").EnumerateArray(),
+                    static node => node.GetProperty("operation").GetInt32() == 58
+                        && node.GetProperty("type").GetInt32() == 7);
+                Assert.Contains(functions[2].GetProperty("nodes").EnumerateArray(),
+                    static node => node.GetProperty("operation").GetInt32() == 3
+                        && node.GetProperty("type").GetInt32() == 8);
+                Assert.Contains(functions[3].GetProperty("nodes").EnumerateArray(),
+                    static node => node.GetProperty("operation").GetInt32() == 57
+                        && node.GetProperty("type").GetInt32() == 7);
+                Assert.Contains(functions[4].GetProperty("nodes").EnumerateArray(),
+                    static node => node.GetProperty("operation").GetInt32() == 67
+                        && node.GetProperty("type").GetInt32() == 5);
+            }
+
+            var (exit, json, error) = await RunAsync(input,
+                "frontend-build-library", directory, "-", "-o", output,
+                "--runtime", policy, "--json");
+            Assert.True(exit == 0, $"{policy}: {json}{error}");
+            var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
+                "build-library", "-", "--export", "Decimal32", "--export", "NegativeZero32",
+                "--export", "Hex64", "--export", "AddLiteral32", "--export",
+                "CompareLiteral32", "-o", hosted, "--runtime", policy, "--json");
+            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
+            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+        }
+        finally
+        {
+            File.Delete(output);
+            File.Delete(hosted);
         }
     }
 }

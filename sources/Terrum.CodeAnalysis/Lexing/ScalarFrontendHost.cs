@@ -124,9 +124,9 @@ public static partial class ScalarFrontendHost
             return ReadTree();
         }
 
-        var condition = Expression(16);
-        var whenTrue = Expression(22);
-        var whenFalse = Expression(28);
+        var condition = ValidateFloatingLiteral(Expression(16));
+        var whenTrue = ValidateFloatingLiteral(Expression(22));
+        var whenFalse = ValidateFloatingLiteral(Expression(28));
         if (!ValidExpression(whenTrue, words[5], count)
             || (words[15] == 0
                 ? !AllZero(16, 22) || !AllZero(28, 34)
@@ -156,6 +156,21 @@ public static partial class ScalarFrontendHost
         ScalarFrontendExpression Expression(int offset) => new(
             words[offset], words[offset + 1], words[offset + 2], words[offset + 3],
             Span(offset + 4));
+
+        ScalarFrontendExpression ValidateFloatingLiteral(ScalarFrontendExpression expression)
+        {
+            if (expression.Operation == 3 && expression.Type is 7 or 8)
+            {
+                var span = NumericSpan(source, expression.Span);
+                if (expression.LeftParameter != 0 || expression.RightParameter != 0
+                    || !TryParseFloatingLiteral(source.Text.AsSpan(span.Start, span.Length),
+                        expression.Type, out _))
+                {
+                    throw InvalidResult();
+                }
+            }
+            return expression;
+        }
 
         ScalarFrontendResult ReadTree()
         {
@@ -240,6 +255,13 @@ public static partial class ScalarFrontendHost
                 var node = new ScalarFrontendNode(words[offset], words[offset + 1],
                     Span(offset + 2), words[offset + 4], words[offset + 5],
                     words[offset + 6], words[offset + 7]);
+                if (node.Operation == 3 && node.Type is 7 or 8
+                    && (node.Low != 0 || node.High != 0
+                        || !TryParseFloatingLiteral(source.Text.AsSpan(
+                            node.Span.Start, node.Span.Length), node.Type, out _)))
+                {
+                    throw InvalidResult();
+                }
                 var call = node.Operation == 102 || node.Operation == 105 && context is not null;
                 var callee = node.Operation == 105 ? context?.Callee(i) : null;
                 var callCount = callee?.ParameterTypes.Length ?? count;
@@ -1471,9 +1493,13 @@ public static partial class ScalarFrontendHost
                         }
                     }
                     else if (!Take(TokenKind.NumericLiteral)
-                        || !ValidMagnitude(tokens[at - 1].Text.AsSpan(), node.Type,
-                            tree.Any(parent => parent.Operation == 58 && parent.Left == index
-                                && parent.Right == -1), node.Low, node.High))
+                        || (node.Type is 7 or 8
+                            ? node.Low != 0 || node.High != 0
+                                || !TryParseFloatingLiteral(tokens[at - 1].Text.AsSpan(),
+                                    node.Type, out _)
+                            : !ValidMagnitude(tokens[at - 1].Text.AsSpan(), node.Type,
+                                tree.Any(parent => parent.Operation == 58 && parent.Left == index
+                                    && parent.Right == -1), node.Low, node.High)))
                     {
                         return false;
                     }
@@ -1818,8 +1844,8 @@ public static partial class ScalarFrontendHost
             if (operation is 657 or 658)
             {
                 if (expression.Type != type
-                    || (operation == 658 ? type is not (1 or 3)
-                        : type is not (1 or 2 or 3 or 4))
+                    || (operation == 658 ? type is not (1 or 3 or 7 or 8)
+                        : type is not (1 or 2 or 3 or 4 or 7 or 8))
                     || !ValidSpan(expression.Span, nonempty: true))
                 {
                     return false;
@@ -1832,8 +1858,12 @@ public static partial class ScalarFrontendHost
                         : TokenKind.Plus, expression.Span.Length,
                         out var operandIndex)
                     && tokens[operandIndex].Kind == TokenKind.NumericLiteral
-                    && ValidMagnitude(tokens[operandIndex].Text.AsSpan(),
-                        type, false, left, right);
+                    && (type is 7 or 8
+                        ? left == 0 && right == 0
+                            && TryParseFloatingLiteral(tokens[operandIndex].Text.AsSpan(),
+                                type, out _)
+                        : ValidMagnitude(tokens[operandIndex].Text.AsSpan(),
+                            type, false, left, right));
             }
             if (IsNegatedBooleanBinary(operation))
             {
@@ -2012,9 +2042,10 @@ public static partial class ScalarFrontendHost
                 var comparison = binaryOperation % 100 is >= 65 and <= 70;
                 if ((encodedOffset != 0 && binaryOperation / 100 != (literalFirst ? 3 : 1))
                     || expression.Type != type
-                    || (comparison ? type != 5 || parameterType is not (1 or 2 or 3 or 4 or 6)
-                        : type != parameterType || parameterType is not (1 or 2 or 3 or 4))
-                    || parameter > parameters || negativeLiteral && parameterType is not (1 or 3)
+                    || (comparison ? type != 5 || parameterType is not (1 or 2 or 3 or 4 or 6 or 7 or 8)
+                        : type != parameterType || parameterType is not (1 or 2 or 3 or 4 or 7 or 8))
+                    || parameter > parameters
+                    || negativeLiteral && parameterType is not (1 or 3 or 7 or 8)
                     || !ValidSpan(expression.Span, nonempty: true))
                 {
                     return false;
@@ -2032,12 +2063,17 @@ public static partial class ScalarFrontendHost
                     && tokens[literalFirst ? second : first].Name
                         == SourceName(source, name)
                     && tokens[literalFirst ? first : second].Kind == TokenKind.NumericLiteral
-                    && ValidMagnitude(tokens[literalFirst ? first : second].Text.AsSpan(),
-                        parameterType, negativeLiteral, left, right);
+                    && (parameterType is 7 or 8
+                        ? left == 0 && right == 0
+                            && TryParseFloatingLiteral(
+                                tokens[literalFirst ? first : second].Text.AsSpan(),
+                                parameterType, out _)
+                        : ValidMagnitude(tokens[literalFirst ? first : second].Text.AsSpan(),
+                            parameterType, negativeLiteral, left, right));
             }
             if (operation == 3)
             {
-                if (expression.Type != type || type is not (1 or 2 or 3 or 4 or 6)
+                if (expression.Type != type || type is not (1 or 2 or 3 or 4 or 6 or 7 or 8)
                     || !ValidSpan(expression.Span, nonempty: true))
                 {
                     return false;
@@ -2045,7 +2081,10 @@ public static partial class ScalarFrontendHost
                 var negative = source.Text[expression.Span.Start] == '-';
                 var numberSpan = NumericSpan(source, expression.Span);
                 var digits = source.Text.AsSpan(numberSpan.Start, numberSpan.Length);
-                return ValidMagnitude(digits, type, negative, left, right);
+                return type is 7 or 8
+                    ? left == 0 && right == 0
+                        && TryParseFloatingLiteral(digits, type, out _)
+                    : ValidMagnitude(digits, type, negative, left, right);
             }
             if (operation is 20 or 21)
             {
@@ -2392,6 +2431,31 @@ public static partial class ScalarFrontendHost
 
     private static bool ScalarType(int type) => type is >= 1 and <= 8;
 
+    private static bool TryParseFloatingLiteral(ReadOnlySpan<char> text, int type, out long value)
+    {
+        value = 0;
+        if (type is not (7 or 8) || text.IsEmpty)
+        {
+            return false;
+        }
+
+        var lexical = Lexer.Lex(SourceText.From(text.ToString()));
+        var tokens = lexical.Tokens;
+        if (!lexical.Diagnostics.IsEmpty || tokens.Length != 2
+            || tokens[0].Kind != TokenKind.NumericLiteral
+            || tokens[0].Span.Start != 0 || tokens[0].Span.Length != text.Length
+            || tokens[1].Kind != TokenKind.EndOfFile)
+        {
+            return false;
+        }
+
+        var primitiveType = type == 7 ? PrimitiveType.Float32 : PrimitiveType.Float64;
+        return FloatingLiteralParser.TryParse(tokens[0].Text.AsSpan(), primitiveType, out value);
+    }
+
+    private static long ParseFloatingLiteral(ReadOnlySpan<char> text, int type)
+        => TryParseFloatingLiteral(text, type, out var value) ? value : throw InvalidResult();
+
     private static bool ValidMagnitude(ReadOnlySpan<char> digits, int type, bool negative,
         int low, int high)
     {
@@ -2590,8 +2654,11 @@ public static partial class ScalarFrontendHost
                 }
                 else if (node.Operation == 3)
                 {
-                    var value = node.Type is 1 or 2 or 6 ? node.Low
-                        : unchecked((long)((ulong)(uint)node.High << 32 | (uint)node.Low));
+                    var value = node.Type is 7 or 8
+                        ? ParseFloatingLiteral(source.Text.AsSpan(node.Span.Start, node.Span.Length),
+                            node.Type)
+                        : node.Type is 1 or 2 or 6 ? node.Low
+                            : unchecked((long)((ulong)(uint)node.High << 32 | (uint)node.Low));
                     bound = new BoundConstant(value, type, node.Span);
                 }
                 else if (node.Operation is 103 or 104)
@@ -3019,10 +3086,12 @@ public static partial class ScalarFrontendHost
                 var token = lexical.Tokens[UnaryOperandIndex(lexical.Tokens)];
                 var operandSpan = new TextSpan(expression.Span.Start + token.Span.Start, token.Span.Length);
                 var type = Type(expression.Type);
-                var value = expression.Type is 1 or 2
-                    ? expression.LeftParameter
-                    : unchecked((long)((ulong)(uint)expression.RightParameter << 32
-                        | (uint)expression.LeftParameter));
+                var value = expression.Type is 7 or 8
+                    ? ParseFloatingLiteral(token.Text.AsSpan(), expression.Type)
+                    : expression.Type is 1 or 2
+                        ? expression.LeftParameter
+                        : unchecked((long)((ulong)(uint)expression.RightParameter << 32
+                            | (uint)expression.LeftParameter));
                 return Binder.FoldScalarConstant(new BoundUnary(operation == 658
                     ? TokenKind.Minus : TokenKind.Plus,
                     new BoundConstant(value, type, operandSpan), type, expression.Span));
@@ -3241,10 +3310,13 @@ public static partial class ScalarFrontendHost
                 var numberIndex = literalFirst ? first : second;
                 var nameIndex = literalFirst ? second : first;
                 var parameterType = types[parameter - 1].Type;
-                var value = parameterType is PrimitiveType.Int32 or PrimitiveType.UInt32
-                    ? expression.LeftParameter
-                    : unchecked((long)((ulong)(uint)expression.RightParameter << 32
-                        | (uint)expression.LeftParameter));
+                var value = parameterType is PrimitiveType.Float32 or PrimitiveType.Float64
+                    ? ParseFloatingLiteral(tokens[numberIndex].Text.AsSpan(),
+                        parameterType == PrimitiveType.Float32 ? 7 : 8)
+                    : parameterType is PrimitiveType.Int32 or PrimitiveType.UInt32
+                        ? expression.LeftParameter
+                        : unchecked((long)((ulong)(uint)expression.RightParameter << 32
+                            | (uint)expression.LeftParameter));
                 var leftOperand = new BoundRead(parameter - 1, parameterType,
                     new TextSpan(expression.Span.Start + tokens[nameIndex].Span.Start, tokens[nameIndex].Span.Length));
                 var numberSpan = new TextSpan(expression.Span.Start + tokens[numberIndex].Span.Start,
@@ -3274,10 +3346,15 @@ public static partial class ScalarFrontendHost
             if (operation == 3)
             {
                 var negative = source.Text[expression.Span.Start] == '-';
-                var value = expression.Type is 1 or 2
-                    ? expression.LeftParameter
-                    : unchecked((long)((ulong)(uint)expression.RightParameter << 32
-                        | (uint)expression.LeftParameter));
+                var numberSpan = expression.Type is 7 or 8
+                    ? NumericSpan(source, expression.Span) : expression.Span;
+                var value = expression.Type is 7 or 8
+                    ? ParseFloatingLiteral(source.Text.AsSpan(numberSpan.Start, numberSpan.Length),
+                        expression.Type)
+                    : expression.Type is 1 or 2
+                        ? expression.LeftParameter
+                        : unchecked((long)((ulong)(uint)expression.RightParameter << 32
+                            | (uint)expression.LeftParameter));
                 if (!negative)
                 {
                     return new BoundConstant(value, Type(expression.Type), expression.Span);

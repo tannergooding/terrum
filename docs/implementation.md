@@ -1198,10 +1198,13 @@ Arithmetic NaNs currently use positive quiet encodings `0x7FC00000` and
 [unapproved proposal](proposals/floating-arithmetic-nan-encoding.md).
 Floating `%`, mixed-format operators and floating `[ConstEval]` remain
 unsupported. The bounded Terrum-authored scalar frontend projects same-format
-`float32`/`float64` unary signs, `+`, `-`, `*`, `/` and IEEE comparisons for
-typed values through v85. Floating literal construction and conversions are
-not yet projected; source-free TRRM still does not support floating operators.
-Frontend verification/emission remains hosted.
+`float32`/`float64` unary signs, target-typed decimal and hexadecimal floating
+literals, based integer literals directly targeting either floating format,
+`+`, `-`, `*`, `/` and IEEE comparisons through v85. Its authored parser
+publishes literal types and source spans; the hosted reader validates the
+token spans and reconstructs exact target-format bits. Floating conversions
+remain unprojected, and source-free TRRM still does not support floating
+operators. Frontend verification/emission remains hosted.
 Existing source function and local shadowing keeps its ordinary call-binding
 precedence. Top-level generic function templates support multiple independently
 constrained type parameters over eligible `Copy` structs, scalar value types,
