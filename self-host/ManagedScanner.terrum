@@ -32,7 +32,8 @@ bool IsValidScannerToken(int32 index, int32 count, int32 previousEnd,
             }
         }
     }
-    return kind > 0;
+    // TokenKind is the implicit contiguous catalog 0..106 (QuestionDot).
+    return kind > 0 && kind <= 106 && length > 0;
 }
 
 // Only a complete, validated snapshot of the fixed host records escapes.

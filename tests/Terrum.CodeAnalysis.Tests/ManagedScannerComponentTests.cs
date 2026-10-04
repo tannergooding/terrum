@@ -2688,6 +2688,29 @@ public sealed partial class ManagedScannerComponentTests
         }
     }
 
+    [Theory]
+    [InlineData(3, 107)]
+    [InlineData(5, 0)]
+    public async Task UndefinedKindAndZeroLengthNonEofRecordDoNotPublishManagedChainAsync(int word, int value)
+    {
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 count = Scan();
+                Host.Tokens[{{word}}] = {{value}};
+                if (TryBuildManagedTokenChain(count, init var chain)) { return 1; }
+                if (ManagedHeap.Collect() != 2) { return 2; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync("alpha beta", entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
     private static Task<BoundProgram> CompileParserAsync(string text, string entry, BoundRuntimePolicy policy) =>
         CompileAsync(text, entry, policy, "ScalarFunctionParser");
 
