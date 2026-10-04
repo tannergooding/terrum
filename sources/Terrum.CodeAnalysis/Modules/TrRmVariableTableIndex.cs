@@ -67,9 +67,10 @@ public readonly ref struct TrRmVariableTableIndex
 
         var start = (int)ReadOffset(row - 1);
         var end = (int)ReadOffset(row);
+        // Row alignment is restricted to 1 or 4, so one low-bit mask checks both offsets.
         if (start < 0 || start > _data.Length - _minimumRowBytes
             || end > _data.Length || end < start + _minimumRowBytes
-            || start % _rowAlignment != 0 || end % _rowAlignment != 0)
+            || ((start | end) & (_rowAlignment - 1)) != 0)
         {
             throw InvalidIndex();
         }
