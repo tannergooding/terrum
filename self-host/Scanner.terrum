@@ -104,9 +104,10 @@ void Report(int32 code, int32 start, int32 length)
 {
     int32 count = Host.Diagnostics[0];
     require CanAppendRecord(count, Host.Diagnostics.Length, 3, 1);
-    Host.Diagnostics[count * 3 + 1] = code;
-    Host.Diagnostics[count * 3 + 2] = start;
-    Host.Diagnostics[count * 3 + 3] = length;
+    int32 record = count * 3 + 1;
+    Host.Diagnostics[record] = code;
+    Host.Diagnostics[record + 1] = start;
+    Host.Diagnostics[record + 2] = length;
     Host.Diagnostics[0] = count + 1;
 }
 
@@ -170,10 +171,11 @@ void PublishTrivia(int32 kind, int32 start, int32 end, int32 owner)
 {
     int32 count = Host.Trivia[0];
     require CanAppendRecord(count, Host.Trivia.Length, 4, 1);
-    Host.Trivia[count * 4 + 1] = kind;
-    Host.Trivia[count * 4 + 2] = start;
-    Host.Trivia[count * 4 + 3] = end - start;
-    Host.Trivia[count * 4 + 4] = owner;
+    int32 record = count * 4 + 1;
+    Host.Trivia[record] = kind;
+    Host.Trivia[record + 1] = start;
+    Host.Trivia[record + 2] = end - start;
+    Host.Trivia[record + 3] = owner;
     Host.Trivia[0] = count + 1;
 }
 
@@ -457,15 +459,16 @@ void PublishInteger(int32 tokenIndex, bool overflow, uint64 magnitude, int32 tag
     // The low half is masked and the shifted high half is already uint32-bounded.
     uint32 low = uint32(payload & uint64(uint32.MaxValue));
     uint32 high = uint32(payload >> 32);
-    Host.IntegerValues[count * 5 + 1] = tokenIndex;
-    Host.IntegerValues[count * 5 + 2] = 0;
+    int32 record = count * 5 + 1;
+    Host.IntegerValues[record] = tokenIndex;
+    Host.IntegerValues[record + 1] = 0;
     if (overflow)
     {
-        Host.IntegerValues[count * 5 + 2] = 1;
+        Host.IntegerValues[record + 1] = 1;
     }
-    Host.IntegerValues[count * 5 + 3] = EncodeWord(low);
-    Host.IntegerValues[count * 5 + 4] = EncodeWord(high);
-    Host.IntegerValues[count * 5 + 5] = tag;
+    Host.IntegerValues[record + 2] = EncodeWord(low);
+    Host.IntegerValues[record + 3] = EncodeWord(high);
+    Host.IntegerValues[record + 4] = tag;
     Host.IntegerValues[0] = count + 1;
 }
 
@@ -1081,17 +1084,19 @@ int32 Scan()
             }
 
             require CanAppendRecord(count, Host.Tokens.Length, 3, 0);
-            Host.Tokens[count * 3] = kind;
-            Host.Tokens[count * 3 + 1] = start;
-            Host.Tokens[count * 3 + 2] = position - start;
+            int32 record = count * 3;
+            Host.Tokens[record] = kind;
+            Host.Tokens[record + 1] = start;
+            Host.Tokens[record + 2] = position - start;
             count = count + 1;
         }
     }
 
     require CanAppendRecord(count, Host.Tokens.Length, 3, 0);
-    Host.Tokens[count * 3] = 0;
-    Host.Tokens[count * 3 + 1] = position;
-    Host.Tokens[count * 3 + 2] = 0;
+    int32 endRecord = count * 3;
+    Host.Tokens[endRecord] = 0;
+    Host.Tokens[endRecord + 1] = position;
+    Host.Tokens[endRecord + 2] = 0;
 
     return count + 1;
 }
