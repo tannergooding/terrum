@@ -917,7 +917,7 @@ public sealed partial class ManagedScannerComponentTests
         var assertion = evaluable
             ? $$"""
                 require {{evaluator}}(move tokens, {{first}}, {{second}},
-                    out var name, out var bound);
+                    init var name, init var bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}})
                 {
@@ -926,7 +926,7 @@ public sealed partial class ManagedScannerComponentTests
                 """
             : $$"""
                 if ({{evaluator}}(move tokens, {{first}}, {{second}},
-                    out var name, out var bound))
+                    init var name, init var bound))
                 {
                     return 1;
                 }
@@ -976,13 +976,42 @@ public sealed partial class ManagedScannerComponentTests
             int32 Main() {
                 require TokenSnapshot.TryScan(init var tokens);
                 if (TryEvaluateInt32TwoParameterAddReturn(move tokens, 1, 2,
-                    out var name, out var value)) { return 1; }
+                    init var name, init var value)) { return 1; }
                 return 42;
             }
             """;
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompilePairParserAsync(text, Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    public async Task BoundedNativeTwoParameterAdditionKeepsOutputsVacantOnFailureAsync()
+    {
+        const string Text = "int32 Value(int32 x, int32 y) { return x + y; }";
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                if (TryEvaluateInt32TwoParameterAddReturn(
+                    move tokens, int32.MaxValue, 1, init var name, init var value))
+                {
+                    return 1;
+                }
+                require TokenSnapshot.TryScan(init var retryTokens);
+                require TryEvaluateInt32TwoParameterAddReturn(
+                    move retryTokens, 20, 22, init name, init value);
+                if (name.Start != 6 || name.Length != 5 || value != 42) { return 2; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompilePairParserAsync(Text, Entry, (BoundRuntimePolicy)policy)
+                .ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -1023,7 +1052,7 @@ public sealed partial class ManagedScannerComponentTests
         var assertion = evaluable
             ? $$"""
                 require {{evaluator}}(move tokens, {{first}}, {{second}},
-                    out var name, out var bound);
+                    init var name, init var bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}})
                 {
@@ -1032,7 +1061,7 @@ public sealed partial class ManagedScannerComponentTests
                 """
             : $$"""
                 if ({{evaluator}}(move tokens, {{first}}, {{second}},
-                    out var name, out var bound))
+                    init var name, init var bound))
                 {
                     return 1;
                 }
@@ -1338,7 +1367,7 @@ public sealed partial class ManagedScannerComponentTests
         var assertion = evaluable
             ? $$"""
                 require {{evaluator}}(move tokens, {{first}}, {{second}},
-                    out var name, out var bound);
+                    init var name, init var bound);
                 if (name.Start != 5 || name.Length != 5 || bound != {{expectedValue}})
                 {
                     return 1;
@@ -1346,7 +1375,7 @@ public sealed partial class ManagedScannerComponentTests
                 """
             : $$"""
                 if ({{evaluator}}(move tokens, {{first}}, {{second}},
-                    out var name, out var bound))
+                    init var name, init var bound))
                 {
                     return 1;
                 }
@@ -1425,7 +1454,7 @@ public sealed partial class ManagedScannerComponentTests
             ? $$"""
                 require {{evaluator}}(
                     move tokens, move integers, {{first}}, {{second}},
-                    out var name, out var bound);
+                    init var name, init var bound);
                 if (name.Start != {{typeName.Length + 1}} || name.Length != 5
                     || bound != {{expected}})
                 {
@@ -1435,7 +1464,7 @@ public sealed partial class ManagedScannerComponentTests
             : $$"""
                 if ({{evaluator}}(
                     move tokens, move integers, {{first}}, {{second}},
-                    out var name, out var bound))
+                    init var name, init var bound))
                 {
                     return 1;
                 }
@@ -2593,7 +2622,7 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("int32 Value() { return -#42; }", true, "ScalarFunctionParser",
         "TryParseScalarReturnFunctionTyped(move tokens, out var scalarType, out var name, out var expression)")]
     [InlineData("int32 Value(int32 x, int32 y) { return x#+#y; }", false, "ScalarParameterPairParser",
-        "TryEvaluateInt32TwoParameterAddReturn(move tokens, 20, 22, out var name, out var value)")]
+        "TryEvaluateInt32TwoParameterAddReturn(move tokens, 20, 22, init var name, init var value)")]
     [InlineData("int32 Value(bool c, int32 x, int32 y) { if (c) { return x#+#y; } else { return x; } }",
         false, "ScalarConditionalAddParser",
         "TryEvaluateInt32ScalarConditionalAddReturn(move tokens, true, 20, 22, out var name, out var value)")]
