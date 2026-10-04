@@ -1509,7 +1509,8 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private mut bool ParseReturn(int32 returnType, out ScalarFrontendExpression expression)
+    private mut bool ParseReturn(
+        int32 returnType, init ref<ScalarFrontendExpression> expression)
     {
         if (!Take(19, init var keyword) || !ParseExpression(returnType, out var found))
         {
@@ -4047,7 +4048,7 @@ mut class ScalarFrontendState
                 }
                 if (_error == 0 && Take(47, init var closeCondition)
                     && Take(48, init var openTrue)
-                    && ParseReturn(returnType, out var firstReturn)
+                    && ParseReturn(returnType, init var firstReturn)
                     && Take(49, init var closeTrue))
                 {
                     whenTrue = firstReturn;
@@ -4056,20 +4057,20 @@ mut class ScalarFrontendState
                     {
                         _at = _at + 1;
                         if (Take(48, init var openFalse)
-                            && ParseReturn(returnType, out var secondReturn)
+                            && ParseReturn(returnType, init var secondReturn)
                             && Take(49, init var closeFalse))
                         {
                             whenFalse = secondReturn;
                         }
                     }
-                    else if (ParseReturn(returnType, out var trailingReturn))
+                    else if (ParseReturn(returnType, init var trailingReturn))
                     {
                         whenFalse = trailingReturn;
                         hasFallthrough = true;
                     }
                 }
             }
-            else if (ParseReturn(returnType, out var found))
+            else if (ParseReturn(returnType, init var found))
             {
                 whenTrue = found;
             }
