@@ -240,6 +240,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             {
                 throw InvalidBody();
             }
+
             blockParameters[block] = ReadList(extent, ref cursor, width, (presence & 2) != 0, ValueCount);
             liveIns[block] = ReadList(extent, ref cursor, width, (presence & 4) != 0, ValueCount);
             liveOuts[block] = ReadList(extent, ref cursor, width, (presence & 8) != 0, ValueCount);
@@ -305,15 +306,17 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     || owner[value] > block
                     || (owner[value] == block && (!defined[value]
                         || definitions[value - 1] != sentinel
-                            && definitions[value - 1] >= useOffset))
-                    || owner[value] != block && !Contains(liveIns[block], value))
+                            && definitions[value - 1] >= useOffset)))
                 {
                     throw InvalidBody();
                 }
 
                 if (owner[value] != block)
                 {
-                    externalUses[block].Add(value);
+                    if (externalUses[block].Add(value) && !Contains(liveIns[block], value))
+                    {
+                        throw InvalidBody();
+                    }
                 }
 
                 if (observedLastUses.TryAdd(value, ordinal))
