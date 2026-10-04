@@ -55,9 +55,9 @@ public static partial class NativeModuleCompiler
         if (artifact.AsSpan().StartsWith("TNPK"u8))
         {
             var leaf = Read(artifact);
-            ValidateProducer(leaf);
+            var reference = ValidateProducer(leaf);
             return new GraphPackage(false, leaf.Identity, leaf.Policy,
-                [.. ModuleCompiler.CreateReference(leaf.Contract).Functions.Select(static item => item.Name)
+                [.. reference.Functions.Select(static item => item.Name)
                     .Order(StringComparer.Ordinal)], [], leaf.Contract, leaf.Image) {
                 IsLeaf = true,
             };
