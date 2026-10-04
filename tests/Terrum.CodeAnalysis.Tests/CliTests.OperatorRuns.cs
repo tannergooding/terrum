@@ -65,7 +65,7 @@ public sealed partial class CliTests
                     Assert.Equal(expected, await File.ReadAllBytesAsync(path));
                 }
             }
-            foreach (var run in new[] { "!!", "..^", ">?>" })
+            foreach (var run in new[] { "!!", ">?>" })
             {
                 var invalid = "int32 Main() { return " + run + "1; }";
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(invalid),
@@ -76,7 +76,7 @@ public sealed partial class CliTests
                 var found = false;
                 foreach (var diagnostic in document.RootElement.GetProperty("diagnostics").EnumerateArray())
                 {
-                    if (diagnostic.GetProperty("code").GetString() == (run == "..^" ? "TRM0012" : "TRM0011"))
+                    if (diagnostic.GetProperty("code").GetString() == "TRM0011")
                     {
                         Assert.Equal(invalid.IndexOf(run, StringComparison.Ordinal), diagnostic.GetProperty("span").GetProperty("start").GetInt32());
                         Assert.Equal(run.Length, diagnostic.GetProperty("span").GetProperty("length").GetInt32());
@@ -92,7 +92,7 @@ public sealed partial class CliTests
                     Assert.Empty(nativeError);
                     using var failure = JsonDocument.Parse(nativeOutput);
                     var diagnostic = Assert.Single(failure.RootElement.GetProperty("diagnostics").EnumerateArray());
-                    Assert.Equal(run == "..^" ? "TRM0012" : "TRM0011", diagnostic.GetProperty("code").GetString());
+                    Assert.Equal("TRM0011", diagnostic.GetProperty("code").GetString());
                     Assert.Equal(invalid.IndexOf(run, StringComparison.Ordinal), diagnostic.GetProperty("span").GetProperty("start").GetInt32());
                     Assert.Equal(run.Length, diagnostic.GetProperty("span").GetProperty("length").GetInt32());
                     Assert.Equal(expected, await File.ReadAllBytesAsync(paths[2]));

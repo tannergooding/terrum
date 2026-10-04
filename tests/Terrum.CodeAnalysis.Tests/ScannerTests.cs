@@ -140,12 +140,15 @@ public sealed class ScannerTests
         Assert.Equal(79, (int)TokenKind.WhereKeyword);
         Assert.Equal(102, (int)TokenKind.AliasKeyword);
         Assert.Equal(103, (int)TokenKind.CharacterLiteral);
+        Assert.Equal(104, (int)TokenKind.DotDot);
+        Assert.Equal(105, (int)TokenKind.DotDotCaret);
+        Assert.Equal(106, (int)TokenKind.QuestionDot);
     }
 
     [Fact]
     public async Task EveryOperatorAndTriviaFormExecutesNativelyAsync()
     {
-        const string Operators = "_ ( ) { } [ ] ; , . : ? ?? ??= + - ++ -- * / % ! ~ = == => != < <= > >= & && | || ^"
+        const string Operators = "_ ( ) { } [ ] ; , . .. ..^ : ? ?. ?? ??= + - ++ -- * / % ! ~ = == => != < <= > >= & && | || ^"
             + " << >> >>> += -= *= /= %= &= |= ^= <<= >>= >>>=";
         var lexed = Lexer.Lex(SourceText.From(Operators));
         var actual = lexed.Tokens.Select(token => token.Kind).ToHashSet();

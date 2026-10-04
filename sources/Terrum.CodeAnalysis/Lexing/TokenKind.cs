@@ -213,4 +213,10 @@ public enum TokenKind
     AliasKeyword,
     /// <summary>A single-scalar character literal.</summary>
     CharacterLiteral,
+    /// <summary>A range connector (<c>..</c>).</summary>
+    DotDot,
+    /// <summary>A range connector with an end-relative upper bound (<c>..^</c>).</summary>
+    DotDotCaret,
+    /// <summary>Optional member access (<c>?.</c>).</summary>
+    QuestionDot,
 }

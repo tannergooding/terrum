@@ -22,8 +22,7 @@ public sealed class OperatorRunTests
         new[] { "+++", "!!", "+-", "===", ">>+", "!~", "~!", "><", "<>", "<>>", "=:",
             "::", ".+", "...", "....", "??.", "?.?", "&&&", "|||", "**", "%%", "->",
             "??==", ">>>>=", ">>=>", "/+", new string('!', 129) }
-            .Select(text => new object[] { text, "TRM0011" })
-            .Concat(new[] { "..", "..^", "?." }.Select(text => new object[] { text, "TRM0012" }));
+            .Select(text => new object[] { text, "TRM0011" });
 
     [Theory]
     [MemberData(nameof(InvalidRuns))]
@@ -51,7 +50,8 @@ public sealed class OperatorRunTests
     public static IEnumerable<object[]> DefinedSpellings =>
         new[] { ".", ":", "?", "??", "??=", "+", "++", "-", "--", "*", "/", "%", "!", "~",
             "=", "==", "=>", "!=", "<", "<=", ">", ">=", "&", "&&", "|", "||", "^",
-            "<<", ">>", ">>>", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", ">>>=" }
+            "<<", ">>", ">>>", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", ">>>=",
+            "..", "..^", "?." }
             .Select(text => new object[] { text });
 
     [Theory]
@@ -154,7 +154,6 @@ public sealed class OperatorRunTests
 
     [Theory]
     [InlineData("!!", 11)]
-    [InlineData("..^", 12)]
     public void AppendedDiagnosticRecordsServiceCurrentBadRunsWithoutChangingRawRecordShape(string text, int code)
     {
         var source = SourceText.From(text);
@@ -170,10 +169,29 @@ public sealed class OperatorRunTests
     }
 
     [Theory]
-    [InlineData(11)]
-    [InlineData(12)]
-    [InlineData(0)]
-    public void DiagnosticHeavyMaximumSourceRecordsRequireEveryExactCodeAndSpan(int code)
+    [InlineData("..", TokenKind.DotDot)]
+    [InlineData("..^", TokenKind.DotDotCaret)]
+    [InlineData("?.", TokenKind.QuestionDot)]
+    public void FormerlyUnsupportedPunctuationRequiresItsCurrentTokenKind(string text, TokenKind kind)
+    {
+        var source = SourceText.From(text);
+        var tokens = TokenRecords((TokenKind.Bad, 0, text.Length), (TokenKind.EndOfFile, text.Length, 0));
+        var diagnostics = new byte[16];
+        BinaryPrimitives.WriteInt32LittleEndian(diagnostics, 1);
+        BinaryPrimitives.WriteInt32LittleEndian(diagnostics.AsSpan(4), 12);
+        BinaryPrimitives.WriteInt32LittleEndian(diagnostics.AsSpan(12), text.Length);
+
+        Assert.Throws<ArgumentException>(() =>
+            ScannerHost.ReadLexResult(source, 2, tokens, new byte[4], diagnostics));
+
+        var current = TokenRecords((kind, 0, text.Length), (TokenKind.EndOfFile, text.Length, 0));
+        var lexed = ScannerHost.ReadLexResult(source, 2, current, new byte[4], new byte[4]);
+        Assert.Equal(kind, Assert.Single(lexed.Tokens.Where(token => token.Kind != TokenKind.EndOfFile)).Kind);
+        Assert.Empty(lexed.Diagnostics);
+    }
+
+    [Fact]
+    public void InvalidPunctuationDiagnosticHeavyMaximumSourceRecordsRequireEveryExactCodeAndSpan()
     {
         const int runs = 5461;
         var text = new StringBuilder(ScannerHost.MaximumSourceLength);
@@ -184,11 +202,10 @@ public sealed class OperatorRunTests
         BinaryPrimitives.WriteInt32LittleEndian(diagnostics, runs);
         for (var index = 0; index < runs; index++)
         {
-            var kind = code == 0 ? 11 + index % 2 : code;
-            text.Append(kind == 11 ? "!! " : ".. ");
+            text.Append("!! ");
             records[index] = (TokenKind.Bad, index * 3, 2);
             var diagnosticOffset = (1 + index * 3) * sizeof(int);
-            BinaryPrimitives.WriteInt32LittleEndian(diagnostics.AsSpan(diagnosticOffset), kind);
+            BinaryPrimitives.WriteInt32LittleEndian(diagnostics.AsSpan(diagnosticOffset), 11);
             BinaryPrimitives.WriteInt32LittleEndian(diagnostics.AsSpan(diagnosticOffset + 4), index * 3);
             BinaryPrimitives.WriteInt32LittleEndian(diagnostics.AsSpan(diagnosticOffset + 8), 2);
             var triviaOffset = (1 + index * 4) * sizeof(int);
@@ -208,7 +225,7 @@ public sealed class OperatorRunTests
         Assert.Equal(source.Text, SyntaxTree.Parse(result).Root.ToFullString());
         for (var index = 0; index < runs; index++)
         {
-            Assert.Equal($"TRM{(code == 0 ? 11 + index % 2 : code):0000}", result.Diagnostics[index].Code);
+            Assert.Equal("TRM0011", result.Diagnostics[index].Code);
             Assert.Equal(new TextSpan(index * 3, 2), result.Diagnostics[index].Span);
         }
         var middle = runs / 2;
@@ -222,8 +239,7 @@ public sealed class OperatorRunTests
         Assert.Throws<ArgumentException>(() =>
             ScannerHost.ReadLexResult(source, records.Length, tokens, trivia, wrongSpan));
         var wrongRunKind = (byte[])diagnostics.Clone();
-        var expected = code == 0 ? 11 + middle % 2 : code;
-        BinaryPrimitives.WriteInt32LittleEndian(wrongRunKind.AsSpan(offset), expected == 11 ? 12 : 11);
+        BinaryPrimitives.WriteInt32LittleEndian(wrongRunKind.AsSpan(offset), 12);
         Assert.Throws<ArgumentException>(() =>
             ScannerHost.ReadLexResult(source, records.Length, tokens, trivia, wrongRunKind));
         var missing = new byte[diagnostics.Length - 3 * sizeof(int)];

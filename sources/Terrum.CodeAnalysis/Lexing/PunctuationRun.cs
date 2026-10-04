@@ -26,7 +26,9 @@ internal static class PunctuationRun
         (TokenKind.OpenBrace, "{"), (TokenKind.CloseBrace, "}"),
         (TokenKind.OpenBracket, "["), (TokenKind.CloseBracket, "]"),
         (TokenKind.Semicolon, ";"), (TokenKind.Comma, ","), (TokenKind.Dot, "."),
+        (TokenKind.DotDot, ".."), (TokenKind.DotDotCaret, "..^"),
         (TokenKind.Colon, ":"), (TokenKind.Question, "?"),
+        (TokenKind.QuestionDot, "?."),
         (TokenKind.QuestionQuestion, "??"), (TokenKind.QuestionQuestionEquals, "??="),
         (TokenKind.Plus, "+"), (TokenKind.PlusPlus, "++"),
         (TokenKind.Minus, "-"), (TokenKind.MinusMinus, "--"), (TokenKind.Star, "*"), (TokenKind.Slash, "/"),
@@ -79,10 +81,6 @@ internal static class PunctuationRun
             }
         }
         tokenKind = TokenKind.Bad;
-        if (text is ".." or "..^" or "?.")
-        {
-            return PunctuationRunKind.Unsupported;
-        }
         if (text.Length > 1)
         {
             foreach (var unit in text)

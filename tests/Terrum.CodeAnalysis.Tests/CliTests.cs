@@ -313,8 +313,8 @@ public sealed partial class CliTests
         Assert.Equal(0, exit);
         Assert.Empty(error);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(9, document.RootElement.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("scanner-9", document.RootElement.GetProperty("component").GetString());
+        Assert.Equal(10, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("scanner-10", document.RootElement.GetProperty("component").GetString());
         var integers = document.RootElement.GetProperty("integerValues");
         Assert.Equal(5, integers.GetArrayLength());
         string[] tags = ["", "", "", "", ""];
@@ -345,8 +345,8 @@ public sealed partial class CliTests
         Assert.Equal(1, exit);
         Assert.Equal("", error);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(9, document.RootElement.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("scanner-9", document.RootElement.GetProperty("component").GetString());
+        Assert.Equal(10, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("scanner-10", document.RootElement.GetProperty("component").GetString());
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
         var diagnostic = Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray());
         Assert.Equal("TRM0001", diagnostic.GetProperty("code").GetString());

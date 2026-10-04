@@ -143,9 +143,11 @@ The compiled scanner and native input path support generalized comment fences
 and closed-catalog `@keyword` names, preserving raw source ranges and name
 identity.
 
-Scanner-9/schema-9 appends `CharacterLiteral` token kind 103; Scanner-8/schema-8
-diagnostic identities 11/12 for invalid and defined-but-unsupported maximal
-runs remain unchanged. See the
+Scanner-10/schema-10 appends `DotDot`, `DotDotCaret`, and `QuestionDot` token
+kinds 104–106 after Scanner-9/schema-9 added `CharacterLiteral` kind 103.
+Scanner-8/schema-8 diagnostic identities 11/12 for invalid and
+defined-but-unsupported maximal runs remain unchanged. These tokens do not
+imply parser or binder support. See the
 [scanner contract](scanner.md) for spans and current record shapes. Hosted
 role-specific punctuation rules are in the
 [implementation reference](implementation.md). The bounded frontend produces
@@ -266,7 +268,7 @@ existing single-evaluation, checked-failure and lazy-effect behavior and
 counts toward the existing eight-identity limit. Versions 1–52 retain their
 prior shapes and do not admit discard records; later projections may carry
 kind 15 alongside newer kinds. This appends only a provisional frontend feature
-version: source grammar (host language version 44), scanner-8/schema-8,
+version: source grammar (host language version 44), scanner-10/schema-10,
 diagnostic/token inventories, semantic/ISA/Contract/TRRM formats, native
 formats and ABI do not change. The exact record and publication contract is
 in the [implementation reference](implementation.md).

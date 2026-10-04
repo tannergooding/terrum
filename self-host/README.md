@@ -59,9 +59,11 @@ candidates self-hosting or change their provisional frontend projections.
 Current scanner behavior and record shapes are specified in the
 [scanner contract](../docs/scanner.md); hosted parser and native projection
 boundaries are in the [implementation reference](../docs/implementation.md).
-Scanner-9/schema-9 appends `CharacterLiteral` token kind 103 while retaining
+Scanner-10/schema-10 appends `DotDot`, `DotDotCaret`, and `QuestionDot` token
+kinds 104–106 after Scanner-9/schema-9 added `CharacterLiteral` kind 103.
 Scanner-8/schema-8 diagnostic identities 11/12 for invalid and unsupported
-maximal runs, including atomic Bad tokens for `..`, `..^` and `?.`. Hosted
+maximal runs remain unchanged. These punctuation tokens do not imply parser
+consumption or binding. Hosted
 generic closers and optional suffixes require parser consumption; native
 scalar spacing permits only the `init ref<T>` parameter delimiters, not
 general generic type contexts. Raw buffers have no schema marker and current

@@ -24,8 +24,8 @@ public sealed partial class CliTests
         Assert.Equal(0, exit);
         Assert.Empty(error);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(9, document.RootElement.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("scanner-9", document.RootElement.GetProperty("component").GetString());
+        Assert.Equal(10, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("scanner-10", document.RootElement.GetProperty("component").GetString());
         Assert.Equal(["DocumentationLineComment", "NewLine", "DocumentationBlockComment", "Whitespace",
                 "MultiLineComment", "Whitespace"],
             document.RootElement.GetProperty("tokens")[0].GetProperty("leadingTrivia")

@@ -63,12 +63,15 @@ decoder handles decimal, hexadecimal and
 binary integers with digit separators; floating/custom literal parsing,
 registered string targets and `[ConstEval]` remain unsupported.
 
-Scanner-9/schema-9 appends `CharacterLiteral` as token kind 103 for single-
-quoted character tokens. Existing token IDs, record widths, diagnostic IDs and
-integer records remain unchanged. The component diagnoses empty or
-multi-scalar literals with `TRM0001`, unterminated literals with `TRM0002` and
-invalid escapes with `TRM0005`; it validates one scalar but leaves target-type
-representability to the hosted binder.
+Scanner-10/schema-10 appends `DotDot`, `DotDotCaret`, and `QuestionDot` as
+token kinds 104–106 after Scanner-9/schema-9 added `CharacterLiteral` as kind
+103. Existing token IDs, record widths, diagnostic IDs and integer records
+remain unchanged. These punctuators are lexically recognized; parser
+consumption and binding remain separate support boundaries. The component
+diagnoses empty or multi-scalar character literals with `TRM0001`,
+unterminated literals with `TRM0002` and invalid escapes with `TRM0005`; it
+validates one scalar but leaves target-type representability to the hosted
+binder.
 
 ```powershell
 dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll scan-component self-host\Scanner.terrum input.txt --runtime fail-fast --json
@@ -79,7 +82,7 @@ Both are execution-worker commands: compiled scanner code runs inside that CLI
 process. Supervising clients must launch a bounded subprocess and treat abnormal
 termination as a runtime failure. Ordinary `build` still uses the host lexer.
 When `scan-component`
-scanning completes, JSON uses `schemaVersion: 9`, `component: "scanner-9"`,
+scanning completes, JSON uses `schemaVersion: 10`, `component: "scanner-10"`,
 `coordinateSystem: "utf-16"`, the pinned `unicodeVersion`, `sourceLength`,
 `success`, and arrays of `tokens`, `integerValues`, and `diagnostics`. Each token has an exact
 lexical `kind`, `start`, `length` and its ordered `leadingTrivia` array.
@@ -93,7 +96,7 @@ return `success: false` and exit code 1 but still publish the full token stream
 and diagnostics on stdout. Without `--json`, token rows go to stdout and
 diagnostic code/spans go to stderr. Input, compilation, or invalid-result
 failures retain the standard schema-1 error response rather than producing a
-scanner-9 token response.
+scanner-10 token response.
 
 `build-component` instead adapts the native records to `LexResult`, pairs the
 validated integer values with that same source and token stream, feeds them
@@ -187,9 +190,9 @@ Leading trivia remains attached to EOF when there is no following token.
 `Host.Diagnostics[0]` contains
 the diagnostic count; subsequent triples are numeric code (1–12 maps to
 `TRM0001`–`TRM0012`), UTF-16 start and UTF-16 length, in reporting order.
-Scanner-8/schema-8 appends 11 for an invalid maximal punctuation run and 12
-for a defined but unsupported spelling; previous diagnostic meanings and
-record widths remain unchanged. Raw buffers have no schema marker; adapters
+Scanner-8/schema-8 introduced diagnostic identities 11 for an invalid maximal
+punctuation run and 12 for a defined but unsupported spelling; Scanner-10
+retains those identities and record widths. Raw buffers have no schema marker; adapters
 interpret them with current record identities and validate the current source
 profile without replacing supplied classifications.
 Overlong suffixed fences report their whole run plus the required suffix;
@@ -242,7 +245,7 @@ nonempty diagnostic/trivia spans, and exact contiguous coverage by token and
 trivia records. No source unit may be omitted, duplicated or reordered.
 Current parser adaptation additionally audits leading trivia against current
 comment rules, including required diagnostics; token classification and numeric
-decoding remain native results. The current component emits scanner-9/schema-9
+decoding remain native results. The current component emits scanner-10/schema-10
 only. Raw buffer adapters apply current identities and shapes and do not
 provide compatibility for historical scanner schemas.
 A malformed token remains a `Bad`, `NumericLiteral`, `StringLiteral`, or `CharacterLiteral` token
@@ -254,17 +257,19 @@ boundaries over raw token spans; these checks do not change tokenization. See th
 [implementation reference](implementation.md) for exact roles and
 diagnostics.
 
-Scanner-8 classifies maximal ASCII punctuation runs in the compiled scanner.
-Unlisted runs are one Bad token with whole-run `TRM0011`; unsupported `..`,
-`..^` and `?.` are one Bad token with `TRM0012`. Deferred `>`/`?`
+Scanner-10 classifies maximal ASCII punctuation runs in the compiled scanner.
+Unlisted runs are one Bad token with whole-run `TRM0011`; `..`, `..^` and `?.`
+are recognized as single tokens, while their parser consumption and binding
+remain unsupported. Other defined-but-unsupported spellings remain one Bad
+token with `TRM0012`. Deferred `>`/`?`
 type-boundary candidates retain existing splitting only when actual hosted
 parser consumption certifies them; missing/recovery tokens cannot certify a
 boundary, and repeated optional marking retains `TRM1005`. Native scalar
 snapshots check whole runs before spacing/fallback, with no type exemptions.
-Scanner-8/schema-8
-adds only diagnostic identities 11/12; token IDs, record widths, projections,
-bounds and semantic/native ABI remain fixed. Raw buffer records are interpreted
-only with the current identities and shapes. See the
+Scanner-10/schema-10 retains Scanner-8's diagnostic identities 11/12 and
+appends token IDs 104–106; record widths, projections, bounds and semantic/native
+ABI remain fixed. Raw buffer records are interpreted only with the current
+identities and shapes. See the
 [implementation reference](implementation.md) for current parser and
 unsupported-spelling boundaries.
 

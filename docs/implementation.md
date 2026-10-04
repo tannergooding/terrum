@@ -102,10 +102,12 @@ below.
 The lexer treats each maximal contiguous ASCII punctuation run from
 `!%&*+-./:<=>?^|~` as one candidate. Implemented spellings are classified as
 such; other runs produce one lossless Bad token and whole-run `TRM0011`.
-Recognized but unsupported `..`, `..^` and `?.` produce one Bad token with
-`TRM0012`. Comments, literals, numeric exponents and keyword escapes retain
-priority; grouping/list delimiters, commas and semicolons are outside this
-glyph set. A deferred `>`/`?` candidate is certified only when the parser
+The grammar-defined `..`, `..^` and `?.` spellings are now single lexical
+tokens; parser consumption and binding remain unsupported. Other defined but
+unsupported spellings produce one Bad token with `TRM0012`. Comments, literals,
+numeric exponents and keyword escapes retain priority; grouping/list
+delimiters, commas and semicolons are outside this glyph set. A deferred
+`>`/`?` candidate is certified only when the parser
 consumes it as a generic closer or optional suffix, including split and
 four-or-more-character closing runs. Missing or recovery tokens cannot certify
 it. Repeated optional modifiers
@@ -611,9 +613,11 @@ height. The publisher shares local/parameter checks and header/version writing
 to preserve the existing semantic work limit. Invalid input clears provisional
 projection data and does not publish completion; failed CLI builds retain
 existing PE bytes. There is no hosted parse fallback or raw-record
-reinterpretation. Current syntax, scanner-8/schema-8, diagnostic and token
-inventories, semantic/ISA/Contract/TRRM formats, native formats and ABI are
-unchanged. Only the provisional frontend feature version is appended.
+reinterpretation. This projection version does not change the current syntax,
+scanner-10/schema-10, diagnostic inventory, semantic/ISA/Contract/TRRM formats,
+native formats or ABI. Scanner token identities 104–106 are defined separately
+by the current scanner contract. Only the provisional frontend feature version
+is appended.
 
 Provisional projection v54 appends labeled loop headers and named transfers
 within the existing 392-word projection and five-word statement records:
@@ -1110,7 +1114,7 @@ Obsolete tags reject rather than selecting earlier feature restrictions. The
 identities, 12 statement records, 32 expression nodes, three parameters,
 16 expression-recursion levels, six source structural levels and the shared
 100,000-visit limit. Compiler-generated discard blocks do not consume source
-depth. Scanner-8/schema-8, diagnostic kinds 1–12, token IDs,
+depth. Scanner-10/schema-10, diagnostic kinds 1–12, token IDs through 106,
 semantic/ISA/Contract/TRRM formats and native ABI remain unchanged.
 
 ### Compiler library boundary
@@ -1354,7 +1358,7 @@ is ordered in the
 | Surface | Implemented | Not yet implemented |
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
-| Lexing | Pinned Unicode identifiers with standalone `_` reserved and closed-catalog `@keyword` escapes, single-scalar character tokens, ASCII decimal, `0x`/`0X` hexadecimal and `0b`/`0B` binary numeric tokens, digit separators, decimal fractional/exponent token boundaries, generalized ordinary/documentation comment fences, leading trivia, strings, diagnostics including `TRM0006`–`TRM0009` for numeric suffixes, missing based digits and malformed separators, `TRM0010` for overlong comment closers, `TRM0011`/`TRM0012` for invalid/unsupported maximal punctuation runs, EOF; the scanner-9 integer record retains suffix metadata only for diagnostic-bearing tokens | Complete canonical unescaped reservation/context migration; interpolation, raw/native literals, directives; successful range/slice/optional-access tokens |
+| Lexing | Pinned Unicode identifiers with standalone `_` reserved and closed-catalog `@keyword` escapes, single-scalar character tokens, lexical `..`, `..^` and `?.` tokens, ASCII decimal, `0x`/`0X` hexadecimal and `0b`/`0B` binary numeric tokens, digit separators, decimal fractional/exponent token boundaries, generalized ordinary/documentation comment fences, leading trivia, strings, diagnostics including `TRM0006`–`TRM0009` for numeric suffixes, missing based digits and malformed separators, `TRM0010` for overlong comment closers, `TRM0011`/`TRM0012` for invalid/unsupported maximal punctuation runs, EOF; the scanner-10 integer record retains suffix metadata only for diagnostic-bearing tokens | Complete canonical unescaped reservation/context migration; interpolation, raw/native literals, directives; range/slice/optional-access parser consumption and binding |
 | Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded source classes including `mut class`, readonly default and writable `mut` class receivers, non-owning compact-struct `mut` methods with named mutable-local receiver writeback, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`, same-compilation caller-unsafe declarations; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes and generic classes/structs (struct and field attributes diagnose `TRM3001`), parameter-only `implicit ref<T>` binding and ordinary reference-lifetime contracts, persisted caller-unsafe contracts, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; source-class and `ManagedNode` optional handles with `write` capability preserved through fields, parameters, results and inference; repeated `?` diagnoses | `pin ref<T>`, scalar options, general generic optional normalization after substitution, family defaults/conditional conformance, general ownership/form qualifiers and general borrowed references, transparent-wrapper ABI contracts |
 | Statements | Initialized typed/inferred locals, standalone vacant locals, local value lifetime ending `name = _;`, `mut`, blocks, `if`/`else`, `while`, scoped `for`, post-tested `do`, nearest/named enclosing-loop `break`/`continue`, return, statement-form `require`, bounded constant-only body `static require`/outer-body `static ensure`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment, primitive integer compound assignment, managed optional `??=` and expression statements, standalone `_ = expression;` with statement-end owning cleanup | `defer`, policy blocks/expressions and variants, `for (... in ...)`, general switch/patterns and wildcard patterns, other context-specific discard destinations, declaration pre/postconditions and symbolic static proofs, typed requirement-failure selection, general exception objects/throw, async, nominal compound assignment |

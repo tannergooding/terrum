@@ -132,7 +132,6 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("\"unterminated\n\"\\q\"")]
     [InlineData("/* **/ */")]
     [InlineData("!!")]
-    [InlineData("..^")]
     [InlineData("\U00010400 +++")]
     public async Task OwnedDiagnosticsRemainAvailableOnLexicalFailureAsync(string text)
     {
