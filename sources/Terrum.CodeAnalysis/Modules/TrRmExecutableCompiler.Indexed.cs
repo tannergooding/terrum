@@ -82,12 +82,13 @@ public static partial class TrRmExecutableCompiler
             var indegree = new int[source.Count];
             foreach (var block in source)
             {
-                foreach (var edge in Edges(block))
+                if (block.True is { } trueEdge && !IsBackEdge(block, trueEdge))
                 {
-                    if (!IsBackEdge(block, edge))
-                    {
-                        indegree[edge.Target.Creation]++;
-                    }
+                    indegree[trueEdge.Target.Creation]++;
+                }
+                if (block.False is { } falseEdge && !IsBackEdge(block, falseEdge))
+                {
+                    indegree[falseEdge.Target.Creation]++;
                 }
             }
             var ordered = new List<IndexedBlock>(source.Count);
@@ -110,14 +111,18 @@ public static partial class TrRmExecutableCompiler
                 var next = source[first];
                 next.Id = ordered.Count + 1;
                 ordered.Add(next);
-                foreach (var edge in Edges(next))
+                if (next.True is { } trueEdge && !IsBackEdge(next, trueEdge))
                 {
-                    if (!IsBackEdge(next, edge))
+                    if (--indegree[trueEdge.Target.Creation] == 0)
                     {
-                        if (--indegree[edge.Target.Creation] == 0)
-                        {
-                            ready.Add(edge.Target.Creation);
-                        }
+                        ready.Add(trueEdge.Target.Creation);
+                    }
+                }
+                if (next.False is { } falseEdge && !IsBackEdge(next, falseEdge))
+                {
+                    if (--indegree[falseEdge.Target.Creation] == 0)
+                    {
+                        ready.Add(falseEdge.Target.Creation);
                     }
                 }
             }
@@ -184,9 +189,16 @@ public static partial class TrRmExecutableCompiler
                     VisitReads(block.Operations[operation].Expression, id => Use(id, operation));
                 }
                 Use(block.Condition != 0 ? block.Condition : block.ReturnValue, block.Operations.Count);
-                foreach (var edge in Edges(block))
+                if (block.True is { } trueEdge)
                 {
-                    foreach (var argument in edge.Arguments)
+                    foreach (var argument in trueEdge.Arguments)
+                    {
+                        Use(argument, block.Operations.Count);
+                    }
+                }
+                if (block.False is { } falseEdge)
+                {
+                    foreach (var argument in falseEdge.Arguments)
                     {
                         Use(argument, block.Operations.Count);
                     }
@@ -200,10 +212,18 @@ public static partial class TrRmExecutableCompiler
                 for (var b = ordered.Count - 1; b >= 0; b--)
                 {
                     var block = ordered[b];
-                    foreach (var edge in Edges(block))
+                    if (block.True is { } trueEdge)
                     {
-                        liveOuts[b].UnionWith(liveIns[edge.Target.Id - 1]);
-                        foreach (var argument in edge.Arguments)
+                        liveOuts[b].UnionWith(liveIns[trueEdge.Target.Id - 1]);
+                        foreach (var argument in trueEdge.Arguments)
+                        {
+                            liveOuts[b].Add(remap[argument]);
+                        }
+                    }
+                    if (block.False is { } falseEdge)
+                    {
+                        liveOuts[b].UnionWith(liveIns[falseEdge.Target.Id - 1]);
+                        foreach (var argument in falseEdge.Arguments)
                         {
                             liveOuts[b].Add(remap[argument]);
                         }
@@ -375,18 +395,6 @@ public static partial class TrRmExecutableCompiler
                 }
             }
             throw Unsupported("Indexed scalar Body exceeds four-byte offset/index bounds.");
-        }
-
-        private static IEnumerable<IndexedEdge> Edges(IndexedBlock block)
-        {
-            if (block.True is not null)
-            {
-                yield return block.True;
-            }
-            if (block.False is not null)
-            {
-                yield return block.False;
-            }
         }
 
         private static void VisitReads(BoundExpression expression, Action<int> visit)
