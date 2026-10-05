@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `3b53fa2` | Transfer validated scalar frontend snapshots through `TokenCursor` before existing managed parsing |
 | `5e9816f` | Pre-size module class identity index |
 | `909b4e8` | Pre-size semantic module read indexes |
 | `d05d654` | Pre-size linked module name index |
