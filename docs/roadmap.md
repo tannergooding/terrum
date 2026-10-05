@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `30c989c` | Resolve module owner visibility and export layout in one pass |
 | `88b92f3` | Resolve declared structure dependencies with one lookup pass |
 | `9c0204b` | Reuse imported ownership-transfer facts during graph library creation |
 | `b13036b` | Validate graph cleanup ownership during the structure traversal |
