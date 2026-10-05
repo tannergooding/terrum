@@ -4605,7 +4605,7 @@ public sealed partial class ManagedScannerComponentTests
             trees.Add(SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path));
         }
         trees.Add(SyntaxTree.Parse(entry, "managed-scanner-entry.terrum"));
-        var buffers = parserName is "ScalarFrontendProjection" or "ScalarFrontend"
+        var buffers = parserName is not null
             ? ScalarFrontendHost.CreateBuffers(SourceText.From(text))
             : ScannerHost.CreateBuffers(SourceText.From(text));
         var compilation = Compilation.Create(trees, buffers, policy);
