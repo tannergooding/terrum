@@ -12,9 +12,11 @@ from `BitOperations`, `CharacterFacts`, `Float32MathSelection`,
 `Float64MathSelection`, `IntegerCheckedArithmetic`, `IntegerFormatting`,
 `IntegerCheckedConversions`, `IntegerMath`, `SourceRange`, `Token`,
 `IntegerSaturation`, `IntegerWrapping`, `Utf16CodeUnits` and
-`WideIntegerFacts`. The test build also includes
+`WideIntegerFacts`, `IntegerFacts` and `CopyAlgorithms`. The test build also includes
 `tests\native\integer-formatting-abi.terrum` for workspace setup and
-consumption, and `tests\native\token-abi.terrum` for aggregate ABI selection;
+consumption, `tests\native\token-abi.terrum` for aggregate ABI selection,
+`tests\native\integer-facts-abi.terrum` for integer-fact predicates and
+`tests\native\copy-algorithms-abi.terrum` for concrete Copy specialization;
 these helper exports are test-only. This maintained native
 compiler-primitives library exports `Terrum.CodeAnalysis.SourceRange.TryCreate`,
 `Terrum.CodeAnalysis.IsAsciiDigit`,
