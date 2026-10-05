@@ -61,6 +61,12 @@ This bounded implementation is recorded by the still-unapproved
 it does not extend the native profile or move the scalar frontend beyond the
 hosted verifier/emitter.
 
+A separate source-independent persisted semantic-module consumer exercises
+`SourceRange.TryCreate`, its fields, and both `End`/`GetEnd` against empty,
+maximum-endpoint and overflow boundaries under both runtime policies. This adds
+persistence evidence only; it does not change the range contract or source
+coordinate representation.
+
 Revision 55 provisionally supports top-level caller-unsafe function contracts
 and calls inside explicit `unsafe { }` blocks in structured semantic modules.
 Readers reconstruct call authorization from the persisted block scope rather

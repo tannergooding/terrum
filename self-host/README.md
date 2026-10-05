@@ -603,6 +603,10 @@ runtime text must use UTF-16. A later larger-source protocol needs an explicit
 schema change. Source file UTF-8 decoding remains separate from coordinates.
 The range's explicit `End` getter is exported alongside the existing `GetEnd`
 method for independent module consumers; both compute the checked end.
+Persisted semantic-module JIT coverage also exercises construction, field
+reads, both end accessors, and rejected negative/overflowing ranges from an
+independent consumer under both runtime policies. This verifies persistence,
+not a broader coordinate or range contract.
 
 `CharacterFacts` uses `int32(value)` instead of a per-source conversion hook.
 Raw `char16` values are code units, not automatically validated Unicode scalars.
