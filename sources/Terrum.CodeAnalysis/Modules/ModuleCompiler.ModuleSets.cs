@@ -168,8 +168,7 @@ public static partial class ModuleCompiler
                 });
             }
         }
-        var required = RequiredStructures(program.Functions.Select(static function =>
-            function.IsExternal ? Declaration(function) : function), program.Structures);
+        var required = RequiredStructures(program.Functions, program.Structures);
         var structures = SelectStructures(program.Structures, required);
         var referenceStructures = IndexStructures(reference.Structures);
         var imported = ImmutableArray.CreateBuilder<string>();
