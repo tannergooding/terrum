@@ -147,13 +147,13 @@ public sealed partial class SourceLineComponentTests
         }
     }
 
-    private static async Task<ImmutableArray<SyntaxTree>> ReadComponentsAsync(bool includeTests)
+    private static async Task<ImmutableArray<SyntaxTree>> ReadComponentsAsync(bool includeTests,
+        bool includeLines = true)
     {
         var trees = ImmutableArray.CreateBuilder<SyntaxTree>();
-        var names = new[]
-        {
-            "SourceRange.terrum", "CharacterFacts.terrum", "SourceText.terrum", "SourceLines.terrum",
-        };
+        var names = includeLines || includeTests
+            ? new[] { "SourceRange.terrum", "CharacterFacts.terrum", "SourceText.terrum", "SourceLines.terrum" }
+            : new[] { "SourceRange.terrum", "CharacterFacts.terrum", "SourceText.terrum" };
         foreach (var name in includeTests ? [.. names, "SourceLineTests.terrum"] : names)
         {
             var path = Path.Combine(RepositoryRoot(), "self-host", name);

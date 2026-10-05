@@ -20,7 +20,7 @@ public sealed partial class SourceLineComponentTests
     [InlineData("\uD800\0\uDC00\uD800\uDC00")]
     public async Task SourceTextReadsExactUnitsAndValidatesRangesAsync(string text)
     {
-        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var trees = await ReadComponentsAsync(includeTests: false, includeLines: false).ConfigureAwait(true);
         var codeUnitChecks = string.Join(Environment.NewLine, text.Select((unit, index) =>
             $"if (!TryReadSourceCodeUnit({index}, init var codeUnit{index})) {{ return {index + 2}; }}" +
             $"{Environment.NewLine}if (int32(codeUnit{index}) != {(int)unit}) {{ return {index + 2}; }}"));
