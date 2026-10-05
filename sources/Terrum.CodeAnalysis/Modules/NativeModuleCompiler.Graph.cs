@@ -429,15 +429,32 @@ public static partial class NativeModuleCompiler
         reference ??= GetValidatedProviderReference(provider);
         if (provider.IsLeaf)
         {
-            return reference.Structures.ToDictionary(static item => item.Name,
-                item => (GraphTypeOrigin?)new GraphTypeOrigin(item.Name, provider.Identity!,
-                    item.CleanupMethod is not null ? provider.Identity : null), StringComparer.Ordinal);
+            var origins = new Dictionary<string, GraphTypeOrigin?>(reference.Structures.Length,
+                StringComparer.Ordinal);
+            foreach (var structure in reference.Structures)
+            {
+                origins.Add(structure.Name, new GraphTypeOrigin(structure.Name, provider.Identity!,
+                    structure.CleanupMethod is not null ? provider.Identity : null));
+            }
+            return origins;
         }
-        var retained = provider.Origins.ToDictionary(static item => item.Name, StringComparer.Ordinal);
-        return reference.Structures.ToDictionary(static item => item.Name,
-            item => (GraphTypeOrigin?)(retained.TryGetValue(item.Name, out var origin)
-                ? origin : throw new ModuleFormatException($"Missing graph origin for '{item.Name}'.")),
+        var retained = new Dictionary<string, GraphTypeOrigin>(provider.Origins.Length,
             StringComparer.Ordinal);
+        foreach (var origin in provider.Origins)
+        {
+            retained.Add(origin.Name, origin);
+        }
+        var result = new Dictionary<string, GraphTypeOrigin?>(reference.Structures.Length,
+            StringComparer.Ordinal);
+        foreach (var structure in reference.Structures)
+        {
+            if (!retained.TryGetValue(structure.Name, out var origin))
+            {
+                throw new ModuleFormatException($"Missing graph origin for '{structure.Name}'.");
+            }
+            result.Add(structure.Name, origin);
+        }
+        return result;
     }
 
     private static GraphTypeOrigin[] CreateGraphOrigins(ModuleCompiler.GraphContractSnapshot contract,
