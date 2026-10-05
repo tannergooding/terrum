@@ -85,6 +85,12 @@ oracle at source/destination boundaries and code-unit edges, including
 surrogate values, under both runtime policies. This remains evidence for that
 provisional candidate API; it does not adopt a general numeric-conversion
 policy.
+Revision-56 persisted semantic-module JIT also compares all 20 existing
+`IntegerWrapping` candidate helpers with a `BigInteger` modulo and
+two's-complement oracle across source/destination boundaries and code-unit
+edges, including surrogates, under both runtime policies. This remains
+provisional candidate evidence, not unchecked conversion syntax or a general
+conversion policy.
 A second persisted semantic-module consumer executes private generic
 `CopyAlgorithms` specializations over scalar values, code units and nested
 `Token`/`SourceRange` aggregates. It checks conditional `init ref` publication
