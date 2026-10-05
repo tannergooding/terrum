@@ -47,17 +47,16 @@ public static partial class ModuleCompiler
                 types.Add(structure);
             }
         }
-        var allTypes = types.ToImmutable();
-        var destinationTypes = IndexTypes(allTypes);
+        var destinationTypes = IndexTypes(types);
         var typeIndex = 0;
         foreach (var reference in references)
         {
             foreach (var structure in reference.Structures)
             {
-                types[typeIndex++] = RemapStructure(structure, reference.Structures, allTypes, destinationTypes);
+                types[typeIndex++] = RemapStructure(structure, reference.Structures, types, destinationTypes);
             }
         }
-        allTypes = types.ToImmutable();
+        var allTypes = types.ToImmutable();
         foreach (var reference in references)
         {
             foreach (var function in reference.Functions)

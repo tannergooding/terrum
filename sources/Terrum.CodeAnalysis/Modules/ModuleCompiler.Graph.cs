@@ -91,14 +91,13 @@ public static partial class ModuleCompiler
                 types.Add(structure);
             }
         }
-        var combined = types.ToImmutable();
-        var destinationTypes = IndexTypes(combined);
+        var destinationTypes = IndexTypes(types);
         for (var index = 0; index < types.Count; index++)
         {
             var original = originals[types[index].Name];
-            types[index] = RemapStructure(original.Type, original.Table, combined, destinationTypes);
+            types[index] = RemapStructure(original.Type, original.Table, types, destinationTypes);
         }
-        combined = types.ToImmutable();
+        var combined = types.ToImmutable();
         var functions = ImmutableArray.CreateBuilder<BoundFunction>();
         foreach (var reference in references)
         {

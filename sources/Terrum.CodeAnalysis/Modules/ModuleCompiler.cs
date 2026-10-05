@@ -1485,14 +1485,14 @@ public static partial class ModuleCompiler
         return true;
     }
 
-    private static Dictionary<string, PrimitiveType>? IndexTypes(ImmutableArray<BoundStruct> destination)
+    private static Dictionary<string, PrimitiveType>? IndexTypes(IReadOnlyList<BoundStruct> destination)
     {
-        if (destination.IsEmpty)
+        if (destination.Count == 0)
         {
             return null;
         }
-        var types = new Dictionary<string, PrimitiveType>(destination.Length, StringComparer.Ordinal);
-        for (var index = 0; index < destination.Length; index++)
+        var types = new Dictionary<string, PrimitiveType>(destination.Count, StringComparer.Ordinal);
+        for (var index = 0; index < destination.Count; index++)
         {
             types.Add(destination[index].Name, (PrimitiveType)(100 + index));
         }
@@ -1500,7 +1500,7 @@ public static partial class ModuleCompiler
     }
 
     private static PrimitiveType RemapType(PrimitiveType type, ImmutableArray<BoundStruct> source,
-        ImmutableArray<BoundStruct> destination, int classOffset = 0,
+        IReadOnlyList<BoundStruct> destination, int classOffset = 0,
         IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null)
     {
         if (classOffset != 0 && (int)type >= ManagedClassTypes.First && ManagedClassTypes.IsManaged(type))
@@ -1521,7 +1521,7 @@ public static partial class ModuleCompiler
             return destinationTypes.TryGetValue(source[index].Name, out var mapped)
                 ? mapped : throw new ModuleContractException($"Missing type '{source[index].Name}'.");
         }
-        for (var i = 0; i < destination.Length; i++)
+        for (var i = 0; i < destination.Count; i++)
         {
             if (destination[i].Name == source[index].Name)
             {
@@ -1532,7 +1532,7 @@ public static partial class ModuleCompiler
     }
 
     private static BoundStruct RemapStructure(BoundStruct structure, ImmutableArray<BoundStruct> source,
-        ImmutableArray<BoundStruct> destination, IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null) => structure with {
+        IReadOnlyList<BoundStruct> destination, IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null) => structure with {
             Fields = [.. structure.Fields.Select(field => field with {
                 Type = RemapType(field.Type, source, destination, destinationTypes: destinationTypes),
             })],
