@@ -32,7 +32,9 @@ public sealed class CharacterFactsModuleTests
                 mut int32 index = 0;
                 while (index < Host.Source.Length) {
                     char16 value = Host.Source[index];
-                    if (IsAsciiDigit(value) != (value >= 48 && value <= 57)) { return index + 1; }
+                    bool isDigit = value >= 48 && value <= 57;
+                    if (IsAsciiDigit(value) != isDigit) { return index + 1; }
+                    if (isDigit && GetDecimalDigit(value) != int32(value) - 48) { return index + 1; }
                     bool expectedLineBreak = value == 10 || value == 13 || value == 133
                         || value == 8232 || value == 8233;
                     if (IsLineBreak(value) != expectedLineBreak) { return index + 1; }
