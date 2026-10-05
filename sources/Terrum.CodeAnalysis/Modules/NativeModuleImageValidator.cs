@@ -231,7 +231,7 @@ internal static class NativeModuleImageValidator
                 {
                     throw Invalid();
                 }
-                var names = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+                var names = new Dictionary<string, IReadOnlyList<string>>(providerCount, StringComparer.Ordinal);
                 var systemCount = checkedExceptions ? 2 : 1;
                 string? singleProviderDll = null;
                 var expectedDlls = Array.Empty<string>();
@@ -260,13 +260,14 @@ internal static class NativeModuleImageValidator
                     }
                     var dll = Name(name);
                     var providerIndex = index - systemCount;
-                    if (dll != (index == 0 ? "KERNEL32.dll"
+                    var expectedDll = index == 0 ? "KERNEL32.dll"
                         : checkedExceptions && index == 1 ? "NTDLL.dll"
-                        : providerCount == 1 ? singleProviderDll : expectedDlls[providerIndex]))
+                        : providerCount == 1 ? singleProviderDll : expectedDlls[providerIndex];
+                    if (dll != expectedDll)
                     {
                         throw Invalid();
                     }
-                    var symbols = new List<string>();
+                    var symbols = new List<string>(index < systemCount ? 0 : providerImports[dll].Count);
                     string? previousSymbol = null;
                     var hasExitProcess = false;
                     var hasRaiseException = false;
