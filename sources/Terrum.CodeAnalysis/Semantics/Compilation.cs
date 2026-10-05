@@ -183,12 +183,16 @@ public sealed class Compilation
             return "native-19";
         }
         var usesManagedNodes = false;
+        var ownedBuffer = false;
+        var readonlyView = false;
+        var mutableView = false;
         foreach (var function in program.Functions)
         {
             if (ManagedClassTypes.IsOptional(function.ReturnType))
             {
                 return "native-20";
             }
+            ownedBuffer |= function.ReturnType == PrimitiveType.OwnedInt32Buffer;
             var functionUsesManagedNodes = function.Intrinsic >= BoundIntrinsic.NodeTryCreate
                 || function.ReturnType is PrimitiveType.ManagedNode or PrimitiveType.WriteManagedNode;
             foreach (var variable in function.Variables)
@@ -197,6 +201,9 @@ public sealed class Compilation
                 {
                     return "native-20";
                 }
+                ownedBuffer |= variable.Type == PrimitiveType.OwnedInt32Buffer;
+                readonlyView |= variable.Type == PrimitiveType.ReadonlyInt32BufferView;
+                mutableView |= variable.Type == PrimitiveType.MutableInt32BufferView;
                 functionUsesManagedNodes |= variable.Type is PrimitiveType.ManagedNode
                     or PrimitiveType.WriteManagedNode;
             }
@@ -208,27 +215,7 @@ public sealed class Compilation
         }
         var structures = program.Structures;
         var composite = HasCompositeUnique(structures, out var unique);
-        var ownedBuffer = HasOwnedNativeBuffer(structures);
-        var readonlyView = false;
-        var mutableView = false;
-        foreach (var function in program.Functions)
-        {
-            ownedBuffer |= function.ReturnType == PrimitiveType.OwnedInt32Buffer;
-            foreach (var variable in function.Variables)
-            {
-                ownedBuffer |= variable.Type == PrimitiveType.OwnedInt32Buffer;
-                readonlyView |= variable.Type == PrimitiveType.ReadonlyInt32BufferView;
-                mutableView |= variable.Type == PrimitiveType.MutableInt32BufferView;
-                if (readonlyView && mutableView)
-                {
-                    break;
-                }
-            }
-            if (readonlyView && mutableView)
-            {
-                break;
-            }
-        }
+        ownedBuffer |= HasOwnedNativeBuffer(structures);
         var mutableViewOrClear = mutableView || UsesBufferClear(program);
         foreach (var function in program.Functions)
         {
