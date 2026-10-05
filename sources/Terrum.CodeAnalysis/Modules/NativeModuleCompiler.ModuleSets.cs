@@ -51,7 +51,7 @@ public static partial class NativeModuleCompiler
             allowManagedParticipant: true);
         var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(semantic);
         var imports = contractSnapshot.Declarations.ToHashSet(StringComparer.Ordinal);
-        var externalFunctionNames = new HashSet<string>(StringComparer.Ordinal);
+        var externalFunctionNames = new HashSet<string>(imports.Count, StringComparer.Ordinal);
         foreach (var function in program.Functions)
         {
             if (function.IsExternal)
