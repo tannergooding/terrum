@@ -346,8 +346,17 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native graph package exceeds its artifact size limit.");
         }
-        var result = stream.ToArray();
-        return [.. result, .. SHA256.HashData(result)];
+        return AppendChecksum(stream);
+    }
+
+    private static byte[] AppendChecksum(MemoryStream stream)
+    {
+        var payloadLength = checked((int)stream.Length);
+        var result = new byte[checked(payloadLength + HashSize)];
+        var payload = stream.GetBuffer().AsSpan(0, payloadLength);
+        payload.CopyTo(result);
+        _ = SHA256.HashData(payload, result.AsSpan(payloadLength));
+        return result;
     }
 
     private static GraphDependency[] GraphBindings(IReadOnlyList<GraphPackage> providers,

@@ -321,8 +321,7 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native module set exceeds its artifact size limit.");
         }
-        var bytesOut = stream.ToArray();
-        return [.. bytesOut, .. SHA256.HashData(bytesOut)];
+        return AppendChecksum(stream);
     }
 
     private static CompilationReference CreateReferenceSet(ValidatedProvider[] providers) =>
