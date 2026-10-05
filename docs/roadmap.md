@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `ae9c961` | Collect module-set machine imports during parsing |
 | `84eb86b` | Binary-search graph declaration ownership |
 | `92fbf02` | Fuse imported layout validation with indexing |
 | `d80faf9` | Fuse managed-node facts into verifier validation |
