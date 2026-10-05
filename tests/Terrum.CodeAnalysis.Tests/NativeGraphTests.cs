@@ -170,6 +170,30 @@ public sealed class NativeGraphTests
     }
 
     [Fact]
+    public void ConsumerValidationAcceptsMultipleImports()
+    {
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Zebra() { return 2; }
+            public int32 Alpha() { return 1; }
+            """));
+        Assert.False(providerCompilation.HasErrors,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = NativeModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(providerCompilation.Program), ["Zebra", "Alpha"],
+            "MultipleImports", NativeRuntimePolicy.FailFast);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() { return Zebra() + Alpha(); }
+            """), NativeModuleCompiler.CreateReference(provider));
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+
+        var consumer = NativeModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(consumerCompilation.Program), provider, NativeRuntimePolicy.FailFast);
+
+        Assert.NotEmpty(consumer);
+    }
+
+    [Fact]
     public void GraphProvidersRejectCaseOnlyIdentityDuplicates()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(

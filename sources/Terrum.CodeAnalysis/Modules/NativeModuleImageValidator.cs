@@ -344,10 +344,16 @@ internal static class NativeModuleImageValidator
                 {
                     throw Invalid();
                 }
-                if (names.Count != providerImports.Count
-                    || names.Any(pair => !pair.Value.SequenceEqual(providerImports[pair.Key].Order(StringComparer.Ordinal))))
+                if (names.Count != providerImports.Count)
                 {
                     throw Invalid();
+                }
+                foreach (var pair in names)
+                {
+                    if (!pair.Value.SequenceEqual(SortOrdinalIfNeeded(providerImports[pair.Key])))
+                    {
+                        throw Invalid();
+                    }
                 }
             }
 
@@ -533,15 +539,7 @@ internal static class NativeModuleImageValidator
                 var functions = Read32(at + 28);
                 var names = Read32(at + 32);
                 var ordinals = Read32(at + 36);
-                IReadOnlyList<string> sorted = expected;
-                for (var index = 1; index < expected.Count; index++)
-                {
-                    if (StringComparer.Ordinal.Compare(expected[index - 1], expected[index]) > 0)
-                    {
-                        sorted = expected.Order(StringComparer.Ordinal).ToArray();
-                        break;
-                    }
-                }
+                var sorted = SortOrdinalIfNeeded(expected);
                 for (var index = 0; index < count; index++)
                 {
                     var ordinal = BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(Offset(ordinals + (index * 2), 2), 2));
@@ -559,6 +557,19 @@ internal static class NativeModuleImageValidator
         {
             throw new ModuleFormatException("Native module image is not a valid PE32+ image.", exception);
         }
+    }
+
+    private static IReadOnlyList<string> SortOrdinalIfNeeded(IReadOnlyList<string> names)
+    {
+        for (var index = 1; index < names.Count; index++)
+        {
+            if (StringComparer.Ordinal.Compare(names[index - 1], names[index]) > 0)
+            {
+                return names.Order(StringComparer.Ordinal).ToArray();
+            }
+        }
+
+        return names;
     }
 
     private static ModuleFormatException Invalid() => new("Malformed or incompatible native module PE image.");
