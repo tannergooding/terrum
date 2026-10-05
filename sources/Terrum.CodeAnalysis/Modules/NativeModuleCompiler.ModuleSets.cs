@@ -183,7 +183,11 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleContractException("A native module set requires 2 to 16 producers.");
         }
-        var packages = producers.Select(Read).ToArray();
+        var packages = new Package[producers.Count];
+        for (var i = 0; i < packages.Length; i++)
+        {
+            packages[i] = Read(producers[i]);
+        }
         var providers = new ValidatedProvider[packages.Length];
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < packages.Length; i++)
