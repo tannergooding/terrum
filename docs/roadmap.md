@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `3932fb2` | Inspect optional-handle and managed-node profile features together |
 | `fd4a240` | Collect unique and composite module profile facts in one pass |
 | `50290f2` | Inspect persisted readonly/mutable view features in one body pass |
 | `c99350e` | Cache native optional-assignment owner destinations |
