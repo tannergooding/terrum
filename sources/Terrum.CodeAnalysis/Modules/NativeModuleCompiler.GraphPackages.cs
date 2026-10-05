@@ -249,7 +249,12 @@ public static partial class NativeModuleCompiler
         }
         if (origins.Length != 0)
         {
-            var originsByName = origins.ToDictionary(static item => item.Name, StringComparer.Ordinal);
+            var originsByName = new Dictionary<string, GraphTypeOrigin>(origins.Length,
+                StringComparer.Ordinal);
+            foreach (var origin in origins)
+            {
+                originsByName.Add(origin.Name, origin);
+            }
             foreach (var structure in structures)
             {
                 if (!originsByName.TryGetValue(structure.Name, out var origin)
@@ -259,7 +264,12 @@ public static partial class NativeModuleCompiler
                     throw new ModuleFormatException("Graph origin table differs from retained semantic types.");
                 }
             }
-            var importedTypes = contractSnapshot.ImportedStructures.ToHashSet(StringComparer.Ordinal);
+            var importedStructureNames = contractSnapshot.ImportedStructures;
+            var importedTypes = new HashSet<string>(importedStructureNames.Length, StringComparer.Ordinal);
+            foreach (var name in importedStructureNames)
+            {
+                _ = importedTypes.Add(name);
+            }
             HashSet<string>? dependencyIdentities = null;
             foreach (var origin in origins)
             {
