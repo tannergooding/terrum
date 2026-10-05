@@ -484,10 +484,18 @@ public static partial class ModuleCompiler
 
     private static void ValidateProducer(Module producer)
     {
-        var names = producer.Functions.Select((function, index) => (function.Name, Index: index))
-            .ToDictionary(static item => item.Name, static item => item.Index, StringComparer.Ordinal);
-        var program = Resolve(new BoundProgram([.. producer.Functions.Select(static function =>
-            function.Function ?? throw new ModuleFormatException("Missing producer body."))], -1) {
+        var names = new Dictionary<string, int>(producer.Functions.Length, StringComparer.Ordinal);
+        for (var index = 0; index < producer.Functions.Length; index++)
+        {
+            names.Add(producer.Functions[index].Name, index);
+        }
+        var functions = ImmutableArray.CreateBuilder<BoundFunction>(producer.Functions.Length);
+        foreach (var function in producer.Functions)
+        {
+            functions.Add(function.Function
+                ?? throw new ModuleFormatException("Missing producer body."));
+        }
+        var program = Resolve(new BoundProgram(functions.MoveToImmutable(), -1) {
             Structures = producer.Structures,
             Classes = producer.Classes,
             RuntimePolicy = producer.RuntimePolicy,
