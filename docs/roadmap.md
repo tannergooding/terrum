@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `74b1a26` | Pre-size graph reference function materialization |
 | `be4ea09` | Build module-set references without LINQ materialization |
 | `073a2b0` | Cover no-import module-set provider validation |
 | `1046881` | Share direct provider import declaration materialization |
