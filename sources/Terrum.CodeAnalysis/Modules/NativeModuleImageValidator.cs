@@ -164,13 +164,33 @@ internal static class NativeModuleImageValidator
                     {
                         continue;
                     }
-                    var delta = (long)rva - section.VirtualAddress;
-                    if (delta >= 0 && delta + size <= section.VirtualSize && delta + size <= section.SizeOfRawData)
+                    if (TryOffset(section, rva, size, out var offset))
                     {
-                        return checked(section.PointerToRawData + (int)delta);
+                        return offset;
                     }
                 }
                 throw Invalid();
+            }
+
+            int OffsetInSection(int rva, int size, SectionHeader section)
+            {
+                if (rva < 0 || size < 0 || !TryOffset(section, rva, size, out var offset))
+                {
+                    throw Invalid();
+                }
+                return offset;
+            }
+
+            bool TryOffset(SectionHeader section, int rva, int size, out int offset)
+            {
+                var delta = (long)rva - section.VirtualAddress;
+                if (delta >= 0 && delta + size <= section.VirtualSize && delta + size <= section.SizeOfRawData)
+                {
+                    offset = checked(section.PointerToRawData + (int)delta);
+                    return true;
+                }
+                offset = 0;
+                return false;
             }
 
             int Read32(int at)
@@ -394,6 +414,8 @@ internal static class NativeModuleImageValidator
             {
                 var table = header.ExceptionTableDirectory;
                 // Earlier exact section-order validation fixes .text first and .xdata last before provider .edata.
+                var textSection = sections[0];
+                var pdataSection = sections[managedData ? 3 : 2];
                 var infoSection = sections[sections.Length - (isConsumer ? 1 : 2)];
                 if (table.Size % 12 != 0 || table.Size < 12
                     || table.Size > MaximumUnwindRecords * NativeUnwind.RuntimeFunctionSize)
@@ -416,7 +438,7 @@ internal static class NativeModuleImageValidator
                 var exceptionalCleanups = checkedExceptions ? new List<int>() : null;
                 for (var index = 0; index < table.Size / 12; index++)
                 {
-                    var at = Offset(table.RelativeVirtualAddress + (index * 12), 12, ".pdata");
+                    var at = OffsetInSection(table.RelativeVirtualAddress + (index * 12), 12, pdataSection);
                     var begin = Read32(at);
                     var end = Read32(at + 4);
                     var unwind = Read32(at + 8);
@@ -424,7 +446,7 @@ internal static class NativeModuleImageValidator
                     {
                         throw Invalid();
                     }
-                    var info = Offset(unwind, 8, ".xdata");
+                    var info = OffsetInSection(unwind, 8, infoSection);
                     var savedFrame = image[info + 2] == 3;
                     var baseSize = savedFrame ? 12 : 8;
                     var flags = image[info];
@@ -437,17 +459,17 @@ internal static class NativeModuleImageValidator
                     var size = baseSize;
                     if (scoped)
                     {
-                        var metadataAt = Offset(unwind + baseSize, 8, ".xdata");
+                        var metadataAt = OffsetInSection(unwind + baseSize, 8, infoSection);
                         var handler = Read32(metadataAt);
                         var count = Read32(metadataAt + 4);
-                        var thunk = Offset(handler, 6, ".text");
+                        var thunk = OffsetInSection(handler, 6, textSection);
                         if (count is < 1 or > MaximumUnwindRecords
                             || image[thunk] != 0xFF || image[thunk + 1] != 0x25)
                         {
                             throw Invalid();
                         }
                         size = checked(baseSize + 8 + (count * 16));
-                        var scopes = Offset(unwind + baseSize + 8, count * 16, ".xdata");
+                        var scopes = OffsetInSection(unwind + baseSize + 8, count * 16, infoSection);
                         for (var scope = 0; scope < count; scope++)
                         {
                             var rangeBegin = Read32(scopes + (scope * 16));
@@ -464,7 +486,7 @@ internal static class NativeModuleImageValidator
                             }
                             else
                             {
-                                var filter = Offset(handlerAddress, 3, ".text");
+                                var filter = OffsetInSection(handlerAddress, 3, textSection);
                                 if (target < begin || target >= end || image[filter] != 0x48
                                     || image[filter + 1] != 0x8B || image[filter + 2] != 0x01)
                                 {
@@ -477,8 +499,8 @@ internal static class NativeModuleImageValidator
                     {
                         throw Invalid();
                     }
-                    _ = Offset(begin, end - begin, ".text");
-                    info = Offset(unwind, size, ".xdata");
+                    _ = OffsetInSection(begin, end - begin, textSection);
+                    info = OffsetInSection(unwind, size, infoSection);
                     if (image[info] != flags || image[info + 1] != (savedFrame ? 11 : 7)
                         || image[info + 2] != (savedFrame ? 3 : 2) || image[info + 3] != 0
                         || image[info + 4] != (savedFrame ? 8 : 7) || image[info + 5] != 1
@@ -493,7 +515,7 @@ internal static class NativeModuleImageValidator
                     {
                         throw Invalid();
                     }
-                    var code = Offset(begin, savedFrame ? 11 : 7, ".text");
+                    var code = OffsetInSection(begin, savedFrame ? 11 : 7, textSection);
                     if (savedFrame
                         ? image[code] != 0x55 || image[code + 1] != 0x48 || image[code + 2] != 0x81
                             || image[code + 3] != 0xEC
