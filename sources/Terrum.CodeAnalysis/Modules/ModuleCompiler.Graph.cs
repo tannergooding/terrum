@@ -140,8 +140,10 @@ public static partial class ModuleCompiler
         var allNames = program.Functions.Select(static item => item.Name).ToHashSet(StringComparer.Ordinal);
         var available = dependencies.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
         var hasPrivateManagedState = HasPrivateManagedState(program);
-        foreach (var function in program.Functions)
+        var ownershipTransfers = new bool[program.Functions.Length];
+        for (var index = 0; index < program.Functions.Length; index++)
         {
+            var function = program.Functions[index];
             if (hasPrivateManagedState && (function.IsExternal || names.Contains(function.Name))
                 && !ManagedExportShape.Supported(function, program.Structures))
             {
@@ -151,13 +153,20 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleContractException($"Graph export '{function.Name}' is not a public implementation.");
             }
-            if (function.IsExternal && (!available.TryGetValue(function.Name, out var actual)
-                || !CompatibleContract(Contract(function, program.Structures),
-                    Contract(actual, dependencies.Structures))
-                || Compilation.HasOwnershipTransfer(function, program.Structures)
-                    != Compilation.HasOwnershipTransfer(actual, dependencies.Structures)))
+            if (function.IsExternal)
             {
-                throw new ModuleContractException($"Incompatible graph import '{function.Name}'.");
+                if (!available.TryGetValue(function.Name, out var actual)
+                    || !CompatibleContract(Contract(function, program.Structures),
+                        Contract(actual, dependencies.Structures)))
+                {
+                    throw new ModuleContractException($"Incompatible graph import '{function.Name}'.");
+                }
+                var hasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures);
+                if (hasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, dependencies.Structures))
+                {
+                    throw new ModuleContractException($"Incompatible graph import '{function.Name}'.");
+                }
+                ownershipTransfers[index] = hasOwnershipTransfer;
             }
         }
         if (!names.IsSubsetOf(allNames))
@@ -194,11 +203,12 @@ public static partial class ModuleCompiler
                 throw new ModuleContractException($"Graph-owned type requires exported cleanup '{cleanup}'.");
             }
         }
-        var functions = program.Functions.Select(function => {
+        var functions = program.Functions.Select((function, index) => {
             var remapped = RemapFunction(function, program.Structures, structures);
             return new ModuleFunction(function.Name,
                 Contract(remapped, structures), function.IsExternal ? null : remapped, function.IsExternal) {
-                HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
+                HasOwnershipTransfer = function.IsExternal
+                    ? ownershipTransfers[index] : Compilation.HasOwnershipTransfer(function, program.Structures),
             };
         }).ToImmutableArray();
         RejectImportedTypeMembers(functions, importedTypes.ToImmutable());
