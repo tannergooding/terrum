@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `c149c87` | Validate imported symbols without per-import lists |
 | `24ba4b8` | Validate native provider imports without a temporary dictionary |
 | `15b75ba` | Validate exceptional cleanup targets without LINQ |
 | `94e80e0` | Sort fallback native symbol names in one array |
