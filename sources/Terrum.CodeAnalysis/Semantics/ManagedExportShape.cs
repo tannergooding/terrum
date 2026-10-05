@@ -79,10 +79,6 @@ internal static class ManagedExportShape
     private static bool Value(PrimitiveType type, IReadOnlyList<BoundStruct> structures, int depth,
         Dictionary<(PrimitiveType Type, int Depth), bool> cache)
     {
-        if (Scalar(type))
-        {
-            return true;
-        }
         var key = (type, depth);
         if (cache.TryGetValue(key, out var supported))
         {
@@ -103,7 +99,8 @@ internal static class ManagedExportShape
         }
         foreach (var field in structure.Fields)
         {
-            if (field.IsPrivate || field.IsInternal || !Value(field.Type, structures, depth + 1, cache))
+            if (field.IsPrivate || field.IsInternal
+                || (!Scalar(field.Type) && !Value(field.Type, structures, depth + 1, cache)))
             {
                 cache.Add(key, false);
                 return false;
