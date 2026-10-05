@@ -416,9 +416,12 @@ public static partial class ModuleCompiler
                 throw new ModuleContractException($"Incompatible graph dependency layout '{structure.Name}'.");
             }
         }
-        if (imported.Any(name => !dependencyTypes.ContainsKey(name)))
+        foreach (var name in imported)
         {
-            throw new ModuleContractException("Graph dependency type is missing.");
+            if (!dependencyTypes.ContainsKey(name))
+            {
+                throw new ModuleContractException("Graph dependency type is missing.");
+            }
         }
         RejectImportedTypeMembers(module.Functions, imported);
         return hasUnsupportedManagedImport;
