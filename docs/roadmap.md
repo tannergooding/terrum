@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `6c263d4` | Check imported type members directly |
 | `3be7f3c` | Skip unused graph import tracking sets |
 | `6bfcde8` | Reuse validated PE sections for unwind checks |
 | `d181d9d` | Pre-size graph catalog indexes |
