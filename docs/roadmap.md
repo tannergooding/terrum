@@ -237,6 +237,10 @@ prerequisite has already been met.
     [invocation-scoped source-grant proposal](proposals/invocation-scoped-source-grant.md);
     source-dependent components remain outside the compiler-primitives DLL, and
     the scanner and scalar frontend still rely on hosted verification/emission.
+    A separate
+    [native source-grant library proposal](proposals/native-source-grant-library.md)
+    records a candidate per-call ABI for those helpers; it remains unapproved
+    and does not authorize DLL emission.
     A scanner-specific `scanner-10` persisted semantic-module JIT profile is
     implemented provisionally under the still-unapproved
     [scanner invocation-profile proposal](proposals/scanner-invocation-profile.md).

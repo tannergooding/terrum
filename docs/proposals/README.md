@@ -34,6 +34,9 @@ approved.
 - [Invocation-scoped source grant](invocation-scoped-source-grant.md)
   recommends a narrow persisted-module dependency for source-aware compiler
   components without enabling arbitrary host-buffer capture.
+- [Native source-grant library](native-source-grant-library.md) proposes a
+  bounded per-call source ABI for internal native-library exports; it does not
+  extend the semantic-module source-grant profile or establish DLL support.
 - [Persisted scanner invocation profile](scanner-invocation-profile.md)
   considers a named, scanner-specific invocation profile and copied result
   publication without generalizing source grants to arbitrary buffers.
