@@ -1905,20 +1905,42 @@ public static partial class TrRmExecutableCompiler
 
                     continue;
                 }
-                if (block.Statements[index] is not (BoundLocal { Initializer: not null }
-                    or BoundAssignment
-                    or BoundRequire
-                    or BoundExpressionStatement
-                        { Expression: BoundCompoundAssignment
-                            { Place: BoundRead, Type: PrimitiveType.Int32 or PrimitiveType.UInt32
-                                or PrimitiveType.Int64 or PrimitiveType.UInt64 } }
-                    or BoundExpressionStatement { Expression: BoundUpdate }))
+                if (!AcyclicTerminalPrefix(block.Statements[index]))
                 {
                     return false;
                 }
             }
 
             return true;
+        }
+
+        private static bool AcyclicTerminalPrefix(BoundStatement statement)
+        {
+            if (statement is BoundIf conditional)
+            {
+                return AcyclicTerminalPrefix(conditional.Then)
+                    && (conditional.Else is null || AcyclicTerminalPrefix(conditional.Else));
+            }
+            if (statement is BoundBlock block && block.RetiredManagedLocals.IsEmpty)
+            {
+                foreach (var child in block.Statements)
+                {
+                    if (!AcyclicTerminalPrefix(child))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            return statement is BoundLocal { Initializer: not null }
+                or BoundAssignment
+                or BoundRequire
+                or BoundExpressionStatement
+                    { Expression: BoundCompoundAssignment
+                        { Place: BoundRead, Type: PrimitiveType.Int32 or PrimitiveType.UInt32
+                            or PrimitiveType.Int64 or PrimitiveType.UInt64 } }
+                or BoundExpressionStatement { Expression: BoundUpdate };
         }
 
         private static BoundStatement AcyclicLoopBody(BoundWhile loop)

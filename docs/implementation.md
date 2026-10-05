@@ -2904,7 +2904,10 @@ branch conditions and their effects, routes breaks to the existing
 fallthrough, and retains returns. Before terminal leaves it preserves
 supported scalar local initializations, assignments, requirement checks and
 expression statements lowered by the existing paths, plus primitive integer
-local updates and compound assignments. Nested constant-true or post-tested
+local updates and compound assignments. Prefixes may also contain scalar-only
+blocks and `if` statements whose branches consist solely of supported
+fallthrough prefixes; standalone call statements, loop transfers and managed
+cleanup remain excluded from that proof. Nested constant-true or post-tested
 loops erase recursively as return-only terminal tails, or as terminal prefixes
 with a direct break before an enclosing terminal tail; inner breaks route only
 to their own fallthrough and cannot satisfy an enclosing loop's break proof. The
