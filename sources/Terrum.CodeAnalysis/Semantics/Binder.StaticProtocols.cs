@@ -1268,11 +1268,24 @@ internal sealed partial class Binder
         string? qualified = null)
     {
         var operandCount = protocol.Key.Arity - (protocol.HasSelf ? 1 : 0);
-        return argumentNames.Length == operandCount + 1
-            && argumentNames.Take(operandCount).All(argument =>
-                argument == type || argument == qualified)
-            && (protocol.Key.Arity == 1 || (IsComparisonOperator(protocol.Key.Operator)
-                ? argumentNames[^1] == "bool"
-                : argumentNames[^1] == type || argumentNames[^1] == qualified));
+        if (argumentNames.Length != operandCount + 1)
+        {
+            return false;
+        }
+        for (var index = 0; index < operandCount; index++)
+        {
+            if (argumentNames[index] != type && argumentNames[index] != qualified)
+            {
+                return false;
+            }
+        }
+        if (protocol.Key.Arity == 1)
+        {
+            return true;
+        }
+        var result = argumentNames[^1];
+        return IsComparisonOperator(protocol.Key.Operator)
+            ? result == "bool"
+            : result == type || result == qualified;
     }
 }
