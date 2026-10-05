@@ -122,6 +122,10 @@ counts and content/full-break extents with the hosted snapshot.
 comparing decoded scalars, consumed widths and error spans with hosted lexer
 diagnostics across fresh escape grants, including malformed Unicode escapes
 and escaped unpaired surrogates.
+`IntegerParsingModuleReadsFreshSourceGrants` passed under both policies,
+reusing the persisted decimal parser provider and consumers across fresh
+snapshots and checking signed/unsigned 32-/64-bit and `char16` results,
+boundaries, separators and rejected inputs.
 This slice does not make the maintained
 compiler-primitives DLL source-aware or move the scalar frontend beyond the
 hosted verifier/emitter.

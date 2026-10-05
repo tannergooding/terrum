@@ -16,9 +16,10 @@ module sets, native DLLs and persisted AOT images remain outside this support.
 The same bounded adapter has also been exercised with the Terrum-authored
 `CharacterLiteral` and `StringLiteral` leaf decoders and the provisional
 `StringEscape` leaf decoder and the provisional UTF-8 namespace-row encoder,
-and with `SourceLineIndex` line counts and content/including-break extents
-across fresh grants. These tests do not make `StringRow` a TRRM section writer
-or move the scanner or scalar frontend beyond hosted verification and emission.
+and with `IntegerParsing` decimal slices plus `SourceLineIndex` line counts and
+content/including-break extents across fresh grants. These tests do not make
+`StringRow` a TRRM section writer or move the scanner or scalar frontend beyond
+hosted verification and emission.
 This bounded implementation is recorded by the still-unapproved
 [invocation-scoped source grant proposal](proposals/invocation-scoped-source-grant.md);
 it does not extend the native profile or move the scalar frontend beyond the
