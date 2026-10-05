@@ -230,8 +230,13 @@ public static partial class ModuleCompiler
         }
         var immutableFunctions = functions.MoveToImmutable();
         RejectImportedTypeMembers(immutableFunctions, importedTypeNames);
+        var classes = ImmutableArray.CreateBuilder<BoundClass>(program.Classes.Length);
+        foreach (var @class in program.Classes)
+        {
+            classes.Add(RemapClass(@class, program.Structures, structures));
+        }
         var module = new Module(true, -1, structures, immutableFunctions) {
-            Classes = [.. program.Classes.Select(@class => RemapClass(@class, program.Structures, structures))],
+            Classes = classes.MoveToImmutable(),
             ImportedStructures = importedTypes.ToImmutable(),
             RuntimePolicy = program.RuntimePolicy,
         };
