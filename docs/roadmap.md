@@ -255,6 +255,8 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `0b23da5` | Validate image sections by index |
+| `f1cbc39` | Copy indexed scalar types directly |
 | `be9c62d` | Reuse graph JIT provider snapshots |
 | `7963de0` | Copy native set dependencies directly |
 | `fe699ec` | Index unwind sections by validated order |
