@@ -117,7 +117,9 @@ public sealed partial class CliTests
                 }
             }
             """;
-        var artifact = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-unsafe-acyclic-prefix-{Guid.NewGuid():N}.trrm");
+        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-unsafe-acyclic-prefix-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var executable = prefix + ".exe";
         try
         {
             var (compiled, compileOutput, compileError) = await RunAsync(
@@ -130,10 +132,16 @@ public sealed partial class CliTests
             Assert.Equal(unchecked((int)0xE0540003), ran);
             Assert.Empty(runOutput);
             Assert.Empty(runError);
+
+            var (built, buildOutput, buildError) = await RunAsync([], "build-trrm", artifact,
+                "-o", executable, "--runtime", "fail-fast", "--json");
+            Assert.True(built == 0, $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.Equal(unchecked((int)0xE0540003), await ExecuteTrRmImageAsync(executable));
         }
         finally
         {
             File.Delete(artifact);
+            File.Delete(executable);
         }
     }
 
