@@ -349,10 +349,27 @@ public static partial class NativeModuleCompiler
             {
                 continue;
             }
-            cleanupExports ??= providers.ToDictionary(static provider => provider.Identity!,
-                static provider => provider.Exports.ToHashSet(StringComparer.Ordinal), StringComparer.Ordinal);
-            cleanupFunctions ??= result.Functions.Where(static function => function.IsCleanup)
-                .Select(static function => (function.DeclaringStruct, function.Name)).ToHashSet();
+            if (cleanupExports is null)
+            {
+                cleanupExports = new Dictionary<string, HashSet<string>>(providers.Length,
+                    StringComparer.Ordinal);
+                foreach (var provider in providers)
+                {
+                    var providerExports = new HashSet<string>(provider.Exports, StringComparer.Ordinal);
+                    cleanupExports.Add(provider.Identity!, providerExports);
+                }
+            }
+            if (cleanupFunctions is null)
+            {
+                cleanupFunctions = new HashSet<(string? DeclaringStruct, string Name)>();
+                foreach (var function in result.Functions)
+                {
+                    if (function.IsCleanup)
+                    {
+                        _ = cleanupFunctions.Add((function.DeclaringStruct, function.Name));
+                    }
+                }
+            }
             if (!cleanupOwners.TryGetValue(structure.Name, out var owner) || owner is null
                 || !cleanupExports.TryGetValue(owner, out var exports) || !exports.Contains(cleanup)
                 || !cleanupFunctions.Contains((structure.Name, cleanup)))
