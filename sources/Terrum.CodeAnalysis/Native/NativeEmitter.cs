@@ -202,6 +202,13 @@ public static class NativeEmitter
             cancellationToken.ThrowIfCancellationRequested();
             functionIndices.Add(program.Functions[index].Name, index);
         }
+        var structureVisibility = new Dictionary<string, bool>(program.Structures.Length,
+            StringComparer.Ordinal);
+        foreach (var structure in program.Structures)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            structureVisibility.Add(structure.Name, !structure.IsPrivate && !structure.IsInternal);
+        }
         foreach (var name in exports)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -211,7 +218,7 @@ public static class NativeEmitter
                 throw new ArgumentException("Export names must be unique printable ASCII names of at most 256 bytes.", nameof(exports));
             }
             if (!functionIndices.TryGetValue(name, out var index)
-                || !Exportable(program, program.Functions[index], managedExports))
+                || !Exportable(program, program.Functions[index], managedExports, structureVisibility))
             {
                 throw new ArgumentException($"'{name}' is not an accessible native library export.", nameof(exports));
             }
@@ -230,7 +237,8 @@ public static class NativeEmitter
         || ManagedClassTypes.IsManaged(function.ReturnType)
         || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type)));
 
-    private static bool Exportable(BoundProgram program, BoundFunction function, bool managedExports)
+    private static bool Exportable(BoundProgram program, BoundFunction function, bool managedExports,
+        IReadOnlyDictionary<string, bool> structureVisibility)
     {
         if (function.IsPrivate || function.IsInternal || function.IsExternal)
         {
@@ -238,17 +246,14 @@ public static class NativeEmitter
         }
         if (function.DeclaringStruct is string owner)
         {
-            var ownerExists = false;
-            var hasPublicOwner = false;
-            foreach (var structure in program.Structures)
+            if (structureVisibility.TryGetValue(owner, out var isPublic))
             {
-                if (structure.Name == owner)
+                if (!isPublic)
                 {
-                    ownerExists = true;
-                    hasPublicOwner |= !structure.IsPrivate && !structure.IsInternal;
+                    return false;
                 }
             }
-            if (!(Binder.TryPrimitiveType(owner, out _) && !ownerExists) && !hasPublicOwner)
+            else if (!Binder.TryPrimitiveType(owner, out _))
             {
                 return false;
             }
