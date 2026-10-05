@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `18d45ea` | Validate native set bindings without a projection |
 | `e034a34` | Check native declaration membership without a temporary set |
 | `219820f` | Check native call imports directly |
 | `02a0652` | Materialize native names directly |
