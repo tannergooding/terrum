@@ -646,6 +646,50 @@ public sealed class CallerUnsafeTests
     }
 
     [Fact]
+    public void TrRmUnsafeRegionRequiresEveryExternalEdgeToUseItsEntry()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unsafe int32 Danger() { return 42; }
+            int32 Main() {
+                mut int32 value = 0;
+                unsafe {
+                    if (value == 0) { value = Danger(); }
+                    else { value = 1; }
+                }
+                return value;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.Emit(
+            Assert.IsType<BoundProgram>(compilation.Program), "unsafe-region-entry");
+        var malformed = (byte[])artifact.Clone();
+        var bodyRow = BodyRowOffset(malformed, 2);
+        var regionOffset = RegionTableOffset(malformed, 2);
+        var width = 1 << (malformed[bodyRow] & 3);
+        var regionHeaderOffset = regionOffset + 1 + width;
+        var regionHeader = ReadCompactCount(malformed, regionHeaderOffset, width);
+        var alternateHeader = FindOtherBlockInRegion(malformed, 2, 1, regionHeader);
+        WriteCompactCount(malformed, regionHeaderOffset, width, alternateHeader);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
+    [Fact]
+    public void TrRmUnsafeRegionRejectsEdgesThatBypassItsDesignatedExit()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { mut int32 value = 0; unsafe { value = 1; } return value; }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.Emit(
+            Assert.IsType<BoundProgram>(compilation.Program), "unsafe-region-designated-exit");
+        var malformed = (byte[])artifact.Clone();
+        var bodyOffset = BodyRowOffset(malformed, 1);
+        var regionOffset = RegionTableOffset(malformed, 1);
+        var width = 1 << (malformed[bodyOffset] & 3);
+        WriteCompactCount(malformed, regionOffset + 1 + (2 * width), width, 1);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
+    [Fact]
     public void TrRmNestedUnsafeRegionCannotExitItsParentLoop()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -713,6 +757,40 @@ public sealed class CallerUnsafeTests
         }
 
         return bodyOffset + 1 + (4 * width) + (4 * typeCount);
+    }
+
+    private static int FindOtherBlockInRegion(byte[] artifact, int bodyRow, int regionId, int excludedBlock)
+    {
+        var bodyOffset = BodyRowOffset(artifact, bodyRow);
+        var width = 1 << (artifact[bodyOffset] & 3);
+        var blockCount = ReadCompactCount(artifact, bodyOffset + 1, width);
+        var valueCount = ReadCompactCount(artifact, bodyOffset + 1 + width, width);
+        var regionCount = ReadCompactCount(artifact, bodyOffset + 1 + (2 * width), width);
+        var typeCount = ReadCompactCount(artifact, bodyOffset + 1 + (3 * width), width);
+        var blockOffsetsOffset = bodyOffset + 1 + (4 * width) + (4 * typeCount)
+            + (regionCount * (1 + (4 * width)))
+            + (2 * valueCount * width)
+            + ((blockCount + 1) * width)
+            + (valueCount * width);
+        var blockDataOffset = blockOffsetsOffset + ((2 * blockCount + 1) * width);
+        for (var block = 1; block <= blockCount; block++)
+        {
+            if (block == excludedBlock)
+            {
+                continue;
+            }
+
+            var blockDataStart = blockDataOffset + ReadCompactCount(artifact,
+                blockOffsetsOffset + ((block - 1) * width), width);
+            var presence = artifact[blockDataStart];
+            if ((presence & 1) != 0
+                && ReadCompactCount(artifact, blockDataStart + 1, width) == regionId)
+            {
+                return block;
+            }
+        }
+
+        throw new InvalidDataException("Indexed Body has no alternate block in the requested region.");
     }
 
     private static int ReadCompactCount(byte[] bytes, int offset, int width) =>
