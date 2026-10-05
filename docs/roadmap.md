@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `d80faf9` | Fuse managed-node facts into verifier validation |
 | `ac09000` | Skip producer type scans without cleanup types |
 | `591c1e6` | Skip producer cleanup discovery without cleanup types |
 | `5b98063` | Build cleanup function indexes on demand |
