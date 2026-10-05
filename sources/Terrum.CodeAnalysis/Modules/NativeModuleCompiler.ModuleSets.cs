@@ -59,7 +59,7 @@ public static partial class NativeModuleCompiler
                 _ = externalFunctionNames.Add(function.Name);
             }
         }
-        var bindings = new List<NativeImportBinding>();
+        var bindings = new List<NativeImportBinding>(imports.Count);
         foreach (var provider in providers)
         {
             foreach (var function in provider.Reference.Functions)
