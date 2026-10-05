@@ -246,6 +246,7 @@ public sealed class TrRmDoForTests
     [InlineData(42, "int32 Main() { mut int32 result = 0; do { if (Choose()) { { int32 local = Compute(40, 0); result = local; } } else { result = 13; } return result + 2; } while (Fail()); } bool Choose() { return true; } int32 Compute(int32 left, int32 right) { return left + right; } bool Fail() { require false; return false; }")]
     [InlineData(15, "int32 Main() { mut int32 result = 0; do { if (Choose()) { { int32 local = Compute(40, 0); result = local; } } else { result = 13; } return result + 2; } while (Fail()); } bool Choose() { return false; } int32 Compute(int32 left, int32 right) { return left + right; } bool Fail() { require false; return false; }")]
     [InlineData(42, "int32 Main() { do { Touch(); break; } while (false); return 42; } void Touch() { }")]
+    [InlineData(42, "int32 Main() { mut int32 result = 0; for (mut int32 index = 0; true; index++) { if (index == 0) { result = 40; } else { result = 13; } return result + 2; } }")]
     [InlineData(42, "int32 Main() { mut int32 result = 0; for (mut int32 i = 0; true; i = Fail()) { int32 local = Compute(40, 2); result = local; break; } return result; } int32 Compute(int32 left, int32 right) { return left + right; } int32 Fail() { require false; return 0; }")]
     public void AcyclicLoopsPreserveSafeTerminalPrefixEffects(int expected, string source)
     {
