@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `8865e0c` | Classify optional managed and node profiles in fewer function passes |
 | `c38db3a` | Reuse resolved owners for property field collision checks |
 | `e8036c8` | Resolve semantic owners through a lazy ordinal index |
 | `a3c15f4` | Inspect token-span metadata and function bodies in one pass |
