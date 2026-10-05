@@ -131,6 +131,10 @@ and escaped unpaired surrogates.
 reusing the persisted decimal parser provider and consumers across fresh
 snapshots and checking signed/unsigned 32-/64-bit and `char16` results,
 boundaries, separators and rejected inputs.
+`IntegerParsingRadixModuleMatchesHostOracleAcrossFreshSourceGrantsAsync` also
+passed under both policies, comparing all five parser APIs across radices
+2–36, their type boundaries and overflows, invalid digits/radices and the
+radix-specific separator rules over fresh grants.
 This slice does not make the maintained
 compiler-primitives DLL source-aware or move the scalar frontend beyond the
 hosted verifier/emitter.
