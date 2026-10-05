@@ -70,8 +70,15 @@ public static partial class NativeModuleCompiler
         var selected = inputs.Select(static bytes => (byte[])bytes.Clone()).ToArray();
         var root = ReadGraphPackageSnapshot(rootBytes);
         ValidateGraphProviderCount(selected.Length);
-        var indexed = selected.Select(bytes => (Bytes: bytes, Package: ReadGraphPackageSnapshot(bytes))).ToArray();
-        var providers = ValidateGraphProviders(indexed.Select(static item => item.Package).ToArray());
+        var indexed = new (byte[] Bytes, GraphPackage Package)[selected.Length];
+        var packages = new GraphPackage[selected.Length];
+        for (var index = 0; index < selected.Length; index++)
+        {
+            var package = ReadGraphPackageSnapshot(selected[index]);
+            indexed[index] = (selected[index], package);
+            packages[index] = package;
+        }
+        var providers = ValidateGraphProviders(packages);
         if (root.Policy != runtimePolicy)
         {
             throw new ModuleContractException("Selected graph JIT runtime policy differs from persisted consumer.");
