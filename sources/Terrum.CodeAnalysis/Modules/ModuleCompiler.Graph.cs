@@ -80,6 +80,7 @@ public static partial class ModuleCompiler
             throw new ModuleContractException("Graph type origin tables differ from selected providers.");
         }
         var types = ImmutableArray.CreateBuilder<BoundStruct>();
+        var functionNames = new HashSet<string>(StringComparer.Ordinal);
         var originals = new Dictionary<string, (BoundStruct Type, ImmutableArray<BoundStruct> Table, string? Origin)>(
             StringComparer.Ordinal);
         for (var provider = 0; provider < references.Count; provider++)
@@ -117,7 +118,7 @@ public static partial class ModuleCompiler
         {
             foreach (var function in reference.Functions)
             {
-                if (!originals.TryAdd(function.Name, default))
+                if (originals.ContainsKey(function.Name) || !functionNames.Add(function.Name))
                 {
                     throw new ModuleContractException($"Ambiguous graph export '{function.Name}'.");
                 }
