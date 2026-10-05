@@ -226,6 +226,8 @@ public static partial class ModuleCompiler
             throw new ModuleContractException("Consumer and provider runtime policies differ.");
         }
         var exports = reference.Functions.ToDictionary(static function => function.Name, StringComparer.Ordinal);
+        var hasPrivateManagedState = HasPrivateManagedState(consumer);
+        var hasUnsupportedManagedImport = false;
         foreach (var imported in consumer.Functions.Where(static item => item.Import))
         {
             if (!exports.TryGetValue(imported.Name, out var actual)
@@ -233,6 +235,11 @@ public static partial class ModuleCompiler
                 || imported.HasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, reference.Structures))
             {
                 throw new ModuleContractException($"Incompatible or missing provider contract for '{imported.Name}'.");
+            }
+            if (hasPrivateManagedState && !hasUnsupportedManagedImport
+                && !ManagedExportShape.Supported(actual, reference.Structures))
+            {
+                hasUnsupportedManagedImport = true;
             }
         }
         var providerStructures = IndexStructures(reference.Structures);
@@ -251,9 +258,7 @@ public static partial class ModuleCompiler
             }
         }
         RejectImportedTypeMembers(consumer.Functions, consumer.ImportedStructures);
-        if (HasPrivateManagedState(consumer) && consumer.Functions.Any(item => item.Import
-            && (!exports.TryGetValue(item.Name, out var actual)
-                || !ManagedExportShape.Supported(actual, reference.Structures))))
+        if (hasPrivateManagedState && hasUnsupportedManagedImport)
         {
             throw new ModuleContractException("Managed graph import crosses a non-Copy boundary.");
         }
