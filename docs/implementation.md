@@ -72,6 +72,13 @@ independent `BigInteger` oracle checks results, rejection and the distinct
 signed-minimum/-1 quotient and remainder behavior; failed outputs remain
 unreadable. This adds persisted-execution evidence only, not new operators or
 conversion policy.
+Persisted semantic-module JIT also exercises all ten signed and unsigned
+checked 32-bit binary helpers, both signed unary helpers, and total
+`MagnitudeInt32` across 935 boundary cases under both runtime policies. The
+independent `BigInteger` oracle distinguishes signed-minimum quotient overflow
+from the valid zero remainder; separate invalid consumers verify that failed
+outputs remain unreadable for every checked helper. This is persisted-execution
+evidence for the existing named functions, not new arithmetic operators.
 A second persisted semantic-module consumer executes private generic
 `CopyAlgorithms` specializations over scalar values, code units and nested
 `Token`/`SourceRange` aggregates. It checks conditional `init ref` publication
