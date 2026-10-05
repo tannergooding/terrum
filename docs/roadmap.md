@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `37e16ea` | Collect persisted ownership-transfer profile facts during module feature validation |
 | `a5b618d` | Collect owned-buffer and buffer-view profile facts during managed-feature traversal |
 | `8653b14` | Aggregate native kernel import policy facts during symbol validation |
 | `3c6f15a` | Check native export owners in one structure pass |
