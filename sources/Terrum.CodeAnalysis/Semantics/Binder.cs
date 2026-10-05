@@ -894,16 +894,50 @@ internal sealed partial class Binder
                 .Where(static node => node.Kind == SyntaxKind.AliasDeclaration))
             {
                 _cancellationToken.ThrowIfCancellationRequested();
-                var nameToken = declaration.Children.OfType<SyntaxTokenElement>()
-                    .FirstOrDefault(static element => element.Token.Kind == TokenKind.Identifier)?.Token;
-                var target = declaration.Children.OfType<SyntaxNode>()
-                    .FirstOrDefault(static node => node.Kind == SyntaxKind.TypeName);
+                SyntaxToken? nameToken = null;
+                SyntaxNode? target = null;
+                SyntaxNode? typeParameterList = null;
+                var isPublic = false;
+                var visibilityCount = 0;
+                var hasPrivateVisibility = false;
+                var hasInvalidModifier = false;
+                var hasAttribute = false;
+                foreach (var child in declaration.Children)
+                {
+                    if (child is SyntaxTokenElement tokenElement)
+                    {
+                        var token = tokenElement.Token;
+                        if (nameToken is null && token.Kind == TokenKind.Identifier)
+                        {
+                            nameToken = token;
+                        }
+                        if (token.Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword
+                            or TokenKind.PrivateKeyword)
+                        {
+                            visibilityCount++;
+                            isPublic |= token.Kind == TokenKind.PublicKeyword;
+                            hasPrivateVisibility |= token.Kind == TokenKind.PrivateKeyword;
+                        }
+                        hasInvalidModifier |= token.Kind is TokenKind.StaticKeyword or TokenKind.MutKeyword
+                            or TokenKind.UniqueKeyword or TokenKind.UnsafeKeyword;
+                    }
+                    else if (child is SyntaxNode node)
+                    {
+                        if (target is null && node.Kind == SyntaxKind.TypeName)
+                        {
+                            target = node;
+                        }
+                        if (typeParameterList is null && node.Kind == SyntaxKind.TypeParameterList)
+                        {
+                            typeParameterList = node;
+                        }
+                        hasAttribute |= node.Kind == SyntaxKind.Attribute;
+                    }
+                }
                 if (nameToken is not SyntaxToken name || target is null)
                 {
                     continue;
                 }
-                var typeParameterList = declaration.Children.OfType<SyntaxNode>()
-                    .FirstOrDefault(static node => node.Kind == SyntaxKind.TypeParameterList);
                 var typeParameters = typeParameterList is null ? [] : typeParameterList.Children
                     .OfType<SyntaxTokenElement>()
                     .Where(static element => element.Token.Kind == TokenKind.Identifier)
@@ -913,17 +947,7 @@ internal sealed partial class Binder
                     Report("TRM3001", "A type alias cannot repeat a type parameter.", declaration.Span);
                     continue;
                 }
-                var visibility = declaration.Children.OfType<SyntaxTokenElement>()
-                    .Where(static element => element.Token.Kind is TokenKind.PublicKeyword
-                        or TokenKind.InternalKeyword or TokenKind.PrivateKeyword)
-                    .Select(static element => element.Token.Kind).ToArray();
-                var isPublic = visibility.Contains(TokenKind.PublicKeyword);
-                if (visibility.Length > 1 || visibility.Contains(TokenKind.PrivateKeyword)
-                    || declaration.Children.OfType<SyntaxTokenElement>().Any(static element =>
-                        element.Token.Kind is TokenKind.StaticKeyword or TokenKind.MutKeyword
-                            or TokenKind.UniqueKeyword or TokenKind.UnsafeKeyword)
-                    || declaration.Children.OfType<SyntaxNode>()
-                        .Any(static node => node.Kind == SyntaxKind.Attribute))
+                if (visibilityCount > 1 || hasPrivateVisibility || hasInvalidModifier || hasAttribute)
                 {
                     Report("TRM3001", "Type aliases permit at most one public or internal modifier and no attributes.",
                         declaration.Span);

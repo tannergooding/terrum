@@ -127,6 +127,16 @@ public sealed class CompilationTests
         SemanticVerifier.Verify(compilation.Program);
     }
 
+    [Theory]
+    [InlineData("private alias Count = int32;")]
+    [InlineData("[NoThrow] alias Count = int32;")]
+    public void RejectsUnsupportedAliasDeclarationModifiers(string declaration)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            declaration + " int32 Main() { return 0; }"));
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3001");
+    }
+
     [Fact]
     public void AliasesPreserveNominalTypeIdentity()
     {
