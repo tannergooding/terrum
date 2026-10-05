@@ -280,7 +280,8 @@ public static partial class NativeModuleCompiler
         IReadOnlyList<NativeImportBinding> used, ModuleCompiler.ConsumerContractSnapshot contractSnapshot)
     {
         var imports = contractSnapshot.Declarations.ToHashSet(StringComparer.Ordinal);
-        var usedByDll = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var usedByDll = new Dictionary<string, List<string>>(Math.Min(providers.Length, used.Count),
+            StringComparer.Ordinal);
         foreach (var import in used)
         {
             if (!usedByDll.TryGetValue(import.DllName, out var names))
