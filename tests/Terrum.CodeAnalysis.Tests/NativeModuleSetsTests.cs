@@ -82,7 +82,10 @@ public sealed class NativeModuleSetsTests
     [Fact]
     public void PersistedConsumerSetWithoutImportsValidatesAgainstPopulatedProviders()
     {
-        var alpha = Producer(Alpha, "Alpha", "First");
+        var alpha = Producer("""
+            public struct Node { public int32 Value; }
+            public Node Echo(Node value) { return value; }
+            """, "Echo", "First");
         var beta = Producer(Beta, "Beta", "Second");
         var consumer = MakeConsumerSource("int32 Main() { return 42; }", alpha, beta);
 

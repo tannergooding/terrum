@@ -269,11 +269,13 @@ public static partial class ModuleCompiler
                 hasUnsupportedManagedImport = true;
             }
         }
-        var providerStructures = IndexStructures(reference.Structures);
+        var providerStructures = consumer.Structures.IsEmpty && consumer.ImportedStructures.IsEmpty
+            ? null
+            : IndexStructures(reference.Structures);
         var importedNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var name in consumer.ImportedStructures)
         {
-            if (!providerStructures.ContainsKey(name))
+            if (providerStructures is null || !providerStructures.ContainsKey(name))
             {
                 throw new ModuleContractException("Missing imported value layout.");
             }
@@ -281,7 +283,7 @@ public static partial class ModuleCompiler
         }
         foreach (var expected in consumer.Structures)
         {
-            if (providerStructures.TryGetValue(expected.Name, out var actual)
+            if (providerStructures is not null && providerStructures.TryGetValue(expected.Name, out var actual)
                 && (!importedNames.Contains(expected.Name)
                 || !SameStructure(expected, actual, consumer.Structures, reference.Structures)))
             {
