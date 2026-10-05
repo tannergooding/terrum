@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `a65e2ac` | Reuse private managed-state analysis while reading modules |
 | `9c2448d` | Reuse private managed-state analysis during producer validation |
 | `f6103f8` | Reuse private managed-state analysis across graph library validation |
 | `77ac7d3` | Remove a redundant module-set import declaration membership check |
