@@ -285,6 +285,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `c3ac3c1b` | Cover terminal-loop compound prefixes across integer widths and shifts |
 | `22271cbb` | Verify terminal-loop compound overflow remains a persisted fail-fast failure |
 | `4f2d4bcc` | Preserve primitive integer compound assignments before terminal loop exits |
 | `0d7a74e5` | Preserve scalar local initialization before terminal loop exits |
