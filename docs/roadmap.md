@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `de1c4d7` | Build provider export sets without temporary arrays during module-set validation |
 | `4e4b6f2` | Reuse parsed contract snapshots during semantic linking |
 | `bad9a04` | Reuse validated leaf profiles during graph artifact inspection |
 | `61f0576` | Reuse provider contract snapshots in native package validation |
