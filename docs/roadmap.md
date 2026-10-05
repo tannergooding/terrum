@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7d11b76` | Read graph providers directly into arrays |
 | `975dd98` | Build module-set import names directly |
 | `38a9cf7` | Materialize graph type origins directly |
 | `ee7602b` | Materialize module-set reference arrays directly |
