@@ -60,7 +60,9 @@ public static partial class NativeModuleCompiler
                 throw new ModuleContractException("Native graph runtime policies differ.");
             }
         }
-        return [.. providers.OrderBy(static item => item.Identity, StringComparer.OrdinalIgnoreCase)];
+        Array.Sort(providers, static (left, right) =>
+            StringComparer.OrdinalIgnoreCase.Compare(left.Identity, right.Identity));
+        return providers;
     }
 
     private static void ValidateGraphProviderCount(int count)

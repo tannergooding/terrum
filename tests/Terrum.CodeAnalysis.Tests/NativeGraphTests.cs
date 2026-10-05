@@ -134,6 +134,51 @@ public sealed class NativeGraphTests
             NativeModuleCompiler.InspectGraphArtifact(leaf).NativeProfileVersion);
     }
 
+    [Fact]
+    public void GraphProvidersAreOrderedByIdentity()
+    {
+        static byte[] CreateStructuredProvider(string structure, string identity)
+        {
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+                $"public struct {structure} {{ public int32 Value; }} "
+                + $"public int32 Read{structure}({structure} value) {{ return value.Value; }}"));
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            return NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program),
+                [$"Read{structure}"], identity, NativeRuntimePolicy.FailFast);
+        }
+
+        var reference = NativeModuleCompiler.CreateGraphReference([
+            CreateStructuredProvider("Zulu", "NodeZ"),
+            CreateStructuredProvider("Alpha", "NodeA"),
+        ]);
+
+        Assert.Equal(["Alpha", "Zulu"], reference.Structures.Select(static item => item.Name));
+    }
+
+    [Fact]
+    public void GraphProvidersRejectCaseOnlyIdentityDuplicates()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "[NoThrow] public int32 Leaf() { return 40; }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var provider = NativeModuleCompiler.CreateProducer(program, ["Leaf"], "NodeB",
+            NativeRuntimePolicy.FailFast);
+        var caseVariant = NativeModuleCompiler.CreateProducer(program, ["Leaf"], "nodeb",
+            NativeRuntimePolicy.FailFast);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return Leaf() + 1; }"), NativeModuleCompiler.CreateGraphReference([provider]));
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateGraphConsumer(
+            Assert.IsType<BoundProgram>(consumerCompilation.Program), [provider], NativeRuntimePolicy.FailFast);
+
+        var error = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(consumer, [provider, caseVariant]));
+
+        Assert.Equal("Duplicate, ambiguous or consumer graph dependency.", error.Message);
+    }
+
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
