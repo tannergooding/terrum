@@ -50,6 +50,37 @@ public sealed class NativeModuleSetsTests
         return result;
     }
 
+    private static byte[] WithSourceGrantRequirement(byte[] artifact) =>
+        WithUpdatedSetChecksum(artifact, bytes => {
+            var dependencyCount = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(6, 2));
+            var at = 16;
+            for (var dependency = 0; dependency < dependencyCount; dependency++)
+            {
+                var identityLength = bytes[at++];
+                at += identityLength;
+                var importCount = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at, 2));
+                at += 2;
+                for (var import = 0; import < importCount; import++)
+                {
+                    var importLength = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at, 2));
+                    at += 2 + importLength;
+                }
+                var machineImportCount = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at, 2));
+                at += 2;
+                for (var import = 0; import < machineImportCount; import++)
+                {
+                    var importLength = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at, 2));
+                    at += 2 + importLength;
+                }
+            }
+
+            Assert.True(bytes.AsSpan(at, 4).SequenceEqual("TRRM"u8));
+            var profileLength = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(at + 8, 4));
+            var requirementOffset = checked(at + 8 + 4 + profileLength + 2);
+            Assert.Equal(0, bytes[requirementOffset]);
+            bytes[requirementOffset] = 1;
+        });
+
     private static int UniqueOffset(byte[] bytes, string text)
     {
         var value = Encoding.ASCII.GetBytes(text);
@@ -117,6 +148,9 @@ public sealed class NativeModuleSetsTests
         var beta = Producer(Beta, "Beta", "Second");
         var consumer = MakeConsumer(alpha, beta);
         Assert.Equal(2, consumer[4]);
+        var sourceRequired = WithSourceGrantRequirement(consumer);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectConsumerSet(sourceRequired));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateConsumerSet(sourceRequired, [alpha, beta]));
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(consumer, [alpha]));
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(consumer, [alpha, alpha]));
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateReferenceSet([

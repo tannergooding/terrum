@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -35,6 +36,221 @@ public sealed partial class SourceLineComponentTests
     public async Task AlternatingBreaksAndSurrogatesPreserveAllOffsetsAsync()
     {
         await CheckAsync(string.Concat(Enumerable.Repeat("a\r\n\uD800\u2028\uDC00\n", 64))).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task SourceFacadeModulesBindFreshSnapshotsAndRejectInvalidGrantsAsync()
+    {
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var entry = SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return 0; }
+            public int32 GetLastSourceCodeUnitOrMinusOne() {
+                if (Host.Source.Length == 0) { return -1; }
+                return int32(Host.Source[^1]);
+            }
+            int32 SourceIndex() { return 0; }
+            public int32 GetFirstSourceCodeUnitOrMinusOne() {
+                if (Host.Source.Length == 0) { return -1; }
+                return int32(Host.Source[SourceIndex()]);
+            }
+            """, "source-grant-producer-entry.terrum");
+        var consumerTree = SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 length = GetSourceTextLength();
+                if (TryReadSourceCodeUnit(length, init var outOfRange)) { return -7; }
+                if (!TryGetSourceRange(0, length, init var whole)) { return -2; }
+                int32 last = GetLastSourceCodeUnitOrMinusOne();
+                int32 first = GetFirstSourceCodeUnitOrMinusOne();
+                mut int32 checksum = (length + whole.Start + whole.Length + last + first + 2 * 65521) % 65521;
+                mut int32 at = 0;
+                while (at < length) {
+                    if (!TryReadSourceCodeUnit(at, init var unit)) { return -3; }
+                    checksum = (checksum + (int32(unit) * ((at % 97) + 1)) % 65521) % 65521;
+                    at = at + 1;
+                }
+                at = 0;
+                while (at <= length) {
+                    if (!TryGetSourcePosition(at, init var line, init var character)) { return -4; }
+                    if (!TryGetSourceOffset(line, character, init var offset)) { return -5; }
+                    if (offset != at) { return -6; }
+                    checksum = (checksum + (line * 31 + character) % 65521) % 65521;
+                    at = at + 1;
+                }
+                mut int32 lineIndex = 0;
+                mut bool done = false;
+                while (!done) {
+                    if (TryGetSourceLineExtent(lineIndex, init var extent)) {
+                        checksum = (checksum + extent.Start + extent.Length) % 65521;
+                        lineIndex = lineIndex + 1;
+                    } else {
+                        done = true;
+                    }
+                }
+                return checksum;
+            }
+            """, "source-grant-consumer.terrum");
+        var snapshots = new[] {
+            "",
+            "plain",
+            "\r",
+            "\n",
+            "\r\n",
+            "a\r\nb\rc\nd\u0085e\u2028f\u2029",
+            "\uD800\r\n\uDC00\0\uD800\uDC00",
+        };
+
+        foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
+        {
+            var producerCompilation = Compilation.Create(trees.Add(entry),
+                [new HostBuffer("Source", PrimitiveType.Char16, [0x1357, 0x2468, 0x369A], false) {
+                    IsInvocationScoped = true,
+                }], policy);
+            Assert.False(producerCompilation.HasErrors,
+                string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+            var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+                ["Terrum.CodeAnalysis.GetSourceTextLength", "Terrum.CodeAnalysis.TryReadSourceCodeUnit",
+                    "Terrum.CodeAnalysis.TryGetSourceRange", "Terrum.CodeAnalysis.TryReadSourceLine",
+                    "Terrum.CodeAnalysis.TryGetSourcePosition", "Terrum.CodeAnalysis.TryGetSourceOffset",
+                    "Terrum.CodeAnalysis.TryGetSourceLineExtent",
+                    "Terrum.CodeAnalysis.GetLastSourceCodeUnitOrMinusOne",
+                    "Terrum.CodeAnalysis.GetFirstSourceCodeUnitOrMinusOne"]);
+            Assert.Equal(-1, producer.AsSpan().IndexOf(new byte[] { 0x57, 0x13, 0x68, 0x24, 0x9A, 0x36 }));
+            Assert.True(ModuleCompiler.CreateReference(producer).RequiresSourceGrant);
+
+            var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
+            Assert.False(consumerCompilation.HasErrors,
+                string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+            var consumerProgram = Assert.IsType<BoundProgram>(consumerCompilation.Program);
+            Assert.True(consumerProgram.RequiresSourceGrant);
+            Assert.Throws<NotSupportedException>(() =>
+                NativeEmitter.EmitWithImports(consumerProgram, [], (NativeRuntimePolicy)policy));
+            var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
+            var linked = ModuleCompiler.Link(consumer, producer);
+            Assert.True(linked.RequiresSourceGrant);
+            Assert.Throws<ArgumentException>(() => NativeJit.Execute(linked, (NativeRuntimePolicy)policy));
+            Assert.Throws<NotSupportedException>(() => NativeEmitter.Emit(linked, (NativeRuntimePolicy)policy));
+
+            var neutralCompilation = Compilation.Create(SyntaxTree.Parse("""
+                namespace Terrum.CodeAnalysis;
+                public int32 Different() { return 0; }
+                int32 Main() { return 0; }
+                """, "source-grant-neutral-producer.terrum"), policy);
+            Assert.False(neutralCompilation.HasErrors,
+                string.Join(Environment.NewLine, neutralCompilation.Diagnostics));
+            var neutralProducer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(neutralCompilation.Program),
+                ["Terrum.CodeAnalysis.Different"]);
+            Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, neutralProducer));
+            Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateReferenceSet([producer, neutralProducer]));
+            var neutralLengthCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+                namespace Terrum.CodeAnalysis;
+                public int32 GetSourceTextLength() { return 0; }
+                """, "source-grant-neutral-length.terrum"), policy);
+            Assert.False(neutralLengthCompilation.HasErrors,
+                string.Join(Environment.NewLine, neutralLengthCompilation.Diagnostics));
+            var neutralLengthProducer = ModuleCompiler.CreateProducer(
+                Assert.IsType<BoundProgram>(neutralLengthCompilation.Program),
+                ["Terrum.CodeAnalysis.GetSourceTextLength"]);
+            Assert.Throws<ModuleContractException>(() =>
+                ModuleCompiler.CreateConsumer(consumerProgram, neutralLengthProducer));
+
+            foreach (var text in snapshots)
+            {
+                var expected = ComputeSourceFacadeChecksum(SourceText.From(text));
+                var actual = NativeJit.ExecuteWithSourceGrant(linked, [CreateSourceGrant(text)],
+                    (NativeRuntimePolicy)policy);
+                Assert.True(expected == actual, $"Source snapshot '{text}': expected {expected}, got {actual}.");
+            }
+
+            var vacantOutputCompilation = Compilation.Create(SyntaxTree.Parse("""
+                namespace Terrum.CodeAnalysis;
+                int32 Main() {
+                    if (TryReadSourceCodeUnit(-1, init var codeUnit)) { return 1; }
+                    return int32(codeUnit);
+                }
+                """, "source-grant-vacant-output.terrum"), ModuleCompiler.CreateReference(producer), policy);
+            Assert.True(vacantOutputCompilation.HasErrors);
+            Assert.Contains(vacantOutputCompilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3016");
+
+            var lengthConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+                namespace Terrum.CodeAnalysis;
+                int32 Main() { return GetSourceTextLength(); }
+                """, "source-grant-length-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
+            Assert.False(lengthConsumerCompilation.HasErrors,
+                string.Join(Environment.NewLine, lengthConsumerCompilation.Diagnostics));
+            var lengthConsumer = ModuleCompiler.CreateConsumer(
+                Assert.IsType<BoundProgram>(lengthConsumerCompilation.Program), producer);
+            var lengthLinked = ModuleCompiler.Link(lengthConsumer, producer);
+            Assert.Equal(16_384, NativeJit.ExecuteWithSourceGrant(lengthLinked,
+                [CreateSourceGrant(new string('x', 16_384))], (NativeRuntimePolicy)policy));
+
+            var valid = CreateSourceGrant("");
+            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked, [], (NativeRuntimePolicy)policy));
+            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked, [valid, valid],
+                (NativeRuntimePolicy)policy));
+            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
+                [valid with { IsWritable = true }], (NativeRuntimePolicy)policy));
+            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
+                [new HostBuffer("Source", PrimitiveType.Int32, [1], false) { IsInvocationScoped = true }],
+                (NativeRuntimePolicy)policy));
+            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
+                [new HostBuffer("Other", PrimitiveType.Char16, [65], false) { IsInvocationScoped = true }],
+                (NativeRuntimePolicy)policy));
+            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
+                [new HostBuffer("Source", PrimitiveType.Char16, [-1], false) { IsInvocationScoped = true }],
+                (NativeRuntimePolicy)policy));
+            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
+                [new HostBuffer("Source", PrimitiveType.Char16, [ushort.MaxValue + 1], false) {
+                    IsInvocationScoped = true,
+                }], (NativeRuntimePolicy)policy));
+            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(lengthLinked,
+                [CreateSourceGrant(new string('x', 16_385))], (NativeRuntimePolicy)policy));
+        }
+    }
+
+    [Fact]
+    public void PersistedSourceReadsUseInvocationLengthAndResolveCallsInIndexes()
+    {
+        var sourceTree = SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return 0; }
+            int32 SourceIndex() { return 0; }
+            public int32 GetLastSourceCodeUnitOrMinusOne() {
+                if (Host.Source.Length == 0) { return -1; }
+                return int32(Host.Source[^1]);
+            }
+            public int32 GetFirstSourceCodeUnitOrMinusOne() {
+                if (Host.Source.Length == 0) { return -1; }
+                return int32(Host.Source[SourceIndex()]);
+            }
+            """, "source-grant-index-producer.terrum");
+        var producerCompilation = Compilation.Create(sourceTree,
+            [new HostBuffer("Source", PrimitiveType.Char16, [65, 66, 67], false) {
+                IsInvocationScoped = true,
+            }]);
+        Assert.False(producerCompilation.HasErrors,
+            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+            ["Terrum.CodeAnalysis.GetLastSourceCodeUnitOrMinusOne",
+                "Terrum.CodeAnalysis.GetFirstSourceCodeUnitOrMinusOne"]);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return GetLastSourceCodeUnitOrMinusOne(); }
+            """, "source-grant-index-consumer.terrum"), ModuleCompiler.CreateReference(producer));
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program),
+            producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+
+        foreach (var text in new[] { "", "plain", "\r", "\uD83D\uDE00", "\uD800" })
+        {
+            var source = SourceText.From(text);
+            var last = source.Length == 0 ? -1 : source[source.Length - 1];
+            Assert.Equal(last, NativeJit.ExecuteWithSourceGrant(linked, [CreateSourceGrant(text)],
+                NativeRuntimePolicy.FailFast));
+        }
     }
 
     [Theory]
@@ -164,6 +380,33 @@ public sealed partial class SourceLineComponentTests
             trees.Add(tree);
         }
         return trees.ToImmutable();
+    }
+
+    private static HostBuffer CreateSourceGrant(string text) =>
+        new("Source", PrimitiveType.Char16, [.. text.Select(static unit => (int)unit)], false) {
+            IsInvocationScoped = true,
+        };
+
+    private static int ComputeSourceFacadeChecksum(SourceText source)
+    {
+        var last = source.Length == 0 ? -1 : source[source.Length - 1];
+        var first = source.Length == 0 ? -1 : source[0];
+        var checksum = (source.Length * 2 + last + first + 2 * 65_521) % 65_521;
+        for (var index = 0; index < source.Length; index++)
+        {
+            checksum = (checksum + (source[index] * ((index % 97) + 1)) % 65_521) % 65_521;
+        }
+        for (var position = 0; position <= source.Length; position++)
+        {
+            var line = source.GetLinePosition(position);
+            checksum = (checksum + (line.Line * 31 + line.Character) % 65_521) % 65_521;
+        }
+        foreach (var line in source.Lines)
+        {
+            checksum = (checksum + line.SpanIncludingLineBreak.Start
+                + line.SpanIncludingLineBreak.Length) % 65_521;
+        }
+        return checksum;
     }
 
     private static string RepositoryRoot() => Path.GetFullPath(

@@ -495,6 +495,10 @@ public static partial class NativeModuleCompiler
         }
         var contract = bytes.AsSpan(at, contractLength).ToArray();
         var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(contract);
+        if (contractSnapshot.RequiresSourceGrant)
+        {
+            throw new ModuleFormatException("Native module sets do not support Host.Source requirements.");
+        }
         if ((byte)contractSnapshot.RuntimePolicy != bytes[5])
         {
             throw new ModuleFormatException("Native set and semantic runtime policies differ.");

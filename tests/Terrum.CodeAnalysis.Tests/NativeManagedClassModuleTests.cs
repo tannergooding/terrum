@@ -135,7 +135,7 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """, policy);
         var contract = ModuleCompiler.CreateProducer(program, ["Proof"]);
-        Assert.Equal(54, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
+        Assert.Equal(55, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
         Assert.Equal("native-19", ModuleCompiler.GetNativeProfileVersion(contract, false));
         var reference = ModuleCompiler.CreateReference(contract);
         Assert.Empty(reference.Structures);
@@ -187,11 +187,11 @@ public sealed partial class NativeManagedClassModuleTests
     {
         var contract = ModuleCompiler.CreateProducer(Compile(Sample("managed-copy-class-leaf"),
             NativeRuntimePolicy.FailFast), ["Leaf"]);
-        Assert.Equal(54, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
+        Assert.Equal(55, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
         using var reader = new BinaryReader(new MemoryStream(contract));
         reader.BaseStream.Position = 8;
         var profileLength = reader.ReadInt32();
-        reader.BaseStream.Position += profileLength + 1 + 1 + 4;
+        reader.BaseStream.Position += profileLength + 1 + 1 + 1 + 4;
         Assert.Equal(2, reader.ReadInt32());
         var unique = -1;
         var nestedOffset = -1;
@@ -284,12 +284,12 @@ public sealed partial class NativeManagedClassModuleTests
     {
         var program = Compile(Sample("managed-class-leaf"), NativeRuntimePolicy.FailFast);
         var contract = ModuleCompiler.CreateProducer(program, ["Leaf"]);
-        Assert.Equal(54, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
+        Assert.Equal(55, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
         Assert.Equal("native-20", ModuleCompiler.GetNativeProfileVersion(contract, false));
         using var reader = new BinaryReader(new MemoryStream(contract));
         reader.BaseStream.Position = 8;
         var profileLength = reader.ReadInt32();
-        reader.BaseStream.Position += profileLength + 1 + 1 + 4;
+        reader.BaseStream.Position += profileLength + 1 + 1 + 1 + 4;
         Assert.Equal(0, reader.ReadInt32());
         var classCount = (int)reader.BaseStream.Position;
         Assert.Equal(1, reader.ReadInt32());
@@ -443,7 +443,7 @@ public sealed partial class NativeManagedClassModuleTests
         Assert.False(imported.HasErrors, string.Join(Environment.NewLine, imported.Diagnostics));
         var graph = NativeModuleCompiler.CreateGraphProducer(Assert.IsType<BoundProgram>(imported.Program),
             ["Leaf"], "NodeB", [dependency], policy);
-        Assert.Equal(54, GraphSemanticVersion(graph));
+        Assert.Equal(55, GraphSemanticVersion(graph));
         var root = NativeModuleCompiler.CreateGraphConsumer(Compile("int32 Main() { return Leaf(); }",
             policy, NativeModuleCompiler.CreateGraphReference([graph]), library: false), [graph], policy);
         Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(root, [graph, dependency],

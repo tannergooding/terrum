@@ -300,7 +300,7 @@ public sealed class Compilation
                             expressions.Push(buffer.Index);
                             break;
                         case BoundConstant or BoundRead or BoundMove or BoundReceiverLoan
-                            or BoundMutableReceiverLoan or BoundViewLength or BoundOutArgument:
+                            or BoundMutableReceiverLoan or BoundViewLength or BoundBufferLength or BoundOutArgument:
                             break;
                         default:
                             throw new ArgumentException("Unknown bound expression.", nameof(program));

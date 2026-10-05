@@ -129,7 +129,9 @@ public static partial class SemanticVerifier
         {
             if (buffer is null || string.IsNullOrWhiteSpace(buffer.Name) || !bufferNames.Add(buffer.Name)
                 || buffer.ElementType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16 or PrimitiveType.Bool)
-                || buffer.Values.IsDefault)
+                || buffer.Values.IsDefault
+                || (buffer.IsInvocationScoped && (buffer.Name != "Source"
+                    || buffer.ElementType != PrimitiveType.Char16 || buffer.IsWritable)))
             {
                 throw Invalid();
             }
@@ -146,6 +148,10 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
             }
+        }
+        if (program.Buffers.Any(static buffer => buffer.IsInvocationScoped) && !program.RequiresSourceGrant)
+        {
+            throw Invalid();
         }
         var structNames = new HashSet<string>(program.Structures.Length, StringComparer.Ordinal);
         var layoutStates = new byte[program.Structures.Length];
@@ -818,7 +824,7 @@ public static partial class SemanticVerifier
                 case BoundSnapshotSpan:
                     break;
                 case BoundConstant or BoundNull or BoundRead or BoundMove or BoundReceiverLoan
-                    or BoundMutableReceiverLoan or BoundOutArgument or BoundViewLength:
+                    or BoundMutableReceiverLoan or BoundOutArgument or BoundViewLength or BoundBufferLength:
                     break;
                 default:
                     throw Invalid();
@@ -1318,7 +1324,7 @@ public static partial class SemanticVerifier
                 case BoundBufferRead buffer:
                     Expression(buffer.Index, depth + 1, acquiringRoot);
                     break;
-                case BoundConstant or BoundNull or BoundRead:
+                case BoundConstant or BoundNull or BoundRead or BoundBufferLength:
                     break;
                 default:
                     throw Invalid();
@@ -3185,6 +3191,13 @@ public static partial class SemanticVerifier
                     throw InvalidEffect(length.Span, "Ownership");
                 }
                 break;
+            case BoundBufferLength bufferLength:
+                if (bufferLength.Type != PrimitiveType.Int32
+                    || bufferLength.Buffer < 0 || bufferLength.Buffer >= program.Buffers.Length)
+                {
+                    throw Invalid();
+                }
+                break;
             case BoundViewRead viewRead:
                 if (viewRead.Variable < 0 || viewRead.Variable >= initialized.Length
                     || !initialized[viewRead.Variable]
@@ -3868,6 +3881,7 @@ public static partial class SemanticVerifier
 
     private static bool IsProvenBufferIndex(int buffer, BoundExpression index, BoundProgram program) =>
         buffer >= 0 && buffer < program.Buffers.Length
+            && !program.Buffers[buffer].IsInvocationScoped
             && index is BoundConstant { Type: PrimitiveType.Int32 } constant
             && constant.Value >= 0 && constant.Value < program.Buffers[buffer].Values.Length;
 
@@ -4206,6 +4220,7 @@ public static partial class SemanticVerifier
             case BoundSnapshotSpan:
                 break;
             case BoundViewLength:
+            case BoundBufferLength:
             case BoundConstant:
             case BoundNull:
             case BoundRead:
@@ -4279,7 +4294,7 @@ public static partial class SemanticVerifier
                 read.Index, flowFacts, ref remaining),
             BoundSpanAdvance advance => FlowFacts(advance.View, flowFacts, ref remaining),
             BoundSnapshotSpan => 0,
-            BoundViewLength or BoundConstant or BoundNull or BoundRead or BoundReceiverLoan
+            BoundViewLength or BoundBufferLength or BoundConstant or BoundNull or BoundRead or BoundReceiverLoan
                 or BoundMutableReceiverLoan or BoundMutableFieldLoan or BoundFieldLoan => 0,
             _ => AllFlowFacts,
         };

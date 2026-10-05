@@ -463,12 +463,20 @@ public static partial class NativeModuleCompiler
         if (bytes[5] == 2)
         {
             contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(contract);
+            if (contractSnapshot.RequiresSourceGrant)
+            {
+                throw new ModuleFormatException("Native modules do not support Host.Source requirements.");
+            }
             contractProfile = contractSnapshot.Profile;
             contractPolicy = contractSnapshot.RuntimePolicy;
         }
         else
         {
             providerSnapshot = ModuleCompiler.ReadProviderContractSnapshot(contract);
+            if (providerSnapshot.RequiresSourceGrant)
+            {
+                throw new ModuleFormatException("Native modules do not support Host.Source requirements.");
+            }
             contractProfile = providerSnapshot.Profile;
             contractPolicy = providerSnapshot.RuntimePolicy;
         }

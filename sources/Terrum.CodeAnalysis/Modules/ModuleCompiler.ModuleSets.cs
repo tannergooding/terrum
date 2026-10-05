@@ -34,6 +34,10 @@ public static partial class ModuleCompiler
         var functionCount = 0;
         foreach (var reference in references)
         {
+            if (reference.RequiresSourceGrant)
+            {
+                throw new ModuleContractException("Native module sets do not support Host.Source requirements.");
+            }
             if (reference.RuntimePolicy != references[0].RuntimePolicy)
             {
                 throw new ModuleContractException("Native module set runtime policies differ.");
@@ -103,6 +107,10 @@ public static partial class ModuleCompiler
         for (var i = 0; i < modules.Length; i++)
         {
             modules[i] = Read(producers[i], expectedConsumer: false);
+            if (modules[i].RequiresSourceGrant)
+            {
+                throw new ModuleContractException("Native module sets do not support Host.Source requirements.");
+            }
             ValidateProducer(modules[i]);
             if (modules[i].RuntimePolicy != modules[0].RuntimePolicy)
             {
@@ -123,6 +131,10 @@ public static partial class ModuleCompiler
         bool allowManagedParticipant = false)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (reference.RequiresSourceGrant)
+        {
+            throw new ModuleContractException("Native module sets do not support Host.Source requirements.");
+        }
         RejectCompilationLocalSpans(program);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
         {

@@ -131,7 +131,7 @@ frontend with source-audited `unsafe(expr)` scopes and caller-unsafe callable
 declarations. Both projection families use only v85; verification and emission
 remain hosted.
 
-Separately, semantic-module revision 54 provisionally persists top-level
+Separately, semantic-module revision 55 provisionally persists top-level
 caller-unsafe contracts and calls enclosed by explicit `unsafe { }` blocks,
 reconstructing authorization from that scope. Unsafe members and executable
 TRRM caller-unsafe calls remain unsupported; the broader reference-call
@@ -153,7 +153,7 @@ prerequisite has already been met.
 1. **Full runtime/structured contracts — references and safety.** General
    reference/access/loan metadata and caller-unsafe member contracts still
    need definition before wider use across calls or imports. Structured
-   semantic-module revision 54 provisionally carries top-level caller-unsafe
+   semantic-module revision 55 provisionally carries top-level caller-unsafe
    obligations through explicit unsafe-block scopes; this bounded
    implementation does not settle the general schema or approve the
    [reference-call metadata proposal](proposals/reference-call-metadata.md),
@@ -212,10 +212,12 @@ prerequisite has already been met.
     bounded components toward a compiler bootstrap only as their language and
     library prerequisites are met and through the shared
     [self-host gate](#compiler-and-self-hosting-gate). Persisting source-aware
-    helpers would require the still-unapproved
+    helpers in the maintained compiler-primitives library remains pending. A
+    bounded semantic-module JIT path is provisionally implemented under the
+    still-unapproved
     [invocation-scoped source-grant proposal](proposals/invocation-scoped-source-grant.md);
-    current source-dependent components are not included in the persisted
-    compiler-primitives library.
+    source-dependent components remain outside the compiler-primitives DLL, and
+    the scanner and scalar frontend still rely on hosted verification/emission.
 
 These are pending contracts, not support claims. Exact grammar, metadata and
 implementation remain subject to their canonical specifications and proposals.

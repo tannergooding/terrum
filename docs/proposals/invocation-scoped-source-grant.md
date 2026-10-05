@@ -6,9 +6,9 @@
 
 The bounded `SourceLines`, scanner and scalar-frontend components read the
 immutable UTF-16 `Host.Source` grant. Hosted compilation can bind that grant as
-a read-only `char16` host buffer, but persisted producer modules currently
-reject host-buffer dependencies. As a result, adding source-aware helpers to a
-persisted compiler-primitives library is not just build wiring.
+a read-only `char16` host buffer. Semantic-module revision 55 now supports the
+bounded invocation-scoped source facade described below; the maintained
+compiler-primitives library and other execution paths remain source-independent.
 
 This proposal concerns only how persisted modules may declare and receive the
 existing source grant. It does not change source decoding, UTF-16 coordinates,
@@ -32,6 +32,77 @@ source ranges, malformed UTF-16 and line coordinates remain unchanged.
 This is the smallest direction that lets existing source-aware components
 participate in a persisted compiler library without inventing general buffer
 capture, reference or span semantics.
+
+## Provisional first implementation slice
+
+**Status: implemented provisionally; proposal remains unapproved.**
+
+**Summary:** The broad recommendation does not define invocation extent,
+dependency propagation, source-length binding, or the initial execution
+backend. The existing `SourceText` and `SourceLines` facades need only four
+read operations; the scanner and scalar frontend additionally depend on
+writable interchange buffers and other contracts outside this proposal.
+
+**Recommendation:** First persist only the four-operation source facade as one
+development semantic producer module, with `SourceRange` and
+`CharacterFacts` as host-neutral dependencies. Invoke it through an
+independently persisted consumer using an explicit source-binding JIT adapter.
+Keep source length and reads symbolic in the module; at each invocation bind
+the supplied snapshot into fresh execution-owned storage, lower those
+operations to the existing checked host-buffer representation, verify the
+linked program, then use the hosted JIT emitter. Reusing module bytes does not
+require reusing generated machine code.
+
+**Implemented provisionally:** Semantic-module revision 55 stores the
+requirement bit and symbolic length/read operations. References propagate the
+requirement; linking checks it; `NativeJit.ExecuteWithSourceGrant` validates
+and copies one eligible source snapshot before hosted verification/emission.
+The native emitter, graph and module-set paths reject unbound or unsupported
+source requirements. No general buffer dependency or source-aware maintained
+compiler-primitives DLL was added.
+
+The provisional contract for this slice is:
+
+- A module may require only the reserved identity `Host.Source`, with readonly
+  `char16` elements and invocation lifetime. The requirement is module-level,
+  exposed through references and propagated through retained producer
+  dependencies. Replacement must preserve the recorded requirement.
+- One synchronous entry invocation, including nested calls and defined
+  unwinding/cleanup, observes one immutable snapshot. Different invocations
+  bind independently; there is no process-global current source, capture,
+  suspension, or rebinding during execution.
+- The caller explicitly supplies exact UTF-16 code units, copied into
+  invocation-owned backing. Empty source is valid and distinct from a missing
+  grant. This first profile accepts at most 16,384 code units, preserving
+  malformed surrogates, NUL and line endings. Missing, duplicate, writable,
+  wrong-element-type, invalid-code-unit or oversized grants reject before
+  entry execution.
+- Artifacts retain only the requirement and symbolic source operations, never
+  invocation contents, concrete length or address. Source-dependent operations
+  cannot use a compile-time sample length for constant evaluation or persisted
+  bounds/effect proofs. Checked indexing and conditional-output publication
+  retain their existing behavior.
+- The capability cannot become a source value, field, pointer, returned view
+  or retained handle. Copied code units, scalar coordinates and `SourceRange`
+  values may escape; they carry no source backing or implicit snapshot
+  identity.
+- Initial support covers a single-producer semantic-module JIT execution only.
+  Source-dependent native DLLs, native packages, graphs and persisted AOT
+  images continue to reject explicitly. A reusable AOT contract requires a
+  separate invocation adapter; embedding a snapshot in an executable does not
+  satisfy this profile.
+
+**Acceptance evidence:** `SourceFacadeModulesBindFreshSnapshotsAndRejectInvalidGrantsAsync`
+reuses identical producer and consumer artifacts across empty, differently
+sized, malformed-surrogate and mixed-line-break snapshots. It compares the
+facade with hosted `SourceText`, checks failed-output vacancy, rejects invalid
+grants, and preserves host-neutral module behavior. The focused source,
+module, native-package, module-set and line-component selection passed 399
+tests. Persisted-index coverage also checks invocation-relative `^1` reads
+across empty and one-code-unit snapshots and resolves call-valued indexes.
+This slice does not make the maintained
+compiler-primitives DLL source-aware or move the scalar frontend beyond the
+hosted verifier/emitter.
 
 ## Alternative
 

@@ -57,6 +57,10 @@ public static class NativeEmitter
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(bindings);
+        if (program.RequiresSourceGrant)
+        {
+            throw new NotSupportedException("Native modules do not support Host.Source requirements.");
+        }
         SemanticVerifier.VerifyReferences(program);
         if (program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
         {
@@ -173,6 +177,10 @@ public static class NativeEmitter
         }
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(program);
+        if (program.RequiresSourceGrant && !program.IsInvocationSourceBound)
+        {
+            throw new NotSupportedException("An invocation-scoped Host.Source grant must be bound through NativeJit.");
+        }
         if (bindings is null)
         {
             SemanticVerifier.VerifyLibrary(program);
@@ -323,6 +331,11 @@ public static class NativeEmitter
             throw new NotSupportedException("Unsupported native runtime policy.");
         }
         cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(program);
+        if (program.RequiresSourceGrant && !program.IsInvocationSourceBound)
+        {
+            throw new NotSupportedException("An invocation-scoped Host.Source grant must be bound through NativeJit.");
+        }
         SemanticVerifier.Verify(program);
         if (program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
         {
@@ -2844,7 +2857,7 @@ internal sealed partial class PeCompiler
             var negativeOffset = _code.JumpIf(0x88);
             _code.Byte(0x3D); // cmp eax,length
             _code.Int32(_program.Buffers[buffer].Values.Length);
-            var outOfRange = _code.JumpIf(0x83);
+            var outOfRange = _code.JumpIf(0x87);
             _code.Byte(0xB9); // mov ecx,length
             _code.Int32(_program.Buffers[buffer].Values.Length);
             _code.Bytes(0x29, 0xC1, 0x89, 0xC8); // ecx = length - eax; eax = ecx
@@ -2971,6 +2984,10 @@ internal sealed partial class PeCompiler
                 break;
             case BoundViewLength length:
                 _code.Load(Slot(length.Variable) + 8);
+                break;
+            case BoundBufferLength length:
+                _code.Byte(0xB8);
+                _code.Int32(_program.Buffers[length.Buffer].Values.Length);
                 break;
             case BoundSnapshotSpan snapshot:
                 EmitSnapshotSpan(snapshot, spill);

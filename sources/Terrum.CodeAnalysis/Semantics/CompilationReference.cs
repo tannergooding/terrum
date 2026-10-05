@@ -8,11 +8,12 @@ namespace Terrum.CodeAnalysis.Semantics;
 public sealed class CompilationReference
 {
     internal CompilationReference(ImmutableArray<BoundStruct> structures, ImmutableArray<BoundFunction> functions,
-        BoundRuntimePolicy runtimePolicy)
+        BoundRuntimePolicy runtimePolicy, bool requiresSourceGrant = false)
     {
         Structures = structures;
         Functions = functions;
         RuntimePolicy = runtimePolicy;
+        RequiresSourceGrant = requiresSourceGrant;
     }
 
     /// <summary>Gets the value layouts exposed by the imported declarations.</summary>
@@ -23,4 +24,7 @@ public sealed class CompilationReference
 
     /// <summary>The checked-failure behavior required by imported declarations.</summary>
     public BoundRuntimePolicy RuntimePolicy { get; }
+
+    /// <summary>Whether the retained provider contract requires an invocation-scoped <c>Host.Source</c> grant.</summary>
+    public bool RequiresSourceGrant { get; }
 }

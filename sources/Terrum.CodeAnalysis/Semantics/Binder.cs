@@ -590,6 +590,8 @@ internal sealed partial class Binder
             Structures = [.. _structs],
             Classes = [.. _classes],
             Buffers = _buffers,
+            RequiresSourceGrant = _buffers.Any(static buffer => buffer.IsInvocationScoped)
+                || _reference?.RequiresSourceGrant == true,
             RuntimePolicy = _runtimePolicy,
         };
         if (!SemanticVerifier.TryVerifySource(program, out var functionIndex, out var span, out var exceededWorkLimit, out var invalidEffect))
@@ -2022,6 +2024,12 @@ internal sealed partial class Binder
             offsetValue = (int)constant.Value;
         }
 
+        if (_buffers[buffer].IsInvocationScoped)
+        {
+            isEndRelative = true;
+            return new BoundConstant(offsetValue, PrimitiveType.Int32, index.Span);
+        }
+
         var indexValue = offsetValue < 0
             ? -1
             : (long)_buffers[buffer].Values.Length - offsetValue;
@@ -3156,7 +3164,9 @@ internal sealed partial class Binder
                 if (((SyntaxTokenElement)node.Children[2]).Token.Text == "Length"
                     && TryFindBuffer((SyntaxNode)node.Children[0], out var buffer))
                 {
-                    expression = new BoundConstant(_buffers[buffer].Values.Length, PrimitiveType.Int32, node.Span);
+                    expression = _buffers[buffer].IsInvocationScoped
+                        ? new BoundBufferLength(buffer, node.Span)
+                        : new BoundConstant(_buffers[buffer].Values.Length, PrimitiveType.Int32, node.Span);
                     break;
                 }
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Name;

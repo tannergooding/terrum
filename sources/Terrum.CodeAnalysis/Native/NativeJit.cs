@@ -32,14 +32,62 @@ internal sealed record NativeJitModule(string DllName, string FullPath, IReadOnl
 /// </remarks>
 public static unsafe class NativeJit
 {
+    private const int MaximumInvocationSourceCodeUnits = 16_384;
     private static readonly List<INativeJitContinuationRegistration> s_retainedRegistrations = [];
 
-    /// <summary>Emits and executes the callable entry point, returning its int32 result.</summary>
+    /// <summary>Emits and executes a host-neutral callable entry point, returning its int32 result.</summary>
+    /// <exception cref="ArgumentException">The program requires an invocation-scoped source grant.</exception>
     /// <exception cref="PlatformNotSupportedException">The host is not Windows x64.</exception>
     public static int Execute(BoundProgram program, NativeRuntimePolicy runtimePolicy,
         string? registrarAssembly = null)
     {
+        ArgumentNullException.ThrowIfNull(program);
+        if (program.RequiresSourceGrant)
+        {
+            throw new ArgumentException("A source-dependent program requires ExecuteWithSourceGrant.", nameof(program));
+        }
         var code = EmitCode(program, runtimePolicy);
+        return ExecuteCode(code, [], [], registrarAssembly, null, null, false, out _);
+    }
+
+    /// <summary>Executes a source-dependent program with one fresh, immutable UTF-16 source grant.</summary>
+    /// <param name="program">The verified program requiring <c>Host.Source</c>.</param>
+    /// <param name="sourceGrants">Exactly one readonly invocation-scoped <c>Host.Source</c> buffer containing at most 16,384 code units.</param>
+    /// <param name="runtimePolicy">The generated native runtime policy.</param>
+    /// <param name="registrarAssembly">Trusted CLI assembly serving remote CET continuation registration
+    /// when the current host enforces CET and generated code uses checked exception continuations.</param>
+    /// <exception cref="ArgumentException">The program or source grant does not match the supported source profile.</exception>
+    /// <exception cref="PlatformNotSupportedException">The host is not Windows x64.</exception>
+    public static int ExecuteWithSourceGrant(BoundProgram program, ImmutableArray<HostBuffer> sourceGrants,
+        NativeRuntimePolicy runtimePolicy, string? registrarAssembly = null)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        if (!program.RequiresSourceGrant || program.Buffers.Length != 1
+            || !IsSourceGrant(program.Buffers[0]))
+        {
+            throw new ArgumentException("The program does not have the supported Host.Source dependency.", nameof(program));
+        }
+        if (sourceGrants.IsDefaultOrEmpty || sourceGrants.Length != 1
+            || sourceGrants[0] is not HostBuffer source || !IsSourceGrant(source)
+            || source.Values.IsDefault || source.Values.Length > MaximumInvocationSourceCodeUnits)
+        {
+            throw new ArgumentException("Exactly one readonly Host.Source grant of at most 16,384 code units is required.",
+                nameof(sourceGrants));
+        }
+        foreach (var codeUnit in source.Values)
+        {
+            if (codeUnit is < 0 or > ushort.MaxValue)
+            {
+                throw new ArgumentException("Host.Source contains a value outside the UTF-16 code-unit range.",
+                    nameof(sourceGrants));
+            }
+        }
+
+        var invocationProgram = program with {
+            Buffers = [source with { Values = ImmutableArray.CreateRange(source.Values.ToArray()) }],
+            IsInvocationSourceBound = true,
+        };
+        var code = EmitCode(invocationProgram, runtimePolicy);
         return ExecuteCode(code, [], [], registrarAssembly, null, null, false, out _);
     }
 
@@ -69,6 +117,10 @@ public static unsafe class NativeJit
         ValidateBufferMetadata(program, code);
         return code;
     }
+
+    private static bool IsSourceGrant(HostBuffer buffer) =>
+        buffer is not null && buffer.Name == "Source" && buffer.ElementType == PrimitiveType.Char16
+            && !buffer.IsWritable && buffer.IsInvocationScoped;
 
     internal static int ExecuteImportedCode(NativeCode code, IReadOnlyList<NativeJitModule> modules,
         IReadOnlyList<NativeImportBinding> expectedImports, string? registrarAssembly = null,

@@ -83,6 +83,10 @@ public static partial class ModuleCompiler
         for (var provider = 0; provider < references.Count; provider++)
         {
             var reference = references[provider];
+            if (reference.RequiresSourceGrant)
+            {
+                throw new ModuleContractException("Native graphs do not support Host.Source requirements.");
+            }
             if (reference.RuntimePolicy != references[0].RuntimePolicy)
             {
                 throw new ModuleContractException("Graph dependency policies differ.");
@@ -147,7 +151,8 @@ public static partial class ModuleCompiler
             throw new ModuleContractException("Only top-level caller-unsafe functions are supported in persisted semantic modules.");
         }
         SemanticVerifier.VerifyLibraryReferences(program);
-        if (program.EntryPoint != -1 || !program.Buffers.IsDefaultOrEmpty
+        if (program.EntryPoint != -1 || program.RequiresSourceGrant || !program.Buffers.IsDefaultOrEmpty
+            || dependencies.RequiresSourceGrant
             || program.RuntimePolicy != dependencies.RuntimePolicy)
         {
             throw new ModuleContractException("Graph libraries require compatible unbuffered library IR.");
@@ -375,6 +380,10 @@ public static partial class ModuleCompiler
     internal static GraphContractSnapshot ReadGraphConsumerContract(byte[] contract)
     {
         var module = Read(contract, expectedConsumer: true, out var profile);
+        if (module.RequiresSourceGrant)
+        {
+            throw new ModuleContractException("Native graphs do not support Host.Source requirements.");
+        }
         return CreateGraphContractSnapshot(module, reference: null,
             HasPrivateManagedState(module), profile);
     }
@@ -422,6 +431,10 @@ public static partial class ModuleCompiler
     private static bool ValidateGraphImports(Module module, CompilationReference dependencies,
         bool hasPrivateManagedState, out IReadOnlyDictionary<string, BoundFunction> dependencyFunctions)
     {
+        if (module.RequiresSourceGrant || dependencies.RequiresSourceGrant)
+        {
+            throw new ModuleContractException("Native graphs do not support Host.Source requirements.");
+        }
         if (module.RuntimePolicy != dependencies.RuntimePolicy)
         {
             throw new ModuleContractException("Graph library and dependency runtime policies differ.");
@@ -488,7 +501,11 @@ public static partial class ModuleCompiler
         {
             using var stream = new MemoryStream(bytes, writable: false);
             using var reader = new BinaryReader(stream, StrictUtf8, leaveOpen: true);
-            var (policy, profile) = ReadModuleHeader(reader, expectedConsumer: true);
+            var (policy, profile, requiresSourceGrant) = ReadModuleHeader(reader, expectedConsumer: true);
+            if (requiresSourceGrant)
+            {
+                throw new ModuleFormatException("Native graph libraries cannot require Host.Source.");
+            }
             if (reader.ReadInt32() != -1)
             {
                 throw new ModuleFormatException("Graph library cannot have an entry point.");
@@ -512,6 +529,7 @@ public static partial class ModuleCompiler
             var module = new Module(true, -1, structures, functions) {
                 Classes = classes,
                 ImportedStructures = imported,
+                RequiresSourceGrant = requiresSourceGrant,
                 RuntimePolicy = policy,
             };
             var retainedProfile = RetainedNativeProfile(module);

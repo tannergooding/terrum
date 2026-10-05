@@ -353,6 +353,8 @@ internal sealed partial class Binder
                 return field with { Receiver = ResolveConstExpression(field.Receiver, locals, functions, variableCount) };
             case BoundBufferRead buffer:
                 return buffer with { Index = ResolveConstExpression(buffer.Index, locals, functions, variableCount) };
+            case BoundBufferLength:
+                return expression;
             case BoundViewRead view:
                 return view with { Index = ResolveConstExpression(view.Index, locals, functions, variableCount) };
             case BoundSpanLength length:

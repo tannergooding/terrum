@@ -13,6 +13,12 @@ namespace Terrum.CodeAnalysis.Semantics;
 /// Values use one 32-bit storage word per element, including code units. This is a
 /// bounded host interchange layout, not the language's general array or span ABI.
 /// Source cannot construct, resize, return, store or transfer the capability.
+/// Invocation-scoped source buffers are copied by the source-specific JIT adapter;
+/// persisted modules retain only their dependency and symbolic reads.
 /// Its backing exists for the entire execution, and all accesses are checked.
 /// </remarks>
-public sealed record HostBuffer(string Name, PrimitiveType ElementType, ImmutableArray<int> Values, bool IsWritable);
+public sealed record HostBuffer(string Name, PrimitiveType ElementType, ImmutableArray<int> Values, bool IsWritable)
+{
+    /// <summary>Whether the capability is supplied anew for each invocation and must not bind sample values.</summary>
+    public bool IsInvocationScoped { get; init; }
+}

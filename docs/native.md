@@ -84,10 +84,13 @@ are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
-Persisted semantic modules currently write and accept only revision 54. The
+Persisted semantic modules currently write and accept only revision 55. The
 semantic v24-v32 labels below are historical module revisions and implementation
 milestones, not reader-compatibility promises; those revisions are retired and
 rejected instead of normalized.
+Revision 55 can carry the provisional `Host.Source` requirement for the
+semantic-module JIT adapter only; it does not make source-dependent native DLL
+or persisted AOT images executable.
 Semantic version 24 carries the validated class/`ManagedNode` access
 capability contract. Semantic version 25 adds the distinct `MutReceiver`
 contract for persisted, non-exported mutating methods on non-owning compact
@@ -102,7 +105,7 @@ Source visibility may be public or private. Named mutable locals, their
 writable nested fields, and forwarding through an existing writable `this`
 and its writable fields are supported receiver places. Current artifacts
 record the validated access and receiver contracts directly; all use semantic
-module revision 54 regardless of which supported constructs they contain.
+module revision 55 regardless of which supported constructs they contain.
 Older revisions are not upgraded while reading.
 The `native-18` through `native-20` labels below identify bounded runtime
 features; they do not imply that general references/views, ownership forms, or
@@ -590,7 +593,7 @@ existing initialization authority; ordinary immutable locals cannot. Failed
 initialization leaves vacancy and does not reactivate a root or cleanup bit.
 Retained end nodes were added at the v47 feature milestone and are audited through
 producer/reference/consumer linking and private native graphs. Both PE and
-JIT policies use the same lowering under current semantic-module revision 54,
+JIT policies use the same lowering under current semantic-module revision 55,
 with no native ABI/profile or scanner change. Parameter/receiver aliases, fields, indexers, const aliases and
 unresolved/vacant locals reject. General ref/pin types, enums, arbitrary
 guards/ARC, view rebinding, source-free TRRM and the compiled scalar frontend
@@ -1313,7 +1316,7 @@ cleanup. Labels may identify enclosing `while`, `for` and `do` loops.
 The bounded implementation rejects duplicate enclosing labels and permits
 reuse in disjoint scopes; the general source collision policy remains
 unspecified. The v39 feature milestone added post-tested loops and non-nearest
-transfer depths; current semantic-module revision 54 serializes these nodes
+transfer depths; current semantic-module revision 55 serializes these nodes
 when present. Native calling conventions, cleanup funclets and public ABI do
 not change.
 

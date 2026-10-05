@@ -229,6 +229,11 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     /// <summary>Compiler-supplied, bounded buffers; never represented as source values or raw addresses.</summary>
     public ImmutableArray<HostBuffer> Buffers { get; init; } = [];
 
+    /// <summary>Whether execution requires an invocation-scoped immutable <c>Host.Source</c> grant.</summary>
+    public bool RequiresSourceGrant { get; internal init; }
+
+    internal bool IsInvocationSourceBound { get; init; }
+
     /// <summary>The runtime behavior verified for this program and its imports.</summary>
     public BoundRuntimePolicy RuntimePolicy { get; init; }
 }
@@ -559,6 +564,9 @@ public sealed record BoundMutableReceiverLoan(int Variable, PrimitiveType Type, 
 
 /// <summary>Reads the fixed length of an active lexical native buffer view.</summary>
 public sealed record BoundViewLength(int Variable, TextSpan Span) : BoundExpression(PrimitiveType.Int32, Span);
+
+/// <summary>Reads the length of a compiler-supplied host buffer.</summary>
+public sealed record BoundBufferLength(int Buffer, TextSpan Span) : BoundExpression(PrimitiveType.Int32, Span);
 
 /// <summary>Reads a checked element from an active lexical native buffer view.</summary>
 public sealed record BoundViewRead(int Variable, BoundExpression Index, TextSpan Span) : BoundExpression(PrimitiveType.Int32, Span);

@@ -111,6 +111,18 @@ public sealed class NativeModuleTests
         return at;
     }
 
+    private static byte[] WithSourceGrantRequirement(byte[] artifact)
+    {
+        var result = artifact.ToArray();
+        var contractOffset = PackageContractOffset(result);
+        var profileLength = BinaryPrimitives.ReadInt32LittleEndian(result.AsSpan(contractOffset + 8, 4));
+        var requirementOffset = checked(contractOffset + 8 + 4 + profileLength + 2);
+        Assert.Equal(0, result[requirementOffset]);
+        result[requirementOffset] = 1;
+        RehashArtifact(result);
+        return result;
+    }
+
     private static int PackageImageOffset(byte[] artifact) => PackageContractOffset(artifact)
         + BinaryPrimitives.ReadInt32LittleEndian(artifact.AsSpan(10, 4));
 
@@ -157,6 +169,20 @@ public sealed class NativeModuleTests
                 .CopyTo(previousVersion, previousVersion.Length - 32);
             _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(previousVersion));
         }
+    }
+
+    [Fact]
+    public void NativeModuleIngressRejectsSourceGrantContracts()
+    {
+        var producer = Producer("public int32 Run() { return 42; }", "SourceGrant", ["Run"]);
+        var consumer = ConsumerPackage(producer, "int32 Main() { return Run(); }");
+        var sourceRequiredProducer = WithSourceGrantRequirement(producer);
+        var sourceRequiredConsumer = WithSourceGrantRequirement(consumer);
+
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateReference(sourceRequiredProducer));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(sourceRequiredProducer));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(sourceRequiredConsumer));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(sourceRequiredConsumer, producer));
     }
 
     [Fact]
