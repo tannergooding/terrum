@@ -335,9 +335,9 @@ public static partial class ModuleCompiler
         return ReadConsumerContractSnapshot(consumerBytes).Declarations;
     }
 
-    private static Dictionary<string, BoundStruct> IndexStructures(IEnumerable<BoundStruct> structures)
+    private static Dictionary<string, BoundStruct> IndexStructures(IReadOnlyCollection<BoundStruct> structures)
     {
-        var result = new Dictionary<string, BoundStruct>(StringComparer.Ordinal);
+        var result = new Dictionary<string, BoundStruct>(structures.Count, StringComparer.Ordinal);
         foreach (var structure in structures)
         {
             _ = result.TryAdd(structure.Name, structure);
