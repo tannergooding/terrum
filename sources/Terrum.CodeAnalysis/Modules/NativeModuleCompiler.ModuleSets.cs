@@ -488,10 +488,16 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native set and semantic runtime policies differ.");
         }
-        if (!symbols.SetEquals(contractSnapshot.Declarations)
-            || !contractSnapshot.CallImports.All(allMachineImports.Contains))
+        if (!symbols.SetEquals(contractSnapshot.Declarations))
         {
             throw new ModuleFormatException("Native set declaration or machine imports differ from semantic contract.");
+        }
+        foreach (var import in contractSnapshot.CallImports)
+        {
+            if (!allMachineImports.Contains(import))
+            {
+                throw new ModuleFormatException("Native set declaration or machine imports differ from semantic contract.");
+            }
         }
         return new SetPackage((NativeRuntimePolicy)bytes[5], contract,
             bytes.AsSpan(at + contractLength, imageLength).ToArray(), dependencies, contractSnapshot);
