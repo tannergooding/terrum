@@ -15,7 +15,7 @@ namespace Terrum.CodeAnalysis.Native;
 
 /// <summary>The native entry result and an owned snapshot of its compiler-supplied data buffers.</summary>
 /// <param name="ExitCode">The callable entry's int32 result.</param>
-/// <param name="Data">A copy of the initialized data image after successful execution.</param>
+/// <param name="Data">A copy of the initialized host-buffer data after successful execution.</param>
 [SuppressMessage("Performance", "CA1819:Properties should not return arrays", Justification = "The caller owns an independent snapshot after native memory is freed.")]
 public sealed record NativeExecutionResult(int ExitCode, byte[] Data)
 {
@@ -465,13 +465,11 @@ public static unsafe class NativeJit
 
             var entryPoint = (delegate* unmanaged[Stdcall]<int>)(memory + code.EntryPoint);
             var exitCode = entryPoint();
-            var snapshot = new byte[data.Length];
+            var snapshot = new byte[code.HostDataLength];
             new ReadOnlySpan<byte>((void*)(memory + readOnlyOffset), code.ReadOnlyDataLength).CopyTo(snapshot);
-            new ReadOnlySpan<byte>((void*)(memory + writableOffset), writableLength).CopyTo(snapshot.AsSpan(code.ReadOnlyDataLength));
-            if (code.ManagedRuntimeOffset >= 0)
-            {
-                Array.Resize(ref snapshot, code.HostDataLength);
-            }
+            var hostWritableLength = code.HostDataLength - code.ReadOnlyDataLength;
+            new ReadOnlySpan<byte>((void*)(memory + writableOffset), hostWritableLength)
+                .CopyTo(snapshot.AsSpan(code.ReadOnlyDataLength));
             return new NativeExecutionResult(exitCode, snapshot) { BufferOffsets = code.BufferOffsets };
         }
         finally

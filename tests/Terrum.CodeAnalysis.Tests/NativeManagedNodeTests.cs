@@ -86,6 +86,27 @@ public sealed class NativeManagedNodeTests
     }
 
     [Fact]
+    public void RuntimeMetadataIsNotReturnedAsHostData()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                require ManagedNode.TryCreate(42, out var node);
+                return node.Value;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
+        Assert.True(code.ManagedRuntimeOffset >= 0);
+        Assert.Equal(0, code.HostDataLength);
+
+        var result = NativeJit.ExecuteWithData(program, NativeRuntimePolicy.FailFast);
+
+        Assert.Equal(42, result.ExitCode);
+        Assert.Empty(result.Data);
+    }
+
+    [Fact]
     public async Task ClearingAnEdgeMakesItsChildCollectibleAsync()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
