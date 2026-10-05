@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `c5e9e400` | Exercise checked wide arithmetic through the internal Windows x64 compiler-primitives DLL |
 | `79155d79` | Exercise checked wide accumulators through the internal Windows x64 compiler-primitives DLL |
 | `13eb3cc8` | Invoke wide signed magnitude through the internal Windows x64 compiler-primitives DLL |
 | `2f9bb5da` | Reuse wide signed magnitude when parsing signed integer limits |
