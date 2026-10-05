@@ -50,6 +50,8 @@ public readonly ref struct TrRmSourceFileTableReader
         return ReadPath(row - 1);
     }
 
+    public int Count => _recordCount;
+
     public int GetOwnerModule(int row)
     {
         if (row <= 0 || row > _recordCount)

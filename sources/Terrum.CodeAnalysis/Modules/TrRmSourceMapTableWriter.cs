@@ -24,8 +24,9 @@ public static class TrRmSourceMapTableWriter
         }
 
         var seen = new HashSet<(int Body, int Block, int Ordinal)>(mappings.Count);
-        var fileSlots = new Dictionary<int, (int Slot, int OwnerModule)>();
-        var fileRows = new List<int>();
+        var fileCapacity = Math.Min(mappings.Count, files.Count);
+        var fileSlots = new Dictionary<int, (int Slot, int OwnerModule)>(fileCapacity);
+        var fileRows = new List<int>(fileCapacity);
         var hasLastBody = false;
         var lastBodyRow = 0;
         var lastBodyOwnerModule = 0;

@@ -33,6 +33,7 @@ public sealed class TrRmSourceFileTableWriterTests
 
         paths[0] = 4;
         var reader = new TrRmSourceFileTableReader(files, 2, strings, moduleReader);
+        Assert.Equal(2, reader.Count);
         Assert.Equal("src/A.terrum", reader.GetPath(1));
         Assert.Equal("src/B.terrum", reader.GetPath(2));
         Assert.Equal(1, reader.GetOwnerModule(1));
