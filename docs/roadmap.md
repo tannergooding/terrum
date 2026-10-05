@@ -266,6 +266,7 @@ boundaries remain in the [implementation reference](implementation.md).
 | `055386d` | Compare parsed graph and module-set declarations against already-built import sets |
 | `3425e7f` | Use sorted declarations directly for native graph machine-import ownership checks |
 | `12ad2ac` | Preserve sorted provider export order when forming graph declarations |
+| `534f921` | Write native graph and module-set checksums without an intermediate payload copy |
 | `ef83b3c` | Replace indexed TRRM per-use tree updates with dictionary updates and final key sorting |
 | `ae4ceea` | Cache managed-state detection outside per-function module-set boundary checks |
 | `3bb7cc7` | Cache graph managed-state checks outside per-function boundary validation |
