@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `ee7602b` | Materialize module-set reference arrays directly |
 | `38bad38` | Avoid empty module-set import dictionaries |
 | `fa10ee2` | Build graph native bindings directly |
 | `4244e6a` | Materialize module-set imports directly |
