@@ -261,6 +261,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `1844cc5` | Verify ordinal `StringRow` name and namespace comparisons through semantic-module JIT |
 | `dc55669` | Exercise provisional `StringRow` name and namespace encodings through semantic-module JIT |
 | `dd8b0f8` | Verify all `StringLiteral` encodings through persisted semantic-module JIT |
 | `767bd39` | Exercise decimal and all-radix integer formatting through semantic-module JIT |
