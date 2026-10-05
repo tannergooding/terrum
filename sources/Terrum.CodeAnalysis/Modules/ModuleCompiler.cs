@@ -198,8 +198,10 @@ public static partial class ModuleCompiler
             return "native-19";
         }
         var usesManagedNodes = false;
+        var ownershipTransfer = false;
         foreach (var item in module.Functions)
         {
+            ownershipTransfer |= item.HasOwnershipTransfer;
             if (item.Function is not BoundFunction function)
             {
                 continue;
@@ -226,7 +228,6 @@ public static partial class ModuleCompiler
         {
             return "native-18";
         }
-        var ownershipTransfer = module.Functions.Any(static function => function.HasOwnershipTransfer);
         var compositeUnique = Compilation.HasCompositeUnique(module.Structures, out var unique);
         var ownedNativeBuffer = HasOwnedNativeBuffer(module.Structures, module.Functions);
         var (readonlyNativeView, mutableNativeViewOrClear) = NativeViewFeatures(module.Functions);
