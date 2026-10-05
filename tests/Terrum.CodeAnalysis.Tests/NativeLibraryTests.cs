@@ -148,4 +148,46 @@ public sealed class NativeLibraryTests
             + " public Hidden Make() { return new Hidden(42); }");
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(privateField, ["Make"], NativeRuntimePolicy.FailFast));
     }
+
+    [Fact]
+    public void AllowsAbsentPrimitiveDeclaringStructOwner()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public struct Cell { public int32 Value; public int32 Read() { return 42; } }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var function = Assert.Single(program.Functions);
+        var primitiveOwner = program with
+        {
+            Functions = program.Functions.SetItem(0, function with
+            {
+                Name = "int32.Read",
+                DeclaringStruct = "int32",
+                Variables = function.Variables.SetItem(0, function.Variables[0] with { Type = PrimitiveType.Int32 }),
+            }),
+        };
+
+        _ = NativeEmitter.EmitLibrary(primitiveOwner, ["int32.Read"], NativeRuntimePolicy.FailFast);
+    }
+
+    [Fact]
+    public void AllowsPublicMatchingDeclaringStructOwner()
+    {
+        var program = Compile();
+        var function = Assert.Single(program.Functions, static function => function.DeclaringStruct == "Twelve");
+
+        _ = NativeEmitter.EmitLibrary(program, [function.Name], NativeRuntimePolicy.FailFast);
+    }
+
+    [Theory]
+    [InlineData("struct Private", "Private")]
+    [InlineData("internal struct Internal", "Internal")]
+    public void RejectsNonPublicMatchingDeclaringStructOwner(string declaration, string owner)
+    {
+        var program = Compile($"{declaration} {{ public int32 Value; public {owner}(int32 value) {{ Value = value; }} }}");
+        var function = Assert.Single(program.Functions, function => function.DeclaringStruct == owner);
+
+        var exception = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, [function.Name], NativeRuntimePolicy.FailFast));
+        Assert.Contains($"'{function.Name}' is not an accessible native library export.", exception.Message);
+    }
 }

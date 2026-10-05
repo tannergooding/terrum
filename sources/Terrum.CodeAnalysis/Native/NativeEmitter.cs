@@ -238,12 +238,22 @@ public static class NativeEmitter
         {
             return false;
         }
-        if (function.DeclaringStruct is string owner
-            && !(Binder.TryPrimitiveType(owner, out _)
-                && !program.Structures.Any(structure => structure.Name == owner))
-            && !program.Structures.Any(structure => structure.Name == owner && !structure.IsPrivate && !structure.IsInternal))
+        if (function.DeclaringStruct is string owner)
         {
-            return false;
+            var ownerExists = false;
+            var hasPublicOwner = false;
+            foreach (var structure in program.Structures)
+            {
+                if (structure.Name == owner)
+                {
+                    ownerExists = true;
+                    hasPublicOwner |= !structure.IsPrivate && !structure.IsInternal;
+                }
+            }
+            if (!(Binder.TryPrimitiveType(owner, out _) && !ownerExists) && !hasPublicOwner)
+            {
+                return false;
+            }
         }
         if (!PublicLayout(function.ReturnType)
             || (managedExports && !ManagedExportShape.Supported(function, program.Structures)))
