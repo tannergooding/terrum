@@ -220,7 +220,7 @@ internal sealed partial class Binder
         SetContext(tree);
         var name = _classes[index].Name;
         var publicClass = false;
-        var mutableClass = false;
+        var mutableClass = _classes[index].IsMutable;
         foreach (var child in declaration.Children)
         {
             if (child is SyntaxNode {
@@ -233,7 +233,6 @@ internal sealed partial class Binder
             if (child is SyntaxTokenElement token)
             {
                 publicClass |= token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.PublicKeyword;
-                mutableClass |= token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.MutKeyword;
                 if (token.Token.Kind is Terrum.CodeAnalysis.Lexing.TokenKind.UniqueKeyword
                     or Terrum.CodeAnalysis.Lexing.TokenKind.StaticKeyword
                     or Terrum.CodeAnalysis.Lexing.TokenKind.PrivateKeyword
