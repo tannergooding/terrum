@@ -96,9 +96,14 @@ public static partial class NativeModuleCompiler
         {
             var leaf = Read(artifact);
             var leafReference = ValidateProducer(leaf);
+            var leafExports = new string[leafReference.Functions.Length];
+            for (var i = 0; i < leafExports.Length; i++)
+            {
+                leafExports[i] = leafReference.Functions[i].Name;
+            }
+            Array.Sort(leafExports, StringComparer.Ordinal);
             return new GraphPackage(false, leaf.Identity, leaf.Policy,
-                [.. leafReference.Functions.Select(static item => item.Name)
-                    .Order(StringComparer.Ordinal)], [], leaf.Contract, leaf.Image) {
+                leafExports, [], leaf.Contract, leaf.Image) {
                 IsLeaf = true,
                 ValidatedProfile = leaf.Profile,
                 ValidatedReference = leafReference,
