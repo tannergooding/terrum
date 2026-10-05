@@ -26,6 +26,51 @@ public static partial class ModuleCompiler
     private const int MaximumDepth = 128;
     private const int MaximumStringBytes = 1024;
 
+    internal sealed class ConsumerContractSnapshot(Module module, string profile)
+    {
+        private ImmutableArray<string> _declarations;
+        private ImmutableArray<string> _callImports;
+
+        internal BoundRuntimePolicy RuntimePolicy => module.RuntimePolicy;
+        internal string Profile { get; } = profile;
+
+        internal ImmutableArray<string> Declarations
+        {
+            get
+            {
+                if (_declarations.IsDefault)
+                {
+                    _declarations = [.. module.Functions.Where(static item => item.Import)
+                        .Select(static item => item.Name).Order(StringComparer.Ordinal)];
+                }
+                return _declarations;
+            }
+        }
+
+        internal ImmutableArray<string> CallImports
+        {
+            get
+            {
+                if (_callImports.IsDefault)
+                {
+                    _callImports = ReadConsumerCallImports(module);
+                }
+                return _callImports;
+            }
+        }
+
+        internal void ValidateAgainstReference(CompilationReference reference)
+        {
+            _ = RestoreConsumerAgainstReference(module, reference);
+        }
+    }
+
+    internal static ConsumerContractSnapshot ReadConsumerContractSnapshot(byte[] consumerBytes)
+    {
+        var module = Read(consumerBytes, expectedConsumer: true, out var profile);
+        return new ConsumerContractSnapshot(module, profile);
+    }
+
     /// <summary>Reads and verifies a producer artifact, exposing only exported declarations and their value layouts to source binding.</summary>
     public static CompilationReference CreateReference(byte[] producerBytes)
     {
@@ -48,6 +93,11 @@ public static partial class ModuleCompiler
     internal static ImmutableArray<string> GetConsumerCallImports(byte[] consumerBytes)
     {
         var consumer = Read(consumerBytes, expectedConsumer: true);
+        return ReadConsumerCallImports(consumer);
+    }
+
+    private static ImmutableArray<string> ReadConsumerCallImports(Module consumer)
+    {
         var indexes = consumer.Functions.Select((function, index) => (function.Name, index))
             .ToDictionary(static item => item.Name, static item => item.index, StringComparer.Ordinal);
         var imports = new HashSet<string>(StringComparer.Ordinal);

@@ -48,7 +48,8 @@ public static partial class NativeModuleCompiler
         var referenceSet = CreateReferenceSet(providers);
         var semantic = ModuleCompiler.CreateConsumerAgainstReference(program, referenceSet,
             allowManagedParticipant: true);
-        var imports = ModuleCompiler.GetConsumerSetDeclarations(semantic).ToHashSet(StringComparer.Ordinal);
+        var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(semantic);
+        var imports = contractSnapshot.Declarations.ToHashSet(StringComparer.Ordinal);
         var externalFunctionNames = program.Functions.Where(static item => item.IsExternal)
             .Select(static item => item.Name).ToHashSet(StringComparer.Ordinal);
         var bindings = new List<NativeImportBinding>();
@@ -67,7 +68,7 @@ public static partial class NativeModuleCompiler
             throw new ModuleContractException("Persisted consumer calls differ from native import bindings.");
         }
         var (image, used) = NativeEmitter.EmitWithImportUsage(program, bindings, runtimePolicy);
-        var artifact = WriteSet(providers, runtimePolicy, semantic, image, used);
+        var artifact = WriteSet(providers, runtimePolicy, semantic, image, used, contractSnapshot);
         ValidateSet(ReadSet(artifact), providers);
         return artifact;
     }
@@ -83,12 +84,12 @@ public static partial class NativeModuleCompiler
     public static NativeModuleSetInfo InspectConsumerSet(byte[] consumer)
     {
         var set = ReadSet(consumer);
-        var imports = ModuleCompiler.GetConsumerSetDeclarations(set.Contract).ToHashSet(StringComparer.Ordinal);
+        var imports = set.ContractSnapshot.Declarations.ToHashSet(StringComparer.Ordinal);
         if (!imports.SetEquals(set.Dependencies.SelectMany(static item => item.Imports)))
         {
             throw new ModuleFormatException("Native set import mapping differs from its semantic declarations.");
         }
-        var profile = ModuleCompiler.GetNativeProfileVersion(set.Contract, true);
+        var profile = set.ContractSnapshot.Profile;
         NativeModuleImageValidator.Validate(set.Image, true, Imports(set), [], set.Policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
             allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
@@ -214,8 +215,8 @@ public static partial class NativeModuleCompiler
             providerExports[i] = exports.ToHashSet(StringComparer.Ordinal);
         }
         var referenceSet = CreateReferenceSet(providers);
-        ModuleCompiler.ValidateConsumerAgainstReference(set.Contract, referenceSet);
-        var actual = ModuleCompiler.GetConsumerSetDeclarations(set.Contract).ToHashSet(StringComparer.Ordinal);
+        set.ContractSnapshot.ValidateAgainstReference(referenceSet);
+        var actual = set.ContractSnapshot.Declarations.ToHashSet(StringComparer.Ordinal);
         var mapped = set.Dependencies.SelectMany(static item => item.Imports).ToHashSet(StringComparer.Ordinal);
         if (!actual.SetEquals(mapped))
         {
@@ -231,11 +232,11 @@ public static partial class NativeModuleCompiler
             }
         }
         var used = set.Dependencies.SelectMany(static item => item.MachineImports).ToHashSet(StringComparer.Ordinal);
-        if (!ModuleCompiler.GetConsumerCallImports(set.Contract).All(used.Contains))
+        if (!set.ContractSnapshot.CallImports.All(used.Contains))
         {
             throw new ModuleFormatException("Native set machine imports omit a retained semantic call.");
         }
-        var profile = ModuleCompiler.GetNativeProfileVersion(set.Contract, true);
+        var profile = set.ContractSnapshot.Profile;
         NativeModuleImageValidator.Validate(set.Image, true, Imports(set), [], set.Policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
             allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
@@ -248,9 +249,9 @@ public static partial class NativeModuleCompiler
                 StringComparer.Ordinal);
 
     private static byte[] WriteSet(ValidatedProvider[] providers, NativeRuntimePolicy policy, byte[] contract, byte[] image,
-        IReadOnlyList<NativeImportBinding> used)
+        IReadOnlyList<NativeImportBinding> used, ModuleCompiler.ConsumerContractSnapshot contractSnapshot)
     {
-        var imports = ModuleCompiler.GetConsumerSetDeclarations(contract).ToHashSet(StringComparer.Ordinal);
+        var imports = contractSnapshot.Declarations.ToHashSet(StringComparer.Ordinal);
         var usedByDll = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var import in used)
         {
@@ -417,25 +418,26 @@ public static partial class NativeModuleCompiler
             throw new ModuleFormatException("Invalid native set payload bounds.");
         }
         var contract = bytes.AsSpan(at, contractLength).ToArray();
-        var (_, semanticPolicy) = ModuleCompiler.ReadNativeProfile(contract, true);
-        if ((byte)semanticPolicy != bytes[5])
+        var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(contract);
+        if ((byte)contractSnapshot.RuntimePolicy != bytes[5])
         {
             throw new ModuleFormatException("Native set and semantic runtime policies differ.");
         }
         var allMachineImports = dependencies.SelectMany(static item => item.MachineImports)
             .ToHashSet(StringComparer.Ordinal);
-        if (!symbols.SetEquals(ModuleCompiler.GetConsumerSetDeclarations(contract))
-            || !ModuleCompiler.GetConsumerCallImports(contract).All(allMachineImports.Contains))
+        if (!symbols.SetEquals(contractSnapshot.Declarations)
+            || !contractSnapshot.CallImports.All(allMachineImports.Contains))
         {
             throw new ModuleFormatException("Native set declaration or machine imports differ from semantic contract.");
         }
         return new SetPackage((NativeRuntimePolicy)bytes[5], contract,
-            bytes.AsSpan(at + contractLength, imageLength).ToArray(), dependencies);
+            bytes.AsSpan(at + contractLength, imageLength).ToArray(), dependencies, contractSnapshot);
     }
 
     private sealed record SetDependency(string Identity, string[] Imports)
     {
         public string[] MachineImports { get; init; } = [];
     }
-    private sealed record SetPackage(NativeRuntimePolicy Policy, byte[] Contract, byte[] Image, SetDependency[] Dependencies);
+    private sealed record SetPackage(NativeRuntimePolicy Policy, byte[] Contract, byte[] Image,
+        SetDependency[] Dependencies, ModuleCompiler.ConsumerContractSnapshot ContractSnapshot);
 }

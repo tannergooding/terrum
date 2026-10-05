@@ -65,17 +65,18 @@ public static partial class NativeModuleCompiler
         var package = provider.Package;
         CheckPolicy(runtimePolicy);
         var contract = ModuleCompiler.CreateConsumer(program, package.Contract);
+        var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(contract);
         var dll = DllName(package.Identity);
         var bindings = program.Functions.Where(static function => function.IsExternal)
             .Select(function => new NativeImportBinding(function.Name, dll, function.Name)).ToArray();
-        var imports = ModuleCompiler.GetConsumerCallImports(contract);
+        var imports = contractSnapshot.CallImports;
         if (imports.Except(bindings.Select(static binding => binding.FunctionName), StringComparer.Ordinal).Any())
         {
             throw new ModuleContractException("Persisted consumer calls differ from native import bindings.");
         }
         var (image, used) = NativeEmitter.EmitWithImportUsage(program, bindings, runtimePolicy);
         var consumer = Write(isConsumer: true, package.Identity, runtimePolicy, contract, image,
-            [.. used.Select(static item => item.FunctionName)]);
+            [.. used.Select(static item => item.FunctionName)], contractSnapshot);
         ValidatePair(Read(consumer), provider);
         return consumer;
     }
@@ -257,13 +258,15 @@ public static partial class NativeModuleCompiler
 
     private static void ValidateConsumerImage(Package consumer)
     {
+        var contractSnapshot = consumer.ContractSnapshot
+            ?? throw new InvalidOperationException("Native consumer contract snapshot is missing.");
         IReadOnlyList<string> imports = consumer.MachineImports;
         var groups = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         if (imports.Count != 0)
         {
             groups.Add(DllName(consumer.Identity), imports);
         }
-        var profile = ModuleCompiler.GetNativeProfileVersion(consumer.Contract, true);
+        var profile = contractSnapshot.Profile;
         NativeModuleImageValidator.Validate(consumer.Image, isConsumer: true, groups, [], consumer.Policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
             allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
@@ -292,22 +295,28 @@ public static partial class NativeModuleCompiler
     }
 
     private static byte[] Write(bool isConsumer, string identity, NativeRuntimePolicy policy, byte[] contract,
-        byte[] image, string[]? machineImports = null)
+        byte[] image, string[]? machineImports = null,
+        ModuleCompiler.ConsumerContractSnapshot? contractSnapshot = null)
     {
         CheckIdentity(identity);
         CheckPolicy(policy);
         var name = Encoding.ASCII.GetBytes(identity);
-        var profile = Encoding.ASCII.GetBytes(ModuleCompiler.GetNativeProfileVersion(contract, isConsumer));
         if (isConsumer != (machineImports is not null))
         {
             throw new ModuleFormatException("Native package kind and machine import table differ.");
         }
+        var consumerSnapshot = isConsumer
+            ? contractSnapshot ?? ModuleCompiler.ReadConsumerContractSnapshot(contract)
+            : null;
+        var profile = Encoding.ASCII.GetBytes(consumerSnapshot is not null ? consumerSnapshot.Profile
+            : ModuleCompiler.GetNativeProfileVersion(contract, false));
         var imports = machineImports ?? [];
         if (machineImports is not null)
         {
             if (machineImports.Length > 1024
                 || !machineImports.ToHashSet(StringComparer.Ordinal).IsSubsetOf(
-                    ModuleCompiler.GetConsumerSetDeclarations(contract)))
+                    consumerSnapshot?.Declarations
+                        ?? throw new InvalidOperationException("Native consumer contract snapshot is missing.")))
             {
                 throw new ModuleFormatException("Native consumer machine imports differ from retained declarations.");
             }
@@ -399,15 +408,27 @@ public static partial class NativeModuleCompiler
             throw new ModuleFormatException("Invalid native machine import table bounds.");
         }
         var contract = bytes.AsSpan(at, contractLength).ToArray();
-        var (contractProfile, contractPolicy) = ModuleCompiler.ReadNativeProfile(contract, bytes[5] == 2);
+        ModuleCompiler.ConsumerContractSnapshot? contractSnapshot = null;
+        string contractProfile;
+        BoundRuntimePolicy contractPolicy;
+        if (bytes[5] == 2)
+        {
+            contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(contract);
+            contractProfile = contractSnapshot.Profile;
+            contractPolicy = contractSnapshot.RuntimePolicy;
+        }
+        else
+        {
+            (contractProfile, contractPolicy) = ModuleCompiler.ReadNativeProfile(contract, false);
+        }
         if (profile != contractProfile || bytes[6] != (byte)contractPolicy)
         {
             throw new ModuleFormatException("Native package and semantic contract profiles or runtime policies differ.");
         }
         if (bytes[5] == 2
-            && (!machineImports.ToHashSet(StringComparer.Ordinal).IsSubsetOf(
-                    ModuleCompiler.GetConsumerSetDeclarations(contract))
-                || !ModuleCompiler.GetConsumerCallImports(contract).All(
+            && (contractSnapshot is null
+                || !machineImports.ToHashSet(StringComparer.Ordinal).IsSubsetOf(contractSnapshot.Declarations)
+                || !contractSnapshot.CallImports.All(
                     name => machineImports.Contains(name, StringComparer.Ordinal))))
         {
             throw new ModuleFormatException("Native machine imports differ from retained semantic declarations or calls.");
@@ -415,6 +436,7 @@ public static partial class NativeModuleCompiler
         var image = bytes.AsSpan(at + contractLength, imageLength).ToArray();
         return new Package(bytes[5] == 2, name, (NativeRuntimePolicy)bytes[6], contract, image, profile) {
             MachineImports = machineImports,
+            ContractSnapshot = contractSnapshot,
         };
     }
 
@@ -445,6 +467,7 @@ public static partial class NativeModuleCompiler
     private sealed record Package(bool IsConsumer, string Identity, NativeRuntimePolicy Policy, byte[] Contract, byte[] Image, string Profile)
     {
         public string[] MachineImports { get; init; } = [];
+        public ModuleCompiler.ConsumerContractSnapshot? ContractSnapshot { get; init; }
     }
 
     private sealed record ValidatedProducer(Package Package);

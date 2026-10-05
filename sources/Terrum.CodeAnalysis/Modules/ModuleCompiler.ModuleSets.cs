@@ -279,9 +279,7 @@ public static partial class ModuleCompiler
 
     internal static ImmutableArray<string> GetConsumerSetDeclarations(byte[] consumerBytes)
     {
-        var consumer = Read(consumerBytes, expectedConsumer: true);
-        return [.. consumer.Functions.Where(static item => item.Import).Select(static item => item.Name)
-            .Order(StringComparer.Ordinal)];
+        return ReadConsumerContractSnapshot(consumerBytes).Declarations;
     }
 
     private static Dictionary<string, BoundStruct> IndexStructures(IEnumerable<BoundStruct> structures)
