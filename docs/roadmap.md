@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `17eb08cc` | Exercise ASCII hexadecimal conversion through the Windows x64 compiler-primitives DLL |
 | `9ac38530` | Share ASCII hexadecimal digit parsing across character and string escapes |
 | `4f078737` | Exercise UTF-16 compiler primitive exports from Windows x64 |
 | `900f9f15` | Extract pure UTF-16 code-unit decoding into compiler primitives |
