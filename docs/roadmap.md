@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `ea0c364` | Pre-size native producer export-address tracking |
 | `71a9af9` | Validate TRRM zero-filled gaps with span search |
 | `4d7ed3f` | Skip exceptional-cleanup tracking for fail-fast images |
 | `21b3027` | Skip export-address set construction for native consumers |
