@@ -65,18 +65,33 @@ public static partial class ModuleCompiler
         }
     }
 
+    internal sealed class ProviderContractSnapshot(Module module, string profile)
+    {
+        private CompilationReference? _reference;
+
+        internal BoundRuntimePolicy RuntimePolicy => module.RuntimePolicy;
+        internal string Profile { get; } = profile;
+
+        internal CompilationReference GetReference() =>
+            _reference ??= CreateValidatedReference(module);
+    }
+
     internal static ConsumerContractSnapshot ReadConsumerContractSnapshot(byte[] consumerBytes)
     {
         var module = Read(consumerBytes, expectedConsumer: true, out var profile);
         return new ConsumerContractSnapshot(module, profile);
     }
 
+    internal static ProviderContractSnapshot ReadProviderContractSnapshot(byte[] producerBytes)
+    {
+        var module = Read(producerBytes, expectedConsumer: false, out var profile);
+        return new ProviderContractSnapshot(module, profile);
+    }
+
     /// <summary>Reads and verifies a producer artifact, exposing only exported declarations and their value layouts to source binding.</summary>
     public static CompilationReference CreateReference(byte[] producerBytes)
     {
-        var producer = Read(producerBytes, expectedConsumer: false);
-        ValidateProducer(producer);
-        return CreateReference(producer);
+        return ReadProviderContractSnapshot(producerBytes).GetReference();
     }
 
     private static CompilationReference CreateReference(Module producer)
@@ -88,6 +103,12 @@ public static partial class ModuleCompiler
         var structures = SelectStructures(producer.Structures, required);
         return new CompilationReference(structures,
             [.. declarations.Select(function => RemapFunction(function, producer.Structures, structures))], producer.RuntimePolicy);
+    }
+
+    private static CompilationReference CreateValidatedReference(Module producer)
+    {
+        ValidateProducer(producer);
+        return CreateReference(producer);
     }
 
     internal static ImmutableArray<string> GetConsumerCallImports(byte[] consumerBytes)

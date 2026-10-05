@@ -245,7 +245,9 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native package and linked semantic policies differ.");
         }
-        return ModuleCompiler.CreateReference(producer.Contract);
+        var providerSnapshot = producer.ProviderSnapshot
+            ?? throw new InvalidOperationException("Native provider contract snapshot is missing.");
+        return providerSnapshot.GetReference();
     }
 
     private static void ValidateProducerImage(Package producer, IReadOnlyList<string> exports)
@@ -277,7 +279,9 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Expected a native producer package.");
         }
-        var reference = ModuleCompiler.CreateReference(producer.Contract);
+        var providerSnapshot = producer.ProviderSnapshot
+            ?? throw new InvalidOperationException("Native provider contract snapshot is missing.");
+        var reference = providerSnapshot.GetReference();
         if (reference.RuntimePolicy != (BoundRuntimePolicy)producer.Policy)
         {
             throw new ModuleFormatException("Native package and semantic contract policies differ.");
@@ -408,6 +412,7 @@ public static partial class NativeModuleCompiler
         }
         var contract = bytes.AsSpan(at, contractLength).ToArray();
         ModuleCompiler.ConsumerContractSnapshot? contractSnapshot = null;
+        ModuleCompiler.ProviderContractSnapshot? providerSnapshot = null;
         string contractProfile;
         BoundRuntimePolicy contractPolicy;
         if (bytes[5] == 2)
@@ -418,7 +423,9 @@ public static partial class NativeModuleCompiler
         }
         else
         {
-            (contractProfile, contractPolicy) = ModuleCompiler.ReadNativeProfile(contract, false);
+            providerSnapshot = ModuleCompiler.ReadProviderContractSnapshot(contract);
+            contractProfile = providerSnapshot.Profile;
+            contractPolicy = providerSnapshot.RuntimePolicy;
         }
         if (profile != contractProfile || bytes[6] != (byte)contractPolicy)
         {
@@ -436,6 +443,7 @@ public static partial class NativeModuleCompiler
         return new Package(bytes[5] == 2, name, (NativeRuntimePolicy)bytes[6], contract, image, profile) {
             MachineImports = machineImports,
             ContractSnapshot = contractSnapshot,
+            ProviderSnapshot = providerSnapshot,
         };
     }
 
@@ -467,6 +475,7 @@ public static partial class NativeModuleCompiler
     {
         public string[] MachineImports { get; init; } = [];
         public ModuleCompiler.ConsumerContractSnapshot? ContractSnapshot { get; init; }
+        public ModuleCompiler.ProviderContractSnapshot? ProviderSnapshot { get; init; }
     }
 
     private sealed record ValidatedProducer(Package Package);
