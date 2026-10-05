@@ -1,40 +1,8 @@
 namespace Terrum.CodeAnalysis;
 
-// Host.Source is the immutable UTF-16 snapshot granted for this invocation.
-public bool TryReadSourceLine(int32 start, init ref<SourceRange> content,
-    init ref<SourceRange> includingBreak)
-{
-    if (start < 0 || start > Host.Source.Length)
-    {
-        return false;
-    }
-
-    mut int32 end = start;
-    while (end < Host.Source.Length && !IsLineBreak(Host.Source[end]))
-    {
-        end = end + 1;
-    }
-
-    mut int32 next = end;
-    if (next < Host.Source.Length)
-    {
-        char16 first = Host.Source[next];
-        next = next + 1;
-        if (first == 13 && next < Host.Source.Length && Host.Source[next] == 10)
-        {
-            next = next + 1;
-        }
-    }
-
-    require SourceRange.TryCreate(start, end - start, init content);
-    require SourceRange.TryCreate(start, next - start, init includingBreak);
-
-    return true;
-}
-
 public bool TryGetSourcePosition(int32 position, init ref<int32> line, init ref<int32> character)
 {
-    if (position < 0 || position > Host.Source.Length)
+    if (position < 0 || position > GetSourceTextLength())
     {
         return false;
     }

@@ -26,3 +26,36 @@ public bool TryGetSourceRange(int32 start, int32 length, init ref<SourceRange> r
 
     return SourceRange.TryCreate(start, length, init range);
 }
+
+public bool TryReadSourceLine(int32 start, init ref<SourceRange> content,
+    init ref<SourceRange> includingBreak)
+{
+    // Host.Source is the immutable UTF-16 snapshot granted for this invocation.
+    int32 sourceLength = GetSourceTextLength();
+    if (start < 0 || start > sourceLength)
+    {
+        return false;
+    }
+
+    mut int32 end = start;
+    while (end < sourceLength && !IsLineBreak(Host.Source[end]))
+    {
+        end = end + 1;
+    }
+
+    mut int32 next = end;
+    if (next < sourceLength)
+    {
+        char16 first = Host.Source[next];
+        next = next + 1;
+        if (first == 13 && next < sourceLength && Host.Source[next] == 10)
+        {
+            next = next + 1;
+        }
+    }
+
+    require TryGetSourceRange(start, end - start, init content);
+    require TryGetSourceRange(start, next - start, init includingBreak);
+
+    return true;
+}

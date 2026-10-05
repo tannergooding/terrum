@@ -249,7 +249,7 @@ native emitter or compiler self-build.
 | [IntegerSaturation](IntegerSaturation.terrum) | All twelve cross-type 32-/64-bit integer conversions, four `char16` narrowings that clamp, and four value-preserving `char16` widenings | AOT/JIT range and code-unit boundaries plus an independent compiled-module consumer under both policies; these named functions are provisional, not general conversion syntax or witnesses |
 | [IntegerWrapping](IntegerWrapping.terrum) | All twelve cross-type signed/unsigned 32- and 64-bit conversions, four low-bit `char16` narrowings and four value-preserving `char16` widenings | AOT/JIT host-oracle cases and an independent compiled-module consumer under both policies; no `unchecked` syntax or new primitive conversion policy |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and vacancy-only `init ref` publication through independent module consumers |
-| [SourceText](SourceText.terrum) | Stateless, invocation-scoped queries over immutable `Host.Source`: exact UTF-16 length/code-unit reads and source-bounded half-open ranges | AOT/JIT under both policies compare all code units, including unpaired surrogates and NUL; invalid reads/ranges publish no output; does not own or copy source, carry a path, return strings, or replace the hosted `SourceText` collection |
+| [SourceText](SourceText.terrum) | Stateless, invocation-scoped queries over immutable `Host.Source`: exact UTF-16 length/code-unit reads, source-bounded half-open ranges, and streaming line reads | AOT/JIT under both policies compare all code units and line extents, including unpaired surrogates and NUL; invalid reads/ranges/line starts publish no output; does not own or copy source, carry a path, return strings, or replace the hosted `SourceText` collection |
 | [Utf16Scalar](Utf16Scalar.terrum) | Decode one in-range UTF-16 source position to a Unicode scalar or `-1` for an unpaired surrogate; return its code-unit width | Shared by scanner, managed-token validation, character-literal, string-escape and validated string-literal decoding; callers retain their own diagnostics and token/literal boundaries |
 | [CharacterLiteral](CharacterLiteral.terrum) | Decode source-ranged single-quoted literals into one Unicode scalar or the hosted lexical diagnostic code/span | The scalar frontend consumes successful scalars; the scanner consumes diagnostic-aware results after finding token boundaries; the host reader independently validates source spelling |
 | [StringEscape](StringEscape.terrum) | Decode one string escape and report its scalar, consumed width, and hosted diagnostic boundary | Shared by validated `StringLiteral` decoding and scanner lexical diagnostics; escaped unpaired UTF-16 retains its separate diagnostic |
@@ -616,13 +616,13 @@ to that `init ref<T>` implementation and publishing only after successful
 selection.
 
 `SourceText` exposes only source-grant queries: UTF-16 code-unit length,
-checked code-unit reads, and validation of half-open ranges against the current
-immutable `Host.Source`. It retains no pointer or source text, creates no
-runtime string, and does not carry a diagnostic path. Its ranges remain offsets
-for the current invocation's source grant; this facade is not the hosted,
-owning `SourceText` collection.
+checked code-unit reads, validation of half-open ranges, and streaming line
+reads against the current immutable `Host.Source`. It retains no pointer or
+source text, creates no runtime string, and does not carry a diagnostic path.
+Its ranges remain offsets for the current invocation's source grant; this
+facade is not the hosted, owning `SourceText` collection.
 
-`SourceLines` reads the same immutable `Host.Source` capability as the scanner,
+`SourceLines` builds coordinate and ordinal queries on the `SourceText` facade,
 without retaining a pointer, borrowing writable storage or allocating a line table.
 The host binds the original candidate snapshots through
 `Compilation.Create(trees, buffers)`, preserving source-associated diagnostics

@@ -24,11 +24,25 @@ public sealed partial class SourceLineComponentTests
         var codeUnitChecks = string.Join(Environment.NewLine, text.Select((unit, index) =>
             $"if (!TryReadSourceCodeUnit({index}, init var codeUnit{index})) {{ return {index + 2}; }}" +
             $"{Environment.NewLine}if (int32(codeUnit{index}) != {(int)unit}) {{ return {index + 2}; }}"));
+        var lines = SourceText.From(text).Lines;
+        var lineChecks = string.Join(Environment.NewLine, lines.Select((line, index) =>
+            $"if (!TryReadSourceLine({line.Span.Start}, init var contentLine{index}, init var includingBreakLine{index})" +
+            $"{Environment.NewLine}    || contentLine{index}.Start != {line.Span.Start}" +
+            $"{Environment.NewLine}    || contentLine{index}.Length != {line.Span.Length}" +
+            $"{Environment.NewLine}    || includingBreakLine{index}.Start != {line.SpanIncludingLineBreak.Start}" +
+            $"{Environment.NewLine}    || includingBreakLine{index}.Length != {line.SpanIncludingLineBreak.Length})" +
+            $"{Environment.NewLine}{{ return {20 + index}; }}"));
         var harness = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 if (GetSourceTextLength() != {{text.Length}}) { return 1; }
                 {{codeUnitChecks}}
+                {{lineChecks}}
+                if (TryReadSourceLine(-1, init var beforeLine, init var beforeBreak)
+                    || TryReadSourceLine({{text.Length + 1}}, init var afterLine, init var afterBreak))
+                {
+                    return 19;
+                }
                 if (TryReadSourceCodeUnit(-1, init var before)
                     || TryReadSourceCodeUnit({{text.Length}}, init var after)
                     || TryReadSourceCodeUnit(int32.MaxValue, init var maximum))
