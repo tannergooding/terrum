@@ -1108,11 +1108,13 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 {
                     if (neededIns[edge.Target] is HashSet<int> targetIn)
                     {
-                        (neededOuts[block] ??= new HashSet<int>()).UnionWith(targetIn);
+                        (neededOuts[block] ??= new HashSet<int>(liveOuts[block].Length))
+                            .UnionWith(targetIn);
                     }
                     if (edge.Arguments.Length != 0)
                     {
-                        (neededOuts[block] ??= new HashSet<int>()).UnionWith(edge.Arguments);
+                        (neededOuts[block] ??= new HashSet<int>(liveOuts[block].Length))
+                            .UnionWith(edge.Arguments);
                     }
                 }
 
@@ -1122,7 +1124,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     {
                         if (owner[value] != block)
                         {
-                            (neededIns[block] ??= new HashSet<int>()).Add(value);
+                            (neededIns[block] ??= new HashSet<int>(liveIns[block].Length))
+                                .Add(value);
                         }
                     }
                 }
@@ -1139,7 +1142,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     predecessorCounts[edge.Target]++;
                     if (edge.Arguments.Length != 0)
                     {
-                        (neededOuts[block] ??= new HashSet<int>()).UnionWith(edge.Arguments);
+                        (neededOuts[block] ??= new HashSet<int>(liveOuts[block].Length))
+                            .UnionWith(edge.Arguments);
                     }
                 }
                 if (neededIns[block] is HashSet<int> neededIn)
@@ -1187,11 +1191,12 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     for (var index = predecessorStarts[block]; index < predecessorStarts[block + 1]; index++)
                     {
                         var predecessor = predecessors[index];
-                        (neededOuts[predecessor] ??= new HashSet<int>()).Add(value);
+                        (neededOuts[predecessor] ??= new HashSet<int>(liveOuts[predecessor].Length))
+                            .Add(value);
                         if (owner[value] != predecessor)
                         {
                             var predecessorIn = neededIns[predecessor]
-                                ??= new HashSet<int>();
+                                ??= new HashSet<int>(liveIns[predecessor].Length);
                             if (predecessorIn.Add(value))
                             {
                                 pendingBlocks[pendingCount++] = predecessor;
