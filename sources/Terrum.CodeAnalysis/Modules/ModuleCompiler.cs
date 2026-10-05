@@ -1762,7 +1762,8 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Optional managed nodes require a private source-class leaf.");
             }
-            if (HasPrivateManagedState(module) && !expectedConsumer
+            var hasPrivateManagedState = !expectedConsumer && HasPrivateManagedState(module);
+            if (hasPrivateManagedState
                 && module.Functions.Any(item =>
                     item.Import && (item.Function is not BoundFunction function
                         || !ManagedExportShape.Supported(function, structures)
@@ -1774,7 +1775,7 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Module has trailing data or an imported entry point.");
             }
-            if (!expectedConsumer && HasPrivateManagedState(module))
+            if (hasPrivateManagedState)
             {
                 ValidateProducer(module);
             }
