@@ -241,12 +241,14 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleContractException("Native runtime policies differ.");
         }
-        if (ModuleCompiler.Link(consumer.Contract, producer.Contract).RuntimePolicy != (BoundRuntimePolicy)consumer.Policy)
+        var consumerSnapshot = consumer.ContractSnapshot
+            ?? throw new InvalidOperationException("Native consumer contract snapshot is missing.");
+        var providerSnapshot = producer.ProviderSnapshot
+            ?? throw new InvalidOperationException("Native provider contract snapshot is missing.");
+        if (ModuleCompiler.Link(consumerSnapshot, providerSnapshot).RuntimePolicy != (BoundRuntimePolicy)consumer.Policy)
         {
             throw new ModuleFormatException("Native package and linked semantic policies differ.");
         }
-        var providerSnapshot = producer.ProviderSnapshot
-            ?? throw new InvalidOperationException("Native provider contract snapshot is missing.");
         return providerSnapshot.GetReference();
     }
 

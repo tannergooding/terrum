@@ -31,6 +31,7 @@ public static partial class ModuleCompiler
         private ImmutableArray<string> _declarations;
         private ImmutableArray<string> _callImports;
 
+        internal Module ParsedModule => module;
         internal BoundRuntimePolicy RuntimePolicy => module.RuntimePolicy;
         internal string Profile { get; } = profile;
 
@@ -68,12 +69,26 @@ public static partial class ModuleCompiler
     internal sealed class ProviderContractSnapshot(Module module, string profile)
     {
         private CompilationReference? _reference;
+        private bool _isValidated;
 
+        internal Module ParsedModule => module;
         internal BoundRuntimePolicy RuntimePolicy => module.RuntimePolicy;
         internal string Profile { get; } = profile;
 
-        internal CompilationReference GetReference() =>
-            _reference ??= CreateValidatedReference(module);
+        internal void Validate()
+        {
+            if (!_isValidated)
+            {
+                ValidateProducer(module);
+                _isValidated = true;
+            }
+        }
+
+        internal CompilationReference GetReference()
+        {
+            Validate();
+            return _reference ??= CreateReference(module);
+        }
     }
 
     internal static ConsumerContractSnapshot ReadConsumerContractSnapshot(byte[] consumerBytes)
@@ -103,12 +118,6 @@ public static partial class ModuleCompiler
         var structures = SelectStructures(producer.Structures, required);
         return new CompilationReference(structures,
             [.. declarations.Select(function => RemapFunction(function, producer.Structures, structures))], producer.RuntimePolicy);
-    }
-
-    private static CompilationReference CreateValidatedReference(Module producer)
-    {
-        ValidateProducer(producer);
-        return CreateReference(producer);
     }
 
     internal static ImmutableArray<string> GetConsumerCallImports(byte[] consumerBytes)
@@ -709,7 +718,22 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Consumer and producer checked-failure policies differ.");
         }
-        ValidateConsumerAgainstReference(consumerBytes, CreateReference(producer));
+        return Link(consumer, producer, CreateReference(producer));
+    }
+
+    internal static BoundProgram Link(ConsumerContractSnapshot consumer, ProviderContractSnapshot producer)
+    {
+        producer.Validate();
+        if (consumer.RuntimePolicy != producer.RuntimePolicy)
+        {
+            throw new ModuleContractException("Consumer and producer checked-failure policies differ.");
+        }
+        return Link(consumer.ParsedModule, producer.ParsedModule, producer.GetReference());
+    }
+
+    private static BoundProgram Link(Module consumer, Module producer, CompilationReference reference)
+    {
+        _ = RestoreConsumerAgainstReference(consumer, reference);
         if (consumer.Classes.Length + producer.Classes.Length > SemanticVerifier.MaximumVariables)
         {
             throw new ModuleContractException("Combined private managed class layouts exceed the supported limit.");
