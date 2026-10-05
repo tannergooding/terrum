@@ -20,6 +20,10 @@ public sealed partial class CliTests
         [MarshalAs(UnmanagedType.I1)] bool takeFirst, NativeToken first, NativeToken second);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate NativeSourceRange RangeCopySelectorExport(
+        [MarshalAs(UnmanagedType.I1)] bool takeFirst, NativeSourceRange first, NativeSourceRange second);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int TokenCopyOutputExport(
         int index, NativeToken first, NativeToken second, ref NativeToken result);
 
@@ -55,6 +59,8 @@ public sealed partial class CliTests
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.SourceRange.TryCreate"));
             var select = Marshal.GetDelegateForFunctionPointer<TokenCopySelectorExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.SelectTokenCopyForAbiTest"));
+            var selectRange = Marshal.GetDelegateForFunctionPointer<RangeCopySelectorExport>(
+                NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.SelectRangeCopyForAbiTest"));
             var selectInit = Marshal.GetDelegateForFunctionPointer<TokenCopyOutputExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.TrySelectTokenCopyInitForAbiTest"));
             var selectOut = Marshal.GetDelegateForFunctionPointer<TokenCopyOutputExport>(
@@ -72,8 +78,16 @@ public sealed partial class CliTests
             var sentinel = CreateToken(123456789, 101, 202);
             var firstBefore = first;
             var secondBefore = second;
+            var firstRange = new NativeSourceRange { Start = 2, Length = 5 };
+            var secondRange = new NativeSourceRange { Start = int.MaxValue - 1, Length = 1 };
+            var firstRangeBefore = firstRange;
+            var secondRangeBefore = secondRange;
             AssertNativeToken(first, select(true, first, second), "SelectTokenCopyForAbiTest(true)");
             AssertNativeToken(second, select(false, first, second), "SelectTokenCopyForAbiTest(false)");
+            AssertNativeSourceRange(firstRange, selectRange(true, firstRange, secondRange),
+                "SelectRangeCopyForAbiTest(true)");
+            AssertNativeSourceRange(secondRange, selectRange(false, firstRange, secondRange),
+                "SelectRangeCopyForAbiTest(false)");
 
             const ulong BeforeCanary = 0x13579BDF2468ACE0UL;
             const ulong AfterCanary = 0x0ECA86425A5A5A5AUL;
@@ -137,10 +151,21 @@ public sealed partial class CliTests
 
             AssertNativeToken(firstBefore, first, "first input");
             AssertNativeToken(secondBefore, second, "second input");
+            AssertNativeSourceRange(firstRangeBefore, firstRange, "first range input");
+            AssertNativeSourceRange(secondRangeBefore, secondRange, "second range input");
         }
         finally
         {
             NativeLibrary.Free(handle);
         }
+    }
+
+    private static void AssertNativeSourceRange(
+        NativeSourceRange expected, NativeSourceRange actual, string operation)
+    {
+        Assert.True(expected.Start == actual.Start,
+            $"{operation}: expected start {expected.Start}, got {actual.Start}.");
+        Assert.True(expected.Length == actual.Length,
+            $"{operation}: expected length {expected.Length}, got {actual.Length}.");
     }
 }

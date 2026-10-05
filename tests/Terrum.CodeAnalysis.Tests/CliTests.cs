@@ -1707,6 +1707,7 @@ public sealed partial class CliTests
                 "Terrum.CodeAnalysis.DecodeUtf16Scalar",
                 "Terrum.CodeAnalysis.Utf16ScalarWidth",
                 "Terrum.CodeAnalysis.SelectTokenCopyForAbiTest",
+                "Terrum.CodeAnalysis.SelectRangeCopyForAbiTest",
                 "Terrum.CodeAnalysis.TrySelectTokenCopyInitForAbiTest",
                 "Terrum.CodeAnalysis.TrySelectTokenCopyForAbiTest",
                 "Terrum.CodeAnalysis.CanAddInt32ForAbiTest",

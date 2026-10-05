@@ -8,6 +8,12 @@ public Token SelectTokenCopyForAbiTest(bool takeFirst, Token first, Token second
 }
 
 [NoThrow]
+public SourceRange SelectRangeCopyForAbiTest(bool takeFirst, SourceRange first, SourceRange second)
+{
+    return SelectCopy<SourceRange>(takeFirst, first, second);
+}
+
+[NoThrow]
 public bool TrySelectTokenCopyInitForAbiTest(
     int32 index, Token first, Token second, init ref<Token> result)
 {
