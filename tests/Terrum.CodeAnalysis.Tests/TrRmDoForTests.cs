@@ -127,8 +127,20 @@ public sealed class TrRmDoForTests
     }
 
     [Theory]
-    [InlineData("int32 Main() { mut int32 x = 0; do { x++; break; } while (false); return 42; }")]
-    [InlineData("int32 Main() { mut int32 x = 0; for (;;) { x++; break; } return 42; }")]
+    [InlineData(42, "int32 Main() { mut int32 x = 0; do { x++; break; } while (Fail()); return x == 1 ? 42 : 0; } bool Fail() { require false; return false; }")]
+    [InlineData(42, "int32 Main() { mut int32 x = 0; for (;;) { x++; break; } return x == 1 ? 42 : 0; }")]
+    [InlineData(42, "int32 Main() { mut int32 x = 0; do { x = 42; break; } while (Fail()); return x; } bool Fail() { require false; return false; }")]
+    public void AcyclicLoopsPreserveSafeTerminalPrefixEffects(int expected, string source)
+    {
+        var original = Compile(source);
+        var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "acyclic-effects"));
+        Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData("int32 Main() { do { Touch(); break; } while (false); return 42; } void Touch() { }")]
     public void AcyclicLoopShapesRejectWithoutInventedBackedges(string source)
         => Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(Compile(source), "acyclic-loop"));

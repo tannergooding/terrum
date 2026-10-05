@@ -1850,8 +1850,32 @@ public static partial class TrRmExecutableCompiler
                 hasBreak = implicitThenHasBreak || continuationHasBreak;
                 return true;
             }
+            if (HasAcyclicTerminalPrefixes(block)
+                && TerminalAcyclicBody(block.Statements[^1], out var tailHasBreak))
+            {
+                hasBreak = tailHasBreak;
+                return true;
+            }
             hasBreak = false;
             return false;
+        }
+
+        private static bool HasAcyclicTerminalPrefixes(BoundBlock block)
+        {
+            if (block.Statements.Length < 2)
+            {
+                return false;
+            }
+            for (var index = 0; index < block.Statements.Length - 1; index++)
+            {
+                if (block.Statements[index] is not (BoundAssignment { Value: BoundConstant or BoundRead }
+                    or BoundExpressionStatement { Expression: BoundUpdate }))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static BoundStatement AcyclicLoopBody(BoundWhile loop)
@@ -1893,6 +1917,16 @@ public static partial class TrRmExecutableCompiler
                 && block.Statements[0] is BoundIf { Else: null } implicitElse)
             {
                 AcyclicTerminalBranch(implicitElse.Condition, implicitElse.Then, block.Statements[1], exit, visible);
+                return;
+            }
+            if (statement is BoundBlock blockWithPrefixes && blockWithPrefixes.RetiredManagedLocals.IsEmpty
+                && HasAcyclicTerminalPrefixes(blockWithPrefixes))
+            {
+                for (var index = 0; index < blockWithPrefixes.Statements.Length - 1; index++)
+                {
+                    Statement(blockWithPrefixes.Statements[index]);
+                }
+                AcyclicTerminalStatement(blockWithPrefixes.Statements[^1], exit, visible);
                 return;
             }
             if (statement is BoundBlock blockWithSingleStatement
