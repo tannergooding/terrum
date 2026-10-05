@@ -63,7 +63,8 @@ public static class NativeEmitter
             throw new ArgumentException("Native and verified checked-failure policies differ.", nameof(program));
         }
         var selected = SelectImports(program, bindings, cancellationToken);
-        var compiler = new PeCompiler(program, cancellationToken, imports: selected);
+        var managedNodes = UsesManagedNodes(program);
+        var compiler = new PeCompiler(program, cancellationToken, managedNodes, imports: selected);
         return (compiler.Compile(), selected);
     }
 
@@ -228,7 +229,7 @@ public static class NativeEmitter
         }
         selected.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
         var imports = bindings is null ? null : SelectImports(program, bindings, cancellationToken);
-        var compiler = new PeCompiler(program, cancellationToken, library: true, imports: imports);
+        var compiler = new PeCompiler(program, cancellationToken, managedExports, library: true, imports: imports);
         var code = compiler.Compile();
         return (PeImage.BuildLibrary(code, [.. selected]), UsedImports(code, imports));
     }
@@ -322,7 +323,8 @@ public static class NativeEmitter
         {
             throw new ArgumentException("Native and verified checked-failure policies differ.", nameof(program));
         }
-        return new PeCompiler(program, cancellationToken).Compile();
+        var managedNodes = UsesManagedNodes(program);
+        return new PeCompiler(program, cancellationToken, managedNodes).Compile();
     }
 }
 
@@ -395,7 +397,7 @@ internal sealed partial class PeCompiler
         internal List<int> Continues { get; } = [];
     }
 
-    internal PeCompiler(BoundProgram program, CancellationToken cancellationToken, bool library = false,
+    internal PeCompiler(BoundProgram program, CancellationToken cancellationToken, bool managedNodes, bool library = false,
         IReadOnlyDictionary<int, NativeImportBinding>? imports = null)
     {
         _program = program;
@@ -453,7 +455,7 @@ internal sealed partial class PeCompiler
             }
         }
         _hostDataLength = writableAt;
-        _managedNodes = NativeEmitter.UsesManagedNodes(program);
+        _managedNodes = managedNodes;
         _managedRuntimeOffset = _managedNodes ? (writableAt + 7) & ~7 : -1;
         _data = new byte[_managedNodes ? _managedRuntimeOffset + 24 : writableAt];
         for (var index = 0; index < program.Buffers.Length; index++)
