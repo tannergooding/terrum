@@ -285,6 +285,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `9736e304` | Verify nested and enclosing acyclic breaks retain distinct exits |
 | `7fa2b0f4` | Preserve proven nested-loop breaks before enclosing terminal tails |
 | `ac170e0f` | Erase nested return-only loops without adding indexed loop regions |
 | `46c1bb4c` | Cover scalar initializer prefixes in embedded-iterator for-loop erasure |
