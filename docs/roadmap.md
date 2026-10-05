@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `a2a7f929` | Exercise all CharacterFacts exports across the UTF-16 code-unit domain through the Windows x64 compiler-primitives DLL |
 | `17eb08cc` | Exercise ASCII hexadecimal conversion through the Windows x64 compiler-primitives DLL |
 | `9ac38530` | Share ASCII hexadecimal digit parsing across character and string escapes |
 | `4f078737` | Exercise UTF-16 compiler primitive exports from Windows x64 |
