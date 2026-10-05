@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f7c83a4` | Build sorted graph import snapshots without LINQ materialization |
 | `e9942cb` | Reuse graph import lookups during managed-boundary validation |
 | `db76eb0` | Reuse cleanup structure traversal state |
 | `71ac1b0` | Reuse cleanup dependency function buffer |
