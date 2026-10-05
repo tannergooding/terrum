@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `b5eefaa` | Pre-size graph declaration tracking |
 | `1c48c8a` | Check graph declaration totals before allocation |
 | `d253fbe` | Pre-size native external function names |
 | `b679039` | Pre-size graph cleanup owner index |
