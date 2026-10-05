@@ -241,11 +241,15 @@ public static partial class ModuleCompiler
             }
         }
         var providerStructures = IndexStructures(reference.Structures);
-        if (consumer.ImportedStructures.Any(name => !providerStructures.ContainsKey(name)))
+        var importedNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var name in consumer.ImportedStructures)
         {
-            throw new ModuleContractException("Missing imported value layout.");
+            if (!providerStructures.ContainsKey(name))
+            {
+                throw new ModuleContractException("Missing imported value layout.");
+            }
+            _ = importedNames.Add(name);
         }
-        var importedNames = consumer.ImportedStructures.ToHashSet(StringComparer.Ordinal);
         foreach (var expected in consumer.Structures)
         {
             if (providerStructures.TryGetValue(expected.Name, out var actual)
