@@ -526,11 +526,10 @@ internal sealed partial class Binder
         }
     }
 
-    private void DeclareGeneric(SyntaxNode declaration)
+    private void DeclareGeneric(SyntaxNode declaration, SyntaxNode typeParameters)
     {
         _cancellationToken.ThrowIfCancellationRequested();
         var children = declaration.Children.OfType<SyntaxNode>().ToArray();
-        var typeParameters = children.First(static child => child.Kind == SyntaxKind.TypeParameterList);
         var typeNames = typeParameters.Children.OfType<SyntaxTokenElement>()
             .Where(static child => child.Token.Kind == TokenKind.Identifier)
             .Select(static child => child.Token.Name).ToArray();

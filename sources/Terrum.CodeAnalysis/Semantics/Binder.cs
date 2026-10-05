@@ -367,9 +367,11 @@ internal sealed partial class Binder
                     Report("TRM3001", "Only top-level function declarations are supported.", node.Span);
                     continue;
                 }
-                if (node.Children.Any(static child => child is SyntaxNode { Kind: SyntaxKind.TypeParameterList }))
+                if (node.Children.OfType<SyntaxNode>()
+                    .FirstOrDefault(static child => child.Kind == SyntaxKind.TypeParameterList)
+                    is SyntaxNode typeParameters)
                 {
-                    DeclareGeneric(node);
+                    DeclareGeneric(node, typeParameters);
                 }
                 else
                 {
