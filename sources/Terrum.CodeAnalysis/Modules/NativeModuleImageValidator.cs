@@ -541,10 +541,16 @@ internal static class NativeModuleImageValidator
                     previousEnd = end;
                     nextInfo = checked(nextInfo + size);
                 }
-                if ((managedData && !sawManagedCollector)
-                    || exceptionalCleanups.Any(handler => !cleanupStarts.Contains(handler)))
+                if (managedData && !sawManagedCollector)
                 {
                     throw Invalid();
+                }
+                for (var index = 0; index < exceptionalCleanups.Count; index++)
+                {
+                    if (!cleanupStarts.Contains(exceptionalCleanups[index]))
+                    {
+                        throw Invalid();
+                    }
                 }
                 if (nextInfo != infoSection.VirtualAddress + infoSection.VirtualSize)
                 {
