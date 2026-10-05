@@ -88,7 +88,7 @@ public sealed class Compilation
         return false;
     }
 
-    private static bool HasOwnedNativeBuffer(ImmutableArray<BoundStruct> structures)
+    internal static bool HasOwnedNativeBuffer(ImmutableArray<BoundStruct> structures)
     {
         foreach (var structure in structures)
         {

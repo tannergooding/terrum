@@ -199,6 +199,7 @@ public static partial class ModuleCompiler
         }
         var usesManagedNodes = false;
         var ownershipTransfer = false;
+        var hasOwnedBufferInFunction = false;
         foreach (var item in module.Functions)
         {
             ownershipTransfer |= item.HasOwnershipTransfer;
@@ -210,6 +211,7 @@ public static partial class ModuleCompiler
             {
                 return "native-20";
             }
+            hasOwnedBufferInFunction |= function.ReturnType == PrimitiveType.OwnedInt32Buffer;
             var functionUsesManagedNodes = function.Intrinsic is >= BoundIntrinsic.NodeTryCreate
                 and <= BoundIntrinsic.NodeCollect
                 || function.ReturnType is PrimitiveType.ManagedNode or PrimitiveType.WriteManagedNode;
@@ -219,6 +221,7 @@ public static partial class ModuleCompiler
                 {
                     return "native-20";
                 }
+                hasOwnedBufferInFunction |= variable.Type == PrimitiveType.OwnedInt32Buffer;
                 functionUsesManagedNodes |= variable.Type is PrimitiveType.ManagedNode
                     or PrimitiveType.WriteManagedNode;
             }
@@ -229,7 +232,13 @@ public static partial class ModuleCompiler
             return "native-18";
         }
         var compositeUnique = Compilation.HasCompositeUnique(module.Structures, out var unique);
-        var ownedNativeBuffer = HasOwnedNativeBuffer(module.Structures, module.Functions);
+        var ownedNativeBuffer = Compilation.HasOwnedNativeBuffer(module.Structures);
+        if (!ownedNativeBuffer)
+        {
+            ownedNativeBuffer = hasOwnedBufferInFunction
+                || module.Functions.Any(static function =>
+                    ContractContainsType(function.Contract, PrimitiveType.OwnedInt32Buffer));
+        }
         var (readonlyNativeView, mutableNativeViewOrClear) = NativeViewFeatures(module.Functions);
         return Compilation.GetNativeProfileVersion(module.RuntimePolicy, unique, ownershipTransfer,
             compositeUnique, ownedNativeBuffer, readonlyNativeView, mutableNativeViewOrClear);
@@ -284,13 +293,6 @@ public static partial class ModuleCompiler
         || function.ReturnType is PrimitiveType.ManagedNode or PrimitiveType.WriteManagedNode
         || function.Variables.Any(static variable => variable.Type is PrimitiveType.ManagedNode
             or PrimitiveType.WriteManagedNode);
-
-    private static bool HasOwnedNativeBuffer(ImmutableArray<BoundStruct> structures,
-        ImmutableArray<ModuleFunction> functions) =>
-        Compilation.HasOwnedNativeBuffer(structures,
-            functions.Where(static function => function.Function is not null)
-                .Select(static function => function.Function ?? throw new ModuleFormatException("Missing function body.")))
-        || functions.Any(static function => ContractContainsType(function.Contract, PrimitiveType.OwnedInt32Buffer));
 
     private static bool ContractContainsType(string contract, PrimitiveType type)
     {
