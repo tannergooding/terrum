@@ -372,19 +372,41 @@ public static partial class NativeModuleCompiler
         IReadOnlyCollection<string> declarations)
     {
         var unmatched = declarations.ToHashSet(StringComparer.Ordinal);
-        var result = new List<GraphDependency>(providers.Count);
-        foreach (var provider in providers)
+        var result = new GraphDependency[providers.Count];
+        for (var i = 0; i < providers.Count; i++)
         {
+            var provider = providers[i];
             // Every leaf and graph package exposes ordinally sorted exports.
-            var imports = provider.Exports.Where(unmatched.Remove).ToArray();
-            result.Add(new GraphDependency(provider.Identity
-                ?? throw new ModuleFormatException("Graph dependency has no identity."), imports, []));
+            var importCount = 0;
+            foreach (var export in provider.Exports)
+            {
+                if (unmatched.Contains(export))
+                {
+                    importCount++;
+                }
+            }
+            var imports = importCount == 0 ? Array.Empty<string>() : new string[importCount];
+            if (importCount != 0)
+            {
+                var importIndex = 0;
+                foreach (var export in provider.Exports)
+                {
+                    if (unmatched.Remove(export))
+                    {
+                        imports[importIndex++] = export;
+                    }
+                }
+            }
+            result[i] = new GraphDependency(provider.Identity
+                ?? throw new ModuleFormatException("Graph dependency has no identity."), imports, []);
         }
         if (unmatched.Count != 0)
         {
             throw new ModuleContractException("Missing graph declaration.");
         }
-        return [.. result.OrderBy(static item => item.Identity, StringComparer.OrdinalIgnoreCase)];
+        Array.Sort(result, static (left, right) =>
+            StringComparer.OrdinalIgnoreCase.Compare(left.Identity, right.Identity));
+        return result;
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> GraphImports(GraphPackage package)
