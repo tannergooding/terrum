@@ -10,6 +10,8 @@ using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -33,7 +35,6 @@ public sealed partial class NativeManagedClassModuleTests
         public PublicPair Make(int64 first, int64 second) {
             return new PublicPair(first, second);
         }
-        public int32 CollectGarbage() { return ManagedHeap.Collect(); }
         """;
 
     private const string ConditionalValueSource = """
@@ -326,6 +327,31 @@ public sealed partial class NativeManagedClassModuleTests
     public async Task ManagedCompactConditionalOutputsRespectPublicationAcrossNativeImportsAsync(
         NativeRuntimePolicy policy)
     {
+        const string originalSource = """
+            public struct Pair {
+                public int64 First;
+                public int64 Second;
+                public Pair(int64 first, int64 second) { First = first; Second = second; }
+            }
+            public Pair Make(int64 first, int64 second) { return new Pair(first, second); }
+            public bool TryPair(int64 first, int64 second, int32 mode, out Pair value, out int32 count) {
+                if (mode != 1) { return false; }
+                value = new Pair(first, second);
+                count = 2;
+                return true;
+            }
+            public bool TryScalar(int32 value, bool publish, out int32 result) {
+                if (!publish) { return false; }
+                result = value;
+                return true;
+            }
+            public int32 FillCopy(int64 first, out Pair value) {
+                value = new Pair(first, 22);
+                return 7;
+            }
+            public void FillVoid(out Pair value) { value = new Pair(18, 24); }
+            public int32 CollectGarbage() { return 0; }
+            """;
         var consumerSource = """
             int32 Main() {
                 mut Pair pair = Make(7, 9);
@@ -354,15 +380,172 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """;
         string[] exports = ["Make", "TryPair", "TryScalar", "FillCopy", "FillVoid", "CollectGarbage"];
+        var originalProgram = Compile(originalSource, policy);
+        var originalProducer = ModuleCompiler.CreateProducer(originalProgram, exports);
         var program = Compile(ConditionalValueSource, policy);
         var producer = ModuleCompiler.CreateProducer(program, exports);
         Assert.Equal(56, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var consumer = ModuleCompiler.CreateConsumer(Compile(consumerSource, policy,
-            ModuleCompiler.CreateReference(producer), library: false), producer);
+            ModuleCompiler.CreateReference(originalProducer), library: false), originalProducer);
+        var consumerHash = SHA256.HashData(consumer);
         Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, producer), policy))
             .ConfigureAwait(true));
+        Assert.Equal(consumerHash, SHA256.HashData(consumer));
 
+        var originalNativeProducer = NativeModuleCompiler.CreateProducer(originalProgram, exports, "NodeB", policy);
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(consumerSource, policy,
+            NativeModuleCompiler.CreateGraphReference([originalNativeProducer]), library: false),
+            [originalNativeProducer], policy);
+        var nativeConsumerHash = SHA256.HashData(nativeConsumer);
         var nativeProducer = NativeModuleCompiler.CreateProducer(program, exports, "NodeB", policy);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        var framework = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = framework.Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration directory.");
+        var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
+            configuration, framework.Name, "terrumc.exe");
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeProducer],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.Equal(nativeConsumerHash, SHA256.HashData(nativeConsumer));
+    }
+
+    [Fact]
+    public async Task NonBooleanCopyOutputsRemainUnpublishedOnCheckedExceptionAsync()
+    {
+        const string providerSource = """
+            public struct Pair {
+                public int64 First;
+                public int64 Second;
+                public Pair(int64 first, int64 second) { First = first; Second = second; }
+            }
+            public int32 FillCopyThenFail(bool fail, out Pair result) {
+                result = new Pair(40, 2);
+                if (fail) { require false; }
+                return 7;
+            }
+            public void FillVoidThenFail(bool fail, out Pair result) {
+                result = new Pair(18, 24);
+                if (fail) { require false; }
+            }
+            """;
+        const string consumerSource = """
+            int32 CatchCopy(out Pair result) {
+                mut int32 collected = 0;
+                unsafe {
+                    try {
+                        try {
+                            require ManagedNode.TryCreate(40, out var departed);
+                            FillCopyThenFail(true, out var failed);
+                        }
+                        finally {
+                            collected = ManagedHeap.Collect();
+                        }
+                    }
+                    catch {
+                        if (collected != 1) {
+                            FillCopyThenFail(false, out result);
+                            return 1;
+                        }
+                        if (ManagedHeap.Collect() != 0) {
+                            FillCopyThenFail(false, out result);
+                            return 2;
+                        }
+                        if (ManagedHeap.Collect() != 0) {
+                            FillCopyThenFail(false, out result);
+                            return 3;
+                        }
+                        FillCopyThenFail(false, out result);
+                        return 4;
+                    }
+                }
+                FillCopyThenFail(false, out result);
+                return 5;
+            }
+            int32 CatchVoid(out Pair result) {
+                mut int32 collected = 0;
+                unsafe {
+                    try {
+                        try {
+                            require ManagedNode.TryCreate(18, out var departed);
+                            FillVoidThenFail(true, out var failed);
+                        }
+                        finally {
+                            collected = ManagedHeap.Collect();
+                        }
+                    }
+                    catch {
+                        if (collected != 1) {
+                            FillVoidThenFail(false, out result);
+                            return 11;
+                        }
+                        if (ManagedHeap.Collect() != 0) {
+                            FillVoidThenFail(false, out result);
+                            return 12;
+                        }
+                        if (ManagedHeap.Collect() != 0) {
+                            FillVoidThenFail(false, out result);
+                            return 13;
+                        }
+                        FillVoidThenFail(false, out result);
+                        return 14;
+                    }
+                }
+                FillVoidThenFail(false, out result);
+                return 15;
+            }
+            int32 Main() {
+                unsafe {
+                    try {
+                        int32 copyStatus = CatchCopy(out var copy);
+                        int32 voidStatus = CatchVoid(out var voidResult);
+                        if (copyStatus != 4) { return copyStatus; }
+                        if (copy.First != 40 || copy.Second != 2) { return 5; }
+                        if (voidStatus != 14) { return voidStatus; }
+                        if (voidResult.First != 18 || voidResult.Second != 24) { return 6; }
+                        return 42;
+                    }
+                    catch { return 3; }
+                }
+            }
+            """;
+        const NativeRuntimePolicy policy = NativeRuntimePolicy.CheckedExceptions;
+        string[] exports = ["FillCopyThenFail", "FillVoidThenFail"];
+        var providerProgram = Compile(providerSource, policy);
+        var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
+        var invalidCopyConsumer = Compilation.Create(SyntaxTree.Parse("""
+            int32 ReadCopyAfterFailure(out Pair copy) {
+                unsafe {
+                    try { FillCopyThenFail(true, out copy); }
+                    catch { return int32(copy.First); }
+                }
+                FillCopyThenFail(false, out copy);
+                return 0;
+            }
+            int32 Main() { return 0; }
+            """), ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
+        Assert.Contains(invalidCopyConsumer.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
+        var invalidVoidConsumer = Compilation.Create(SyntaxTree.Parse("""
+            int32 ReadVoidAfterFailure(out Pair value) {
+                unsafe {
+                    try { FillVoidThenFail(true, out value); }
+                    catch { return int32(value.First); }
+                }
+                FillVoidThenFail(false, out value);
+                return 0;
+            }
+            int32 Main() { return 0; }
+            """), ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
+        Assert.Contains(invalidVoidConsumer.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
+
+        var consumer = ModuleCompiler.CreateConsumer(Compile(consumerSource, policy,
+            ModuleCompiler.CreateReference(producer), library: false), producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.Equal(42, NativeJit.Execute(linked, policy));
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+
+        var nativeProducer = NativeModuleCompiler.CreateProducer(providerProgram, exports,
+            "CopyOutputFailureProvider", policy);
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(consumerSource, policy,
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), library: false),
             [nativeProducer], policy);

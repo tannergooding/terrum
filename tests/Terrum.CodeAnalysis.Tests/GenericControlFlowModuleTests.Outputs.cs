@@ -123,6 +123,18 @@ public sealed partial class GenericControlFlowModuleTests
                 result = new Pair(18, 24);
             }
             """;
+        const string originalProviderSource = """
+            public struct Pair {
+                public int64 First;
+                public int64 Second;
+                public Pair(int64 first, int64 second) { First = first; Second = second; }
+            }
+            public int32 Fill(out Pair result) {
+                result = new Pair(0, 0);
+                return 0;
+            }
+            public void FillVoid(out Pair result) { result = new Pair(0, 0); }
+            """;
         const string consumerSource = """
             int32 Main() {
                 int32 status = Fill(out var first);
@@ -130,22 +142,30 @@ public sealed partial class GenericControlFlowModuleTests
                 return int32(first.First + first.Second + second.First + second.Second) + status - 7;
             }
             """;
+        var originalProviderProgram = Compile(originalProviderSource, policy);
+        var originalProducer = ModuleCompiler.CreateProducer(originalProviderProgram, ["Fill", "FillVoid"]);
+        var consumerProgram = Compile(consumerSource, policy,
+            ModuleCompiler.CreateReference(originalProducer), library: false);
+        var consumer = ModuleCompiler.CreateConsumer(consumerProgram, originalProducer);
+        var consumerHash = SHA256.HashData(consumer);
         var providerProgram = Compile(providerSource, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, ["Fill", "FillVoid"]);
-        var consumerProgram = Compile(consumerSource, policy,
-            ModuleCompiler.CreateReference(producer), library: false);
-        var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.Equal(84, NativeJit.Execute(linked, policy));
         Assert.Equal(84, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.Equal(consumerHash, SHA256.HashData(consumer));
 
-        var nativeProducer = NativeModuleCompiler.CreateProducer(providerProgram,
+        var originalNativeProducer = NativeModuleCompiler.CreateProducer(originalProviderProgram,
             ["Fill", "FillVoid"], "CopyOutputProvider", policy);
         var nativeConsumerProgram = Compile(consumerSource, policy,
-            NativeModuleCompiler.CreateReference(nativeProducer), library: false);
-        var nativeConsumer = NativeModuleCompiler.CreateConsumer(nativeConsumerProgram, nativeProducer, policy);
+            NativeModuleCompiler.CreateReference(originalNativeProducer), library: false);
+        var nativeConsumer = NativeModuleCompiler.CreateConsumer(nativeConsumerProgram, originalNativeProducer, policy);
+        var nativeConsumerHash = SHA256.HashData(nativeConsumer);
+        var nativeProducer = NativeModuleCompiler.CreateProducer(providerProgram,
+            ["Fill", "FillVoid"], "CopyOutputProvider", policy);
         Assert.Equal(84, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
             TimeSpan.FromSeconds(10)).ConfigureAwait(true));
+        Assert.Equal(nativeConsumerHash, SHA256.HashData(nativeConsumer));
     }
 
     [Theory]

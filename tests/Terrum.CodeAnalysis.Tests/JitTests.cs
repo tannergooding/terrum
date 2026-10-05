@@ -326,7 +326,7 @@ public sealed partial class JitTests
     [InlineData("int32 Main() { mut int32 y = 9; while (y > 0) { Try(out y); } return 0; } bool Try(out int32 y) { return false; }", "TRM")]
     [InlineData("int32 Main() { return 0; } int32 Set(bool publish, out int32 value) { if (publish) { value = 42; return 2; } return 0; }", "TRM3016")]
     [InlineData("int32 Main() { return 0; } void Fill(out int32 value) { }", "TRM3016")]
-    [InlineData("struct Pair { public int32 Value; public Pair(int32 value) { Value = value; } } int32 Main() { return 0; } int32 Make(out Pair value) { value = new Pair(42); return 2; }", "TRM3011")]
+    [InlineData("struct Pair { public int32 Value; public Pair(int32 value) { Value = value; } } int32 Main() { return 0; } int32 Make(bool publish, out Pair value) { if (publish) { value = new Pair(42); } return 2; }", "TRM3016")]
     [InlineData("int32 Main() { return 1", "TRM")]
     public async Task InvalidSourceDoesNotExecuteAsync(string source, string diagnosticPrefix)
     {
@@ -335,6 +335,39 @@ public sealed partial class JitTests
         using var document = JsonDocument.Parse(output);
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
         Assert.StartsWith(diagnosticPrefix, document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NonBooleanCopyOutExecutesThroughCliJitAsync()
+    {
+        const string source = """
+            struct Pair {
+                public int32 First;
+                public int32 Second;
+                public Pair(int32 first, int32 second) { First = first; Second = second; }
+            }
+            int32 Fill(int32 seed, out Pair value) {
+                value = new Pair(seed, seed + 1);
+                return seed;
+            }
+            void FillVoid(out Pair value) { value = new Pair(20, 22); }
+            int32 Main() {
+                int32 zeroStatus = Fill(0, out var zero);
+                int32 nonzeroStatus = Fill(40, out var nonzero);
+                FillVoid(out var voidResult);
+                if (zeroStatus != 0 || zero.First != 0 || zero.Second != 1) { return 1; }
+                if (nonzeroStatus != 40 || nonzero.First != 40 || nonzero.Second != 41) { return 2; }
+                if (voidResult.First != 20 || voidResult.Second != 22) { return 3; }
+                return 42;
+            }
+            """;
+        (var exit, var output, var error) = await RunAsync(
+            CliStart("jit", "-", "--runtime", "fail-fast"),
+            Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);
+
+        Assert.Equal(42, exit);
+        Assert.Empty(output);
+        Assert.Empty(error);
     }
 
     [Fact]
