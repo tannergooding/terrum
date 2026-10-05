@@ -118,6 +118,10 @@ with the hosted string-table writer across fresh grants.
 reusing persisted provider and consumer artifacts across empty, ordinary,
 mixed-line-break and malformed-surrogate snapshots while comparing line
 counts and content/full-break extents with the hosted snapshot.
+`StringEscapeModuleAnalyzesFreshSourceGrants` passed under both policies,
+comparing decoded scalars, consumed widths and error spans with hosted lexer
+diagnostics across fresh escape grants, including malformed Unicode escapes
+and escaped unpaired surrogates.
 This slice does not make the maintained
 compiler-primitives DLL source-aware or move the scalar frontend beyond the
 hosted verifier/emitter.
