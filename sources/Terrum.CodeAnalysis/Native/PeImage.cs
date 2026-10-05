@@ -3,7 +3,6 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 using Terrum.CodeAnalysis.Semantics;
 
@@ -16,6 +15,12 @@ internal static class PeImage
     private const int HeaderSize = 0x400;
     private const int TextRva = 0x1000;
     private const ulong ImageBase = 0x140000000;
+    private static readonly IComparer<ImportGroup> ImportGroupOrder = Comparer<ImportGroup>.Create(
+        static (left, right) =>
+        {
+            var comparison = StringComparer.OrdinalIgnoreCase.Compare(left.DllName, right.DllName);
+            return comparison != 0 ? comparison : StringComparer.Ordinal.Compare(left.DllName, right.DllName);
+        });
 
     internal static byte[] Build(NativeCode native) => BuildCore(native, null);
 
@@ -223,9 +228,7 @@ internal static class PeImage
             [groups[0].DllName] = groups[0],
         };
         groups[0].AddSymbol("ExitProcess");
-        // Export names are sorted per group below, so fixups only need DLL ordering here.
-        foreach (var fixup in native.NativeImports.OrderBy(static item => item.DllName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(static item => item.DllName, StringComparer.Ordinal))
+        foreach (var fixup in native.NativeImports)
         {
             if (!groupsByName.TryGetValue(fixup.DllName, out var group))
             {
@@ -233,7 +236,15 @@ internal static class PeImage
                 groups.Add(group);
                 groupsByName.Add(fixup.DllName, group);
             }
+            else if (group != groups[0])
+            {
+                group.PreferDllName(fixup.DllName);
+            }
             group.AddSymbol(fixup.ExportName);
+        }
+        if (groups.Count > 2)
+        {
+            groups.Sort(1, groups.Count - 1, ImportGroupOrder);
         }
         foreach (var group in groups)
         {
@@ -292,13 +303,21 @@ internal static class PeImage
 
     private sealed class ImportGroup(string dllName)
     {
-        internal string DllName { get; } = dllName;
+        internal string DllName { get; private set; } = dllName;
         internal List<ImportSymbol> Symbols { get; } = [];
         internal int Ilt { get; set; }
         internal int Iat { get; set; }
         internal int Name { get; set; }
 
         private HashSet<string> SymbolNames { get; } = new(StringComparer.Ordinal);
+
+        internal void PreferDllName(string name)
+        {
+            if (StringComparer.Ordinal.Compare(name, DllName) < 0)
+            {
+                DllName = name;
+            }
+        }
 
         internal void AddSymbol(string name)
         {
