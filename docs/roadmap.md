@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `a42e57f` | Write graph strings without temporary arrays |
 | `36eedc8` | Populate graph JIT package indexes together |
 | `cdc3dff` | Skip empty graph type-origin indexes |
 | `2b1518e` | Build native consumer bindings and names together |
