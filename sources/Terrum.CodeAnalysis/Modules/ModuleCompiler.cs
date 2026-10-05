@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 55;
+    private const int Version = 56;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -138,7 +138,7 @@ public static partial class ModuleCompiler
             remapped.Add(RemapFunction(declaration, producer.Structures, structures));
         }
         return new CompilationReference(structures, remapped.MoveToImmutable(), producer.RuntimePolicy,
-            producer.RequiresSourceGrant);
+            producer.RequiresSourceGrant, producer.InvocationProfileId);
     }
 
     private static ImmutableArray<BoundFunction> ImportDeclarations(Module module)
@@ -551,10 +551,13 @@ public static partial class ModuleCompiler
         var program = Resolve(new BoundProgram(functions.MoveToImmutable(), -1) {
             Structures = producer.Structures,
             Classes = producer.Classes,
-            Buffers = producer.RequiresSourceGrant
-                ? [new HostBuffer("Source", PrimitiveType.Char16, [], false) { IsInvocationScoped = true }]
-                : [],
+            Buffers = producer.InvocationProfileId is not null
+                ? producer.InvocationBuffers
+                : producer.RequiresSourceGrant
+                    ? [new HostBuffer("Source", PrimitiveType.Char16, [], false) { IsInvocationScoped = true }]
+                    : [],
             RequiresSourceGrant = producer.RequiresSourceGrant,
+            InvocationProfileId = producer.InvocationProfileId,
             RuntimePolicy = producer.RuntimePolicy,
         }, names);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
@@ -575,11 +578,20 @@ public static partial class ModuleCompiler
     {
         if (program.Buffers.IsDefaultOrEmpty)
         {
-            if (program.RequiresSourceGrant)
+            if (program.RequiresSourceGrant || program.InvocationProfileId is not null)
             {
                 throw new ModuleFormatException("Source-grant metadata has no Host.Source buffer.");
             }
             return false;
+        }
+        if (program.InvocationProfileId is not null)
+        {
+            if (!program.RequiresSourceGrant
+                || !ScannerHost.IsInvocationProfileBufferSet(program.Buffers, program.InvocationProfileId))
+            {
+                throw new ModuleFormatException("Invocation buffers do not match the named scanner profile.");
+            }
+            return true;
         }
         if (!program.RequiresSourceGrant || program.Buffers.Length != 1
             || !IsSourceGrantBuffer(program.Buffers[0]))
@@ -591,7 +603,7 @@ public static partial class ModuleCompiler
 
     private static bool IsSourceGrantBuffer(HostBuffer? buffer) =>
         buffer is not null && buffer.Name == "Source" && buffer.ElementType == PrimitiveType.Char16
-            && !buffer.IsWritable && buffer.IsInvocationScoped;
+            && !buffer.IsWritable && buffer.IsInvocationScoped && buffer.InvocationProfileId is null;
 
     /// <summary>Creates an independently stored producer from named functions in a verified compilation.</summary>
     public static byte[] CreateProducer(BoundProgram program, IEnumerable<string> exports)
@@ -747,6 +759,8 @@ public static partial class ModuleCompiler
         var module = new Module(false, -1, structures, moduleFunctions.MoveToImmutable()) {
             Classes = classes.MoveToImmutable(),
             RequiresSourceGrant = requiresSourceGrant,
+            InvocationProfileId = program.InvocationProfileId,
+            InvocationBuffers = program.InvocationProfileId is null ? [] : program.Buffers,
             RuntimePolicy = program.RuntimePolicy,
         };
         return Write(module, program);
@@ -794,6 +808,10 @@ public static partial class ModuleCompiler
         if (program.RequiresSourceGrant != producer.RequiresSourceGrant)
         {
             throw new ModuleContractException("Consumer and producer Host.Source requirements differ.");
+        }
+        if (program.InvocationProfileId != producer.InvocationProfileId)
+        {
+            throw new ModuleContractException("Consumer and producer invocation profiles differ.");
         }
         if (program.RuntimePolicy != producer.RuntimePolicy)
         {
@@ -937,6 +955,8 @@ public static partial class ModuleCompiler
             Classes = [.. program.Classes.Select(@class => RemapClass(@class, program.Structures, structures))],
             ImportedStructures = importedTypes.ToImmutable(),
             RequiresSourceGrant = producer.RequiresSourceGrant,
+            InvocationProfileId = producer.InvocationProfileId,
+            InvocationBuffers = producer.InvocationBuffers,
             RuntimePolicy = program.RuntimePolicy,
         }, program);
     }
@@ -956,6 +976,10 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Consumer and producer Host.Source requirements differ.");
         }
+        if (consumer.InvocationProfileId != producer.InvocationProfileId)
+        {
+            throw new ModuleContractException("Consumer and producer invocation profiles differ.");
+        }
         return Link(consumer, producer, CreateReference(producer));
     }
 
@@ -969,6 +993,10 @@ public static partial class ModuleCompiler
         if (consumer.ParsedModule.RequiresSourceGrant != producer.ParsedModule.RequiresSourceGrant)
         {
             throw new ModuleContractException("Consumer and producer Host.Source requirements differ.");
+        }
+        if (consumer.ParsedModule.InvocationProfileId != producer.ParsedModule.InvocationProfileId)
+        {
+            throw new ModuleContractException("Consumer and producer invocation profiles differ.");
         }
         return Link(consumer.ParsedModule, producer.ParsedModule, producer.GetReference());
     }
@@ -1085,10 +1113,13 @@ public static partial class ModuleCompiler
             Classes = [.. consumer.Classes, .. producer.Classes.Select(@class => RemapClass(
                 @class with { Name = "$producer." + @class.Name }, renamedTypes, allStructures,
                 consumer.Classes.Length))],
-            Buffers = producer.RequiresSourceGrant
-                ? [new HostBuffer("Source", PrimitiveType.Char16, [], false) { IsInvocationScoped = true }]
-                : [],
+            Buffers = producer.InvocationProfileId is not null
+                ? producer.InvocationBuffers
+                : producer.RequiresSourceGrant
+                    ? [new HostBuffer("Source", PrimitiveType.Char16, [], false) { IsInvocationScoped = true }]
+                    : [],
             RequiresSourceGrant = producer.RequiresSourceGrant,
+            InvocationProfileId = producer.InvocationProfileId,
             RuntimePolicy = consumer.RuntimePolicy,
         };
         try
@@ -1152,6 +1183,10 @@ public static partial class ModuleCompiler
                 case BoundAssignment assignment:
                     visitAssignment?.Invoke(assignment);
                     VisitExpression(assignment.Value);
+                    break;
+                case BoundBufferAssignment write:
+                    VisitExpression(write.Index);
+                    VisitExpression(write.Value);
                     break;
                 case BoundLifetimeEnd end:
                     visitLifetimeEnd?.Invoke();
@@ -1959,6 +1994,10 @@ public static partial class ModuleCompiler
                 Index = RemapExpression(write.Index, source, destination, classOffset, destinationTypes),
                 Value = RemapExpression(write.Value, source, destination, classOffset, destinationTypes),
             },
+            BoundBufferAssignment write => write with {
+                Index = RemapExpression(write.Index, source, destination, classOffset, destinationTypes),
+                Value = RemapExpression(write.Value, source, destination, classOffset, destinationTypes),
+            },
             BoundDrop => statement,
             BoundDropConstructedFields => statement,
             SymbolicDrop => statement,
@@ -2004,6 +2043,13 @@ public static partial class ModuleCompiler
     private static byte[] Write(Module module, BoundProgram program)
     {
         RejectCompilationLocalSpans(program);
+        if (module.InvocationProfileId is null
+            ? !module.InvocationBuffers.IsEmpty
+            : !module.RequiresSourceGrant
+                || !ScannerHost.IsInvocationProfileBufferSet(module.InvocationBuffers, module.InvocationProfileId))
+        {
+            throw new ModuleFormatException("Module invocation buffers do not match their profile requirement.");
+        }
         if (program.Functions.Any(static function => function.IndexedBody is not null))
         {
             throw new ModuleFormatException("Indexed executable Bodies cannot be serialized as structured module IR.");
@@ -2020,6 +2066,14 @@ public static partial class ModuleCompiler
         writer.Write(module.Consumer);
         writer.Write((byte)program.RuntimePolicy);
         writer.Write(module.RequiresSourceGrant);
+        PutString(writer, module.InvocationProfileId ?? "");
+        writer.Write(module.InvocationBuffers.Length);
+        foreach (var buffer in module.InvocationBuffers)
+        {
+            PutString(writer, buffer.Name);
+            writer.Write((int)buffer.ElementType);
+            writer.Write(buffer.IsWritable);
+        }
         writer.Write(module.EntryPoint);
         writer.Write(module.Structures.Length);
         foreach (var structure in module.Structures)
@@ -2109,7 +2163,8 @@ public static partial class ModuleCompiler
         {
             using var stream = new MemoryStream(bytes, writable: false);
             using var reader = new BinaryReader(stream, StrictUtf8, leaveOpen: true);
-            var (policy, profile, requiresSourceGrant) = ReadModuleHeader(reader, expectedConsumer);
+            var (policy, profile, requiresSourceGrant, invocationProfileId, invocationBuffers) =
+                ReadModuleHeader(reader, expectedConsumer);
             var entry = reader.ReadInt32();
             var (structures, structureNames) = ReadStructures(reader);
             var classes = ReadClasses(reader, structureNames);
@@ -2124,6 +2179,8 @@ public static partial class ModuleCompiler
                 Classes = classes,
                 ImportedStructures = importedTypes,
                 RequiresSourceGrant = requiresSourceGrant,
+                InvocationProfileId = invocationProfileId,
+                InvocationBuffers = invocationBuffers,
                 RuntimePolicy = policy,
             };
             var retainedProfile = RetainedNativeProfile(module);
@@ -2161,7 +2218,8 @@ public static partial class ModuleCompiler
         }
     }
 
-    private static (BoundRuntimePolicy Policy, string Profile, bool RequiresSourceGrant)
+    private static (BoundRuntimePolicy Policy, string Profile, bool RequiresSourceGrant,
+        string? InvocationProfileId, ImmutableArray<HostBuffer> InvocationBuffers)
         ReadModuleHeader(BinaryReader reader, bool expectedConsumer)
     {
         if (reader.ReadInt32() != Magic)
@@ -2179,13 +2237,40 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Unexpected module kind.");
         }
         var policy = (BoundRuntimePolicy)reader.ReadByte();
+        var requiresSourceGrant = GetBool(reader);
+        var profileIdText = GetString(reader);
+        var invocationProfileId = profileIdText.Length == 0 ? null : profileIdText;
+        var bufferCount = Count(reader, 10);
+        if ((invocationProfileId is not null
+                && (invocationProfileId != ScannerHost.InvocationProfileIdentity || !requiresSourceGrant || bufferCount != 10))
+            || (invocationProfileId is null && bufferCount != 0))
+        {
+            throw new ModuleFormatException("Unsupported invocation profile metadata.");
+        }
+        var invocationBuffers = ImmutableArray.CreateBuilder<HostBuffer>(bufferCount);
+        for (var index = 0; index < bufferCount; index++)
+        {
+            var name = GetString(reader);
+            var elementType = (PrimitiveType)reader.ReadInt32();
+            var isWritable = GetBool(reader);
+            invocationBuffers.Add(new HostBuffer(name, elementType, [], isWritable) {
+                IsInvocationScoped = true,
+                InvocationProfileId = invocationProfileId,
+            });
+        }
+        var buffers = invocationBuffers.MoveToImmutable();
+        if (invocationProfileId is not null
+            && !ScannerHost.IsInvocationProfileBufferSet(buffers, invocationProfileId))
+        {
+            throw new ModuleFormatException("Invocation buffers do not match the named scanner profile.");
+        }
         if (policy is not (BoundRuntimePolicy.FailFast or BoundRuntimePolicy.CheckedExceptions)
             || profile is not ("native-10" or "native-11" or "native-12" or "native-13" or "native-14"
                 or "native-15" or "native-16" or "native-17" or "native-18" or "native-19" or "native-20"))
         {
             throw new ModuleFormatException("Unsupported module semantic profile or checked-failure policy.");
         }
-        return (policy, profile, GetBool(reader));
+        return (policy, profile, requiresSourceGrant, invocationProfileId, buffers);
     }
 
     private static (ImmutableArray<BoundStruct> Structures, HashSet<string> Names) ReadStructures(BinaryReader reader)
@@ -2473,6 +2558,7 @@ public static partial class ModuleCompiler
             BoundDropConstructedFields => (byte)15,
             BoundViewScope => (byte)16,
             BoundViewSet => (byte)17,
+            BoundBufferAssignment => (byte)27,
             BoundBreak { TargetDepth: not 1 } => (byte)22,
             BoundContinue { TargetDepth: not 1 } => (byte)23,
             BoundBreak => (byte)18,
@@ -2517,6 +2603,12 @@ public static partial class ModuleCompiler
                 break;
             case BoundViewSet write:
                 writer.Write(write.Variable);
+                PutExpression(writer, write.Index, names, ref remaining, depth + 1, inUnsafe);
+                PutExpression(writer, write.Value, names, ref remaining, depth + 1, inUnsafe);
+                break;
+            case BoundBufferAssignment write:
+                writer.Write(write.Buffer);
+                writer.Write(write.IsEndRelativeOffset);
                 PutExpression(writer, write.Index, names, ref remaining, depth + 1, inUnsafe);
                 PutExpression(writer, write.Value, names, ref remaining, depth + 1, inUnsafe);
                 break;
@@ -2753,6 +2845,14 @@ public static partial class ModuleCompiler
             case 17:
                 return new BoundViewSet(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1),
                     GetExpression(reader, ref remaining, depth + 1), span);
+            case 27:
+                var assignedBuffer = reader.ReadInt32();
+                var isEndRelativeOffset = GetBool(reader);
+                return new BoundBufferAssignment(assignedBuffer,
+                    GetExpression(reader, ref remaining, depth + 1),
+                    GetExpression(reader, ref remaining, depth + 1), span) {
+                    IsEndRelativeOffset = isEndRelativeOffset,
+                };
             case 18:
                 return new BoundBreak(span);
             case 19:
@@ -3132,6 +3232,10 @@ public static partial class ModuleCompiler
             Index = ResolveExpression(write.Index, names, functions, inUnsafe),
             Value = ResolveExpression(write.Value, names, functions, inUnsafe),
         },
+        BoundBufferAssignment write => write with {
+            Index = ResolveExpression(write.Index, names, functions, inUnsafe),
+            Value = ResolveExpression(write.Value, names, functions, inUnsafe),
+        },
         SymbolicDrop drop => drop.Name is null
             ? new BoundDrop(drop.Variable, -1, drop.Span) { IsOutput = drop.IsOutput }
             : names.TryGetValue(drop.Name, out var method)
@@ -3282,6 +3386,8 @@ public static partial class ModuleCompiler
         public ImmutableArray<BoundClass> Classes { get; init; } = [];
         public ImmutableArray<string> ImportedStructures { get; init; } = [];
         public bool RequiresSourceGrant { get; init; }
+        public string? InvocationProfileId { get; init; }
+        public ImmutableArray<HostBuffer> InvocationBuffers { get; init; } = [];
         public BoundRuntimePolicy RuntimePolicy { get; init; }
     }
     internal sealed record ModuleFunction(string Name, string Contract, BoundFunction? Function, bool Import)

@@ -9,7 +9,9 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Native;
 
@@ -62,7 +64,7 @@ public static unsafe class NativeJit
         NativeRuntimePolicy runtimePolicy, string? registrarAssembly = null)
     {
         ArgumentNullException.ThrowIfNull(program);
-        if (!program.RequiresSourceGrant || program.Buffers.Length != 1
+        if (!program.RequiresSourceGrant || program.InvocationProfileId is not null || program.Buffers.Length != 1
             || !IsSourceGrant(program.Buffers[0]))
         {
             throw new ArgumentException("The program does not have the supported Host.Source dependency.", nameof(program));
@@ -89,6 +91,36 @@ public static unsafe class NativeJit
         };
         var code = EmitCode(invocationProgram, runtimePolicy);
         return ExecuteCode(code, [], [], registrarAssembly, null, null, false, out _);
+    }
+
+    /// <summary>Executes a persisted scanner-profile program against fresh source and output buffers.</summary>
+    /// <param name="program">The linked program retaining the scanner invocation profile.</param>
+    /// <param name="source">The source snapshot to scan.</param>
+    /// <param name="runtimePolicy">The generated native runtime policy.</param>
+    /// <param name="registrarAssembly">Trusted CLI assembly serving remote CET continuation registration
+    /// when the current host enforces CET and generated code uses checked exception continuations.</param>
+    /// <returns>Owned lexical and integer results validated against the scanner interchange.</returns>
+    public static ScannerInvocationResult ExecuteWithScannerProfile(BoundProgram program, SourceText source,
+        NativeRuntimePolicy runtimePolicy, string? registrarAssembly = null)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(source);
+        if (!program.RequiresSourceGrant || program.InvocationProfileId != ScannerHost.InvocationProfileIdentity
+            || !ScannerHost.IsInvocationProfileBufferSet(program.Buffers, program.InvocationProfileId))
+        {
+            throw new ArgumentException("The program does not retain the supported scanner invocation profile.",
+                nameof(program));
+        }
+
+        var buffers = ScannerHost.CreateInvocationProfileBuffers(source);
+        var invocationProgram = program with {
+            Buffers = buffers,
+            IsInvocationSourceBound = true,
+        };
+        var code = EmitCode(invocationProgram, runtimePolicy);
+        var tokenCount = ExecuteCode(code, [], [], registrarAssembly, null, null, true, out var data);
+        var execution = new NativeExecutionResult(tokenCount, data) { BufferOffsets = code.BufferOffsets };
+        return ScannerHost.ReadInvocationResult(source, tokenCount, execution, buffers);
     }
 
     /// <summary>Executes the entry point and copies compiler-supplied buffers before releasing native memory.</summary>
@@ -120,7 +152,7 @@ public static unsafe class NativeJit
 
     private static bool IsSourceGrant(HostBuffer buffer) =>
         buffer is not null && buffer.Name == "Source" && buffer.ElementType == PrimitiveType.Char16
-            && !buffer.IsWritable && buffer.IsInvocationScoped;
+            && !buffer.IsWritable && buffer.IsInvocationScoped && buffer.InvocationProfileId is null;
 
     internal static int ExecuteImportedCode(NativeCode code, IReadOnlyList<NativeJitModule> modules,
         IReadOnlyList<NativeImportBinding> expectedImports, string? registrarAssembly = null,

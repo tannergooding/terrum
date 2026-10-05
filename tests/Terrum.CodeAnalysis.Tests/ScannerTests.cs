@@ -11,6 +11,7 @@ using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -376,6 +377,99 @@ public sealed class ScannerTests
         Assert.Equal(1 + (5 * 3), buffers[8].Values.Length);
         _ = Assert.Throws<ArgumentException>(() => ScannerHost.CreateBuffers(
             SourceText.From(new string('x', ScannerHost.MaximumSourceLength + 1))));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task PersistedScannerProfileRebindsFreshBuffersForEachInvocationAsync(BoundRuntimePolicy policy)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var scanner = await ReadScannerSourceAsync(root).ConfigureAwait(true);
+        scanner = scanner.Replace("int32 Scan()", "public int32 Scan()", StringComparison.Ordinal);
+        var seed = SourceText.From("seed 1");
+        var providerCompilation = Compilation.Create(SyntaxTree.Parse(scanner + "\nint32 Main() { return 0; }"),
+            ScannerHost.CreateInvocationProfileBuffers(seed), policy);
+        Assert.False(providerCompilation.HasErrors, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(providerCompilation.Program),
+            ["Terrum.CodeAnalysis.Scan"]);
+
+        var alternateCompilation = Compilation.Create(
+            SyntaxTree.Parse(scanner + "\nint32 Main() { return 0; }"),
+            ScannerHost.CreateInvocationProfileBuffers(SourceText.From("a differently sized seed")), policy);
+        Assert.False(alternateCompilation.HasErrors,
+            string.Join(Environment.NewLine, alternateCompilation.Diagnostics));
+        var alternateProvider = ModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(alternateCompilation.Program), ["Terrum.CodeAnalysis.Scan"]);
+        Assert.Equal(provider, alternateProvider);
+
+        var invalidProvider = provider.ToArray();
+        var sourceDescriptor = Encoding.UTF8.GetBytes("Source");
+        var sourceDescriptorOffset = invalidProvider.AsSpan().IndexOf(sourceDescriptor);
+        Assert.True(sourceDescriptorOffset >= 0);
+        invalidProvider[sourceDescriptorOffset] = (byte)'X';
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(invalidProvider));
+
+        var reference = ModuleCompiler.CreateReference(provider);
+        Assert.Equal(ScannerHost.InvocationProfileIdentity, reference.InvocationProfileId);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("namespace Terrum.CodeAnalysis; int32 Main() { return Scan(); }"),
+            reference, policy);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(consumerCompilation.Program), provider);
+        var linked = ModuleCompiler.Link(consumer, provider);
+
+        var sources = new[] {
+            "if 12i8 18446744073709551616u64 // trailing trivia\r\n\"\\q\"",
+            "\uD800 0x_ \uDC00",
+            new string('x', ScannerHost.MaximumSourceLength),
+            "",
+        };
+        ScannerInvocationResult? retained = null;
+        foreach (var text in sources)
+        {
+            var source = SourceText.From(text);
+            var expected = Lexer.Lex(source);
+            var actual = NativeJit.ExecuteWithScannerProfile(linked, source, (NativeRuntimePolicy)policy);
+            Assert.Equal(expected.Tokens.Select(static token => (token.Kind, token.Span)),
+                actual.LexResult.Tokens.Select(static token => (token.Kind, token.Span)));
+            Assert.Equal(expected.Diagnostics.Select(static diagnostic => (diagnostic.Code, diagnostic.Span)),
+                actual.LexResult.Diagnostics.Select(static diagnostic => (diagnostic.Code, diagnostic.Span)));
+
+            var expectedTrivia = ImmutableArray.CreateBuilder<ScannerTrivia>();
+            for (var tokenIndex = 0; tokenIndex < expected.Tokens.Length; tokenIndex++)
+            {
+                foreach (var trivia in expected.Tokens[tokenIndex].LeadingTrivia)
+                {
+                    expectedTrivia.Add(new ScannerTrivia(trivia.Kind, trivia.Span, tokenIndex));
+                }
+            }
+            Assert.Equal<ScannerTrivia>(expectedTrivia, actual.LexResult.Tokens
+                .SelectMany(static (token, tokenIndex) => token.LeadingTrivia.Select(trivia =>
+                    new ScannerTrivia(trivia.Kind, trivia.Span, tokenIndex))));
+
+            if (text.StartsWith("if ", StringComparison.Ordinal))
+            {
+                Assert.Equal<ScannerIntegerValue>(
+                    [new(1, "i8", false, 12), new(2, "u64", true, null)],
+                    actual.IntegerValues);
+                retained = actual;
+            }
+            else if (text.Length == 0)
+            {
+                Assert.Empty(actual.LexResult.Diagnostics);
+                Assert.Empty(actual.IntegerValues);
+            }
+        }
+
+        Assert.NotNull(retained);
+        Assert.Equal(5, retained.TokenCount);
+        Assert.Equal(3, retained.LexResult.Diagnostics.Length);
+        Assert.Equal<ScannerIntegerValue>(
+            [new(1, "i8", false, 12), new(2, "u64", true, null)],
+            retained.IntegerValues);
     }
 
     [Theory]

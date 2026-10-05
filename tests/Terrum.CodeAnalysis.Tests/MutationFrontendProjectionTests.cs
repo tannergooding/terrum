@@ -131,7 +131,7 @@ public sealed class MutationFrontendProjectionTests
             Assert.IsType<BoundReturn>(statements[2]).Value);
         Assert.False(update.IsPrefix);
         var producer = ModuleCompiler.CreateProducer(program, ["Value"]);
-        Assert.Equal(55, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(56, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var client = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Value(); }"),
             ModuleCompiler.CreateReference(producer));
         Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));

@@ -501,8 +501,9 @@ public static partial class ModuleCompiler
         {
             using var stream = new MemoryStream(bytes, writable: false);
             using var reader = new BinaryReader(stream, StrictUtf8, leaveOpen: true);
-            var (policy, profile, requiresSourceGrant) = ReadModuleHeader(reader, expectedConsumer: true);
-            if (requiresSourceGrant)
+            var (policy, profile, requiresSourceGrant, invocationProfileId, invocationBuffers) =
+                ReadModuleHeader(reader, expectedConsumer: true);
+            if (requiresSourceGrant || invocationProfileId is not null || !invocationBuffers.IsEmpty)
             {
                 throw new ModuleFormatException("Native graph libraries cannot require Host.Source.");
             }

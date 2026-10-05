@@ -653,15 +653,26 @@ an executed bounded component, not an efficient indexed replacement. Together
 these source-grant helpers still do not implement the hosted `SourceText`
 collection.
 
-Semantic-module revision 55 can persist these four source reads symbolically
+Semantic-module revision 56 can persist these four source reads symbolically
 and propagate the reserved `Host.Source` requirement to an independent
 consumer. `NativeJit.ExecuteWithSourceGrant` links and executes that
 source-dependent program with one readonly `char16` snapshot of at most 16,384
 code units, copied into fresh invocation storage. Source contents, sample
 lengths and addresses are not stored in artifacts. This is provisional support
 under the still-unapproved source-grant proposal; graphs, module sets, native
-DLLs and persisted AOT images remain unsupported, and the scanner and scalar
-frontend retain their hosted verifier/emitter dependency.
+DLLs and persisted AOT images remain unsupported. The scanner also has
+provisional persisted semantic-module JIT support under revision 56:
+`scanner-10` artifacts retain the fingerprinted profile identity and canonical
+buffer descriptors but no sample contents or capacities. The dedicated
+`NativeJit.ExecuteWithScannerProfile` adapter supplies fresh source, readonly
+tables and output buffers for every invocation, then returns only copied and
+validated token, diagnostic, trivia and integer results after normal
+completion. Regression coverage reuses the same producer and consumer
+artifacts across empty, differently sized, malformed-UTF-16 and maximum-length
+inputs under both runtime policies. The
+[scanner-profile proposal](../docs/proposals/scanner-invocation-profile.md)
+remains unapproved; this support does not make the scanner or scalar frontend
+independent of hosted verification and emission.
 
 `SourceLineIndex` builds on that streaming reader. It owns a fixed-capacity native
 table of line starts, publishes the completed index through a conditional output,

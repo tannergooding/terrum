@@ -592,6 +592,8 @@ internal sealed partial class Binder
             Buffers = _buffers,
             RequiresSourceGrant = _buffers.Any(static buffer => buffer.IsInvocationScoped)
                 || _reference?.RequiresSourceGrant == true,
+            InvocationProfileId = _buffers.FirstOrDefault(static buffer => buffer.InvocationProfileId is not null)
+                ?.InvocationProfileId ?? _reference?.InvocationProfileId,
             RuntimePolicy = _runtimePolicy,
         };
         if (!SemanticVerifier.TryVerifySource(program, out var functionIndex, out var span, out var exceededWorkLimit, out var invalidEffect))

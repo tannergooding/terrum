@@ -4,12 +4,21 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using Terrum.CodeAnalysis.Diagnostics;
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Lexing;
+
+/// <summary>A completed persisted scanner invocation with owned lexical and integer results.</summary>
+public sealed record ScannerInvocationResult(int TokenCount, LexResult LexResult,
+    ImmutableArray<ScannerIntegerValue> IntegerValues);
 
 /// <summary>Supplies owned input and output storage to the compiled Terrum scanner component.</summary>
 public static class ScannerHost
@@ -24,9 +33,16 @@ public static class ScannerHost
     public const string ComponentName = "scanner-10";
 
     // Lexemes are packed as (kind, UTF-16 length, code units...) and terminated by kind -1.
+    private static readonly ImmutableArray<int> s_xidStart =
+        ImmutableArray.CreateRange(UnicodeIdentifierProfile.StartRanges.ToArray());
+    private static readonly ImmutableArray<int> s_xidContinue =
+        ImmutableArray.CreateRange(UnicodeIdentifierProfile.ContinueRanges.ToArray());
     private static readonly ImmutableArray<int> s_keywords = CreateKeywords();
     private static readonly ImmutableArray<int> s_escapeKeywords = CreateEscapeKeywords();
     private static readonly ImmutableArray<int> s_operators = CreateOperators();
+
+    /// <summary>The immutable profile identity covering scanner tables, kinds, and record layouts.</summary>
+    public static string InvocationProfileIdentity { get; } = CreateInvocationProfileIdentity();
 
     /// <summary>Creates fixed buffers containing source code units, shared pinned tables and vacant token records.</summary>
     /// <param name="source">The immutable source snapshot, including any malformed UTF-16 units.</param>
@@ -43,8 +59,8 @@ public static class ScannerHost
 
         return [
             new HostBuffer("Source", PrimitiveType.Char16, [.. source.Text], false),
-            new HostBuffer("XidStart", PrimitiveType.Int32, [.. UnicodeIdentifierProfile.StartRanges], false),
-            new HostBuffer("XidContinue", PrimitiveType.Int32, [.. UnicodeIdentifierProfile.ContinueRanges], false),
+            new HostBuffer("XidStart", PrimitiveType.Int32, s_xidStart, false),
+            new HostBuffer("XidContinue", PrimitiveType.Int32, s_xidContinue, false),
             new HostBuffer("Tokens", PrimitiveType.Int32, [.. new int[(source.Length + 1) * 3]], true),
             new HostBuffer("Diagnostics", PrimitiveType.Int32, [.. new int[1 + (source.Length * 3)]], true),
             new HostBuffer("Trivia", PrimitiveType.Int32, [.. new int[1 + (source.Length * 4)]], true),
@@ -53,6 +69,159 @@ public static class ScannerHost
             new HostBuffer("IntegerValues", PrimitiveType.Int32, [.. new int[1 + (source.Length * 5)]], true),
             new HostBuffer("EscapeKeywords", PrimitiveType.Int32, s_escapeKeywords, false),
         ];
+    }
+
+    /// <summary>Creates fresh invocation buffers for the fixed persisted scanner profile.</summary>
+    /// <param name="source">The immutable source snapshot, including any malformed UTF-16 units.</param>
+    /// <returns>The scanner-10 buffers in their canonical ordinal order.</returns>
+    /// <exception cref="ArgumentNullException">The source is null.</exception>
+    /// <exception cref="ArgumentException">The source exceeds this component's resource limit.</exception>
+    public static ImmutableArray<HostBuffer> CreateInvocationProfileBuffers(SourceText source)
+    {
+        var buffers = CreateBuffers(source);
+        var result = ImmutableArray.CreateBuilder<HostBuffer>(buffers.Length);
+        foreach (var buffer in buffers)
+        {
+            result.Add(buffer with {
+                IsInvocationScoped = true,
+                InvocationProfileId = InvocationProfileIdentity,
+            });
+        }
+        return result.MoveToImmutable();
+    }
+
+    internal static bool IsInvocationProfileBufferSet(ImmutableArray<HostBuffer> buffers, string? profileId)
+    {
+        if (profileId != InvocationProfileIdentity || buffers.Length != 10)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<(string Name, PrimitiveType Type, bool Writable)> expected = [
+            ("Source", PrimitiveType.Char16, false),
+            ("XidStart", PrimitiveType.Int32, false),
+            ("XidContinue", PrimitiveType.Int32, false),
+            ("Tokens", PrimitiveType.Int32, true),
+            ("Diagnostics", PrimitiveType.Int32, true),
+            ("Trivia", PrimitiveType.Int32, true),
+            ("Keywords", PrimitiveType.Int32, false),
+            ("Operators", PrimitiveType.Int32, false),
+            ("IntegerValues", PrimitiveType.Int32, true),
+            ("EscapeKeywords", PrimitiveType.Int32, false),
+        ];
+        for (var index = 0; index < expected.Length; index++)
+        {
+            var buffer = buffers[index];
+            var descriptor = expected[index];
+            if (buffer is null || buffer.Name != descriptor.Name || buffer.ElementType != descriptor.Type
+                || buffer.IsWritable != descriptor.Writable || !buffer.IsInvocationScoped
+                || buffer.InvocationProfileId != profileId)
+            {
+                return false;
+            }
+        }
+
+        if (buffers.All(static buffer => buffer.Values.IsEmpty))
+        {
+            return true;
+        }
+
+        var sourceLength = buffers[0].Values.Length;
+        return sourceLength <= MaximumSourceLength
+            && buffers[1].Values.AsSpan().SequenceEqual(s_xidStart.AsSpan())
+            && buffers[2].Values.AsSpan().SequenceEqual(s_xidContinue.AsSpan())
+            && buffers[3].Values.Length == (sourceLength + 1) * 3
+            && buffers[4].Values.Length == 1 + sourceLength * 3
+            && buffers[5].Values.Length == 1 + sourceLength * 4
+            && buffers[6].Values.AsSpan().SequenceEqual(s_keywords.AsSpan())
+            && buffers[7].Values.AsSpan().SequenceEqual(s_operators.AsSpan())
+            && buffers[8].Values.Length == 1 + sourceLength * 5
+            && buffers[9].Values.AsSpan().SequenceEqual(s_escapeKeywords.AsSpan())
+            && buffers[3].Values.AsSpan().IndexOfAnyExcept(0) < 0
+            && buffers[4].Values.AsSpan().IndexOfAnyExcept(0) < 0
+            && buffers[5].Values.AsSpan().IndexOfAnyExcept(0) < 0
+            && buffers[8].Values.AsSpan().IndexOfAnyExcept(0) < 0;
+    }
+
+    internal static ScannerInvocationResult ReadInvocationResult(SourceText source, int tokenCount,
+        NativeExecutionResult execution, ImmutableArray<HostBuffer> buffers)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(execution);
+        if (buffers.Length != 10 || execution.BufferOffsets.Length != buffers.Length)
+        {
+            throw new ArgumentException("Invalid scanner invocation result layout.", nameof(execution));
+        }
+
+        ReadOnlySpan<byte> BufferBytes(int index)
+        {
+            var offset = execution.BufferOffsets[index];
+            var length = checked(buffers[index].Values.Length * sizeof(int));
+            if (offset < 0 || offset > execution.Data.Length || length > execution.Data.Length - offset)
+            {
+                throw new ArgumentException("Scanner result buffer is outside the copied data.", nameof(execution));
+            }
+            return execution.Data.AsSpan(offset, length);
+        }
+
+        var lexical = ReadLexResult(source, tokenCount, BufferBytes(3), BufferBytes(5), BufferBytes(4));
+        var integerValues = ReadIntegerValues(source, lexical.Tokens, BufferBytes(8));
+        return new ScannerInvocationResult(tokenCount, lexical, integerValues);
+    }
+
+    private static string CreateInvocationProfileIdentity()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+        writer.Write(ComponentName);
+        writer.Write(SchemaVersion);
+        writer.Write(MaximumSourceLength);
+        foreach (var descriptor in new (string Name, PrimitiveType Type, bool Writable, string Capacity)[] {
+            ("Source", PrimitiveType.Char16, false, "N"),
+            ("XidStart", PrimitiveType.Int32, false, "canonical"),
+            ("XidContinue", PrimitiveType.Int32, false, "canonical"),
+            ("Tokens", PrimitiveType.Int32, true, "3*(N+1)"),
+            ("Diagnostics", PrimitiveType.Int32, true, "1+3*N"),
+            ("Trivia", PrimitiveType.Int32, true, "1+4*N"),
+            ("Keywords", PrimitiveType.Int32, false, "canonical"),
+            ("Operators", PrimitiveType.Int32, false, "canonical"),
+            ("IntegerValues", PrimitiveType.Int32, true, "1+5*N"),
+            ("EscapeKeywords", PrimitiveType.Int32, false, "canonical"),
+        })
+        {
+            writer.Write(descriptor.Name);
+            writer.Write((int)descriptor.Type);
+            writer.Write(descriptor.Writable);
+            writer.Write(descriptor.Capacity);
+        }
+        WriteValues(writer, s_xidStart);
+        WriteValues(writer, s_xidContinue);
+        WriteValues(writer, s_keywords);
+        WriteValues(writer, s_operators);
+        WriteValues(writer, s_escapeKeywords);
+        WriteEnum<TokenKind>(writer);
+        WriteEnum<TriviaKind>(writer);
+        WriteEnum<ScannerIntegerStatus>(writer);
+        WriteEnum<ScannerIntegerTag>(writer);
+        return $"{ComponentName}:{Convert.ToHexString(SHA256.HashData(stream.ToArray())).ToLowerInvariant()}";
+    }
+
+    private static void WriteValues(BinaryWriter writer, ImmutableArray<int> values)
+    {
+        writer.Write(values.Length);
+        foreach (var value in values)
+        {
+            writer.Write(value);
+        }
+    }
+
+    private static void WriteEnum<TEnum>(BinaryWriter writer) where TEnum : struct, Enum
+    {
+        foreach (var value in Enum.GetValues<TEnum>())
+        {
+            writer.Write(Convert.ToInt32(value));
+            writer.Write(value.ToString());
+        }
     }
 
     private static ImmutableArray<int> CreateKeywords()

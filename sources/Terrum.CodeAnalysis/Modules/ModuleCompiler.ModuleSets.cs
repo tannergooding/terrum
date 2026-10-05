@@ -257,6 +257,14 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Consumer and provider runtime policies differ.");
         }
+        if (consumer.RequiresSourceGrant != reference.RequiresSourceGrant)
+        {
+            throw new ModuleContractException("Consumer and provider Host.Source requirements differ.");
+        }
+        if (consumer.InvocationProfileId != reference.InvocationProfileId)
+        {
+            throw new ModuleContractException("Consumer and provider invocation profiles differ.");
+        }
         IReadOnlyDictionary<string, BoundFunction>? exports = null;
         var hasPrivateManagedState = HasPrivateManagedState(consumer);
         var hasUnsupportedManagedImport = false;

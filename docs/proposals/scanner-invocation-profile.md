@@ -1,8 +1,10 @@
 # Persisted scanner invocation profile proposal
 
-**Status: unapproved proposal.** The current revision-55 source-grant JIT
-continues to accept only one readonly invocation-scoped `Host.Source` grant.
-This proposal does not change that contract or claim persisted scanner support.
+**Status: unapproved proposal.** Semantic-module revision 56 now contains a
+provisional implementation of the bounded `scanner-10` invocation profile.
+That implementation does not approve this proposal, expand the target
+contract, or make the scanner/scalar frontend independent of hosted
+verification and emission.
 
 ## Summary
 
@@ -38,8 +40,11 @@ persisted scanner execution.
 
 `NativeJit.ExecuteWithSourceGrant` accepts exactly one readonly invocation-
 scoped `char16` source grant, rejects contents longer than 16,384 code units,
-copies the source into invocation storage, and returns an integer result. The
-persisted scanner profile would need the existing `ScannerHost` buffer set:
+copies the source into invocation storage, and returns an integer result.
+`NativeJit.ExecuteWithScannerProfile` separately accepts a linked program
+retaining the fixed scanner profile, binds fresh storage and returns validated
+owned results. The persisted scanner profile uses the existing
+`ScannerHost` buffer set:
 
 | Buffer | Access | Existing shape or capacity |
 |---|---|---|
@@ -96,8 +101,33 @@ module graphs/sets, native DLLs or persisted AOT.
 
 Defer the proposal if satisfying it requires arbitrary buffer capture,
 escaped views, general host-buffer registration, broader linking/AOT support
-or new scanner semantics. Successful scanner-module execution alone would
-not pass the self-hosting gate.
+or new scanner semantics. Successful scanner-module execution alone does not pass the self-hosting gate.
+
+## Provisional implementation record (not approval)
+
+Revision 56 persists the current `ScannerHost.InvocationProfileIdentity` and
+the ten canonical buffer descriptors in ordinal order. The identity
+fingerprints the component/schema and source bound, descriptor names, types,
+mutability and capacity formulas, readonly table contents, and token/trivia/
+integer record enums. Persisted descriptors contain no values or concrete
+capacities. The source grant is part of this named profile; arbitrary profile
+composition, graphs, module sets, native DLLs and persisted AOT are rejected
+or remain unsupported.
+
+Structured `BoundBufferAssignment` operations are retained as semantic-module
+statement tag 27. The scanner JIT adapter binds a fresh `ScannerHost` buffer
+set for each source, copies native data after normal completion and validates
+tokens, diagnostics, trivia and integer records before returning. Lexical
+diagnostics remain successful scan results; a runtime failure does not return
+partial scanner buffers. Regression coverage reuses identical persisted
+producer/consumer artifacts for empty, varied, malformed-UTF-16 and
+maximum-length sources under both runtime policies, compares lexical results
+with the hosted scanner, and checks integer magnitudes.
+
+This is implementation evidence for review, not approval of the proposed
+support boundary or the related source-grant proposal. The scanner and scalar
+frontend still depend on hosted verification/emission, and no self-hosting
+gate is claimed.
 
 ## Evidence
 
@@ -107,6 +137,7 @@ not pass the self-hosting gate.
 - [`Scanner.terrum`](../../self-host/Scanner.terrum) writes token, diagnostic,
   trivia and integer-value records and uses the immutable scanner tables.
 - [`NativeJit.ExecuteWithSourceGrant`](../../sources/Terrum.CodeAnalysis/Native/NativeJit.cs)
-  currently binds only the source grant and returns an integer result.
+  retains the source-only API; the separate scanner adapter binds the named
+  profile and publishes validated owned results.
 - The [invocation-scoped source-grant proposal](invocation-scoped-source-grant.md)
   remains unapproved and continues to describe only the source-only profile.

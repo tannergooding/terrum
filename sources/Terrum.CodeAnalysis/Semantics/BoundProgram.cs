@@ -232,6 +232,9 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     /// <summary>Whether execution requires an invocation-scoped immutable <c>Host.Source</c> grant.</summary>
     public bool RequiresSourceGrant { get; internal init; }
 
+    /// <summary>The named invocation profile required by this program, or null for the source-only profile.</summary>
+    public string? InvocationProfileId { get; internal init; }
+
     internal bool IsInvocationSourceBound { get; init; }
 
     /// <summary>The runtime behavior verified for this program and its imports.</summary>

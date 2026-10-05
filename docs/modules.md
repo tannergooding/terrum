@@ -46,8 +46,8 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 55. Writers use it for every producer,
-consumer and graph library; readers accept only revision 55. Revision 48 adds
+The current semantic-module revision is 56. Writers use it for every producer,
+consumer and graph library; readers accept only revision 56. Revision 48 adds
 the initialization-aware optional-handle pattern expression, recording its
 source expression, capture slot and whether initialized null is accepted.
 Revision 49 adds expression tag 28 for named-storage initialization tests,
@@ -67,12 +67,23 @@ modules. Import readers derive call authorization from those scopes; calls
 authorized only by `unsafe(expr)`, unsafe fields, accessors, operators, and
 caller-unsafe TRRM Bodies remain unsupported. Revision 54 and older are retired
 by the current reader and must be recreated from source. Revision 55
-additionally records a provisional invocation-scoped `Host.Source` requirement
-and symbolic source length/read operations. The source-dependent single-producer
-JIT path requires `NativeJit.ExecuteWithSourceGrant`; graphs, module sets,
-native DLLs and persisted AOT remain unsupported. This implementation is
-covered by the still unapproved
+introduced a provisional invocation-scoped `Host.Source` requirement and
+symbolic source length/read operations. Revision 56 retains that contract and
+adds a named invocation-profile identity plus ordered buffer descriptors
+(name, primitive element type and mutability); it stores no sample contents or
+sample-derived capacities. Structured `BoundBufferAssignment` statements also
+persist as tag 27 so scanner output writes survive producer/consumer storage.
+`NativeJit.ExecuteWithSourceGrant` remains the source-only entry point, while
+`NativeJit.ExecuteWithScannerProfile` binds the canonical `scanner-10` buffers
+fresh for each invocation and publishes copied, validated lexical and integer
+results only after normal completion. The scanner profile includes the source
+grant and rejects unsupported profile compositions. Graphs, module sets,
+native DLLs and persisted AOT remain unsupported. The source-only boundary is
+covered by the still-unapproved
 [source-grant proposal](proposals/invocation-scoped-source-grant.md).
+The scanner-specific implementation is provisional and its design remains
+unapproved; see the
+[scanner invocation-profile proposal](proposals/scanner-invocation-profile.md).
 This revision is independent of native profile labels, native package and graph
 container formats, and scalar frontend projection revisions. See
 [implementation](implementation.md) for the compiler support boundary and
@@ -342,7 +353,7 @@ unsupported.
 
 The following feature notes document implementation milestones only. They do
 not describe current writer selection or reader compatibility: current
-artifacts always use revision 55, and older semantic-module revisions are
+artifacts always use revision 56, and older semantic-module revisions are
 rejected.
 
 Version 12 stored the unique layout flag, declared cleanup method, cleanup

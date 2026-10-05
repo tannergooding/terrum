@@ -123,6 +123,13 @@ public static partial class SemanticVerifier
         {
             throw Invalid();
         }
+        if (program.InvocationProfileId is not null
+            && (!program.RequiresSourceGrant
+                || (!program.Buffers.IsEmpty
+                    && !ScannerHost.IsInvocationProfileBufferSet(program.Buffers, program.InvocationProfileId))))
+        {
+            throw Invalid();
+        }
         var bufferNames = new HashSet<string>(program.Buffers.Length, StringComparer.Ordinal);
         long bufferWords = 0;
         foreach (var buffer in program.Buffers)
@@ -130,8 +137,10 @@ public static partial class SemanticVerifier
             if (buffer is null || string.IsNullOrWhiteSpace(buffer.Name) || !bufferNames.Add(buffer.Name)
                 || buffer.ElementType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16 or PrimitiveType.Bool)
                 || buffer.Values.IsDefault
-                || (buffer.IsInvocationScoped && (buffer.Name != "Source"
-                    || buffer.ElementType != PrimitiveType.Char16 || buffer.IsWritable)))
+                || (buffer.InvocationProfileId is not null
+                    && buffer.InvocationProfileId != program.InvocationProfileId)
+                || (buffer.IsInvocationScoped && program.InvocationProfileId is null
+                    && (buffer.Name != "Source" || buffer.ElementType != PrimitiveType.Char16 || buffer.IsWritable)))
             {
                 throw Invalid();
             }
