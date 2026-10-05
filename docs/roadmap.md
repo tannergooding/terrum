@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f625d17` | Count managed output slots incrementally |
 | `ae9c961` | Collect module-set machine imports during parsing |
 | `84eb86b` | Binary-search graph declaration ownership |
 | `92fbf02` | Fuse imported layout validation with indexing |
