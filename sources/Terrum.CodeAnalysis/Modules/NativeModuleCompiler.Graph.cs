@@ -144,7 +144,7 @@ public static partial class NativeModuleCompiler
         _ = CheckGraph(executable, providers);
         cancellationToken.ThrowIfCancellationRequested();
         var directory = Directory.CreateTempSubdirectory("terrum-native-graph-").FullName;
-        var paths = new List<string>();
+        var paths = new List<string>(providers.Length + 1);
         try
         {
             var executablePath = Path.Combine(directory, "consumer.exe");
@@ -205,8 +205,8 @@ public static partial class NativeModuleCompiler
         {
             byIdentity.Add(provider.Identity!, provider);
         }
-        var visiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visiting = new HashSet<string>(providers.Length, StringComparer.OrdinalIgnoreCase);
+        var visited = new HashSet<string>(providers.Length, StringComparer.OrdinalIgnoreCase);
         var order = new GraphPackage[providers.Length];
         var orderCount = 0;
         foreach (var dependency in consumer.Dependencies)
