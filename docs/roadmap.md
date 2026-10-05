@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `ab7214d` | Pre-size compilation snapshot collection |
 | `f72d204` | Index repeated CLI diagnostic source lookups |
 | `0f99f3d` | Materialize module declarations as arrays |
 | `0b23da5` | Validate image sections by index |
