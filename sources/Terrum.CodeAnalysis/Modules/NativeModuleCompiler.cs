@@ -475,10 +475,16 @@ public static partial class NativeModuleCompiler
                 throw new ModuleFormatException("Native machine imports differ from retained semantic declarations or calls.");
             }
             var machineImportSet = machineImports.ToHashSet(StringComparer.Ordinal);
-            if (!machineImportSet.IsSubsetOf(contractSnapshot.Declarations)
-                || !contractSnapshot.CallImports.All(machineImportSet.Contains))
+            if (!machineImportSet.IsSubsetOf(contractSnapshot.Declarations))
             {
                 throw new ModuleFormatException("Native machine imports differ from retained semantic declarations or calls.");
+            }
+            foreach (var import in contractSnapshot.CallImports)
+            {
+                if (!machineImportSet.Contains(import))
+                {
+                    throw new ModuleFormatException("Native machine imports differ from retained semantic declarations or calls.");
+                }
             }
         }
         var image = bytes.AsSpan(at + contractLength, imageLength).ToArray();
