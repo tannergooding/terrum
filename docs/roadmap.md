@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7a0e3bc` | Pre-size graph imported-type builder |
 | `48d55b0` | Skip unused imported cleanup indexes |
 | `aada8d9` | Skip empty imported graph type indexes |
 | `6e754ca` | Pre-size semantic module-set imports |
