@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f679574` | Reuse native machine import membership set |
 | `48fe445` | Collect managed class offsets in one pass |
 | `f625d17` | Count managed output slots incrementally |
 | `ae9c961` | Collect module-set machine imports during parsing |
