@@ -67,15 +67,14 @@ public static partial class NativeModuleCompiler
         }
         cancellationToken.ThrowIfCancellationRequested();
         var rootBytes = (byte[])consumer.Clone();
-        var selected = inputs.Select(static bytes => (byte[])bytes.Clone()).ToArray();
         var root = ReadGraphPackageSnapshot(rootBytes);
-        ValidateGraphProviderCount(selected.Length);
-        var indexed = new (byte[] Bytes, GraphPackage Package)[selected.Length];
-        var packages = new GraphPackage[selected.Length];
-        for (var index = 0; index < selected.Length; index++)
+        ValidateGraphProviderCount(inputs.Length);
+        var indexed = new (byte[] Bytes, GraphPackage Package)[inputs.Length];
+        var packages = new GraphPackage[inputs.Length];
+        for (var index = 0; index < inputs.Length; index++)
         {
-            var package = ReadGraphPackageSnapshot(selected[index]);
-            indexed[index] = (selected[index], package);
+            var package = ReadGraphPackageSnapshot(inputs[index]);
+            indexed[index] = (inputs[index], package);
             packages[index] = package;
         }
         var providers = ValidateGraphProviders(packages);
