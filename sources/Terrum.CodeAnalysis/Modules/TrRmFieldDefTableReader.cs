@@ -15,9 +15,25 @@ public readonly ref struct TrRmFieldDefTableReader
     private readonly TrRmStringTableReader _strings;
     private readonly int _recordCount;
 
+    /// <summary>Validates FieldDef rows and requires layouts for fixed-offset fields.</summary>
     public TrRmFieldDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs)
+        : this(section, recordCount, strings, types, typeSpecs, default, false)
+    {
+    }
+
+    /// <summary>Validates FieldDef rows and fixed offsets against their assigned layout sizes.</summary>
+    public TrRmFieldDefTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmStringTableReader strings, TrRmTypeDefTableReader types,
+        TrRmTypeSpecTableReader typeSpecs, TrRmLayoutTableReader layouts)
+        : this(section, recordCount, strings, types, typeSpecs, layouts, true)
+    {
+    }
+
+    private TrRmFieldDefTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmStringTableReader strings, TrRmTypeDefTableReader types,
+        TrRmTypeSpecTableReader typeSpecs, TrRmLayoutTableReader layouts, bool validateLayoutSizes)
     {
         if (recordCount <= 0 || recordCount > 0xFF_FFFF
             || recordCount != types.FieldCount || (long)recordCount * RowSize != section.Length)
@@ -28,6 +44,7 @@ public readonly ref struct TrRmFieldDefTableReader
         _rows = section;
         _strings = strings;
         _recordCount = recordCount;
+        var invalidLayoutSize = false;
         for (var row = 1; row <= recordCount; row++)
         {
             var owner = Read(row - 1, 0);
@@ -38,37 +55,35 @@ public readonly ref struct TrRmFieldDefTableReader
             if (owner == 0 || owner > types.Count || owner != types.GetFieldOwner(row)
                 || name is 0 or > 0xFF_FFFF
                 || spec == 0 || spec > typeSpecs.Count
-                || (flags & ~7u) != 0 || (flags & 3) == 3
-                || (offset != uint.MaxValue && types.GetLayoutRow((int)owner) == 0))
+                || (flags & ~7u) != 0 || (flags & 3) == 3)
             {
                 throw InvalidField();
+            }
+
+            if (offset != uint.MaxValue)
+            {
+                var layoutRow = types.GetLayoutRow((int)owner);
+                if (layoutRow == 0)
+                {
+                    throw InvalidField();
+                }
+
+                if (validateLayoutSizes && offset >= layouts.GetSize(layoutRow))
+                {
+                    invalidLayoutSize = true;
+                }
             }
 
             _ = _strings.DecodeName((int)name);
         }
-    }
 
-    public TrRmFieldDefTableReader(ReadOnlySpan<byte> section, int recordCount,
-        TrRmStringTableReader strings, TrRmTypeDefTableReader types,
-        TrRmTypeSpecTableReader typeSpecs, TrRmLayoutTableReader layouts)
-        : this(section, recordCount, strings, types, typeSpecs)
-    {
-        for (var row = 1; row <= recordCount; row++)
+        if (invalidLayoutSize)
         {
-            var offset = Read(row - 1, 16);
-            if (offset == uint.MaxValue)
-            {
-                continue;
-            }
-
-            var owner = types.GetFieldOwner(row);
-            if (offset >= layouts.GetSize(types.GetLayoutRow(owner)))
-            {
-                throw InvalidField();
-            }
+            throw InvalidField();
         }
     }
 
+    /// <summary>Gets the decoded name for a FieldDef row.</summary>
     public string GetName(int row)
     {
         if (row <= 0 || row > _recordCount)
@@ -86,7 +101,7 @@ public readonly ref struct TrRmFieldDefTableReader
     }
 
     private uint Read(int row, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(_rows.Slice(row * RowSize + offset, sizeof(uint)));
+        => BinaryPrimitives.ReadUInt32LittleEndian(_rows.Slice((row * RowSize) + offset, sizeof(uint)));
 
     private static InvalidDataException InvalidField()
         => new("Invalid TRRM FieldDef table.");
