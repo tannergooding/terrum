@@ -88,6 +88,10 @@ public sealed class TrRmArtifactIndexTests
         TrRmStructuralMetadataValidator.Validate(MinimalArtifact());
         TrRmStructuralMetadataValidator.Validate(ArtifactWithMetadataTables());
         TrRmStructuralMetadataValidator.Validate(ArtifactWithCallableMetadata());
+        var callableWithoutBody = ArtifactWithCallableMetadata();
+        TrRmStructuralMetadataValidator.ValidateCompactLinear(callableWithoutBody);
+        TrRmStructuralMetadataValidator.ValidateCompactIndexed(callableWithoutBody);
+        TrRmStructuralMetadataValidator.ValidateCompact(callableWithoutBody);
         var withBlob = ArtifactWithCallableMetadata(includeEmptyBlob: true);
         TrRmStructuralMetadataValidator.Validate(withBlob);
         TrRmStructuralMetadataValidator.Validate(ArtifactWithCallableMetadata(includeBody: true));

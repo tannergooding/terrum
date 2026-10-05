@@ -124,43 +124,46 @@ public static class TrRmStructuralMetadataValidator
             var indexedCounts = sourceMapCount == 0
                 || inspection == BodyInspection.CompactLinear ? []
                 : new int[methods.Count + 1][];
-            for (var method = 1; method <= methods.Count; method++)
+            if (bodyCount != 0)
             {
-                var row = methods.GetBodyRow(method);
-                if (row != 0)
+                for (var method = 1; method <= methods.Count; method++)
                 {
-                    var linear = inspection == BodyInspection.CompactLinear
-                        || inspection == BodyInspection.CompactMixed
-                            && (bodies.GetRow(row)[0] & 0x0C) == 0x04;
-                    if (linear)
+                    var row = methods.GetBodyRow(method);
+                    if (row != 0)
                     {
-                        var body = new TrRmCompactLinearBodyReader(bodies, method, modules,
-                            methods, signatures, parameters, typeSpecs, types, imports);
-                        if (sourceMapCount != 0)
+                        var linear = inspection == BodyInspection.CompactLinear
+                            || inspection == BodyInspection.CompactMixed
+                                && (bodies.GetRow(row)[0] & 0x0C) == 0x04;
+                        if (linear)
                         {
-                            if (inspection == BodyInspection.CompactMixed)
+                            var body = new TrRmCompactLinearBodyReader(bodies, method, modules,
+                                methods, signatures, parameters, typeSpecs, types, imports);
+                            if (sourceMapCount != 0)
                             {
-                                indexedCounts[method] = [0, body.OperationCount];
-                            }
-                            else
-                            {
-                                linearCounts[method] = body.OperationCount;
+                                if (inspection == BodyInspection.CompactMixed)
+                                {
+                                    indexedCounts[method] = [0, body.OperationCount];
+                                }
+                                else
+                                {
+                                    linearCounts[method] = body.OperationCount;
+                                }
                             }
                         }
-                    }
-                    else
-                    {
-                        var body = new TrRmCompactIndexedBodyReader(bodies, method, modules,
-                            methods, signatures, parameters, typeSpecs, types, imports);
-                        if (sourceMapCount != 0)
+                        else
                         {
-                            var counts = new int[body.BlockCount + 1];
-                            for (var block = 1; block <= body.BlockCount; block++)
+                            var body = new TrRmCompactIndexedBodyReader(bodies, method, modules,
+                                methods, signatures, parameters, typeSpecs, types, imports);
+                            if (sourceMapCount != 0)
                             {
-                                counts[block] = body.GetOperationCount(block);
-                            }
+                                var counts = new int[body.BlockCount + 1];
+                                for (var block = 1; block <= body.BlockCount; block++)
+                                {
+                                    counts[block] = body.GetOperationCount(block);
+                                }
 
-                            indexedCounts[method] = counts;
+                                indexedCounts[method] = counts;
+                            }
                         }
                     }
                 }
