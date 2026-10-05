@@ -124,6 +124,9 @@ embedded-zero inputs.
 `Utf16ScalarModuleDecodesFreshSourceGrants` passed under both policies,
 checking scalar values and code-unit widths for BMP and supplementary
 characters and rejection of unpaired surrogate code units.
+`CharacterFactsModuleClassifiesEveryUtf16CodeUnit` passed under both policies,
+checking the ASCII-digit and line-break predicates against independent host
+conditions for all 65,536 UTF-16 code units in four bounded fresh grants.
 `SourceLineIndexModuleIndexesFreshSourceGrants` passed under both policies,
 reusing persisted provider and consumer artifacts across empty, ordinary,
 mixed-line-break and malformed-surrogate snapshots while comparing line
