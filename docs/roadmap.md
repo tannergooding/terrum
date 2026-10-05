@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `5a62f4e` | Pre-size CET continuation validation set |
 | `cf78764` | Size graph cleanup index by actual entries |
 | `3901f21` | Pre-size graph cleanup function index |
 | `37baa12` | Pre-size graph catalog traversal sets |
