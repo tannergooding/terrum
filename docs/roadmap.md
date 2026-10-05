@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `035f281` | Reuse static protocol argument names |
 | `6da62ac` | Reuse generic declaration dispatch result |
 | `e282982` | Check generic type parameter facts together |
 | `871405e` | Collect alias parameters and detect duplicates together |
