@@ -376,6 +376,9 @@ internal sealed partial class Binder
                 var staticModifierCount = 0;
                 var hasInvalidModifier = false;
                 var hasInvalidAttribute = false;
+                var signatureCount = 0;
+                SyntaxNode? firstSignature = null;
+                SyntaxNode? formals = null;
                 foreach (var child in member.Children)
                 {
                     if (child is SyntaxTokenElement tokenElement)
@@ -407,19 +410,25 @@ internal sealed partial class Binder
                             hasInvalidAttribute = true;
                         }
                     }
+                    else if (child is SyntaxNode syntaxNode && syntaxNode.Kind != SyntaxKind.Attribute)
+                    {
+                        firstSignature ??= syntaxNode;
+                        signatureCount++;
+                        if (syntaxNode.Kind == SyntaxKind.ParameterList)
+                        {
+                            formals ??= syntaxNode;
+                        }
+                    }
                 }
-                var signature = member.Children.OfType<SyntaxNode>()
-                    .Where(static child => child.Kind != SyntaxKind.Attribute).ToArray();
-                var formals = signature.FirstOrDefault(static child => child.Kind == SyntaxKind.ParameterList);
                 var arguments = formals?.Children.OfType<SyntaxNode>().ToArray() ?? [];
                 var noThrow = noThrowCount > 0;
                 var arity = arguments.Length;
                 if (op is not TokenKind operation
                     || !((arity == 1 && IsStaticUnaryOperator(operation))
                         || (arity == 2 && IsStaticBinaryOperator(operation)))
-                    || variableCount != arity + 1 || signature.Length != 2
-                    || signature[0].Kind != SyntaxKind.TypeName
-                    || NameText(signature[0]) != variables[variableCount - 1]
+                    || variableCount != arity + 1 || signatureCount != 2
+                    || firstSignature is not SyntaxNode { Kind: SyntaxKind.TypeName } resultType
+                    || NameText(resultType) != variables[variableCount - 1]
                     || arguments[0].Children is not [SyntaxNode first, SyntaxTokenElement]
                     || NameText(first) != variables[0]
                     || (arity == 2 && (arguments[1].Children is not [SyntaxNode second, SyntaxTokenElement]

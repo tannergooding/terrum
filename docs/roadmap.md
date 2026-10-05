@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `TBD` | Classify static protocol signature nodes during the member scan |
 | `TBD` | Reuse qualified struct names during layout |
 | `035f281` | Reuse static protocol argument names |
 | `6da62ac` | Reuse generic declaration dispatch result |
