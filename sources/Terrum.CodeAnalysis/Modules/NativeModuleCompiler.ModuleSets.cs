@@ -51,8 +51,14 @@ public static partial class NativeModuleCompiler
             allowManagedParticipant: true);
         var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(semantic);
         var imports = contractSnapshot.Declarations.ToHashSet(StringComparer.Ordinal);
-        var externalFunctionNames = program.Functions.Where(static item => item.IsExternal)
-            .Select(static item => item.Name).ToHashSet(StringComparer.Ordinal);
+        var externalFunctionNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var function in program.Functions)
+        {
+            if (function.IsExternal)
+            {
+                _ = externalFunctionNames.Add(function.Name);
+            }
+        }
         var bindings = new List<NativeImportBinding>();
         foreach (var provider in providers)
         {
