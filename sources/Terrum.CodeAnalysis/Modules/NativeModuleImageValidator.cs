@@ -434,8 +434,8 @@ internal static class NativeModuleImageValidator
                 var sawSourceFrame = false;
                 var sawCleanupFrame = false;
                 var sawManagedCollector = false;
-                var cleanupStarts = checkedExceptions ? new HashSet<int>() : null;
-                var exceptionalCleanups = checkedExceptions ? new List<int>() : null;
+                HashSet<int>? cleanupStarts = null;
+                List<int>? exceptionalCleanups = null;
                 for (var index = 0; index < table.Size / 12; index++)
                 {
                     var at = OffsetInSection(table.RelativeVirtualAddress + (index * 12), 12, pdataSection);
@@ -482,7 +482,7 @@ internal static class NativeModuleImageValidator
                             }
                             if (target == 0)
                             {
-                                exceptionalCleanups?.Add(handlerAddress);
+                                (exceptionalCleanups ??= new List<int>()).Add(handlerAddress);
                             }
                             else
                             {
@@ -555,7 +555,11 @@ internal static class NativeModuleImageValidator
                             throw Invalid();
                         }
                         sawCleanupFrame = true;
-                        _ = cleanupStarts?.Add(begin);
+                        if (checkedExceptions)
+                        {
+                            cleanupStarts ??= new HashSet<int>();
+                            _ = cleanupStarts.Add(begin);
+                        }
                     }
                     else
                     {
