@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `8741761` | Avoid validating each native-set provider image twice |
 | `a65e2ac` | Reuse private managed-state analysis while reading modules |
 | `9c2448d` | Reuse private managed-state analysis during producer validation |
 | `f6103f8` | Reuse private managed-state analysis across graph library validation |
