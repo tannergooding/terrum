@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f5cf507` | Check graph producer dependencies directly |
 | `d620203` | Scan graph symbols by index |
 | `8a74581` | Size graph import tracking from declarations |
 | `0b03510` | Scan graph symbols without LINQ |
