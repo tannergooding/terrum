@@ -285,6 +285,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `1b60f08a` | Exercise all 24 IntegerFacts predicates through test-only native compiler-primitives exports |
 | `f041664c` | Preserve bounded scalar updates and assignments before terminal loop exits |
 | `4e4079ec` | Lower terminal implicit-else paths in acyclic loop erasure |
 | `9a7687b4` | Omit embedded for iterators when every terminal branch returns or breaks |
