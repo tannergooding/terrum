@@ -471,10 +471,10 @@ internal sealed partial class Binder
             }
             foreach (var name in list.Children.OfType<SyntaxNode>())
             {
-                var shape = TryProtocolApplication(name, out var head, out var parts);
+                var shape = TryProtocolApplication(name, out var head, out var parts, out var partNames);
                 var protocolName = shape ? FindProtocol(head) : null;
                 if (protocolName is null
-                    || !MatchesProtocolArguments(_protocols[protocolName], parts,
+                    || !MatchesProtocolArguments(_protocols[protocolName], partNames,
                         StructName(declaration).Name, typeName))
                 {
                     Report("TRM3007", "Conformance requires a distinct declared local protocol with exact operand and result types.", name.Span);
@@ -680,9 +680,9 @@ internal sealed partial class Binder
                     copies[index] = true;
                     continue;
                 }
-                var shape = TryProtocolApplication(item, out var head, out var parts);
+                var shape = TryProtocolApplication(item, out var head, out var parts, out var partNames);
                 var protocol = shape ? FindProtocol(head) : null;
-                if (protocol is null || !MatchesProtocolArguments(_protocols[protocol], parts,
+                if (protocol is null || !MatchesProtocolArguments(_protocols[protocol], partNames,
                         formal.Token.Name)
                     || operations[index].ContainsKey(_protocols[protocol].Key))
                 {
@@ -690,7 +690,7 @@ internal sealed partial class Binder
                 }
                 else
                 {
-                    var resultName = NameText(parts[^1]);
+                    var resultName = partNames[^1];
                     var resultIndex = Array.IndexOf(typeNames, resultName);
                     var fixedResult = resultIndex >= 0 ? null : GenericScalarType(resultName);
                     if (resultIndex < 0 && fixedResult is null)
@@ -1208,26 +1208,36 @@ internal sealed partial class Binder
         return hasCandidate ? candidate : null;
     }
 
-    private static bool TryProtocolApplication(SyntaxNode type, out string head, out SyntaxNode[] arguments)
+    private static bool TryProtocolApplication(SyntaxNode type, out string head, out SyntaxNode[] arguments,
+        out string[] argumentNames)
     {
         arguments = [.. type.Children.OfType<SyntaxNode>()];
         var tokens = type.Children.OfType<SyntaxTokenElement>().Select(static child => child.Token).ToArray();
         var open = Array.FindIndex(tokens, static token => token.Kind == TokenKind.Less);
         head = open > 0 ? string.Concat(tokens.Take(open).Select(static token => token.Name)) : "";
-        return type.Kind == SyntaxKind.TypeName && open > 0 && arguments.Length is 1 or 2 or 3
-            && tokens[^1].Kind == TokenKind.Greater
-            && NameText(type) == head + "<" + string.Join(",", arguments.Select(NameText)) + ">";
+        if (type.Kind != SyntaxKind.TypeName || open <= 0 || arguments.Length is not (1 or 2 or 3)
+            || tokens[^1].Kind != TokenKind.Greater)
+        {
+            argumentNames = [];
+            return false;
+        }
+        argumentNames = new string[arguments.Length];
+        for (var index = 0; index < arguments.Length; index++)
+        {
+            argumentNames[index] = NameText(arguments[index]);
+        }
+        return NameText(type) == head + "<" + string.Join(",", argumentNames) + ">";
     }
 
-    private static bool MatchesProtocolArguments(StaticProtocol protocol, SyntaxNode[] arguments, string type,
+    private static bool MatchesProtocolArguments(StaticProtocol protocol, string[] argumentNames, string type,
         string? qualified = null)
     {
         var operandCount = protocol.Key.Arity - (protocol.HasSelf ? 1 : 0);
-        return arguments.Length == operandCount + 1
-            && arguments.Take(operandCount).All(argument =>
-                NameText(argument) == type || NameText(argument) == qualified)
+        return argumentNames.Length == operandCount + 1
+            && argumentNames.Take(operandCount).All(argument =>
+                argument == type || argument == qualified)
             && (protocol.Key.Arity == 1 || (IsComparisonOperator(protocol.Key.Operator)
-                ? NameText(arguments[^1]) == "bool"
-                : NameText(arguments[^1]) == type || NameText(arguments[^1]) == qualified));
+                ? argumentNames[^1] == "bool"
+                : argumentNames[^1] == type || argumentNames[^1] == qualified));
     }
 }
