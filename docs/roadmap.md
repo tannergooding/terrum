@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `97e647d` | Skip compact body scans when no bodies exist |
 | `02bd15c` | Reuse generic parameter indexes during constraint binding |
 | `1c78294` | Reuse completed struct alignments during layout |
 | `e29a0d8` | Reuse the declaring struct name across conformance checks |
