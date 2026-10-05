@@ -25,7 +25,7 @@ public readonly ref struct TrRmImportTableReader
             throw InvalidImport();
         }
 
-        _expected = new Dictionary<uint, (uint TargetRequirement, uint RuntimePolicy)>();
+        _expected = new Dictionary<uint, (uint TargetRequirement, uint RuntimePolicy)>(recordCount);
         var lastModuleRefRow = 0;
         var lastRequirements = default((int OwnerModule,
             uint TargetRequirement, uint RuntimePolicy));

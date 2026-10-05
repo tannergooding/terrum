@@ -24,7 +24,7 @@ public readonly ref struct TrRmExportTableReader
             throw InvalidExport();
         }
 
-        var keys = new HashSet<(int Module, string Key)>();
+        var keys = new HashSet<(int Module, string Key)>(recordCount);
         for (var row = 0; row < recordCount; row++)
         {
             var data = section.Slice(row * RowSize, RowSize);
