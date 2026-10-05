@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `2b49dd9` | Detect unique and composite profile features in one structure traversal |
 | `7325427` | Count managed class construction pairs in one function pass |
 | `d4e6f30` | Detect native buffer views in one profile scan |
 | `c4fe7ac` | Remap graph and module-set structures without intermediate immutable snapshots |
