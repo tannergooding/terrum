@@ -59,6 +59,14 @@ public sealed class NativeModuleTests
             return Recurse(3);
         }
         """;
+    private const string OwnedBufferImportSource = """
+        public int32 Run() {
+            if (!OwnedInt32Buffer.TryCreate(1, out var created)) { return 0; }
+            mut OwnedInt32Buffer buffer = move created;
+            if (!buffer.TryAppend(42)) { return 0; }
+            return buffer.Read(0);
+        }
+        """;
     private static readonly string[] s_exports = ["Evaluate", "MakeTwelve", "MakeWide", "TryWide"];
 
     private static BoundProgram CompileLibrary(string source)
@@ -81,6 +89,15 @@ public sealed class NativeModuleTests
     private static byte[] ConsumerPackage(byte[] producer, string source = Consumer) =>
         NativeModuleCompiler.CreateConsumer(CompileConsumer(source, producer), producer, NativeRuntimePolicy.FailFast);
 
+    private static byte[] ProducerForPolicy(string source, NativeRuntimePolicy policy, string identity = "Example")
+    {
+        var boundPolicy = policy == NativeRuntimePolicy.CheckedExceptions
+            ? BoundRuntimePolicy.CheckedExceptions : BoundRuntimePolicy.FailFast;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), boundPolicy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), ["Run"], identity, policy);
+    }
+
     private static int PackageContractOffset(byte[] artifact)
     {
         var at = 18 + artifact[7] + artifact[8];
@@ -96,6 +113,33 @@ public sealed class NativeModuleTests
 
     private static int PackageImageOffset(byte[] artifact) => PackageContractOffset(artifact)
         + BinaryPrimitives.ReadInt32LittleEndian(artifact.AsSpan(10, 4));
+
+    private static byte[] ReplacePackageImageSymbol(byte[] artifact, ReadOnlySpan<byte> oldSymbol,
+        ReadOnlySpan<byte> newSymbol)
+    {
+        Assert.Equal(oldSymbol.Length, newSymbol.Length);
+        var result = (byte[])artifact.Clone();
+        var imageOffset = PackageContractOffset(result);
+        var imageLength = BinaryPrimitives.ReadInt32LittleEndian(result.AsSpan(14, 4));
+        var symbolOffset = result.AsSpan(imageOffset, imageLength).IndexOf(oldSymbol);
+        var replacement = newSymbol;
+        if (symbolOffset < 0 && oldSymbol.Length > 0 && newSymbol.Length > 0
+            && oldSymbol[^1] == 0 && newSymbol[^1] == 0)
+        {
+            oldSymbol = oldSymbol[..^1];
+            replacement = newSymbol[..^1];
+            symbolOffset = result.AsSpan(imageOffset, imageLength).IndexOf(oldSymbol);
+        }
+        Assert.True(symbolOffset >= 0);
+        replacement.CopyTo(result.AsSpan(imageOffset + symbolOffset, replacement.Length));
+        RehashArtifact(result);
+        return result;
+    }
+
+    private static void RehashArtifact(byte[] artifact)
+    {
+        SHA256.HashData(artifact.AsSpan(0, artifact.Length - 32)).CopyTo(artifact, artifact.Length - 32);
+    }
 
     [Fact]
     public void NativePackagesUseCurrentVersionAndRejectPreviousVersion()
@@ -310,6 +354,35 @@ public sealed class NativeModuleTests
         {
             _ = Assert.Throws<ArgumentException>(() => Producer(identity: identity));
         }
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void NativeImageAcceptsPolicySpecificSystemImports(NativeRuntimePolicy policy)
+    {
+        var producer = ProducerForPolicy("public int32 Run() { return 42; }", policy);
+        _ = NativeModuleCompiler.Inspect(producer);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void NativeImageAcceptsOwnedBufferImportsForEachFailurePolicy(NativeRuntimePolicy policy)
+    {
+        var producer = ProducerForPolicy(OwnedBufferImportSource, policy, "OwnedImport");
+        _ = NativeModuleCompiler.Inspect(producer);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void NativeImageRejectsUnsupportedOwnedBufferKernelSymbols(NativeRuntimePolicy policy)
+    {
+        var producer = ProducerForPolicy(OwnedBufferImportSource, policy, "OwnedImport");
+        var damaged = ReplacePackageImageSymbol(producer, "GetProcessHeap\0"u8, "GetProcessHxxx\0"u8);
+
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(damaged));
     }
 
     [Fact]

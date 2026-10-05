@@ -251,6 +251,13 @@ internal static class NativeModuleImageValidator
                     }
                     var symbols = new List<string>();
                     string? previousSymbol = null;
+                    var hasExitProcess = false;
+                    var hasRaiseException = false;
+                    var hasGetProcessHeap = false;
+                    var hasHeapAlloc = false;
+                    var hasHeapFree = false;
+                    var hasUnsupportedKernelSymbol = false;
+                    var hasOwnedBufferKernelSymbol = false;
                     for (var symbol = 0; symbol <= 1024; symbol++)
                     {
                         var hint = Rva64(checked(lookup + (symbol * 8)));
@@ -273,6 +280,33 @@ internal static class NativeModuleImageValidator
                         {
                             throw Invalid();
                         }
+                        if (index == 0)
+                        {
+                            switch (symbolName)
+                            {
+                                case "ExitProcess":
+                                    hasExitProcess = true;
+                                    break;
+                                case "RaiseException":
+                                    hasRaiseException = true;
+                                    break;
+                                case "GetProcessHeap":
+                                    hasOwnedBufferKernelSymbol = true;
+                                    hasGetProcessHeap = true;
+                                    break;
+                                case "HeapAlloc":
+                                    hasOwnedBufferKernelSymbol = true;
+                                    hasHeapAlloc = true;
+                                    break;
+                                case "HeapFree":
+                                    hasOwnedBufferKernelSymbol = true;
+                                    hasHeapFree = true;
+                                    break;
+                                default:
+                                    hasUnsupportedKernelSymbol = true;
+                                    break;
+                            }
+                        }
                         symbols.Add(symbolName);
                         previousSymbol = symbolName;
                     }
@@ -286,13 +320,11 @@ internal static class NativeModuleImageValidator
                     {
                         throw Invalid();
                     }
-                    if (index == 0 && (!symbols.Contains("ExitProcess")
-                        || symbols.Contains("RaiseException") != checkedExceptions
-                        || symbols.Any(symbol => symbol is not ("ExitProcess" or "RaiseException")
-                            && (!allowOwnedBufferRuntime
-                                || symbol is not ("GetProcessHeap" or "HeapAlloc" or "HeapFree")))
-                        || (symbols.Contains("GetProcessHeap")
-                            != (symbols.Contains("HeapAlloc") || symbols.Contains("HeapFree")))))
+                    if (index == 0 && (!hasExitProcess
+                        || hasRaiseException != checkedExceptions
+                        || hasUnsupportedKernelSymbol
+                        || (hasOwnedBufferKernelSymbol && !allowOwnedBufferRuntime)
+                        || (hasGetProcessHeap != (hasHeapAlloc || hasHeapFree))))
                     {
                         throw Invalid();
                     }
