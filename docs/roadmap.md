@@ -211,7 +211,11 @@ prerequisite has already been met.
 12. **Rich libraries/self-hosting — bootstrap components.** Grow the current
     bounded components toward a compiler bootstrap only as their language and
     library prerequisites are met and through the shared
-    [self-host gate](#compiler-and-self-hosting-gate).
+    [self-host gate](#compiler-and-self-hosting-gate). Persisting source-aware
+    helpers would require the still-unapproved
+    [invocation-scoped source-grant proposal](proposals/invocation-scoped-source-grant.md);
+    current source-dependent components are not included in the persisted
+    compiler-primitives library.
 
 These are pending contracts, not support claims. Exact grammar, metadata and
 implementation remain subject to their canonical specifications and proposals.

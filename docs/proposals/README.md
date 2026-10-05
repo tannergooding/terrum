@@ -31,6 +31,9 @@ approved.
 - [Span-backed token cursor](span-backed-token-cursor.md) records the open
   backing, capture, indexing and construction contracts needed for the
   existing zero-copy self-host cursor candidate.
+- [Invocation-scoped source grant](invocation-scoped-source-grant.md)
+  recommends a narrow persisted-module dependency for source-aware compiler
+  components without enabling arbitrary host-buffer capture.
 - [Checked-exception TRRM](checked-exception-trrm.md) records the unapproved
   exceptional-control-flow contract needed before source-free checked-exception
   Bodies can be considered.
