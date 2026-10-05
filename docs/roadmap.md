@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f629661` | Classify static protocol declaration facts in one syntax pass |
 | `2ab20d9` | Classify static protocol member facts in one syntax pass |
 | `b073691` | Reuse static protocol NoThrow attribute count |
 | `a030840` | Reuse one immutable source snapshot array throughout compilation |
