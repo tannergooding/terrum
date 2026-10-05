@@ -73,17 +73,26 @@ public sealed class Compilation
     internal static bool HasOwnedNativeBuffer(ImmutableArray<BoundStruct> structures,
         IEnumerable<BoundFunction> functions)
     {
-        foreach (var structure in structures)
+        if (HasOwnedNativeBuffer(structures))
         {
-            if (structure.Fields.Any(static field => field.Type == PrimitiveType.OwnedInt32Buffer))
-            {
-                return true;
-            }
+            return true;
         }
         foreach (var function in functions)
         {
             if (function.ReturnType == PrimitiveType.OwnedInt32Buffer
                 || function.Variables.Any(static variable => variable.Type == PrimitiveType.OwnedInt32Buffer))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool HasOwnedNativeBuffer(ImmutableArray<BoundStruct> structures)
+    {
+        foreach (var structure in structures)
+        {
+            if (structure.Fields.Any(static field => field.Type == PrimitiveType.OwnedInt32Buffer))
             {
                 return true;
             }
@@ -184,13 +193,15 @@ public sealed class Compilation
                 break;
             }
         }
-        var ownedBuffer = HasOwnedNativeBuffer(program.Structures, program.Functions);
+        var ownedBuffer = HasOwnedNativeBuffer(structures);
         var readonlyView = false;
         var mutableView = false;
         foreach (var function in program.Functions)
         {
+            ownedBuffer |= function.ReturnType == PrimitiveType.OwnedInt32Buffer;
             foreach (var variable in function.Variables)
             {
+                ownedBuffer |= variable.Type == PrimitiveType.OwnedInt32Buffer;
                 readonlyView |= variable.Type == PrimitiveType.ReadonlyInt32BufferView;
                 mutableView |= variable.Type == PrimitiveType.MutableInt32BufferView;
                 if (readonlyView && mutableView)
