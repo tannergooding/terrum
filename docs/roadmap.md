@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `d181d9d` | Pre-size graph catalog indexes |
 | `d8376c7` | Pre-size imported structure membership |
 | `f9152e9` | Pre-size shared structure indexes |
 | `18d45ea` | Validate native set bindings without a projection |
