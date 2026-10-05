@@ -77,7 +77,7 @@ public sealed class TrRmDoForTests
     public void ReturnOnlyAcyclicLoopsEraseToTheirTerminalReturn()
     {
         string[] sources = [
-            "int32 Main() { do { return 42; } while (false); }",
+            "int32 Main() { do { return 42; } while (Fail()); } bool Fail() { require false; return false; }",
             "int32 Main() { while (true) { return 42; } }",
             "int32 Main() { for (;;) { return 42; } }",
         ];
@@ -95,9 +95,9 @@ public sealed class TrRmDoForTests
     public void BreakOnlyAcyclicLoopsEraseToTheirFallthrough()
     {
         string[] sources = [
-            "int32 Main() { do { break; } while (false); return 42; }",
+            "int32 Main() { do { break; } while (Fail()); return 42; } bool Fail() { require false; return false; }",
             "int32 Main() { while (true) { break; } return 42; }",
-            "int32 Main() { for (;;) { break; } return 42; }",
+            "int32 Main() { mut int32 value = 0; for (value = Start();; ) { break; } return value; } int32 Start() { return 42; }",
         ];
         foreach (var source in sources)
         {
