@@ -345,12 +345,18 @@ public static partial class NativeModuleCompiler
         var imports = machineImports ?? [];
         if (machineImports is not null)
         {
-            if (machineImports.Length > 1024
-                || !machineImports.ToHashSet(StringComparer.Ordinal).IsSubsetOf(
-                    consumerSnapshot?.Declarations
-                        ?? throw new InvalidOperationException("Native consumer contract snapshot is missing.")))
+            if (machineImports.Length > 1024)
             {
                 throw new ModuleFormatException("Native consumer machine imports differ from retained declarations.");
+            }
+            var declarations = consumerSnapshot?.Declarations
+                ?? throw new InvalidOperationException("Native consumer contract snapshot is missing.");
+            foreach (var imported in machineImports)
+            {
+                if (!declarations.Contains(imported))
+                {
+                    throw new ModuleFormatException("Native consumer machine imports differ from retained declarations.");
+                }
             }
             Array.Sort(imports, StringComparer.Ordinal);
         }
