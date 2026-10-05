@@ -590,23 +590,26 @@ public static partial class ModuleCompiler
                     pending.Enqueue(callee);
                 }
             }
-            var types = RequiredStructures([program.Functions[index]], program.Structures,
-                findStructureIndex: FindStructureIndex);
-            foreach (var structure in cleanupStructures)
+            if (cleanupStructures.Length != 0)
             {
-                if (types.Contains(structure.Name) && structure.CleanupMethod is string cleanup)
+                var types = RequiredStructures([program.Functions[index]], program.Structures,
+                    findStructureIndex: FindStructureIndex);
+                foreach (var structure in cleanupStructures)
                 {
-                    functionIndexes ??= program.Functions.Select((function, functionIndex) =>
-                        (function.Name, functionIndex))
-                        .ToDictionary(static item => item.Name, static item => item.functionIndex,
-                            StringComparer.Ordinal);
-                    if (!functionIndexes.TryGetValue(cleanup, out var callee))
+                    if (types.Contains(structure.Name) && structure.CleanupMethod is string cleanup)
                     {
-                        throw new ModuleFormatException($"Missing cleanup declaration '{cleanup}'.");
-                    }
-                    if (indexes.Add(callee))
-                    {
-                        pending.Enqueue(callee);
+                        functionIndexes ??= program.Functions.Select((function, functionIndex) =>
+                            (function.Name, functionIndex))
+                            .ToDictionary(static item => item.Name, static item => item.functionIndex,
+                                StringComparer.Ordinal);
+                        if (!functionIndexes.TryGetValue(cleanup, out var callee))
+                        {
+                            throw new ModuleFormatException($"Missing cleanup declaration '{cleanup}'.");
+                        }
+                        if (indexes.Add(callee))
+                        {
+                            pending.Enqueue(callee);
+                        }
                     }
                 }
             }
