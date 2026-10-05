@@ -113,7 +113,7 @@ public static partial class ModuleCompiler
     {
         var declarations = producer.Functions.Where(static function => function.Import)
             .Select(static item => Declaration(item.Function ?? throw new ModuleFormatException("Missing export declaration.")))
-            .ToImmutableArray();
+            .ToArray();
         var required = RequiredStructures(declarations, producer.Structures);
         var structures = SelectStructures(producer.Structures, required);
         return new CompilationReference(structures,
