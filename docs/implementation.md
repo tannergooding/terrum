@@ -2901,10 +2901,10 @@ terminal tree of returns and direct breaks, including nested `if` statements
 whose two explicit arms are terminal, or whose terminal `then` arm is followed
 by a terminal statement for its implicit `else` path. The lowering keeps those
 branch conditions and their effects, routes breaks to the existing
-fallthrough, and retains returns. Before terminal leaves it preserves only
-scalar local initializations from constants/reads, assignments lowered by the
-existing scalar expression path, primitive integer local updates and compound
-assignments; it omits
+fallthrough, and retains returns. Before terminal leaves it preserves
+supported scalar local initializations, assignments and expression statements
+lowered by the existing paths, plus primitive integer local updates and
+compound assignments; it omits
 the unreachable loop condition and iterator and adds no loop region or
 backedge. For initializers remain in source order. Bodies with implicit
 fallthrough, continues, nested loops, managed-local cleanup or other
