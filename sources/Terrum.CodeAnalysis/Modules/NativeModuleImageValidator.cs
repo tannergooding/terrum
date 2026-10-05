@@ -353,7 +353,8 @@ internal static class NativeModuleImageValidator
             void CheckUnwind()
             {
                 var table = header.ExceptionTableDirectory;
-                var infoSection = sections.Single(static section => section.Name == ".xdata");
+                // Earlier exact section-order validation fixes .text first and .xdata last before provider .edata.
+                var infoSection = sections[sections.Length - (isConsumer ? 1 : 2)];
                 if (table.Size % 12 != 0 || table.Size < 12
                     || table.Size > MaximumUnwindRecords * NativeUnwind.RuntimeFunctionSize)
                 {
@@ -367,7 +368,7 @@ internal static class NativeModuleImageValidator
                     throw Invalid();
                 }
                 var nextInfo = infoSection.VirtualAddress;
-                var previousEnd = sections.Single(static section => section.Name == ".text").VirtualAddress;
+                var previousEnd = sections[0].VirtualAddress;
                 var sawSourceFrame = false;
                 var sawCleanupFrame = false;
                 var sawManagedCollector = false;
