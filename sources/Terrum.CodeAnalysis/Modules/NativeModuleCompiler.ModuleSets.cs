@@ -226,13 +226,11 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native set import mapping omits a called semantic import.");
         }
-        var declarationNames = referenceSet.Functions.Select(static item => item.Name).ToHashSet(StringComparer.Ordinal);
         for (var i = 0; i < providers.Length; i++)
         {
             var dependency = set.Dependencies[i];
             var exported = providerExports[i];
-            if (dependency.Imports.Length == 0 || dependency.Imports.Any(name =>
-                !exported.Contains(name) || !declarationNames.Contains(name)))
+            if (dependency.Imports.Length == 0 || dependency.Imports.Any(name => !exported.Contains(name)))
             {
                 throw new ModuleFormatException("Native set import mapping differs from provider declarations.");
             }
