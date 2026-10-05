@@ -204,7 +204,7 @@ public static class NativeJitContinuationRegistrar
             throw new InvalidDataException("Native JIT continuation request has invalid code bounds.");
         }
         var targets = new JitContinuationTarget[count];
-        var unique = new HashSet<int>();
+        var unique = new HashSet<int>(count);
         for (var index = 0; index < count; index++)
         {
             var offset = reader.ReadInt32();
