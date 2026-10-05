@@ -56,6 +56,54 @@ public sealed partial class CliTests
     }
 
     [Fact]
+    public async Task PersistedNestedAcyclicBreaksRunAndBuildWithoutProducerSourceAsync()
+    {
+        const string source = """
+            int32 Main() {
+                mut int32 result = 0;
+                do {
+                    do {
+                        result = 40;
+                        break;
+                    } while (Fail());
+                    result += 2;
+                    break;
+                } while (Fail());
+                return result;
+            }
+            bool Fail() { require false; return false; }
+            """;
+        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-nested-acyclic-breaks-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var executable = prefix + ".exe";
+        try
+        {
+            var (compiled, compileOutput, compileError) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "compile-trrm", "-", "--identity", "nested-acyclic-breaks",
+                "-o", artifact, "--runtime", "fail-fast", "--json");
+            Assert.True(compiled == 0, $"{compileOutput}{Environment.NewLine}{compileError}");
+            Assert.Empty(compileError);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(ran == 42, $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+
+            var (built, buildOutput, buildError) = await RunAsync([], "build-trrm", artifact,
+                "-o", executable, "--runtime", "fail-fast", "--json");
+            Assert.True(built == 0, $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.Empty(buildError);
+            Assert.Equal(42, await ExecuteTrRmImageAsync(executable));
+        }
+        finally
+        {
+            File.Delete(artifact);
+            File.Delete(executable);
+        }
+    }
+
+    [Fact]
     public async Task PersistedDirectCallsAgreeAcrossJitAndExecutableAsync()
     {
         var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-calls-{Guid.NewGuid():N}");
