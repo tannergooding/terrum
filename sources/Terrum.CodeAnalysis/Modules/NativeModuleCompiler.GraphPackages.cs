@@ -204,33 +204,23 @@ public static partial class NativeModuleCompiler
         }
         var contract = bytes.AsSpan(at, contractLength).ToArray();
         var policy = (NativeRuntimePolicy)bytes[6];
-        CompilationReference? reference = null;
-        BoundRuntimePolicy contractPolicy;
-        if (consumer)
-        {
-            contractPolicy = ModuleCompiler.ReadNativeProfile(contract, true).RuntimePolicy;
-        }
-        else
-        {
-            reference = ModuleCompiler.CreateGraphReference(contract, exports, allowImportedCleanup: true);
-            contractPolicy = reference.RuntimePolicy;
-        }
-        if (contractPolicy != (BoundRuntimePolicy)policy)
+        var contractSnapshot = consumer ? ModuleCompiler.ReadGraphConsumerContract(contract)
+            : ModuleCompiler.ReadGraphProviderContract(contract, exports);
+        if (contractSnapshot.RuntimePolicy != (BoundRuntimePolicy)policy)
         {
             throw new ModuleFormatException("Graph package and semantic runtime policies differ.");
         }
         var image = bytes.AsSpan(at + contractLength, imageLength).ToArray();
         var package = new GraphPackage(consumer, identity, policy, exports, dependencies, contract, image) {
             Origins = origins,
-            ValidatedReference = reference,
+            ValidatedReference = contractSnapshot.Reference,
         };
-        var imported = consumer ? ModuleCompiler.GetConsumerSetDeclarations(contract)
-            : ModuleCompiler.GetGraphImports(contract);
+        var imported = contractSnapshot.Imports;
         if (!seenImports.SetEquals(imported))
         {
             throw new ModuleFormatException("Graph declaration mapping differs from semantic declarations.");
         }
-        var structures = ModuleCompiler.GetGraphRetainedTypes(contract, consumer);
+        var structures = contractSnapshot.Structures;
         if (structures.Length != origins.Length)
         {
             throw new ModuleFormatException("Graph origin table differs from retained semantic types.");
@@ -241,8 +231,7 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Graph origin table differs from retained semantic types.");
         }
-        var importedTypes = ModuleCompiler.GetGraphImportedTypes(contract, consumer)
-            .ToHashSet(StringComparer.Ordinal);
+        var importedTypes = contractSnapshot.ImportedStructures.ToHashSet(StringComparer.Ordinal);
         HashSet<string>? dependencyIdentities = null;
         foreach (var origin in origins)
         {
@@ -275,12 +264,9 @@ public static partial class NativeModuleCompiler
                 throw new ModuleFormatException("Graph dependency supplies neither declarations nor types.");
             }
         }
-        var profile = consumer
-            ? ModuleCompiler.GetNativeProfileVersion(contract, true)
-            : ModuleCompiler.GetGraphProfile(contract);
         NativeModuleImageValidator.Validate(image, consumer, GraphImports(package), exports, policy,
-            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
-            allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
+            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(contractSnapshot.Profile),
+            allowManagedRuntimeData: AllowsManagedRuntimeData(contractSnapshot.Profile));
         return package;
     }
 

@@ -79,8 +79,8 @@ public static partial class ModuleCompiler
 
     internal static (string Profile, BoundRuntimePolicy RuntimePolicy) ReadNativeProfile(byte[] artifact, bool isConsumer)
     {
-        var module = Read(artifact, isConsumer);
-        return (RetainedNativeProfile(module), module.RuntimePolicy);
+        var module = Read(artifact, isConsumer, out var profile);
+        return (profile, module.RuntimePolicy);
     }
 
     private static string RetainedNativeProfile(Module module)
@@ -1727,7 +1727,11 @@ public static partial class ModuleCompiler
     }
 
     [SuppressMessage("Style", "IDE0078:Use pattern matching", Justification = "Both header reads must execute in order; matching must not reorder or combine reads.")]
-    private static Module Read(byte[] bytes, bool expectedConsumer)
+    private static Module Read(byte[] bytes, bool expectedConsumer) =>
+        Read(bytes, expectedConsumer, out _);
+
+    [SuppressMessage("Style", "IDE0078:Use pattern matching", Justification = "Both header reads must execute in order; matching must not reorder or combine reads.")]
+    private static Module Read(byte[] bytes, bool expectedConsumer, out string profileVersion)
     {
         ArgumentNullException.ThrowIfNull(bytes);
         if (bytes.Length is > MaximumBytes or < 17)
@@ -1754,7 +1758,8 @@ public static partial class ModuleCompiler
                 ImportedStructures = importedTypes,
                 RuntimePolicy = policy,
             };
-            if (profile != RetainedNativeProfile(module))
+            var retainedProfile = RetainedNativeProfile(module);
+            if (profile != retainedProfile)
             {
                 throw new ModuleFormatException("Module semantic profile does not match its retained contracts.");
             }
@@ -1779,6 +1784,7 @@ public static partial class ModuleCompiler
             {
                 ValidateProducer(module);
             }
+            profileVersion = retainedProfile;
             return module;
         }
         catch (Exception exception) when (exception is EndOfStreamException or DecoderFallbackException or OverflowException or ArgumentOutOfRangeException or IOException)

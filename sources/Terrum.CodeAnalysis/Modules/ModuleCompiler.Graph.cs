@@ -12,6 +12,10 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class ModuleCompiler
 {
+    internal sealed record GraphContractSnapshot(CompilationReference? Reference,
+        BoundRuntimePolicy RuntimePolicy, string Profile, ImmutableArray<string> Imports,
+        ImmutableArray<BoundStruct> Structures, ImmutableArray<string> ImportedStructures);
+
     internal static CompilationReference MergeGraphReferences(IReadOnlyList<CompilationReference> references,
         IReadOnlyList<IReadOnlyDictionary<string, string?>>? origins = null)
     {
@@ -271,6 +275,20 @@ public static partial class ModuleCompiler
             .Order(StringComparer.Ordinal)];
     }
 
+    internal static GraphContractSnapshot ReadGraphConsumerContract(byte[] contract)
+    {
+        var module = Read(contract, expectedConsumer: true, out var profile);
+        return CreateGraphContractSnapshot(module, reference: null, profile: profile);
+    }
+
+    internal static GraphContractSnapshot ReadGraphProviderContract(byte[] contract,
+        IReadOnlyList<string> exports)
+    {
+        var module = ReadGraphLibrary(contract, out var profile);
+        var reference = CreateGraphReference(module, exports, allowImportedCleanup: true, out _);
+        return CreateGraphContractSnapshot(module, reference, profile);
+    }
+
     internal static ImmutableArray<BoundStruct> GetGraphRetainedTypes(byte[] contract, bool consumer) =>
         consumer ? Read(contract, expectedConsumer: true).Structures : ReadGraphLibrary(contract).Structures;
 
@@ -280,9 +298,16 @@ public static partial class ModuleCompiler
 
     internal static string GetGraphProfile(byte[] contract)
     {
-        var module = ReadGraphLibrary(contract);
-        return RetainedNativeProfile(module);
+        _ = ReadGraphLibrary(contract, out var profile);
+        return profile;
     }
+
+    private static GraphContractSnapshot CreateGraphContractSnapshot(Module module,
+        CompilationReference? reference, string profile) =>
+        new(reference, module.RuntimePolicy, profile,
+            [.. module.Functions.Where(static item => item.Import).Select(static item => item.Name)
+                .Order(StringComparer.Ordinal)],
+            module.Structures, module.ImportedStructures);
 
     private static BoundFunction RecordedImportPromises(string contract, BoundFunction replacement)
     {
@@ -333,7 +358,10 @@ public static partial class ModuleCompiler
         RejectImportedTypeMembers(module.Functions, module.ImportedStructures);
     }
 
-    private static Module ReadGraphLibrary(byte[] bytes)
+    private static Module ReadGraphLibrary(byte[] bytes) =>
+        ReadGraphLibrary(bytes, out _);
+
+    private static Module ReadGraphLibrary(byte[] bytes, out string profileVersion)
     {
         ArgumentNullException.ThrowIfNull(bytes);
         if (bytes.Length is < 17 or > MaximumBytes)
@@ -367,11 +395,13 @@ public static partial class ModuleCompiler
                 ImportedStructures = imported,
                 RuntimePolicy = policy,
             };
+            var retainedProfile = RetainedNativeProfile(module);
             if ((profile == "native-20" && classes.IsEmpty)
-                || stream.Position != stream.Length || profile != RetainedNativeProfile(module))
+                || stream.Position != stream.Length || profile != retainedProfile)
             {
                 throw new ModuleFormatException("Graph semantic profile or payload is invalid.");
             }
+            profileVersion = retainedProfile;
             return module;
         }
         catch (Exception exception) when (exception is EndOfStreamException or DecoderFallbackException
