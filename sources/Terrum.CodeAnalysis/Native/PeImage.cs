@@ -108,9 +108,9 @@ internal static class PeImage
             var namesAt = checked(functionsAt + (4 * count));
             var ordinalsAt = checked(namesAt + (4 * count));
             var dllNameAt = checked(ordinalsAt + (2 * count));
-            var dllName = AsciiBytes("terrum.dll\0");
-            dllName.CopyTo(image, exportFile + dllNameAt);
-            var stringAt = dllNameAt + dllName.Length;
+            const string dllName = "terrum.dll";
+            WriteAscii(image, exportFile + dllNameAt, dllName);
+            var stringAt = dllNameAt + dllName.Length + 1;
             Write32(image, exportFile + 12, exportRva + dllNameAt);
             Write32(image, exportFile + 16, 1); // ordinal base
             Write32(image, exportFile + 20, count);
@@ -130,9 +130,8 @@ internal static class PeImage
                 Write32(image, exportFile + functionsAt + (4 * i), textRva + sourceOffset);
                 Write32(image, exportFile + namesAt + (4 * i), exportRva + stringAt);
                 Write16(image, exportFile + ordinalsAt + (2 * i), i);
-                var nameBytes = AsciiBytes(name + "\0");
-                nameBytes.CopyTo(image, exportFile + stringAt);
-                stringAt += nameBytes.Length;
+                WriteAscii(image, exportFile + stringAt, name);
+                stringAt += name.Length + 1;
             }
         }
 
@@ -206,7 +205,7 @@ internal static class PeImage
         void Section(int index, string name, int size, int rva, int file, int flags)
         {
             var at = sections + (index * 40);
-            AsciiBytes(name).CopyTo(image, at);
+            WriteAscii(image, at, name);
             Write32(image, at + 8, size);
             Write32(image, at + 12, rva);
             Write32(image, at + 16, Align(size, FileAlignment));
@@ -279,9 +278,9 @@ internal static class PeImage
             for (var symbolIndex = 0; symbolIndex < group.Symbols.Count; symbolIndex++)
             {
                 var symbol = group.Symbols[symbolIndex];
-                AsciiBytes(symbol.Name + "\0").CopyTo(bytes, symbol.HintName + 2);
+                WriteAscii(bytes, symbol.HintName + 2, symbol.Name);
             }
-            AsciiBytes(group.DllName + "\0").CopyTo(bytes, group.Name);
+            WriteAscii(bytes, group.Name, group.DllName);
         }
         var targets = new Dictionary<(string DllName, string ExportName), int>();
         foreach (var group in groups)
@@ -350,7 +349,8 @@ internal static class PeImage
         }
     }
 
-    private static byte[] AsciiBytes(string value) => Encoding.ASCII.GetBytes(value);
+    private static void WriteAscii(byte[] destination, int offset, string value)
+        => Encoding.ASCII.GetBytes(value, 0, value.Length, destination, offset);
     private static int Align(int value, int alignment) => checked((value + alignment - 1) & -alignment);
     private static void Write16(byte[] image, int at, int value) =>
         BinaryPrimitives.WriteUInt16LittleEndian(image.AsSpan(at), checked((ushort)value));
