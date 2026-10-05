@@ -61,8 +61,8 @@ The native emitter, graph and module-set paths reject unbound or unsupported
 source requirements. No general buffer dependency or source-aware maintained
 compiler-primitives DLL was added.
 
-The same capability also runs the bounded Terrum-authored `CharacterLiteral`
-and `StringLiteral` leaf decoders and the provisional `StringRow` name and
+The same capability also runs the bounded Terrum-authored `Utf16Scalar`,
+`CharacterLiteral` and `StringLiteral` leaf decoders and the provisional `StringRow` name and
 namespace encoders for ASCII, UTF-8, UTF-16LE and UTF-32LE as persisted
 semantic-module providers. This reuses the existing requirement and grant
 validation; it does not make `StringRow` a TRRM section writer or make the
@@ -121,6 +121,9 @@ embedded zero scalars across fresh grants.
 policies, comparing the ordinal decoded-scalar name and namespace predicates
 with hosted ordinal string equality and checking invalid empty-name and
 embedded-zero inputs.
+`Utf16ScalarModuleDecodesFreshSourceGrants` passed under both policies,
+checking scalar values and code-unit widths for BMP and supplementary
+characters and rejection of unpaired surrogate code units.
 `SourceLineIndexModuleIndexesFreshSourceGrants` passed under both policies,
 reusing persisted provider and consumer artifacts across empty, ordinary,
 mixed-line-break and malformed-surrogate snapshots while comparing line

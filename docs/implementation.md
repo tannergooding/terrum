@@ -13,8 +13,8 @@ single-producer semantic-module program can be linked and executed by
 of at most 16,384 code units and copies it into fresh invocation storage.
 Artifacts do not retain source contents, concrete length or address. Graphs,
 module sets, native DLLs and persisted AOT images remain outside this support.
-The bounded adapter has executed the Terrum-authored `CharacterLiteral` and
-`StringLiteral` leaf decoders, the provisional `StringEscape` decoder and
+The bounded adapter has executed the Terrum-authored `Utf16Scalar`,
+`CharacterLiteral` and `StringLiteral` leaf decoders, the provisional `StringEscape` decoder and
 `StringRow` name/namespace encoders for ASCII, UTF-8, UTF-16LE and UTF-32LE.
 Persisted semantic-module JIT tests compare those rows with the hosted string
 table writer across fresh grants, including the existing empty-name,
@@ -22,6 +22,9 @@ unrepresentable-ASCII and embedded-zero rejection behavior. They also compare
 the ordinal decoded-scalar name and namespace comparison APIs against hosted
 ordinal string equality, including invalid empty-name and embedded-zero
 requests.
+`Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
+across fresh grants, including valid surrogate pairs and unpaired-surrogate
+rejection under both runtime policies.
 Persisted semantic-module JIT tests also compare
 `StringLiteral` length and encoding results for UTF-8, UTF-16
 units and LE/BE bytes, strict ASCII and Latin-1, and UTF-32 LE/BE bytes with
