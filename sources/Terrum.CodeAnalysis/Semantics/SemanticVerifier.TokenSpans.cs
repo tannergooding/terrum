@@ -67,12 +67,21 @@ public static partial class SemanticVerifier
         return hasSpans;
     }
 
-    private sealed class BackingDependencies(int length)
+    private sealed class BackingDependencies
     {
         // A slot conservatively retains every source it can hold on any path. Liveness
         // remains path-sensitive in InitializationState, including unwind replay.
-        internal HashSet<int>[] Sources { get; } = [.. Enumerable.Range(0, length).Select(static _ => new HashSet<int>())];
+        internal HashSet<int>[] Sources { get; }
         internal List<HashSet<int>> Staged { get; } = [];
+
+        internal BackingDependencies(int length)
+        {
+            Sources = new HashSet<int>[length];
+            for (var slot = 0; slot < length; slot++)
+            {
+                Sources[slot] = [];
+            }
+        }
     }
 
     private static BackingDependencies? CreateBackingDependencies(BoundFunction function, BoundProgram program, bool hasSpans)
@@ -229,8 +238,14 @@ public static partial class SemanticVerifier
         }
 
         Collect(function.Body, 0);
-        var pending = new Queue<int>(Enumerable.Range(0, edges.Length));
-        var queued = Enumerable.Repeat(true, edges.Length).ToArray();
+        var pending = new Queue<int>(edges.Length);
+        var queued = new bool[edges.Length];
+        for (var source = 0; source < edges.Length; source++)
+        {
+            pending.Enqueue(source);
+            queued[source] = true;
+        }
+
         while (pending.TryDequeue(out var source))
         {
             queued[source] = false;
