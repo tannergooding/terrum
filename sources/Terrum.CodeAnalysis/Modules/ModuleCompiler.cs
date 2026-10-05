@@ -168,29 +168,36 @@ public static partial class ModuleCompiler
 
     private static ImmutableArray<string> ReadConsumerCallImports(Module consumer)
     {
-        var indexes = new Dictionary<string, int>(consumer.Functions.Length, StringComparer.Ordinal);
-        for (var index = 0; index < consumer.Functions.Length; index++)
-        {
-            indexes.Add(consumer.Functions[index].Name, index);
-        }
-        var imports = new HashSet<string>(StringComparer.Ordinal);
+        Dictionary<string, int>? indexes = null;
+        HashSet<string>? imports = null;
         foreach (var function in consumer.Functions)
         {
             if (function.Function is BoundFunction body)
             {
                 _ = Calls(body.Body, visitSymbolicFunction: name => {
-                    if (!indexes.TryGetValue(name, out var target))
+                    var functionIndexes = indexes ??= CreateFunctionIndexes();
+                    if (!functionIndexes.TryGetValue(name, out var target))
                     {
                         throw new ModuleContractException($"Unresolved function reference '{name}'.");
                     }
                     if (consumer.Functions[target].Import)
                     {
-                        _ = imports.Add(name);
+                        (imports ??= new HashSet<string>(StringComparer.Ordinal)).Add(name);
                     }
                 });
             }
         }
-        return [.. imports.Order(StringComparer.Ordinal)];
+        return imports is null ? [] : [.. imports.Order(StringComparer.Ordinal)];
+
+        Dictionary<string, int> CreateFunctionIndexes()
+        {
+            var result = new Dictionary<string, int>(consumer.Functions.Length, StringComparer.Ordinal);
+            for (var index = 0; index < consumer.Functions.Length; index++)
+            {
+                result.Add(consumer.Functions[index].Name, index);
+            }
+            return result;
+        }
     }
 
     /// <summary>Reads the native semantic profile of a persisted module, including its retained value contracts.</summary>
