@@ -223,8 +223,13 @@ public static partial class NativeModuleCompiler
             {
                 throw new ModuleContractException("Missing, extra or identity-incompatible native dependency.");
             }
-            providerExports[i] = provider.Reference.Functions
-                .Select(static item => item.Name).ToHashSet(StringComparer.Ordinal);
+            var functions = provider.Reference.Functions;
+            var exported = new HashSet<string>(functions.Length, StringComparer.Ordinal);
+            foreach (var function in functions)
+            {
+                _ = exported.Add(function.Name);
+            }
+            providerExports[i] = exported;
         }
         var referenceSet = CreateReferenceSet(providers);
         set.ContractSnapshot.ValidateAgainstReference(referenceSet);
@@ -232,9 +237,12 @@ public static partial class NativeModuleCompiler
         {
             var dependency = set.Dependencies[i];
             var exported = providerExports[i];
-            if (dependency.Imports.Any(name => !exported.Contains(name)))
+            foreach (var name in dependency.Imports)
             {
-                throw new ModuleFormatException("Native set import mapping differs from provider declarations.");
+                if (!exported.Contains(name))
+                {
+                    throw new ModuleFormatException("Native set import mapping differs from provider declarations.");
+                }
             }
         }
         var profile = set.ContractSnapshot.Profile;
