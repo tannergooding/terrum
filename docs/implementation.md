@@ -51,6 +51,11 @@ A second persisted semantic-module consumer executes private generic
 `Token`/`SourceRange` aggregates. It checks conditional `init ref` publication
 and the explicit `out` adapter under both policies; this adds neither general
 reference support nor a new public library API.
+A persisted semantic-module consumer also exercises `ManagedTokenChain`
+creation, rejected mutation, copied records, cursor read/lookahead and
+invalidation, plus link collection after clear, under both runtime policies.
+The chain remains a bounded component and this evidence does not make it a
+scanner or scalar-frontend dependency.
 This bounded implementation is recorded by the still-unapproved
 [invocation-scoped source grant proposal](proposals/invocation-scoped-source-grant.md);
 it does not extend the native profile or move the scalar frontend beyond the
