@@ -3,9 +3,10 @@
 **Status: unapproved.** This records a recommended first implementation slice
 for the roadmap's general reference/access/loan call contracts. It does not
 change accepted source semantics or the approved metadata schema, and does not
-approve the broader proposal. Its marked provisional implementation slice now
-has hosted structured semantic-module support; that implementation boundary is
-described in [the module format](../modules.md) and [implementation notes](../implementation.md).
+approve the broader proposal. Its marked provisional slices now include
+structured semantic-module caller obligations and validated indexed executable
+unsafe scopes; their boundaries are described in [the module
+format](../modules.md) and [implementation notes](../implementation.md).
 
 ## Current boundary
 
@@ -36,7 +37,8 @@ and emitter.
 caller-unsafe function declarations and explicit `unsafe` scopes. Before the
 provisional slice below, structured semantic modules retained `BoundUnsafe`
 scopes but rejected caller-unsafe declarations and calls. Executable TRRM
-Bodies still do not retain a validated unsafe-call scope.
+Bodies also previously lacked a validated unsafe-call scope; the bounded
+indexed-Body support is described separately in section 3.
 
 **Recommendation:** Provisionally implement round-tripping caller-unsafe
 contracts for top-level functions and calls enclosed by explicit `unsafe { }`
@@ -45,13 +47,13 @@ obligation, retain the `BoundUnsafe` scope, and reconstruct call authorization
 from that scope when reading; do not trust a serialized authorization bit by
 itself. `unsafe(expr)` remains same-compilation-only because its scope is
 currently represented only by a bound-call authorization fact. Keep unsafe
-fields, accessors and operators outside this slice, and keep caller-unsafe
-calls rejected in executable TRRM until its Body contract can prove explicit
-call scope. Top-level declarations may provisionally round-trip the assigned
-Effects bit, but that metadata alone does not authorize calls. This slice
-changes the internal semantic-module format and must advance its revision. It
-is an implementation experiment, not approval of general reference metadata
-or the broader proposal.
+fields, accessors and operators outside this semantic-module slice. Top-level
+declarations also provisionally round-trip the assigned Effects bit in
+executable TRRM, but that metadata alone does not authorize calls; executable
+call support is limited to the separately validated indexed unsafe regions in
+section 3. This slice changes the internal semantic-module format and must
+advance its revision. It is an implementation experiment, not approval of
+general reference metadata or the broader proposal.
 
 **Implemented provisionally:** Semantic-module revision 56 persists the
 top-level function obligation and reconstructs call authorization only from
@@ -89,39 +91,38 @@ reject unknown kinds and flags rather than infer dependencies from bodies.
 ### 2. How should caller-unsafe declarations cross an import boundary?
 
 **Summary:** The grammar gives `unsafe` on a callable declaration a caller
-obligation, distinct from unsafe operations inside its body, but the source
-to metadata mapping is open. The metadata design already reserves Effects
-bit `0x04` for exactly the unsafe-caller requirement. That function-level bit
-is provisionally round-tripped by executable TRRM, but it does not authorize a
-call inside a source-free Body: the current `Call` record carries no checked
-provenance for an explicit unsafe scope, so a reader cannot distinguish a
-scoped call from an unscoped one.
+obligation, distinct from unsafe operations inside its body. Assigned Effects
+bit `0x04` carries that obligation and is provisionally round-tripped by
+executable TRRM. It does not authorize a call by itself: call authorization
+requires the separately validated indexed unsafe-region structure.
 
 **Recommendation:** Map the source declaration to that assigned Effects bit
 and propagate the obligation at each call site. Only an explicit unsafe
 caller scope discharges it; an implementation's internal unsafe block or
 body analysis must not silently change the published contract. Before
 executable support admits such calls, assign and validate a Body representation
-for explicit unsafe scopes. Until then, keep caller-unsafe calls outside the
-executable TRRM profile; do not treat the callee's Effects bit or hosted
-source verification as proof that an individual call was authorized.
+for explicit unsafe scopes. The provisional indexed-body implementation in
+section 3 admits calls only when that region structure validates; do not treat
+the callee's Effects bit or hosted source verification as proof that an
+individual call was authorized.
 
 ### 3. How should executable Bodies validate caller-unsafe scope?
 
 **Summary:** The source caller obligation and assigned Effects bit `0x04` are
 settled, and semantic-module revision 56 reconstructs authorization from
 explicit `BoundUnsafe` scopes. Executable TRRM provisionally round-trips
-caller-unsafe declarations but still rejects their calls: region kind `0x06`
-is reserved, and a call-site authorization bit would not prove explicit
+caller-unsafe declarations and supports calls only inside validated indexed
+Body unsafe scopes. Compact-linear Bodies still cannot prove explicit
 unsafe-block enclosure.
 
 **Recommendation:** Define a first executable slice for indexed, fail-fast
-Bodies with root-free Copy-scalar shapes only, using region kind `0x06` as a
-structurally validated lexical unsafe region. Assign compact-indexed
-`bodyLayout` bit `0x04` as its Body-local feature requirement, set exactly when
-the Body contains an unsafe region; retain bit `0x08` as reserved and keep
-compact-linear Bodies scope-free. Split blocks at unsafe-scope boundaries and
-derive authorization only from validated enclosing-region membership.
+Bodies with root-free Copy-scalar shapes only, using proposed region kind
+`0x06` as a structurally validated lexical unsafe region and its feature
+discriminator.
+Do not change `bodyLayout`: bits 2–3 select the existing Body form, `0x0C` is
+the invalid fourth form, and bits 4–7 remain reserved. Compact-linear Bodies
+stay scope-free. Split blocks at unsafe-scope boundaries and derive
+authorization only from validated enclosing-region membership.
 
 For kind `0x06`, require a preceding parent region ID, an entry block inside
 the region, an exit block outside its subtree but within its parent, and a zero
@@ -138,9 +139,22 @@ unsafe fields, accessors and operators rejected.
 Writers and readers must audit every call and every Body, including uncalled
 functions, and reject malformed, stripped, bypassed or leaking scope
 structures. This validates Body structure under the existing producer-trust
-model; it does not authenticate original source authorship. Gate support behind
-assigned Body feature requirements. This is a representation proposal, not
-executable support or source-contract approval.
+model; it does not authenticate original source authorship. The proposed
+region kind itself gates this provisional support; no `bodyLayout` feature
+bit is added.
+The accepted instruction-set contract still reserves kind `0x06`, so this
+recommendation and its implementation remain provisional until approved.
+
+**Implemented provisionally:** Indexed fail-fast Bodies use kind-`0x06`
+regions to represent explicit `BoundUnsafe` scopes without changing
+`bodyLayout`. The writer lowers scopes into nested lexical regions and rejects
+unsafe calls without one; the reader validates region ancestry, entry/exit
+edges, loop backedges and the zero cleanup field before reconstructing call
+authorization from region membership. Returns and fail-fast terminators may
+end paths inside a region. Transfers that leave an unsafe region,
+compact-linear unsafe calls, `unsafe(expr)`, unsafe members, cleanup, unwind
+and lifetime authority remain unsupported. This bounded implementation
+remains provisional and does not approve the broader proposal.
 
 ### 4. Which source rules and metadata gate general output-call migration?
 

@@ -86,7 +86,7 @@ internal sealed record TrRmScalarBlock(ImmutableArray<int> Parameters,
     ImmutableArray<BoundStatement> Operations, int Condition, TrRmScalarEdge? True,
     TrRmScalarEdge? False, int ReturnValue, int FailureReason, int SwitchValue = 0,
     ImmutableArray<TrRmScalarSwitchCase> SwitchCases = default,
-    TrRmScalarEdge? SwitchDefault = null);
+    TrRmScalarEdge? SwitchDefault = null, bool IsCallerUnsafeScope = false);
 
 /// <summary>Immutable, source-free scalar SSA body admitted only after compact Body validation.</summary>
 internal sealed class TrRmScalarGraph
@@ -225,7 +225,9 @@ internal sealed class TrRmScalarGraph
                     || target.IsClassConstructor || target.ClassConstructor != -1
                     || target.DeclaringStruct is not null || target.IsStatic || target.IsCleanup
                     || target.PropertyName is not null || target.Intrinsic != BoundIntrinsic.None
-                    || target.RequiresUnsafeCaller || target.ReturnType != call.Type
+                    || target.RequiresUnsafeCaller != call.IsUnsafeAuthorized
+                    || target.RequiresUnsafeCaller && !block.IsCallerUnsafeScope
+                    || target.ReturnType != call.Type
                     || target.ParameterCount != call.Arguments.Length
                     || function.IsNoThrow && !target.IsNoThrow)
                 {

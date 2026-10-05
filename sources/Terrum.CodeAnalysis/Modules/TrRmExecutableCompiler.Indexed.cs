@@ -48,6 +48,7 @@ public static partial class TrRmExecutableCompiler
         internal int Id = id;
         internal int Parent = parent;
         internal IndexedBlock Header = header;
+        internal byte Kind = 1;
         internal IndexedBlock ContinueTarget = header;
         internal IndexedBlock? Exit;
         internal int[] VisibleSlots = visibleSlots;
@@ -486,7 +487,7 @@ public static partial class TrRmExecutableCompiler
                 }
                 foreach (var region in regions)
                 {
-                    destination[bodyPosition++] = 1;
+                    destination[bodyPosition++] = region.Kind;
                     WriteToSpan(destination, ref bodyPosition, (ulong)region.Parent, width);
                     WriteToSpan(destination, ref bodyPosition, (ulong)region.Header.Id, width);
                     WriteToSpan(destination, ref bodyPosition,
@@ -901,7 +902,14 @@ public static partial class TrRmExecutableCompiler
                     throw Invalid("Void indexed value type.");
                 }
             }
-            position += regionCount * (1 + 4 * width);
+            var regionKinds = new byte[regionCount + 1];
+            var regionParents = new int[regionCount + 1];
+            for (var region = 1; region <= regionCount; region++)
+            {
+                regionKinds[region] = ReadByte(body, ref position);
+                regionParents[region] = ReadInt(body, ref position, width);
+                position += 3 * width;
+            }
             var valueTypes = ImmutableArray.CreateBuilder<PrimitiveType>(valueCount);
             for (var value = 0; value < valueCount; value++)
             {
@@ -943,9 +951,12 @@ public static partial class TrRmExecutableCompiler
                 var extent = blockData[offsets[b]..offsets[b + 1]];
                 var cursor = 0;
                 var presence = ReadByte(extent, ref cursor);
-                if ((presence & 1) != 0)
+                var blockRegion = (presence & 1) != 0
+                    ? ReadInt(extent, ref cursor, width) : 0;
+                var isCallerUnsafeScope = false;
+                for (var region = blockRegion; region != 0; region = regionParents[region])
                 {
-                    _ = ReadInt(extent, ref cursor, width);
+                    isCallerUnsafeScope |= regionKinds[region] == 6;
                 }
                 var parameters = ReadIndexedList(extent, ref cursor, width, (presence & 2) != 0);
                 _ = ReadIndexedList(extent, ref cursor, width, (presence & 4) != 0);
@@ -1003,10 +1014,32 @@ public static partial class TrRmExecutableCompiler
                         {
                             throw Invalid("Indexed scalar operation result type mismatch.");
                         }
+                        if (local.Initializer is BoundCall call)
+                        {
+                            local = local with
+                            {
+                                Initializer = call with
+                                {
+                                    IsUnsafeAuthorized = functions[call.Function].RequiresUnsafeCaller
+                                        && isCallerUnsafeScope,
+                                },
+                            };
+                        }
                         operations.Add(local);
                     }
                     else if (statement is BoundExpressionStatement discarded)
                     {
+                        if (discarded.Expression is BoundCall call)
+                        {
+                            discarded = discarded with
+                            {
+                                Expression = call with
+                                {
+                                    IsUnsafeAuthorized = functions[call.Function].RequiresUnsafeCaller
+                                        && isCallerUnsafeScope,
+                                },
+                            };
+                        }
                         operations.Add(discarded);
                     }
                     else if (statement is TrRmScalarDivRem divRem)
@@ -1117,7 +1150,7 @@ public static partial class TrRmExecutableCompiler
                 }
                 result.Add(new TrRmScalarBlock(parameters, operations.MoveToImmutable(),
                     condition, whenTrue, whenFalse, returned, failureReason, switchValue,
-                    switchCases, switchDefault));
+                    switchCases, switchDefault, isCallerUnsafeScope));
             }
             return TrRmScalarGraph.FromAuditedBody(result.MoveToImmutable(),
                 valueTypes.MoveToImmutable(), parameterCount, resultType, noThrow, doesNotReturn);
@@ -1432,7 +1465,10 @@ public static partial class TrRmExecutableCompiler
                     return Merge(condition, () => Expression(conditional.WhenTrue),
                         () => Expression(conditional.WhenFalse), conditional.Type);
                 case BoundCall call:
-                    if (_program.Functions[call.Function].RequiresUnsafeCaller)
+                    if (_program.Functions[call.Function].RequiresUnsafeCaller
+                        && (!call.IsUnsafeAuthorized
+                            || !IsCallerUnsafeScope((_current
+                                ?? throw Unsupported("Caller-unsafe call has no indexed block.")).Region)))
                     {
                         throw Unsupported("Caller-unsafe calls require an executable unsafe-region contract.");
                     }
@@ -1474,6 +1510,38 @@ public static partial class TrRmExecutableCompiler
                         }
                     }
                     break;
+                case BoundUnsafe unsafeBlock:
+                {
+                    var source = _current ?? throw Unsupported("Unsafe scope has no entry block.");
+                    var unsafeParent = source.Region;
+                    var visibleSlots = (int[])_slots.Clone();
+                    var unsafeHeader = NewBlock(_regions.Count + 1);
+                    var unsafeRegion = new IndexedRegion(_regions.Count + 1, unsafeParent,
+                        unsafeHeader, visibleSlots)
+                    {
+                        Kind = 6,
+                    };
+                    _regions.Add(unsafeRegion);
+                    var unsafeEntrySlots = Parameters(unsafeHeader, visibleSlots);
+                    Jump(unsafeHeader, _slots, visibleSlots);
+                    _current = unsafeHeader;
+                    _slots = unsafeEntrySlots;
+                    Statement(unsafeBlock.Body);
+                    if (_current is not null)
+                    {
+                        var unsafeExit = NewBlock(unsafeParent);
+                        unsafeRegion.Exit = unsafeExit;
+                        var unsafeExitSlots = Parameters(unsafeExit, visibleSlots);
+                        Jump(unsafeExit, _slots, visibleSlots);
+                        _current = unsafeExit;
+                        _slots = unsafeExitSlots;
+                    }
+                    else
+                    {
+                        unsafeRegion.Exit = source;
+                    }
+                    break;
+                }
                 case BoundLocal local:
                     var initialValue = Expression(local.Initializer);
                     _slots[local.Variable] = initialValue;
@@ -1663,8 +1731,37 @@ public static partial class TrRmExecutableCompiler
             return depth == 1 ? _loops.Peek() : _loops.ElementAt(depth - 1);
         }
 
+        private bool IsCallerUnsafeScope(int region)
+        {
+            while (region != 0)
+            {
+                var current = _regions[region - 1];
+                if (current.Kind == 6)
+                {
+                    return true;
+                }
+                region = current.Parent;
+            }
+
+            return false;
+        }
+
         private void Transfer(IndexedRegion target, bool isContinue)
         {
+            var sourceRegion = (_current ?? throw Unsupported("Unreachable source transfer.")).Region;
+            for (var scopeRegion = sourceRegion; scopeRegion != target.Id;)
+            {
+                if (scopeRegion == 0)
+                {
+                    throw Unsupported("Scalar loop transfer target is not an enclosing region.");
+                }
+                var currentRegion = _regions[scopeRegion - 1];
+                if (currentRegion.Kind == 6)
+                {
+                    throw Unsupported("Loop transfers cannot leave an executable unsafe region.");
+                }
+                scopeRegion = currentRegion.Parent;
+            }
             var region = _loops.Peek();
             if (region == target && isContinue)
             {
@@ -1723,9 +1820,11 @@ public static partial class TrRmExecutableCompiler
             }
             foreach (var region in _regions)
             {
-                if (!region.HasSourceContinuation || !region.HasHeaderBackedge)
+                if (region.Kind == 1
+                    && (!region.HasSourceContinuation || !region.HasHeaderBackedge)
+                    || region.Kind == 6 && region.Exit is null)
                 {
-                    throw Unsupported("An indexed loop requires a reachable header backedge.");
+                    throw Unsupported("An indexed region is missing its required loop or scope exit.");
                 }
             }
             return EncodeIndexed(_function, _blocks, _regions, _types, _program, _hasFloatingTypes);

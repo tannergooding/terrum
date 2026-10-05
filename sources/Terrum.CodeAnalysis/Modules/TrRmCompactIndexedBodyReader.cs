@@ -8,12 +8,15 @@ using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
 
-/// <summary>Inspects the root-free scalar compact-indexed subset with branches and nested loop regions.</summary>
+/// <summary>
+/// Inspects the root-free scalar compact-indexed subset with branches, loop regions and lexical
+/// unsafe scopes.
+/// </summary>
 /// <remarks>Only scalar constants, operators, integer conversions, optional values, Copy, Select, local, expected-import and packed direct scalar calls, Branch/BranchIf/Switch, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
 public readonly ref struct TrRmCompactIndexedBodyReader
 {
     private readonly record struct Edge(int Target, int[] Arguments);
-    private readonly record struct LoopRegion(int Parent, int Header, int Exit);
+    private readonly record struct BodyRegion(byte Kind, int Parent, int Header, int Exit);
 
     private readonly int[] _operationCounts;
 
@@ -124,11 +127,12 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             mappedTypes[typeId] = type;
         }
 
-        var regions = new LoopRegion[regionCount + 1];
+        var regions = new BodyRegion[regionCount + 1];
         var regionDepths = new int[regionCount + 1];
         for (var region = 1; region <= regionCount; region++)
         {
-            if (Read(body, ref position, 1) != 1)
+            var kind = (byte)Read(body, ref position, 1);
+            if (kind is not (1 or 6))
             {
                 throw InvalidBody();
             }
@@ -143,7 +147,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 throw InvalidBody();
             }
 
-            regions[region] = new LoopRegion(parent, header, exit);
+            regions[region] = new BodyRegion(kind, parent, header, exit);
             regionDepths[region] = regionDepths[parent] + 1;
         }
 
@@ -912,6 +916,11 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             {
                 throw InvalidBody();
             }
+            if (regions[region].Kind == 6
+                && blockRegions[regions[region].Exit] != regions[region].Parent)
+            {
+                throw InvalidBody();
+            }
         }
 
         var backedges = new bool[regionCount + 1];
@@ -946,7 +955,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 }
 
                 if (edge.Target <= block
-                    && (targetRegion == 0
+                    && (targetRegion == 0 || regions[targetRegion].Kind != 1
                         || commonRegion != targetRegion
                         || edge.Target != regions[targetRegion].Header))
                 {
@@ -961,7 +970,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         }
         for (var region = 1; region <= regionCount; region++)
         {
-            if (!backedges[region])
+            if (regions[region].Kind == 1 && !backedges[region])
             {
                 throw InvalidBody();
             }
@@ -1239,7 +1248,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
     private static bool Contains(int[] values, int value)
         => Array.BinarySearch(values, value) >= 0;
 
-    private static int CommonRegion(LoopRegion[] regions, int[] depths,
+    private static int CommonRegion(BodyRegion[] regions, int[] depths,
         int first, int second)
     {
         while (depths[first] > depths[second])

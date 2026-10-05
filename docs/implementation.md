@@ -287,11 +287,17 @@ inside persisted `BoundUnsafe` scopes. Caller-unsafe methods, accessors,
 operators and fields remain unsupported in semantic modules; `unsafe(expr)`
 authorization also remains same-compilation-only. Executable TRRM
 provisionally round-trips the caller-unsafe Effects bit on top-level function
-declarations, but still rejects calls to those functions because its Body
-cannot prove explicit call scope. This does not add caller-unsafe region
-support or authorize those calls. Complete-program scalar projection v85 also
-source-audits caller-unsafe top-level declarations and calls enclosed by
-explicit `unsafe { ... }` blocks; it also audits `unsafe(expr)` call-site
+declarations and admits calls only inside structurally validated lexical
+unsafe regions in compact-indexed fail-fast Bodies. These regions carry no
+cleanup, unwind or lifetime authority; transfers that leave a region,
+`unsafe(expr)`, compact-linear unsafe calls and unsafe members remain
+unsupported. Region kind `0x06` itself identifies this provisional feature;
+the accepted `bodyLayout` form and reserved-bit assignments remain unchanged.
+The accepted instruction-set contract still reserves region kind `0x06`;
+this implementation is not standardized TRRM support or approval of the
+broader reference-call metadata proposal. Complete-program scalar projection
+v85 also source-audits caller-unsafe top-level declarations and calls enclosed
+by explicit `unsafe { ... }` blocks; it also audits `unsafe(expr)` call-site
 scopes. Both remain backed by the hosted verifier/emitter.
 
 Target type matching also preserves generic/concrete consistency, including

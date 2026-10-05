@@ -373,7 +373,7 @@ public static partial class TrRmExecutableCompiler
             TrRmScalarGraph? indexed = null;
             ImmutableArray<BoundVariable>.Builder variables;
             ImmutableArray<BoundStatement> statements;
-            if ((body[0] & 0x0C) == 0x08)
+            if ((body[0] & 0x08) != 0)
             {
                 TrRmCompactIndexedBodyReader.ValidateOnly(bodies, row, modules, defs, sigs,
                     parameters, types);
@@ -539,6 +539,10 @@ public static partial class TrRmExecutableCompiler
                 {
                     AnalyzeStatement(loop.Iterator, true, ref hasFloatingTypes, ref hasIndexedFlow);
                 }
+                break;
+            case BoundUnsafe unsafeBlock:
+                hasIndexedFlow = true;
+                AnalyzeStatement(unsafeBlock.Body, true, ref hasFloatingTypes, ref hasIndexedFlow);
                 break;
             case BoundRequire require:
                 hasIndexedFlow = true;

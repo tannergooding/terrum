@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -490,6 +491,255 @@ public sealed class CallerUnsafeTests
         Assert.False(caller.HasErrors, string.Join(Environment.NewLine, caller.Diagnostics));
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(
             Assert.IsType<BoundProgram>(caller.Program), "unsafe-call"));
+
+        var scopedCaller = Compilation.Create(SyntaxTree.Parse(
+            "unsafe int32 Danger() { return 42; }"
+            + " int32 Main() { unsafe { return Danger(); } }"));
+        Assert.False(scopedCaller.HasErrors, string.Join(Environment.NewLine, scopedCaller.Diagnostics));
+        var executable = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(
+            Assert.IsType<BoundProgram>(scopedCaller.Program), "unsafe-block-call"));
+        Assert.Equal(42, NativeJit.Execute(executable, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void TrRmUnsafeRegionsNestWithLoopsAndCarryOuterScalarValues()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unsafe int32 Danger() { return 42; }
+            int32 Main() {
+                mut int32 value = 0;
+                while (value < 1) {
+                    unsafe { unsafe { value = Danger(); } }
+                }
+                return value;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.Emit(
+            Assert.IsType<BoundProgram>(compilation.Program), "nested-unsafe-regions");
+        Assert.Equal(42, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void TrRmLoopTransfersRemainValidWhenNestedWithinUnsafeScope()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut int32 value = 0;
+                unsafe {
+                    outer: while (value < 3) {
+                        while (value < 3) {
+                            value++;
+                            if (value == 1) { continue outer; }
+                            if (value == 2) { continue; }
+                            break outer;
+                        }
+                    }
+                }
+                return value;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.Emit(
+            Assert.IsType<BoundProgram>(compilation.Program), "unsafe-nested-loop-transfers");
+        Assert.Equal(3, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData("break;")]
+    [InlineData("continue;")]
+    [InlineData("break outer;")]
+    [InlineData("continue outer;")]
+    public void TrRmRejectsLoopTransfersThatLeaveUnsafeScope(string transfer)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { mut int32 value = 0;"
+            + " outer: while (value < 1) { while (value < 1) { unsafe { "
+            + transfer + " } } } return 42; }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(
+            Assert.IsType<BoundProgram>(compilation.Program), "unsafe-loop-transfer"));
+    }
+
+    [Fact]
+    public void TrRmUnsafeRegionPreservesReservedBodyLayoutBits()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "unsafe int32 Danger() { return 42; }"
+            + " int32 Main() { unsafe { return Danger(); } }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.Emit(
+            Assert.IsType<BoundProgram>(compilation.Program), "unsafe-region-layout");
+        var bodyOffset = BodyRowOffset(artifact, 2);
+        Assert.Equal(0x08, artifact[bodyOffset] & 0xFC);
+
+        var invalidForm = (byte[])artifact.Clone();
+        invalidForm[bodyOffset] |= 0x04;
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(invalidForm));
+
+        var reservedBit = (byte[])artifact.Clone();
+        reservedBit[bodyOffset] |= 0x10;
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(reservedBit));
+    }
+
+    [Fact]
+    public void TrRmAuditsUnscopedCallerUnsafeCallsInUncalledIndexedFunctions()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [NoThrow] int32 Danger() { return 42; }
+            int32 Caller() {
+                mut int32 value = 0;
+                while (value < 1) { value = Danger(); }
+                return value;
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.Emit(
+            Assert.IsType<BoundProgram>(compilation.Program), "unsafe-unscoped-uncalled-indexed");
+        Assert.Equal(0x08, artifact[BodyRowOffset(artifact, 2)] & 0xFC);
+        _ = TrRmExecutableCompiler.Load(artifact);
+
+        var (methodOffset, methodCount) = FindSection(artifact, 0x16);
+        var contractRow = 0;
+        for (var method = 0; method < methodCount; method++)
+        {
+            var methodRow = methodOffset + (method * 28);
+            if (BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(methodRow + 20)) != 0)
+            {
+                contractRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                    artifact.AsSpan(methodRow + 16)));
+                break;
+            }
+        }
+        Assert.NotEqual(0, contractRow);
+
+        var (contractOffset, contractCount) = FindSection(artifact, 0x1B);
+        var contractData = contractOffset + ((contractCount + 1) * sizeof(uint));
+        var contractRowOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+            artifact.AsSpan(contractOffset + ((contractRow - 1) * sizeof(uint)))));
+        var effectsMaskOffset = contractData + contractRowOffset + 8;
+        Assert.Equal(1u, BinaryPrimitives.ReadUInt32LittleEndian(
+            artifact.AsSpan(effectsMaskOffset)));
+        BinaryPrimitives.WriteUInt32LittleEndian(artifact.AsSpan(effectsMaskOffset), 5);
+
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+    }
+
+    [Fact]
+    public void TrRmUnsafeRegionRequiresAValidExitBlock()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "unsafe int32 Danger() { return 42; }"
+            + " int32 Main() { unsafe { return Danger(); } }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.Emit(
+            Assert.IsType<BoundProgram>(compilation.Program), "unsafe-region-exit");
+        var malformed = (byte[])artifact.Clone();
+        var regionOffset = RegionTableOffset(malformed, 2);
+        var width = 1 << (malformed[BodyRowOffset(malformed, 2)] & 3);
+        var header = ReadCompactCount(malformed, regionOffset + 1 + width, width);
+        WriteCompactCount(malformed, regionOffset + 1 + (2 * width), width, header);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
+    [Fact]
+    public void TrRmNestedUnsafeRegionCannotExitItsParentLoop()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unsafe int32 Danger() { return 42; }
+            int32 Main() {
+                mut int32 value = 0;
+                while (value < 1) {
+                    unsafe { unsafe { value = Danger(); } }
+                }
+                return value;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.Emit(
+            Assert.IsType<BoundProgram>(compilation.Program), "unsafe-region-parent-exit");
+        var malformed = (byte[])artifact.Clone();
+        var bodyOffset = BodyRowOffset(malformed, 2);
+        var regionOffset = RegionTableOffset(malformed, 2);
+        var width = 1 << (malformed[bodyOffset] & 3);
+        var nestedUnsafeRegion = regionOffset + 1 + (4 * width);
+        Assert.Equal(6, malformed[nestedUnsafeRegion]);
+        WriteCompactCount(malformed, nestedUnsafeRegion + 1 + (2 * width), width, 1);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
+    private static int BodyRowOffset(byte[] artifact, int row)
+    {
+        var (dataOffset, bodyCount) = FindSection(artifact, 0x20);
+        if (row < 1 || row > bodyCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(row));
+        }
+
+        var rowOffset = (int)BinaryPrimitives.ReadUInt32LittleEndian(
+            artifact.AsSpan(dataOffset + ((row - 1) * sizeof(uint))));
+        return dataOffset + ((bodyCount + 1) * sizeof(uint)) + rowOffset;
+    }
+
+    private static (int Offset, int Count) FindSection(byte[] artifact, ushort kind)
+    {
+        var sectionCount = (int)BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(12));
+        for (var section = 0; section < sectionCount; section++)
+        {
+            var entryOffset = 32 + section * 16;
+            if (BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(entryOffset)) == kind)
+            {
+                return (
+                    (int)BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(entryOffset + 8)),
+                    (int)BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(entryOffset + 4)));
+            }
+        }
+
+        throw new InvalidDataException("Executable artifact is missing a required section.");
+    }
+
+    private static int RegionTableOffset(byte[] artifact, int bodyRow)
+    {
+        var bodyOffset = BodyRowOffset(artifact, bodyRow);
+        var width = 1 << (artifact[bodyOffset] & 3);
+        var regionCount = ReadCompactCount(artifact, bodyOffset + 1 + (2 * width), width);
+        var typeCount = ReadCompactCount(artifact, bodyOffset + 1 + (3 * width), width);
+        if (regionCount == 0)
+        {
+            throw new InvalidDataException("Indexed Body has no region table.");
+        }
+
+        return bodyOffset + 1 + (4 * width) + (4 * typeCount);
+    }
+
+    private static int ReadCompactCount(byte[] bytes, int offset, int width) =>
+        width switch
+        {
+            1 => bytes[offset],
+            2 => BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(offset)),
+            4 => checked((int)BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset))),
+            _ => throw new InvalidDataException("Invalid compact Body width."),
+        };
+
+    private static void WriteCompactCount(byte[] bytes, int offset, int width, int value)
+    {
+        switch (width)
+        {
+            case 1:
+                bytes[offset] = checked((byte)value);
+                break;
+            case 2:
+                BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset), checked((ushort)value));
+                break;
+            case 4:
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), checked((uint)value));
+                break;
+            default:
+                throw new InvalidDataException("Invalid compact Body width.");
+        }
     }
 
     [Fact]

@@ -23,9 +23,12 @@ this roadmap for adoption sequencing and remaining work.
 The source-free TRRM scalar path remains fail-fast and supports the assigned
 `NoThrow` and `DoesNotReturn` Effects in its bounded Body subset. It also
 provisionally round-trips caller-unsafe Effects on top-level declarations,
-without authorizing calls in Bodies lacking a validated unsafe scope.
-Checked-exception Bodies and other Effects/contracts remain unsupported. See
-[implementation](implementation.md) for the current support boundary.
+and admits calls only within validated indexed Body unsafe scopes.
+The kind-`0x06` scope representation is still reserved by the accepted
+instruction-set contract; it remains a provisional implementation proposal,
+not standardized Body support. Checked-exception Bodies and other
+Effects/contracts remain unsupported. See [implementation](implementation.md)
+for the current support boundary.
 
 Hosted source binding now carries grammar-defined named calls, including
 `out` and `init ref<T>` destinations, through verification, native lowering
@@ -145,8 +148,8 @@ remain hosted.
 Separately, semantic-module revision 56 provisionally persists top-level
 caller-unsafe contracts and calls enclosed by explicit `unsafe { }` blocks,
 reconstructing authorization from that scope. Executable TRRM provisionally
-round-trips top-level caller-unsafe Effects while continuing to reject calls
-without a validated Body scope. Unsafe members remain unsupported; the
+round-trips top-level caller-unsafe Effects and supports calls only inside
+validated indexed Body unsafe scopes. Unsafe members remain unsupported; the
 broader reference-call metadata proposal remains unapproved.
 
 ## Planned work (priority order)
@@ -170,10 +173,11 @@ prerequisite has already been met.
    implementation does not settle the general schema or approve the
    [reference-call metadata proposal](proposals/reference-call-metadata.md),
    which recommends a narrow first dependency registry and reuse of the
-   assigned caller-unsafe effect bit. The proposal also recommends, but does
-   not implement, a structurally validated indexed-Body region for explicit
-   caller-unsafe scopes; compact-linear Bodies and caller-unsafe TRRM calls
-   remain unsupported.
+   assigned caller-unsafe effect bit. The proposal recommends a structurally
+   validated indexed-Body region for explicit caller-unsafe scopes. A bounded
+   kind-`0x06` implementation now admits indexed calls provisionally, while
+   compact-linear calls and calls without validated unsafe scope remain
+   unsupported; the broader proposal remains unapproved.
 2. **Full runtime/structured contracts — initialization and outputs.** Complete
    general `out`/`init ref<T>` declaration and call migration with definite
    initialization, cleanup and publication rules. Preserve their distinct
