@@ -207,9 +207,11 @@ internal static class NativeModuleImageValidator
                 return Read32(Offset(rva, 4));
             }
 
-            int Rva64(int rva)
+            int Rva64(int rva, SectionHeader? section = null)
             {
-                var value = BinaryPrimitives.ReadUInt64LittleEndian(image.AsSpan(Offset(rva, 8), 8));
+                var offset = section is SectionHeader importSection
+                    ? OffsetInSection(rva, 8, importSection) : Offset(rva, 8);
+                var value = BinaryPrimitives.ReadUInt64LittleEndian(image.AsSpan(offset, 8));
                 if (value > int.MaxValue)
                 {
                     throw Invalid();
@@ -244,6 +246,8 @@ internal static class NativeModuleImageValidator
             void CheckImports()
             {
                 var table = header.ImportTableDirectory;
+                // The address table is later bounded to .idata; lookup pointers retain general RVA mapping.
+                var importSection = sections[1];
                 var providerCount = providerImports.Count;
                 var count = 1 + providerCount + (checkedExceptions ? 1 : 0);
                 if (table.Size != 20 * (count + 1))
@@ -311,7 +315,7 @@ internal static class NativeModuleImageValidator
                     for (var symbol = 0; symbol <= 1024; symbol++)
                     {
                         var hint = Rva64(checked(lookup + (symbol * 8)));
-                        var iat = Rva64(checked(address + (symbol * 8)));
+                        var iat = Rva64(checked(address + (symbol * 8)), importSection);
                         if (hint != iat)
                         {
                             throw Invalid();
