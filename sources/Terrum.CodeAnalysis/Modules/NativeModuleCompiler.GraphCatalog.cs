@@ -3,7 +3,6 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace Terrum.CodeAnalysis.Modules;
@@ -193,7 +192,15 @@ public static partial class NativeModuleCompiler
                 {
                     throw new ModuleContractException("Native graph catalog has multiple compatible closures.");
                 }
-                resolved = [.. selected.Values.OrderBy(static item => item.Package.Identity, StringComparer.Ordinal)];
+                var selectedCandidates = new CatalogCandidate[selected.Count];
+                var selectedIndex = 0;
+                foreach (var candidate in selected.Values)
+                {
+                    selectedCandidates[selectedIndex++] = candidate;
+                }
+                Array.Sort(selectedCandidates, static (left, right) =>
+                    StringComparer.Ordinal.Compare(left.Package.Identity, right.Package.Identity));
+                resolved = selectedCandidates;
                 return;
             }
             if (!catalog.TryGetValue(next, out var options))
