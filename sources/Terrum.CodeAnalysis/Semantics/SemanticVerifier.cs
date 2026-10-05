@@ -123,7 +123,7 @@ public static partial class SemanticVerifier
         {
             throw Invalid();
         }
-        var bufferNames = new HashSet<string>(StringComparer.Ordinal);
+        var bufferNames = new HashSet<string>(program.Buffers.Length, StringComparer.Ordinal);
         long bufferWords = 0;
         foreach (var buffer in program.Buffers)
         {
@@ -147,7 +147,7 @@ public static partial class SemanticVerifier
                 }
             }
         }
-        var structNames = new HashSet<string>(StringComparer.Ordinal);
+        var structNames = new HashSet<string>(program.Structures.Length, StringComparer.Ordinal);
         var layoutStates = new byte[program.Structures.Length];
         var alignments = new int[program.Structures.Length];
         var layoutHeights = new int[program.Structures.Length];
@@ -155,7 +155,7 @@ public static partial class SemanticVerifier
         {
             VerifyLayout(index, 0);
         }
-        var classNames = new HashSet<string>(StringComparer.Ordinal);
+        var classNames = new HashSet<string>(program.Classes.Length, StringComparer.Ordinal);
         foreach (var @class in program.Classes)
         {
             if (@class is null || string.IsNullOrWhiteSpace(@class.Name)
@@ -167,7 +167,7 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             var offset = 0;
-            var fieldNames = new HashSet<string>(StringComparer.Ordinal);
+            var fieldNames = new HashSet<string>(@class.Fields.Length, StringComparer.Ordinal);
             foreach (var field in @class.Fields)
             {
                 if (field is null || !ValidType(field.Type, allowVoid: false, program)
@@ -227,7 +227,7 @@ public static partial class SemanticVerifier
             var offset = 0;
             var alignment = 1;
             var height = 1;
-            var fieldNames = new HashSet<string>(StringComparer.Ordinal);
+            var fieldNames = new HashSet<string>(structure.Fields.Length, StringComparer.Ordinal);
             foreach (var field in structure.Fields)
             {
                 if (field is null || !ValidType(field.Type, allowVoid: false, program))
