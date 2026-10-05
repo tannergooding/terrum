@@ -88,8 +88,13 @@ public static partial class NativeModuleCompiler
             }
         }
         var (image, used) = NativeEmitter.EmitWithImportUsage(program, bindings, runtimePolicy);
+        var machineImports = new string[used.Length];
+        for (var i = 0; i < machineImports.Length; i++)
+        {
+            machineImports[i] = used[i].FunctionName;
+        }
         var consumer = Write(isConsumer: true, package.Identity, runtimePolicy, contract, image,
-            [.. used.Select(static item => item.FunctionName)], contractSnapshot);
+            machineImports, contractSnapshot);
         ValidatePair(Read(consumer), provider);
         return consumer;
     }
@@ -229,7 +234,11 @@ public static partial class NativeModuleCompiler
     private static void ValidatePair(Package consumer, Package producer)
     {
         var producerReference = ValidatePairContracts(consumer, producer);
-        var exports = producerReference.Functions.Select(static function => function.Name).ToArray();
+        var exports = new string[producerReference.Functions.Length];
+        for (var i = 0; i < exports.Length; i++)
+        {
+            exports[i] = producerReference.Functions[i].Name;
+        }
         ValidateProducerImage(producer, exports);
         ValidateConsumerImage(consumer);
     }
@@ -301,7 +310,12 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native package and semantic contract policies differ.");
         }
-        ValidateProducerImage(producer, [.. reference.Functions.Select(static function => function.Name)]);
+        var exports = new string[reference.Functions.Length];
+        for (var i = 0; i < exports.Length; i++)
+        {
+            exports[i] = reference.Functions[i].Name;
+        }
+        ValidateProducerImage(producer, exports);
         return reference;
     }
 
