@@ -294,6 +294,7 @@ public sealed class ValueTests
         Assert.Equal(8, code.ReadOnlyDataLength);
         Assert.Equal(12, code.Data.Length);
         Assert.NotEmpty(code.DataFixups);
+        Assert.Equal(68, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
         Assert.Equal(68, await RunNativeAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
     }
 
