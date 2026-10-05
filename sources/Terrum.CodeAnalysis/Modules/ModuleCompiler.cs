@@ -41,8 +41,24 @@ public static partial class ModuleCompiler
             {
                 if (_declarations.IsDefault)
                 {
-                    _declarations = [.. module.Functions.Where(static item => item.Import)
-                        .Select(static item => item.Name).Order(StringComparer.Ordinal)];
+                    var declarationCount = 0;
+                    foreach (var item in module.Functions)
+                    {
+                        if (item.Import)
+                        {
+                            declarationCount++;
+                        }
+                    }
+                    var declarations = ImmutableArray.CreateBuilder<string>(declarationCount);
+                    foreach (var item in module.Functions)
+                    {
+                        if (item.Import)
+                        {
+                            declarations.Add(item.Name);
+                        }
+                    }
+                    declarations.Sort(StringComparer.Ordinal);
+                    _declarations = declarations.MoveToImmutable();
                 }
                 return _declarations;
             }
