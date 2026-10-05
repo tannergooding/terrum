@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `71ac1b0` | Reuse cleanup dependency function buffer |
 | `9028f1e` | Sort graph providers in place after validation |
 | `34fa8d1` | Skip JIT range copies and sorting for ordered emitter output |
 | `8861bb2` | Validate exported layouts without LINQ |
