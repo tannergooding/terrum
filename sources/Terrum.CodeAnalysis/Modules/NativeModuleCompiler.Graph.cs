@@ -367,9 +367,29 @@ public static partial class NativeModuleCompiler
         provider.ValidatedReference
             ?? throw new InvalidOperationException("Native graph provider was not semantically validated.");
 
-    private static NativeImportBinding[] NativeBindings(GraphDependency[] dependencies) =>
-        [.. dependencies.SelectMany(item => item.Declarations.Select(name =>
-            new NativeImportBinding(name, DllName(item.Identity), name)))];
+    private static NativeImportBinding[] NativeBindings(GraphDependency[] dependencies)
+    {
+        var bindingCount = 0;
+        foreach (var dependency in dependencies)
+        {
+            bindingCount += dependency.Declarations.Length;
+        }
+        if (bindingCount == 0)
+        {
+            return Array.Empty<NativeImportBinding>();
+        }
+        var bindings = new NativeImportBinding[bindingCount];
+        var bindingIndex = 0;
+        foreach (var dependency in dependencies)
+        {
+            var dllName = DllName(dependency.Identity);
+            foreach (var name in dependency.Declarations)
+            {
+                bindings[bindingIndex++] = new NativeImportBinding(name, dllName, name);
+            }
+        }
+        return bindings;
+    }
 
     private static Dictionary<string, GraphTypeOrigin?> ProviderOrigins(GraphPackage provider,
         CompilationReference? reference = null)
