@@ -474,7 +474,7 @@ public static partial class NativeModuleCompiler
     private static GraphDependency[] WithGraphUsage(GraphDependency[] declarations,
         IReadOnlyList<NativeImportBinding> used)
     {
-        var names = new HashSet<string>(StringComparer.Ordinal);
+        var names = new HashSet<string>(used.Count, StringComparer.Ordinal);
         var usedByDll = new Dictionary<string, List<NativeImportBinding>>(
             Math.Min(declarations.Length, used.Count), StringComparer.Ordinal);
         foreach (var import in used)
