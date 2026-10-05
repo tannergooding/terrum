@@ -276,8 +276,36 @@ internal sealed partial class Binder
                     continue;
                 }
                 var qualified = Qualify(name);
-                var parameters = node.Children.OfType<SyntaxNode>()
-                    .FirstOrDefault(static child => child.Kind == SyntaxKind.TypeParameterList);
+                SyntaxNode? parameters = null;
+                SyntaxNode? operatorMember = null;
+                var operatorCount = 0;
+                var hasInvalidInterfaceModifier = false;
+                var hasInvalidDeclaration = false;
+                foreach (var child in node.Children)
+                {
+                    if (child is SyntaxTokenElement tokenElement)
+                    {
+                        hasInvalidInterfaceModifier |= tokenElement.Token.Kind is TokenKind.PublicKeyword
+                            or TokenKind.PrivateKeyword or TokenKind.StaticKeyword or TokenKind.MutKeyword
+                            or TokenKind.UniqueKeyword;
+                    }
+                    else if (child is SyntaxNode childNode)
+                    {
+                        if (childNode.Kind == SyntaxKind.TypeParameterList)
+                        {
+                            parameters ??= childNode;
+                        }
+                        else if (childNode.Kind == SyntaxKind.OperatorDeclaration)
+                        {
+                            operatorCount++;
+                            operatorMember ??= childNode;
+                        }
+                        else
+                        {
+                            hasInvalidDeclaration = true;
+                        }
+                    }
+                }
                 var formalTokens = parameters?.Children.OfType<SyntaxTokenElement>().ToArray() ?? [];
                 var selfMarkers = formalTokens.Where(static child =>
                     child.Token.Kind == TokenKind.Identifier && child.Token.Text == "this").ToArray();
@@ -296,22 +324,16 @@ internal sealed partial class Binder
                 if (selfMarkers.Length > 1 || (selfMarkers.Length == 1 && !hasSelf)
                     || variables.Length is not (2 or 3)
                     || variables.Distinct(StringComparer.Ordinal).Count() != variables.Length
-                    || node.Children.OfType<SyntaxTokenElement>().Any(static child =>
-                        child.Token.Kind is TokenKind.PublicKeyword or TokenKind.PrivateKeyword
-                            or TokenKind.StaticKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword))
+                    || hasInvalidInterfaceModifier)
                 {
                     Report("TRM3001", "Local static operator interfaces require two or three distinct type parameters and internal visibility.", node.Span);
                     continue;
                 }
-                var members = node.Children.OfType<SyntaxNode>()
-                    .Where(static child => child.Kind == SyntaxKind.OperatorDeclaration).ToArray();
-                if (members.Length != 1 || node.Children.OfType<SyntaxNode>()
-                    .Any(static child => child.Kind is not (SyntaxKind.TypeParameterList or SyntaxKind.OperatorDeclaration)))
+                if (operatorCount != 1 || hasInvalidDeclaration || operatorMember is not SyntaxNode member)
                 {
                     Report("TRM3001", "A local static operator interface must declare exactly one operator.", node.Span);
                     continue;
                 }
-                var member = members[0];
                 TokenKind? op = null;
                 var noThrowCount = 0;
                 var unsafeModifierCount = 0;

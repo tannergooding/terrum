@@ -73,6 +73,9 @@ public sealed class StaticProtocolTests
     [InlineData("operator +(Meters left, Meters right)", "op_Addition(Meters left, Meters right)", "TRM3007")]
     [InlineData("static TResult operator +(TSelf left, TOther right)",
         "[NoThrow] [NoThrow] static TResult operator +(TSelf left, TOther right)", "TRM3001")]
+    [InlineData("static TResult operator +(TSelf left, TOther right);",
+        "static TResult operator +(TSelf left, TOther right); static TResult operator -(TSelf left, TOther right);",
+        "TRM3001")]
     [InlineData("static TResult operator +(TSelf left, TOther right)", "static TOther operator +(TSelf left, TOther right)", "TRM3001")]
     [InlineData("=> (a * x + b) * x + c;", "=> EvaluateQuadratic<Meters>(x, a, b, c);", "TRM3007")]
     public void RejectsMissingOrFalseProtocolPromises(string before, string after, string expected)
