@@ -261,14 +261,17 @@ public static partial class NativeModuleCompiler
                 }
             }
         }
-        if (dependencies.Any(static item => item.Declarations.Length == 0))
+        HashSet<string>? originIdentities = null;
+        foreach (var dependency in dependencies)
         {
-            var originIdentities = origins.Select(static item => item.Identity)
-                .ToHashSet(StringComparer.Ordinal);
-            if (dependencies.Any(item => item.Declarations.Length == 0
-                && !originIdentities.Contains(item.Identity)))
+            if (dependency.Declarations.Length == 0)
             {
-                throw new ModuleFormatException("Graph dependency supplies neither declarations nor types.");
+                originIdentities ??= origins.Select(static item => item.Identity)
+                    .ToHashSet(StringComparer.Ordinal);
+                if (!originIdentities.Contains(dependency.Identity))
+                {
+                    throw new ModuleFormatException("Graph dependency supplies neither declarations nor types.");
+                }
             }
         }
         NativeModuleImageValidator.Validate(image, consumer, GraphImports(package), exports, policy,
