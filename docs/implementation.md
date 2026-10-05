@@ -2390,6 +2390,8 @@ Signed and unsigned 32-bit paths bound each accumulated digit to the
 destination range rather than first parsing a 64-bit value. AOT/JIT fixtures
 cover every radix, both widths and both failure policies; malformed slices,
 invalid bounds and overflow leave vacancy-only `init ref` outputs unpublished.
+Negative limits use the shared `WideIntegerFacts.MagnitudeInt64` helper without
+negating the signed minimum.
 It is not wired into `SyntaxTree.Parse(LexResult)` or the scanner-backed
 integer record: that record still supplies the binder's contextual literal
 magnitude.

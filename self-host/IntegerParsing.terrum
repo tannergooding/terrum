@@ -119,7 +119,7 @@ bool TryParseSignedBase(int32 start, int32 length, uint32 radix,
     if (negative)
     {
         // Compute the negative limit without negating int64.MinValue.
-        magnitudeLimit = uint64(-(minimum + 1)) + 1;
+        magnitudeLimit = MagnitudeInt64(minimum);
     }
 
     if (!TryParseMagnitude(digitStart, digitLength, radix, magnitudeLimit, init var magnitude))
