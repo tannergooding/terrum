@@ -27,6 +27,7 @@ public static partial class NativeModuleCompiler
         public bool IsLeaf { get; init; }
         public GraphTypeOrigin[] Origins { get; init; } = [];
         public ModuleCompiler.GraphContractSnapshot? ContractSnapshot { get; init; }
+        public string? ValidatedProfile { get; init; }
         public CompilationReference? ValidatedReference { get; init; }
     }
 
@@ -86,6 +87,7 @@ public static partial class NativeModuleCompiler
                 [.. leafReference.Functions.Select(static item => item.Name)
                     .Order(StringComparer.Ordinal)], [], leaf.Contract, leaf.Image) {
                 IsLeaf = true,
+                ValidatedProfile = leaf.Profile,
                 ValidatedReference = leafReference,
             };
         }

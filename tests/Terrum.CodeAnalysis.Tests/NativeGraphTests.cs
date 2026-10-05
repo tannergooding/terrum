@@ -125,6 +125,15 @@ public sealed class NativeGraphTests
         }
     }
 
+    [Fact]
+    public void InspectingLeafGraphArtifactPreservesNativeProfile()
+    {
+        var leaf = Leaf("[NoThrow] public int32 Leaf() { return 40; }");
+
+        Assert.Equal(NativeModuleCompiler.Inspect(leaf).NativeProfileVersion,
+            NativeModuleCompiler.InspectGraphArtifact(leaf).NativeProfileVersion);
+    }
+
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]

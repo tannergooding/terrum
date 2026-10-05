@@ -98,6 +98,7 @@ public static partial class NativeModuleCompiler
     {
         var package = ReadGraphPackage(artifact);
         var profile = package.ContractSnapshot?.Profile
+            ?? package.ValidatedProfile
             ?? ModuleCompiler.GetNativeProfileVersion(package.Contract, false);
         return new NativeGraphInfo(package.Identity, package.Consumer, package.Policy, profile,
             Convert.ToHexString(SHA256.HashData(package.Image)),
