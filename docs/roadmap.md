@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `0bbda4e` | Materialize cached consumer declarations directly |
 | `3d09cc0` | Build consumer module-set declarations directly |
 | `72b53a0` | Skip unused graph dependency function indexes |
 | `9de26e0` | Build module-set restoration inputs directly |
