@@ -285,6 +285,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `9ffc7292` | Verify acyclic loop erasure skips post-loop conditions and preserves for initializers |
 | `8903a118` | Erase return-only and direct-break acyclic loops to existing terminal or fallthrough flow without TRRM loop regions |
 | `1d93e1bd` | Erase return-only acyclic source loops to terminal returns without adding TRRM loop regions or wire forms |
 | `50c47740` | Provisionally validate indexed caller-unsafe regions and scope exits without changing the accepted Body layout |
