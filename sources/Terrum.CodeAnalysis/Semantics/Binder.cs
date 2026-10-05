@@ -707,7 +707,7 @@ internal sealed partial class Binder
             return;
         }
         var qualified = _structs[index].Name;
-        var isPublic = false;
+        var isPublic = !_structs[index].IsInternal;
         var isUnique = false;
         var isTransparent = false;
         var isSequential = false;
@@ -736,7 +736,6 @@ internal sealed partial class Binder
             }
             if (element is SyntaxTokenElement modifier)
             {
-                isPublic |= modifier.Token.Kind == TokenKind.PublicKeyword;
                 isUnique |= modifier.Token.Kind == TokenKind.UniqueKeyword;
                 visibilityCount += modifier.Token.Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword ? 1 : 0;
                 if (modifier.Token.Kind is TokenKind.PrivateKeyword or TokenKind.StaticKeyword
@@ -867,7 +866,7 @@ internal sealed partial class Binder
             Report("TRM3005", "A struct must have a naturally aligned size from 1 through 16 bytes.", declaration.Span);
         }
         _structs[index] = new BoundStruct(qualified, fields.ToImmutable(), size) {
-            IsInternal = !isPublic,
+            IsInternal = _structs[index].IsInternal,
             IsUnique = isUnique,
             IsTransparent = isTransparent,
             IsSequential = isSequential,
