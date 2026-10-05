@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `a030840` | Reuse one immutable source snapshot array throughout compilation |
 | `76c3791` | Reuse verified consumer functions for module-set type closure |
 | `f32c374` | Reuse validated module function facts when classifying owned-buffer profiles |
 | `37e16ea` | Collect persisted ownership-transfer profile facts during module feature validation |
