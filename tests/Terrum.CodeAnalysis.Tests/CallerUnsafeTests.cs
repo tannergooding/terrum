@@ -547,6 +547,29 @@ public sealed class CallerUnsafeTests
             NativeRuntimePolicy.FailFast));
     }
 
+    [Fact]
+    public void TrRmTerminalAssignmentPrefixKeepsEnclosingUnsafeAuthorization()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unsafe int32 Danger() { return 42; }
+            int32 Main() {
+                mut int32 value = 0;
+                unsafe {
+                    do {
+                        value = Danger();
+                        break;
+                    } while (false);
+                }
+                return value;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.Emit(
+            Assert.IsType<BoundProgram>(compilation.Program), "unsafe-terminal-assignment-prefix");
+        Assert.Equal(42, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast));
+    }
+
     [Theory]
     [InlineData("break;")]
     [InlineData("continue;")]
