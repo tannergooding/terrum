@@ -255,6 +255,8 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `be9c62d` | Reuse graph JIT provider snapshots |
+| `7963de0` | Copy native set dependencies directly |
 | `fe699ec` | Index unwind sections by validated order |
 | `c525acc` | Validate empty graph dependencies in one pass |
 | `7ef2ac7` | Sort native imports in place before writing |
