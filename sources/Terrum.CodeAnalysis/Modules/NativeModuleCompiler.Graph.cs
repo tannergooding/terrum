@@ -105,9 +105,14 @@ public static partial class NativeModuleCompiler
         var profile = package.ContractSnapshot?.Profile
             ?? package.ValidatedProfile
             ?? ModuleCompiler.GetNativeProfileVersion(package.Contract, false);
+        var dependencies = new string[package.Dependencies.Length];
+        for (var i = 0; i < dependencies.Length; i++)
+        {
+            dependencies[i] = package.Dependencies[i].Identity;
+        }
         return new NativeGraphInfo(package.Identity, package.Consumer, package.Policy, profile,
             Convert.ToHexString(SHA256.HashData(package.Image)),
-            [.. package.Dependencies.Select(static item => item.Identity)], package.Exports);
+            dependencies, package.Exports);
     }
 
     /// <summary>Checks the complete selected closure, every edge and every PE import before execution.</summary>
