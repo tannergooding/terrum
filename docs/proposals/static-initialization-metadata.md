@@ -99,14 +99,60 @@ the implementation should maintain one current writer and reader rather than
 add historical-revision support; a version boundary for a shipped preview
 remains a release decision.
 
+### Candidate first-slice profile
+
+**Recommendation, still unapproved:** make the first implementation slice a
+self-contained single-module profile for non-generic, non-partial nominal
+types with ordinary eager static fields. Permit an authored static constructor
+only with one of the two explicit trigger choices above. Exclude lazy fields,
+static-property backing storage, foreign storage, generic substitutions and
+partial type/constructor composition from this slice; the accepted language
+contracts for those forms do not change. A module may contain unrelated
+imports, but an imported or packed definition cannot participate in a static
+initializer, initialization helper, triggerable member or cleanup dependency.
+Reject rather than infer a foreign initialization dependency.
+
+Within this profile, use these proposed access obligations:
+
+| Context or operation | Proposed obligation |
+|---|---|
+| Runtime access to a grouped static field | Complete the owning group before the field access when no static constructor is authored or its explicit policy is `grouped-static-field-access`. |
+| Runtime access to a static field or static member | Complete the owning group before the access when its explicit policy is `runtime-static-member-access`. |
+| Static constructor, initializer, or checked helper accessing the owning group under validated initialization-phase authority | Use that authority, not an ordinary reentrant demand. A read is valid only after the field has been initialized; no unfinished group is published to ordinary callers. A helper does not receive this authority merely because an ordinary caller invokes it. |
+| Type-name resolution, member binding or metadata inspection without runtime access | Create no initialization demand. |
+| Imported or packed access participating in initialization | Reject in this slice; do not bind by name or omit the initialization effect. |
+
+The triggering operation carries the accepted initialization effect and
+failure behavior in its published contract. Successful group completion
+publishes all required initialized and completion facts; a failed group remains
+unpublished and retains the accepted failure outcome. The profile does not
+weaken waiting, cycle-detection, memory-publication, ownership, cleanup or
+load-scoped unload requirements. These are required runtime obligations, not
+facts that the proposed metadata can prove.
+
+Proposed validation ownership for this slice:
+
+| Layer | Required responsibility |
+|---|---|
+| Source compiler | Resolve registered attribute identities and closed schemas; assign each field to one group; preserve initializer source order; prove authored bodies satisfy initialization-phase authority, definite-initialization, effect and constructor-policy clauses. |
+| Metadata reader | Require the profile and every required record; validate row extents, typed owner references, unique field/group assignments, signatures, policy cardinality, initializer ordering, and the identity, payload shape, placement and consistency of every recognized clause; reject unknown required forms. Under the selected artifact trust policy, this structural contract validation does not re-prove accepted producer body facts. |
+| Linker or consumer | Accept only self-contained initialization dependencies for this slice; reject imported/packed initialization edges and incompatible trigger contracts before lowering. |
+| Runtime | Key state by loaded type identity within its load instance; implement the accepted waiting, cycle, completion publication, retained failure, cleanup and unload behavior. Metadata is not a substitute for these state transitions. |
+
+This proposed slice is a scope boundary for staged implementation, not a new
+language restriction. Later slices must add generic closed-type identity,
+partial composition, lazy units, property backing storage and validated
+cross-module dependencies without changing the accepted initialization
+contract.
+
 ### Decisions still open
 
 | Question | Summary | Recommendation |
 |---|---|---|
-| Which required metadata kinds and executable access forms carry these records? | Current TRRM assigns no static-storage records or static access operations; definition references and required-unknown-data handling already exist. | Assign closed required records and access forms together, with typed ownership and checked references. Do not emit under the current profile or overload existing flags. |
-| How are semantic clauses validated? | The accepted contract requires phase authority, completion, sharing, trigger effects, failure and lifecycle obligations that structural metadata alone cannot prove. | Encode typed required clause references and define consumer/verifier checks for each; reject unsupported clauses rather than accepting producer assertions as proof. |
-| What runtime identity and lifecycle ABI implements the accepted behavior? | Runtime state must distinguish loaded closed types and preserve waiting, publication, failure, cleanup and unload guarantees; these are not structural-reader facts. | Specify canonicalization and runtime state transitions against the accepted contract before runtime adoption; do not inherit host static-constructor behavior. |
-| How do imported field references participate? | Current module imports do not bind `FieldDef`, so cross-module static-field access cannot yet carry a validated owner or initialization obligation. | Keep such imports unsupported until field identity and access obligations are explicit; never fall back to name-only binding. |
+| Which required metadata kinds and executable access forms carry these records? | The slice now names the logical cases, but current TRRM assigns no static-storage records or access operations. | Assign closed required records and access forms together, with typed ownership and checked references. Do not emit under the current profile or overload existing flags. |
+| How are semantic clauses validated? | The slice assigns reader validation of clause shape/placement separately from source-body proof, but exact clause identities, payloads and proof obligations remain open. | Define each typed required clause and its compiler proof, reader shape/consistency checks, linker compatibility checks and runtime enforcement. Keep body re-proof governed by the artifact trust policy; reject unknown required or unsupported clauses. |
+| What runtime identity and lifecycle ABI implements the accepted behavior? | The accepted key is a loaded type identity plus its closed substitution within one load instance, but the current profile excludes generics and has no runtime protocol. | Specify state identity and transitions against the accepted contract before runtime adoption; do not inherit host static-constructor behavior. |
+| How do imported field references participate? | The current module schema does not bind `FieldDef` imports; the candidate slice avoids that dependency but not the eventual cross-module contract. | Keep imported/packed initialization edges rejected in the first slice; define validated field identity, trigger effects and dependency edges before a later cross-module slice. |
 | What artifact revision boundary applies? | Terrum remains pre-1.0 and has no external artifact consumers. | Keep one current writer and reader during development; make any shipped-preview boundary an explicit release decision. |
 
 ## Implementation boundary
@@ -115,10 +161,11 @@ This proposal does not authorize changes to the accepted trigger, initialization
 sharing, failure/recovery, cleanup or unload semantics. It does not make the
 current `(1, 0)` metadata flags carry static-initialization policy, and it does
 not establish hosted or native compiler support. Emission and execution are
-not authorized under the current profiles. Implementation remains blocked on
-assigning required metadata kinds and access forms, specifying the semantic
-contract clauses and verifier rules, defining loaded closed-type
-canonicalization and runtime initialization/publication/failure/cleanup
-behavior, and resolving the current lack of imported field binding. These
+not authorized under the current profiles. The candidate first-slice profile
+does not itself assign metadata kinds or access encodings. Implementation
+remains blocked on those assignments, exact semantic clause and verifier
+rules, and a runtime protocol implementing initialization identity,
+publication, failure, cleanup and unload. Cross-module initialization remains
+excluded until field identity and dependency obligations are defined. These
 blockers do not justify changing the accepted contract or borrowing host
 static-constructor behavior.
