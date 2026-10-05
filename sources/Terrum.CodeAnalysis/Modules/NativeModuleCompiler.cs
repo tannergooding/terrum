@@ -338,12 +338,13 @@ public static partial class NativeModuleCompiler
             {
                 throw new ModuleFormatException("Native consumer machine imports differ from retained declarations.");
             }
+            Array.Sort(imports, StringComparer.Ordinal);
         }
         using var importStream = new MemoryStream();
         using (var importWriter = new BinaryWriter(importStream, Encoding.UTF8, leaveOpen: true))
         {
             importWriter.Write(checked((ushort)imports.Length));
-            foreach (var imported in imports.Order(StringComparer.Ordinal))
+            foreach (var imported in imports)
             {
                 PutGraphString(importWriter, imported);
             }
