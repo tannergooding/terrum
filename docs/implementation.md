@@ -2895,16 +2895,17 @@ Vacant locals, direct edges that bypass designated exits, field/nominal mutation
 places, roots, ownership, cleanup, exceptional transfer and imported
 declarations are not implemented here. Indexed loop emission requires a
 reachable backedge and a designated exit; it does not synthesize a backedge
-for a source loop whose body always transfers out. A `do` body containing only
-an unconditional return erases to that return, as do constant-true `while`
-and `for` bodies with the same terminal shape and no iterator. Their
-unreachable loop conditions are not emitted, and no loop region or backedge
-is invented. A `do` body containing only a direct break, or a constant-true
-`while`/`for` body containing only a direct break and no iterator, erases to
-fallthrough; for initializers remain in source order. Effectful break-only
-forms and other acyclic source loops remain outside this emitter. All retained
-inactive operations and every function Body still undergo mandatory
-validation. Source scope support is
+for a source loop whose body always transfers out. A `do` body, or a
+constant-true `while`/`for` body without an iterator, erases when it is a
+terminal tree of returns and direct breaks, including nested `if` statements
+whose two explicit arms are terminal. The lowering keeps those branch
+conditions and their effects, routes breaks to the existing fallthrough, and
+retains returns; it omits the unreachable loop condition and adds no loop
+region or backedge. For initializers remain in source order. Bodies with
+implicit fallthrough, continues, nested loops, managed-local cleanup or other
+nonterminal effects remain outside this erasure. All retained inactive
+operations and every function Body still undergo mandatory validation.
+Source scope support is
 an implementation boundary, not an unresolved language contract.
 Loaded indexed graphs execute but cannot be re-emitted through the structured
 source emitter or serialized as development semantic-module IR.

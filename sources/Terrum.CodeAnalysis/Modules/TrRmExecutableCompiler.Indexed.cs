@@ -1585,16 +1585,23 @@ public static partial class TrRmExecutableCompiler
                     if (loop.Iterator is null
                         && (loop.IsPostTested
                             || loop.Condition is BoundConstant { Type: PrimitiveType.Bool, Value: not 0 })
-                        && TerminalAcyclicReturn(loop.Body) is { } terminalReturn)
+                        && TerminalAcyclicBody(loop.Body, out var hasAcyclicBreak))
                     {
-                        Statement(terminalReturn);
-                        break;
-                    }
-                    if (loop.Iterator is null
-                        && (loop.IsPostTested
-                            || loop.Condition is BoundConstant { Type: PrimitiveType.Bool, Value: not 0 })
-                        && TerminalAcyclicBreak(loop.Body))
-                    {
+                        var acyclicParent = _current.Region;
+                        var acyclicEntrySlots = (int[])_slots.Clone();
+                        IndexedBlock? acyclicExit = null;
+                        int[]? acyclicExitSlots = null;
+                        if (hasAcyclicBreak)
+                        {
+                            acyclicExit = NewBlock(acyclicParent);
+                            acyclicExitSlots = Parameters(acyclicExit, acyclicEntrySlots);
+                        }
+                        AcyclicTerminalStatement(loop.Body, acyclicExit, acyclicEntrySlots);
+                        if (acyclicExit is not null)
+                        {
+                            _current = acyclicExit;
+                            _slots = acyclicExitSlots ?? throw Unsupported("Acyclic loop exit values are missing.");
+                        }
                         break;
                     }
                     var parent = _current.Region;
@@ -1801,46 +1808,84 @@ public static partial class TrRmExecutableCompiler
             _pendingBreaks.Add((region, edge));
         }
 
-        private static BoundReturn? TerminalAcyclicReturn(BoundStatement statement)
+        private static bool TerminalAcyclicBody(BoundStatement statement, out bool hasBreak)
         {
-            if (statement is BoundReturn result)
+            if (statement is BoundReturn)
             {
-                return result;
+                hasBreak = false;
+                return true;
             }
-            if (statement is not BoundBlock block || !block.RetiredManagedLocals.IsEmpty)
-            {
-                return null;
-            }
-            if (block.Statements.Length == 1)
-            {
-                return TerminalAcyclicReturn(block.Statements[0]);
-            }
-            if (block.Statements.Length == 2
-                && block.Statements[1] is BoundBlock { Statements.IsEmpty: true, RetiredManagedLocals.IsEmpty: true })
-            {
-                return TerminalAcyclicReturn(block.Statements[0]);
-            }
-
-            return null;
-        }
-
-        private static bool TerminalAcyclicBreak(BoundStatement statement)
-        {
             if (statement is BoundBreak { TargetDepth: 1 })
             {
+                hasBreak = true;
+                return true;
+            }
+            if (statement is BoundIf { Else: not null } conditional
+                && TerminalAcyclicBody(conditional.Then, out var thenHasBreak)
+                && TerminalAcyclicBody(conditional.Else, out var elseHasBreak))
+            {
+                hasBreak = thenHasBreak || elseHasBreak;
                 return true;
             }
             if (statement is not BoundBlock block || !block.RetiredManagedLocals.IsEmpty)
             {
+                hasBreak = false;
                 return false;
             }
             if (block.Statements.Length == 1)
             {
-                return TerminalAcyclicBreak(block.Statements[0]);
+                return TerminalAcyclicBody(block.Statements[0], out hasBreak);
             }
-            return block.Statements.Length == 2
-                && block.Statements[1] is BoundBlock { Statements.IsEmpty: true, RetiredManagedLocals.IsEmpty: true }
-                && TerminalAcyclicBreak(block.Statements[0]);
+            if (block.Statements.Length == 2
+                && block.Statements[1] is BoundBlock { Statements.IsEmpty: true, RetiredManagedLocals.IsEmpty: true })
+            {
+                return TerminalAcyclicBody(block.Statements[0], out hasBreak);
+            }
+            hasBreak = false;
+            return false;
+        }
+
+        private void AcyclicTerminalStatement(BoundStatement statement, IndexedBlock? exit, int[] visible)
+        {
+            if (statement is BoundReturn)
+            {
+                Statement(statement);
+                return;
+            }
+            if (statement is BoundBreak { TargetDepth: 1 })
+            {
+                Jump(exit ?? throw Unsupported("Acyclic loop break has no fallthrough target."), _slots, visible);
+                return;
+            }
+            if (statement is BoundIf { Else: not null } conditional)
+            {
+                var condition = Expression(conditional.Condition);
+                var source = _current ?? throw Unsupported("Acyclic loop condition did not reach its branch.");
+                var region = source.Region;
+                var trueBlock = NewBlock(region);
+                var falseBlock = NewBlock(region);
+                source.Condition = condition;
+                source.True = new IndexedEdge(trueBlock, []);
+                source.False = new IndexedEdge(falseBlock, []);
+                var branchSlots = (int[])_slots.Clone();
+                _current = trueBlock;
+                _slots = (int[])branchSlots.Clone();
+                AcyclicTerminalStatement(conditional.Then, exit, visible);
+                _current = falseBlock;
+                _slots = (int[])branchSlots.Clone();
+                AcyclicTerminalStatement(conditional.Else, exit, visible);
+                return;
+            }
+            if (statement is BoundBlock block && block.RetiredManagedLocals.IsEmpty
+                && (block.Statements.Length == 1
+                    || block.Statements.Length == 2
+                        && block.Statements[1] is BoundBlock
+                            { Statements.IsEmpty: true, RetiredManagedLocals.IsEmpty: true }))
+            {
+                AcyclicTerminalStatement(block.Statements[0], exit, visible);
+                return;
+            }
+            throw Unsupported("Acyclic loop terminal shape changed during lowering.");
         }
 
         internal byte[] Encode()

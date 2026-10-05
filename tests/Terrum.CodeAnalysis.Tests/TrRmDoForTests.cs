@@ -110,6 +110,20 @@ public sealed class TrRmDoForTests
     }
 
     [Theory]
+    [InlineData(42, "int32 Main() { mut int32 x = 0; do { if (x++ == 0) { break; } else { return 13; } } while (Fail()); return x == 1 ? 42 : 0; } bool Fail() { require false; return false; }")]
+    [InlineData(42, "int32 Main() { while (true) { if (Check()) { return 42; } else { break; } } return 0; } bool Check() { return true; }")]
+    [InlineData(42, "int32 Main() { mut int32 x = 0; for (x = Start();;) { if (x == 42) { break; } else { return 13; } } return x; } int32 Start() { return 42; }")]
+    [InlineData(42, "int32 Main() { do { if (true) { if (false) { break; } else { return 42; } } else { return 13; } } while (Fail()); return 0; } bool Fail() { require false; return false; }")]
+    public void BranchingAcyclicLoopsEraseToExistingReturnsAndFallthrough(int expected, string source)
+    {
+        var original = Compile(source);
+        var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "acyclic-branches"));
+        Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
     [InlineData("int32 Main() { mut int32 x = 0; do { x++; break; } while (false); return 42; }")]
     [InlineData("int32 Main() { mut int32 x = 0; for (;;) { x++; break; } return 42; }")]
     public void AcyclicLoopShapesRejectWithoutInventedBackedges(string source)
