@@ -94,6 +94,7 @@ public sealed class TrRmDoForTests
     [InlineData(13, "int32 Main() { mut int32 value = 0; do { if (Choose()) { int32 local = Compute(40, 2); value = local; } else { value = 13; } } while (false); return value; } bool Choose() { return false; } int32 Compute(int32 left, int32 right) { return left + right; }")]
     [InlineData(42, "int32 Main() { mut int32 value = 0; do { do { value++; } while (false); value++; } while (false); return value == 2 ? 42 : 0; }")]
     [InlineData(42, "int32 Main() { mut int32 value = 0; do { while (false) { } value = 42; } while (false); return value; }")]
+    [InlineData(42, "unsafe int32 Danger() { return 42; } int32 Main() { mut int32 value = 0; unsafe { do { value = Danger(); } while (false); } return value; }")]
     public void LiteralFalseDoLoopsExecuteSupportedBodyOnceWithoutRegions(int expected, string source)
     {
         var original = Compile(source);

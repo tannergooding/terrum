@@ -104,6 +104,40 @@ public sealed partial class CliTests
     }
 
     [Fact]
+    public async Task PersistedUnsafeCallBeforeAcyclicReturnKeepsFailureStatusAsync()
+    {
+        const string source = """
+            unsafe void Danger() { require false; }
+            int32 Main() {
+                unsafe {
+                    do {
+                        Danger();
+                        return 42;
+                    } while (false);
+                }
+            }
+            """;
+        var artifact = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-unsafe-acyclic-prefix-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            var (compiled, compileOutput, compileError) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "compile-trrm", "-", "--identity", "unsafe-acyclic-prefix",
+                "-o", artifact, "--runtime", "fail-fast", "--json");
+            Assert.True(compiled == 0, $"{compileOutput}{Environment.NewLine}{compileError}");
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.Equal(unchecked((int)0xE0540003), ran);
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+        }
+        finally
+        {
+            File.Delete(artifact);
+        }
+    }
+
+    [Fact]
     public async Task PersistedDirectCallsAgreeAcrossJitAndExecutableAsync()
     {
         var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-calls-{Guid.NewGuid():N}");
