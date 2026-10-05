@@ -264,6 +264,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `b16d95c` | Execute `CopyAlgorithms` generic specializations through persisted semantic modules |
 | `fe9245d` | Verify `IntegerFacts` checked predicates through persisted semantic-module JIT |
 | `c85735b` | Exhaustively verify `CharacterFacts` through semantic-module JIT grants |
 | `c1021ed` | Verify bounded UTF-16 scalar decoding through semantic-module JIT |
