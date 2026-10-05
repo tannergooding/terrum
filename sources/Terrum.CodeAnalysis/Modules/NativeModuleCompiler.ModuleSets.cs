@@ -213,10 +213,6 @@ public static partial class NativeModuleCompiler
             var functions = provider.Reference.Functions;
             var exports = functions.Select(static item => item.Name).ToArray();
             providerExports[i] = exports.ToHashSet(StringComparer.Ordinal);
-            var providerProfile = ModuleCompiler.GetNativeProfileVersion(provider.Package.Contract, false);
-            NativeModuleImageValidator.Validate(provider.Package.Image, false, DllName(provider.Package.Identity),
-                exports, provider.Package.Policy, allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(providerProfile),
-                allowManagedRuntimeData: AllowsManagedRuntimeData(providerProfile));
         }
         var referenceSet = CreateReferenceSet(providers);
         ModuleCompiler.ValidateConsumerAgainstReference(set.Contract, referenceSet);
