@@ -496,13 +496,27 @@ public static partial class SemanticVerifier
         {
             var @class = program.Classes[classIndex];
             var classType = (PrimitiveType)(ManagedClassTypes.First + classIndex);
-            if (!allowGenericProofDependencies
-                && (program.Functions.Count(function => function.IsClassConstructor
-                    && function.DeclaringStruct == @class.Name
+            if (allowGenericProofDependencies)
+            {
+                continue;
+            }
+            var constructors = 0;
+            var factories = 0;
+            foreach (var function in program.Functions)
+            {
+                if (function.IsClassConstructor && function.DeclaringStruct == @class.Name
                     && function.Variables[0].Type == (@class.IsMutable
-                        ? ManagedClassTypes.Writable(classType) : classType)) != 1
-                    || program.Functions.Count(function => function.Intrinsic == BoundIntrinsic.ClassTryCreate
-                        && function.DeclaringStruct == @class.Name) != 1))
+                        ? ManagedClassTypes.Writable(classType) : classType))
+                {
+                    constructors++;
+                }
+                if (function.Intrinsic == BoundIntrinsic.ClassTryCreate
+                    && function.DeclaringStruct == @class.Name)
+                {
+                    factories++;
+                }
+            }
+            if (constructors != 1 || factories != 1)
             {
                 throw Invalid();
             }

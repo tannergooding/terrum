@@ -156,6 +156,10 @@ public sealed class NativeManagedClassVerifierTests
                 public int32 Value;
                 public Leaf(int32 value) { Value = value; }
             }
+            class Branch {
+                public int32 Value;
+                public Branch(int32 value) { Value = value; }
+            }
             public int32 Export() { return 42; }
             """));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -165,7 +169,7 @@ public sealed class NativeManagedClassVerifierTests
         var descriptorOnly = program with {
             Functions = [Assert.Single(program.Functions, static function => function.Name == "Export")],
         };
-        _ = Assert.Single(descriptorOnly.Classes);
+        Assert.Equal(2, descriptorOnly.Classes.Length);
         Assert.Equal(-1, descriptorOnly.EntryPoint);
         Assert.Equal("Export", Assert.Single(descriptorOnly.Functions).Name);
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(descriptorOnly));
