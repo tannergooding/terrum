@@ -253,7 +253,7 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Graph library requires distinct exported declarations.");
         }
         hasPrivateManagedState = HasPrivateManagedState(module);
-        var declarations = ImmutableArray.CreateBuilder<BoundFunction>();
+        var declarations = ImmutableArray.CreateBuilder<BoundFunction>(names.Count);
         foreach (var item in module.Functions)
         {
             if (names.Contains(item.Name))
@@ -283,8 +283,12 @@ public static partial class ModuleCompiler
             }
         }
         var structures = SelectStructures(module.Structures, required);
-        return new CompilationReference(structures,
-            [.. declarations.Select(item => RemapFunction(item, module.Structures, structures))],
+        var remappedDeclarations = ImmutableArray.CreateBuilder<BoundFunction>(declarations.Count);
+        foreach (var declaration in declarations)
+        {
+            remappedDeclarations.Add(RemapFunction(declaration, module.Structures, structures));
+        }
+        return new CompilationReference(structures, remappedDeclarations.MoveToImmutable(),
             module.RuntimePolicy);
     }
 
