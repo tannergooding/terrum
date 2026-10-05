@@ -407,6 +407,16 @@ public static partial class ModuleCompiler
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         var pending = new Queue<PrimitiveType>();
+        PopulateRequiredStructures(functions, structures, classes, findStructureIndex, result, pending);
+        return result;
+    }
+
+    private static void PopulateRequiredStructures(IEnumerable<BoundFunction> functions,
+        ImmutableArray<BoundStruct> structures, ImmutableArray<BoundClass> classes,
+        Func<string, int>? findStructureIndex, HashSet<string> result, Queue<PrimitiveType> pending)
+    {
+        result.Clear();
+        pending.Clear();
         if (!classes.IsDefaultOrEmpty)
         {
             foreach (var @class in classes)
@@ -444,7 +454,6 @@ public static partial class ModuleCompiler
                 Add(field.Type);
             }
         }
-        return result;
 
         int FindStructureIndex(string name)
         {
@@ -579,6 +588,8 @@ public static partial class ModuleCompiler
         }
         var pending = new Queue<int>(indexes);
         BoundFunction[]? cleanupFunction = null;
+        HashSet<string>? cleanupTypes = null;
+        Queue<PrimitiveType>? cleanupTypeQueue = null;
         Dictionary<string, int>? functionIndexes = null;
         while (pending.Count != 0)
         {
@@ -598,11 +609,14 @@ public static partial class ModuleCompiler
             {
                 var singleFunction = cleanupFunction ??= new BoundFunction[1];
                 singleFunction[0] = program.Functions[index];
-                var types = RequiredStructures(singleFunction, program.Structures,
-                    findStructureIndex: FindStructureIndex);
+                var currentCleanupTypes = cleanupTypes ??= new HashSet<string>(StringComparer.Ordinal);
+                var currentCleanupTypeQueue = cleanupTypeQueue ??= new Queue<PrimitiveType>();
+                PopulateRequiredStructures(singleFunction, program.Structures, default,
+                    FindStructureIndex, currentCleanupTypes, currentCleanupTypeQueue);
                 foreach (var structure in cleanupStructures)
                 {
-                    if (types.Contains(structure.Name) && structure.CleanupMethod is string cleanup)
+                    if (currentCleanupTypes.Contains(structure.Name)
+                        && structure.CleanupMethod is string cleanup)
                     {
                         functionIndexes ??= program.Functions.Select((function, functionIndex) =>
                             (function.Name, functionIndex))
