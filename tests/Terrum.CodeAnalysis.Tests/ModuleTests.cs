@@ -981,6 +981,50 @@ public sealed class ModuleTests
     }
 
     [Fact]
+    public void RetainedBufferClearPreservesUnexportedProducerCallDiagnostic()
+    {
+        var producer = Produce("public int32 API() { Helper(); return 42; } void Helper() { }", "API");
+        var consumer = Compile("""
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                mut OwnedInt32Buffer buffer = move raw;
+                buffer.Clear();
+                Helper();
+                return 0;
+            }
+            void Helper() { }
+            """);
+        Assert.Contains(consumer.Functions, static function => function.Intrinsic == BoundIntrinsic.BufferClear);
+
+        var exception = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateConsumer(consumer, producer));
+        Assert.Equal("Consumer cannot call an unexported producer implementation.", exception.Message);
+    }
+
+    [Fact]
+    public void UnreferencedBufferClearIsOmittedWithoutCheckingSkippedProducerImplementations()
+    {
+        var producer = Produce("""
+            public int32 API() { Hidden(); return 42; }
+            void Hidden() { Helper(); }
+            void Helper() { }
+            """, "API");
+        var consumer = Compile("""
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(1, out var buffer);
+                return buffer.Count;
+            }
+            void Hidden() { Helper(); }
+            void Helper() { }
+            """);
+        Assert.Contains(consumer.Functions, static function => function.Intrinsic == BoundIntrinsic.BufferClear);
+
+        var artifact = ModuleCompiler.CreateConsumer(consumer, producer);
+
+        Assert.DoesNotContain("OwnedInt32Buffer.Clear", Encoding.UTF8.GetString(artifact), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TamperedProducerCannotExportPrivateDependency()
     {
         const string Source = "public struct Secret { private int32 Value; "

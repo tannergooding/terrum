@@ -643,16 +643,45 @@ public static partial class ModuleCompiler
             .Select(function => function.Name).ToHashSet(StringComparer.Ordinal);
         var hasExternalDeclarations = program.Functions.Any(static function => function.IsExternal);
         var declarations = ImmutableArray.CreateBuilder<ModuleFunction>();
+        List<int>?[]? functionCalls = null;
         for (var i = 0; i < program.Functions.Length; i++)
         {
             var function = program.Functions[i];
-            if (function.Intrinsic == BoundIntrinsic.BufferClear
-                && !program.Functions.Any(candidate => Calls(candidate.Body).Contains(i)))
+            if (function.Intrinsic == BoundIntrinsic.BufferClear)
             {
-                continue;
+                functionCalls ??= new List<int>?[program.Functions.Length];
+                var isReferenced = false;
+                for (var candidateIndex = 0; candidateIndex < program.Functions.Length; candidateIndex++)
+                {
+                    var candidateCalls = functionCalls[candidateIndex];
+                    if (candidateCalls is null)
+                    {
+                        candidateCalls = Calls(program.Functions[candidateIndex].Body);
+                        if (candidateIndex >= i)
+                        {
+                            functionCalls[candidateIndex] = candidateCalls;
+                        }
+                    }
+                    if (candidateCalls.Contains(i))
+                    {
+                        isReferenced = true;
+                        break;
+                    }
+                }
+                // Earlier functions have passed validation and cannot reuse their call lists.
+                Array.Clear(functionCalls, 0, i);
+                if (!isReferenced)
+                {
+                    functionCalls[i] = null;
+                    continue;
+                }
             }
             if (!hasExternalDeclarations && implementationFunctions.Contains(function.Name))
             {
+                if (functionCalls is not null)
+                {
+                    functionCalls[i] = null;
+                }
                 continue;
             }
             if (exports.TryGetValue(function.Name, out var imported))
@@ -680,6 +709,10 @@ public static partial class ModuleCompiler
                 declarations.Add(new ModuleFunction(function.Name, imported.Contract, null, true) {
                     HasOwnershipTransfer = hasOwnershipTransfer,
                 });
+                if (functionCalls is not null)
+                {
+                    functionCalls[i] = null;
+                }
             }
             else
             {
@@ -687,12 +720,16 @@ public static partial class ModuleCompiler
                 {
                     throw new ModuleContractException($"External declaration '{function.Name}' is not provided by this producer.");
                 }
-                foreach (var callee in Calls(function.Body))
+                foreach (var callee in functionCalls?[i] ?? Calls(function.Body))
                 {
                     if (!hasExternalDeclarations && implementationFunctions.Contains(program.Functions[callee].Name))
                     {
                         throw new ModuleContractException("Consumer cannot call an unexported producer implementation.");
                     }
+                }
+                if (functionCalls is not null)
+                {
+                    functionCalls[i] = null;
                 }
                 declarations.Add(new ModuleFunction(function.Name, Contract(function, program.Structures), function, false) {
                     HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
