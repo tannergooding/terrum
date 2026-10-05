@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `3add77d` | Index JIT import providers during validation |
 | `5c4288d` | Reuse public layout checks across library exports |
 | `f8ed4aa` | Index struct visibility for library exports |
 | `794ee9f` | Index functions during library export selection |
