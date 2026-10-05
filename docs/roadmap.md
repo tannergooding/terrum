@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `b13036b` | Validate graph cleanup ownership during the structure traversal |
 | `b10b0a8` | Combine graph origin and cleanup-owner construction into one structure pass |
 | `31abf0a` | Reuse consumer declaration contracts and ownership facts during packaging |
 | `6b672a3` | Detect exception imports during native JIT fixup validation |
