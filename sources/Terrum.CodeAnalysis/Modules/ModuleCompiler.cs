@@ -198,13 +198,13 @@ public static partial class ModuleCompiler
         {
             return "native-18";
         }
-        var profile = Compilation.GetNativeProfileVersion(module.RuntimePolicy,
-            module.Structures.Any(static structure => structure.IsUnique),
-            module.Functions.Any(static function => function.HasOwnershipTransfer),
-            Compilation.HasCompositeUnique(module.Structures),
-            HasOwnedNativeBuffer(module.Structures, module.Functions),
-            HasReadonlyNativeView(module.Functions), HasMutableNativeViewOrClear(module.Functions));
-        return profile;
+        var unique = module.Structures.Any(static structure => structure.IsUnique);
+        var ownershipTransfer = module.Functions.Any(static function => function.HasOwnershipTransfer);
+        var compositeUnique = Compilation.HasCompositeUnique(module.Structures);
+        var ownedNativeBuffer = HasOwnedNativeBuffer(module.Structures, module.Functions);
+        var (readonlyNativeView, mutableNativeViewOrClear) = NativeViewFeatures(module.Functions);
+        return Compilation.GetNativeProfileVersion(module.RuntimePolicy, unique, ownershipTransfer,
+            compositeUnique, ownedNativeBuffer, readonlyNativeView, mutableNativeViewOrClear);
     }
 
     private static void RejectManagedNodes(BoundProgram program)
@@ -313,25 +313,41 @@ public static partial class ModuleCompiler
         }
     }
 
-    private static bool HasMutableNativeViewOrClear(ImmutableArray<ModuleFunction> functions)
+    private static (bool Readonly, bool MutableOrClear) NativeViewFeatures(
+        ImmutableArray<ModuleFunction> functions)
     {
+        var readonlyView = false;
+        var mutableViewOrClear = false;
         foreach (var item in functions)
         {
-            if (item.Function is BoundFunction function)
+            if (item.Function is not BoundFunction function)
             {
-                if (function.Intrinsic == BoundIntrinsic.BufferClear)
+                continue;
+            }
+            if (function.Intrinsic == BoundIntrinsic.BufferClear)
+            {
+                mutableViewOrClear = true;
+                if (readonlyView)
                 {
-                    return true;
-                }
-                var found = false;
-                _ = Calls(function.Body, visitView: view => found |= view.IsMutable);
-                if (found)
-                {
-                    return true;
+                    break;
                 }
             }
+            _ = Calls(function.Body, visitView: view => {
+                if (view.IsMutable)
+                {
+                    mutableViewOrClear = true;
+                }
+                else
+                {
+                    readonlyView = true;
+                }
+            });
+            if (readonlyView && mutableViewOrClear)
+            {
+                break;
+            }
         }
-        return false;
+        return (readonlyView, mutableViewOrClear);
     }
 
     private static int ContractParameterCount(string contract) => ContractParameterCount(contract.Split('|'));
@@ -345,23 +361,6 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Invalid function contract parameter count.");
         }
         return parameterCount;
-    }
-
-    private static bool HasReadonlyNativeView(ImmutableArray<ModuleFunction> functions)
-    {
-        foreach (var item in functions)
-        {
-            if (item.Function is BoundFunction function)
-            {
-                var found = false;
-                _ = Calls(function.Body, visitView: view => found |= !view.IsMutable);
-                if (found)
-                {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     private static BoundFunction Declaration(BoundFunction function) => function with {
