@@ -261,6 +261,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `8cce660` | Persist invocation-scoped `Host.Source` requirements for semantic-module JIT execution |
 | `3fd426c` | Pre-size verifier lookup indexes |
 | `d15dd48` | Pre-size verifier uniqueness sets |
 | `677ab34` | Pre-size native import validation maps |
