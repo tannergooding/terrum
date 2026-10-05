@@ -280,7 +280,7 @@ public static partial class NativeModuleCompiler
         var data = new byte[count * sizeof(int)];
         await requests.ReadExactlyAsync(data, cancellationToken).ConfigureAwait(false);
         var targets = new JitContinuationTarget[count];
-        var unique = new HashSet<int>();
+        var unique = new HashSet<int>(count);
         for (var index = 0; index < count; index++)
         {
             var offset = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(index * sizeof(int), sizeof(int)));
