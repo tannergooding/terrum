@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e365577` | Reuse managed-class mutability during declaration validation |
 | `bf28c0b` | Collect generic signature nodes in one pass |
 | `3c6e58f` | Scan static protocol formals once without intermediate arrays |
 | `45e7514` | Reuse generic declaration attribute and modifier facts |
