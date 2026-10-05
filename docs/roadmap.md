@@ -273,6 +273,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `35db563a` | Return precise source spans for rejected scalar aliases |
 | `2c0d6dbf` | Preserve hosted type/function namespace parity for scalar aliases |
 | `2a79685d` | Verify `SourceRange` boundaries through persisted semantic-module JIT |
 | `91764c60` | Project bounded internal scalar aliases through complete v85 snapshots |
