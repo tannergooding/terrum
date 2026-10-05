@@ -26,6 +26,7 @@ internal sealed partial class Binder
     private readonly List<Signature> _signatures = [];
     private readonly HashSet<BoundLocal> _constRequired = new(ReferenceEqualityComparer.Instance);
     private readonly List<BoundStruct> _structs = [];
+    private readonly Dictionary<PrimitiveType, int> _structureAlignments = [];
     private readonly Dictionary<int, (SyntaxTree Tree, SyntaxNode Declaration)> _structDeclarations = [];
     private readonly HashSet<int> _layingOut = [];
     private readonly HashSet<int> _laidOut = [];
@@ -786,7 +787,7 @@ internal sealed partial class Binder
                 Report("TRM3023", "Copy structs cannot store unique owning fields.", field.Span);
             }
             var width = ValueLayout.Size(type, _structs);
-            var fieldAlignment = width == 0 ? 1 : ValueLayout.Alignment(type, _structs);
+            var fieldAlignment = width == 0 ? 1 : ValueAlignment(type);
             var duplicate = false;
             foreach (var previous in fields)
             {
@@ -871,8 +872,27 @@ internal sealed partial class Binder
             IsTransparent = isTransparent,
             IsSequential = isSequential,
         };
+        _structureAlignments[(PrimitiveType)(100 + index)] = alignment;
         _ = _layingOut.Remove(index);
         _ = _laidOut.Add(index);
+    }
+
+    private int ValueAlignment(PrimitiveType type)
+    {
+        if (!IsStruct(type))
+        {
+            return ValueLayout.Alignment(type, _structs);
+        }
+        if (_structureAlignments.TryGetValue(type, out var alignment))
+        {
+            return alignment;
+        }
+        alignment = ValueLayout.Alignment(type, _structs);
+        if (_laidOut.Contains((int)type - 100))
+        {
+            _structureAlignments.Add(type, alignment);
+        }
+        return alignment;
     }
 
     private static SyntaxToken StructName(SyntaxNode declaration)
