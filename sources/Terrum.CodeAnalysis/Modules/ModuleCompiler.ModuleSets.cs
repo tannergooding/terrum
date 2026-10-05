@@ -132,13 +132,16 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Consumer and producer checked-failure policies differ.");
         }
-        var available = reference.Functions.ToDictionary(static function => function.Name, StringComparer.Ordinal);
+        IReadOnlyDictionary<string, BoundFunction>? available = null;
         var hasPrivateManagedState = HasPrivateManagedState(program);
-        var declarations = ImmutableArray.CreateBuilder<ModuleFunction>();
+        var declarations = ImmutableArray.CreateBuilder<ModuleFunction>(program.Functions.Length);
         foreach (var function in program.Functions)
         {
             if (function.IsExternal)
             {
+                available ??= reference.Functions.IsEmpty
+                    ? ImmutableDictionary<string, BoundFunction>.Empty
+                    : reference.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
                 if (hasPrivateManagedState && !ManagedExportShape.Supported(function, program.Structures))
                 {
                     throw new ModuleContractException($"Managed graph import '{function.Name}' crosses a non-Copy boundary.");
@@ -168,6 +171,7 @@ public static partial class ModuleCompiler
                 });
             }
         }
+        var declarationArray = declarations.MoveToImmutable();
         var required = RequiredStructures(program.Functions, program.Structures);
         var structures = SelectStructures(program.Structures, required);
         var referenceStructures = IndexStructures(reference.Structures);
@@ -184,13 +188,22 @@ public static partial class ModuleCompiler
                 imported.Add(structure.Name);
             }
         }
-        RejectImportedTypeMembers(declarations, imported);
-        var functions = declarations.Select(declaration => declaration with {
-            Function = declaration.Import ? null : RemapFunction(declaration.Function
-                ?? throw new ModuleFormatException("Missing consumer function."), program.Structures, structures),
-        }).ToImmutableArray();
-        var module = new Module(true, program.EntryPoint, structures, functions) {
-            Classes = [.. program.Classes.Select(@class => RemapClass(@class, program.Structures, structures))],
+        RejectImportedTypeMembers(declarationArray, imported);
+        var functions = ImmutableArray.CreateBuilder<ModuleFunction>(declarationArray.Length);
+        foreach (var declaration in declarationArray)
+        {
+            functions.Add(declaration with {
+                Function = declaration.Import ? null : RemapFunction(declaration.Function
+                    ?? throw new ModuleFormatException("Missing consumer function."), program.Structures, structures),
+            });
+        }
+        var classes = ImmutableArray.CreateBuilder<BoundClass>(program.Classes.Length);
+        foreach (var @class in program.Classes)
+        {
+            classes.Add(RemapClass(@class, program.Structures, structures));
+        }
+        var module = new Module(true, program.EntryPoint, structures, functions.MoveToImmutable()) {
+            Classes = classes.MoveToImmutable(),
             ImportedStructures = imported.ToImmutable(),
             RuntimePolicy = program.RuntimePolicy,
         };
