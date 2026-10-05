@@ -2397,6 +2397,14 @@ code unit, including surrogate values. AOT/JIT compare against host bit-pattern
 results under both policies, including an independent compiled-module consumer. This does not
 introduce `unchecked` source syntax or change existing type-call conversion.
 
+The [integer-math candidate](../self-host/IntegerMath.terrum) provides
+checked `Abs` alternatives, sign/min/max/clamp, exact widened `int32`
+multiplication and signed-input GCD with unsigned magnitudes. Revision-56
+persisted semantic-module JIT compares the existing candidate operations
+against integer oracles across 858 boundary cases under both runtime policies;
+the signed-minimum magnitudes and failed `TryAbs` outputs are included. This
+does not approve a public API or add tuple-returning `DivRem`.
+
 The [StringLiteral candidate](../self-host/StringLiteral.terrum) decodes
 validated quoted spelling from the immutable source grant. Its ASCII and
 ISO-8859-1 (Latin-1) length queries return false for unrepresentable scalars;
