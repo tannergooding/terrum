@@ -279,6 +279,7 @@ public static unsafe class NativeJit
             }
         }
         var emitted = new HashSet<(string Dll, string Export)>();
+        var hasRaiseException = false;
         foreach (var fixup in code.NativeImports)
         {
             if (fixup.DisplacementOffset < 0 || fixup.DisplacementOffset > text.Length - sizeof(int)
@@ -291,6 +292,10 @@ public static unsafe class NativeJit
                             && fixup.ExportName == "__C_specific_handler"))))
             {
                 throw new ArgumentException("Invalid or unowned JIT import.", nameof(code));
+            }
+            if (fixup.ExportName == "RaiseException")
+            {
+                hasRaiseException = true;
             }
             if (fixup.DeclarationIndex >= 0)
             {
@@ -309,7 +314,7 @@ public static unsafe class NativeJit
             throw new ArgumentException("Native JIT fixups differ from persisted machine imports.", nameof(code));
         }
         var cetEnforced = false;
-        if (code.NativeImports.Any(static fixup => fixup.ExportName == "RaiseException")
+        if (hasRaiseException
             && OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041))
         {
             if (!JitWindows.GetProcessMitigationPolicy(JitWindows.GetCurrentProcess(), 15,
