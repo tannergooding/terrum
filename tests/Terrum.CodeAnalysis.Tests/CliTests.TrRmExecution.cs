@@ -294,6 +294,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return int32(uint32.MaxValue); }", unchecked((int)0xE0540001))]
     [InlineData("int32 Main() { _ = int32(1) / 0; return 42; }", unchecked((int)0xE0540002))]
     [InlineData("int32 Main() { int32 x = 1 / 0; return 42; }", unchecked((int)0xE0540002))]
+    [InlineData("int32 Main() { mut int32 x = int32.MaxValue; do { x += 1; break; } while (false); return x; }", unchecked((int)0xE0540001))]
     [InlineData("int32 Main() { return (1 / 0) + (int32.MaxValue + 1); }", unchecked((int)0xE0540002))]
     [InlineData("int32 Main() { return (int32.MaxValue + 1) + (1 / 0); }", unchecked((int)0xE0540001))]
     [InlineData("int32 Main() { Fail(); return 42; } void Fail() { int32 x = 1 / 0; }", unchecked((int)0xE0540002))]
