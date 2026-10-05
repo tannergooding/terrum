@@ -1827,6 +1827,23 @@ public sealed partial class CliTests
                 "Terrum.CodeAnalysis.Numerics64.TryGetUInt32BaseLength",
                 "Terrum.CodeAnalysis.Numerics64.TryGetInt32BaseLength",
                 "Terrum.CodeAnalysis.Numerics64.TryGetChar16BaseLength",
+                "Terrum.CodeAnalysis.Numerics64.FormatUInt64",
+                "Terrum.CodeAnalysis.Numerics64.FormatInt64",
+                "Terrum.CodeAnalysis.Numerics64.FormatUInt32",
+                "Terrum.CodeAnalysis.Numerics64.FormatInt32",
+                "Terrum.CodeAnalysis.Numerics64.FormatChar16",
+                "Terrum.CodeAnalysis.Numerics64.FormatUInt64Base",
+                "Terrum.CodeAnalysis.Numerics64.FormatUInt64BaseUpper",
+                "Terrum.CodeAnalysis.Numerics64.FormatInt64Base",
+                "Terrum.CodeAnalysis.Numerics64.FormatInt64BaseUpper",
+                "Terrum.CodeAnalysis.Numerics64.FormatUInt32Base",
+                "Terrum.CodeAnalysis.Numerics64.FormatUInt32BaseUpper",
+                "Terrum.CodeAnalysis.Numerics64.FormatInt32Base",
+                "Terrum.CodeAnalysis.Numerics64.FormatInt32BaseUpper",
+                "Terrum.CodeAnalysis.Numerics64.FormatChar16Base",
+                "Terrum.CodeAnalysis.Numerics64.FormatChar16BaseUpper",
+                "Terrum.CodeAnalysis.Numerics64.CreateFormattingWorkspaceForAbiTest",
+                "Terrum.CodeAnalysis.Numerics64.ConsumeFormattingWorkspaceForAbiTest",
                 "Terrum.CodeAnalysis.Numerics64.AbsFloat32",
                 "Terrum.CodeAnalysis.Numerics64.MinFloat32",
                 "Terrum.CodeAnalysis.Numerics64.MaxFloat32",
@@ -1890,6 +1907,7 @@ public sealed partial class CliTests
             AssertIntegerSaturationExports(handle);
             AssertIntegerWrappingExports(handle);
             AssertIntegerFormattingLengthExports(handle);
+            AssertIntegerFormattingBufferExports(handle);
             AssertFloatingMathSelectionExports(handle);
 
             var isAsciiDigit = Marshal.GetDelegateForFunctionPointer<Char16PredicateExport>(

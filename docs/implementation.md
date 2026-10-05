@@ -99,9 +99,18 @@ The same DLL directly invokes all five existing `IntegerFormatting` radix
 length queries for signed/unsigned 32-/64-bit values and `char16` code units.
 Across radices 2 through 36, their output lengths match an independent
 `BigInteger` digit-count oracle; invalid radices preserve the output and
-adjacent canaries. The owned-buffer formatters are not part of this evidence,
-and this does not establish a general `init ref` contract or approve the
-candidate API.
+adjacent canaries. This does not establish a general `init ref` contract or
+approve the candidate API.
+The DLL also directly invokes all fifteen decimal and radix formatting
+functions. The C# tests pass `OwnedInt32Buffer` only as Terrum's internal
+eight-byte integer carrier; two test-only Terrum exports allocate exact
+workspaces and consume each result while packing up to eight output digits
+into a scalar for comparison. Every digit is checked against hosted decimal
+formatting or an independent `BigInteger` radix oracle, across bases 2 through
+36 and both letter cases, including workspace reuse. The test never fabricates
+or frees the owner from C#, and does not establish an external owner protocol,
+a stable ABI, or general ownership support. Existing native heap tests
+separately check allocation/release behavior.
 Persisted semantic-module JIT also exercises all 20 existing
 `IntegerCheckedConversions` helpers across source/destination boundaries,
 including signed minima, unsigned maxima, `char16` edges and surrogate code

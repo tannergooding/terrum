@@ -1,0 +1,25 @@
+namespace Terrum.CodeAnalysis.Numerics64;
+
+public OwnedInt32Buffer CreateFormattingWorkspaceForAbiTest(int32 capacity)
+{
+    require OwnedInt32Buffer.TryCreate(capacity, out var created);
+    return move created;
+}
+
+public uint64 ConsumeFormattingWorkspaceForAbiTest(
+    OwnedInt32Buffer buffer,
+    int32 start,
+    init ref<int32> length)
+{
+    // Pack digits so the C# test can inspect output without taking ownership of the buffer.
+    length = buffer.Count;
+    require start >= 0 && start < buffer.Count;
+
+    mut uint64 packed = 0;
+    for (mut int32 offset = 0; offset < 8 && start + offset < buffer.Count; offset = offset + 1)
+    {
+        packed = packed
+            | (uint64(uint32(buffer.Read(start + offset))) << (offset * 8));
+    }
+    return packed;
+}
