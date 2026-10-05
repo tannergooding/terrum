@@ -68,4 +68,25 @@ public sealed class NativeFrameTests
             Assert.True(code.Code.AsSpan(function.Start + 8, 3).SequenceEqual(new byte[] { 0x48, 0x89, 0xD5 }));
         });
     }
+
+    [Fact]
+    public void OptionalAssignmentToOutParametersEmitsNativeCode()
+    {
+        const string Source = """
+            bool SetIfEmpty(out ManagedNode? first, out ManagedNode? second) {
+                first = null;
+                second = null;
+                first ??= null;
+                second ??= null;
+                return true;
+            }
+            int32 Main() { return 42; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
+        Assert.True(code.Code.Length > 0);
+        Assert.Contains(code.Functions.Skip(6), function => function.UsesFramePointer);
+    }
 }

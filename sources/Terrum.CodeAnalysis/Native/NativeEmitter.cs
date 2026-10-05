@@ -2272,12 +2272,13 @@ internal sealed partial class PeCompiler
             case BoundOptionalAssignment optionalAssignment:
                 if (optionalAssignment.Place is BoundRead optionalLocal)
                 {
-                    _code.Load64(OwnerPlace(optionalLocal.Variable));
+                    var optionalDestination = OwnerPlace(optionalLocal.Variable);
+                    _code.Load64(optionalDestination);
                     _code.Bytes(0x48, 0x85, 0xC0);
                     var localPresent = _code.JumpIf(0x85);
                     Expression(optionalAssignment.Value, 0);
-                    StoreValue(OwnerPlace(optionalLocal.Variable), optionalLocal.Type);
-                    SetManagedRoot(OwnerPlace(optionalLocal.Variable), active: true);
+                    StoreValue(optionalDestination, optionalLocal.Type);
+                    SetManagedRoot(optionalDestination, active: true);
                     _code.PatchRelative(localPresent, _code.Position);
                     break;
                 }
