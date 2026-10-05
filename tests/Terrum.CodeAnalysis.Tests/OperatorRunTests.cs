@@ -112,6 +112,17 @@ public sealed class OperatorRunTests
         }
     }
 
+    [Fact]
+    public void NestedGenericClosersConsumeEveryCharacterOfShiftToken()
+    {
+        const string source = "void F() { Get<Outer<Inner<int32>>>(); }";
+        var tree = SyntaxTree.Parse(source);
+
+        Assert.Empty(tree.Diagnostics);
+        Assert.Equal(source, tree.Root.ToFullString());
+        Assert.Equal(3, tree.Root.DescendantTokens().Count(static token => token.Kind == TokenKind.Greater));
+    }
+
     [Theory]
     [InlineData("int32 F(int32 a, int32 b) => a >?> b;", ">?>")]
     [InlineData("int32 F(int32 a, int32 b) => a >>>> b;", ">>>>")]

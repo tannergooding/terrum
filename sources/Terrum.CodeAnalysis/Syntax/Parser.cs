@@ -1412,17 +1412,14 @@ internal sealed class Parser
                     continue;
                 }
                 // The CST consumes a compound closer one actual '>' at a time.
-                foreach (var unit in token.Text)
+                for (var offset = 0; offset < token.Text.Length; offset++)
                 {
-                    if (unit != '>')
+                    if (token.Text[offset] != '>'
+                        || !_typePunctuation.Contains(new TextSpan(token.Span.Start + offset, 1)))
                     {
                         consumed = false;
                         break;
                     }
-                }
-                for (var at = token.Span.Start; at < token.Span.End && consumed; at++)
-                {
-                    consumed = _typePunctuation.Contains(new TextSpan(at, 1));
                 }
             }
             if (!consumed)
