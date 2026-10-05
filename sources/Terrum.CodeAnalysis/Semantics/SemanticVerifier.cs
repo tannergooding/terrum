@@ -72,6 +72,8 @@ public static partial class SemanticVerifier
         {
             throw Limit();
         }
+        var inspectFunctionManagedNodes = program.Classes.IsDefaultOrEmpty;
+        var usesManagedFunctionNodes = false;
         foreach (var function in program.Functions)
         {
             if (function is null || function.Variables.IsDefault)
@@ -82,19 +84,30 @@ public static partial class SemanticVerifier
             {
                 throw Limit();
             }
-            if (function.Variables.Any(static variable => variable is null))
+            if (inspectFunctionManagedNodes && !usesManagedFunctionNodes
+                && (function.Intrinsic >= BoundIntrinsic.NodeTryCreate
+                    || ManagedClassTypes.IsManaged(function.ReturnType)))
             {
-                throw Invalid();
+                usesManagedFunctionNodes = true;
+            }
+            foreach (var variable in function.Variables)
+            {
+                if (variable is null)
+                {
+                    throw Invalid();
+                }
+                if (inspectFunctionManagedNodes && !usesManagedFunctionNodes
+                    && ManagedClassTypes.IsManaged(variable.Type))
+                {
+                    usesManagedFunctionNodes = true;
+                }
             }
         }
         if (program.Classes.IsDefault || program.Classes.Length > MaximumVariables)
         {
             throw Invalid();
         }
-        var usesManagedNodes = !program.Classes.IsEmpty || program.Functions.Any(static function =>
-            function.Intrinsic >= BoundIntrinsic.NodeTryCreate
-            || ManagedClassTypes.IsManaged(function.ReturnType)
-            || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type)));
+        var usesManagedNodes = !program.Classes.IsEmpty || usesManagedFunctionNodes;
         // Isolated definition-site proofs may use private managed declarations, but executable
         // and persisted programs must still enforce the public external-call boundary.
         if (usesManagedNodes && !allowGenericProofDependencies && program.Functions.Any(function =>
