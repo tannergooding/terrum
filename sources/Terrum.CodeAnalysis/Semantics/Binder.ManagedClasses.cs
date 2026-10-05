@@ -230,7 +230,6 @@ internal sealed partial class Binder
         var (tree, declaration) = _classDeclarations[index];
         SetContext(tree);
         var name = _classes[index].Name;
-        var publicClass = false;
         var mutableClass = _classes[index].IsMutable;
         foreach (var child in declaration.Children)
         {
@@ -243,7 +242,6 @@ internal sealed partial class Binder
             }
             if (child is SyntaxTokenElement token)
             {
-                publicClass |= token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.PublicKeyword;
                 if (token.Token.Kind is Terrum.CodeAnalysis.Lexing.TokenKind.UniqueKeyword
                     or Terrum.CodeAnalysis.Lexing.TokenKind.StaticKeyword
                     or Terrum.CodeAnalysis.Lexing.TokenKind.PrivateKeyword
@@ -329,7 +327,7 @@ internal sealed partial class Binder
             Report("TRM3005", $"A managed class supports at most {ManagedClassTypes.MaximumFields} fields.", declaration.Span);
         }
         _classes[index] = new BoundClass(name, fields.ToImmutable(), (offset + 7) & ~7) {
-            IsInternal = !publicClass,
+            IsInternal = _classes[index].IsInternal,
             IsMutable = mutableClass,
         };
     }

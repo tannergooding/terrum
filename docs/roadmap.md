@@ -255,10 +255,11 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
-| `TBD` | Classify generic declaration effects with signature facts |
-| `TBD` | Reuse recorded type visibility when validating aliases |
-| `TBD` | Classify static protocol signature nodes during the member scan |
-| `TBD` | Reuse qualified struct names during layout |
+| `TBD` | Preserve cached class visibility during layout |
+| `d2d1a66` | Classify generic declaration effects with signature facts |
+| `14dbab9` | Reuse recorded type visibility when validating aliases |
+| `1818ad3` | Classify static protocol signature nodes during the member scan |
+| `8080dc7` | Reuse qualified struct names during layout |
 | `035f281` | Reuse static protocol argument names |
 | `6da62ac` | Reuse generic declaration dispatch result |
 | `e282982` | Check generic type parameter facts together |
