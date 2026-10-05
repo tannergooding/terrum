@@ -1277,12 +1277,18 @@ public static partial class ModuleCompiler
     private static string Contract(BoundFunction function, ImmutableArray<BoundStruct> structures)
     {
         var result = new StringBuilder();
-        var ownerVisibility = function.DeclaringStruct is string owner
-            ? Binder.TryPrimitiveType(owner, out _)
-                && !structures.Any(structure => structure.Name == owner) ? 'E'
-                : structures.Where(structure => structure.Name == owner)
-                    .Select(static structure => Visibility(structure)).FirstOrDefault('?')
-            : '-';
+        var ownerVisibility = '-';
+        if (function.DeclaringStruct is string owner)
+        {
+            var isPrimitiveType = Binder.TryPrimitiveType(owner, out _);
+            var index = 0;
+            while (index < structures.Length && structures[index].Name != owner)
+            {
+                index++;
+            }
+            ownerVisibility = index < structures.Length ? Visibility(structures[index])
+                : isPrimitiveType ? 'E' : '?';
+        }
         _ = result.Append(function.Name).Append('|').Append(ContractType(function.ReturnType, structures))
             .Append('|').Append(function.IsConstructor ? 'C' : 'F')
             .Append('|').Append(function.IsPrivate ? 'P' : function.IsInternal ? 'N' : 'E')
@@ -1396,13 +1402,27 @@ public static partial class ModuleCompiler
             return false;
         }
         var visited = new HashSet<(int Index, bool PublicFields)>();
-        if (function.DeclaringStruct is string declaring
-            && !(Binder.TryPrimitiveType(declaring, out _)
-                && !structures.Any(structure => structure.Name == declaring))
-            && !structures.Select((structure, index) => (structure, index))
-                .Any(item => item.structure.Name == declaring && PublicLayout((PrimitiveType)(100 + item.index), false)))
+        if (function.DeclaringStruct is string declaring)
         {
-            return false;
+            var isPrimitiveType = Binder.TryPrimitiveType(declaring, out _);
+            var foundStructure = false;
+            var foundPublicLayout = false;
+            for (var index = 0; index < structures.Length; index++)
+            {
+                if (structures[index].Name == declaring)
+                {
+                    foundStructure = true;
+                    if (PublicLayout((PrimitiveType)(100 + index), false))
+                    {
+                        foundPublicLayout = true;
+                        break;
+                    }
+                }
+            }
+            if (!foundPublicLayout && !(isPrimitiveType && !foundStructure))
+            {
+                return false;
+            }
         }
         bool PublicLayout(PrimitiveType type, bool publicFields)
         {
