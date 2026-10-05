@@ -402,7 +402,8 @@ public static partial class ModuleCompiler
     };
 
     private static HashSet<string> RequiredStructures(IEnumerable<BoundFunction> functions,
-        ImmutableArray<BoundStruct> structures, ImmutableArray<BoundClass> classes = default)
+        ImmutableArray<BoundStruct> structures, ImmutableArray<BoundClass> classes = default,
+        Func<string, int>? findStructureIndex = null)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         var pending = new Queue<PrimitiveType>();
@@ -428,12 +429,8 @@ public static partial class ModuleCompiler
                 && declaring != NativeManagedNodeIntrinsics.TypeName
                 && declaring != NativeManagedNodeIntrinsics.HeapName)
             {
-                var index = 0;
-                while (index < structures.Length && structures[index].Name != declaring)
-                {
-                    index++;
-                }
-                if (index < structures.Length)
+                var index = findStructureIndex?.Invoke(declaring) ?? FindStructureIndex(declaring);
+                if (index >= 0 && index < structures.Length)
                 {
                     Add((PrimitiveType)(100 + index));
                 }
@@ -448,6 +445,16 @@ public static partial class ModuleCompiler
             }
         }
         return result;
+
+        int FindStructureIndex(string name)
+        {
+            var index = 0;
+            while (index < structures.Length && structures[index].Name != name)
+            {
+                index++;
+            }
+            return index < structures.Length ? index : -1;
+        }
 
         void Add(PrimitiveType type)
         {
@@ -546,7 +553,9 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Producer exports must have public, supported native declarations.");
         }
-        var exportedTypes = RequiredStructures(indexes.Select(index => Declaration(program.Functions[index])), program.Structures);
+        Dictionary<string, int>? structureIndexes = null;
+        var exportedTypes = RequiredStructures(indexes.Select(index => Declaration(program.Functions[index])),
+            program.Structures, findStructureIndex: FindStructureIndex);
         foreach (var structure in program.Structures)
         {
             if (exportedTypes.Contains(structure.Name) && structure.CleanupMethod is string cleanup
@@ -580,7 +589,8 @@ public static partial class ModuleCompiler
                     pending.Enqueue(callee);
                 }
             }
-            var types = RequiredStructures([program.Functions[index]], program.Structures);
+            var types = RequiredStructures([program.Functions[index]], program.Structures,
+                findStructureIndex: FindStructureIndex);
             foreach (var structure in program.Structures)
             {
                 if (types.Contains(structure.Name) && structure.CleanupMethod is string cleanup)
@@ -597,7 +607,8 @@ public static partial class ModuleCompiler
             }
         }
         var functions = program.Functions.Where((_, index) => indexes.Contains(index)).ToImmutableArray();
-        var required = RequiredStructures(functions, program.Structures, program.Classes);
+        var required = RequiredStructures(functions, program.Structures, program.Classes,
+            FindStructureIndex);
         var structures = SelectStructures(program.Structures, required);
         var remapped = functions.Select(function => RemapFunction(function, program.Structures, structures));
         var module = new Module(false, -1, structures, [.. remapped.Select(function =>
@@ -608,6 +619,19 @@ public static partial class ModuleCompiler
             RuntimePolicy = program.RuntimePolicy,
         };
         return Write(module, program);
+
+        int FindStructureIndex(string name)
+        {
+            if (structureIndexes is null)
+            {
+                structureIndexes = new Dictionary<string, int>(StringComparer.Ordinal);
+                for (var index = 0; index < program.Structures.Length; index++)
+                {
+                    _ = structureIndexes.TryAdd(program.Structures[index].Name, index);
+                }
+            }
+            return structureIndexes.TryGetValue(name, out var foundIndex) ? foundIndex : -1;
+        }
     }
 
     /// <summary>Stores consumer bound bodies and imported declaration contracts, but never producer bodies.</summary>
