@@ -397,15 +397,17 @@ public static partial class ModuleCompiler
             if (function.DeclaringStruct is string declaring
                 && declaring != NativeBufferIntrinsics.TypeName
                 && declaring != NativeManagedNodeIntrinsics.TypeName
-                && declaring != NativeManagedNodeIntrinsics.HeapName
-                && structures.Any(structure => structure.Name == declaring))
+                && declaring != NativeManagedNodeIntrinsics.HeapName)
             {
                 var index = 0;
                 while (index < structures.Length && structures[index].Name != declaring)
                 {
                     index++;
                 }
-                Add((PrimitiveType)(100 + index));
+                if (index < structures.Length)
+                {
+                    Add((PrimitiveType)(100 + index));
+                }
             }
             _ = Calls(function.Body, Add);
         }
