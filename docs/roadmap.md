@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `3fd426c` | Pre-size verifier lookup indexes |
 | `d15dd48` | Pre-size verifier uniqueness sets |
 | `677ab34` | Pre-size native import validation maps |
 | `d9c60ca` | Pre-size producer linkage name map |
