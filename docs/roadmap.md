@@ -285,6 +285,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `b8df80c0` | Erase recursively nested literal-false loops without regions |
 | `284f62a2` | Execute fallthrough bodies once when erasing literal-false post-tests |
 | `e3c4cabd` | Preserve returning direct calls before terminal loop exits |
 | `a1737884` | Lower scalar-only conditional prefixes before acyclic loop tails |
