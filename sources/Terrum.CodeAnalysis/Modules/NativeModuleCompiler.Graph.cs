@@ -320,24 +320,23 @@ public static partial class NativeModuleCompiler
             origins[index] = originsByName;
         }
         var result = ModuleCompiler.MergeGraphReferences(references, origins);
-        if (result.Structures.Any(static item => item.CleanupMethod is not null))
+        Dictionary<string, HashSet<string>>? cleanupExports = null;
+        HashSet<(string? DeclaringStruct, string Name)>? cleanupFunctions = null;
+        foreach (var structure in result.Structures)
         {
-            var cleanupExports = providers.ToDictionary(static provider => provider.Identity!,
-                static provider => provider.Exports.ToHashSet(StringComparer.Ordinal), StringComparer.Ordinal);
-            var cleanupFunctions = result.Functions.Where(static function => function.IsCleanup)
-                .Select(static function => (function.DeclaringStruct, function.Name)).ToHashSet();
-            foreach (var structure in result.Structures)
+            if (structure.CleanupMethod is not string cleanup)
             {
-                if (structure.CleanupMethod is not string cleanup)
-                {
-                    continue;
-                }
-                if (!cleanupOwners.TryGetValue(structure.Name, out var owner) || owner is null
-                    || !cleanupExports.TryGetValue(owner, out var exports) || !exports.Contains(cleanup)
-                    || !cleanupFunctions.Contains((structure.Name, cleanup)))
-                {
-                    throw new ModuleContractException($"Graph unique type '{structure.Name}' requires its origin cleanup provider.");
-                }
+                continue;
+            }
+            cleanupExports ??= providers.ToDictionary(static provider => provider.Identity!,
+                static provider => provider.Exports.ToHashSet(StringComparer.Ordinal), StringComparer.Ordinal);
+            cleanupFunctions ??= result.Functions.Where(static function => function.IsCleanup)
+                .Select(static function => (function.DeclaringStruct, function.Name)).ToHashSet();
+            if (!cleanupOwners.TryGetValue(structure.Name, out var owner) || owner is null
+                || !cleanupExports.TryGetValue(owner, out var exports) || !exports.Contains(cleanup)
+                || !cleanupFunctions.Contains((structure.Name, cleanup)))
+            {
+                throw new ModuleContractException($"Graph unique type '{structure.Name}' requires its origin cleanup provider.");
             }
         }
         return result;
