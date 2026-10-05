@@ -143,7 +143,7 @@ public static partial class NativeModuleCompiler
         }
         at += identityLength;
         var dependencies = new GraphDependency[dependencyCount];
-        var seenImports = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string>? seenImports = null;
         for (var i = 0; i < dependencies.Length; i++)
         {
             var dependencyName = ReadGraphString(bytes, ref at, 64);
@@ -157,7 +157,12 @@ public static partial class NativeModuleCompiler
             for (var j = 0; j < declarations.Length; j++)
             {
                 var name = ReadGraphString(bytes, ref at, 256);
-                if (!ValidGraphSymbol(name) || !seenImports.Add(name)
+                if (!ValidGraphSymbol(name))
+                {
+                    throw new ModuleFormatException("Duplicate, unordered or invalid graph declaration.");
+                }
+                seenImports ??= new HashSet<string>(StringComparer.Ordinal);
+                if (!seenImports.Add(name)
                     || (j != 0 && StringComparer.Ordinal.Compare(declarations[j - 1], name) >= 0))
                 {
                     throw new ModuleFormatException("Duplicate, unordered or invalid graph declaration.");
@@ -179,7 +184,7 @@ public static partial class NativeModuleCompiler
             }
             dependencies[i] = new GraphDependency(dependencyName, declarations, imports);
         }
-        if (seenImports.Count > 1024)
+        if (seenImports is { Count: > 1024 })
         {
             throw new ModuleFormatException("Graph import total exceeds its bound.");
         }
@@ -238,7 +243,7 @@ public static partial class NativeModuleCompiler
             ValidatedReference = contractSnapshot.Reference,
         };
         var imported = contractSnapshot.Imports;
-        if (!seenImports.SetEquals(imported))
+        if (seenImports is null ? imported.Any() : !seenImports.SetEquals(imported))
         {
             throw new ModuleFormatException("Graph declaration mapping differs from semantic declarations.");
         }
