@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `36f71f6` | Check graph dependency type membership without LINQ |
 | `ea0c364` | Pre-size native producer export-address tracking |
 | `71a9af9` | Validate TRRM zero-filled gaps with span search |
 | `4d7ed3f` | Skip exceptional-cleanup tracking for fail-fast images |
