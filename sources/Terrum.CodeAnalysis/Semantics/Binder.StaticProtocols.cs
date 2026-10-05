@@ -563,6 +563,9 @@ internal sealed partial class Binder
         SyntaxNode? returnType = null;
         SyntaxNode? parameters = null;
         SyntaxNode? body = null;
+        var noThrowCount = 0;
+        var attributeCount = 0;
+        var hasInvalidAttribute = false;
         foreach (var child in children)
         {
             if (returnType is null && child.Kind == SyntaxKind.TypeName)
@@ -577,25 +580,6 @@ internal sealed partial class Binder
             {
                 body = child;
             }
-        }
-        var returnName = returnType is null ? "" : NameText(returnType);
-        var scalarReturn = GenericScalarType(returnName);
-        var nameToken = ((SyntaxTokenElement)declaration.Children.First(element =>
-            element is SyntaxTokenElement { Token.Kind: TokenKind.Identifier })).Token;
-        var qualified = Qualify(nameToken.Name);
-        var arguments = parameters?.Children.OfType<SyntaxNode>().ToArray() ?? [];
-        var parameterNames = new HashSet<string>(StringComparer.Ordinal);
-        var templateParameters = ImmutableArray.CreateBuilder<GenericParameter>(arguments.Length);
-        var operations = typeNames.Select(static _ =>
-            ImmutableDictionary.CreateBuilder<StaticOperatorKey, GenericOperatorConstraint>()).ToArray();
-        var copies = new bool[typeNames.Length];
-        var constrained = new HashSet<string>(StringComparer.Ordinal);
-        var returnIndex = Array.IndexOf(typeNames, returnName);
-        var noThrowCount = 0;
-        var attributeCount = 0;
-        var hasInvalidAttribute = false;
-        foreach (var child in children)
-        {
             if (child.Kind == SyntaxKind.Attribute)
             {
                 attributeCount++;
@@ -609,12 +593,21 @@ internal sealed partial class Binder
                 }
             }
         }
+        var returnName = returnType is null ? "" : NameText(returnType);
+        var scalarReturn = GenericScalarType(returnName);
+        SyntaxToken? nameToken = null;
         var noThrow = noThrowCount != 0;
         var unsafeModifierCount = 0;
         var hasInvalidModifier = false;
-        foreach (var element in declaration.Children.OfType<SyntaxTokenElement>())
+        foreach (var element in declaration.Children)
         {
-            var tokenKind = element.Token.Kind;
+            if (element is not SyntaxTokenElement tokenElement)
+            {
+                continue;
+            }
+            var token = tokenElement.Token;
+            nameToken ??= token.Kind == TokenKind.Identifier ? token : null;
+            var tokenKind = token.Kind;
             if (tokenKind == TokenKind.UnsafeKeyword)
             {
                 unsafeModifierCount++;
@@ -622,6 +615,15 @@ internal sealed partial class Binder
             hasInvalidModifier |= tokenKind is TokenKind.PublicKeyword or TokenKind.PrivateKeyword
                 or TokenKind.StaticKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword;
         }
+        var qualified = Qualify(nameToken?.Name ?? throw new InvalidOperationException());
+        var arguments = parameters?.Children.OfType<SyntaxNode>().ToArray() ?? [];
+        var parameterNames = new HashSet<string>(StringComparer.Ordinal);
+        var templateParameters = ImmutableArray.CreateBuilder<GenericParameter>(arguments.Length);
+        var operations = typeNames.Select(static _ =>
+            ImmutableDictionary.CreateBuilder<StaticOperatorKey, GenericOperatorConstraint>()).ToArray();
+        var copies = new bool[typeNames.Length];
+        var constrained = new HashSet<string>(StringComparer.Ordinal);
+        var returnIndex = Array.IndexOf(typeNames, returnName);
         var requiresUnsafeCaller = unsafeModifierCount != 0;
         var valid = typeNames.Length is >= 1 and <= 8
             && !hasDuplicateTypeParameter
