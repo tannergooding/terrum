@@ -285,6 +285,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `8837912c` | Erase empty literal-false pre-tests without creating loop regions |
 | `249a089c` | Exercise nested acyclic breaks through persisted CLI and native execution |
 | `9736e304` | Verify nested and enclosing acyclic breaks retain distinct exits |
 | `7fa2b0f4` | Preserve proven nested-loop breaks before enclosing terminal tails |
