@@ -23,8 +23,24 @@ public static partial class ModuleCompiler
             Reference = reference;
             RuntimePolicy = module.RuntimePolicy;
             Profile = profile;
-            Imports = [.. module.Functions.Where(static item => item.Import).Select(static item => item.Name)
-                .Order(StringComparer.Ordinal)];
+            var importCount = 0;
+            foreach (var item in module.Functions)
+            {
+                if (item.Import)
+                {
+                    importCount++;
+                }
+            }
+            var imports = ImmutableArray.CreateBuilder<string>(importCount);
+            foreach (var item in module.Functions)
+            {
+                if (item.Import)
+                {
+                    imports.Add(item.Name);
+                }
+            }
+            imports.Sort(StringComparer.Ordinal);
+            Imports = imports.MoveToImmutable();
             Structures = module.Structures;
             ImportedStructures = module.ImportedStructures;
             HasPrivateManagedState = hasPrivateManagedState;

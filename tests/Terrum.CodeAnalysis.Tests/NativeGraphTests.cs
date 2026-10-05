@@ -331,7 +331,7 @@ public sealed class NativeGraphTests
             ["Alpha"], "NodeA", [leaf], NativeRuntimePolicy.FailFast);
         var topCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Top() { return Alpha() + Bravo(); }"),
-            NativeModuleCompiler.CreateGraphReference([middle, leaf]));
+            NativeModuleCompiler.CreateGraphReference([leaf, middle]));
         Assert.False(topCompilation.HasErrors, string.Join(Environment.NewLine, topCompilation.Diagnostics));
         var top = NativeModuleCompiler.CreateGraphProducer(Assert.IsType<BoundProgram>(topCompilation.Program),
             ["Top"], "NodeC", [middle, leaf], NativeRuntimePolicy.FailFast);
