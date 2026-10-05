@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `99671971` | Verify 32-/64-bit BitOperations round-up failure outputs stay unreadable |
 | `9b19cf9b` | Verify provisional IntegerMath helpers through persisted semantic modules |
 | `b821d3fb` | Verify provisional integer wrapping helpers through persisted semantic modules |
 | `efa78c74` | Verify provisional integer saturation helpers through persisted semantic modules |
