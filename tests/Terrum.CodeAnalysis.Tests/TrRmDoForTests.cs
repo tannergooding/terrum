@@ -143,7 +143,9 @@ public sealed class TrRmDoForTests
             bool Fail() { require false; return false; }
             """;
         var original = Compile(source);
-        var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "nested-acyclic-break"));
+        var artifact = TrRmExecutableCompiler.Emit(original, "nested-acyclic-break");
+        Assert.Equal(0, IndexedLoopRegionCount(artifact, 1));
+        var loaded = TrRmExecutableCompiler.Load(artifact);
         Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
         Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
         Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
@@ -171,7 +173,9 @@ public sealed class TrRmDoForTests
             bool Fail() { require false; return false; }
             """;
         var original = Compile(source);
-        var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "nested-acyclic-slots"));
+        var artifact = TrRmExecutableCompiler.Emit(original, "nested-acyclic-slots");
+        Assert.Equal(0, IndexedLoopRegionCount(artifact, 1));
+        var loaded = TrRmExecutableCompiler.Load(artifact);
         Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
         Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
         Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
@@ -215,7 +219,9 @@ public sealed class TrRmDoForTests
     public void BranchingAcyclicLoopsEraseToExistingReturnsAndFallthrough(int expected, string source)
     {
         var original = Compile(source);
-        var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "acyclic-branches"));
+        var artifact = TrRmExecutableCompiler.Emit(original, "acyclic-branches");
+        Assert.Equal(0, IndexedLoopRegionCount(artifact, 1));
+        var loaded = TrRmExecutableCompiler.Load(artifact);
         Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
         Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
         Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
@@ -240,7 +246,9 @@ public sealed class TrRmDoForTests
     public void AcyclicLoopsPreserveSafeTerminalPrefixEffects(int expected, string source)
     {
         var original = Compile(source);
-        var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "acyclic-effects"));
+        var artifact = TrRmExecutableCompiler.Emit(original, "acyclic-effects");
+        Assert.Equal(0, IndexedLoopRegionCount(artifact, 1));
+        var loaded = TrRmExecutableCompiler.Load(artifact);
         Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
         Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
         Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
