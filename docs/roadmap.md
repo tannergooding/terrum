@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `1045730` | Exclude runtime metadata from JIT snapshots |
 | `ab7214d` | Pre-size compilation snapshot collection |
 | `f72d204` | Index repeated CLI diagnostic source lookups |
 | `0f99f3d` | Materialize module declarations as arrays |
