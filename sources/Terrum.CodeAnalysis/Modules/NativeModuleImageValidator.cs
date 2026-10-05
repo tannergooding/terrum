@@ -135,7 +135,7 @@ internal static class NativeModuleImageValidator
                     throw Invalid();
                 }
             }
-            var sourceFunctionStarts = isConsumer ? null : new HashSet<int>();
+            var sourceFunctionStarts = isConsumer ? null : new HashSet<int>(exports.Count);
             CheckImports();
             CheckUnwind();
             if (!isConsumer)
