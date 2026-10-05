@@ -1762,6 +1762,26 @@ public sealed partial class CliTests
                 "Terrum.CodeAnalysis.Numerics64.TryRemainderInt32",
                 "Terrum.CodeAnalysis.Numerics64.TryDivideUInt32",
                 "Terrum.CodeAnalysis.Numerics64.TryRemainderUInt32",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToUInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToUInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToInt32",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToUInt32",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToInt32",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToUInt32",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToInt32",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToUInt32",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToUInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToChar16",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToChar16",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToChar16",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToChar16",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToInt32",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToUInt32",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToUInt64",
             })
             {
                 Assert.True(NativeLibrary.TryGetExport(handle, export, out _),
@@ -1813,6 +1833,7 @@ public sealed partial class CliTests
             AssertBitOperationsExports(handle);
             AssertIntegerMathExports(handle);
             AssertIntegerCheckedArithmeticExports(handle);
+            AssertIntegerCheckedConversionExports(handle);
 
             var isAsciiDigit = Marshal.GetDelegateForFunctionPointer<Char16PredicateExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.IsAsciiDigit"));

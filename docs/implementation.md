@@ -115,6 +115,13 @@ boundaries and quotient/remainder cases against `BigInteger`, exact success
 codes, false-path output preservation and adjacent canaries. This is ABI
 evidence for the existing named candidate helpers only, not an operator or
 public arithmetic-support claim.
+All twenty existing `IntegerCheckedConversions` helpers are also invoked
+directly through that internal DLL. Their signed/unsigned boundaries and
+`char16` code-unit values, including surrogates, are checked against
+`BigInteger`; every call verifies exact success status, preserved failed
+outputs and adjacent canaries. This adds ABI evidence only: it does not approve
+the named conversion APIs, add conversion witnesses, or alter the separate
+source-language checked-conversion contract.
 The provisional `BitOperations` candidate is also compared with hosted
 `System.Numerics.BitOperations` through persisted semantic-module consumers
 under both runtime policies. Separate width-specific consumers cover every
