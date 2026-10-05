@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7a8a7f3` | Materialize native producer declarations directly |
 | `9f30b3c` | Skip empty graph validation lookups |
 | `c2343ea` | Skip empty graph dependency indexes |
 | `4825748` | Validate graph exports without indexing every function name |
