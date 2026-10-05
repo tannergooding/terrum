@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Threading;
@@ -35,8 +34,14 @@ public static partial class NativeModuleCompiler
         CheckIdentity(identity);
         CheckPolicy(runtimePolicy);
         var providers = ReadGraphProviders(dependencies);
-        if (providers.Any(item => item.Identity!.Equals(identity, StringComparison.OrdinalIgnoreCase))
-            || providers[0].Policy != runtimePolicy)
+        foreach (var provider in providers)
+        {
+            if (provider.Identity!.Equals(identity, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ModuleContractException("Graph producer identity or runtime policy conflicts with a dependency.");
+            }
+        }
+        if (providers[0].Policy != runtimePolicy)
         {
             throw new ModuleContractException("Graph producer identity or runtime policy conflicts with a dependency.");
         }
