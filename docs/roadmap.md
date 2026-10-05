@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `13f72dd` | Build graph binding catalogs with direct iteration |
 | `61b2096` | Materialize graph reference provenance arrays directly |
 | `aa3d5c7` | Skip graph type provenance for typeless modules |
 | `0bfe311` | Sort graph origin records in place |
