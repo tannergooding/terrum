@@ -431,6 +431,8 @@ public sealed class NativeModuleTests
         wrongImport[importImage + importName + 7] = (byte)'X';
         Rehash(wrongImport);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(wrongImport, original));
+        var wrongImportSymbol = ReplacePackageImageSymbol(consumer, "Evaluate\0"u8, "Evalueee\0"u8);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(wrongImportSymbol, original));
         var wrongUnwind = (byte[])original.Clone();
         var xdata = -1;
         var pdata = -1;

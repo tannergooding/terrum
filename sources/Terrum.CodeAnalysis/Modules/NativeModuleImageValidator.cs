@@ -4,7 +4,6 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Reflection.PortableExecutable;
 using System.Text;
 using Terrum.CodeAnalysis.Native;
@@ -276,7 +275,11 @@ internal static class NativeModuleImageValidator
                     {
                         throw Invalid();
                     }
-                    var symbols = new List<string>(index < systemCount ? 0 : providerImports[dll].Count);
+                    var expectedSymbols = index < systemCount
+                        ? Array.Empty<string>()
+                        : SortOrdinalIfNeeded(providerImports[dll]);
+                    var symbolCount = 0;
+                    string? firstSymbol = null;
                     string? previousSymbol = null;
                     var hasExitProcess = false;
                     var hasRaiseException = false;
@@ -334,14 +337,24 @@ internal static class NativeModuleImageValidator
                                     break;
                             }
                         }
-                        symbols.Add(symbolName);
+                        if (symbolCount == 0)
+                        {
+                            firstSymbol = symbolName;
+                        }
+                        if (index >= systemCount
+                            && (symbolCount >= expectedSymbols.Count
+                                || symbolName != expectedSymbols[symbolCount]))
+                        {
+                            importsMatchProviders = false;
+                        }
+                        symbolCount++;
                         previousSymbol = symbolName;
                     }
-                    if (symbols.Count == 0
+                    if (symbolCount == 0
                         || lookup < table.RelativeVirtualAddress + table.Size
                         || lookup >= header.ImportAddressTableDirectory.RelativeVirtualAddress
                         || address < header.ImportAddressTableDirectory.RelativeVirtualAddress
-                        || (long)address + ((symbols.Count + 1) * 8)
+                        || (long)address + ((symbolCount + 1) * 8)
                             > (long)header.ImportAddressTableDirectory.RelativeVirtualAddress
                                 + header.ImportAddressTableDirectory.Size)
                     {
@@ -356,17 +369,13 @@ internal static class NativeModuleImageValidator
                         throw Invalid();
                     }
                     if (checkedExceptions && index == 1
-                        && (symbols.Count != 1 || symbols[0] != "__C_specific_handler"))
+                        && (symbolCount != 1 || firstSymbol != "__C_specific_handler"))
                     {
                         throw Invalid();
                     }
-                    if (index >= systemCount)
+                    if (index >= systemCount && symbolCount != expectedSymbols.Count)
                     {
-                        if (importsMatchProviders
-                            && !symbols.SequenceEqual(SortOrdinalIfNeeded(providerImports[dll])))
-                        {
-                            importsMatchProviders = false;
-                        }
+                        importsMatchProviders = false;
                     }
                 }
                 var terminator = Offset(table.RelativeVirtualAddress + (count * 20), 20, ".idata");
