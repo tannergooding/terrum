@@ -374,8 +374,9 @@ internal sealed partial class Binder
 
     private BoundFunction CreateClassFactory(Signature signature)
     {
-        var type = (PrimitiveType)(ManagedClassTypes.First
-            + _classes.FindIndex(item => item.Name == signature.StructName));
+        var type = signature.StructName is not null
+            && _classNames.TryGetValue(signature.StructName, out var classType)
+            ? classType : (PrimitiveType)(ManagedClassTypes.First - 1);
         if (_classes[ManagedClassTypes.ClassIndex(type)].IsMutable)
         {
             type = ManagedClassTypes.Writable(type);
