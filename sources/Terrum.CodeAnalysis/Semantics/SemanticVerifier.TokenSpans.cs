@@ -91,10 +91,9 @@ public static partial class SemanticVerifier
             return null;
         }
         var facts = new BackingDependencies(function.Variables.Length);
-        var edges = new List<int>[function.Variables.Length];
+        var edges = new List<int>?[function.Variables.Length];
         for (var slot = 0; slot < edges.Length; slot++)
         {
-            edges[slot] = [];
             if (slot < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                 && !(slot == 0 && function.IsConstructor)
                 && TokenSpanContract.IsDependent(function.Variables[slot].Type, program.Structures))
@@ -104,6 +103,18 @@ public static partial class SemanticVerifier
             }
         }
         var remaining = MaximumAnalysisVisits;
+
+        void AddEdge(int source, int destination)
+        {
+            var outgoing = edges[source];
+            if (outgoing is null)
+            {
+                outgoing = [];
+                edges[source] = outgoing;
+            }
+
+            outgoing.Add(destination);
+        }
 
         void Source(int destination, BoundExpression expression, int depth)
         {
@@ -122,14 +133,14 @@ public static partial class SemanticVerifier
                     {
                         throw Invalid(read.Span);
                     }
-                    edges[read.Variable].Add(destination);
+                    AddEdge(read.Variable, destination);
                     break;
                 case BoundMove move:
                     if ((uint)move.Variable >= (uint)edges.Length)
                     {
                         throw Invalid(move.Span);
                     }
-                    edges[move.Variable].Add(destination);
+                    AddEdge(move.Variable, destination);
                     break;
                 case BoundFieldRead field:
                     Source(destination, field.Receiver, depth + 1);
@@ -249,15 +260,18 @@ public static partial class SemanticVerifier
         while (pending.TryDequeue(out var source))
         {
             queued[source] = false;
-            foreach (var destination in edges[source])
+            if (edges[source] is { } outgoing)
             {
-                Count(ref remaining, 0);
-                var before = facts.Sources[destination].Count;
-                facts.Sources[destination].UnionWith(facts.Sources[source]);
-                if (before != facts.Sources[destination].Count && !queued[destination])
+                foreach (var destination in outgoing)
                 {
-                    pending.Enqueue(destination);
-                    queued[destination] = true;
+                    Count(ref remaining, 0);
+                    var before = facts.Sources[destination].Count;
+                    facts.Sources[destination].UnionWith(facts.Sources[source]);
+                    if (before != facts.Sources[destination].Count && !queued[destination])
+                    {
+                        pending.Enqueue(destination);
+                        queued[destination] = true;
+                    }
                 }
             }
         }
