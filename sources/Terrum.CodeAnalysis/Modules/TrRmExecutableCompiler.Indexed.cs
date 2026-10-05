@@ -1870,6 +1870,10 @@ public static partial class TrRmExecutableCompiler
             {
                 if (block.Statements[index] is not (BoundLocal { Initializer: BoundConstant or BoundRead }
                     or BoundAssignment { Value: BoundConstant or BoundRead }
+                    or BoundExpressionStatement
+                        { Expression: BoundCompoundAssignment
+                            { Place: BoundRead, Type: PrimitiveType.Int32 or PrimitiveType.UInt32
+                                or PrimitiveType.Int64 or PrimitiveType.UInt64 } }
                     or BoundExpressionStatement { Expression: BoundUpdate }))
                 {
                     return false;
