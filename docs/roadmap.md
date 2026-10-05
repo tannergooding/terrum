@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `72b53a0` | Skip unused graph dependency function indexes |
 | `9de26e0` | Build module-set restoration inputs directly |
 | `dbd07c5` | Materialize provider declarations and references directly |
 | `5516431` | Build native consumer call indexes directly |
