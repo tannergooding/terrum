@@ -319,10 +319,9 @@ internal sealed partial class Binder
                     .Where(static child => child.Kind != SyntaxKind.Attribute).ToArray();
                 var formals = signature.FirstOrDefault(static child => child.Kind == SyntaxKind.ParameterList);
                 var arguments = formals?.Children.OfType<SyntaxNode>().ToArray() ?? [];
-                var noThrow = member.Children.OfType<SyntaxNode>().Any(static child =>
-                    child.Kind == SyntaxKind.Attribute && NameText(child) == "[NoThrow]");
                 var noThrowCount = member.Children.OfType<SyntaxNode>().Count(static child =>
                     child.Kind == SyntaxKind.Attribute && NameText(child) == "[NoThrow]");
+                var noThrow = noThrowCount > 0;
                 var unsafeModifierCount = member.Children.OfType<SyntaxTokenElement>().Count(static child =>
                     child.Token.Kind == TokenKind.UnsafeKeyword);
                 var arity = arguments.Length;
