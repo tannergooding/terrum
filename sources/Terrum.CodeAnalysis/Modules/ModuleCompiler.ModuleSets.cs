@@ -30,16 +30,20 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("A native module set requires 2 to 16 producers.");
         }
+        var typeCount = 0;
+        var functionCount = 0;
         foreach (var reference in references)
         {
             if (reference.RuntimePolicy != references[0].RuntimePolicy)
             {
                 throw new ModuleContractException("Native module set runtime policies differ.");
             }
+            typeCount = checked(typeCount + reference.Structures.Length);
+            functionCount = checked(functionCount + reference.Functions.Length);
         }
-        var types = ImmutableArray.CreateBuilder<BoundStruct>();
-        var functions = ImmutableArray.CreateBuilder<BoundFunction>();
-        var names = new HashSet<string>(StringComparer.Ordinal);
+        var types = ImmutableArray.CreateBuilder<BoundStruct>(typeCount);
+        var functions = ImmutableArray.CreateBuilder<BoundFunction>(functionCount);
+        var names = new HashSet<string>(checked(typeCount + functionCount), StringComparer.Ordinal);
         foreach (var reference in references)
         {
             foreach (var structure in reference.Structures)
@@ -60,7 +64,7 @@ public static partial class ModuleCompiler
                 types[typeIndex++] = RemapStructure(structure, reference.Structures, types, destinationTypes);
             }
         }
-        var allTypes = types.ToImmutable();
+        var allTypes = types.MoveToImmutable();
         foreach (var reference in references)
         {
             foreach (var function in reference.Functions)
@@ -73,7 +77,7 @@ public static partial class ModuleCompiler
                     destinationTypes: destinationTypes));
             }
         }
-        return new CompilationReference(allTypes, functions.ToImmutable(), references[0].RuntimePolicy);
+        return new CompilationReference(allTypes, functions.MoveToImmutable(), references[0].RuntimePolicy);
     }
     private static CompilationReference SetReference(Module module)
     {
