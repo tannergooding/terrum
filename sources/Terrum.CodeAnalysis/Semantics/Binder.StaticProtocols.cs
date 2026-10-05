@@ -566,14 +566,15 @@ internal sealed partial class Binder
             .Select(static child => child.Token.Name).ToArray();
         var hasPrimitiveTypeParameter = false;
         var hasDuplicateTypeParameter = false;
-        HashSet<string>? seenTypeParameters = typeNames.Length is >= 2 and <= 8
-            ? new HashSet<string>(StringComparer.Ordinal) : null;
-        foreach (var typeName in typeNames)
+        Dictionary<string, int>? typeParameterIndices = typeNames.Length is >= 2 and <= 8
+            ? new Dictionary<string, int>(StringComparer.Ordinal) : null;
+        for (var index = 0; index < typeNames.Length; index++)
         {
+            var typeName = typeNames[index];
             hasPrimitiveTypeParameter |= TryPrimitiveType(typeName, out _);
-            if (seenTypeParameters is not null)
+            if (typeParameterIndices is not null)
             {
-                hasDuplicateTypeParameter |= !seenTypeParameters.Add(typeName);
+                hasDuplicateTypeParameter |= !typeParameterIndices.TryAdd(typeName, index);
             }
         }
         if (hasPrimitiveTypeParameter)
@@ -645,7 +646,7 @@ internal sealed partial class Binder
             ImmutableDictionary.CreateBuilder<StaticOperatorKey, GenericOperatorConstraint>()).ToArray();
         var copies = new bool[typeNames.Length];
         var constrained = new HashSet<string>(StringComparer.Ordinal);
-        var returnIndex = Array.IndexOf(typeNames, returnName);
+        var returnIndex = FindTypeParameter(returnName);
         var requiresUnsafeCaller = unsafeModifierCount != 0;
         var valid = typeNames.Length is >= 1 and <= 8
             && !hasDuplicateTypeParameter
@@ -679,7 +680,7 @@ internal sealed partial class Binder
             {
                 var typeName = NameText(argumentType);
                 var scalar = GenericScalarType(typeName);
-                var index = Array.IndexOf(typeNames, typeName);
+                var index = FindTypeParameter(typeName);
                 if (index < 0 && scalar is null)
                 {
                     valid = false;
@@ -696,7 +697,7 @@ internal sealed partial class Binder
                 valid = false;
                 continue;
             }
-            var index = Array.IndexOf(typeNames, formal.Token.Name);
+            var index = FindTypeParameter(formal.Token.Name);
             if (index < 0)
             {
                 valid = false;
@@ -724,7 +725,7 @@ internal sealed partial class Binder
                 else
                 {
                     var resultName = partNames[^1];
-                    var resultIndex = Array.IndexOf(typeNames, resultName);
+                    var resultIndex = FindTypeParameter(resultName);
                     var fixedResult = resultIndex >= 0 ? null : GenericScalarType(resultName);
                     if (resultIndex < 0 && fixedResult is null)
                     {
@@ -766,6 +767,15 @@ internal sealed partial class Binder
             }))
         {
             Report("TRM3003", $"Duplicate generic function '{qualified}'.", declaration.Span);
+        }
+
+        int FindTypeParameter(string name)
+        {
+            if (typeParameterIndices is not null)
+            {
+                return typeParameterIndices.TryGetValue(name, out var index) ? index : -1;
+            }
+            return Array.IndexOf(typeNames, name);
         }
     }
 
