@@ -153,6 +153,12 @@ unsafe scopes. Both current projections
 source-audit `is init` tests for named scalar locals and parameters. Verification
 and emission remain hosted; this projection does not make the frontend a
 standalone compiler.
+
+Persisted TRRM provisionally admits caller-unsafe calls only inside structurally
+validated lexical unsafe regions in compact-indexed fail-fast Bodies; these
+regions grant no cleanup, unwind or lifetime authority, and `unsafe(expr)`,
+compact-linear calls and unsafe members remain unsupported.
+
 Initialized six-primitive locals in lexical blocks, branches and loops preserve
 scope visibility, outer mutations and per-iteration initialization through
 existing indexed values, without adding executable lexical regions or places.
