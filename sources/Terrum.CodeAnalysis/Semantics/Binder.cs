@@ -1888,6 +1888,24 @@ internal sealed partial class Binder
         return count == 2 && first is not null && second is not null ? (first, second) : null;
     }
 
+    private static SyntaxNode? TryGetSingleSyntaxArgument(SyntaxNode argumentList)
+    {
+        SyntaxNode? argument = null;
+        foreach (var child in argumentList.Children)
+        {
+            if (child is not SyntaxNode syntaxNode)
+            {
+                continue;
+            }
+            if (argument is not null)
+            {
+                return null;
+            }
+            argument = syntaxNode;
+        }
+        return argument;
+    }
+
     private BoundViewScope BindRangeViewScope(SyntaxToken name, bool isMutable, SyntaxNode initializer,
         TextSpan span, PrimitiveType viewType)
     {
@@ -3721,8 +3739,10 @@ internal sealed partial class Binder
             }
             if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
             {
-                var arguments = ((SyntaxNode)node.Children[1]).Children.OfType<SyntaxNode>().ToArray();
-                if (member != "Read" || arguments.Length != 1 || arguments[0].Children is not [SyntaxNode index])
+                if (member != "Read"
+                    || TryGetSingleSyntaxArgument((SyntaxNode)node.Children[1]) is not {
+                        Children: [SyntaxNode index],
+                    })
                 {
                     Report("TRM3011", "A native buffer view supports Read(index) with one positional int32 argument.",
                         node.Span);
@@ -3813,8 +3833,10 @@ internal sealed partial class Binder
 
     private BoundExpression BindConversionCall(SyntaxNode node, SyntaxNode arguments, PrimitiveType target)
     {
-        var items = arguments.Children.OfType<SyntaxNode>().ToArray();
-        if (items is not [{ Kind: SyntaxKind.Argument, Children: [SyntaxNode operandNode] }])
+        if (TryGetSingleSyntaxArgument(arguments) is not {
+            Kind: SyntaxKind.Argument,
+            Children: [SyntaxNode operandNode],
+        })
         {
             Report("TRM3011", "A checked conversion requires exactly one positional value argument.", arguments.Span);
             return ErrorExpression(node.Span);
