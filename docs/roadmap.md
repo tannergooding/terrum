@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e2993c0` | Pre-size graph import name validation |
 | `83cba8f` | Pre-size graph traversal and execution state |
 | `147f7c8` | Pre-size module-set identity validation |
 | `6e8923d` | Pre-size graph provider identity validation |
