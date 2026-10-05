@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `0aa9ae2` | Allocate token-span backing sets only when populated |
 | `5767080` | Allocate token-span dependency edges only when populated |
 | `f1ac891` | Seed token-span dependency facts without LINQ snapshots |
 | `e8f7274` | Validate GenericParam ownership without owner map |
