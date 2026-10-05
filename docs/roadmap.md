@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `d60a6d7` | Reuse empty consumer import map |
 | `b5eefaa` | Pre-size graph declaration tracking |
 | `1c48c8a` | Check graph declaration totals before allocation |
 | `d253fbe` | Pre-size native external function names |
