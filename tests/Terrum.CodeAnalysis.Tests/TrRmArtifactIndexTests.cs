@@ -228,6 +228,26 @@ public sealed class TrRmArtifactIndexTests
     }
 
     [Fact]
+    public void AcceptsOutOfOrderSectionPayloads()
+    {
+        var artifact = TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, new byte[44]),
+            new TrRmSection(0x8001, 1, 1, new byte[] { 0x11 }),
+            new TrRmSection(0x8002, 1, 1, new byte[] { 0x22 }),
+        ]);
+        var firstStart = BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(56));
+        var secondStart = BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(72));
+        Write(artifact, 56, secondStart);
+        Write(artifact, 72, firstStart);
+
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x8001, out var first, out _));
+        Assert.True(index.TryGetSection(0x8002, out var second, out _));
+        Assert.Equal((byte)0x22, first[0]);
+        Assert.Equal((byte)0x11, second[0]);
+    }
+
+    [Fact]
     public void ValidatesReferenceSlottedExtensionsAndTargetRows()
     {
         var artifact = WithReferenceSlottedExtension();

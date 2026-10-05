@@ -44,11 +44,13 @@ public readonly ref struct TrRmArtifactIndex
         _artifact = artifact;
         _directory = artifact.Slice(32, (int)directoryEnd - 32);
         _entryCount = (int)entryCount;
-        var extents = new (uint Start, uint End)[_entryCount];
         // Reference slots target only kinds 1 through 0x20, so validated counts fit a direct index.
         Span<uint> sectionCounts = stackalloc uint[0x20 + 1];
         sectionCounts.Clear();
         var previousKind = 0;
+        // Keep directory-ordered payloads allocation-free while retaining support for alternate layouts.
+        var previousStart = 0u;
+        var rangesOrdered = true;
         var moduleFound = false;
         for (var entry = 0; entry < _entryCount; entry++)
         {
@@ -64,6 +66,11 @@ public readonly ref struct TrRmArtifactIndex
             }
 
             previousKind = kind;
+            if (entry != 0 && start < previousStart)
+            {
+                rangesOrdered = false;
+            }
+            previousStart = start;
             if (kind == 0x0001)
             {
                 moduleFound = true;
@@ -83,8 +90,6 @@ public readonly ref struct TrRmArtifactIndex
             {
                 sectionCounts[kind] = count;
             }
-
-            extents[entry] = (start, start + length);
         }
 
         if (!moduleFound)
@@ -92,24 +97,57 @@ public readonly ref struct TrRmArtifactIndex
             throw InvalidArtifact();
         }
 
-        Array.Sort(extents, static (left, right) => left.Start.CompareTo(right.Start));
         var cursor = (int)directoryEnd;
-        foreach (var (start, end) in extents)
+        if (rangesOrdered)
         {
-            if (start < cursor)
+            for (var entry = 0; entry < _entryCount; entry++)
             {
-                throw InvalidArtifact();
-            }
-
-            foreach (var gap in artifact.Slice(cursor, (int)start - cursor))
-            {
-                if (gap != 0)
+                var start = ReadU32(_directory, entry * 16 + 8);
+                var length = ReadU32(_directory, entry * 16 + 12);
+                if (start < cursor)
                 {
                     throw InvalidArtifact();
                 }
+
+                foreach (var gap in artifact.Slice(cursor, (int)start - cursor))
+                {
+                    if (gap != 0)
+                    {
+                        throw InvalidArtifact();
+                    }
+                }
+
+                cursor = (int)(start + length);
+            }
+        }
+        else
+        {
+            var extents = new (uint Start, uint End)[_entryCount];
+            for (var entry = 0; entry < _entryCount; entry++)
+            {
+                var start = ReadU32(_directory, entry * 16 + 8);
+                var length = ReadU32(_directory, entry * 16 + 12);
+                extents[entry] = (start, start + length);
             }
 
-            cursor = (int)end;
+            Array.Sort(extents, static (left, right) => left.Start.CompareTo(right.Start));
+            foreach (var (start, end) in extents)
+            {
+                if (start < cursor)
+                {
+                    throw InvalidArtifact();
+                }
+
+                foreach (var gap in artifact.Slice(cursor, (int)start - cursor))
+                {
+                    if (gap != 0)
+                    {
+                        throw InvalidArtifact();
+                    }
+                }
+
+                cursor = (int)end;
+            }
         }
 
         if (cursor != artifact.Length)
