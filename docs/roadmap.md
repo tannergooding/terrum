@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `5767080` | Allocate token-span dependency edges only when populated |
 | `f1ac891` | Seed token-span dependency facts without LINQ snapshots |
 | `e8f7274` | Validate GenericParam ownership without owner map |
 | `05c0f85` | Check method ownership against current module range |
