@@ -428,8 +428,9 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("An exported function is missing.");
         }
+        var hasPrivateManagedState = HasPrivateManagedState(program);
         if (indexes.Any(index => !Exportable(program.Functions[index], program.Structures))
-            || (HasPrivateManagedState(program)
+            || (hasPrivateManagedState
                 && indexes.Any(index => !ManagedExportShape.Supported(program.Functions[index], program.Structures))))
         {
             throw new ModuleContractException("Producer exports must have public, supported native declarations.");
@@ -443,7 +444,7 @@ public static partial class ModuleCompiler
                 throw new ModuleContractException($"Exported unique type '{structure.Name}' requires its cleanup method to be exported.");
             }
         }
-        if (HasPrivateManagedState(program))
+        if (hasPrivateManagedState)
         {
             if (program.Functions.Any(static function => function.IsExternal))
             {
