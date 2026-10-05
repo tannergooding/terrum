@@ -282,6 +282,19 @@ public static partial class SemanticVerifier
         var remaining = MaximumAnalysisVisits;
         var names = new HashSet<string>(StringComparer.Ordinal);
         Dictionary<string, int>? ownerTypes = null;
+        Dictionary<string, int>? classIndexes = null;
+        int[]? classConstructorCounts = null;
+        int[]? classFactoryCounts = null;
+        if (!allowGenericProofDependencies && !program.Classes.IsEmpty)
+        {
+            classIndexes = new Dictionary<string, int>(StringComparer.Ordinal);
+            classConstructorCounts = new int[program.Classes.Length];
+            classFactoryCounts = new int[program.Classes.Length];
+            for (var classIndex = 0; classIndex < program.Classes.Length; classIndex++)
+            {
+                classIndexes.Add(program.Classes[classIndex].Name, classIndex);
+            }
+        }
         for (var i = 0; i < program.Functions.Length; i++)
         {
             var function = program.Functions[i];
@@ -346,6 +359,12 @@ public static partial class SemanticVerifier
             if (function.Intrinsic == BoundIntrinsic.ClassTryCreate)
             {
                 VerifyClassFactory(program, function, i);
+                if (classIndexes is not null && classFactoryCounts is not null
+                    && function.DeclaringStruct is string factoryClassName
+                    && classIndexes.TryGetValue(factoryClassName, out var factoryClassIndex))
+                {
+                    classFactoryCounts[factoryClassIndex]++;
+                }
                 continue;
             }
             if (function.Intrinsic != BoundIntrinsic.None)
@@ -490,34 +509,27 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
             }
+            if (classIndexes is not null && classConstructorCounts is not null
+                && function.IsClassConstructor && function.DeclaringStruct is string constructorClassName
+                && classIndexes.TryGetValue(constructorClassName, out var constructorClassIndex))
+            {
+                var classType = (PrimitiveType)(ManagedClassTypes.First + constructorClassIndex);
+                var receiverType = program.Classes[constructorClassIndex].IsMutable
+                    ? ManagedClassTypes.Writable(classType) : classType;
+                if (function.Variables[0].Type == receiverType)
+                {
+                    classConstructorCounts[constructorClassIndex]++;
+                }
+            }
         }
-        for (var classIndex = 0; classIndex < program.Classes.Length; classIndex++)
+        if (classConstructorCounts is not null && classFactoryCounts is not null)
         {
-            var @class = program.Classes[classIndex];
-            var classType = (PrimitiveType)(ManagedClassTypes.First + classIndex);
-            if (allowGenericProofDependencies)
+            for (var classIndex = 0; classIndex < program.Classes.Length; classIndex++)
             {
-                continue;
-            }
-            var constructors = 0;
-            var factories = 0;
-            foreach (var function in program.Functions)
-            {
-                if (function.IsClassConstructor && function.DeclaringStruct == @class.Name
-                    && function.Variables[0].Type == (@class.IsMutable
-                        ? ManagedClassTypes.Writable(classType) : classType))
+                if (classConstructorCounts[classIndex] != 1 || classFactoryCounts[classIndex] != 1)
                 {
-                    constructors++;
+                    throw Invalid();
                 }
-                if (function.Intrinsic == BoundIntrinsic.ClassTryCreate
-                    && function.DeclaringStruct == @class.Name)
-                {
-                    factories++;
-                }
-            }
-            if (constructors != 1 || factories != 1)
-            {
-                throw Invalid();
             }
         }
         foreach (var structure in program.Structures)
