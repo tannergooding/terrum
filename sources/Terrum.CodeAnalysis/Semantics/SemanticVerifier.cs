@@ -293,7 +293,7 @@ public static partial class SemanticVerifier
         }
 
         var remaining = MaximumAnalysisVisits;
-        var names = new HashSet<string>(StringComparer.Ordinal);
+        var names = new HashSet<string>(program.Functions.Length, StringComparer.Ordinal);
         Dictionary<string, int>? ownerTypes = null;
         Dictionary<string, int>? classIndexes = null;
         int[]? classConstructorCounts = null;
@@ -302,7 +302,7 @@ public static partial class SemanticVerifier
         HashSet<string>?[]? fieldNamesByOwner = null;
         if (!allowGenericProofDependencies && !program.Classes.IsEmpty)
         {
-            classIndexes = new Dictionary<string, int>(StringComparer.Ordinal);
+            classIndexes = new Dictionary<string, int>(program.Classes.Length, StringComparer.Ordinal);
             classConstructorCounts = new int[program.Classes.Length];
             classFactoryCounts = new int[program.Classes.Length];
             for (var classIndex = 0; classIndex < program.Classes.Length; classIndex++)
@@ -411,7 +411,8 @@ public static partial class SemanticVerifier
             {
                 if (ownerTypes is null)
                 {
-                    ownerTypes = new Dictionary<string, int>(StringComparer.Ordinal);
+                    ownerTypes = new Dictionary<string, int>(
+                        program.Structures.Length + program.Classes.Length, StringComparer.Ordinal);
                     for (var type = 0; type < program.Structures.Length; type++)
                     {
                         ownerTypes.Add(program.Structures[type].Name, type);
@@ -658,17 +659,20 @@ public static partial class SemanticVerifier
             var names = fieldNamesByOwner[ownerIndex];
             if (names is null)
             {
-                names = new HashSet<string>(StringComparer.Ordinal);
+                var fields = owner >= ManagedClassTypes.First
+                    ? program.Classes[owner - ManagedClassTypes.First].Fields
+                    : program.Structures[owner].Fields;
+                names = new HashSet<string>(fields.Length, StringComparer.Ordinal);
                 if (owner >= ManagedClassTypes.First)
                 {
-                    foreach (var field in program.Classes[owner - ManagedClassTypes.First].Fields)
+                    foreach (var field in fields)
                     {
                         _ = names.Add(field.Name);
                     }
                 }
                 else
                 {
-                    foreach (var field in program.Structures[owner].Fields)
+                    foreach (var field in fields)
                     {
                         _ = names.Add(field.Name);
                     }
