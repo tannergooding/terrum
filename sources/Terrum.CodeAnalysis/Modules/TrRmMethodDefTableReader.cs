@@ -18,8 +18,10 @@ public readonly ref struct TrRmMethodDefTableReader
     private readonly int _contractCount;
     private readonly int[] _bodyOwners;
 
+    /// <summary>Gets the number of Contract rows.</summary>
     public int ContractCount => _contractCount;
 
+    /// <summary>Validates MethodDef rows against their owning modules and referenced tables.</summary>
     public TrRmMethodDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleTableReader modules,
         TrRmTypeDefTableReader types, TrRmMethodSigTableReader signatures,
@@ -44,6 +46,7 @@ public readonly ref struct TrRmMethodDefTableReader
         var module = 1;
         // Method rows are ordered, so reuse each module range until its end.
         var moduleRange = default((int Start, int End));
+        var moduleTypeRange = default((int Start, int End));
         var hasModuleRange = false;
         for (var row = 1; row <= recordCount; row++)
         {
@@ -58,6 +61,7 @@ public readonly ref struct TrRmMethodDefTableReader
                     throw InvalidMethod();
                 }
                 moduleRange = modules.GetMethodDefRange(module);
+                moduleTypeRange = modules.GetTypeDefRange(module);
                 hasModuleRange = true;
             }
 
@@ -74,7 +78,9 @@ public readonly ref struct TrRmMethodDefTableReader
             var first = Read(data, 16);
             var count = Read(data, 20);
             var body = Read(data, 24);
-            if (owner > types.Count || (owner != 0 && types.GetOwnerModule((int)owner) != module)
+            if (owner > types.Count
+                || (owner != 0 && (owner < (uint)moduleTypeRange.Start
+                    || owner >= (uint)moduleTypeRange.End))
                 || name is 0 or > 0xFF_FFFF
                 || signature == 0 || signature > signatures.Count
                 || flags > 2 || !ValidRange(first, count, contractCount)
@@ -115,6 +121,7 @@ public readonly ref struct TrRmMethodDefTableReader
         }
     }
 
+    /// <summary>Gets the decoded name for a MethodDef row.</summary>
     public string GetName(int row)
     {
         if (row <= 0 || row > _recordCount)
@@ -131,18 +138,23 @@ public readonly ref struct TrRmMethodDefTableReader
         return _strings.DecodeName((int)name);
     }
 
+    /// <summary>Gets the owning TypeDef row, or zero for a top-level method.</summary>
     public int GetOwnerType(int row)
         => (int)Read(GetRow(row), 0);
 
+    /// <summary>Gets the signature row for a MethodDef row.</summary>
     public int GetSignature(int row)
         => (int)Read(GetRow(row), 8);
 
+    /// <summary>Gets the flags for a MethodDef row.</summary>
     public uint GetFlags(int row)
         => Read(GetRow(row), 12);
 
+    /// <summary>Gets the body row for a MethodDef row, or zero when it has no body.</summary>
     public int GetBodyRow(int row)
         => (int)Read(GetRow(row), 24);
 
+    /// <summary>Gets the MethodDef row owning a body row.</summary>
     public int GetBodyOwnerMethod(int row)
     {
         if (row <= 0 || row >= _bodyOwners.Length)
@@ -153,12 +165,14 @@ public readonly ref struct TrRmMethodDefTableReader
         return _bodyOwners[row];
     }
 
+    /// <summary>Gets the first Contract row and count for a MethodDef row.</summary>
     public (int Start, int Count) GetContractRange(int row)
     {
         var data = GetRow(row);
         return ((int)Read(data, 16), (int)Read(data, 20));
     }
 
+    /// <summary>Gets the Module row owning a MethodDef row.</summary>
     public int GetOwnerModule(int row)
     {
         _ = GetRow(row);
@@ -166,7 +180,7 @@ public readonly ref struct TrRmMethodDefTableReader
         var high = _modules.Count;
         while (low <= high)
         {
-            var middle = low + (high - low) / 2;
+            var middle = low + ((high - low) / 2);
             var (start, end) = _modules.GetMethodDefRange(middle);
             if (row < start)
             {
@@ -185,6 +199,7 @@ public readonly ref struct TrRmMethodDefTableReader
         throw InvalidMethod();
     }
 
+    /// <summary>Gets the number of MethodDef rows.</summary>
     public int Count => _recordCount;
 
     private ReadOnlySpan<byte> GetRow(int row)

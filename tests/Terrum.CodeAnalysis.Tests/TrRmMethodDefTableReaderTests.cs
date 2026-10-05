@@ -99,6 +99,35 @@ public sealed class TrRmMethodDefTableReaderTests
         Assert.Equal(2, methods.GetOwnerModule(1));
     }
 
+    [Fact]
+    public void ValidatesNominalOwnerAfterEmptyMethodRanges()
+    {
+        var names = new TrRmStringTableReader(TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("One", 0), ("Two", 0), ("Three", 0), ("Widget", 0), ("Run", 0),
+        ]), 6);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 0, 0, 0, 1, 1, 1, 1),
+            new TrRmModuleRow(3, 0, 0, 0, 1, 1, 1, 1),
+            new TrRmModuleRow(4, 0, 0, 0, 1, 1, 1, 1),
+        ], names, 0, 1, 1, 0);
+        var modules = new TrRmModuleTableReader(moduleBytes, 3, names, 0, 1, 1, 0);
+        var typeBytes = TrRmTypeDefTableWriter.Encode([
+            new TrRmTypeDefRow(1, 5, 4, 0, 0, 0, 0, 0, 0, 0),
+        ], names, modules, 0, 0, 0, 0);
+        var types = new TrRmTypeDefTableReader(typeBytes, 1, names, modules, 0, 0, 0, 0);
+        var signatures = new TrRmMethodSigTableReader(Signature(), 1, TypeSpecs(), 0, 0);
+        var method = new byte[28];
+        Write(method, 0, 1);
+        Write(method, 4, 6);
+        Write(method, 8, 1);
+        Write(method, 12, 2);
+
+        var methods = new TrRmMethodDefTableReader(method, 1, names, modules, types,
+            signatures, 0, 0);
+
+        Assert.Equal(3, methods.GetOwnerModule(1));
+    }
+
     private static void CreateTwoModules(bool wrongOwner)
     {
         var names = new TrRmStringTableReader(TrRmStringTableWriter.EncodeTextRows(
