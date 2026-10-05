@@ -79,10 +79,7 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Graph type origin tables differ from selected providers.");
         }
-        var types = ImmutableArray.CreateBuilder<BoundStruct>();
-        var functionNames = new HashSet<string>(StringComparer.Ordinal);
-        var originals = new Dictionary<string, (BoundStruct Type, ImmutableArray<BoundStruct> Table, string? Origin)>(
-            StringComparer.Ordinal);
+        var functionCount = 0;
         for (var provider = 0; provider < references.Count; provider++)
         {
             var reference = references[provider];
@@ -90,6 +87,15 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleContractException("Graph dependency policies differ.");
             }
+            functionCount = checked(functionCount + reference.Functions.Length);
+        }
+        var types = ImmutableArray.CreateBuilder<BoundStruct>();
+        var functionNames = new HashSet<string>(functionCount, StringComparer.Ordinal);
+        var originals = new Dictionary<string, (BoundStruct Type, ImmutableArray<BoundStruct> Table, string? Origin)>(
+            StringComparer.Ordinal);
+        for (var provider = 0; provider < references.Count; provider++)
+        {
+            var reference = references[provider];
             foreach (var structure in reference.Structures)
             {
                 var origin = origins?[provider].GetValueOrDefault(structure.Name);
@@ -113,7 +119,7 @@ public static partial class ModuleCompiler
             types[index] = RemapStructure(original.Type, original.Table, types, destinationTypes);
         }
         var combined = types.ToImmutable();
-        var functions = ImmutableArray.CreateBuilder<BoundFunction>();
+        var functions = ImmutableArray.CreateBuilder<BoundFunction>(functionCount);
         foreach (var reference in references)
         {
             foreach (var function in reference.Functions)
@@ -126,7 +132,7 @@ public static partial class ModuleCompiler
                     destinationTypes: destinationTypes));
             }
         }
-        return new CompilationReference(combined, functions.ToImmutable(), references[0].RuntimePolicy);
+        return new CompilationReference(combined, functions.MoveToImmutable(), references[0].RuntimePolicy);
     }
 
     /// <summary>Stores a verified DLL implementation with symbolic imports and no fabricated entry point.</summary>
