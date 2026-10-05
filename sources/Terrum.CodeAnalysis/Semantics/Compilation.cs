@@ -216,7 +216,8 @@ public sealed class Compilation
         var structures = program.Structures;
         var composite = HasCompositeUnique(structures, out var unique);
         ownedBuffer |= HasOwnedNativeBuffer(structures);
-        var mutableViewOrClear = mutableView || UsesBufferClear(program);
+        // BufferClear requires an OwnedInt32Buffer receiver, so buffer-free programs need no body walk.
+        var mutableViewOrClear = mutableView || (ownedBuffer && UsesBufferClear(program));
         foreach (var function in program.Functions)
         {
             if (HasOwnershipTransfer(function, program.Structures))
