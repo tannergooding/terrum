@@ -819,7 +819,7 @@ public static partial class ModuleCompiler
                 var owner = exported.Function?.DeclaringStruct;
                 var name = exported.Function is { Intrinsic: not (BoundIntrinsic.None or BoundIntrinsic.ClassTryCreate) }
                     || owner is not null && Binder.TryPrimitiveType(owner, out _)
-                        && !producer.Structures.Any(structure => structure.Name == owner)
+                        && !producerTypes.ContainsKey(owner)
                     ? exported.Name
                     : owner is not null && sharedTypes.Contains(owner)
                     ? owner + ".$producer." + exported.Name[(owner.Length + 1)..] : "$producer." + exported.Name;
@@ -870,7 +870,7 @@ public static partial class ModuleCompiler
                 && owner != NativeManagedNodeIntrinsics.TypeName
                 && owner != NativeManagedNodeIntrinsics.HeapName
                 && !(Binder.TryPrimitiveType(owner, out _)
-                    && !producer.Structures.Any(structure => structure.Name == owner))
+                    && !producerTypes.ContainsKey(owner))
                 && !sharedTypes.Contains(owner))
             {
                 owner = "$producer." + owner;
