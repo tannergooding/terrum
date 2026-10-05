@@ -394,11 +394,16 @@ public static partial class TrRmExecutableCompiler
                 {
                     var operations = statements[..^1];
                     var returned = (BoundReturn)statements[^1];
+                    var variableTypes = ImmutableArray.CreateBuilder<PrimitiveType>(variables.Count);
+                    for (var variableIndex = 0; variableIndex < variables.Count; variableIndex++)
+                    {
+                        variableTypes.Add(variables[variableIndex].Type);
+                    }
                     indexed = TrRmScalarGraph.FromAuditedBody(
                         [new TrRmScalarBlock(Enumerable.Range(1, count).ToImmutableArray(),
                             operations, 0, null, null,
                             returned.Value is BoundRead read ? read.Variable + 1 : 0, 0)],
-                        variables.Select(static variable => variable.Type).ToImmutableArray(),
+                        variableTypes.MoveToImmutable(),
                         count, declaration.ReturnType, noThrow, declaration.DoesNotReturn);
                     statements = [];
                 }
