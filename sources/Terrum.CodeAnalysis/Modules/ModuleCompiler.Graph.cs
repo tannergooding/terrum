@@ -152,7 +152,8 @@ public static partial class ModuleCompiler
             throw new ModuleContractException("Graph library exports must be distinct functions.");
         }
         var unmatchedExports = new HashSet<string>(names, StringComparer.Ordinal);
-        var available = dependencies.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
+        var available = dependencies.Functions.IsEmpty ? null
+            : dependencies.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
         var hasPrivateManagedState = HasPrivateManagedState(program);
         var ownershipTransfers = new bool[program.Functions.Length];
         for (var index = 0; index < program.Functions.Length; index++)
@@ -174,7 +175,7 @@ public static partial class ModuleCompiler
             }
             if (function.IsExternal)
             {
-                if (!available.TryGetValue(function.Name, out var actual)
+                if (available is null || !available.TryGetValue(function.Name, out var actual)
                     || !CompatibleContract(Contract(function, program.Structures),
                         Contract(actual, dependencies.Structures)))
                 {
@@ -195,13 +196,13 @@ public static partial class ModuleCompiler
         var required = RequiredStructures(program.Functions.Select(static item =>
             item.IsExternal ? Declaration(item) : item), program.Structures);
         var structures = SelectStructures(program.Structures, required);
-        var dependencyTypes = dependencies.Structures.ToDictionary(static item => item.Name,
-            StringComparer.Ordinal);
+        var dependencyTypes = dependencies.Structures.IsEmpty ? null
+            : dependencies.Structures.ToDictionary(static item => item.Name, StringComparer.Ordinal);
         var importedTypes = ImmutableArray.CreateBuilder<string>();
         var importedTypeNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var structure in structures)
         {
-            if (dependencyTypes.TryGetValue(structure.Name, out var actual))
+            if (dependencyTypes is not null && dependencyTypes.TryGetValue(structure.Name, out var actual))
             {
                 if (structure.IsPrivate || structure.IsInternal
                     || !SameStructure(structure, actual, structures, dependencies.Structures))
