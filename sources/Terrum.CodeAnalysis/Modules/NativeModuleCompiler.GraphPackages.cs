@@ -578,9 +578,9 @@ public static partial class NativeModuleCompiler
         {
             return false;
         }
-        foreach (var character in value)
+        for (var index = 0; index < value.Length; index++)
         {
-            if (character is < '!' or > '~')
+            if (value[index] is < '!' or > '~')
             {
                 return false;
             }
