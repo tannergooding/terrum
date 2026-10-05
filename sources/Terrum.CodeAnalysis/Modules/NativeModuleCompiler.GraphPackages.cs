@@ -278,7 +278,8 @@ public static partial class NativeModuleCompiler
                 {
                     if (dependencyIdentities is null)
                     {
-                        dependencyIdentities = new HashSet<string>(StringComparer.Ordinal);
+                        dependencyIdentities = new HashSet<string>(dependencies.Length,
+                            StringComparer.Ordinal);
                         foreach (var dependency in dependencies)
                         {
                             _ = dependencyIdentities.Add(dependency.Identity);
@@ -306,7 +307,7 @@ public static partial class NativeModuleCompiler
             {
                 if (originIdentities is null)
                 {
-                    originIdentities = new HashSet<string>(StringComparer.Ordinal);
+                    originIdentities = new HashSet<string>(origins.Length, StringComparer.Ordinal);
                     foreach (var origin in origins)
                     {
                         _ = originIdentities.Add(origin.Identity);
