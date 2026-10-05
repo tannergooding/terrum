@@ -644,7 +644,8 @@ public sealed class Compilation
     {
         ArgumentNullException.ThrowIfNull(trees);
         cancellationToken.ThrowIfCancellationRequested();
-        var snapshots = ImmutableArray.CreateBuilder<SyntaxTree>();
+        var snapshots = ImmutableArray.CreateBuilder<SyntaxTree>(
+            trees is ICollection<SyntaxTree> collection ? collection.Count : 0);
         ImmutableArray<Diagnostic>.Builder? diagnostics = null;
         ImmutableArray<SourceDiagnostic>.Builder? sourceDiagnostics = null;
         foreach (var tree in trees)
