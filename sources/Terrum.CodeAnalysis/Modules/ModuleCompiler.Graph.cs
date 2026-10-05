@@ -207,7 +207,7 @@ public static partial class ModuleCompiler
         Dictionary<string, BoundStruct>? dependencyTypes = structures.IsEmpty || dependencies.Structures.IsEmpty
             ? null
             : dependencies.Structures.ToDictionary(static item => item.Name, StringComparer.Ordinal);
-        var importedTypes = ImmutableArray.CreateBuilder<string>();
+        var importedTypes = ImmutableArray.CreateBuilder<string>(structures.Length);
         HashSet<string>? importedTypeNames = null;
         foreach (var structure in structures)
         {
