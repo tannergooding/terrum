@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e282982` | Check generic type parameter facts together |
 | `871405e` | Collect alias parameters and detect duplicates together |
 | `dfa2266` | Classify alias declaration facts in one syntax pass |
 | `e365577` | Reuse managed-class mutability during declaration validation |
