@@ -74,17 +74,25 @@ public sealed class TrRmDoForTests
     }
 
     [Fact]
-    public void PostTestWithNoReachableContinuationRejectsRatherThanEncodingAnInactiveLoop()
+    public void ReturnOnlyAcyclicLoopsEraseToTheirTerminalReturn()
     {
-        var original = Compile("int32 Main() { do { return 42; } while (false); }");
-        var exception = Assert.Throws<NotSupportedException>(
-            () => TrRmExecutableCompiler.Emit(original, "no-backedge"));
-        Assert.Contains("reachable body continuation", exception.Message);
+        string[] sources = [
+            "int32 Main() { do { return 42; } while (false); }",
+            "int32 Main() { while (true) { return 42; } }",
+            "int32 Main() { for (;;) { return 42; } }",
+        ];
+        foreach (var source in sources)
+        {
+            var original = Compile(source);
+            var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "acyclic-return"));
+            Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+            Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+            Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
+        }
     }
 
     [Theory]
     [InlineData("int32 Main() { do { break; } while (false); return 42; }")]
-    [InlineData("int32 Main() { for (;;) { return 42; } }")]
     [InlineData("int32 Main() { for (;;) { break; } return 42; }")]
     public void AcyclicLoopShapesRejectWithoutInventedBackedges(string source)
         => Assert.Throws<NotSupportedException>(() =>

@@ -1582,6 +1582,14 @@ public static partial class TrRmExecutableCompiler
                         null);
                     break;
                 case BoundWhile loop:
+                    if (loop.Iterator is null
+                        && (loop.IsPostTested
+                            || loop.Condition is BoundConstant { Type: PrimitiveType.Bool, Value: not 0 })
+                        && TerminalAcyclicReturn(loop.Body) is { } terminalReturn)
+                    {
+                        Statement(terminalReturn);
+                        break;
+                    }
                     var parent = _current.Region;
                     var header = NewBlock(_regions.Count + 1);
                     header.IsLoopHeader = true;
@@ -1784,6 +1792,29 @@ public static partial class TrRmExecutableCompiler
             region.ExitEdges.Add((source, edge, code));
             region.HasDirectBreak |= code == 0;
             _pendingBreaks.Add((region, edge));
+        }
+
+        private static BoundReturn? TerminalAcyclicReturn(BoundStatement statement)
+        {
+            if (statement is BoundReturn result)
+            {
+                return result;
+            }
+            if (statement is not BoundBlock block || !block.RetiredManagedLocals.IsEmpty)
+            {
+                return null;
+            }
+            if (block.Statements.Length == 1)
+            {
+                return TerminalAcyclicReturn(block.Statements[0]);
+            }
+            if (block.Statements.Length == 2
+                && block.Statements[1] is BoundBlock { Statements.IsEmpty: true, RetiredManagedLocals.IsEmpty: true })
+            {
+                return TerminalAcyclicReturn(block.Statements[0]);
+            }
+
+            return null;
         }
 
         internal byte[] Encode()

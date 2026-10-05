@@ -2895,11 +2895,13 @@ Vacant locals, direct edges that bypass designated exits, field/nominal mutation
 places, roots, ownership, cleanup, exceptional transfer and imported
 declarations are not implemented here. Indexed loop emission requires a
 reachable backedge and a designated exit; it does not synthesize a backedge
-for a source loop whose body always transfers out. A `do` body that always
-returns or breaks, for example, rejects rather than retaining an unreachable
-condition block; acyclic source loops are not erased into plain regions by
-this emitter. All retained inactive operations and every function Body still
-undergo mandatory validation. Source scope support is
+for a source loop whose body always transfers out. A `do` body containing only
+an unconditional return erases to that return, as do constant-true `while`
+and `for` bodies with the same terminal shape and no iterator. Their
+unreachable loop conditions are not emitted, and no loop region or backedge
+is invented. Other acyclic source loops, including break-only forms, remain
+outside this emitter. All retained inactive operations and every function
+Body still undergo mandatory validation. Source scope support is
 an implementation boundary, not an unresolved language contract.
 Loaded indexed graphs execute but cannot be re-emitted through the structured
 source emitter or serialized as development semantic-module IR.
