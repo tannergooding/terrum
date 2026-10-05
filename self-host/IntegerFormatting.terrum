@@ -20,16 +20,6 @@ OwnedInt32Buffer ReverseDigits(OwnedInt32Buffer workspace)
     return move buffer;
 }
 
-uint64 FormattingMagnitude(int64 value)
-{
-    if (value < 0)
-    {
-        return uint64(-(value + 1)) + 1;
-    }
-
-    return uint64(value);
-}
-
 public static OwnedInt32Buffer FormatUInt64(uint64 value, OwnedInt32Buffer workspace)
 {
     return FormatUInt64WithSign(value, false, move workspace);
@@ -62,7 +52,7 @@ public static OwnedInt32Buffer FormatInt64(int64 value, OwnedInt32Buffer workspa
         return FormatUInt64(uint64(value), move workspace);
     }
 
-    return FormatUInt64WithSign(FormattingMagnitude(value), true, move workspace);
+    return FormatUInt64WithSign(MagnitudeInt64(value), true, move workspace);
 }
 
 public static OwnedInt32Buffer FormatUInt32(uint32 value, OwnedInt32Buffer workspace)
@@ -142,7 +132,7 @@ public static OwnedInt32Buffer FormatInt64Base(int64 value, uint32 radix, OwnedI
         return FormatUInt64Base(uint64(value), radix, move workspace);
     }
 
-    return FormatUInt64BaseWithAlphabet(FormattingMagnitude(value), radix, 87, true, move workspace);
+    return FormatUInt64BaseWithAlphabet(MagnitudeInt64(value), radix, 87, true, move workspace);
 }
 
 public static OwnedInt32Buffer FormatInt64BaseUpper(int64 value, uint32 radix, OwnedInt32Buffer workspace)
@@ -152,7 +142,7 @@ public static OwnedInt32Buffer FormatInt64BaseUpper(int64 value, uint32 radix, O
         return FormatUInt64BaseUpper(uint64(value), radix, move workspace);
     }
 
-    return FormatUInt64BaseWithAlphabet(FormattingMagnitude(value), radix, 55, true, move workspace);
+    return FormatUInt64BaseWithAlphabet(MagnitudeInt64(value), radix, 55, true, move workspace);
 }
 
 public static OwnedInt32Buffer FormatUInt32Base(uint32 value, uint32 radix, OwnedInt32Buffer workspace)
@@ -206,7 +196,7 @@ public static bool TryGetUInt64BaseLength(uint64 value, uint32 radix, init ref<i
 
 public static bool TryGetInt64BaseLength(int64 value, uint32 radix, init ref<int32> length)
 {
-    if (!TryGetUInt64BaseLength(FormattingMagnitude(value), radix, init var digits))
+    if (!TryGetUInt64BaseLength(MagnitudeInt64(value), radix, init var digits))
     {
         return false;
     }

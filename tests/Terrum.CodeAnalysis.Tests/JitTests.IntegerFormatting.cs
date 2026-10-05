@@ -58,8 +58,8 @@ public sealed partial class JitTests
                 return 42;
             }
             """;
-        await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
-        await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertIntegerFormattingFailFastExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertIntegerFormattingCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
 
     [Fact]
@@ -75,10 +75,10 @@ public sealed partial class JitTests
                 return digits.Count;
             }
             """;
-        await AssertFailFastExecutionAsync(
+        await AssertIntegerFormattingFailFastExecutionAsync(
             component + Failure + "int32 Main() { return Attempt(); }",
             unchecked((int)0xE0540003)).ConfigureAwait(true);
-        await AssertCheckedExecutionAsync(
+        await AssertIntegerFormattingCheckedExecutionAsync(
             component + Failure + """
                 int32 Main() {
                     unsafe {
@@ -119,8 +119,8 @@ public sealed partial class JitTests
                 return 42;
             }
             """;
-        await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
-        await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertIntegerFormattingFailFastExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertIntegerFormattingCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
 
     [Theory]
@@ -143,9 +143,9 @@ public sealed partial class JitTests
                 return digits.Count;
             }
             """;
-        await AssertFailFastExecutionAsync(component + attempt + "int32 Main() { return Attempt(); }",
+        await AssertIntegerFormattingFailFastExecutionAsync(component + attempt + "int32 Main() { return Attempt(); }",
             unchecked((int)0xE0540003)).ConfigureAwait(true);
-        await AssertCheckedExecutionAsync(component + attempt + """
+        await AssertIntegerFormattingCheckedExecutionAsync(component + attempt + """
             int32 Main() {
                 unsafe {
                     try { return Attempt(); }
@@ -217,8 +217,8 @@ public sealed partial class JitTests
                 return 42;
             }
             """;
-        await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
-        await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertIntegerFormattingFailFastExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertIntegerFormattingCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
 
     public static IEnumerable<object[]> EveryRadix()
@@ -282,8 +282,8 @@ public sealed partial class JitTests
                 return 42;
             }
             """;
-        await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
-        await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertIntegerFormattingFailFastExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertIntegerFormattingCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
 
     public static IEnumerable<object[]> EveryChar16Radix()
@@ -315,9 +315,9 @@ public sealed partial class JitTests
                 return digits.Count;
             }
             """;
-        await AssertFailFastExecutionAsync(component + attempt + "int32 Main() { return Attempt(); }",
+        await AssertIntegerFormattingFailFastExecutionAsync(component + attempt + "int32 Main() { return Attempt(); }",
             unchecked((int)0xE0540003)).ConfigureAwait(true);
-        await AssertCheckedExecutionAsync(component + attempt + """
+        await AssertIntegerFormattingCheckedExecutionAsync(component + attempt + """
             int32 Main() {
                 unsafe {
                     try { return Attempt(); }
@@ -354,9 +354,9 @@ public sealed partial class JitTests
                 return digits.Count;
             }
             """;
-        await AssertFailFastExecutionAsync(component + attempt + "int32 Main() { return Attempt(); }",
+        await AssertIntegerFormattingFailFastExecutionAsync(component + attempt + "int32 Main() { return Attempt(); }",
             unchecked((int)0xE0540003)).ConfigureAwait(true);
-        await AssertCheckedExecutionAsync(component + attempt + """
+        await AssertIntegerFormattingCheckedExecutionAsync(component + attempt + """
             int32 Main() {
                 unsafe {
                     try { return Attempt(); }
@@ -377,4 +377,12 @@ public sealed partial class JitTests
             (false, true, true) => "FormatUInt32Base",
             (true, true, true) => "FormatInt32Base",
         };
+
+    private static Task AssertIntegerFormattingFailFastExecutionAsync(string source, int expected) =>
+        AssertFailFastExecutionAsync(source, expected,
+            Path.Combine(RepositoryRoot(), "self-host", "WideIntegerFacts.terrum"));
+
+    private static Task AssertIntegerFormattingCheckedExecutionAsync(string source, int expected) =>
+        AssertCheckedExecutionAsync(source, expected,
+            Path.Combine(RepositoryRoot(), "self-host", "WideIntegerFacts.terrum"));
 }

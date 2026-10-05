@@ -41,7 +41,7 @@ public sealed class WideCandidateTests
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task RadixLengthsPublishOnlyForValidBasesAcrossModulesAsync(NativeRuntimePolicy policy)
     {
-        var producer = CreateNumericsLibrary("IntegerFormatting.terrum", policy,
+        var producer = CreateIntegerFormattingLibrary(policy,
             "Terrum.CodeAnalysis.Numerics64.TryGetUInt64BaseLength",
             "Terrum.CodeAnalysis.Numerics64.TryGetInt64BaseLength",
             "Terrum.CodeAnalysis.Numerics64.TryGetUInt32BaseLength",
@@ -74,7 +74,7 @@ public sealed class WideCandidateTests
     [Fact]
     public void InvalidRadixLengthCannotBeReadAfterFailure()
     {
-        var producer = CreateNumericsLibrary("IntegerFormatting.terrum", NativeRuntimePolicy.FailFast,
+        var producer = CreateIntegerFormattingLibrary(NativeRuntimePolicy.FailFast,
             "Terrum.CodeAnalysis.Numerics64.TryGetUInt64BaseLength");
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
@@ -950,6 +950,18 @@ public sealed class WideCandidateTests
     {
         var source = ReadTree(Path.Combine(RepositoryRoot(), "self-host", name));
         var compilation = Compilation.CreateLibrary(source, (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), exports);
+    }
+
+    private static byte[] CreateIntegerFormattingLibrary(NativeRuntimePolicy policy, params string[] exports)
+    {
+        var root = RepositoryRoot();
+        var trees = new[] {
+            ReadTree(Path.Combine(root, "self-host", "WideIntegerFacts.terrum")),
+            ReadTree(Path.Combine(root, "self-host", "IntegerFormatting.terrum")),
+        };
+        var compilation = Compilation.CreateLibrary(trees, (BoundRuntimePolicy)policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), exports);
     }
