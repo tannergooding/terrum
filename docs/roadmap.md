@@ -255,7 +255,8 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
-| `TBD` | Preserve cached class visibility during layout |
+| `TBD` | Validate buffer-view arguments without array snapshots |
+| `7f4b7b8` | Preserve cached class visibility during layout |
 | `d2d1a66` | Classify generic declaration effects with signature facts |
 | `14dbab9` | Reuse recorded type visibility when validating aliases |
 | `1818ad3` | Classify static protocol signature nodes during the member scan |

@@ -1838,9 +1838,7 @@ internal sealed partial class Binder
                 new BoundBlock([], span), span) { IsMutable = writable };
         }
 
-        var arguments = ((SyntaxNode)initializer.Children[1]).Children.OfType<SyntaxNode>().ToArray();
-        if (arguments.Length != 2 || arguments.Any(static argument =>
-            argument.Children.Length != 1 || argument.Children[0] is not SyntaxNode))
+        if (TryGetTwoPositionalArguments((SyntaxNode)initializer.Children[1]) is not { } arguments)
         {
             Report("TRM3011", "Slice requires two positional int32 arguments.", initializer.Span);
             var invalid = AddVariable(name.Name, viewType, isMutable, name.Span);
@@ -1851,12 +1849,44 @@ internal sealed partial class Binder
         var owner = writable ? BindMutableReceiverLoan((SyntaxNode)callee.Children[0],
                 PrimitiveType.OwnedInt32Buffer, callee.Span, allowBufferField: true)
             : BindReceiverLoan((SyntaxNode)callee.Children[0], PrimitiveType.OwnedInt32Buffer);
-        var start = BindExpression((SyntaxNode)arguments[0].Children[0], PrimitiveType.Int32);
-        var length = BindExpression((SyntaxNode)arguments[1].Children[0], PrimitiveType.Int32);
+        var start = BindExpression(arguments.First, PrimitiveType.Int32);
+        var length = BindExpression(arguments.Second, PrimitiveType.Int32);
         var variable = AddVariable(name.Name, viewType, isMutable, name.Span);
         return new BoundViewScope(variable, owner, start, length, new BoundBlock([], span), span) {
             IsMutable = writable,
         };
+    }
+
+    private static (SyntaxNode First, SyntaxNode Second)? TryGetTwoPositionalArguments(SyntaxNode argumentList)
+    {
+        SyntaxNode? first = null;
+        SyntaxNode? second = null;
+        var count = 0;
+        foreach (var child in argumentList.Children)
+        {
+            if (child is not SyntaxNode argument)
+            {
+                continue;
+            }
+            if (argument.Children is not [SyntaxNode expression])
+            {
+                return null;
+            }
+            if (count == 0)
+            {
+                first = expression;
+            }
+            else if (count == 1)
+            {
+                second = expression;
+            }
+            else
+            {
+                return null;
+            }
+            count++;
+        }
+        return count == 2 && first is not null && second is not null ? (first, second) : null;
     }
 
     private BoundViewScope BindRangeViewScope(SyntaxToken name, bool isMutable, SyntaxNode initializer,
@@ -2108,12 +2138,11 @@ internal sealed partial class Binder
             return null;
         }
 
-        var arguments = ((SyntaxNode)expressionNode.Children[1]).Children.OfType<SyntaxNode>().ToArray();
-        if (arguments.Length == 2 && arguments.All(static argument => argument.Children is [SyntaxNode]))
+        if (TryGetTwoPositionalArguments((SyntaxNode)expressionNode.Children[1]) is { } arguments)
         {
             return new BoundViewSet(viewSlot >= 0 ? viewSlot : BindViewVariable(receiver),
-                BindExpression((SyntaxNode)arguments[0].Children[0], PrimitiveType.Int32),
-                BindExpression((SyntaxNode)arguments[1].Children[0], PrimitiveType.Int32), span);
+                BindExpression(arguments.First, PrimitiveType.Int32),
+                BindExpression(arguments.Second, PrimitiveType.Int32), span);
         }
         Report("TRM3011", "A mutable native buffer view supports Set(index, value) with two positional int32 arguments.",
             expressionNode.Span);
