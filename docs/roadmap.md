@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `d20620e` | Reuse class indexes when binding factories |
 | `f68327a` | Index native PE import groups and symbols |
 | `3add77d` | Index JIT import providers during validation |
 | `5c4288d` | Reuse public layout checks across library exports |
