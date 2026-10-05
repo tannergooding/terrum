@@ -611,8 +611,9 @@ public static partial class TrRmExecutableCompiler
                 expression = new TrRmScalarWrappingBinary(token, first, second, first.Type);
             }
             else if (opcode == 5 && (kind is 4 or 5)
-                && TrRmOptionalScalar.IsOptionalType(Operand(left).Type)
-                && TrRmOptionalScalar.PayloadType(Operand(left).Type) == PrimitiveType.Char16)
+                && left > 0 && left <= variables.Count
+                && TrRmOptionalScalar.IsOptionalType(variables[left - 1].Type)
+                && TrRmOptionalScalar.PayloadType(variables[left - 1].Type) == PrimitiveType.Char16)
             {
                 var first = Operand(left);
                 var second = Operand(right);
