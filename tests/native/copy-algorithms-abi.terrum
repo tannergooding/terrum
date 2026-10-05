@@ -1,0 +1,21 @@
+using Terrum;
+namespace Terrum.CodeAnalysis;
+
+[NoThrow]
+public Token SelectTokenCopyForAbiTest(bool takeFirst, Token first, Token second)
+{
+    return SelectCopy<Token>(takeFirst, first, second);
+}
+
+[NoThrow]
+public bool TrySelectTokenCopyInitForAbiTest(
+    int32 index, Token first, Token second, init ref<Token> result)
+{
+    return TrySelectCopyInit<Token>(index, first, second, init result);
+}
+
+[NoThrow]
+public bool TrySelectTokenCopyForAbiTest(int32 index, Token first, Token second, out Token result)
+{
+    return TrySelectCopy<Token>(index, first, second, out result);
+}
