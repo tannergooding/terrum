@@ -281,6 +281,7 @@ public static partial class SemanticVerifier
 
         var remaining = MaximumAnalysisVisits;
         var names = new HashSet<string>(StringComparer.Ordinal);
+        Dictionary<string, int>? ownerTypes = null;
         for (var i = 0; i < program.Functions.Length; i++)
         {
             var function = program.Functions[i];
@@ -373,23 +374,20 @@ public static partial class SemanticVerifier
             }
             if (function.DeclaringStruct is string declaringStruct)
             {
-                var declaringType = -1;
-                for (var type = 0; type < program.Structures.Length; type++)
+                if (ownerTypes is null)
                 {
-                    if (program.Structures[type].Name == declaringStruct)
+                    ownerTypes = new Dictionary<string, int>(StringComparer.Ordinal);
+                    for (var type = 0; type < program.Structures.Length; type++)
                     {
-                        declaringType = type;
-                        break;
+                        ownerTypes.Add(program.Structures[type].Name, type);
+                    }
+                    for (var type = 0; type < program.Classes.Length; type++)
+                    {
+                        ownerTypes.Add(program.Classes[type].Name, ManagedClassTypes.First + type);
                     }
                 }
-                for (var type = 0; type < program.Classes.Length; type++)
-                {
-                    if (program.Classes[type].Name == declaringStruct)
-                    {
-                        declaringType = ManagedClassTypes.First + type;
-                        break;
-                    }
-                }
+                var declaringType = ownerTypes.TryGetValue(declaringStruct, out var ownerType)
+                    ? ownerType : -1;
                 var primitiveOwner = declaringType < 0
                     && Binder.TryPrimitiveType(declaringStruct, out var primitive)
                     ? primitive : (PrimitiveType?)null;
