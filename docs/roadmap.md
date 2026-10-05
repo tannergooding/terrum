@@ -140,7 +140,7 @@ frontend with source-audited `unsafe(expr)` scopes and caller-unsafe callable
 declarations. Both projection families use only v85; verification and emission
 remain hosted.
 
-Separately, semantic-module revision 55 provisionally persists top-level
+Separately, semantic-module revision 56 provisionally persists top-level
 caller-unsafe contracts and calls enclosed by explicit `unsafe { }` blocks,
 reconstructing authorization from that scope. Unsafe members and executable
 TRRM caller-unsafe calls remain unsupported; the broader reference-call
@@ -162,7 +162,7 @@ prerequisite has already been met.
 1. **Full runtime/structured contracts — references and safety.** General
    reference/access/loan metadata and caller-unsafe member contracts still
    need definition before wider use across calls or imports. Structured
-   semantic-module revision 55 provisionally carries top-level caller-unsafe
+   semantic-module revision 56 provisionally carries top-level caller-unsafe
    obligations through explicit unsafe-block scopes; this bounded
    implementation does not settle the general schema or approve the
    [reference-call metadata proposal](proposals/reference-call-metadata.md),
@@ -227,9 +227,11 @@ prerequisite has already been met.
     [invocation-scoped source-grant proposal](proposals/invocation-scoped-source-grant.md);
     source-dependent components remain outside the compiler-primitives DLL, and
     the scanner and scalar frontend still rely on hosted verification/emission.
-    Persisted scanner execution would additionally require the still-unapproved
-    [scanner invocation-profile proposal](proposals/scanner-invocation-profile.md);
-    the existing source-only grant contract is unchanged.
+    A scanner-specific `scanner-10` persisted semantic-module JIT profile is
+    implemented provisionally under the still-unapproved
+    [scanner invocation-profile proposal](proposals/scanner-invocation-profile.md).
+    It does not expand the source-only grant contract or establish support for
+    graphs, module sets, native DLLs or persisted AOT.
 
 These are pending contracts, not support claims. Exact grammar, metadata and
 implementation remain subject to their canonical specifications and proposals.
@@ -273,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `4199a815` | Add provisional persisted scanner-profile JIT support |
 | `35db563a` | Return precise source spans for rejected scalar aliases |
 | `2c0d6dbf` | Preserve hosted type/function namespace parity for scalar aliases |
 | `2a79685d` | Verify `SourceRange` boundaries through persisted semantic-module JIT |
