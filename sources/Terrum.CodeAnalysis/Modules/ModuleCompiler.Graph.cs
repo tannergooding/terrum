@@ -208,7 +208,7 @@ public static partial class ModuleCompiler
             ? null
             : dependencies.Structures.ToDictionary(static item => item.Name, StringComparer.Ordinal);
         var importedTypes = ImmutableArray.CreateBuilder<string>();
-        var importedTypeNames = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string>? importedTypeNames = null;
         foreach (var structure in structures)
         {
             if (dependencyTypes is not null && dependencyTypes.TryGetValue(structure.Name, out var actual))
@@ -219,6 +219,7 @@ public static partial class ModuleCompiler
                     throw new ModuleContractException($"Incompatible imported value layout '{structure.Name}'.");
                 }
                 importedTypes.Add(structure.Name);
+                importedTypeNames ??= new HashSet<string>(StringComparer.Ordinal);
                 _ = importedTypeNames.Add(structure.Name);
             }
         }
@@ -227,7 +228,7 @@ public static partial class ModuleCompiler
         foreach (var structure in structures)
         {
             if (publicTypes.Contains(structure.Name) && structure.CleanupMethod is string cleanup
-                && !importedTypeNames.Contains(structure.Name) && !names.Contains(cleanup))
+                && importedTypeNames?.Contains(structure.Name) != true && !names.Contains(cleanup))
             {
                 throw new ModuleContractException($"Graph-owned type requires exported cleanup '{cleanup}'.");
             }
@@ -244,7 +245,10 @@ public static partial class ModuleCompiler
             });
         }
         var immutableFunctions = functions.MoveToImmutable();
-        RejectImportedTypeMembers(immutableFunctions, importedTypeNames);
+        if (importedTypeNames is not null)
+        {
+            RejectImportedTypeMembers(immutableFunctions, importedTypeNames);
+        }
         var classes = ImmutableArray.CreateBuilder<BoundClass>(program.Classes.Length);
         foreach (var @class in program.Classes)
         {
