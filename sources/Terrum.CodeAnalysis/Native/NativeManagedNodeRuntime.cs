@@ -281,16 +281,6 @@ internal sealed partial class PeCompiler
             }
         }
     }
-    private int OutSlotFor(int functionIndex, BoundFunction function, int variable)
-    {
-        var ordinal = 0;
-        for (var i = 0; i < variable; i++)
-        {
-            ordinal += function.Variables[i].IsOut ? 1 : 0;
-        }
-        return _outBases[functionIndex] + (16 * ordinal);
-    }
-
     private void RegisterManagedRoots(int functionIndex)
     {
         var roots = _managedRootFlags[functionIndex];
