@@ -176,6 +176,52 @@ public sealed class TokenCursorTests
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData("alpha 42")]
+    public async Task ManagedReaderCanUseBorrowedSpanAsAMethodParameterAsync(string text)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            mut class TokenViewReader {
+                private mut int32 _initialized;
+
+                public TokenViewReader() {
+                    _initialized = 1;
+                }
+
+                public bool TryGet(Span<Token> tokens, int32 index, init ref<Token> token) {
+                    if (index < 0) { return false; }
+                    uint64 unsignedIndex = uint64(index);
+                    if (unsignedIndex >= tokens.Length) { return false; }
+                    token = tokens[unsignedIndex];
+                    return true;
+                }
+            }
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var scanned);
+                mut TokenSnapshot owner = move scanned;
+                Span<Token> tokens = owner.AsSpan();
+                require TokenViewReader.TryCreate(out var reader);
+                if (!reader.TryGet(tokens, 0, init var first)
+                    || !reader.TryGet(tokens, 0, init var repeated)
+                    || first.Kind != repeated.Kind
+                    || first.Range.Start != repeated.Range.Start
+                    || first.Range.Length != repeated.Range.Length) { return 1; }
+                if (reader.TryGet(tokens, -1, init var negative)
+                    || reader.TryGet(tokens, owner.GetCount(), init var beyond)) { return 2; }
+                tokens = _;
+                owner = _;
+                return 42;
+            }
+            """;
+
+        foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
+        {
+            await ExecuteAsync(Program(await CompileAsync(text, Entry, policy)), policy);
+        }
+    }
+
+    [Theory]
     [InlineData("Span<Token> tokens = owner.AsSpan(); owner = _; return 42;")]
     [InlineData("Span<Token> tokens = owner.AsSpan(); TokenSnapshot moved = move owner; return 42;")]
     [InlineData("Span<Token> tokens = owner.AsSpan(); require Replace(out owner); return 42;")]

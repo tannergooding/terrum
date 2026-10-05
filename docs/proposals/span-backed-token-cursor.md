@@ -159,8 +159,10 @@ owner must remain live through every inventory and parse attempt, including
 the single-function fallback; fallback must not require a returned borrowed
 view or trigger a scanner rescan.
 
-Before replacing `ManagedTokenChain` parsing, prove the limited view-parameter
-call shape with focused lifetime tests. Regression acceptance should cover
+The limited view-parameter call shape is verified for a method on an ordinary
+managed class: the class can consume a borrowed `Span<Token>` parameter without
+storing it. This prerequisite does not implement parser integration.
+Regression acceptance for replacing `ManagedTokenChain` parsing should cover
 grouped/speculative expressions, rewind and previous-token spans, label and
 literal searches, per-function synthetic EOF, later-frame integer operands,
 all parser retries and diagnostics, exact 64/65-token boundaries, owner
