@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `505ea127` | Verify the valid two-element index-from-end boundary in scanner host-buffer access |
 | `524a7b25` | Supply the scalar parser test harness with its required `FrontendProgram` buffer |
 | `a2a7f929` | Exercise all CharacterFacts exports across the UTF-16 code-unit domain through the Windows x64 compiler-primitives DLL |
 | `17eb08cc` | Exercise ASCII hexadecimal conversion through the Windows x64 compiler-primitives DLL |
