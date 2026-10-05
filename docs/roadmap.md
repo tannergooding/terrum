@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `d599d6f` | Pre-size graph continuation validation |
 | `9aa551a` | Pre-size indexed-body liveness sets |
 | `1db07c9` | Pre-size TRRM module identity index |
 | `e215945` | Pre-size SourceMap duplicate index |
