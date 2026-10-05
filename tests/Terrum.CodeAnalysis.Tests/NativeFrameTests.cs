@@ -31,6 +31,7 @@ public sealed class NativeFrameTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
+        AssertFunctionRangesAreOrdered(code);
         Assert.All(code.Functions.Skip(6), function => {
             Assert.True(function.UsesFramePointer);
             Assert.Equal((byte)0x55, code.Code[function.Start]);
@@ -60,6 +61,7 @@ public sealed class NativeFrameTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
+        AssertFunctionRangesAreOrdered(code);
         var funclets = code.Functions.Where(function => function.UsesParentFrame).ToArray();
         Assert.Equal(2, funclets.Length);
         Assert.All(funclets, function => {
@@ -86,7 +88,16 @@ public sealed class NativeFrameTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
+        AssertFunctionRangesAreOrdered(code);
         Assert.True(code.Code.Length > 0);
         Assert.Contains(code.Functions.Skip(6), function => function.UsesFramePointer);
+    }
+
+    private static void AssertFunctionRangesAreOrdered(NativeCode code)
+    {
+        for (var index = 1; index < code.Functions.Length; index++)
+        {
+            Assert.True(code.Functions[index - 1].Start < code.Functions[index].Start);
+        }
     }
 }

@@ -176,9 +176,18 @@ public static unsafe class NativeJit
             }
         }
 
-        var functions = new NativeFunctionRange[code.Functions.Length];
-        code.Functions.CopyTo(functions);
-        Array.Sort(functions, static (left, right) => left.Start.CompareTo(right.Start));
+        var functions = code.Functions.AsSpan();
+        NativeFunctionRange[]? sortedFunctions = null;
+        for (var index = 1; index < functions.Length; index++)
+        {
+            if (functions[index - 1].Start >= functions[index].Start)
+            {
+                sortedFunctions = code.Functions.ToArray();
+                Array.Sort(sortedFunctions, static (left, right) => left.Start.CompareTo(right.Start));
+                functions = sortedFunctions;
+                break;
+            }
+        }
         var previousEnd = 0;
         var containsEntry = false;
         foreach (var function in functions)
@@ -337,7 +346,7 @@ public static unsafe class NativeJit
             cetEnforced = (shadowStackPolicy & 0x05) != 0;
         }
         var continuations = cetEnforced
-            ? functions.SelectMany(static function => function.ExceptionScopes)
+            ? (sortedFunctions ?? functions.ToArray()).SelectMany(static function => function.ExceptionScopes)
                 .Where(static scope => scope.Target != 0).Select(static scope => scope.Target)
                 .Distinct().ToArray()
             : [];
