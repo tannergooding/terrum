@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `4d7ed3f` | Skip exceptional-cleanup tracking for fail-fast images |
 | `21b3027` | Skip export-address set construction for native consumers |
 | `c149c87` | Validate imported symbols without per-import lists |
 | `24ba4b8` | Validate native provider imports without a temporary dictionary |
