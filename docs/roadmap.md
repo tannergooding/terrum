@@ -272,6 +272,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `2c0d6dbf` | Preserve hosted type/function namespace parity for scalar aliases |
 | `2a79685d` | Verify `SourceRange` boundaries through persisted semantic-module JIT |
 | `91764c60` | Project bounded internal scalar aliases through complete v85 snapshots |
 | `e13aa606` | Verify managed token-chain behavior through persisted semantic-module JIT |
