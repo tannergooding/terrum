@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `45e7514` | Reuse generic declaration attribute and modifier facts |
 | `f629661` | Classify static protocol declaration facts in one syntax pass |
 | `2ab20d9` | Classify static protocol member facts in one syntax pass |
 | `b073691` | Reuse static protocol NoThrow attribute count |
