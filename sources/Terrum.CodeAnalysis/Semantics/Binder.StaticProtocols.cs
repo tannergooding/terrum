@@ -534,7 +534,19 @@ internal sealed partial class Binder
         var typeNames = typeParameters.Children.OfType<SyntaxTokenElement>()
             .Where(static child => child.Token.Kind == TokenKind.Identifier)
             .Select(static child => child.Token.Name).ToArray();
-        if (typeNames.Any(static name => TryPrimitiveType(name, out _)))
+        var hasPrimitiveTypeParameter = false;
+        var hasDuplicateTypeParameter = false;
+        HashSet<string>? seenTypeParameters = typeNames.Length is >= 2 and <= 8
+            ? new HashSet<string>(StringComparer.Ordinal) : null;
+        foreach (var typeName in typeNames)
+        {
+            hasPrimitiveTypeParameter |= TryPrimitiveType(typeName, out _);
+            if (seenTypeParameters is not null)
+            {
+                hasDuplicateTypeParameter |= !seenTypeParameters.Add(typeName);
+            }
+        }
+        if (hasPrimitiveTypeParameter)
         {
             Report("TRM3003", "Primitive type names cannot be used as type parameters.",
                 typeParameters.Span);
@@ -604,7 +616,7 @@ internal sealed partial class Binder
         }
         var requiresUnsafeCaller = unsafeModifierCount != 0;
         var valid = typeNames.Length is >= 1 and <= 8
-            && typeNames.Distinct(StringComparer.Ordinal).Count() == typeNames.Length
+            && !hasDuplicateTypeParameter
             && returnType is not null && body is not null
             && (returnIndex >= 0 || scalarReturn is not null)
             && arguments.Length is >= 1 and <= 8
