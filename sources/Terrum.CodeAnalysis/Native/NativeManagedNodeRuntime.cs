@@ -459,6 +459,7 @@ internal sealed partial class PeCompiler
             return;
         }
         var offsets = new int[_program.Classes.Length + 1];
+        List<int>? managedFieldOffsets = null;
         for (var descriptor = 0; descriptor < offsets.Length; descriptor++)
         {
             offsets[descriptor] = _code.Position;
@@ -471,21 +472,21 @@ internal sealed partial class PeCompiler
             else
             {
                 var @class = _program.Classes[descriptor - 1];
-                var edgeCount = 0;
+                managedFieldOffsets?.Clear();
                 foreach (var field in @class.Fields)
                 {
                     if (ManagedClassTypes.IsManaged(field.Type))
                     {
-                        edgeCount++;
+                        (managedFieldOffsets ??= []).Add(field.Offset);
                     }
                 }
-                _code.Int32(edgeCount);
+                _code.Int32(managedFieldOffsets?.Count ?? 0);
                 _code.Int32(@class.Size + 32);
-                foreach (var field in @class.Fields)
+                if (managedFieldOffsets is not null)
                 {
-                    if (ManagedClassTypes.IsManaged(field.Type))
+                    foreach (var fieldOffset in managedFieldOffsets)
                     {
-                        _code.Int32(field.Offset + 32);
+                        _code.Int32(fieldOffset + 32);
                     }
                 }
             }
