@@ -135,7 +135,7 @@ internal static class NativeModuleImageValidator
                     throw Invalid();
                 }
             }
-            var sourceFunctionStarts = new HashSet<int>();
+            var sourceFunctionStarts = isConsumer ? null : new HashSet<int>();
             CheckImports();
             CheckUnwind();
             if (!isConsumer)
@@ -542,7 +542,10 @@ internal static class NativeModuleImageValidator
                             throw Invalid();
                         }
                         sawSourceFrame = true;
-                        _ = sourceFunctionStarts.Add(begin);
+                        if (sourceFunctionStarts is not null)
+                        {
+                            _ = sourceFunctionStarts.Add(begin);
+                        }
                     }
                     previousEnd = end;
                     nextInfo = checked(nextInfo + size);
@@ -584,7 +587,7 @@ internal static class NativeModuleImageValidator
                     var ordinal = BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(Offset(ordinals + (index * 2), 2), 2));
                     var address = Rva32(functions + (index * 4));
                     _ = Offset(address, 1, ".text");
-                    if (ordinal != index || !sourceFunctionStarts.Contains(address)
+                    if (ordinal != index || sourceFunctionStarts is null || !sourceFunctionStarts.Contains(address)
                         || Name(Rva32(names + (index * 4))) != sorted[index])
                     {
                         throw Invalid();
