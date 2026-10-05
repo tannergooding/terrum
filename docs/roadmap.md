@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `4825748` | Validate graph exports without indexing every function name |
 | `e8754a7` | Remap graph classes through an exact-capacity builder |
 | `41cb712` | Materialize graph module functions without LINQ |
 | `9b4b317` | Build graph function indexes directly |
