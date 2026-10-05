@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e034a34` | Check native declaration membership without a temporary set |
 | `219820f` | Check native call imports directly |
 | `02a0652` | Materialize native names directly |
 | `7a0e3bc` | Pre-size graph imported-type builder |
