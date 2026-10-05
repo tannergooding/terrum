@@ -261,6 +261,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `c85735b` | Exhaustively verify `CharacterFacts` through semantic-module JIT grants |
 | `c1021ed` | Verify bounded UTF-16 scalar decoding through semantic-module JIT |
 | `1844cc5` | Verify ordinal `StringRow` name and namespace comparisons through semantic-module JIT |
 | `dc55669` | Exercise provisional `StringRow` name and namespace encodings through semantic-module JIT |
