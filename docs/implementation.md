@@ -147,6 +147,11 @@ oracle at source/destination boundaries and code-unit edges, including
 surrogate values, under both runtime policies. This remains evidence for that
 provisional candidate API; it does not adopt a general numeric-conversion
 policy.
+The internal Windows x64 fail-fast DLL also invokes all twenty existing
+`IntegerWrapping` helpers against a separate `BigInteger` modulo and
+two's-complement oracle, including signed boundaries and surrogate code units.
+This remains candidate ABI evidence only; it does not adopt `unchecked`
+conversion syntax or a general conversion policy.
 Revision-56 persisted semantic-module JIT also compares all 20 existing
 `IntegerWrapping` candidate helpers with a `BigInteger` modulo and
 two's-complement oracle across source/destination boundaries and code-unit
