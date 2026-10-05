@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `6b672a3` | Detect exception imports during native JIT fixup validation |
 | `e08248d` | Resolve each native JIT module export once per setup |
 | `f5fbbf2` | Binary-search validated provider exports when checking native graph JIT imports |
 | `de1c4d7` | Build provider export sets without temporary arrays during module-set validation |
