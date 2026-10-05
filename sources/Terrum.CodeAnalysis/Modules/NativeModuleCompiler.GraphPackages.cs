@@ -26,6 +26,7 @@ public static partial class NativeModuleCompiler
     {
         public bool IsLeaf { get; init; }
         public GraphTypeOrigin[] Origins { get; init; } = [];
+        public ModuleCompiler.GraphContractSnapshot? ContractSnapshot { get; init; }
         public CompilationReference? ValidatedReference { get; init; }
     }
 
@@ -213,6 +214,7 @@ public static partial class NativeModuleCompiler
         var image = bytes.AsSpan(at + contractLength, imageLength).ToArray();
         var package = new GraphPackage(consumer, identity, policy, exports, dependencies, contract, image) {
             Origins = origins,
+            ContractSnapshot = contractSnapshot,
             ValidatedReference = contractSnapshot.Reference,
         };
         var imported = contractSnapshot.Imports;

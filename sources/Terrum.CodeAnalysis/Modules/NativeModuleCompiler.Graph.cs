@@ -42,7 +42,9 @@ public static partial class NativeModuleCompiler
         }
         var reference = GraphReference(providers);
         var contract = ModuleCompiler.CreateGraphLibrary(program, exports, reference);
-        var imports = ModuleCompiler.GetGraphImports(contract);
+        var sortedExports = exports.Order(StringComparer.Ordinal).ToArray();
+        var contractSnapshot = ModuleCompiler.ReadGraphProviderSnapshot(contract);
+        var imports = contractSnapshot.Imports;
         var bindings = GraphBindings(providers, imports);
         var declarations = NativeBindings(bindings);
         var (image, used) = declarations.Length == 0
@@ -50,8 +52,10 @@ public static partial class NativeModuleCompiler
                 ImmutableArray<NativeImportBinding>.Empty)
             : NativeEmitter.EmitLibraryWithImportUsage(program, exports, declarations, runtimePolicy);
         var package = new GraphPackage(false, identity, runtimePolicy,
-            [.. exports.Order(StringComparer.Ordinal)], WithGraphUsage(bindings, used), contract, image) {
-            Origins = CreateGraphOrigins(contract, false, identity, providers),
+            sortedExports, WithGraphUsage(bindings, used), contract, image) {
+            ContractSnapshot = contractSnapshot,
+            ValidatedReference = contractSnapshot.Reference,
+            Origins = CreateGraphOrigins(contractSnapshot, false, identity, providers),
         };
         var result = WriteGraphPackage(package);
         ValidateGraphDirect(ReadGraphPackageSnapshot(result), providers);
@@ -71,7 +75,8 @@ public static partial class NativeModuleCompiler
         }
         var contract = ModuleCompiler.CreateConsumerAgainstReference(program, GraphReference(providers),
             allowManagedParticipant: true);
-        var imports = ModuleCompiler.GetConsumerSetDeclarations(contract);
+        var contractSnapshot = ModuleCompiler.ReadGraphConsumerContract(contract);
+        var imports = contractSnapshot.Imports;
         var bindings = GraphBindings(providers, imports);
         var declarations = NativeBindings(bindings);
         var (image, used) = declarations.Length == 0
@@ -80,7 +85,8 @@ public static partial class NativeModuleCompiler
             : NativeEmitter.EmitWithImportUsage(program, declarations, runtimePolicy);
         var package = new GraphPackage(true, null, runtimePolicy, [],
             WithGraphUsage(bindings, used), contract, image) {
-            Origins = CreateGraphOrigins(contract, true, null, providers),
+            ContractSnapshot = contractSnapshot,
+            Origins = CreateGraphOrigins(contractSnapshot, true, null, providers),
         };
         var result = WriteGraphPackage(package);
         ValidateGraphDirect(ReadGraphPackageSnapshot(result), providers);
@@ -274,7 +280,9 @@ public static partial class NativeModuleCompiler
                 throw new ModuleContractException($"Graph declaration does not belong to '{dependency.Identity}'.");
             }
         }
-        var expected = CreateGraphOrigins(package.Contract, package.Consumer, package.Identity,
+        var expected = CreateGraphOrigins(package.ContractSnapshot
+                ?? throw new InvalidOperationException("Native graph package contract snapshot is missing."),
+            package.Consumer, package.Identity,
             providers, provenance);
         if (!package.Origins.SequenceEqual(expected))
         {
@@ -358,12 +366,12 @@ public static partial class NativeModuleCompiler
             StringComparer.Ordinal);
     }
 
-    private static GraphTypeOrigin[] CreateGraphOrigins(byte[] contract, bool consumer, string? identity,
+    private static GraphTypeOrigin[] CreateGraphOrigins(ModuleCompiler.GraphContractSnapshot contract,
+        bool consumer, string? identity,
         GraphPackage[] providers, Dictionary<string, GraphTypeOrigin?>[]? provenance = null)
     {
-        var imported = ModuleCompiler.GetGraphImportedTypes(contract, consumer)
-            .ToHashSet(StringComparer.Ordinal);
-        var structures = ModuleCompiler.GetGraphRetainedTypes(contract, consumer);
+        var imported = contract.ImportedStructures.ToHashSet(StringComparer.Ordinal);
+        var structures = contract.Structures;
         provenance ??= providers.Select(provider => ProviderOrigins(provider)).ToArray();
         var originEntryCount = 0;
         foreach (var table in provenance)

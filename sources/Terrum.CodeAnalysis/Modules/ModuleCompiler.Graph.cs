@@ -268,13 +268,6 @@ public static partial class ModuleCompiler
         }
     }
 
-    internal static ImmutableArray<string> GetGraphImports(byte[] contract)
-    {
-        var module = ReadGraphLibrary(contract);
-        return [.. module.Functions.Where(static item => item.Import).Select(static item => item.Name)
-            .Order(StringComparer.Ordinal)];
-    }
-
     internal static GraphContractSnapshot ReadGraphConsumerContract(byte[] contract)
     {
         var module = Read(contract, expectedConsumer: true, out var profile);
@@ -289,12 +282,11 @@ public static partial class ModuleCompiler
         return CreateGraphContractSnapshot(module, reference, profile);
     }
 
-    internal static ImmutableArray<BoundStruct> GetGraphRetainedTypes(byte[] contract, bool consumer) =>
-        consumer ? Read(contract, expectedConsumer: true).Structures : ReadGraphLibrary(contract).Structures;
-
-    internal static ImmutableArray<string> GetGraphImportedTypes(byte[] contract, bool consumer) =>
-        consumer ? Read(contract, expectedConsumer: true).ImportedStructures
-            : ReadGraphLibrary(contract).ImportedStructures;
+    internal static GraphContractSnapshot ReadGraphProviderSnapshot(byte[] contract)
+    {
+        var module = ReadGraphLibrary(contract, out var profile);
+        return CreateGraphContractSnapshot(module, reference: null, profile: profile);
+    }
 
     internal static string GetGraphProfile(byte[] contract)
     {
