@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `2f9bb5da` | Reuse wide signed magnitude when parsing signed integer limits |
 | `93a7cd51` | Reuse wide-integer signed magnitude in integer formatting |
 | `aa9cd378` | Exercise checked `SourceRange` construction through the Windows x64 compiler-primitives DLL |
 | `505ea127` | Verify the valid two-element index-from-end boundary in scanner host-buffer access |
