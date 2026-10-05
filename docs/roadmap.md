@@ -255,7 +255,8 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
-| `TBD` | Recognize one syntax argument without array snapshots |
+| `TBD` | Capture static protocol names during interface classification |
+| `2a32680` | Recognize one syntax argument without array snapshots |
 | `925f434` | Match protocol arguments without LINQ enumeration |
 | `7b63d6a` | Scan protocol application tokens without an array snapshot |
 | `abdcf32` | Reuse struct visibility during layout |

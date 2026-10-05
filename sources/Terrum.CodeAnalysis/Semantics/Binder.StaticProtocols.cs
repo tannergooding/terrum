@@ -268,14 +268,7 @@ internal sealed partial class Binder
                 {
                     continue;
                 }
-                var name = ((SyntaxTokenElement)node.Children.First(element =>
-                    element is SyntaxTokenElement { Token.Kind: TokenKind.Identifier })).Token.Name;
-                if (TryPrimitiveType(name, out _))
-                {
-                    Report("TRM3003", $"The primitive type '{name}' cannot be declared as an interface.", node.Span);
-                    continue;
-                }
-                var qualified = Qualify(name);
+                SyntaxToken? nameToken = null;
                 SyntaxNode? parameters = null;
                 SyntaxNode? operatorMember = null;
                 var operatorCount = 0;
@@ -285,6 +278,7 @@ internal sealed partial class Binder
                 {
                     if (child is SyntaxTokenElement tokenElement)
                     {
+                        nameToken ??= tokenElement.Token.Kind == TokenKind.Identifier ? tokenElement.Token : null;
                         hasInvalidInterfaceModifier |= tokenElement.Token.Kind is TokenKind.PublicKeyword
                             or TokenKind.PrivateKeyword or TokenKind.StaticKeyword or TokenKind.MutKeyword
                             or TokenKind.UniqueKeyword;
@@ -306,6 +300,13 @@ internal sealed partial class Binder
                         }
                     }
                 }
+                var name = nameToken?.Name ?? throw new InvalidOperationException();
+                if (TryPrimitiveType(name, out _))
+                {
+                    Report("TRM3003", $"The primitive type '{name}' cannot be declared as an interface.", node.Span);
+                    continue;
+                }
+                var qualified = Qualify(name);
                 var variables = new string[3];
                 var variableCount = 0;
                 var formalTokenCount = 0;
