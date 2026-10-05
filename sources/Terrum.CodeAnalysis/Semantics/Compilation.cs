@@ -101,11 +101,17 @@ public sealed class Compilation
     }
 
     internal static bool HasCompositeUnique(ImmutableArray<BoundStruct> structures)
+        => HasCompositeUnique(structures, out _);
+
+    internal static bool HasCompositeUnique(ImmutableArray<BoundStruct> structures, out bool unique)
     {
+        unique = false;
         foreach (var structure in structures)
         {
+            unique |= structure.IsUnique;
             if (HasCompositeUnique(structure, structures.Length, nameof(structures)))
             {
+                unique = true;
                 return true;
             }
         }
@@ -201,18 +207,7 @@ public sealed class Compilation
             return "native-18";
         }
         var structures = program.Structures;
-        var unique = false;
-        var composite = false;
-        foreach (var structure in structures)
-        {
-            unique |= structure.IsUnique;
-            if (HasCompositeUnique(structure, structures.Length, nameof(structures)))
-            {
-                unique = true;
-                composite = true;
-                break;
-            }
-        }
+        var composite = HasCompositeUnique(structures, out var unique);
         var ownedBuffer = HasOwnedNativeBuffer(structures);
         var readonlyView = false;
         var mutableView = false;

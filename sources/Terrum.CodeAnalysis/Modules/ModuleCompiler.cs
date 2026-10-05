@@ -198,9 +198,8 @@ public static partial class ModuleCompiler
         {
             return "native-18";
         }
-        var unique = module.Structures.Any(static structure => structure.IsUnique);
         var ownershipTransfer = module.Functions.Any(static function => function.HasOwnershipTransfer);
-        var compositeUnique = Compilation.HasCompositeUnique(module.Structures);
+        var compositeUnique = Compilation.HasCompositeUnique(module.Structures, out var unique);
         var ownedNativeBuffer = HasOwnedNativeBuffer(module.Structures, module.Functions);
         var (readonlyNativeView, mutableNativeViewOrClear) = NativeViewFeatures(module.Functions);
         return Compilation.GetNativeProfileVersion(module.RuntimePolicy, unique, ownershipTransfer,
