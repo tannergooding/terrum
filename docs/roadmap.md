@@ -285,6 +285,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `0d7a74e5` | Preserve scalar local initialization before terminal loop exits |
 | `58f25496` | Exercise direct-value SourceRange returns from concrete CopyAlgorithms specializations |
 | `35725fc2` | Exercise concrete CopyAlgorithms specializations through test-only native Token wrappers |
 | `1b60f08a` | Exercise all 24 IntegerFacts predicates through test-only native compiler-primitives exports |
