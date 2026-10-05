@@ -141,6 +141,127 @@ public sealed class WideIntegerFactsModuleTests
         }
     }
 
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task WideAccumulatorsPersistAndMatchBigIntegerBoundariesAsync(
+        BoundRuntimePolicy policy)
+    {
+        var path = Path.Combine(RepositoryRoot(), "self-host", "WideIntegerFacts.terrum");
+        var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
+        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+
+        var producerCompilation = Compilation.CreateLibrary(tree, policy);
+        Assert.False(producerCompilation.HasErrors,
+            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+            [
+                "Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal",
+                "Terrum.CodeAnalysis.Numerics64.TryAccumulateBase",
+            ]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerSource = new StringBuilder("using Terrum.CodeAnalysis.Numerics64;\nint32 Main() {\n");
+        var helpers = new StringBuilder();
+        var checks = new List<string>();
+        var failureCode = 1;
+        ulong[] maxima = [0, 1, (ulong)long.MaxValue, ulong.MaxValue];
+
+        AppendAccumulatorHelpers(helpers);
+        foreach (var maximum in maxima)
+        {
+            for (uint digit = 0; digit <= 10; digit++)
+            {
+                foreach (var value in AccumulationInputs(maximum, digit, 10))
+                {
+                    var succeeds = TryExpectedAccumulateDecimal(value, digit, maximum, out var result);
+                    AppendAccumulationCheck(consumerSource, checks, ref failureCode,
+                        "CheckTryAccumulateDecimal",
+                        $"{UInt64Literal(value)}, {digit}, {UInt64Literal(maximum)}",
+                        UInt64Literal(succeeds ? result : BigInteger.Zero), succeeds,
+                        $"TryAccumulateDecimal({value}, {digit}, {maximum})");
+                }
+            }
+        }
+
+        for (uint radix = 2; radix <= 36; radix++)
+        {
+            foreach (var maximum in maxima)
+            {
+                uint[] digits = radix == 2 ? [0, 1, radix] : [0, 1, radix - 1, radix];
+                foreach (var digit in digits)
+                {
+                    foreach (var value in AccumulationInputs(maximum, digit, radix))
+                    {
+                        var succeeds = TryExpectedAccumulateBase(value, digit, radix, maximum, out var result);
+                        AppendAccumulationCheck(consumerSource, checks, ref failureCode,
+                            "CheckTryAccumulateBase",
+                            $"{UInt64Literal(value)}, {digit}, {radix}, {UInt64Literal(maximum)}",
+                            UInt64Literal(succeeds ? result : BigInteger.Zero), succeeds,
+                            $"TryAccumulateBase({value}, {digit}, {radix}, {maximum})");
+                    }
+                }
+            }
+        }
+
+        foreach (var radix in new uint[] { 0, 1, 37 })
+        {
+            foreach (var maximum in maxima)
+            {
+                var values = new List<BigInteger> { BigInteger.Zero };
+                if (maximum != 0)
+                {
+                    values.Add(maximum);
+                }
+                foreach (var digit in new uint[] { 0, 1 })
+                {
+                    foreach (var value in values)
+                    {
+                        AppendAccumulationCheck(consumerSource, checks, ref failureCode,
+                            "CheckTryAccumulateBase",
+                            $"{UInt64Literal(value)}, {digit}, {radix}, {UInt64Literal(maximum)}",
+                            "0", false,
+                            $"TryAccumulateBase({value}, {digit}, {radix}, {maximum})");
+                    }
+                }
+            }
+        }
+
+        Assert.Equal(2442, checks.Count);
+        consumerSource.AppendLine("return 0;");
+        consumerSource.AppendLine("}");
+        consumerSource.Append(helpers);
+        var consumerTree = SyntaxTree.Parse(consumerSource.ToString(), "wide-accumulation-consumer.terrum");
+        Assert.False(consumerTree.HasErrors, string.Join(Environment.NewLine, consumerTree.Diagnostics));
+        var consumerCompilation = Compilation.Create(consumerTree, reference, policy);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+        var actual = NativeJit.Execute(ModuleCompiler.Link(consumer, producer), (NativeRuntimePolicy)policy);
+        Assert.True(actual == 0,
+            actual > 0 && actual <= checks.Count
+                ? $"Wide accumulation boundary {actual} failed: {checks[actual - 1]}."
+                : $"Expected all wide accumulation checks to pass, got consumer result {actual}.");
+
+        foreach (var (function, arguments) in new[] {
+            ("TryAccumulateDecimal", "0, 10, uint64.MaxValue"),
+            ("TryAccumulateBase", "0, 1, 1, uint64.MaxValue"),
+        })
+        {
+            var invalidConsumer = SyntaxTree.Parse(
+                "using Terrum.CodeAnalysis.Numerics64;\n"
+                + "int32 Main() {\n"
+                + $"    if (!{function}({arguments}, init var result)) {{ return int32(result); }}\n"
+                + "    return 0;\n"
+                + "}",
+                "wide-accumulation-unpublished-" + function + ".terrum");
+            var invalidCompilation = Compilation.Create(invalidConsumer, reference, policy);
+            Assert.Contains(invalidCompilation.Diagnostics,
+                static diagnostic => diagnostic.Code == "TRM3016");
+            Assert.Null(invalidCompilation.Program);
+        }
+    }
+
     private static (string Function, string Arguments)[] RejectedCalls() =>
     [
         ("TryAddInt64", "int64.MaxValue, 1"),
@@ -156,6 +277,83 @@ public sealed class WideIntegerFactsModuleTests
         ("TryDivideUInt64", "1, 0"),
         ("TryRemainderUInt64", "1, 0"),
     ];
+
+    private static void AppendAccumulatorHelpers(StringBuilder source)
+    {
+        source.AppendLine("""
+            bool CheckTryAccumulateDecimal(
+                uint64 value, uint32 digit, uint64 maximum, uint64 expected, bool shouldSucceed) {
+                if (shouldSucceed) {
+                    if (!TryAccumulateDecimal(value, digit, maximum, init var actual)) { return false; }
+                    return actual == expected;
+                }
+                return !TryAccumulateDecimal(value, digit, maximum, init var unpublished);
+            }
+            bool CheckTryAccumulateBase(
+                uint64 value, uint32 digit, uint32 radix, uint64 maximum,
+                uint64 expected, bool shouldSucceed) {
+                if (shouldSucceed) {
+                    if (!TryAccumulateBase(value, digit, radix, maximum, init var actual)) { return false; }
+                    return actual == expected;
+                }
+                return !TryAccumulateBase(value, digit, radix, maximum, init var unpublished);
+            }
+            """);
+    }
+
+    private static void AppendAccumulationCheck(StringBuilder source, List<string> checks,
+        ref int failureCode, string function, string arguments, string expected, bool succeeds,
+        string description)
+    {
+        source.Append("if (!").Append(function).Append('(').Append(arguments).Append(", ")
+            .Append(expected).Append(", ").Append(succeeds ? "true" : "false")
+            .Append(")) { return ")
+            .Append(failureCode.ToString(CultureInfo.InvariantCulture)).AppendLine("; }");
+        checks.Add(description);
+        failureCode++;
+    }
+
+    private static List<BigInteger> AccumulationInputs(ulong maximum, uint digit, uint radix)
+    {
+        var values = new List<BigInteger>();
+        var seen = new HashSet<BigInteger>();
+        var upperBound = new BigInteger(ulong.MaxValue);
+        var maximumValue = new BigInteger(maximum);
+
+        void Add(BigInteger value)
+        {
+            if (value >= BigInteger.Zero && value <= upperBound && seen.Add(value))
+            {
+                values.Add(value);
+            }
+        }
+
+        Add(BigInteger.Zero);
+        Add(maximumValue);
+        Add(maximumValue + 1);
+        if (maximumValue >= digit)
+        {
+            var threshold = (maximumValue - digit) / radix;
+            Add(threshold - 1);
+            Add(threshold);
+            Add(threshold + 1);
+        }
+        return values;
+    }
+
+    private static bool TryExpectedAccumulateDecimal(BigInteger value, uint digit, ulong maximum,
+        out BigInteger result)
+    {
+        result = value * 10 + digit;
+        return digit <= 9 && result <= maximum;
+    }
+
+    private static bool TryExpectedAccumulateBase(BigInteger value, uint digit, uint radix, ulong maximum,
+        out BigInteger result)
+    {
+        result = value * radix + digit;
+        return radix >= 2 && radix <= 36 && digit < radix && result <= maximum;
+    }
 
     private static List<BinaryOperation> BinaryOperations() =>
     [
@@ -279,6 +477,10 @@ public sealed class WideIntegerFactsModuleTests
         value.IsZero ? "0"
             : value == ulong.MaxValue ? "uint64.MaxValue"
                 : value.ToString(CultureInfo.InvariantCulture);
+
+    private static string UInt64Literal(ulong value) =>
+        value == ulong.MaxValue ? "uint64.MaxValue"
+            : value.ToString(CultureInfo.InvariantCulture);
 
     private static string RepositoryRoot() =>
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));

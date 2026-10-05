@@ -72,6 +72,12 @@ independent `BigInteger` oracle checks results, rejection and the distinct
 signed-minimum/-1 quotient and remainder behavior; failed outputs remain
 unreadable. This adds persisted-execution evidence only, not new operators or
 conversion policy.
+Revision-56 persisted semantic-module JIT also compares the existing decimal
+and radix-2..36 accumulation helpers with independent `BigInteger` arithmetic
+across digit, radix, limit and overflow-boundary inputs under both runtime
+policies. Invalid radix/digit cases and unreadable failed outputs are included.
+This adds persistence evidence only; it does not introduce a new parsing API
+or change numeric policy.
 Persisted semantic-module JIT also exercises all ten signed and unsigned
 checked 32-bit binary helpers, both signed unary helpers, and total
 `MagnitudeInt32` across 935 boundary cases under both runtime policies. The
