@@ -421,18 +421,38 @@ internal sealed partial class Binder
                         }
                     }
                 }
-                var arguments = formals?.Children.OfType<SyntaxNode>().ToArray() ?? [];
+                var arity = 0;
+                SyntaxNode? firstArgument = null;
+                SyntaxNode? secondArgument = null;
+                if (formals is not null)
+                {
+                    foreach (var child in formals.Children)
+                    {
+                        if (child is not SyntaxNode argument)
+                        {
+                            continue;
+                        }
+                        if (arity == 0)
+                        {
+                            firstArgument = argument;
+                        }
+                        else if (arity == 1)
+                        {
+                            secondArgument = argument;
+                        }
+                        arity++;
+                    }
+                }
                 var noThrow = noThrowCount > 0;
-                var arity = arguments.Length;
                 if (op is not TokenKind operation
                     || !((arity == 1 && IsStaticUnaryOperator(operation))
                         || (arity == 2 && IsStaticBinaryOperator(operation)))
                     || variableCount != arity + 1 || signatureCount != 2
                     || firstSignature is not SyntaxNode { Kind: SyntaxKind.TypeName } resultType
                     || NameText(resultType) != variables[variableCount - 1]
-                    || arguments[0].Children is not [SyntaxNode first, SyntaxTokenElement]
+                    || firstArgument is not { Children: [SyntaxNode first, SyntaxTokenElement] }
                     || NameText(first) != variables[0]
-                    || (arity == 2 && (arguments[1].Children is not [SyntaxNode second, SyntaxTokenElement]
+                    || (arity == 2 && (secondArgument is not { Children: [SyntaxNode second, SyntaxTokenElement] }
                         || NameText(second) != variables[1]))
                     || member.Children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.Semicolon }
                     || staticModifierCount != 1
