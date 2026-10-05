@@ -62,9 +62,9 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleContractException("Native graph catalog requires a persisted consumer root.");
         }
-        var catalog = new Dictionary<string, List<CatalogCandidate>>(StringComparer.Ordinal);
-        var catalogIdentities = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var ambiguousCatalogIdentities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var catalog = new Dictionary<string, List<CatalogCandidate>>(snapshots.Length, StringComparer.Ordinal);
+        var catalogIdentities = new Dictionary<string, string>(snapshots.Length, StringComparer.OrdinalIgnoreCase);
+        var ambiguousCatalogIdentities = new HashSet<string>(snapshots.Length, StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < snapshots.Length; index++)
         {
             var snapshot = snapshots[index];
