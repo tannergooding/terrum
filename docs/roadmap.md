@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f9de8fb` | Materialize graph closure directly |
 | `f387239` | Materialize graph info dependencies directly |
 | `c2c658b` | Sort graph exports in an exact array |
 | `4e71260` | Pre-size module-set native bindings |
