@@ -293,8 +293,13 @@ public static class NativeEmitter
             else
             {
                 var structure = program.Structures[(int)type - 100];
-                isPublic = !structure.IsPrivate && !structure.IsInternal
-                    && structure.Fields.All(field => !field.IsPrivate && !field.IsInternal && PublicLayout(field.Type));
+                isPublic = !structure.IsPrivate && !structure.IsInternal;
+                var fields = structure.Fields;
+                for (var index = 0; isPublic && index < fields.Length; index++)
+                {
+                    var field = fields[index];
+                    isPublic = !field.IsPrivate && !field.IsInternal && PublicLayout(field.Type);
+                }
             }
             publicLayouts.Add(type, isPublic);
             return isPublic;
