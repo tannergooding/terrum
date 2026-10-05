@@ -16,7 +16,10 @@ module sets, native DLLs and persisted AOT images remain outside this support.
 The bounded adapter has executed the Terrum-authored `CharacterLiteral` and
 `StringLiteral` leaf decoders, the provisional `StringEscape` decoder and the
 provisional UTF-8 namespace-row encoder. Persisted semantic-module JIT tests
-also cover `IntegerParsing` for radices 2–36, `SourceLineIndex`
+also compare `StringLiteral` length and encoding results for UTF-8, UTF-16
+units and LE/BE bytes, strict ASCII and Latin-1, and UTF-32 LE/BE bytes with
+host encoders across fresh grants under both runtime policies. They cover
+`IntegerParsing` for radices 2–36, `SourceLineIndex`
 counts/extents/position mapping/offset lookup, and streaming `SourceLines`
 ranges and coordinates across fresh grants. A test-only formatter wrapper
 also compares `IntegerFormatting` output with expected text from fresh grants;

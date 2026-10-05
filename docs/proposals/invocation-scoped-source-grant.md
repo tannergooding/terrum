@@ -140,6 +140,12 @@ policies, comparing decimal and radix-2..36 formatting for signed/unsigned
 32-/64-bit values and `char16` against a host-side oracle. Its test-only wrapper
 reads expected text from the grant; formatting remains source-independent, and
 unique output workspaces do not cross the module boundary.
+`StringLiteralEncodingModuleMatchesHostEncodersAcrossFreshSourceGrants` also
+passed under both policies, comparing encoded words and measured lengths for
+UTF-8, UTF-16 units and LE/BE bytes, strict ASCII and Latin-1, and UTF-32 LE/BE
+bytes against host encoders. Unrepresentable ASCII and Latin-1 inputs are
+rejected; this adds encoding-path evidence without changing the proposal's
+unapproved status or the frontend and persisted-AOT boundaries.
 This slice does not make the maintained
 compiler-primitives DLL source-aware or move the scalar frontend beyond the
 hosted verifier/emitter.
