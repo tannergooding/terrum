@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7e1c4e8` | Reuse validated provider profiles during native image checks |
 | `0424a30` | Reuse consumer contract snapshots in native package validation |
 | `c142b4f` | Reuse parsed graph modules during closure validation |
 | `53ffd7f` | Reuse the validated graph profile during artifact inspection |
