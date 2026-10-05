@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `84eb86b` | Binary-search graph declaration ownership |
 | `92fbf02` | Fuse imported layout validation with indexing |
 | `d80faf9` | Fuse managed-node facts into verifier validation |
 | `ac09000` | Skip producer type scans without cleanup types |
