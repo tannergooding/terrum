@@ -403,6 +403,7 @@ public static partial class NativeModuleCompiler
             for (var index = 0; index < actual.Count; index++)
             {
                 var import = actual[index];
+                // GraphBindings preserves the provider's ordinally sorted export order.
                 if (import.ExportName != import.FunctionName
                     || Array.BinarySearch(dependency.Declarations, import.FunctionName,
                         StringComparer.Ordinal) < 0
