@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `6c1c458` | Avoid sorting zero- and one-provider import lists |
 | `28996b4` | Skip sorting canonical native import lists |
 | `6a37644` | Skip extent sorting for ordered TRRM section payloads |
 | `2e0b2e1` | Skip sorting canonical native image export lists |
