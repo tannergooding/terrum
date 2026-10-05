@@ -312,18 +312,49 @@ internal sealed partial class Binder
                     continue;
                 }
                 var member = members[0];
-                var op = member.Children.OfType<SyntaxTokenElement>()
-                    .FirstOrDefault(static child => IsStaticBinaryOperator(child.Token.Kind)
-                        || IsStaticUnaryOperator(child.Token.Kind))?.Token.Kind;
+                TokenKind? op = null;
+                var noThrowCount = 0;
+                var unsafeModifierCount = 0;
+                var staticModifierCount = 0;
+                var hasInvalidModifier = false;
+                var hasInvalidAttribute = false;
+                foreach (var child in member.Children)
+                {
+                    if (child is SyntaxTokenElement tokenElement)
+                    {
+                        var tokenKind = tokenElement.Token.Kind;
+                        if (op is null && (IsStaticBinaryOperator(tokenKind) || IsStaticUnaryOperator(tokenKind)))
+                        {
+                            op = tokenKind;
+                        }
+                        if (tokenKind == TokenKind.UnsafeKeyword)
+                        {
+                            unsafeModifierCount++;
+                        }
+                        if (tokenKind == TokenKind.StaticKeyword)
+                        {
+                            staticModifierCount++;
+                        }
+                        hasInvalidModifier |= tokenKind is TokenKind.PrivateKeyword or TokenKind.PublicKeyword
+                            or TokenKind.InternalKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword;
+                    }
+                    else if (child is SyntaxNode { Kind: SyntaxKind.Attribute } attribute)
+                    {
+                        if (NameText(attribute) == "[NoThrow]")
+                        {
+                            noThrowCount++;
+                        }
+                        else
+                        {
+                            hasInvalidAttribute = true;
+                        }
+                    }
+                }
                 var signature = member.Children.OfType<SyntaxNode>()
                     .Where(static child => child.Kind != SyntaxKind.Attribute).ToArray();
                 var formals = signature.FirstOrDefault(static child => child.Kind == SyntaxKind.ParameterList);
                 var arguments = formals?.Children.OfType<SyntaxNode>().ToArray() ?? [];
-                var noThrowCount = member.Children.OfType<SyntaxNode>().Count(static child =>
-                    child.Kind == SyntaxKind.Attribute && NameText(child) == "[NoThrow]");
                 var noThrow = noThrowCount > 0;
-                var unsafeModifierCount = member.Children.OfType<SyntaxTokenElement>().Count(static child =>
-                    child.Token.Kind == TokenKind.UnsafeKeyword);
                 var arity = arguments.Length;
                 if (op is not TokenKind operation
                     || !((arity == 1 && IsStaticUnaryOperator(operation))
@@ -336,13 +367,9 @@ internal sealed partial class Binder
                     || (arity == 2 && (arguments[1].Children is not [SyntaxNode second, SyntaxTokenElement]
                         || NameText(second) != variables[1]))
                     || member.Children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.Semicolon }
-                    || member.Children.OfType<SyntaxTokenElement>().Count(static child =>
-                        child.Token.Kind == TokenKind.StaticKeyword) != 1
-                    || member.Children.OfType<SyntaxTokenElement>().Any(static child =>
-                        child.Token.Kind is TokenKind.PrivateKeyword or TokenKind.PublicKeyword
-                            or TokenKind.InternalKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword)
-                    || member.Children.OfType<SyntaxNode>().Any(child =>
-                        child.Kind == SyntaxKind.Attribute && NameText(child) != "[NoThrow]")
+                    || staticModifierCount != 1
+                    || hasInvalidModifier
+                    || hasInvalidAttribute
                     || noThrowCount > 1 || unsafeModifierCount > 1)
                 {
                     Report("TRM3001", "Static operator protocol signatures must match their operand and result formals and end in ';'.", member.Span);
