@@ -2906,11 +2906,13 @@ supported scalar local initializations, assignments, requirement checks and
 expression statements lowered by the existing paths, plus primitive integer
 local updates and compound assignments. Prefixes may also contain scalar-only
 blocks and `if` statements whose branches consist solely of supported
-fallthrough prefixes; standalone call statements, loop transfers and managed
-cleanup remain excluded from that proof. Nested constant-true or post-tested
-loops erase recursively as return-only terminal tails, or as terminal prefixes
-with a direct break before an enclosing terminal tail; inner breaks route only
-to their own fallthrough and cannot satisfy an enclosing loop's break proof. The
+fallthrough prefixes; loop transfers and managed cleanup remain excluded from
+that proof. Returning direct-call statements are retained in source order; a
+`[DoesNotReturn]` call cannot precede a normal terminal tail. Nested
+constant-true or post-tested loops erase recursively as return-only terminal
+tails, or as terminal prefixes with a direct break before an enclosing
+terminal tail; inner breaks route only to their own fallthrough and cannot
+satisfy an enclosing loop's break proof. The
 lowering omits the unreachable loop condition and iterator and adds no loop
 region or backedge. A literal-false pre-test with an empty cleanup-free body
 also erases to fallthrough. `for` initializers remain in source order; an

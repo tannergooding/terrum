@@ -1940,7 +1940,8 @@ public static partial class TrRmExecutableCompiler
                     { Expression: BoundCompoundAssignment
                         { Place: BoundRead, Type: PrimitiveType.Int32 or PrimitiveType.UInt32
                             or PrimitiveType.Int64 or PrimitiveType.UInt64 } }
-                or BoundExpressionStatement { Expression: BoundUpdate };
+                or BoundExpressionStatement { Expression: BoundUpdate }
+                or BoundExpressionStatement { Expression: BoundCall };
         }
 
         private static BoundStatement AcyclicLoopBody(BoundWhile loop)
