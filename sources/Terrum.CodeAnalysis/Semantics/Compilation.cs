@@ -163,20 +163,40 @@ public sealed class Compilation
     {
         ArgumentNullException.ThrowIfNull(program);
         if (program.Classes.Any(static item => item.Fields.Any(
-                static field => ManagedClassTypes.IsOptional(field.Type)))
-            || program.Functions.Any(static function => ManagedClassTypes.IsOptional(function.ReturnType)
-                || function.Variables.Any(static variable => ManagedClassTypes.IsOptional(variable.Type))))
+                static field => ManagedClassTypes.IsOptional(field.Type))))
         {
             return "native-20";
         }
         if (!program.Classes.IsEmpty)
         {
+            if (program.Functions.Any(static function => ManagedClassTypes.IsOptional(function.ReturnType)
+                    || function.Variables.Any(static variable => ManagedClassTypes.IsOptional(variable.Type))))
+            {
+                return "native-20";
+            }
             return "native-19";
         }
-        if (program.Functions.Any(static function => function.Intrinsic >= BoundIntrinsic.NodeTryCreate
-            || function.ReturnType is PrimitiveType.ManagedNode or PrimitiveType.WriteManagedNode
-            || function.Variables.Any(static variable => variable.Type is PrimitiveType.ManagedNode
-                or PrimitiveType.WriteManagedNode)))
+        var usesManagedNodes = false;
+        foreach (var function in program.Functions)
+        {
+            if (ManagedClassTypes.IsOptional(function.ReturnType))
+            {
+                return "native-20";
+            }
+            var functionUsesManagedNodes = function.Intrinsic >= BoundIntrinsic.NodeTryCreate
+                || function.ReturnType is PrimitiveType.ManagedNode or PrimitiveType.WriteManagedNode;
+            foreach (var variable in function.Variables)
+            {
+                if (ManagedClassTypes.IsOptional(variable.Type))
+                {
+                    return "native-20";
+                }
+                functionUsesManagedNodes |= variable.Type is PrimitiveType.ManagedNode
+                    or PrimitiveType.WriteManagedNode;
+            }
+            usesManagedNodes |= functionUsesManagedNodes;
+        }
+        if (usesManagedNodes)
         {
             return "native-18";
         }
