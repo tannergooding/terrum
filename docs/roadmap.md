@@ -285,6 +285,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `9a7687b4` | Omit embedded for iterators when every terminal branch returns or breaks |
 | `3cf962d1` | Lower terminal nested acyclic loop branches to existing returns and fallthrough without TRRM loop regions |
 | `9ffc7292` | Verify acyclic loop erasure skips post-loop conditions and preserves for initializers |
 | `8903a118` | Erase return-only and direct-break acyclic loops to existing terminal or fallthrough flow without TRRM loop regions |
