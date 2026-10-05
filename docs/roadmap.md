@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `fe699ec` | Index unwind sections by validated order |
 | `c525acc` | Validate empty graph dependencies in one pass |
 | `7ef2ac7` | Sort native imports in place before writing |
 | `10c7696` | Encode native package identities into destinations |
