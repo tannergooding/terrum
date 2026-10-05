@@ -109,12 +109,9 @@ public readonly ref struct TrRmArtifactIndex
                     throw InvalidArtifact();
                 }
 
-                foreach (var gap in artifact.Slice(cursor, (int)start - cursor))
+                if (artifact.Slice(cursor, (int)start - cursor).IndexOfAnyExcept((byte)0) >= 0)
                 {
-                    if (gap != 0)
-                    {
-                        throw InvalidArtifact();
-                    }
+                    throw InvalidArtifact();
                 }
 
                 cursor = (int)(start + length);
@@ -138,12 +135,9 @@ public readonly ref struct TrRmArtifactIndex
                     throw InvalidArtifact();
                 }
 
-                foreach (var gap in artifact.Slice(cursor, (int)start - cursor))
+                if (artifact.Slice(cursor, (int)start - cursor).IndexOfAnyExcept((byte)0) >= 0)
                 {
-                    if (gap != 0)
-                    {
-                        throw InvalidArtifact();
-                    }
+                    throw InvalidArtifact();
                 }
 
                 cursor = (int)end;
