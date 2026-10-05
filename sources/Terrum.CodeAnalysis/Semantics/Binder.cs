@@ -702,8 +702,7 @@ internal sealed partial class Binder
             Report("TRM3005", "Value layouts must be acyclic and within the semantic nesting limit.", declaration.Span);
             return;
         }
-        var name = StructName(declaration);
-        var qualified = string.IsNullOrEmpty(_namespace) ? name.Name : _namespace + "." + name.Name;
+        var qualified = _structs[index].Name;
         var isPublic = false;
         var isUnique = false;
         var isTransparent = false;
