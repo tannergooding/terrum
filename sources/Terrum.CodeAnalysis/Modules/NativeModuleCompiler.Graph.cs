@@ -199,11 +199,16 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleContractException("Native graph root or runtime policy is invalid.");
         }
-        var byIdentity = providers.ToDictionary(static item => item.Identity!,
+        var byIdentity = new Dictionary<string, GraphPackage>(providers.Length,
             StringComparer.OrdinalIgnoreCase);
+        foreach (var provider in providers)
+        {
+            byIdentity.Add(provider.Identity!, provider);
+        }
         var visiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var order = new List<GraphPackage>(providers.Length);
+        var order = new GraphPackage[providers.Length];
+        var orderCount = 0;
         foreach (var dependency in consumer.Dependencies)
         {
             Visit(dependency.Identity);
@@ -213,7 +218,7 @@ public static partial class NativeModuleCompiler
             throw new ModuleContractException("Native graph includes unexpected producers.");
         }
         ValidateGraphDirect(consumer, ResolveDirect(consumer, byIdentity));
-        return [.. order];
+        return order;
 
         void Visit(string identity)
         {
@@ -236,7 +241,7 @@ public static partial class NativeModuleCompiler
                     ValidateGraphDirect(node, ResolveDirect(node, byIdentity));
                 }
                 _ = visited.Add(identity);
-                order.Add(node);
+                order[orderCount++] = node;
             }
             _ = visiting.Remove(identity);
         }
