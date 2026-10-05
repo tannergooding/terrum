@@ -73,14 +73,15 @@ public static partial class ModuleCompiler
     }
     private static CompilationReference SetReference(Module module)
     {
-        var declarations = module.Functions.Where(static item => item.Import)
-            .Select(static item => Declaration(item.Function
-                ?? throw new ModuleFormatException("Missing export declaration."))).ToImmutableArray();
+        var declarations = ImportDeclarations(module);
         var required = RequiredStructures(declarations, module.Structures);
         var structures = SelectStructures(module.Structures, required);
-        return new CompilationReference(structures,
-            [.. declarations.Select(function => RemapFunction(function, module.Structures, structures))],
-            module.RuntimePolicy);
+        var remapped = ImmutableArray.CreateBuilder<BoundFunction>(declarations.Length);
+        foreach (var declaration in declarations)
+        {
+            remapped.Add(RemapFunction(declaration, module.Structures, structures));
+        }
+        return new CompilationReference(structures, remapped.MoveToImmutable(), module.RuntimePolicy);
     }
 
     private static Module[] ReadSet(IReadOnlyList<byte[]> producers)

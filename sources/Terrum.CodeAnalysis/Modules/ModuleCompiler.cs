@@ -127,24 +127,7 @@ public static partial class ModuleCompiler
 
     private static CompilationReference CreateReference(Module producer)
     {
-        var declarationCount = 0;
-        foreach (var function in producer.Functions)
-        {
-            if (function.Import)
-            {
-                declarationCount++;
-            }
-        }
-        var declarationsBuilder = ImmutableArray.CreateBuilder<BoundFunction>(declarationCount);
-        foreach (var function in producer.Functions)
-        {
-            if (function.Import)
-            {
-                declarationsBuilder.Add(Declaration(function.Function
-                    ?? throw new ModuleFormatException("Missing export declaration.")));
-            }
-        }
-        var declarations = declarationsBuilder.MoveToImmutable();
+        var declarations = ImportDeclarations(producer);
         var required = RequiredStructures(declarations, producer.Structures);
         var structures = SelectStructures(producer.Structures, required);
         var remapped = ImmutableArray.CreateBuilder<BoundFunction>(declarations.Length);
@@ -153,6 +136,28 @@ public static partial class ModuleCompiler
             remapped.Add(RemapFunction(declaration, producer.Structures, structures));
         }
         return new CompilationReference(structures, remapped.MoveToImmutable(), producer.RuntimePolicy);
+    }
+
+    private static ImmutableArray<BoundFunction> ImportDeclarations(Module module)
+    {
+        var declarationCount = 0;
+        foreach (var function in module.Functions)
+        {
+            if (function.Import)
+            {
+                declarationCount++;
+            }
+        }
+        var declarations = ImmutableArray.CreateBuilder<BoundFunction>(declarationCount);
+        foreach (var function in module.Functions)
+        {
+            if (function.Import)
+            {
+                declarations.Add(Declaration(function.Function
+                    ?? throw new ModuleFormatException("Missing export declaration.")));
+            }
+        }
+        return declarations.MoveToImmutable();
     }
 
     internal static ImmutableArray<string> GetConsumerCallImports(byte[] consumerBytes)
