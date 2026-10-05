@@ -30,6 +30,12 @@ public sealed partial class CliTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int HexDigitExport(ushort character, ref int digit);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Char16PredicateExport(ushort character);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Char16ValueExport(ushort character);
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -659,6 +665,25 @@ public sealed partial class CliTests
             })
             {
                 Assert.Equal(expected, scalarWidth(scalar));
+            }
+
+            var isAsciiDigit = Marshal.GetDelegateForFunctionPointer<Char16PredicateExport>(
+                NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.IsAsciiDigit"));
+            var isLineBreak = Marshal.GetDelegateForFunctionPointer<Char16PredicateExport>(
+                NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.IsLineBreak"));
+            var getDecimalDigit = Marshal.GetDelegateForFunctionPointer<Char16ValueExport>(
+                NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.GetDecimalDigit"));
+            for (var value = 0; value <= ushort.MaxValue; value++)
+            {
+                var character = (ushort)value;
+                Assert.Equal(value >= 48 && value <= 57 ? 1 : 0, isAsciiDigit(character));
+                var expectedLineBreak = value == 10 || value == 13 || value == 133
+                    || value == 8232 || value == 8233;
+                Assert.Equal(expectedLineBreak ? 1 : 0, isLineBreak(character));
+                if (value >= 48 && value <= 57)
+                {
+                    Assert.Equal(value - 48, getDecimalDigit(character));
+                }
             }
 
             var tryGetHexDigit = Marshal.GetDelegateForFunctionPointer<HexDigitExport>(
