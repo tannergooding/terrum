@@ -255,6 +255,8 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7325427` | Count managed class construction pairs in one function pass |
+| `d4e6f30` | Detect native buffer views in one profile scan |
 | `c4fe7ac` | Remap graph and module-set structures without intermediate immutable snapshots |
 | `192d0ee` | Avoid a temporary imported-type array during module-set validation |
 | `88d6667` | Reuse imported-type lookup sets across module and graph validation |
