@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `a1e83b6a` | Exercise existing IntegerFormatting decimal and radix formatters through the internal Windows x64 compiler-primitives DLL |
 | `2fde0cac` | Exercise existing IntegerFormatting radix-length queries through the internal Windows x64 compiler-primitives DLL |
 | `2cc4eade` | Exercise existing float-selection candidates through the internal Windows x64 compiler-primitives DLL using integer bit carriers |
 | `ff2dc783` | Verify IntegerFacts native execution under both runtime policies |
