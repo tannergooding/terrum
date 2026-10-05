@@ -62,10 +62,10 @@ source requirements. No general buffer dependency or source-aware maintained
 compiler-primitives DLL was added.
 
 The same capability also runs the bounded Terrum-authored `CharacterLiteral`
-decoder as a persisted semantic-module provider. This reuses the existing
-requirement and grant validation; it does not make the scanner or scalar
-frontend source-independent, independently verified, or executable outside
-the hosted verifier/emitter path.
+and `StringLiteral` leaf decoders as persisted semantic-module providers. This
+reuses the existing requirement and grant validation; it does not make the
+scanner or scalar frontend source-independent, independently verified, or
+executable outside the hosted verifier/emitter path.
 
 The provisional contract for this slice is:
 
@@ -106,8 +106,9 @@ grants, and preserves host-neutral module behavior. The focused source,
 module, native-package, module-set and line-component selection passed 399
 tests. Persisted-index coverage also checks invocation-relative `^1` reads
 across empty and one-code-unit snapshots and resolves call-valued indexes.
-`CharacterLiteralModuleUsesFreshSourceGrantsAsync` additionally passed under
-both runtime policies, comparing decoded scalars and lexical error locations
+`CharacterLiteralModuleUsesFreshSourceGrantsAsync` and
+`StringLiteralModuleReadsFreshSourceGrants` additionally passed under both
+runtime policies, comparing decoded scalar results and lexical validity
 against the hosted lexer across fresh grants.
 This slice does not make the maintained
 compiler-primitives DLL source-aware or move the scalar frontend beyond the
