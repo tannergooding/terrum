@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `4e4b6f2` | Reuse parsed contract snapshots during semantic linking |
 | `bad9a04` | Reuse validated leaf profiles during graph artifact inspection |
 | `61f0576` | Reuse provider contract snapshots in native package validation |
 | `7e1c4e8` | Reuse validated provider profiles during native image checks |
