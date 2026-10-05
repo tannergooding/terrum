@@ -272,7 +272,7 @@ public static partial class ModuleCompiler
         var providerStructures = consumer.Structures.IsEmpty && consumer.ImportedStructures.IsEmpty
             ? null
             : IndexStructures(reference.Structures);
-        var importedNames = new HashSet<string>(StringComparer.Ordinal);
+        var importedNames = new HashSet<string>(consumer.ImportedStructures.Length, StringComparer.Ordinal);
         foreach (var name in consumer.ImportedStructures)
         {
             if (providerStructures is null || !providerStructures.ContainsKey(name))
