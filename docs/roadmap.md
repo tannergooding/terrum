@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `13eb3cc8` | Invoke wide signed magnitude through the internal Windows x64 compiler-primitives DLL |
 | `2f9bb5da` | Reuse wide signed magnitude when parsing signed integer limits |
 | `93a7cd51` | Reuse wide-integer signed magnitude in integer formatting |
 | `aa9cd378` | Exercise checked `SourceRange` construction through the Windows x64 compiler-primitives DLL |
