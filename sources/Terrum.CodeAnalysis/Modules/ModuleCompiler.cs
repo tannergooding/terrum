@@ -965,7 +965,7 @@ public static partial class ModuleCompiler
         allStructures = structures.ToImmutable();
         var available = producer.Functions.Where(static function => function.Import)
             .ToDictionary(function => function.Name, StringComparer.Ordinal);
-        var names = new Dictionary<string, int>(StringComparer.Ordinal);
+        var names = new Dictionary<string, int>(consumer.Functions.Length, StringComparer.Ordinal);
         var producerNames = new Dictionary<string, int>(StringComparer.Ordinal);
         var functions = ImmutableArray.CreateBuilder<BoundFunction>();
         var consumerOwned = new List<int>();
