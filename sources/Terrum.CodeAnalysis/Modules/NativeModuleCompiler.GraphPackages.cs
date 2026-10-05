@@ -143,6 +143,7 @@ public static partial class NativeModuleCompiler
         at += identityLength;
         var dependencies = new GraphDependency[dependencyCount];
         HashSet<string>? seenImports = null;
+        var totalDeclarations = 0;
         for (var i = 0; i < dependencies.Length; i++)
         {
             var dependencyName = ReadGraphString(bytes, ref at, 64);
@@ -152,6 +153,11 @@ public static partial class NativeModuleCompiler
                 throw new ModuleFormatException("Duplicate or unordered graph dependency identity.");
             }
             var importCount = ReadGraphCount(bytes, ref at, 1024);
+            if (importCount > 1024 - totalDeclarations)
+            {
+                throw new ModuleFormatException("Graph import total exceeds its bound.");
+            }
+            totalDeclarations += importCount;
             var declarations = new string[importCount];
             for (var j = 0; j < declarations.Length; j++)
             {
@@ -182,10 +188,6 @@ public static partial class NativeModuleCompiler
                 imports[j] = name;
             }
             dependencies[i] = new GraphDependency(dependencyName, declarations, imports);
-        }
-        if (seenImports is { Count: > 1024 })
-        {
-            throw new ModuleFormatException("Graph import total exceeds its bound.");
         }
         var exports = new string[exportCount];
         for (var i = 0; i < exports.Length; i++)
