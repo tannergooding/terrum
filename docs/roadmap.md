@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `223a9d1b` | Verify checked 32-bit arithmetic helpers through persisted semantic modules |
 | `a6c8b305` | Verify checked wide-integer helpers through persisted semantic modules |
 | `089e2800` | Verify checked conversion helpers through persisted semantic modules |
 | `4199a815` | Add provisional persisted scanner-profile JIT support |
