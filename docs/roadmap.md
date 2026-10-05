@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e215945` | Pre-size SourceMap duplicate index |
 | `45932c8` | Pre-size TRRM import and export indexes |
 | `38d61bd` | Encode source-line CRLF markers in line starts |
 | `0eb79b0` | Route streaming line reads through the `SourceText` facade |
