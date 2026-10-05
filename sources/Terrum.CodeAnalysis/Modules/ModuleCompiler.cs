@@ -634,16 +634,34 @@ public static partial class ModuleCompiler
                 }
             }
         }
-        var functions = program.Functions.Where((_, index) => indexes.Contains(index)).ToImmutableArray();
+        var functionsBuilder = ImmutableArray.CreateBuilder<BoundFunction>(indexes.Count);
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            if (indexes.Contains(index))
+            {
+                functionsBuilder.Add(program.Functions[index]);
+            }
+        }
+        var functions = functionsBuilder.MoveToImmutable();
         var required = RequiredStructures(functions, program.Structures, program.Classes,
             FindStructureIndex);
         var structures = SelectStructures(program.Structures, required);
-        var remapped = functions.Select(function => RemapFunction(function, program.Structures, structures));
-        var module = new Module(false, -1, structures, [.. remapped.Select(function =>
-            new ModuleFunction(function.Name, Contract(function, structures), function, names.Contains(function.Name)) {
-                HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, structures),
-            })]) {
-            Classes = [.. program.Classes.Select(@class => RemapClass(@class, program.Structures, structures))],
+        var moduleFunctions = ImmutableArray.CreateBuilder<ModuleFunction>(functions.Length);
+        foreach (var function in functions)
+        {
+            var remapped = RemapFunction(function, program.Structures, structures);
+            moduleFunctions.Add(new ModuleFunction(remapped.Name, Contract(remapped, structures), remapped,
+                names.Contains(remapped.Name)) {
+                HasOwnershipTransfer = Compilation.HasOwnershipTransfer(remapped, structures),
+            });
+        }
+        var classes = ImmutableArray.CreateBuilder<BoundClass>(program.Classes.Length);
+        foreach (var @class in program.Classes)
+        {
+            classes.Add(RemapClass(@class, program.Structures, structures));
+        }
+        var module = new Module(false, -1, structures, moduleFunctions.MoveToImmutable()) {
+            Classes = classes.MoveToImmutable(),
             RuntimePolicy = program.RuntimePolicy,
         };
         return Write(module, program);
