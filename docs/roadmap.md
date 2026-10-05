@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `db76eb0` | Reuse cleanup structure traversal state |
 | `71ac1b0` | Reuse cleanup dependency function buffer |
 | `9028f1e` | Sort graph providers in place after validation |
 | `34fa8d1` | Skip JIT range copies and sorting for ordered emitter output |
