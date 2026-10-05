@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `0b03510` | Scan graph symbols without LINQ |
 | `f10ab45` | Validate IAT entries within `.idata` directly |
 | `84e472d` | Sort graph catalog selections directly |
 | `d48f00f` | Create checked-unwind cleanup indexes lazily |
