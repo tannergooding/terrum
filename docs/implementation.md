@@ -285,9 +285,11 @@ getters. Semantic-module revision 56 provisionally persists top-level
 caller-unsafe function contracts and reconstructs call authorization only
 inside persisted `BoundUnsafe` scopes. Caller-unsafe methods, accessors,
 operators and fields remain unsupported in semantic modules; `unsafe(expr)`
-authorization also remains same-compilation-only. Executable TRRM still
-rejects caller-unsafe declarations and calls because its Body cannot prove
-explicit call scope. Complete-program scalar projection v85 additionally
+authorization also remains same-compilation-only. Executable TRRM
+provisionally round-trips the caller-unsafe Effects bit on top-level function
+declarations, but still rejects calls to those functions because its Body
+cannot prove explicit call scope. This does not add caller-unsafe region
+support or authorize those calls. Complete-program scalar projection v85 also
 source-audits caller-unsafe top-level declarations and calls enclosed by
 explicit `unsafe { ... }` blocks; it also audits `unsafe(expr)` call-site
 scopes. Both remain backed by the hosted verifier/emitter.

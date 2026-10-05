@@ -1432,6 +1432,10 @@ public static partial class TrRmExecutableCompiler
                     return Merge(condition, () => Expression(conditional.WhenTrue),
                         () => Expression(conditional.WhenFalse), conditional.Type);
                 case BoundCall call:
+                    if (_program.Functions[call.Function].RequiresUnsafeCaller)
+                    {
+                        throw Unsupported("Caller-unsafe calls require an executable unsafe-region contract.");
+                    }
                     var arguments = new BoundExpression[call.Arguments.Length];
                     for (var index = 0; index < call.Arguments.Length; index++)
                     {

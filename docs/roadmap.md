@@ -21,7 +21,9 @@ this roadmap for adoption sequencing and remaining work.
    not imply parser, compiler, runtime or library support.
 
 The source-free TRRM scalar path remains fail-fast and supports the assigned
-`NoThrow` and `DoesNotReturn` Effects in its bounded Body subset.
+`NoThrow` and `DoesNotReturn` Effects in its bounded Body subset. It also
+provisionally round-trips caller-unsafe Effects on top-level declarations,
+without authorizing calls in Bodies lacking a validated unsafe scope.
 Checked-exception Bodies and other Effects/contracts remain unsupported. See
 [implementation](implementation.md) for the current support boundary.
 
@@ -142,9 +144,10 @@ remain hosted.
 
 Separately, semantic-module revision 56 provisionally persists top-level
 caller-unsafe contracts and calls enclosed by explicit `unsafe { }` blocks,
-reconstructing authorization from that scope. Unsafe members and executable
-TRRM caller-unsafe calls remain unsupported; the broader reference-call
-metadata proposal remains unapproved.
+reconstructing authorization from that scope. Executable TRRM provisionally
+round-trips top-level caller-unsafe Effects while continuing to reject calls
+without a validated Body scope. Unsafe members remain unsupported; the
+broader reference-call metadata proposal remains unapproved.
 
 ## Planned work (priority order)
 

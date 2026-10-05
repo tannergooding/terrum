@@ -225,7 +225,8 @@ internal sealed class TrRmScalarGraph
                     || target.IsClassConstructor || target.ClassConstructor != -1
                     || target.DeclaringStruct is not null || target.IsStatic || target.IsCleanup
                     || target.PropertyName is not null || target.Intrinsic != BoundIntrinsic.None
-                    || target.ReturnType != call.Type || target.ParameterCount != call.Arguments.Length
+                    || target.RequiresUnsafeCaller || target.ReturnType != call.Type
+                    || target.ParameterCount != call.Arguments.Length
                     || function.IsNoThrow && !target.IsNoThrow)
                 {
                     throw new ArgumentException("Indexed call target declaration does not match.");

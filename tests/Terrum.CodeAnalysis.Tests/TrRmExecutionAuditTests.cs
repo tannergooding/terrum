@@ -295,7 +295,6 @@ public sealed class TrRmExecutionAuditTests
     }
 
     [Theory]
-    [InlineData(4)]
     [InlineData(8)]
     public void UnsupportedEffectsNeverDisappear(uint effect)
         => Assert.Throws<InvalidDataException>(() =>
@@ -372,6 +371,15 @@ public sealed class TrRmExecutionAuditTests
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         Assert.Equal(41, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
             NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void CallerUnsafeEffectDoesNotAuthorizeAnExecutableCall()
+    {
+        byte[] caller = [4, 1, 1, 0, 0, 0, 1, 0x12, 2, 2, 0, 0x83, 2];
+        byte[] callee = [4, 1, 1, 0, 0, 0, 0, 0x83, 1];
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+            LocalCallArtifact(caller, callee, calleeCallerUnsafe: true)));
     }
 
     [Theory]
@@ -505,7 +513,7 @@ public sealed class TrRmExecutionAuditTests
     // Independent metadata and Body bytes; no production compiler, table writer or source parser.
     internal static byte[] LocalCallArtifact(byte[] caller, byte[] callee,
         int resultRow = 1, byte parameterMode = 0, bool callerNoThrow = false,
-        bool calleeNoThrow = false)
+        bool calleeNoThrow = false, bool calleeCallerUnsafe = false)
     {
         byte[] codes = [8, 1, 3, 0x0D, 9, 0x0E, 0];
         var strings = new[] { "independent", "Main", "Callee" }.Select(text =>
@@ -516,7 +524,10 @@ public sealed class TrRmExecutionAuditTests
             utf8.CopyTo(row, 4);
             return row;
         });
-        var contractCount = (callerNoThrow ? 1 : 0) + (calleeNoThrow ? 1 : 0);
+        var calleeEffectMask = (calleeNoThrow ? 1u : 0u) | (calleeCallerUnsafe ? 4u : 0u);
+        var hasCalleeEffect = calleeEffectMask != 0;
+        var contractCount = (callerNoThrow ? 1 : 0) + (hasCalleeEffect ? 1 : 0);
+        var calleeContractFirst = hasCalleeEffect ? callerNoThrow ? 2u : 1u : 0;
         var sections = new List<(ushort Kind, uint Count, byte[] Bytes)>
         {
             (1, 1, Words(1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1)),
@@ -524,8 +535,8 @@ public sealed class TrRmExecutionAuditTests
             (0x11, 7, Rows(codes.Select(code => new byte[] { 1, 0, code }))),
             (0x16, 2, Words(
                 0, 2, 1, 1, callerNoThrow ? 1u : 0, callerNoThrow ? 1u : 0, 1,
-                0, 3, 2, 1, calleeNoThrow ? (uint)(contractCount) : 0,
-                calleeNoThrow ? 1u : 0, 2)),
+                0, 3, 2, 1, calleeContractFirst,
+                hasCalleeEffect ? 1u : 0, 2)),
             (0x17, 2, Words(1, 0, 0, 0, 0, 0,
                 (uint)resultRow, 0, 1, 1, 0, 0)),
             (0x18, 1, Words(2, 0, 1, parameterMode)),
@@ -537,9 +548,9 @@ public sealed class TrRmExecutionAuditTests
             {
                 clauses.Add(Words(0x16000001, 1, 1));
             }
-            if (calleeNoThrow)
+            if (hasCalleeEffect)
             {
-                clauses.Add(Words(0x16000002, 1, 1));
+                clauses.Add(Words(0x16000002, 1, calleeEffectMask));
             }
             sections.Add((0x1B, (uint)contractCount, Rows(clauses)));
         }

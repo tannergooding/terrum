@@ -29,6 +29,10 @@ public static partial class TrRmExecutableCompiler
         new byte[] { 1, 0, 0, 0 },
         new byte[] { 2, 0, 0, 0 },
         new byte[] { 3, 0, 0, 0 },
+        new byte[] { 4, 0, 0, 0 },
+        new byte[] { 5, 0, 0, 0 },
+        new byte[] { 6, 0, 0, 0 },
+        new byte[] { 7, 0, 0, 0 },
     ];
 
     public static byte[] Emit(BoundProgram program, string moduleIdentity)
@@ -57,10 +61,6 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported("An audited indexed Body cannot be reserialized as structured source.");
         }
-        if (ModuleCompiler.ContainsCallerUnsafeContracts(program))
-        {
-            throw Unsupported("Caller-unsafe callable contracts are not supported in executable TRRM Bodies.");
-        }
         if (program.EntryPoint >= 0
             && (program.Functions[program.EntryPoint].ReturnType != PrimitiveType.Int32
                 || program.Functions[program.EntryPoint].ParameterCount != 0))
@@ -81,7 +81,7 @@ public static partial class TrRmExecutableCompiler
             functionFeatures[index] = features;
             hasFloatingTypes |= features.HasFloatingTypes;
             parameterCount = checked(parameterCount + function.ParameterCount);
-            effectCount += function.IsNoThrow || function.DoesNotReturn ? 1 : 0;
+            effectCount += function.IsNoThrow || function.DoesNotReturn || function.RequiresUnsafeCaller ? 1 : 0;
             exportCount += !function.IsPrivate && !function.IsInternal ? 1 : 0;
         }
         var names = new List<(string Text, int Encoding)>(program.Functions.Length + 1)
@@ -133,7 +133,8 @@ public static partial class TrRmExecutableCompiler
                 ? new IndexedBuilder(function, program, functionFeatures[index].HasFloatingTypes).Encode()
                 : EncodeBody(function, functionFeatures[index].HasFloatingTypes));
             var effectMask = (function.IsNoThrow ? 1u : 0u)
-                | (function.DoesNotReturn ? 2u : 0u);
+                | (function.DoesNotReturn ? 2u : 0u)
+                | (function.RequiresUnsafeCaller ? 4u : 0u);
             var contractFirst = effectMask != 0 ? effects.Count + 1 : 0;
             if (effectMask != 0)
             {
@@ -316,6 +317,7 @@ public static partial class TrRmExecutableCompiler
             var (contractFirst, contracts) = defs.GetContractRange(row);
             var noThrow = false;
             var doesNotReturn = false;
+            var requiresUnsafeCaller = false;
             if (contracts != 0)
             {
                 if (contracts != 1 || contractBytes.IsEmpty)
@@ -331,12 +333,13 @@ public static partial class TrRmExecutableCompiler
                 var effectMask = clause.Length == 12
                     ? BinaryPrimitives.ReadUInt32LittleEndian(clause[8..]) : 0;
                 if (clause.Length != 12 || BinaryPrimitives.ReadUInt16LittleEndian(clause[4..]) != 1
-                    || effectMask is < 1 or > 3)
+                    || effectMask is < 1 or > 7)
                 {
                     throw Invalid("Unsupported executable Effects contract.");
                 }
                 noThrow = (effectMask & 1) != 0;
                 doesNotReturn = (effectMask & 2) != 0;
+                requiresUnsafeCaller = (effectMask & 4) != 0;
             }
 
             functions.Add(new BoundFunction(name, FromRow(types, sigs.GetResultTypeSpec(signature)),
@@ -344,6 +347,7 @@ public static partial class TrRmExecutableCompiler
             {
                 IsNoThrow = noThrow,
                 DoesNotReturn = doesNotReturn,
+                RequiresUnsafeCaller = requiresUnsafeCaller,
                 IsPrivate = flags == 0,
                 IsInternal = flags == 1,
             });

@@ -45,22 +45,31 @@ obligation, retain the `BoundUnsafe` scope, and reconstruct call authorization
 from that scope when reading; do not trust a serialized authorization bit by
 itself. `unsafe(expr)` remains same-compilation-only because its scope is
 currently represented only by a bound-call authorization fact. Keep unsafe
-fields, accessors and operators outside this slice, and keep all caller-unsafe
-declarations and calls rejected in executable TRRM until its Body contract
-can prove explicit call scope. This slice changes the internal semantic-module
-format and must advance its revision. It is an implementation experiment, not
-approval of general reference metadata or the broader proposal.
+fields, accessors and operators outside this slice, and keep caller-unsafe
+calls rejected in executable TRRM until its Body contract can prove explicit
+call scope. Top-level declarations may provisionally round-trip the assigned
+Effects bit, but that metadata alone does not authorize calls. This slice
+changes the internal semantic-module format and must advance its revision. It
+is an implementation experiment, not approval of general reference metadata
+or the broader proposal.
 
-**Implemented provisionally:** Semantic-module revision 55 persists the
+**Implemented provisionally:** Semantic-module revision 56 persists the
 top-level function obligation and reconstructs call authorization only from
 explicit `BoundUnsafe` scopes. Safe imports reject caller-unsafe replacements;
 caller-unsafe imports may use a safe replacement. Revision 54 and future
-revision 56 artifacts are rejected rather than upgraded or normalized. These
+revision 57 artifacts are rejected rather than upgraded or normalized. These
 checks are covered by the `CallerUnsafeTests` regressions for round trips,
 replacement compatibility, adjacent-revision rejection, writer refusal of a
 retained authorization outside its unsafe block, and reader rejection after a
 persisted unsafe block is stripped. They do not approve the broader proposal or
 add source-free executable authorization.
+
+Executable TRRM also provisionally round-trips the assigned caller-unsafe
+Effects bit on top-level function declarations, including when composed with
+`NoThrow` or `DoesNotReturn`. It continues to reject calls to caller-unsafe
+functions because executable Bodies do not yet carry a validated unsafe-scope
+region. This narrow declaration round-trip is implemented support, not
+approval of the Body-region recommendation below.
 
 ### 1. Which dependency relations belong in the first callable profile?
 

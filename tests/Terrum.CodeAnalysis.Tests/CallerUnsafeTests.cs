@@ -309,7 +309,7 @@ public sealed class CallerUnsafeTests
             "int32 Main() { unsafe { return Danger(); } }"), reference);
         Assert.False(scopedCall.HasErrors, string.Join(Environment.NewLine, scopedCall.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(scopedCall.Program), producer);
-        foreach (var unsupportedVersion in new[] { 54, 56 })
+        foreach (var unsupportedVersion in new[] { 54, 57 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -461,10 +461,23 @@ public sealed class CallerUnsafeTests
     }
 
     [Fact]
-    public void TrRmRejectsCallerUnsafeContractsAndPreservesExistingEffects()
+    public void TrRmPreservesCallerUnsafeObligationsAndRejectsCalls()
     {
-        var declaration = CompileLibrary("[NoThrow] public unsafe int32 Danger() { return 42; }");
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(declaration, "unsafe-contract"));
+        var declaration = CompileLibrary(
+            "[NoThrow] public unsafe int32 Danger() { return 42; }"
+            + " [DoesNotReturn] public unsafe void Never() { while (true) { } }");
+        var loadedUnsafe = TrRmExecutableCompiler.Load(
+            TrRmExecutableCompiler.Emit(declaration, "unsafe-contract"));
+        var unsafeFunction = Assert.Single(loadedUnsafe.Functions,
+            static function => function.Name == "Danger");
+        Assert.True(unsafeFunction.IsNoThrow);
+        Assert.False(unsafeFunction.DoesNotReturn);
+        Assert.True(unsafeFunction.RequiresUnsafeCaller);
+        var nonReturningFunction = Assert.Single(loadedUnsafe.Functions,
+            static function => function.Name == "Never");
+        Assert.False(nonReturningFunction.IsNoThrow);
+        Assert.True(nonReturningFunction.DoesNotReturn);
+        Assert.True(nonReturningFunction.RequiresUnsafeCaller);
 
         var safeDeclaration = CompileLibrary("[NoThrow] public int32 Danger() { return 42; }");
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(safeDeclaration, "safe-contract"));
