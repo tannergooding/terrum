@@ -285,6 +285,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7fa2b0f4` | Preserve proven nested-loop breaks before enclosing terminal tails |
 | `ac170e0f` | Erase nested return-only loops without adding indexed loop regions |
 | `46c1bb4c` | Cover scalar initializer prefixes in embedded-iterator for-loop erasure |
 | `7e58375b` | Verify persisted failure status for local initializers before terminal loop exits |
