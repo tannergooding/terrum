@@ -33,6 +33,8 @@ public static partial class NativeModuleCompiler
     private const int MaximumContractBytes = 4 * 1024 * 1024;
     private const int HeaderSize = 18;
     private const int HashSize = 32;
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> EmptyProviderImports =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
 
     /// <summary>Stores a verified semantic producer contract and its independently emitted DLL.</summary>
     public static byte[] CreateProducer(BoundProgram program, IReadOnlyList<string> exports, string identity,
@@ -286,11 +288,11 @@ public static partial class NativeModuleCompiler
         var contractSnapshot = consumer.ContractSnapshot
             ?? throw new InvalidOperationException("Native consumer contract snapshot is missing.");
         IReadOnlyList<string> imports = consumer.MachineImports;
-        var groups = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
-        if (imports.Count != 0)
-        {
-            groups.Add(DllName(consumer.Identity), imports);
-        }
+        IReadOnlyDictionary<string, IReadOnlyList<string>> groups = imports.Count == 0
+            ? EmptyProviderImports
+            : new Dictionary<string, IReadOnlyList<string>>(1, StringComparer.Ordinal) {
+                [DllName(consumer.Identity)] = imports,
+            };
         var profile = contractSnapshot.Profile;
         NativeModuleImageValidator.Validate(consumer.Image, isConsumer: true, groups, [], consumer.Policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
