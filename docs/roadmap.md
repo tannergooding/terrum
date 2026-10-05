@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `b679039` | Pre-size graph cleanup owner index |
 | `f5cf507` | Check graph producer dependencies directly |
 | `d620203` | Scan graph symbols by index |
 | `8a74581` | Size graph import tracking from declarations |
