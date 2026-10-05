@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `fa10ee2` | Build graph native bindings directly |
 | `4244e6a` | Materialize module-set imports directly |
 | `9cf5819` | Materialize graph bindings directly |
 | `1df0976` | Avoid empty graph import dictionaries |
