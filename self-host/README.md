@@ -254,7 +254,7 @@ native emitter or compiler self-build.
 | [CharacterLiteral](CharacterLiteral.terrum) | Decode source-ranged single-quoted literals into one Unicode scalar or the hosted lexical diagnostic code/span | The scalar frontend consumes successful scalars; the scanner consumes diagnostic-aware results after finding token boundaries; the host reader independently validates source spelling |
 | [StringEscape](StringEscape.terrum) | Decode one string escape and report its scalar, consumed width, and hosted diagnostic boundary | Shared by validated `StringLiteral` decoding and scanner lexical diagnostics; escaped unpaired UTF-16 retains its separate diagnostic |
 | [SourceLines](SourceLines.terrum) | Streaming line ranges, line extents and bidirectional UTF-16 offset/line-position mapping over an immutable source grant | AOT/JIT vacancy-only `init ref` outputs under both policies; invalid queries leave all outputs vacant, and CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
-| [SourceLineIndex](SourceLineIndex.terrum) | Owned line-start table with packed CRLF-width metadata when needed, random-access line content and including-break extents, and bidirectional UTF-16 offset/line-position lookup | Executed as AOT/JIT under both failure policies; vacancy-only `init ref` construction and lookups, exact offset round-trips, source-mutation-stable extents, unpublished invalid outputs and owner-copy rejection |
+| [SourceLineIndex](SourceLineIndex.terrum) | Owned one-word-per-line table; the sign bit of a next-line offset records a preceding CRLF, alongside random-access extents and bidirectional UTF-16 offset/line-position lookup | Executed as AOT/JIT under both failure policies; vacancy-only `init ref` construction and lookups, exact offset round-trips, CRLF marker boundaries, source-mutation-stable extents, unpublished invalid outputs and owner-copy rejection |
 | [SourceLineTests](SourceLineTests.terrum) | Shared line-range/position fixtures, invalid offsets and repeated queries | Executed natively with host-supplied expected records; no source normalization or default output values |
 | [StringLiteral](StringLiteral.terrum) | Validated quoted spelling and scalar decoding from the immutable UTF-16 source grant, with explicit ASCII, ISO-8859-1 (Latin-1), UTF-8, UTF-16 unit/UTF-16LE and BE byte, and UTF-32LE and BE byte length measurement and encoding into owned storage | Executed with vacancy-only `init ref` construction and scalar/cursor reads, all supported escapes and exact source boundaries; ordinary non-surrogate source units decode directly while surrogate pairs use the shared UTF-16 decoder; single-byte encoders reject unrepresentable scalars rather than substitute, while UTF bytes/units agree with host encoders without a byte-order mark; Latin-1 is not a StringRow selector or default runtime representation |
 | [StringRow](StringRow.terrum) | Provisional tagged ASCII/UTF-8/UTF-16LE/UTF-32LE String-row measurement and emission from validated literal scalars into reusable owned byte words, with nonempty metadata-name and empty-permitted namespace paths that both reject embedded zero scalars, plus ordinal decoded-scalar name and namespace comparison | Name/namespace validation shares the encoding-size pass, comparison validates while comparing, emission reuses measured extents, and power-of-two header/alignment fields use shifts and masks; AOT/JIT fixtures check exact unit counts, encoding-width terminators, four-byte alignment, zero padding, invalid flags, rejected name/namespace text, escape-equivalent spelling, byte parity with the host String-row writer and checked undersized cleanup; not a TRRM section writer, reader, or literal-reference contract |
@@ -647,22 +647,21 @@ the initialized table. The slice borrows the owning field only for that query;
 it is not returned or stored in the index. The index retains only copied offsets
 and the source length; queries do not retain or reread the source grant. It
 also supports the inverse line/character-to-offset lookup from the same table.
-It returns a line's full extent, including its break, using adjacent starts
-without rereading the source; the final line ends at the stored source length.
-Line positions include break units on their preceding line; a character at the
-next line's start must use the next line number, and only the final line admits
-the EOF offset. Invalid line/character pairs return false without publishing
-an offset, including values that would overflow a signed offset if added first.
-Construction counts lines before reserving exactly one word per line start,
-including the final empty line after a trailing break. The fill pass reuses the known first
-and final starts, so one- and two-line sources need no second scan. If every
-code unit ends a line, starts are filled directly from their ordinal positions.
-Other multiline sources trade a partial second scan for smaller storage; this
-is not a resizing collection. Capacity and allocation failure follow the bounded
-`OwnedInt32Buffer` contract: one word is reserved per line start, plus one
-32-bit packed CRLF-width word per 32 non-final lines only when CRLF is present,
-rather than one word per source code unit. This is not a stored
-source view, managed line collection, or general allocator API.
+It returns a line's full extent, including its break, using adjacent decoded
+starts without rereading the source; the final line ends at the stored source
+length. Line positions include break units on their preceding line; a
+character at the next line's start must use the next line number, and only the
+final line admits the EOF offset. Invalid line/character pairs return false
+without publishing an offset, including values that would overflow a signed
+offset if added first. Construction counts lines before reserving exactly one
+word per line start, including the final empty line after a trailing break.
+The sign bit on a noninitial encoded start marks whether its preceding break
+was CRLF; masking recovers the nonnegative offset across the full `int32`
+source-length domain. The fill pass reuses the known first and final starts,
+so one- and two-line sources need no second scan, and captures each other
+break's marker while filling starts. If every code unit ends a line, starts are
+filled directly from their ordinal positions. This is not a resizing collection,
+stored source view, managed line collection, or general allocator API.
 
 `IntegerFormatting` consumes and returns a unique `int32`-word workspace.
 The decimal entry points require capacity for the actual output (at most

@@ -17,11 +17,10 @@ public unique struct SourceLineIndex
     {
         mut int32 lineCount = 0;
         mut int32 position = 0;
-        mut bool hasCrLf = false;
+        mut bool finalBreakIsCrLf = false;
         while (true)
         {
             require TryReadSourceLine(position, init var content, init var includingBreak);
-            hasCrLf = hasCrLf || includingBreak.Length - content.Length == 2;
             if (lineCount == int32.MaxValue)
             {
                 return false;
@@ -31,22 +30,12 @@ public unique struct SourceLineIndex
             {
                 break;
             }
+            finalBreakIsCrLf = includingBreak.Length - content.Length == 2;
             position = includingBreak.End;
         }
 
         int32 finalStart = position;
-        // No code can modify the source between counting and filling the starts.
-        mut int32 breakWordCount = 0;
-        if (hasCrLf)
-        {
-            breakWordCount = (lineCount - 1) / 32;
-            if ((lineCount - 1) % 32 != 0)
-            {
-                breakWordCount = breakWordCount + 1;
-            }
-        }
-        if (lineCount > int32.MaxValue - breakWordCount
-            || !OwnedInt32Buffer.TryCreate(lineCount + breakWordCount, out var created))
+        if (!OwnedInt32Buffer.TryCreate(lineCount, out var created))
         {
             return false;
         }
@@ -70,39 +59,22 @@ public unique struct SourceLineIndex
             {
                 require TryReadSourceLine(position, init var content, init var includingBreak);
                 position = includingBreak.End;
-                require starts.TryAppend(position);
+                mut int32 lineStart = position;
+                if (includingBreak.Length - content.Length == 2)
+                {
+                    lineStart = lineStart | int32.MinValue;
+                }
+                require starts.TryAppend(lineStart);
                 filled = filled + 1;
             }
             if (filled < lineCount)
             {
-                require starts.TryAppend(finalStart);
-            }
-        }
-        // One packed bit per non-final line preserves whether its break was CRLF.
-        if (hasCrLf)
-        {
-            mut int32 packedBreaks = 0;
-            mut int32 bit = 0;
-            mut int32 line = 0;
-            while (line + 1 < lineCount)
-            {
-                int32 next = starts.Read(line + 1);
-                if (next >= 2 && Host.Source[next - 2] == 13 && Host.Source[next - 1] == 10)
+                mut int32 lineStart = finalStart;
+                if (finalBreakIsCrLf)
                 {
-                    packedBreaks = packedBreaks | (1 << bit);
+                    lineStart = lineStart | int32.MinValue;
                 }
-                bit = bit + 1;
-                if (bit == 32)
-                {
-                    require starts.TryAppend(packedBreaks);
-                    packedBreaks = 0;
-                    bit = 0;
-                }
-                line = line + 1;
-            }
-            if (bit != 0)
-            {
-                require starts.TryAppend(packedBreaks);
+                require starts.TryAppend(lineStart);
             }
         }
         index = new SourceLineIndex(move starts, lineCount, Host.Source.Length);
@@ -129,7 +101,7 @@ public unique struct SourceLineIndex
         while (low + 1 < high)
         {
             int32 middle = low + (high - low) / 2;
-            if (starts.Read(middle) <= position)
+            if (DecodeStart(starts.Read(middle)) <= position)
             {
                 low = middle;
             }
@@ -140,7 +112,7 @@ public unique struct SourceLineIndex
         }
 
         line = low;
-        character = position - starts.Read(low);
+        character = position - DecodeStart(starts.Read(low));
         return true;
     }
 
@@ -152,10 +124,10 @@ public unique struct SourceLineIndex
         }
 
         ReadonlyInt32BufferView starts = _starts.Slice(0, _lineCount);
-        int32 start = starts.Read(line);
+        int32 start = DecodeStart(starts.Read(line));
         if (line + 1 < starts.Length)
         {
-            if (character >= starts.Read(line + 1) - start)
+            if (character >= DecodeStart(starts.Read(line + 1)) - start)
             {
                 return false;
             }
@@ -177,11 +149,11 @@ public unique struct SourceLineIndex
         }
 
         ReadonlyInt32BufferView starts = _starts.Slice(0, _lineCount);
-        int32 start = starts.Read(line);
+        int32 start = DecodeStart(starts.Read(line));
         mut int32 end = _length;
         if (line + 1 < starts.Length)
         {
-            end = starts.Read(line + 1);
+            end = DecodeStart(starts.Read(line + 1));
         }
         require SourceRange.TryCreate(start, end - start, init includingBreak);
         return true;
@@ -199,15 +171,20 @@ public unique struct SourceLineIndex
         if (line + 1 < _lineCount)
         {
             breakWidth = 1;
-            if (_starts.Count > _lineCount)
+            if (_starts.Read(line + 1) < 0)
             {
-                int32 packedBreaks = _starts.Read(_lineCount + line / 32);
-                breakWidth = breakWidth + ((packedBreaks >> (line % 32)) & 1);
+                breakWidth = 2;
             }
         }
 
         require SourceRange.TryCreate(start, includingBreak.Length - breakWidth, init content);
         return true;
+    }
+
+    // The sign bit marks a preceding CRLF; offsets themselves are nonnegative int32 values.
+    private static int32 DecodeStart(int32 encodedStart)
+    {
+        return encodedStart & int32.MaxValue;
     }
 
 }
