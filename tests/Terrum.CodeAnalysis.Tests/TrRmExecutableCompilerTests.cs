@@ -1001,6 +1001,22 @@ public sealed class TrRmExecutableCompilerTests
         Assert.Equal(doesNotReturn, function.DoesNotReturn);
     }
 
+    [Fact]
+    public void LoadsMultipleEffectContractsFromOneTableIndex()
+    {
+        const string source = "[NoThrow] void Safe() { } "
+            + "[DoesNotReturn] void Halt() { while (true) { } } "
+            + "int32 Main() { Safe(); return 42; }";
+        var program = TrRmExecutableCompiler.Load(
+            TrRmExecutableCompiler.Emit(Compile(source), "multiple-effects"));
+        var safe = Assert.Single(program.Functions, static function => function.Name == "Safe");
+        var halt = Assert.Single(program.Functions, static function => function.Name == "Halt");
+        Assert.True(safe.IsNoThrow);
+        Assert.False(safe.DoesNotReturn);
+        Assert.False(halt.IsNoThrow);
+        Assert.True(halt.DoesNotReturn);
+    }
+
     [Theory]
     [InlineData("int32 Main() { return 1 << 2; }", 4)]
     [InlineData("int32 Main() { return int32.MaxValue >>> 1; }", 1073741823)]

@@ -259,6 +259,8 @@ public static partial class TrRmExecutableCompiler
         var parameters = paramCount == 0 ? default
             : new TrRmParamTableReader(paramBytes, paramCount, sigs, types);
         var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
+        var clauses = default(TrRmVariableTableIndex);
+        var clausesInitialized = false;
         var declaredExports = new HashSet<int>(exportCount);
         for (var row = 0; row < exportCount; row++)
         {
@@ -320,7 +322,11 @@ public static partial class TrRmExecutableCompiler
                 {
                     throw Invalid("Unsupported method contract.");
                 }
-                var clauses = new TrRmVariableTableIndex(contractBytes, contractCount, 8, 1);
+                if (!clausesInitialized)
+                {
+                    clauses = new TrRmVariableTableIndex(contractBytes, contractCount, 8, 1);
+                    clausesInitialized = true;
+                }
                 var clause = clauses.GetRow(contractFirst);
                 var effectMask = clause.Length == 12
                     ? BinaryPrimitives.ReadUInt32LittleEndian(clause[8..]) : 0;
