@@ -82,6 +82,7 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("alias Number = int32; public Number Main() => 42;", 1, 42)]
     [InlineData("alias A = int32; alias B = int32; alias C = int32; alias D = int32; alias E = int32; alias F = int32; alias G = int32; alias H = int32; alias I = int32; alias J = int32; alias K = int32; public K Main() => 42;", 1, 42)]
     [InlineData("alias Number = int32; void A() {} void B() {} void C() {} void D() {} void E() {} void F() {} void G() {} void H() {} public Number Main() => 42;", 9, 42)]
+    [InlineData("alias Scalar = int32; Scalar Scalar() => 40; public Scalar Main() => Scalar() + 2;", 2, 42)]
     public async Task ScalarFrontendProjectsInternalScalarAliasChainsAsync(string text,
         int expectedFunctions, int expected)
     {

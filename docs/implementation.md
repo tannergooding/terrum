@@ -165,10 +165,11 @@ aliases to scalar types, including forward alias chains, in function return,
 parameter and local type positions. The projection reader independently
 re-inventories and resolves aliases from the original source; duplicate,
 unresolved, cyclic, public, attributed and generic alias declarations reject.
-Alias names do not become explicit conversion-call targets; those remain
-primitive-only. This bounded frontend support does not change v85 layouts or
-the hosted verifier/emitter dependency, and does not add aliases to source-free
-TRRM.
+The reader retains the hosted separate type/function name spaces, so an alias
+may share its spelling with a function. Alias names do not become explicit
+conversion-call targets; those remain primitive-only. This bounded frontend
+support does not change v85 layouts or the hosted verifier/emitter dependency,
+and does not add aliases to source-free TRRM.
 
 A single loop label and its `while`, `do` or `for` introducer must occupy the
 same physical source line (`TRM1012`). The colon attaches to the label; trivia

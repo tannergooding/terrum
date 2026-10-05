@@ -210,7 +210,7 @@ public static partial class ScalarFrontendHost
         }
         var aliases = InventoryScalarAliases(tokens);
         var declarations = ImmutableArray.CreateBuilder<ProgramDeclaration>();
-        var names = new HashSet<string>(aliases.Types.Keys, StringComparer.Ordinal);
+        var names = new HashSet<string>(StringComparer.Ordinal);
         var at = 0;
         while (at < tokens.Length - 1)
         {

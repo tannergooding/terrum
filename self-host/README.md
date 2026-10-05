@@ -34,7 +34,8 @@ Complete-program projections also resolve up to eleven top-level internal,
 non-generic aliases to scalar types in function return, parameter and local
 type positions, including forward chains. The source reader independently
 resolves aliases from the original text. Duplicate, unresolved, cyclic,
-public, attributed and generic aliases reject; alias names are not explicit
+public, attributed and generic aliases reject. The hosted separate
+type/function name spaces are retained, and alias names are not explicit
 conversion-call targets. This preserves the hosted verifier/emitter boundary
 and does not add aliases to source-free TRRM.
 The bounded Terrum-authored scalar frontend now projects same-format

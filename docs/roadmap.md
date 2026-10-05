@@ -84,9 +84,9 @@ Complete-program scalar projections also resolve up to eleven top-level
 internal, non-generic aliases to scalar types in return, parameter and local
 type positions, including forward chains. The reader independently resolves
 them from original source; duplicate, unresolved, cyclic, public, attributed
-and generic alias declarations reject. Alias names remain invalid as explicit
-conversion-call targets, and v85 layouts and hosted verification/emission are
-unchanged.
+and generic alias declarations reject. The host's separate type/function name
+spaces are retained, and alias names remain invalid as explicit conversion-call
+targets. V85 layouts and hosted verification/emission are unchanged.
 
 Projection v85 carries named by-value and scalar `out`/`init ref<T>`
 arguments through bounded direct scalar calls. Arguments remain source-order
