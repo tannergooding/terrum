@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `9682007` | Reuse nested managed export shape checks |
 | `d20620e` | Reuse class indexes when binding factories |
 | `f68327a` | Index native PE import groups and symbols |
 | `3add77d` | Index JIT import providers during validation |
