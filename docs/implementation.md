@@ -109,6 +109,12 @@ independent `BigInteger` oracle distinguishes signed-minimum quotient overflow
 from the valid zero remainder; separate invalid consumers verify that failed
 outputs remain unreadable for every checked helper. This is persisted-execution
 evidence for the existing named functions, not new arithmetic operators.
+The internal Windows x64 fail-fast DLL directly invokes the thirteen
+32-bit `IntegerCheckedArithmetic` helpers, checking signed/unsigned overflow
+boundaries and quotient/remainder cases against `BigInteger`, exact success
+codes, false-path output preservation and adjacent canaries. This is ABI
+evidence for the existing named candidate helpers only, not an operator or
+public arithmetic-support claim.
 The provisional `BitOperations` candidate is also compared with hosted
 `System.Numerics.BitOperations` through persisted semantic-module consumers
 under both runtime policies. Separate width-specific consumers cover every
