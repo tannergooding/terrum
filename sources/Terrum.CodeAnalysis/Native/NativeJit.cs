@@ -259,6 +259,7 @@ public static unsafe class NativeJit
             }
         }
         var moduleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var providersByName = new Dictionary<string, NativeJitModule>(modules.Count, StringComparer.Ordinal);
         foreach (var module in modules)
         {
             if (string.IsNullOrEmpty(module.DllName) || !moduleNames.Add(module.DllName)
@@ -267,12 +268,13 @@ public static unsafe class NativeJit
                 throw new ArgumentException("Native JIT providers require unique DLL names and full paths.",
                     nameof(modules));
             }
+            providersByName.Add(module.DllName, module);
         }
         var allowed = new HashSet<(string Dll, string Export)>();
         foreach (var binding in expectedImports)
         {
-            if (!modules.Any(module => module.DllName == binding.DllName
-                    && ContainsSortedExport(module.Exports, binding.ExportName))
+            if (!providersByName.TryGetValue(binding.DllName, out var module)
+                || !ContainsSortedExport(module.Exports, binding.ExportName)
                 || !allowed.Add((binding.DllName, binding.ExportName)))
             {
                 throw new ArgumentException("Native JIT import has no unique validated provider.", nameof(expectedImports));
