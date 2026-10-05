@@ -433,13 +433,18 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native package and semantic contract profiles or runtime policies differ.");
         }
-        if (bytes[5] == 2
-            && (contractSnapshot is null
-                || !machineImports.ToHashSet(StringComparer.Ordinal).IsSubsetOf(contractSnapshot.Declarations)
-                || !contractSnapshot.CallImports.All(
-                    name => machineImports.Contains(name, StringComparer.Ordinal))))
+        if (bytes[5] == 2)
         {
-            throw new ModuleFormatException("Native machine imports differ from retained semantic declarations or calls.");
+            if (contractSnapshot is null)
+            {
+                throw new ModuleFormatException("Native machine imports differ from retained semantic declarations or calls.");
+            }
+            var machineImportSet = machineImports.ToHashSet(StringComparer.Ordinal);
+            if (!machineImportSet.IsSubsetOf(contractSnapshot.Declarations)
+                || !contractSnapshot.CallImports.All(machineImportSet.Contains))
+            {
+                throw new ModuleFormatException("Native machine imports differ from retained semantic declarations or calls.");
+            }
         }
         var image = bytes.AsSpan(at + contractLength, imageLength).ToArray();
         return new Package(bytes[5] == 2, name, (NativeRuntimePolicy)bytes[6], contract, image, profile) {
