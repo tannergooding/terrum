@@ -474,6 +474,7 @@ public static partial class NativeModuleCompiler
             }
             result.Add(origin);
         }
-        return [.. result.OrderBy(static item => item.Name, StringComparer.Ordinal)];
+        result.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
+        return [.. result];
     }
 }
