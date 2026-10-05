@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `37baa12` | Pre-size graph catalog traversal sets |
 | `a0bd8bb` | Bound SourceMap file indexes by table row counts |
 | `d599d6f` | Pre-size graph continuation validation |
 | `9aa551a` | Pre-size indexed-body liveness sets |
