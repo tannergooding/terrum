@@ -158,6 +158,10 @@ public static partial class NativeModuleCompiler
                 throw new ModuleFormatException("Graph import total exceeds its bound.");
             }
             totalDeclarations += importCount;
+            if (seenImports is not null)
+            {
+                _ = seenImports.EnsureCapacity(totalDeclarations);
+            }
             var declarations = new string[importCount];
             for (var j = 0; j < declarations.Length; j++)
             {
@@ -166,7 +170,7 @@ public static partial class NativeModuleCompiler
                 {
                     throw new ModuleFormatException("Duplicate, unordered or invalid graph declaration.");
                 }
-                seenImports ??= new HashSet<string>(declarations.Length, StringComparer.Ordinal);
+                seenImports ??= new HashSet<string>(totalDeclarations, StringComparer.Ordinal);
                 if (!seenImports.Add(name)
                     || (j != 0 && StringComparer.Ordinal.Compare(declarations[j - 1], name) >= 0))
                 {
