@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `a826758` | Check checked-exception handler import without sequence allocation |
 | `f6e5449` | Sort multiple native image providers in a pre-sized array |
 | `993c7a0` | Pre-size native image import validation collections |
 | `6c1c458` | Avoid sorting zero- and one-provider import lists |
