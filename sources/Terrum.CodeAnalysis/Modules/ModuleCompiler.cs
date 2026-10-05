@@ -111,13 +111,32 @@ public static partial class ModuleCompiler
 
     private static CompilationReference CreateReference(Module producer)
     {
-        var declarations = producer.Functions.Where(static function => function.Import)
-            .Select(static item => Declaration(item.Function ?? throw new ModuleFormatException("Missing export declaration.")))
-            .ToArray();
+        var declarationCount = 0;
+        foreach (var function in producer.Functions)
+        {
+            if (function.Import)
+            {
+                declarationCount++;
+            }
+        }
+        var declarationsBuilder = ImmutableArray.CreateBuilder<BoundFunction>(declarationCount);
+        foreach (var function in producer.Functions)
+        {
+            if (function.Import)
+            {
+                declarationsBuilder.Add(Declaration(function.Function
+                    ?? throw new ModuleFormatException("Missing export declaration.")));
+            }
+        }
+        var declarations = declarationsBuilder.MoveToImmutable();
         var required = RequiredStructures(declarations, producer.Structures);
         var structures = SelectStructures(producer.Structures, required);
-        return new CompilationReference(structures,
-            [.. declarations.Select(function => RemapFunction(function, producer.Structures, structures))], producer.RuntimePolicy);
+        var remapped = ImmutableArray.CreateBuilder<BoundFunction>(declarations.Length);
+        foreach (var declaration in declarations)
+        {
+            remapped.Add(RemapFunction(declaration, producer.Structures, structures));
+        }
+        return new CompilationReference(structures, remapped.MoveToImmutable(), producer.RuntimePolicy);
     }
 
     internal static ImmutableArray<string> GetConsumerCallImports(byte[] consumerBytes)
