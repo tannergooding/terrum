@@ -63,7 +63,7 @@ public struct CharacterLiteralDecodeResult
                     mut int32 digits = 0;
                     mut uint32 value = 0;
                     while (digits < required && at < end
-                        && TryCharacterHexDigit(Host.Source[at], init var digit))
+                        && TryGetHexDigit(Host.Source[at], init var digit))
                     {
                         value = (value << 4) | uint32(digit);
                         at = at + 1;
@@ -140,24 +140,4 @@ bool TryDecodeCharacterLiteral(SourceRange spelling, init ref<int32> scalar)
     }
     scalar = decoded.Scalar;
     return true;
-}
-
-bool TryCharacterHexDigit(char16 character, init ref<int32> digit)
-{
-    if (character >= char16(48) && character <= char16(57))
-    {
-        digit = int32(character) - 48;
-        return true;
-    }
-    if (character >= char16(97) && character <= char16(102))
-    {
-        digit = int32(character) - 87;
-        return true;
-    }
-    if (character >= char16(65) && character <= char16(70))
-    {
-        digit = int32(character) - 55;
-        return true;
-    }
-    return false;
 }

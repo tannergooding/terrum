@@ -17,3 +17,25 @@ public static int32 GetDecimalDigit(char16 value)
     // Caller has established IsAsciiDigit; conversion is explicit, not digit folding.
     return int32(value) - 48;
 }
+
+public static bool TryGetHexDigit(char16 character, init ref<int32> digit)
+{
+    if (character >= char16(48) && character <= char16(57))
+    {
+        digit = int32(character) - 48;
+        return true;
+    }
+
+    if (character >= char16(97) && character <= char16(102))
+    {
+        digit = int32(character) - 87;
+        return true;
+    }
+    if (character >= char16(65) && character <= char16(70))
+    {
+        digit = int32(character) - 55;
+        return true;
+    }
+
+    return false;
+}

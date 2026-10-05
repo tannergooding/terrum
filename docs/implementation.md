@@ -35,9 +35,10 @@ requests.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.
-`CharacterFacts` persisted-JIT coverage also checks the ASCII-digit and
-line-break predicates for every UTF-16 code unit, plus `GetDecimalDigit` for
-all ten ASCII digits, across bounded fresh grants under both policies.
+`CharacterFacts` persisted-JIT coverage also checks ASCII-digit, ASCII
+hex-digit and line-break behavior across every UTF-16 code unit, including
+successful hex-value publication and failed-output vacancy/reuse, plus
+`GetDecimalDigit` for all ten ASCII digits under both runtime policies.
 Persisted semantic-module JIT tests also compare
 `StringLiteral` length and encoding results for UTF-8, UTF-16
 units and LE/BE bytes, strict ASCII and Latin-1, and UTF-32 LE/BE bytes with
