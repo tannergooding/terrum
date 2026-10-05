@@ -79,6 +79,12 @@ independent `BigInteger` oracle distinguishes signed-minimum quotient overflow
 from the valid zero remainder; separate invalid consumers verify that failed
 outputs remain unreadable for every checked helper. This is persisted-execution
 evidence for the existing named functions, not new arithmetic operators.
+A separate revision-56 persisted semantic-module JIT comparison checks all 20
+existing `IntegerSaturation` candidate helpers against a `BigInteger` clamp
+oracle at source/destination boundaries and code-unit edges, including
+surrogate values, under both runtime policies. This remains evidence for that
+provisional candidate API; it does not adopt a general numeric-conversion
+policy.
 A second persisted semantic-module consumer executes private generic
 `CopyAlgorithms` specializations over scalar values, code units and nested
 `Token`/`SourceRange` aggregates. It checks conditional `init ref` publication
