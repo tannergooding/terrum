@@ -341,7 +341,12 @@ public static partial class NativeModuleCompiler
         CompilationReference[] references, Dictionary<string, GraphTypeOrigin?>[] provenance)
     {
         var origins = new IReadOnlyDictionary<string, string?>[references.Length];
-        var cleanupOwners = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var cleanupOwnerCapacity = 0;
+        for (var index = 0; index < references.Length; index++)
+        {
+            cleanupOwnerCapacity = Math.Max(cleanupOwnerCapacity, references[index].Structures.Length);
+        }
+        var cleanupOwners = new Dictionary<string, string?>(cleanupOwnerCapacity, StringComparer.Ordinal);
         for (var index = 0; index < references.Length; index++)
         {
             var reference = references[index];
