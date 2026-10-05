@@ -4103,19 +4103,28 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, init ref<ScalarFrontendResult>
     {
         return false;
     }
+    for (mut int32 at = 0; at < count; at = at + 1)
+    {
+        require tokens.TryGet(at, init var token);
+        require chain.TryAppend(token.Kind, token.Range.Start, token.Range.Length);
+    }
+    return TryParseScalarFrontendChain(chain, count, init result);
+}
+
+bool TryParseScalarFrontendChain(ManagedTokenChain chain, int32 count,
+    init ref<ScalarFrontendResult> result)
+{
+    require SourceRange.TryCreate(0, 0, init var empty);
+    if (count < 1 || count > 64 || chain.GetCount() != count)
+    {
+        return false;
+    }
     // Validate numeric records only when present; scalar functions without
     // literals do not need a second owned snapshot.
     if (Host.IntegerValues[0] != 0
         && !TokenIntegerSnapshot.TryBuild(count, init var integers))
     {
         return false;
-    }
-    // Managed classes cannot own a unique snapshot; copy only validated token values
-    // into the existing bounded chain, without rescanning source or integer text.
-    for (mut int32 at = 0; at < count; at = at + 1)
-    {
-        require tokens.TryGet(at, init var token);
-        require chain.TryAppend(token.Kind, token.Range.Start, token.Range.Length);
     }
     if (!ScalarFrontendState.TryCreate(chain, empty, out var state))
     {

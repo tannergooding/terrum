@@ -69,10 +69,12 @@ bool CopyScalarProgramTokens(ManagedTokenChain tokens, int32 start, int32 end,
     return true;
 }
 
-bool TryPublishScalarFrontendProgram(out bool handled)
+bool TryPublishScalarFrontendProgram(init ref<ManagedTokenChain> fallbackTokens, out bool handled)
 {
     handled = false;
     if (!TokenSnapshot.TryScan(init var tokens)) { return false; }
+    if (!ManagedTokenChain.TryCreate(out var sourceTokens)) { return false; }
+    fallbackTokens = sourceTokens;
     int32 count = tokens.GetCount();
     if (count > 64)
     {
@@ -81,7 +83,6 @@ bool TryPublishScalarFrontendProgram(out bool handled)
     }
     var spacing = tokens.GetScalarOperatorSpacingError();
     if (spacing.Length != 0) { return ScalarProgramError(1, spacing, out handled); }
-    if (!ManagedTokenChain.TryCreate(out var sourceTokens)) { return false; }
     Span<Token> tokenView = tokens.AsSpan();
     mut TokenCursor cursor = new TokenCursor(tokenView);
     while (cursor.TryRead(out var scannedToken))

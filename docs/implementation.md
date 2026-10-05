@@ -2109,9 +2109,12 @@ end-of-chain and invalidated cursors leave the destination vacant; copied
 tokens remain valid after their source links are collected.
 
 The bounded [Terrum-authored scalar frontend](../self-host/ScalarFrontend.terrum)
-consumes one successful scanner token snapshot and publishes an in-process
-typed result: parameter types and names, expression operators and parameter
-references, optional conditional branches, declared `public`/`internal` visibility, and UTF-16 spans. It accepts one
+consumes one successful scanner token snapshot. Its single-function fallback
+reuses the managed token chain materialized during program inventory rather
+than rescanning source. The published in-process typed result contains
+parameter types and names, expression operators and parameter references,
+optional conditional branches, declared `public`/`internal` visibility, and
+UTF-16 spans. It accepts one
 function with zero to three scalar parameters, parameter references, Boolean
 literals, unary `!` over a Boolean literal or named parameter (including grouped operands), unary `~`
 over a contextual integer literal or named integer parameter (including grouped

@@ -24,9 +24,10 @@ void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expres
 bool TryPublishScalarFrontend()
 {
     if (Host.FrontendProgram.Length != 4284) { return false; }
-    if (!TryPublishScalarFrontendProgram(out var handled)) { return false; }
+    if (!TryPublishScalarFrontendProgram(init var fallbackTokens, out var handled)) { return false; }
     if (handled) { return true; }
-    if (Host.Frontend.Length != 392 || !TryScanScalarFrontend(init var result))
+    if (Host.Frontend.Length != 392
+        || !TryParseScalarFrontendChain(fallbackTokens, fallbackTokens.GetCount(), init var result))
     {
         return false;
     }
