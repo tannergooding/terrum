@@ -37,12 +37,35 @@ internal static class TokenSpanContract
     internal static bool IsDependent(PrimitiveType type, IReadOnlyList<BoundStruct> structures) =>
         type == PrimitiveType.TokenSpan || IsCursor(type, structures);
 
-    internal static bool HasMetadata(BoundProgram program) =>
-        program.Structures.Any(static structure => structure.Fields.Any(static field => field.Type == PrimitiveType.TokenSpan))
-        || program.Functions.Any(static function => !function.CapturedParameters.IsDefaultOrEmpty
-            || function.ReturnType == PrimitiveType.TokenSpan
-            || function.Variables.Any(static variable => variable.Type == PrimitiveType.TokenSpan))
-        || program.Functions.Any(static function => HasSpanNodes(function.Body));
+    internal static bool HasMetadata(BoundProgram program)
+    {
+        if (program.Structures.Any(static structure => structure.Fields.Any(static field => field.Type == PrimitiveType.TokenSpan)))
+        {
+            return true;
+        }
+        List<BoundBlock>? bodies = null;
+        foreach (var function in program.Functions)
+        {
+            if (!function.CapturedParameters.IsDefaultOrEmpty
+                || function.ReturnType == PrimitiveType.TokenSpan
+                || function.Variables.Any(static variable => variable.Type == PrimitiveType.TokenSpan))
+            {
+                return true;
+            }
+            (bodies ??= []).Add(function.Body);
+        }
+        if (bodies is not null)
+        {
+            foreach (var body in bodies)
+            {
+                if (HasSpanNodes(body))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 
     private static bool HasSpanNodes(BoundStatement body)
     {

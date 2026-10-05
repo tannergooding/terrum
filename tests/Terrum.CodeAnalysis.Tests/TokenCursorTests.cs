@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
@@ -18,6 +19,36 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TokenCursorTests
 {
+    [Fact]
+    public void SpanMetadataInspectionPreservesFunctionShortCircuitOrder()
+    {
+        var malformed = new BoundFunction("Malformed", PrimitiveType.Int32, [], 0,
+            new BoundBlock(default, default), default);
+        var captured = new BoundFunction("Captured", PrimitiveType.Int32, [], 0,
+            new BoundBlock(default, default), default) { CapturedParameters = [0] };
+        Assert.True(InspectSpanMetadata(new BoundProgram([malformed, captured], -1)));
+
+        var spanBody = new BoundBlock([
+            new BoundReturn(new BoundSnapshotSpan(0, 0, default), default),
+        ], default);
+        var spanFunction = new BoundFunction("SpanNode", PrimitiveType.Int32, [], 0, spanBody, default);
+        var error = Assert.Throws<TargetInvocationException>(
+            () => InspectSpanMetadata(new BoundProgram([malformed, spanFunction], -1)));
+        Assert.Equal("A span-inspected block requires initialized statements.",
+            Assert.IsType<ArgumentException>(error.InnerException).Message);
+
+        Assert.True(InspectSpanMetadata(new BoundProgram([spanFunction], -1)));
+    }
+
+    private static bool InspectSpanMetadata(BoundProgram program)
+    {
+        var contractType = Assert.IsAssignableFrom<Type>(typeof(SemanticVerifier).Assembly.GetType(
+            "Terrum.CodeAnalysis.Semantics.TokenSpanContract", throwOnError: true));
+        var method = Assert.IsAssignableFrom<MethodInfo>(contractType.GetMethod("HasMetadata",
+            BindingFlags.NonPublic | BindingFlags.Static));
+        return Assert.IsType<bool>(method.Invoke(null, [program]));
+    }
+
     private const string EntryPrefix = """
         using Terrum.CodeAnalysis;
         bool Pick() { return false; }
