@@ -184,7 +184,7 @@ public static partial class ModuleCompiler
         var required = RequiredStructures(program.Functions, program.Structures);
         var structures = SelectStructures(program.Structures, required);
         var referenceStructures = IndexStructures(reference.Structures);
-        var imported = ImmutableArray.CreateBuilder<string>();
+        var imported = ImmutableArray.CreateBuilder<string>(structures.Length);
         foreach (var structure in structures)
         {
             if (referenceStructures.TryGetValue(structure.Name, out var match))
