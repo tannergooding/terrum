@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `92035f7` | Remove obsolete managed output slot rescanner |
 | `f679574` | Reuse native machine import membership set |
 | `48fe445` | Collect managed class offsets in one pass |
 | `f625d17` | Count managed output slots incrementally |
