@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `9edbfdb` | Bound graph usage grouping capacity |
 | `b460340` | Bound module-set import grouping capacity |
 | `691a1af` | Build persisted graph provenance indexes directly |
 | `77c4ec4` | Build graph origin indexes directly |
