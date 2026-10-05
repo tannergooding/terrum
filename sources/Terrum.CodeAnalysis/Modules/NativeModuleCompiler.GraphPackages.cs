@@ -229,33 +229,36 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Graph origin table differs from retained semantic types.");
         }
-        var originsByName = origins.ToDictionary(static item => item.Name, StringComparer.Ordinal);
-        if (structures.Any(item => !originsByName.TryGetValue(item.Name, out var origin)
-            || (item.CleanupMethod is not null ? origin.CleanupIdentity is null : origin.CleanupIdentity is not null)))
+        if (origins.Length != 0)
         {
-            throw new ModuleFormatException("Graph origin table differs from retained semantic types.");
-        }
-        var importedTypes = contractSnapshot.ImportedStructures.ToHashSet(StringComparer.Ordinal);
-        HashSet<string>? dependencyIdentities = null;
-        foreach (var origin in origins)
-        {
-            var local = consumer ? "@" : identity;
-            if (importedTypes.Contains(origin.Name))
+            var originsByName = origins.ToDictionary(static item => item.Name, StringComparer.Ordinal);
+            if (structures.Any(item => !originsByName.TryGetValue(item.Name, out var origin)
+                || (item.CleanupMethod is not null ? origin.CleanupIdentity is null : origin.CleanupIdentity is not null)))
             {
-                dependencyIdentities ??= dependencies.Select(static item => item.Identity)
-                    .ToHashSet(StringComparer.Ordinal);
-                if (!dependencyIdentities.Contains(origin.Identity))
+                throw new ModuleFormatException("Graph origin table differs from retained semantic types.");
+            }
+            var importedTypes = contractSnapshot.ImportedStructures.ToHashSet(StringComparer.Ordinal);
+            HashSet<string>? dependencyIdentities = null;
+            foreach (var origin in origins)
+            {
+                var local = consumer ? "@" : identity;
+                if (importedTypes.Contains(origin.Name))
+                {
+                    dependencyIdentities ??= dependencies.Select(static item => item.Identity)
+                        .ToHashSet(StringComparer.Ordinal);
+                    if (!dependencyIdentities.Contains(origin.Identity))
+                    {
+                        throw new ModuleFormatException("Graph type origin has no declared owner.");
+                    }
+                }
+                else if (origin.Identity != local)
                 {
                     throw new ModuleFormatException("Graph type origin has no declared owner.");
                 }
-            }
-            else if (origin.Identity != local)
-            {
-                throw new ModuleFormatException("Graph type origin has no declared owner.");
-            }
-            if (origin.CleanupIdentity is not null && origin.CleanupIdentity != origin.Identity)
-            {
-                throw new ModuleFormatException("Graph cleanup owner differs from type origin.");
+                if (origin.CleanupIdentity is not null && origin.CleanupIdentity != origin.Identity)
+                {
+                    throw new ModuleFormatException("Graph cleanup owner differs from type origin.");
+                }
             }
         }
         if (dependencies.Any(static item => item.Declarations.Length == 0))
