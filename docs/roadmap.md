@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `61b2096` | Materialize graph reference provenance arrays directly |
 | `aa3d5c7` | Skip graph type provenance for typeless modules |
 | `0bfe311` | Sort graph origin records in place |
 | `41fabd1` | Reuse the empty graph dependency import array |
