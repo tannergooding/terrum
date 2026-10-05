@@ -288,10 +288,7 @@ public static partial class ModuleCompiler
     {
         var dependencyFunctions = dependencies.Functions.ToDictionary(static item => item.Name,
             StringComparer.Ordinal);
-        ValidateGraphImports(module, dependencies, dependencyFunctions);
-        if (hasPrivateManagedState && module.Functions.Any(item => item.Import
-            && (!dependencyFunctions.TryGetValue(item.Name, out var function)
-                || !ManagedExportShape.Supported(function, dependencies.Structures))))
+        if (ValidateGraphImports(module, dependencies, dependencyFunctions, hasPrivateManagedState))
         {
             throw new ModuleContractException("Managed graph import crosses a non-Copy boundary.");
         }
@@ -366,8 +363,8 @@ public static partial class ModuleCompiler
         };
     }
 
-    private static void ValidateGraphImports(Module module, CompilationReference dependencies,
-        IReadOnlyDictionary<string, BoundFunction> dependencyFunctions)
+    private static bool ValidateGraphImports(Module module, CompilationReference dependencies,
+        IReadOnlyDictionary<string, BoundFunction> dependencyFunctions, bool hasPrivateManagedState)
     {
         if (module.RuntimePolicy != dependencies.RuntimePolicy)
         {
@@ -375,13 +372,22 @@ public static partial class ModuleCompiler
         }
         var dependencyTypes = dependencies.Structures.ToDictionary(static item => item.Name,
             StringComparer.Ordinal);
-        foreach (var item in module.Functions.Where(static item => item.Import))
+        var hasUnsupportedManagedImport = false;
+        foreach (var item in module.Functions)
         {
+            if (!item.Import)
+            {
+                continue;
+            }
             if (!dependencyFunctions.TryGetValue(item.Name, out var actual)
                 || !CompatibleContract(item.Contract, Contract(actual, dependencies.Structures))
                 || item.HasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, dependencies.Structures))
             {
                 throw new ModuleContractException($"Incompatible graph import '{item.Name}'.");
+            }
+            if (hasPrivateManagedState && !ManagedExportShape.Supported(actual, dependencies.Structures))
+            {
+                hasUnsupportedManagedImport = true;
             }
         }
         var imported = module.ImportedStructures.ToHashSet(StringComparer.Ordinal);
@@ -399,6 +405,7 @@ public static partial class ModuleCompiler
             throw new ModuleContractException("Graph dependency type is missing.");
         }
         RejectImportedTypeMembers(module.Functions, imported);
+        return hasUnsupportedManagedImport;
     }
 
     private static Module ReadGraphLibrary(byte[] bytes) =>
