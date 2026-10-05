@@ -36,8 +36,9 @@ type positions, including forward chains. The source reader independently
 resolves aliases from the original text. Duplicate, unresolved, cyclic,
 public, attributed and generic aliases reject. The hosted separate
 type/function name spaces are retained, and alias names are not explicit
-conversion-call targets. This preserves the hosted verifier/emitter boundary
-and does not add aliases to source-free TRRM.
+conversion-call targets. Rejected aliases report their offending token span.
+This preserves the hosted verifier/emitter boundary and does not add aliases
+to source-free TRRM.
 The bounded Terrum-authored scalar frontend now projects same-format
 `float32`/`float64` unary signs, target-typed decimal and hexadecimal floating
 literals, based integer literals directly targeting either format, `+`, `-`,

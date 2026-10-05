@@ -153,14 +153,15 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Theory]
-    [InlineData("alias Scalar = Missing; int32 Main() => 42;")]
-    [InlineData("alias Scalar = int32; alias Scalar = bool; int32 Main() => 42;")]
-    [InlineData("alias Scalar = Scalar; int32 Main() => 42;")]
-    [InlineData("alias First = Second; alias Second = First; int32 Main() => 42;")]
-    [InlineData("public alias Scalar = int32; int32 Main() => 42;")]
-    [InlineData("alias Identity<T> = T; int32 Main() => 42;")]
-    [InlineData("alias Scalar = int32; int32 Main() => Scalar(42);")]
-    public async Task ScalarFrontendRejectsUnsupportedOrInvalidAliasesAsync(string text)
+    [InlineData("alias Scalar = Missing; int32 Main() => 42;", "Missing", false)]
+    [InlineData("alias Scalar = int32; alias Scalar = bool; int32 Main() => 42;", "Scalar", true)]
+    [InlineData("alias Scalar = Scalar; int32 Main() => 42;", "Scalar", false)]
+    [InlineData("alias First = Second; alias Second = First; int32 Main() => 42;", "First", false)]
+    [InlineData("public alias Scalar = int32; int32 Main() => 42;", "alias", false)]
+    [InlineData("alias Identity<T> = T; int32 Main() => 42;", "<", false)]
+    [InlineData("alias Scalar = int32; int32 Main() => Scalar(42);", "=>", false)]
+    public async Task ScalarFrontendRejectsUnsupportedOrInvalidAliasesAsync(string text,
+        string expectedSpanText, bool expectLastOccurrence)
     {
         var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text,
             NativeRuntimePolicy.FailFast);
@@ -168,6 +169,10 @@ public sealed partial class ManagedScannerComponentTests
             programBytes, BoundRuntimePolicy.FailFast);
         Assert.False(result.IsValid);
         Assert.Equal(1, result.ErrorCode);
+        var expectedStart = expectLastOccurrence
+            ? text.LastIndexOf(expectedSpanText, StringComparison.Ordinal)
+            : text.IndexOf(expectedSpanText, StringComparison.Ordinal);
+        Assert.Equal(new TextSpan(expectedStart, expectedSpanText.Length), result.ErrorSpan);
     }
 
     [Fact]
