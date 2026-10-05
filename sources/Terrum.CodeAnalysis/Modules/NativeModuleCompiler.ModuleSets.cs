@@ -346,6 +346,7 @@ public static partial class NativeModuleCompiler
         var dependencies = new SetDependency[count];
         var identities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var symbols = new HashSet<string>(StringComparer.Ordinal);
+        var allMachineImports = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < count; i++)
         {
             if (at >= bytes.Length - HashSize || bytes[at] is < 1 or > 64
@@ -406,6 +407,7 @@ public static partial class NativeModuleCompiler
                 {
                     throw new ModuleFormatException("Invalid or unordered native set machine import.");
                 }
+                _ = allMachineImports.Add(name);
                 machineImports[j] = name;
             }
             dependencies[i] = new SetDependency(identity, imports) {
@@ -422,8 +424,6 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native set and semantic runtime policies differ.");
         }
-        var allMachineImports = dependencies.SelectMany(static item => item.MachineImports)
-            .ToHashSet(StringComparer.Ordinal);
         if (!symbols.SetEquals(contractSnapshot.Declarations)
             || !contractSnapshot.CallImports.All(allMachineImports.Contains))
         {
