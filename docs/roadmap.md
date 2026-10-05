@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `a3c15f4` | Inspect token-span metadata and function bodies in one pass |
 | `d457228` | Validate consumed generic closers and punctuation spans in one pass |
 | `90a1a9b` | Detect owned buffers and buffer views in one function traversal |
 | `2b49dd9` | Detect unique and composite profile features in one structure traversal |
