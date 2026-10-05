@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `8f62ded` | Build native function metadata in exact-capacity arrays |
 | `cf7a5e7` | Avoid repeated scalar checks in exported value layouts |
 | `c1fd39f` | Group PE imports before sorting DLL groups |
 | `2e467e1` | Reuse the contract index while loading executable TRRM |
