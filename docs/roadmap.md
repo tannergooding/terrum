@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `440303c` | Avoid temporary reads in indexed optional equality checks |
 | `1a1296e` | Reuse indexed TRRM value descriptors across block prefixes |
 | `fd107f0` | Skip redundant native buffer structure scan |
 | `28969c9` | Skip native buffer-clear scan when buffer types are absent |
