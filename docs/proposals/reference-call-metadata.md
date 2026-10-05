@@ -107,15 +107,24 @@ call-site authorization bit would not prove explicit unsafe-block enclosure.
 
 **Recommendation:** Define a first executable slice for indexed, fail-fast
 Bodies with root-free Copy-scalar shapes only, using region kind `0x06` as a
-structurally validated lexical unsafe region. Specify parent nesting, block
-membership, legal entry and exit edges, normal continuation, returns,
-fail-fast departure and loop transfers before enabling it; split blocks at
-unsafe-scope boundaries and derive authorization only from validated
-enclosing-region membership. Keep compact-linear Bodies scope-free.
-Unsafe regions add no cleanup, exception-unwind or lifetime authority; reject
-Bodies that require those behaviors. Limit the slice to top-level
+structurally validated lexical unsafe region. Assign compact-indexed
+`bodyLayout` bit `0x04` as its Body-local feature requirement, set exactly when
+the Body contains an unsafe region; retain bit `0x08` as reserved and keep
+compact-linear Bodies scope-free. Split blocks at unsafe-scope boundaries and
+derive authorization only from validated enclosing-region membership.
+
+For kind `0x06`, require a preceding parent region ID, an entry block inside
+the region, an exit block outside its subtree but within its parent, and a zero
+cleanup block. Every incoming control-flow edge from outside the region must
+target its entry; every normal edge leaving the region must target its
+designated exit. Nested regions are permitted, but loop backedges must stay
+inside their loop region. Returns and fail-fast terminators may end a path
+inside an unsafe region; transfers that leave it must obey the designated-exit
+rule. The region grants no cleanup, exception-unwind or lifetime authority;
+reject Bodies that require those behaviors. Limit the slice to top-level
 caller-unsafe declarations and local calls; keep `unsafe(expr)`, imports,
 unsafe fields, accessors and operators rejected.
+
 Writers and readers must audit every call and every Body, including uncalled
 functions, and reject malformed, stripped, bypassed or leaking scope
 structures. This validates Body structure under the existing producer-trust
