@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `b821d3fb` | Verify provisional integer wrapping helpers through persisted semantic modules |
 | `efa78c74` | Verify provisional integer saturation helpers through persisted semantic modules |
 | `223a9d1b` | Verify checked 32-bit arithmetic helpers through persisted semantic modules |
 | `a6c8b305` | Verify checked wide-integer helpers through persisted semantic modules |
