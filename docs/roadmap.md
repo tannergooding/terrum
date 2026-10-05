@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `c2c658b` | Sort graph exports in an exact array |
 | `4e71260` | Pre-size module-set native bindings |
 | `c78618a` | Build graph cleanup indexes directly |
 | `6073495` | Validate module-set exports directly |
