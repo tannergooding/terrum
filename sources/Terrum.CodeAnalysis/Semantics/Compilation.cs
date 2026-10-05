@@ -95,21 +95,30 @@ public sealed class Compilation
     {
         foreach (var structure in structures)
         {
-            if (!structure.IsUnique)
+            if (HasCompositeUnique(structure, structures.Length, nameof(structures)))
             {
-                continue;
+                return true;
             }
-            foreach (var field in structure.Fields)
+        }
+        return false;
+    }
+
+    private static bool HasCompositeUnique(BoundStruct structure, int structureCount, string parameterName)
+    {
+        if (!structure.IsUnique)
+        {
+            return false;
+        }
+        foreach (var field in structure.Fields)
+        {
+            var index = (int)field.Type - 100;
+            if (index >= structureCount)
             {
-                var index = (int)field.Type - 100;
-                if (index >= structures.Length)
-                {
-                    throw new ArgumentOutOfRangeException(nameof(structures), "An aggregate field has an unknown type.");
-                }
-                if (index >= 0)
-                {
-                    return true;
-                }
+                throw new ArgumentOutOfRangeException(parameterName, "An aggregate field has an unknown type.");
+            }
+            if (index >= 0)
+            {
+                return true;
             }
         }
         return false;
@@ -162,12 +171,19 @@ public sealed class Compilation
         {
             return "native-18";
         }
+        var structures = program.Structures;
         var unique = false;
-        foreach (var structure in program.Structures)
+        var composite = false;
+        foreach (var structure in structures)
         {
             unique |= structure.IsUnique;
+            if (HasCompositeUnique(structure, structures.Length, nameof(structures)))
+            {
+                unique = true;
+                composite = true;
+                break;
+            }
         }
-        var composite = HasCompositeUnique(program.Structures);
         var ownedBuffer = HasOwnedNativeBuffer(program.Structures, program.Functions);
         var readonlyView = false;
         var mutableView = false;
