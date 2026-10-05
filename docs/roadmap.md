@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `8653b14` | Aggregate native kernel import policy facts during symbol validation |
 | `3c6f15a` | Check native export owners in one structure pass |
 | `be2c547` | Reuse module call traversals for buffer-clear reachability |
 | `6392c7c` | Validate structure cleanup owners through one name index |
