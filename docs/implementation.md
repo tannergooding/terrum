@@ -95,6 +95,14 @@ infinities, signed-zero selection and NaN classification. This exercises the
 Terrum internal floating-value ABI, not the standard C floating ABI, and does
 not approve either candidate API or settle NaN payload, signaling or status
 behavior.
+The same internal Windows x64 DLL exercises the existing `Token` constructor
+with valid `SourceRange.TryCreate` results at empty, asymmetric and upper-bound
+positions. Its sequential C# carrier is checked for the current 12-byte layout
+and field offsets; a test-only selector passes four Token values by value and
+returns each in turn, covering the indirect aggregate argument and result path,
+including the stack-passed argument. This is rebuild-coupled ABI evidence only:
+it does not approve a public layout, stable C ABI or exact hidden-result write
+extent.
 The same DLL directly invokes all five existing `IntegerFormatting` radix
 length queries for signed/unsigned 32-/64-bit values and `char16` code units.
 Across radices 2 through 36, their output lengths match an independent

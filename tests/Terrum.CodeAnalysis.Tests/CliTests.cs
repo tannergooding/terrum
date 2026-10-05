@@ -1844,6 +1844,8 @@ public sealed partial class CliTests
                 "Terrum.CodeAnalysis.Numerics64.FormatChar16BaseUpper",
                 "Terrum.CodeAnalysis.Numerics64.CreateFormattingWorkspaceForAbiTest",
                 "Terrum.CodeAnalysis.Numerics64.ConsumeFormattingWorkspaceForAbiTest",
+                "Terrum.CodeAnalysis.Token.#ctor",
+                "Terrum.CodeAnalysis.SelectTokenForAbiTest",
                 "Terrum.CodeAnalysis.Numerics64.AbsFloat32",
                 "Terrum.CodeAnalysis.Numerics64.MinFloat32",
                 "Terrum.CodeAnalysis.Numerics64.MaxFloat32",
@@ -1909,6 +1911,7 @@ public sealed partial class CliTests
             AssertIntegerFormattingLengthExports(handle);
             AssertIntegerFormattingBufferExports(handle);
             AssertFloatingMathSelectionExports(handle);
+            AssertTokenAggregateExports(handle);
 
             var isAsciiDigit = Marshal.GetDelegateForFunctionPointer<Char16PredicateExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.IsAsciiDigit"));

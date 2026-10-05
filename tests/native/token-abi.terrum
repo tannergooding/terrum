@@ -1,0 +1,15 @@
+namespace Terrum.CodeAnalysis;
+
+public Token SelectTokenForAbiTest(
+    Token first,
+    Token second,
+    Token third,
+    Token fourth,
+    int32 selector)
+{
+    if (selector == 0) { return first; }
+    if (selector == 1) { return second; }
+    if (selector == 2) { return third; }
+    require selector == 3;
+    return fourth;
+}

@@ -14,7 +14,8 @@ from `BitOperations`, `CharacterFacts`, `Float32MathSelection`,
 `IntegerSaturation`, `IntegerWrapping`, `Utf16CodeUnits` and
 `WideIntegerFacts`. The test build also includes
 `tests\native\integer-formatting-abi.terrum` for workspace setup and
-consumption; its two helper exports are test-only. This maintained native
+consumption, and `tests\native\token-abi.terrum` for aggregate ABI selection;
+these helper exports are test-only. This maintained native
 compiler-primitives library exports `Terrum.CodeAnalysis.SourceRange.TryCreate`,
 `Terrum.CodeAnalysis.IsAsciiDigit`,
 `Terrum.CodeAnalysis.IsLineBreak`, `Terrum.CodeAnalysis.GetDecimalDigit`,
@@ -64,6 +65,13 @@ floating representations through integer bit carriers, matching the Terrum
 internal floating-value ABI rather than the standard C floating ABI. This is
 internal execution evidence only; it does not approve either candidate API or
 settle NaN payload, signaling, or status behavior.
+It also exports the existing `Token` constructor and a test-only selector for
+four by-value Token arguments and an aggregate return. Internal Windows x64
+tests check the sequential C# carrier's current 12-byte layout and field
+offsets, construct tokens from valid ranges, and select each argument in turn,
+including the stack-passed argument. This is rebuild-coupled ABI evidence only;
+it does not approve a public layout, stable C ABI, or exact hidden-result write
+extent.
 The source-grant-dependent
 `Utf16Scalar.ReadUtf16Scalar` adapter remains outside it. These are internal
 compiler implementation exports, not a language-level API or stable native
