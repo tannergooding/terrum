@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `d9901c9` | Preallocate staged package path lists |
 | `736c44d` | Remove repeated module-set import validation |
 | `199b23d` | Sort validated module set providers in place |
 | `a42e57f` | Write graph strings without temporary arrays |
