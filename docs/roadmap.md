@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `691a1af` | Build persisted graph provenance indexes directly |
 | `77c4ec4` | Build graph origin indexes directly |
 | `23a772d` | Build provider origin maps directly |
 | `f9de8fb` | Materialize graph closure directly |
