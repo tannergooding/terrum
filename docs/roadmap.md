@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `c2c1bdb` | Skip provider type indexing for typeless consumers |
 | `e24bcdf` | Build consumer call indexes on demand |
 | `1f26779` | Avoid unused graph producer dependency indexes |
 | `93c02b8` | Pre-size module-set reference merge collections |
