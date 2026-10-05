@@ -34,6 +34,9 @@ approved.
 - [Invocation-scoped source grant](invocation-scoped-source-grant.md)
   recommends a narrow persisted-module dependency for source-aware compiler
   components without enabling arbitrary host-buffer capture.
+- [Persisted scanner invocation profile](scanner-invocation-profile.md)
+  considers a named, scanner-specific invocation profile and copied result
+  publication without generalizing source grants to arbitrary buffers.
 - [Checked-exception TRRM](checked-exception-trrm.md) records the unapproved
   exceptional-control-flow contract needed before source-free checked-exception
   Bodies can be considered.

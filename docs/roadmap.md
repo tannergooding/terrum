@@ -218,6 +218,9 @@ prerequisite has already been met.
     [invocation-scoped source-grant proposal](proposals/invocation-scoped-source-grant.md);
     source-dependent components remain outside the compiler-primitives DLL, and
     the scanner and scalar frontend still rely on hosted verification/emission.
+    Persisted scanner execution would additionally require the still-unapproved
+    [scanner invocation-profile proposal](proposals/scanner-invocation-profile.md);
+    the existing source-only grant contract is unchanged.
 
 These are pending contracts, not support claims. Exact grammar, metadata and
 implementation remain subject to their canonical specifications and proposals.

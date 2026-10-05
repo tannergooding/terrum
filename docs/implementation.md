@@ -39,7 +39,8 @@ also compares `IntegerFormatting` output with expected text from fresh grants;
 the formatter itself remains source-independent, and its unique workspace
 stays within the producer. These tests do not make `StringRow` a TRRM section
 writer or move the scanner or scalar frontend beyond hosted verification and
-emission.
+emission. A scanner-specific persisted invocation profile remains
+unapproved; see the [proposal](proposals/scanner-invocation-profile.md).
 This bounded implementation is recorded by the still-unapproved
 [invocation-scoped source grant proposal](proposals/invocation-scoped-source-grant.md);
 it does not extend the native profile or move the scalar frontend beyond the
