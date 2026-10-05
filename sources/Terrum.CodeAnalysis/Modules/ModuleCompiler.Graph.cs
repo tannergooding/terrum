@@ -300,12 +300,13 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Graph export is missing from its semantic library.");
         }
         var required = RequiredStructures(declarations, module.Structures);
-        var importedTypes = module.ImportedStructures.ToHashSet(StringComparer.Ordinal);
+        var importedTypes = allowImportedCleanup && !module.ImportedStructures.IsEmpty
+            ? module.ImportedStructures.ToHashSet(StringComparer.Ordinal) : null;
         foreach (var structure in module.Structures)
         {
             if (required.Contains(structure.Name) && structure.CleanupMethod is string cleanup
                 && !names.Contains(cleanup)
-                && (!allowImportedCleanup || !importedTypes.Contains(structure.Name)))
+                && importedTypes?.Contains(structure.Name) != true)
             {
                 throw new ModuleContractException($"Graph export requires cleanup '{cleanup}'.");
             }
