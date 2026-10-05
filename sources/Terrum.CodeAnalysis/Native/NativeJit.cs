@@ -272,7 +272,7 @@ public static unsafe class NativeJit
         foreach (var binding in expectedImports)
         {
             if (!modules.Any(module => module.DllName == binding.DllName
-                    && module.Exports.Contains(binding.ExportName, StringComparer.Ordinal))
+                    && ContainsSortedExport(module.Exports, binding.ExportName))
                 || !allowed.Add((binding.DllName, binding.ExportName)))
             {
                 throw new ArgumentException("Native JIT import has no unique validated provider.", nameof(expectedImports));
@@ -463,6 +463,31 @@ public static unsafe class NativeJit
             Release(memory, tableOffset, registered, continuationRegistration,
                 exitProcessModule, handlerModule, loaded, modules);
         }
+    }
+
+    private static bool ContainsSortedExport(IReadOnlyList<string> exports, string name)
+    {
+        // Graph package decoding guarantees ordinally sorted exports.
+        var low = 0;
+        var high = exports.Count - 1;
+        while (low <= high)
+        {
+            var middle = low + ((high - low) >> 1);
+            var comparison = StringComparer.Ordinal.Compare(exports[middle], name);
+            if (comparison == 0)
+            {
+                return true;
+            }
+            if (comparison < 0)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+        return false;
     }
 
     private static void Release(nint memory, int tableOffset, bool registered,
