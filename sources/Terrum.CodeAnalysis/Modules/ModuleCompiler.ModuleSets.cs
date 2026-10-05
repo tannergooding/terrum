@@ -223,7 +223,9 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Consumer and provider runtime policies differ.");
         }
-        var exports = reference.Functions.ToDictionary(static function => function.Name, StringComparer.Ordinal);
+        IReadOnlyDictionary<string, BoundFunction> exports = reference.Functions.IsEmpty
+            ? ImmutableDictionary<string, BoundFunction>.Empty
+            : reference.Functions.ToDictionary(static function => function.Name, StringComparer.Ordinal);
         var hasPrivateManagedState = HasPrivateManagedState(consumer);
         var hasUnsupportedManagedImport = false;
         foreach (var imported in consumer.Functions.Where(static item => item.Import))
@@ -264,12 +266,20 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Managed graph import crosses a non-Copy boundary.");
         }
-        var names = consumer.Functions.Select((item, index) => (item.Name, index))
-            .ToDictionary(static item => item.Name, static item => item.index, StringComparer.Ordinal);
-        var program = new BoundProgram([.. consumer.Functions.Select(item => item.Import
-            ? RemapFunction(RecordedImportPromises(item.Contract, exports[item.Name]),
-                reference.Structures, consumer.Structures)
-            : item.Function ?? throw new ModuleFormatException("Missing consumer body."))], consumer.EntryPoint) {
+        var names = new Dictionary<string, int>(consumer.Functions.Length, StringComparer.Ordinal);
+        for (var index = 0; index < consumer.Functions.Length; index++)
+        {
+            names.Add(consumer.Functions[index].Name, index);
+        }
+        var functions = ImmutableArray.CreateBuilder<BoundFunction>(consumer.Functions.Length);
+        foreach (var item in consumer.Functions)
+        {
+            functions.Add(item.Import
+                ? RemapFunction(RecordedImportPromises(item.Contract, exports[item.Name]),
+                    reference.Structures, consumer.Structures)
+                : item.Function ?? throw new ModuleFormatException("Missing consumer body."));
+        }
+        var program = new BoundProgram(functions.MoveToImmutable(), consumer.EntryPoint) {
             Structures = consumer.Structures,
             Classes = consumer.Classes,
             RuntimePolicy = consumer.RuntimePolicy,
