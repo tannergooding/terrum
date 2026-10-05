@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `2ab20d9` | Classify static protocol member facts in one syntax pass |
 | `b073691` | Reuse static protocol NoThrow attribute count |
 | `a030840` | Reuse one immutable source snapshot array throughout compilation |
 | `76c3791` | Reuse verified consumer functions for module-set type closure |
