@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `2cc4eade` | Exercise existing float-selection candidates through the internal Windows x64 compiler-primitives DLL using integer bit carriers |
 | `ff2dc783` | Verify IntegerFacts native execution under both runtime policies |
 | `a79e0884` | Verify existing private IntegerFacts predicates in native execution |
 | `15c8f6b2` | Exercise existing integer wrapping candidates through the internal Windows x64 compiler-primitives DLL |
