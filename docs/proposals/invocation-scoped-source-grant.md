@@ -117,7 +117,12 @@ with the hosted string-table writer across fresh grants.
 `SourceLineIndexModuleIndexesFreshSourceGrants` passed under both policies,
 reusing persisted provider and consumer artifacts across empty, ordinary,
 mixed-line-break and malformed-surrogate snapshots while comparing line
-counts and content/full-break extents with the hosted snapshot.
+counts, content/full-break extents, position mappings, offset round-trips and
+invalid query boundaries with the hosted snapshot.
+`SourceLinesModuleQueriesFreshSourceGrants` also passed under both policies,
+reusing persisted streaming-component artifacts across fresh grants and
+comparing full line extents, positions, offsets and invalid-query results with
+the hosted snapshot.
 `StringEscapeModuleAnalyzesFreshSourceGrants` passed under both policies,
 comparing decoded scalars, consumed widths and error spans with hosted lexer
 diagnostics across fresh escape grants, including malformed Unicode escapes

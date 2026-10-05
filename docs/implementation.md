@@ -13,13 +13,13 @@ single-producer semantic-module program can be linked and executed by
 of at most 16,384 code units and copies it into fresh invocation storage.
 Artifacts do not retain source contents, concrete length or address. Graphs,
 module sets, native DLLs and persisted AOT images remain outside this support.
-The same bounded adapter has also been exercised with the Terrum-authored
-`CharacterLiteral` and `StringLiteral` leaf decoders and the provisional
-`StringEscape` leaf decoder and the provisional UTF-8 namespace-row encoder,
-and with `IntegerParsing` decimal slices plus `SourceLineIndex` line counts and
-content/including-break extents across fresh grants. These tests do not make
-`StringRow` a TRRM section writer or move the scanner or scalar frontend beyond
-hosted verification and emission.
+The bounded adapter has executed the Terrum-authored `CharacterLiteral` and
+`StringLiteral` leaf decoders, the provisional `StringEscape` decoder and the
+provisional UTF-8 namespace-row encoder. Persisted semantic-module JIT tests
+also cover decimal `IntegerParsing`, `SourceLineIndex` counts/extents/position
+mapping/offset lookup, and streaming `SourceLines` ranges and coordinates
+across fresh grants. These tests do not make `StringRow` a TRRM section writer
+or move the scanner or scalar frontend beyond hosted verification and emission.
 This bounded implementation is recorded by the still-unapproved
 [invocation-scoped source grant proposal](proposals/invocation-scoped-source-grant.md);
 it does not extend the native profile or move the scalar frontend beyond the
@@ -1726,9 +1726,13 @@ outputs. Invalid construction or queries publish no value, while a later valid
 request may fill the same vacant destination.
 The revision-55 semantic-module JIT also reuses persisted `SourceLineIndex`
 provider and consumer artifacts across fresh source grants, comparing line
-counts and line content/full-break extents with the hosted snapshot under both
-runtime policies. This does not extend the source grant beyond the
-semantic-module JIT path or claim persisted AOT support.
+counts, content/full-break extents, valid position mappings and offset
+round-trips with the hosted snapshot under both runtime policies. Invalid
+position and line/character boundaries are compared as well. This does not
+extend the source grant beyond the semantic-module JIT path or claim persisted
+AOT support. The streaming `SourceLines` component also reuses persisted
+provider and consumer artifacts across fresh grants, comparing full line
+extents, positions and offsets with the hosted snapshot under both policies.
 `SourceRange.TryCreate` uses `init ref<SourceRange>` as its sole output mode:
 invalid bounds leave the destination vacant, while valid empty ranges publish
 normally.
