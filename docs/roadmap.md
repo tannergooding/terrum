@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `d9c60ca` | Pre-size producer linkage name map |
 | `ae35fcf` | Parse scalar frontends from indexed snapshot windows |
 | `b5abb12` | Add repeatable indexed TokenCursor reads |
 | `5a62f4e` | Pre-size CET continuation validation set |
