@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `9ac38530` | Share ASCII hexadecimal digit parsing across character and string escapes |
 | `4f078737` | Exercise UTF-16 compiler primitive exports from Windows x64 |
 | `900f9f15` | Extract pure UTF-16 code-unit decoding into compiler primitives |
 | `e1f5e167` | Verify decimal digit conversion across UTF-16 values through persisted modules |
