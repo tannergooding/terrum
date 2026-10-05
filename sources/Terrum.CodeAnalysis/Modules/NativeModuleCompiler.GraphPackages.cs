@@ -266,8 +266,14 @@ public static partial class NativeModuleCompiler
                 var local = consumer ? "@" : identity;
                 if (importedTypes.Contains(origin.Name))
                 {
-                    dependencyIdentities ??= dependencies.Select(static item => item.Identity)
-                        .ToHashSet(StringComparer.Ordinal);
+                    if (dependencyIdentities is null)
+                    {
+                        dependencyIdentities = new HashSet<string>(StringComparer.Ordinal);
+                        foreach (var dependency in dependencies)
+                        {
+                            _ = dependencyIdentities.Add(dependency.Identity);
+                        }
+                    }
                     if (!dependencyIdentities.Contains(origin.Identity))
                     {
                         throw new ModuleFormatException("Graph type origin has no declared owner.");
@@ -288,8 +294,14 @@ public static partial class NativeModuleCompiler
         {
             if (dependency.Declarations.Length == 0)
             {
-                originIdentities ??= origins.Select(static item => item.Identity)
-                    .ToHashSet(StringComparer.Ordinal);
+                if (originIdentities is null)
+                {
+                    originIdentities = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var origin in origins)
+                    {
+                        _ = originIdentities.Add(origin.Identity);
+                    }
+                }
                 if (!originIdentities.Contains(dependency.Identity))
                 {
                     throw new ModuleFormatException("Graph dependency supplies neither declarations nor types.");
