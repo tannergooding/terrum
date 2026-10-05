@@ -144,16 +144,22 @@ public static partial class ModuleCompiler
                 {
                     throw new ModuleContractException($"Managed graph import '{function.Name}' crosses a non-Copy boundary.");
                 }
-                if (!available.TryGetValue(function.Name, out var export)
-                    || !CompatibleContract(Contract(function, program.Structures),
-                        Contract(export, reference.Structures))
-                    || Compilation.HasOwnershipTransfer(function, program.Structures)
-                        != Compilation.HasOwnershipTransfer(export, reference.Structures))
+                if (!available.TryGetValue(function.Name, out var export))
                 {
                     throw new ModuleContractException($"Incompatible or missing provider declaration '{function.Name}'.");
                 }
-                declarations.Add(new ModuleFunction(function.Name, Contract(function, program.Structures), function, true) {
-                    HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
+                var contract = Contract(function, program.Structures);
+                if (!CompatibleContract(contract, Contract(export, reference.Structures)))
+                {
+                    throw new ModuleContractException($"Incompatible or missing provider declaration '{function.Name}'.");
+                }
+                var hasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures);
+                if (hasOwnershipTransfer != Compilation.HasOwnershipTransfer(export, reference.Structures))
+                {
+                    throw new ModuleContractException($"Incompatible or missing provider declaration '{function.Name}'.");
+                }
+                declarations.Add(new ModuleFunction(function.Name, contract, function, true) {
+                    HasOwnershipTransfer = hasOwnershipTransfer,
                 });
             }
             else

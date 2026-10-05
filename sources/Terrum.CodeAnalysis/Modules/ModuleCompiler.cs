@@ -639,13 +639,18 @@ public static partial class ModuleCompiler
                 {
                     throw new ModuleContractException($"Declaration '{function.Name}' is not a public module import.");
                 }
-                if (!CompatibleContract(Contract(function, program.Structures), imported.Contract)
-                    || Compilation.HasOwnershipTransfer(function, program.Structures) != imported.HasOwnershipTransfer)
+                var contract = Contract(function, program.Structures);
+                if (!CompatibleContract(contract, imported.Contract))
+                {
+                    throw new ModuleContractException($"Reference declaration for '{function.Name}' differs from the producer.");
+                }
+                var hasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures);
+                if (hasOwnershipTransfer != imported.HasOwnershipTransfer)
                 {
                     throw new ModuleContractException($"Reference declaration for '{function.Name}' differs from the producer.");
                 }
                 declarations.Add(new ModuleFunction(function.Name, imported.Contract, null, true) {
-                    HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
+                    HasOwnershipTransfer = hasOwnershipTransfer,
                 });
             }
             else
