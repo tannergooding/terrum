@@ -2,7 +2,6 @@
 
 using System;
 using System.Buffers.Binary;
-using System.Collections.Generic;
 using System.IO;
 
 namespace Terrum.CodeAnalysis.Modules;
@@ -24,7 +23,6 @@ public readonly ref struct TrRmTypeArgTableReader
         }
 
         _rows = section;
-        var ownedCounts = new Dictionary<uint, int>();
         for (var row = 1; row <= recordCount; row++)
         {
             var owner = Read(row, 0);
@@ -47,22 +45,27 @@ public readonly ref struct TrRmTypeArgTableReader
             {
                 throw InvalidArgument();
             }
-
-            ownedCounts.TryGetValue(owner, out var owned);
-            ownedCounts[owner] = owned + 1;
         }
 
+        var declaredCount = 0;
         for (var row = 1; row <= types.Count; row++)
         {
             var spec = types.GetRow(row);
             if (spec[0] == 0x05)
             {
-                ownedCounts.TryGetValue((uint)row, out var owned);
-                if (owned != BinaryPrimitives.ReadUInt32LittleEndian(spec[10..]))
+                declaredCount += (int)BinaryPrimitives.ReadUInt32LittleEndian(spec[10..]);
+                if (declaredCount > recordCount)
                 {
                     throw InvalidArgument();
                 }
             }
+        }
+
+        // Each argument row already matches its owner's range and ordinal, so the total
+        // declared range length proves that the constructed ranges partition the table.
+        if (declaredCount != recordCount)
+        {
+            throw InvalidArgument();
         }
     }
 
