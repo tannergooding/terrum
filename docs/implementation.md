@@ -95,6 +95,11 @@ infinities, signed-zero selection and NaN classification. This exercises the
 Terrum internal floating-value ABI, not the standard C floating ABI, and does
 not approve either candidate API or settle NaN payload, signaling or status
 behavior.
+The same DLL directly invokes both existing `SourceRange` end-query forms,
+`GetEnd` and the `End` property getter, with every successful boundary produced
+by `TryCreate` and compares them with hosted `TextSpan.End`. These calls exercise
+the internal eight-byte by-value receiver on Windows x64; they do not establish
+a stable or portable range ABI.
 The same internal Windows x64 DLL exercises the existing `Token` constructor
 with valid `SourceRange.TryCreate` results at empty, asymmetric and upper-bound
 positions. Its sequential C# carrier is checked for the current 12-byte layout

@@ -90,6 +90,9 @@ public sealed partial class CliTests
     private delegate int SourceRangeTryCreateExport(int start, int length, ref NativeSourceRange range);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int SourceRangeGetEndExport(NativeSourceRange range);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate ulong MagnitudeInt64Export(long value);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -1695,6 +1698,8 @@ public sealed partial class CliTests
         {
             foreach (var export in new[] {
                 "Terrum.CodeAnalysis.SourceRange.TryCreate",
+                "Terrum.CodeAnalysis.SourceRange.GetEnd",
+                "Terrum.CodeAnalysis.SourceRange.#get:End",
                 "Terrum.CodeAnalysis.IsAsciiDigit",
                 "Terrum.CodeAnalysis.IsLineBreak",
                 "Terrum.CodeAnalysis.GetDecimalDigit",
@@ -1941,6 +1946,10 @@ public sealed partial class CliTests
 
             var tryCreateRange = Marshal.GetDelegateForFunctionPointer<SourceRangeTryCreateExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.SourceRange.TryCreate"));
+            var getRangeEnd = Marshal.GetDelegateForFunctionPointer<SourceRangeGetEndExport>(
+                NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.SourceRange.GetEnd"));
+            var getRangeEndProperty = Marshal.GetDelegateForFunctionPointer<SourceRangeGetEndExport>(
+                NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.SourceRange.#get:End"));
             const int lowerRangeCanary = 0x13579BDF;
             const int sentinelStart = 0x2468ACE0;
             const int sentinelLength = unchecked((int)0xECA86420);
@@ -1991,6 +2000,12 @@ public sealed partial class CliTests
                     guarded.Range.Length);
                 Assert.Equal(lowerRangeCanary, guarded.Before);
                 Assert.Equal(upperRangeCanary, guarded.After);
+                if (expectedSuccess)
+                {
+                    var expectedEnd = expectedRange.GetValueOrDefault().End;
+                    Assert.Equal(expectedEnd, getRangeEnd(guarded.Range));
+                    Assert.Equal(expectedEnd, getRangeEndProperty(guarded.Range));
+                }
             }
 
             var reusedRange = new GuardedSourceRange {
