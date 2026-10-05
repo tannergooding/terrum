@@ -592,7 +592,13 @@ internal static class NativeModuleImageValidator
         {
             if (StringComparer.Ordinal.Compare(names[index - 1], names[index]) > 0)
             {
-                return names.Order(StringComparer.Ordinal).ToArray();
+                var sorted = new string[names.Count];
+                for (var nameIndex = 0; nameIndex < sorted.Length; nameIndex++)
+                {
+                    sorted[nameIndex] = names[nameIndex];
+                }
+                Array.Sort(sorted, StringComparer.Ordinal);
+                return sorted;
             }
         }
 
