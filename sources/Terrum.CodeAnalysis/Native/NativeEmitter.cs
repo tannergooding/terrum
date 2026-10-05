@@ -204,6 +204,7 @@ public static class NativeEmitter
         }
         var structureVisibility = new Dictionary<string, bool>(program.Structures.Length,
             StringComparer.Ordinal);
+        var publicLayouts = new Dictionary<PrimitiveType, bool>(program.Structures.Length);
         foreach (var structure in program.Structures)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -218,7 +219,8 @@ public static class NativeEmitter
                 throw new ArgumentException("Export names must be unique printable ASCII names of at most 256 bytes.", nameof(exports));
             }
             if (!functionIndices.TryGetValue(name, out var index)
-                || !Exportable(program, program.Functions[index], managedExports, structureVisibility))
+                || !Exportable(program, program.Functions[index], managedExports,
+                    structureVisibility, publicLayouts))
             {
                 throw new ArgumentException($"'{name}' is not an accessible native library export.", nameof(exports));
             }
@@ -238,7 +240,7 @@ public static class NativeEmitter
         || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type)));
 
     private static bool Exportable(BoundProgram program, BoundFunction function, bool managedExports,
-        IReadOnlyDictionary<string, bool> structureVisibility)
+        IReadOnlyDictionary<string, bool> structureVisibility, Dictionary<PrimitiveType, bool> publicLayouts)
     {
         if (function.IsPrivate || function.IsInternal || function.IsExternal)
         {
@@ -275,17 +277,26 @@ public static class NativeEmitter
 
         bool PublicLayout(PrimitiveType type)
         {
+            if (publicLayouts.TryGetValue(type, out var isPublic))
+            {
+                return isPublic;
+            }
             if (ManagedClassTypes.IsManaged(type) || TokenSpanContract.IsDependent(type, program.Structures))
             {
-                return false;
+                isPublic = false;
             }
-            if ((int)type < 100)
+            else if ((int)type < 100)
             {
-                return true;
+                isPublic = true;
             }
-            var structure = program.Structures[(int)type - 100];
-            return !structure.IsPrivate && !structure.IsInternal
-                && structure.Fields.All(field => !field.IsPrivate && !field.IsInternal && PublicLayout(field.Type));
+            else
+            {
+                var structure = program.Structures[(int)type - 100];
+                isPublic = !structure.IsPrivate && !structure.IsInternal
+                    && structure.Fields.All(field => !field.IsPrivate && !field.IsInternal && PublicLayout(field.Type));
+            }
+            publicLayouts.Add(type, isPublic);
+            return isPublic;
         }
     }
 
