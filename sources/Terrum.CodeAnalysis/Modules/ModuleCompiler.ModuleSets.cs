@@ -236,13 +236,18 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Consumer and provider runtime policies differ.");
         }
-        IReadOnlyDictionary<string, BoundFunction> exports = reference.Functions.IsEmpty
-            ? ImmutableDictionary<string, BoundFunction>.Empty
-            : reference.Functions.ToDictionary(static function => function.Name, StringComparer.Ordinal);
+        IReadOnlyDictionary<string, BoundFunction>? exports = null;
         var hasPrivateManagedState = HasPrivateManagedState(consumer);
         var hasUnsupportedManagedImport = false;
-        foreach (var imported in consumer.Functions.Where(static item => item.Import))
+        foreach (var imported in consumer.Functions)
         {
+            if (!imported.Import)
+            {
+                continue;
+            }
+            exports ??= reference.Functions.IsEmpty
+                ? ImmutableDictionary<string, BoundFunction>.Empty
+                : reference.Functions.ToDictionary(static function => function.Name, StringComparer.Ordinal);
             if (!exports.TryGetValue(imported.Name, out var actual)
                 || !CompatibleContract(imported.Contract, Contract(actual, reference.Structures))
                 || imported.HasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, reference.Structures))
@@ -279,6 +284,7 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Managed graph import crosses a non-Copy boundary.");
         }
+        var providerFunctions = exports ?? ImmutableDictionary<string, BoundFunction>.Empty;
         var names = new Dictionary<string, int>(consumer.Functions.Length, StringComparer.Ordinal);
         for (var index = 0; index < consumer.Functions.Length; index++)
         {
@@ -288,7 +294,7 @@ public static partial class ModuleCompiler
         foreach (var item in consumer.Functions)
         {
             functions.Add(item.Import
-                ? RemapFunction(RecordedImportPromises(item.Contract, exports[item.Name]),
+                ? RemapFunction(RecordedImportPromises(item.Contract, providerFunctions[item.Name]),
                     reference.Structures, consumer.Structures)
                 : item.Function ?? throw new ModuleFormatException("Missing consumer body."));
         }
