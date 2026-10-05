@@ -189,7 +189,7 @@ public static partial class NativeModuleCompiler
             packages[i] = Read(producers[i]);
         }
         var providers = new ValidatedProvider[packages.Length];
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var names = new HashSet<string>(packages.Length, StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < packages.Length; i++)
         {
             var package = packages[i];
@@ -408,7 +408,7 @@ public static partial class NativeModuleCompiler
         }
         var at = SetHeaderSize;
         var dependencies = new SetDependency[count];
-        var identities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var identities = new HashSet<string>(count, StringComparer.OrdinalIgnoreCase);
         var symbols = new HashSet<string>(StringComparer.Ordinal);
         var allMachineImports = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < count; i++)
