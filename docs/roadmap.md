@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `84e472d` | Sort graph catalog selections directly |
 | `d48f00f` | Create checked-unwind cleanup indexes lazily |
 | `6c263d4` | Check imported type members directly |
 | `3be7f3c` | Skip unused graph import tracking sets |
