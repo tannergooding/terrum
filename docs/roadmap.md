@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f549b2f` | Fuse cleanup detection into spill sizing |
 | `76f170b` | Reuse validated source-map slot selectors |
 | `226831c` | Reuse field names when validating getters |
 | `97e647d` | Skip compact body scans when no bodies exist |
