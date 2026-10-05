@@ -578,6 +578,7 @@ public static partial class ModuleCompiler
             indexes.UnionWith(Enumerable.Range(0, program.Functions.Length));
         }
         var pending = new Queue<int>(indexes);
+        BoundFunction[]? cleanupFunction = null;
         Dictionary<string, int>? functionIndexes = null;
         while (pending.Count != 0)
         {
@@ -595,7 +596,9 @@ public static partial class ModuleCompiler
             }
             if (cleanupStructures.Length != 0)
             {
-                var types = RequiredStructures([program.Functions[index]], program.Structures,
+                var singleFunction = cleanupFunction ??= new BoundFunction[1];
+                singleFunction[0] = program.Functions[index];
+                var types = RequiredStructures(singleFunction, program.Structures,
                     findStructureIndex: FindStructureIndex);
                 foreach (var structure in cleanupStructures)
                 {
