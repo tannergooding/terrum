@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -232,11 +233,30 @@ public static partial class NativeModuleCompiler
             allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
     }
 
-    private static Dictionary<string, IReadOnlyList<string>> Imports(SetPackage set) =>
-        set.Dependencies.Where(static item => item.MachineImports.Length != 0)
-            .ToDictionary(static item => DllName(item.Identity),
-                static item => (IReadOnlyList<string>)item.MachineImports,
-                StringComparer.Ordinal);
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> Imports(SetPackage set)
+    {
+        var count = 0;
+        foreach (var dependency in set.Dependencies)
+        {
+            if (dependency.MachineImports.Length != 0)
+            {
+                count++;
+            }
+        }
+        if (count == 0)
+        {
+            return ImmutableDictionary<string, IReadOnlyList<string>>.Empty;
+        }
+        var imports = new Dictionary<string, IReadOnlyList<string>>(count, StringComparer.Ordinal);
+        foreach (var dependency in set.Dependencies)
+        {
+            if (dependency.MachineImports.Length != 0)
+            {
+                imports.Add(DllName(dependency.Identity), dependency.MachineImports);
+            }
+        }
+        return imports;
+    }
 
     private static byte[] WriteSet(ValidatedProvider[] providers, NativeRuntimePolicy policy, byte[] contract, byte[] image,
         IReadOnlyList<NativeImportBinding> used, ModuleCompiler.ConsumerContractSnapshot contractSnapshot)
