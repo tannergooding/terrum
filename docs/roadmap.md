@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `9b4b317` | Build graph function indexes directly |
 | `02d8f0c` | Materialize verified graph functions directly |
 | `7840941` | Pre-size and directly remap graph export declarations |
 | `bd074c4` | Limit graph export collision tracking to function names |
