@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `9c0204b` | Reuse imported ownership-transfer facts during graph library creation |
 | `b13036b` | Validate graph cleanup ownership during the structure traversal |
 | `b10b0a8` | Combine graph origin and cleanup-owner construction into one structure pass |
 | `31abf0a` | Reuse consumer declaration contracts and ownership facts during packaging |
