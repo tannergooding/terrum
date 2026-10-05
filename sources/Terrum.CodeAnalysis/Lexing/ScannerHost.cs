@@ -536,16 +536,22 @@ public static class ScannerHost
         for (var index = 0; index < records.Length; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var leading = ImmutableArray.CreateBuilder<SyntaxTrivia>();
-            while (triviaIndex < trivia.Length && trivia[triviaIndex].TokenIndex == index)
+            var leading = ImmutableArray<SyntaxTrivia>.Empty;
+            if (triviaIndex < trivia.Length && trivia[triviaIndex].TokenIndex == index)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var item = trivia[triviaIndex++];
-                leading.Add(new SyntaxTrivia(item.Kind, item.Span, source.Text.Substring(item.Span.Start, item.Span.Length)));
+                var leadingBuilder = ImmutableArray.CreateBuilder<SyntaxTrivia>();
+                while (triviaIndex < trivia.Length && trivia[triviaIndex].TokenIndex == index)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var item = trivia[triviaIndex++];
+                    leadingBuilder.Add(new SyntaxTrivia(item.Kind, item.Span,
+                        source.Text.Substring(item.Span.Start, item.Span.Length)));
+                }
+                leading = leadingBuilder.ToImmutable();
             }
             var record = records[index];
             tokens.Add(new SyntaxToken(record.Kind, source.Text.Substring(record.Span.Start, record.Span.Length),
-                record.Span, leading.ToImmutable()));
+                record.Span, leading));
         }
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>(diagnosticRecords.Length);
         foreach (var diagnostic in diagnosticRecords)
