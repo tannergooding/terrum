@@ -56,6 +56,11 @@ all twelve checked 64-bit add/subtract/multiply/divide/remainder and signed
 negate/absolute helpers, checking their results and conditional outputs
 against `BigInteger` boundary expectations; these remain named internal
 candidate functions, not language operators or general arithmetic support.
+The DLL also directly invokes all eighteen `BitOperations` width-specific
+helpers against hosted `System.Numerics.BitOperations`, checking each bit
+position, rotation-count extremes, round-up success/failure publication and
+adjacent canaries. This validates the internal Windows x64 fail-fast calls
+only; the candidate API remains unapproved.
 Persisted semantic-module JIT tests also compare
 `StringLiteral` length and encoding results for UTF-8, UTF-16
 units and LE/BE bytes, strict ASCII and Latin-1, and UTF-32 LE/BE bytes with

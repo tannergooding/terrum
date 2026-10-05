@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -54,6 +55,14 @@ public sealed partial class CliTests
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct GuardedUInt32
+    {
+        public uint Before;
+        public uint Value;
+        public uint After;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct GuardedInt64
     {
         public long Before;
@@ -90,6 +99,36 @@ public sealed partial class CliTests
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Int64UnaryExport(long value, ref long result);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int UInt32IntUnaryExport(uint value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint UInt32UnaryExport(uint value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint UInt32BinaryExport(uint value, int count);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int UInt32PredicateExport(uint value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int UInt32RoundUpExport(uint value, ref uint result);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int UInt64IntUnaryExport(ulong value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong UInt64UnaryExport(ulong value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong UInt64BinaryExport(ulong value, int count);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int UInt64PredicateExport(ulong value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int UInt64RoundUpExport(ulong value, ref ulong result);
 
     [Theory]
     [InlineData(false)]
@@ -471,6 +510,194 @@ public sealed partial class CliTests
             Assert.Equal(expectedSuccess ? expectedAbsolute : signedOutputSentinel, absoluteGuard.Value);
             Assert.Equal(lowerSignedCanary, absoluteGuard.Before);
             Assert.Equal(upperSignedCanary, absoluteGuard.After);
+        }
+    }
+
+    private static void AssertBitOperationsExports(nint handle)
+    {
+        const uint Lower32Canary = 0x13579BDF;
+        const uint UInt32OutputSentinel = 0xFEDCBA98;
+        const uint Upper32Canary = 0x0ECA8642;
+        const ulong Lower64Canary = 0x13579BDF2468ACE0UL;
+        const ulong UInt64OutputSentinel = 0xFEDCBA9876543210UL;
+        const ulong Upper64Canary = 0x0ECA86425A5A5A5AUL;
+        const string ExportPrefix = "Terrum.CodeAnalysis.Numerics64.";
+
+        Assert.Equal(12, Marshal.SizeOf<GuardedUInt32>());
+        Assert.Equal(0, Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.Before)).ToInt32());
+        Assert.Equal(4, Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.Value)).ToInt32());
+        Assert.Equal(8, Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.After)).ToInt32());
+        Assert.Equal(24, Marshal.SizeOf<GuardedUInt64>());
+        Assert.Equal(0, Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.Before)).ToInt32());
+        Assert.Equal(8, Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.Value)).ToInt32());
+        Assert.Equal(16, Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.After)).ToInt32());
+
+        UInt32IntUnaryExport GetUInt32Int(string name) =>
+            Marshal.GetDelegateForFunctionPointer<UInt32IntUnaryExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        UInt32UnaryExport GetUInt32(string name) =>
+            Marshal.GetDelegateForFunctionPointer<UInt32UnaryExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        UInt32BinaryExport GetUInt32Binary(string name) =>
+            Marshal.GetDelegateForFunctionPointer<UInt32BinaryExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        UInt32PredicateExport GetUInt32Predicate(string name) =>
+            Marshal.GetDelegateForFunctionPointer<UInt32PredicateExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        UInt32RoundUpExport GetUInt32RoundUp(string name) =>
+            Marshal.GetDelegateForFunctionPointer<UInt32RoundUpExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        UInt64IntUnaryExport GetUInt64Int(string name) =>
+            Marshal.GetDelegateForFunctionPointer<UInt64IntUnaryExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        UInt64UnaryExport GetUInt64(string name) =>
+            Marshal.GetDelegateForFunctionPointer<UInt64UnaryExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        UInt64BinaryExport GetUInt64Binary(string name) =>
+            Marshal.GetDelegateForFunctionPointer<UInt64BinaryExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        UInt64PredicateExport GetUInt64Predicate(string name) =>
+            Marshal.GetDelegateForFunctionPointer<UInt64PredicateExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        UInt64RoundUpExport GetUInt64RoundUp(string name) =>
+            Marshal.GetDelegateForFunctionPointer<UInt64RoundUpExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+
+        var leadingZeroCount32 = GetUInt32Int("LeadingZeroCountUInt32");
+        var trailingZeroCount32 = GetUInt32Int("TrailingZeroCountUInt32");
+        var popCount32 = GetUInt32Int("PopCountUInt32");
+        var rotateLeft32 = GetUInt32Binary("RotateLeftUInt32");
+        var rotateRight32 = GetUInt32Binary("RotateRightUInt32");
+        var reverseBits32 = GetUInt32("ReverseBitsUInt32");
+        var reverseEndianness32 = GetUInt32("ReverseEndiannessUInt32");
+        var isPow232 = GetUInt32Predicate("IsPow2UInt32");
+        var roundUp32 = GetUInt32RoundUp("TryRoundUpToPowerOfTwoUInt32");
+        var leadingZeroCount64 = GetUInt64Int("LeadingZeroCountUInt64");
+        var trailingZeroCount64 = GetUInt64Int("TrailingZeroCountUInt64");
+        var popCount64 = GetUInt64Int("PopCountUInt64");
+        var rotateLeft64 = GetUInt64Binary("RotateLeftUInt64");
+        var rotateRight64 = GetUInt64Binary("RotateRightUInt64");
+        var reverseBits64 = GetUInt64("ReverseBitsUInt64");
+        var reverseEndianness64 = GetUInt64("ReverseEndiannessUInt64");
+        var isPow264 = GetUInt64Predicate("IsPow2UInt64");
+        var roundUp64 = GetUInt64RoundUp("TryRoundUpToPowerOfTwoUInt64");
+
+        var values32 = new List<uint> { 0, 1, 2, 3, 0x01234567, 0xAAAAAAAA, 0x55555555, uint.MaxValue };
+        var values64 = new List<ulong> {
+            0, 1, 2, 3, 0x0123456789ABCDEF, 0xAAAAAAAAAAAAAAAA, 0x5555555555555555, ulong.MaxValue,
+        };
+        for (var bit = 0; bit < 32; bit++)
+        {
+            var oneBit = 1U << bit;
+            values32.Add(oneBit);
+            values32.Add(~oneBit);
+        }
+        for (var bit = 0; bit < 64; bit++)
+        {
+            var oneBit = 1UL << bit;
+            values64.Add(oneBit);
+            values64.Add(~oneBit);
+        }
+
+        int[] rotationCounts = [int.MinValue, -65, -64, -33, -32, -1, 0, 1, 31, 32, 33, 63, 64, 65, int.MaxValue];
+        foreach (var value in values32)
+        {
+            Assert.Equal(BitOperations.LeadingZeroCount(value), leadingZeroCount32(value));
+            Assert.Equal(BitOperations.TrailingZeroCount(value), trailingZeroCount32(value));
+            Assert.Equal(BitOperations.PopCount(value), popCount32(value));
+            Assert.Equal(ReverseBits32(value), reverseBits32(value));
+            Assert.Equal(BinaryPrimitives.ReverseEndianness(value), reverseEndianness32(value));
+            Assert.Equal(BitOperations.IsPow2(value) ? 1 : 0, isPow232(value));
+            foreach (var count in rotationCounts)
+            {
+                Assert.Equal(BitOperations.RotateLeft(value, count), rotateLeft32(value, count));
+                Assert.Equal(BitOperations.RotateRight(value, count), rotateRight32(value, count));
+            }
+        }
+
+        foreach (var value in values64)
+        {
+            Assert.Equal(BitOperations.LeadingZeroCount(value), leadingZeroCount64(value));
+            Assert.Equal(BitOperations.TrailingZeroCount(value), trailingZeroCount64(value));
+            Assert.Equal(BitOperations.PopCount(value), popCount64(value));
+            Assert.Equal(ReverseBits64(value), reverseBits64(value));
+            Assert.Equal(BinaryPrimitives.ReverseEndianness(value), reverseEndianness64(value));
+            Assert.Equal(BitOperations.IsPow2(value) ? 1 : 0, isPow264(value));
+            foreach (var count in rotationCounts)
+            {
+                Assert.Equal(BitOperations.RotateLeft(value, count), rotateLeft64(value, count));
+                Assert.Equal(BitOperations.RotateRight(value, count), rotateRight64(value, count));
+            }
+        }
+
+        var roundUpValues32 = new List<uint> { 0, 1, uint.MaxValue };
+        for (var bit = 0; bit < 32; bit++)
+        {
+            var power = 1U << bit;
+            roundUpValues32.Add(power - 1);
+            roundUpValues32.Add(power);
+            roundUpValues32.Add(power + 1);
+        }
+        foreach (var value in roundUpValues32)
+        {
+            var expected = BitOperations.RoundUpToPowerOf2(value);
+            var expectedSuccess = expected != 0;
+            var guarded = new GuardedUInt32 {
+                Before = Lower32Canary,
+                Value = UInt32OutputSentinel,
+                After = Upper32Canary,
+            };
+            var actual = roundUp32(value, ref guarded.Value);
+            Assert.Equal(expectedSuccess ? 1 : 0, actual);
+            Assert.Equal(expectedSuccess ? expected : UInt32OutputSentinel, guarded.Value);
+            Assert.Equal(Lower32Canary, guarded.Before);
+            Assert.Equal(Upper32Canary, guarded.After);
+        }
+
+        var roundUpValues64 = new List<ulong> { 0, 1, ulong.MaxValue };
+        for (var bit = 0; bit < 64; bit++)
+        {
+            var power = 1UL << bit;
+            roundUpValues64.Add(power - 1);
+            roundUpValues64.Add(power);
+            roundUpValues64.Add(power + 1);
+        }
+        foreach (var value in roundUpValues64)
+        {
+            var expected = BitOperations.RoundUpToPowerOf2(value);
+            var expectedSuccess = expected != 0;
+            var guarded = new GuardedUInt64 {
+                Before = Lower64Canary,
+                Value = UInt64OutputSentinel,
+                After = Upper64Canary,
+            };
+            var actual = roundUp64(value, ref guarded.Value);
+            Assert.Equal(expectedSuccess ? 1 : 0, actual);
+            Assert.Equal(expectedSuccess ? expected : UInt64OutputSentinel, guarded.Value);
+            Assert.Equal(Lower64Canary, guarded.Before);
+            Assert.Equal(Upper64Canary, guarded.After);
+        }
+
+        static uint ReverseBits32(uint value)
+        {
+            uint reversed = 0;
+            for (var bit = 0; bit < 32; bit++)
+            {
+                reversed = (reversed << 1) | (value & 1);
+                value >>= 1;
+            }
+            return reversed;
+        }
+
+        static ulong ReverseBits64(ulong value)
+        {
+            ulong reversed = 0;
+            for (var bit = 0; bit < 64; bit++)
+            {
+                reversed = (reversed << 1) | (value & 1);
+                value >>= 1;
+            }
+            return reversed;
         }
     }
 
@@ -1041,6 +1268,24 @@ public sealed partial class CliTests
                 "Terrum.CodeAnalysis.Numerics64.TryMultiplyUInt64",
                 "Terrum.CodeAnalysis.Numerics64.TryDivideUInt64",
                 "Terrum.CodeAnalysis.Numerics64.TryRemainderUInt64",
+                "Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt32",
+                "Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt32",
+                "Terrum.CodeAnalysis.Numerics64.PopCountUInt32",
+                "Terrum.CodeAnalysis.Numerics64.RotateLeftUInt32",
+                "Terrum.CodeAnalysis.Numerics64.RotateRightUInt32",
+                "Terrum.CodeAnalysis.Numerics64.ReverseBitsUInt32",
+                "Terrum.CodeAnalysis.Numerics64.ReverseEndiannessUInt32",
+                "Terrum.CodeAnalysis.Numerics64.IsPow2UInt32",
+                "Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt32",
+                "Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt64",
+                "Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt64",
+                "Terrum.CodeAnalysis.Numerics64.PopCountUInt64",
+                "Terrum.CodeAnalysis.Numerics64.RotateLeftUInt64",
+                "Terrum.CodeAnalysis.Numerics64.RotateRightUInt64",
+                "Terrum.CodeAnalysis.Numerics64.ReverseBitsUInt64",
+                "Terrum.CodeAnalysis.Numerics64.ReverseEndiannessUInt64",
+                "Terrum.CodeAnalysis.Numerics64.IsPow2UInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt64",
             })
             {
                 Assert.True(NativeLibrary.TryGetExport(handle, export, out _),
@@ -1089,6 +1334,7 @@ public sealed partial class CliTests
             Assert.Equal(0x8000000000000000UL, magnitudeInt64(long.MinValue));
             AssertWideIntegerAccumulatorExports(handle);
             AssertWideIntegerArithmeticExports(handle);
+            AssertBitOperationsExports(handle);
 
             var isAsciiDigit = Marshal.GetDelegateForFunctionPointer<Char16PredicateExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.IsAsciiDigit"));

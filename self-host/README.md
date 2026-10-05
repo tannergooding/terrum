@@ -8,8 +8,8 @@ They are not linked into the C# implementation. The native profile executes
 the range, character, integer and nested token components and a bounded token scanner.
 The full-solution build also produces
 `artifacts\bin\self-host\<configuration>\terrum-compiler-primitives.dll`
-from `CharacterFacts`, `SourceRange`, `Token`, `Utf16CodeUnits` and
-`WideIntegerFacts`. This maintained native
+from `BitOperations`, `CharacterFacts`, `SourceRange`, `Token`,
+`Utf16CodeUnits` and `WideIntegerFacts`. This maintained native
 compiler-primitives library exports `Terrum.CodeAnalysis.SourceRange.TryCreate`,
 `Terrum.CodeAnalysis.IsAsciiDigit`,
 `Terrum.CodeAnalysis.IsLineBreak`, `Terrum.CodeAnalysis.GetDecimalDigit`,
@@ -25,7 +25,10 @@ compiler-primitives library exports `Terrum.CodeAnalysis.SourceRange.TryCreate`,
 `Terrum.CodeAnalysis.Numerics64.TryRemainderInt64`,
 `Terrum.CodeAnalysis.Numerics64.TryNegateInt64`,
 `Terrum.CodeAnalysis.Numerics64.TryAbsoluteInt64`, and the five matching
-unsigned binary helpers; the source-grant-dependent
+unsigned binary helpers. It also exports the nine `BitOperations` functions
+for each width: leading/trailing-zero count, population count, left/right
+rotation, bit/endianness reversal, power-of-two test and checked round-up.
+The source-grant-dependent
 `Utf16Scalar.ReadUtf16Scalar` adapter remains outside it. These are internal
 compiler implementation exports, not a language-level API or stable native
 ABI; the library is not a self-host compiler or an executable scanner/parser.
@@ -260,7 +263,7 @@ native emitter or compiler self-build.
 
 | Candidate | Purpose | Gates before execution |
 |---|---|---|
-| [BitOperations](BitOperations.terrum) | Candidate `uint32`/`uint64` leading/trailing-zero counts, population counts, rotations, bit/byte reversal, power-of-two checks and vacancy-only round-up | Independently compiled module consumers compare boundary and deterministic values with hosted bit operations under both policies; separate width-specific consumers cover every one-hot/one-cold bit position, rotation count extremes and values around every power of two for round-up; zero and unrepresentable results leave outputs vacant, and `TRM3016` compile checks cover failed-output reads for both widths and policies; candidate API remains unapproved |
+| [BitOperations](BitOperations.terrum) | Candidate `uint32`/`uint64` leading/trailing-zero counts, population counts, rotations, bit/byte reversal, power-of-two checks and vacancy-only round-up | Independently compiled module consumers compare boundary and deterministic values with hosted bit operations under both policies; separate width-specific consumers cover every one-hot/one-cold bit position, rotation count extremes and values around every power of two for round-up; zero and unrepresentable results leave outputs vacant, and `TRM3016` compile checks cover failed-output reads for both widths and policies; the internal Windows x64 fail-fast DLL directly invokes all 18 width-specific helpers against hosted `BitOperations`, including conditional-output preservation and adjacent canaries; candidate API remains unapproved |
 | [IntegerMath](IntegerMath.terrum) | Candidate checked absolute values, sign/min/max/clamp, exact widened `int32` multiplication and signed-input GCD returning unsigned magnitudes | AOT/JIT and independent-module boundaries include signed minima, failed `TryAbs` vacancy/reuse, reversed clamp rejection and full-magnitude GCD; revision-56 persisted semantic-module JIT compares candidate operations against integer oracles across 858 boundary cases under both policies, including signed-minimum magnitude and failed-output checks; tuple-returning `DivRem`, public API approval and conversion witnesses remain out of scope |
 | [Float32MathSelection](Float32MathSelection.terrum) | Unapproved `float32` candidate for absolute value, numeric min/max, and clamp with proposed NaN propagation and signed-zero selection | AOT/JIT and independent-module tests check NaN results, infinities, zero-sign selection and clamp validation order; payload/signaling/status effects remain open, and this is not an adopted `Float32Math` API |
 | [Float64MathSelection](Float64MathSelection.terrum) | Unapproved matching-width candidate for `float64` absolute value, numeric min/max, and clamp; exact contract remains in [its proposal](../docs/proposals/float64-math-selection.md) | AOT/JIT and independent-module tests check NaN results, infinities, zero-sign selection and clamp validation order; payload/signaling/status effects remain open, and this is not an adopted `Float64Math` API |
