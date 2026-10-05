@@ -28,10 +28,12 @@ hosted verifier/emitter.
 Revision 55 provisionally supports top-level caller-unsafe function contracts
 and calls inside explicit `unsafe { }` blocks in structured semantic modules.
 Readers reconstruct call authorization from the persisted block scope rather
-than trusting a serialized call flag. `unsafe(expr)`, unsafe fields, accessors
-and operators remain outside this slice; executable TRRM continues to reject
-caller-unsafe declarations and calls. This implementation does not approve the
-broader reference/access metadata proposal.
+than trusting a serialized call flag. Linking rejects replacing a safe import
+with a caller-unsafe implementation, while an unsafe import may use a safe
+replacement. `unsafe(expr)`, unsafe fields, accessors and operators remain
+outside this slice; executable TRRM continues to reject caller-unsafe
+declarations and calls. This implementation does not approve the broader
+reference/access metadata proposal.
 
 Hosted binding accepts named arguments, including `out` and `init ref<T>`
 destinations, for uniquely resolved non-intrinsic calls. Arguments retain

@@ -32,10 +32,11 @@ and emitter.
 
 ### Provisional implementation slice: semantic-module caller obligations
 
-**Summary:** Same-compilation binding already enforces caller-unsafe function
-declarations and explicit `unsafe` scopes. Structured semantic modules retain
-`BoundUnsafe` scopes but currently reject every caller-unsafe declaration or
-call. Executable TRRM Bodies do not retain a validated unsafe-call scope.
+**Pre-slice boundary:** Same-compilation binding already enforces
+caller-unsafe function declarations and explicit `unsafe` scopes. Before the
+provisional slice below, structured semantic modules retained `BoundUnsafe`
+scopes but rejected caller-unsafe declarations and calls. Executable TRRM
+Bodies still do not retain a validated unsafe-call scope.
 
 **Recommendation:** Provisionally implement round-tripping caller-unsafe
 contracts for top-level functions and calls enclosed by explicit `unsafe { }`
@@ -49,6 +50,17 @@ declarations and calls rejected in executable TRRM until its Body contract
 can prove explicit call scope. This slice changes the internal semantic-module
 format and must advance its revision. It is an implementation experiment, not
 approval of general reference metadata or the broader proposal.
+
+**Implemented provisionally:** Semantic-module revision 55 persists the
+top-level function obligation and reconstructs call authorization only from
+explicit `BoundUnsafe` scopes. Safe imports reject caller-unsafe replacements;
+caller-unsafe imports may use a safe replacement. Revision 54 and future
+revision 56 artifacts are rejected rather than upgraded or normalized. These
+checks are covered by the `CallerUnsafeTests` regressions for round trips,
+replacement compatibility, adjacent-revision rejection, writer refusal of a
+retained authorization outside its unsafe block, and reader rejection after a
+persisted unsafe block is stripped. They do not approve the broader proposal or
+add source-free executable authorization.
 
 ### 1. Which dependency relations belong in the first callable profile?
 

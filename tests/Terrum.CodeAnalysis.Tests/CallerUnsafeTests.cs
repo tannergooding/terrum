@@ -309,6 +309,13 @@ public sealed class CallerUnsafeTests
             "int32 Main() { unsafe { return Danger(); } }"), reference);
         Assert.False(scopedCall.HasErrors, string.Join(Environment.NewLine, scopedCall.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(scopedCall.Program), producer);
+        foreach (var unsupportedVersion in new[] { 54, 56 })
+        {
+            var unsupportedConsumer = (byte[])consumer.Clone();
+            BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
+                unsupportedVersion);
+            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
+        }
         var linked = ModuleCompiler.Link(consumer, producer);
         SemanticVerifier.Verify(linked);
         Assert.Equal(42, NativeJit.Execute(linked, NativeRuntimePolicy.FailFast));
@@ -337,6 +344,50 @@ public sealed class CallerUnsafeTests
         Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(safeConsumer, safeProducer),
             NativeRuntimePolicy.FailFast));
         Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, safeProducer),
+            NativeRuntimePolicy.FailFast));
+
+        var changedUnsafeProducer = ModuleCompiler.CreateProducer(
+            CompileLibrary("public unsafe int32 Danger() { return 7; }"), ["Danger"]);
+        Assert.Equal(7, NativeJit.Execute(ModuleCompiler.Link(consumer, changedUnsafeProducer),
+            NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void SemanticModuleReadersReconstructCallerUnsafeAuthorizationFromUnsafeBlocks()
+    {
+        const string source = "int32 Main() { unsafe { return Danger(); } }";
+        var producer = ModuleCompiler.CreateProducer(
+            CompileLibrary("public unsafe int32 Danger() { return 42; }"), ["Danger"]);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), ModuleCompiler.CreateReference(producer));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var main = program.Functions[program.EntryPoint];
+        var unsafeBlock = Assert.IsType<BoundUnsafe>(Assert.Single(main.Body.Statements));
+
+        var forgedMain = main with {
+            Body = main.Body with { Statements = [unsafeBlock.Body] },
+        };
+        var forgedProgram = program with {
+            Functions = program.Functions.SetItem(program.EntryPoint, forgedMain),
+        };
+        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(forgedProgram, producer));
+
+        var consumer = ModuleCompiler.CreateConsumer(program, producer);
+        const byte BoundUnsafeStatementTag = 11;
+        var unsafeScope = new byte[1 + (2 * sizeof(int))];
+        unsafeScope[0] = BoundUnsafeStatementTag;
+        BinaryPrimitives.WriteInt32LittleEndian(unsafeScope.AsSpan(1), unsafeBlock.Span.Start);
+        BinaryPrimitives.WriteInt32LittleEndian(unsafeScope.AsSpan(1 + sizeof(int)), unsafeBlock.Span.Length);
+        var unsafeScopeOffset = consumer.AsSpan().IndexOf(unsafeScope);
+        Assert.True(unsafeScopeOffset >= 0);
+        Assert.Equal(unsafeScopeOffset, consumer.AsSpan().LastIndexOf(unsafeScope));
+
+        var forgedConsumer = new byte[consumer.Length - unsafeScope.Length];
+        consumer.AsSpan(0, unsafeScopeOffset).CopyTo(forgedConsumer);
+        consumer.AsSpan(unsafeScopeOffset + unsafeScope.Length)
+            .CopyTo(forgedConsumer.AsSpan(unsafeScopeOffset));
+        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forgedConsumer, producer));
     }
 
     [Fact]
