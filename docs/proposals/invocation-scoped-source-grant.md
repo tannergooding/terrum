@@ -135,6 +135,11 @@ boundaries, separators and rejected inputs.
 passed under both policies, comparing all five parser APIs across radices
 2–36, their type boundaries and overflows, invalid digits/radices and the
 radix-specific separator rules over fresh grants.
+`IntegerFormattingModuleMatchesFreshSourceGrantsAsync` passed under both
+policies, comparing decimal and radix-2..36 formatting for signed/unsigned
+32-/64-bit values and `char16` against a host-side oracle. Its test-only wrapper
+reads expected text from the grant; formatting remains source-independent, and
+unique output workspaces do not cross the module boundary.
 This slice does not make the maintained
 compiler-primitives DLL source-aware or move the scalar frontend beyond the
 hosted verifier/emitter.

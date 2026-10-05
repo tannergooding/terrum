@@ -18,9 +18,12 @@ The bounded adapter has executed the Terrum-authored `CharacterLiteral` and
 provisional UTF-8 namespace-row encoder. Persisted semantic-module JIT tests
 also cover `IntegerParsing` for radices 2–36, `SourceLineIndex`
 counts/extents/position mapping/offset lookup, and streaming `SourceLines`
-ranges and coordinates across fresh grants. These tests do not make `StringRow`
-a TRRM section writer or move the scanner or scalar frontend beyond hosted
-verification and emission.
+ranges and coordinates across fresh grants. A test-only formatter wrapper
+also compares `IntegerFormatting` output with expected text from fresh grants;
+the formatter itself remains source-independent, and its unique workspace
+stays within the producer. These tests do not make `StringRow` a TRRM section
+writer or move the scanner or scalar frontend beyond hosted verification and
+emission.
 This bounded implementation is recorded by the still-unapproved
 [invocation-scoped source grant proposal](proposals/invocation-scoped-source-grant.md);
 it does not extend the native profile or move the scalar frontend beyond the
