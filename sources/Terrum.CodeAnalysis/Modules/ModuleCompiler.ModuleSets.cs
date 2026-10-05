@@ -14,7 +14,11 @@ public static partial class ModuleCompiler
     public static CompilationReference CreateReferenceSet(IReadOnlyList<byte[]> producers)
     {
         var modules = ReadSet(producers);
-        var references = modules.Select(SetReference).ToArray();
+        var references = new CompilationReference[modules.Length];
+        for (var index = 0; index < modules.Length; index++)
+        {
+            references[index] = SetReference(modules[index]);
+        }
         return CreateReferenceSetFromReferences(references);
     }
 
