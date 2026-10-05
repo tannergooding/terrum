@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `15c8f6b2` | Exercise existing integer wrapping candidates through the internal Windows x64 compiler-primitives DLL |
 | `8e522cb3` | Exercise existing integer saturation candidates through the internal Windows x64 compiler-primitives DLL |
 | `821099f0` | Exercise existing checked integer and char16 conversion candidates through the internal Windows x64 compiler-primitives DLL |
 | `81a462ea` | Exercise existing checked 32-bit arithmetic helpers through the internal Windows x64 compiler-primitives DLL |
