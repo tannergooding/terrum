@@ -223,9 +223,9 @@ internal static class PeImage
             [groups[0].DllName] = groups[0],
         };
         groups[0].AddSymbol("ExitProcess");
+        // Export names are sorted per group below, so fixups only need DLL ordering here.
         foreach (var fixup in native.NativeImports.OrderBy(static item => item.DllName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(static item => item.DllName, StringComparer.Ordinal)
-            .ThenBy(static item => item.ExportName, StringComparer.Ordinal))
+            .ThenBy(static item => item.DllName, StringComparer.Ordinal))
         {
             if (!groupsByName.TryGetValue(fixup.DllName, out var group))
             {
