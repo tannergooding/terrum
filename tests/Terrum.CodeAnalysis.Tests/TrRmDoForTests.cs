@@ -136,6 +136,7 @@ public sealed class TrRmDoForTests
     [InlineData(42, "int32 Main() { mut int64 result = 0; do { result += 42; break; } while (false); return result == 42 ? 42 : 0; }")]
     [InlineData(42, "int32 Main() { mut uint64 result = 0; do { result += 42; break; } while (false); return result == 42 ? 42 : 0; }")]
     [InlineData(42, "int32 Main() { mut int32 result = 21; do { result <<= 1; break; } while (false); return result; }")]
+    [InlineData(42, "int32 Main() { mut int32 result = 1; do { result += result++; break; } while (false); return result == 2 ? 42 : 0; }")]
     public void AcyclicLoopsPreserveSafeTerminalPrefixEffects(int expected, string source)
     {
         var original = Compile(source);
