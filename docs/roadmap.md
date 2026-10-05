@@ -272,6 +272,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `91764c60` | Project bounded internal scalar aliases through complete v85 snapshots |
 | `e13aa606` | Verify managed token-chain behavior through persisted semantic-module JIT |
 | `b16d95c` | Execute `CopyAlgorithms` generic specializations through persisted semantic modules |
 | `fe9245d` | Verify `IntegerFacts` checked predicates through persisted semantic-module JIT |
