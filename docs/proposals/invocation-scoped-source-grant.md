@@ -114,6 +114,10 @@ against the hosted lexer across fresh grants.
 `StringRowModuleEncodesUtf8NamespaceRowsFromFreshSourceGrants` also passed
 under both policies, comparing every emitted row byte and the end boundary
 with the hosted string-table writer across fresh grants.
+`SourceLineIndexModuleIndexesFreshSourceGrants` passed under both policies,
+reusing persisted provider and consumer artifacts across empty, ordinary,
+mixed-line-break and malformed-surrogate snapshots while comparing line
+counts and content/full-break extents with the hosted snapshot.
 This slice does not make the maintained
 compiler-primitives DLL source-aware or move the scalar frontend beyond the
 hosted verifier/emitter.
