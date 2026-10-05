@@ -2898,14 +2898,15 @@ reachable backedge and a designated exit; it does not synthesize a backedge
 for a source loop whose body always transfers out. A `do` body, or a
 constant-true `while`/`for` body, erases when it is a
 terminal tree of returns and direct breaks, including nested `if` statements
-whose two explicit arms are terminal. The lowering keeps those branch
-conditions and their effects, routes breaks to the existing fallthrough, and
-retains returns; it omits the unreachable loop condition and iterator and
-adds no loop region or backedge. For initializers remain in source order.
-Bodies with implicit fallthrough, continues, nested loops, managed-local
-cleanup or other nonterminal effects remain outside this erasure. All retained
-inactive operations and every function Body still undergo mandatory
-validation.
+whose two explicit arms are terminal, or whose terminal `then` arm is followed
+by a terminal statement for its implicit `else` path. The lowering keeps those
+branch conditions and their effects, routes breaks to the existing
+fallthrough, and retains returns; it omits the unreachable loop condition and
+iterator and adds no loop region or backedge. For initializers remain in
+source order. Bodies with implicit fallthrough, continues, nested loops,
+managed-local cleanup or other nonterminal effects remain outside this
+erasure. All retained inactive operations and every function Body still
+undergo mandatory validation.
 Source scope support is
 an implementation boundary, not an unresolved language contract.
 Loaded indexed graphs execute but cannot be re-emitted through the structured

@@ -1820,9 +1820,10 @@ public static partial class TrRmExecutableCompiler
                 hasBreak = true;
                 return true;
             }
-            if (statement is BoundIf { Else: not null } conditional
+            if (statement is BoundIf conditional
+                && conditional.Else is { } otherwise
                 && TerminalAcyclicBody(conditional.Then, out var thenHasBreak)
-                && TerminalAcyclicBody(conditional.Else, out var elseHasBreak))
+                && TerminalAcyclicBody(otherwise, out var elseHasBreak))
             {
                 hasBreak = thenHasBreak || elseHasBreak;
                 return true;
@@ -1840,6 +1841,14 @@ public static partial class TrRmExecutableCompiler
                 && block.Statements[1] is BoundBlock { Statements.IsEmpty: true, RetiredManagedLocals.IsEmpty: true })
             {
                 return TerminalAcyclicBody(block.Statements[0], out hasBreak);
+            }
+            if (block.Statements.Length == 2
+                && block.Statements[0] is BoundIf { Else: null } implicitElse
+                && TerminalAcyclicBody(implicitElse.Then, out var implicitThenHasBreak)
+                && TerminalAcyclicBody(block.Statements[1], out var continuationHasBreak))
+            {
+                hasBreak = implicitThenHasBreak || continuationHasBreak;
+                return true;
             }
             hasBreak = false;
             return false;
@@ -1874,35 +1883,49 @@ public static partial class TrRmExecutableCompiler
                 Jump(exit ?? throw Unsupported("Acyclic loop break has no fallthrough target."), _slots, visible);
                 return;
             }
-            if (statement is BoundIf { Else: not null } conditional)
+            if (statement is BoundIf { Else: { } otherwise } conditional)
             {
-                var condition = Expression(conditional.Condition);
-                var source = _current ?? throw Unsupported("Acyclic loop condition did not reach its branch.");
-                var region = source.Region;
-                var trueBlock = NewBlock(region);
-                var falseBlock = NewBlock(region);
-                source.Condition = condition;
-                source.True = new IndexedEdge(trueBlock, []);
-                source.False = new IndexedEdge(falseBlock, []);
-                var branchSlots = (int[])_slots.Clone();
-                _current = trueBlock;
-                _slots = (int[])branchSlots.Clone();
-                AcyclicTerminalStatement(conditional.Then, exit, visible);
-                _current = falseBlock;
-                _slots = (int[])branchSlots.Clone();
-                AcyclicTerminalStatement(conditional.Else, exit, visible);
+                AcyclicTerminalBranch(conditional.Condition, conditional.Then, otherwise, exit, visible);
                 return;
             }
             if (statement is BoundBlock block && block.RetiredManagedLocals.IsEmpty
-                && (block.Statements.Length == 1
-                    || block.Statements.Length == 2
-                        && block.Statements[1] is BoundBlock
+                && block.Statements.Length == 2
+                && block.Statements[0] is BoundIf { Else: null } implicitElse)
+            {
+                AcyclicTerminalBranch(implicitElse.Condition, implicitElse.Then, block.Statements[1], exit, visible);
+                return;
+            }
+            if (statement is BoundBlock blockWithSingleStatement
+                && blockWithSingleStatement.RetiredManagedLocals.IsEmpty
+                && (blockWithSingleStatement.Statements.Length == 1
+                    || blockWithSingleStatement.Statements.Length == 2
+                        && blockWithSingleStatement.Statements[1] is BoundBlock
                             { Statements.IsEmpty: true, RetiredManagedLocals.IsEmpty: true }))
             {
-                AcyclicTerminalStatement(block.Statements[0], exit, visible);
+                AcyclicTerminalStatement(blockWithSingleStatement.Statements[0], exit, visible);
                 return;
             }
             throw Unsupported("Acyclic loop terminal shape changed during lowering.");
+        }
+
+        private void AcyclicTerminalBranch(BoundExpression conditionExpression, BoundStatement whenTrue,
+            BoundStatement whenFalse, IndexedBlock? exit, int[] visible)
+        {
+            var condition = Expression(conditionExpression);
+            var source = _current ?? throw Unsupported("Acyclic loop condition did not reach its branch.");
+            var region = source.Region;
+            var trueBlock = NewBlock(region);
+            var falseBlock = NewBlock(region);
+            source.Condition = condition;
+            source.True = new IndexedEdge(trueBlock, []);
+            source.False = new IndexedEdge(falseBlock, []);
+            var branchSlots = (int[])_slots.Clone();
+            _current = trueBlock;
+            _slots = (int[])branchSlots.Clone();
+            AcyclicTerminalStatement(whenTrue, exit, visible);
+            _current = falseBlock;
+            _slots = (int[])branchSlots.Clone();
+            AcyclicTerminalStatement(whenFalse, exit, visible);
         }
 
         internal byte[] Encode()
