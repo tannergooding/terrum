@@ -92,25 +92,7 @@ public sealed class WideCandidateTests
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task BitOperationsMatchHostedReferenceAcrossModulesAsync(NativeRuntimePolicy policy)
     {
-        var producer = CreateNumericsLibrary("BitOperations.terrum", policy,
-            "Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt32",
-            "Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt32",
-            "Terrum.CodeAnalysis.Numerics64.PopCountUInt32",
-            "Terrum.CodeAnalysis.Numerics64.RotateLeftUInt32",
-            "Terrum.CodeAnalysis.Numerics64.RotateRightUInt32",
-            "Terrum.CodeAnalysis.Numerics64.ReverseBitsUInt32",
-            "Terrum.CodeAnalysis.Numerics64.ReverseEndiannessUInt32",
-            "Terrum.CodeAnalysis.Numerics64.IsPow2UInt32",
-            "Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt32",
-            "Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt64",
-            "Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt64",
-            "Terrum.CodeAnalysis.Numerics64.PopCountUInt64",
-            "Terrum.CodeAnalysis.Numerics64.RotateLeftUInt64",
-            "Terrum.CodeAnalysis.Numerics64.RotateRightUInt64",
-            "Terrum.CodeAnalysis.Numerics64.ReverseBitsUInt64",
-            "Terrum.CodeAnalysis.Numerics64.ReverseEndiannessUInt64",
-            "Terrum.CodeAnalysis.Numerics64.IsPow2UInt64",
-            "Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt64");
+        var producer = CreateBitOperationsLibrary(policy);
         var compilation = Compilation.Create(SyntaxTree.Parse(BuildBitOperationsConsumer()),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -118,6 +100,18 @@ public sealed class WideCandidateTests
         Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public Task BitOperationsUInt32MatchEveryBitPositionAcrossModulesAsync(NativeRuntimePolicy policy) =>
+        ExecuteBitOperationsPositionConsumerAsync(policy, includeUInt64: false);
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public Task BitOperationsUInt64MatchEveryBitPositionAcrossModulesAsync(NativeRuntimePolicy policy) =>
+        ExecuteBitOperationsPositionConsumerAsync(policy, includeUInt64: true);
 
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast, "UInt32", "uint32.MaxValue")]
@@ -958,6 +952,131 @@ public sealed class WideCandidateTests
         var compilation = Compilation.CreateLibrary(source, (BoundRuntimePolicy)policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), exports);
+    }
+
+    private static byte[] CreateBitOperationsLibrary(NativeRuntimePolicy policy) =>
+        CreateNumericsLibrary("BitOperations.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt32",
+            "Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt32",
+            "Terrum.CodeAnalysis.Numerics64.PopCountUInt32",
+            "Terrum.CodeAnalysis.Numerics64.RotateLeftUInt32",
+            "Terrum.CodeAnalysis.Numerics64.RotateRightUInt32",
+            "Terrum.CodeAnalysis.Numerics64.ReverseBitsUInt32",
+            "Terrum.CodeAnalysis.Numerics64.ReverseEndiannessUInt32",
+            "Terrum.CodeAnalysis.Numerics64.IsPow2UInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt32",
+            "Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt64",
+            "Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt64",
+            "Terrum.CodeAnalysis.Numerics64.PopCountUInt64",
+            "Terrum.CodeAnalysis.Numerics64.RotateLeftUInt64",
+            "Terrum.CodeAnalysis.Numerics64.RotateRightUInt64",
+            "Terrum.CodeAnalysis.Numerics64.ReverseBitsUInt64",
+            "Terrum.CodeAnalysis.Numerics64.ReverseEndiannessUInt64",
+            "Terrum.CodeAnalysis.Numerics64.IsPow2UInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt64");
+
+    private static async Task ExecuteBitOperationsPositionConsumerAsync(
+        NativeRuntimePolicy policy, bool includeUInt64)
+    {
+        var producer = CreateBitOperationsLibrary(policy);
+        var compilation = Compilation.Create(
+            SyntaxTree.Parse(BuildBitOperationsPositionConsumer(includeUInt64)),
+            ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    private static string BuildBitOperationsPositionConsumer(bool includeUInt64)
+    {
+        var source = new StringBuilder("using Terrum.CodeAnalysis.Numerics64;\nint32 Main() {\n");
+        var failureCode = 1;
+        if (!includeUInt64)
+        {
+            int[] counts32 = [int.MinValue, -1, 1, int.MaxValue];
+            for (var bit = 0; bit < 32; bit++)
+            {
+                var oneBit = 1U << bit;
+                foreach (var value in new uint[] { oneBit, ~oneBit })
+                {
+                    var literal = Hex(value);
+                    AppendBitCheck(source, $"LeadingZeroCountUInt32({literal})",
+                        BitOperations.LeadingZeroCount(value).ToString(CultureInfo.InvariantCulture), ref failureCode);
+                    AppendBitCheck(source, $"TrailingZeroCountUInt32({literal})",
+                        BitOperations.TrailingZeroCount(value).ToString(CultureInfo.InvariantCulture), ref failureCode);
+                    AppendBitCheck(source, $"PopCountUInt32({literal})",
+                        BitOperations.PopCount(value).ToString(CultureInfo.InvariantCulture), ref failureCode);
+                    AppendBitCheck(source, $"ReverseBitsUInt32({literal})", Hex(ReverseBits(value)), ref failureCode);
+                    AppendBitCheck(source, $"ReverseEndiannessUInt32({literal})",
+                        Hex(BinaryPrimitives.ReverseEndianness(value)), ref failureCode);
+                    AppendBitCheck(source, $"IsPow2UInt32({literal})",
+                        BitOperations.IsPow2(value) ? "true" : "false", ref failureCode);
+                    foreach (var count in counts32)
+                    {
+                        var countLiteral = count.ToString(CultureInfo.InvariantCulture);
+                        AppendBitCheck(source, $"RotateLeftUInt32({literal}, {countLiteral})",
+                            Hex(BitOperations.RotateLeft(value, count)), ref failureCode);
+                        AppendBitCheck(source, $"RotateRightUInt32({literal}, {countLiteral})",
+                            Hex(BitOperations.RotateRight(value, count)), ref failureCode);
+                    }
+                }
+
+                var power = 1U << bit;
+                foreach (var value in new uint[] { power - 1, power, power + 1 })
+                {
+                    var expected = BitOperations.RoundUpToPowerOf2(value);
+                    AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt32", Hex(value), Hex(expected),
+                        expected != 0, ref failureCode);
+                }
+            }
+            AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt32", Hex(uint.MaxValue),
+                Hex(BitOperations.RoundUpToPowerOf2(uint.MaxValue)), false, ref failureCode);
+        }
+        else
+        {
+            int[] counts64 = [int.MinValue, -1, 1, int.MaxValue];
+            for (var bit = 0; bit < 64; bit++)
+            {
+                var oneBit = 1UL << bit;
+                foreach (var value in new ulong[] { oneBit, ~oneBit })
+                {
+                    var literal = Hex(value);
+                    AppendBitCheck(source, $"LeadingZeroCountUInt64({literal})",
+                        BitOperations.LeadingZeroCount(value).ToString(CultureInfo.InvariantCulture), ref failureCode);
+                    AppendBitCheck(source, $"TrailingZeroCountUInt64({literal})",
+                        BitOperations.TrailingZeroCount(value).ToString(CultureInfo.InvariantCulture), ref failureCode);
+                    AppendBitCheck(source, $"PopCountUInt64({literal})",
+                        BitOperations.PopCount(value).ToString(CultureInfo.InvariantCulture), ref failureCode);
+                    AppendBitCheck(source, $"ReverseBitsUInt64({literal})", Hex(ReverseBits(value)), ref failureCode);
+                    AppendBitCheck(source, $"ReverseEndiannessUInt64({literal})",
+                        Hex(BinaryPrimitives.ReverseEndianness(value)), ref failureCode);
+                    AppendBitCheck(source, $"IsPow2UInt64({literal})",
+                        BitOperations.IsPow2(value) ? "true" : "false", ref failureCode);
+                    foreach (var count in counts64)
+                    {
+                        var countLiteral = count.ToString(CultureInfo.InvariantCulture);
+                        AppendBitCheck(source, $"RotateLeftUInt64({literal}, {countLiteral})",
+                            Hex(BitOperations.RotateLeft(value, count)), ref failureCode);
+                        AppendBitCheck(source, $"RotateRightUInt64({literal}, {countLiteral})",
+                            Hex(BitOperations.RotateRight(value, count)), ref failureCode);
+                    }
+                }
+
+                var power = 1UL << bit;
+                foreach (var value in new ulong[] { power - 1, power, power + 1 })
+                {
+                    var expected = BitOperations.RoundUpToPowerOf2(value);
+                    AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt64", Hex(value), Hex(expected),
+                        expected != 0, ref failureCode);
+                }
+            }
+            AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt64", Hex(ulong.MaxValue),
+                Hex(BitOperations.RoundUpToPowerOf2(ulong.MaxValue)), false, ref failureCode);
+        }
+
+        source.AppendLine("return 42;").AppendLine("}");
+        return source.ToString();
     }
 
     private static string BuildBitOperationsConsumer()

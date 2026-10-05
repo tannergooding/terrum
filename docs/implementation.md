@@ -85,6 +85,12 @@ independent `BigInteger` oracle distinguishes signed-minimum quotient overflow
 from the valid zero remainder; separate invalid consumers verify that failed
 outputs remain unreadable for every checked helper. This is persisted-execution
 evidence for the existing named functions, not new arithmetic operators.
+The provisional `BitOperations` candidate is also compared with hosted
+`System.Numerics.BitOperations` through persisted semantic-module consumers
+under both runtime policies. Separate width-specific consumers cover every
+one-hot and one-cold bit position, rotation count extremes, and the values
+immediately around every power of two for round-up, including unrepresentable
+results. This remains candidate evidence; the API is not approved.
 A separate revision-56 persisted semantic-module JIT comparison checks all 20
 existing `IntegerSaturation` candidate helpers against a `BigInteger` clamp
 oracle at source/destination boundaries and code-unit edges, including
