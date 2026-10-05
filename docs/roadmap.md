@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f8d3914` | Validate native graph and module-set checksums into stack storage |
 | `33fa5b5` | Aggregate sparse graph type origins only when repeated provider probes outweigh a bounded entry pass |
 | `7a53bb9` | Index native module-set machine imports once when validating semantic call coverage |
 | `3149b1b` | Group native module-set machine imports by DLL before serialization |
