@@ -306,9 +306,14 @@ public static partial class NativeModuleCompiler
 
     private static CompilationReference GraphReference(GraphPackage[] providers)
     {
-        var references = providers.Select(GetValidatedProviderReference).ToArray();
-        var provenance = providers.Select((provider, index) =>
-            ProviderOrigins(provider, references[index])).ToArray();
+        var references = new CompilationReference[providers.Length];
+        var provenance = new Dictionary<string, GraphTypeOrigin?>[providers.Length];
+        for (var index = 0; index < providers.Length; index++)
+        {
+            var provider = providers[index];
+            references[index] = GetValidatedProviderReference(provider);
+            provenance[index] = ProviderOrigins(provider, references[index]);
+        }
         return GraphReference(providers, references, provenance);
     }
 
@@ -393,7 +398,14 @@ public static partial class NativeModuleCompiler
             return [];
         }
         var imported = contract.ImportedStructures.ToHashSet(StringComparer.Ordinal);
-        provenance ??= providers.Select(provider => ProviderOrigins(provider)).ToArray();
+        if (provenance is null)
+        {
+            provenance = new Dictionary<string, GraphTypeOrigin?>[providers.Length];
+            for (var index = 0; index < providers.Length; index++)
+            {
+                provenance[index] = ProviderOrigins(providers[index]);
+            }
+        }
         var originEntryCount = 0;
         foreach (var table in provenance)
         {
