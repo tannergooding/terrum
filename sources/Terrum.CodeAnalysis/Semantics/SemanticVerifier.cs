@@ -372,6 +372,7 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
+            var declaringType = -1;
             if (function.DeclaringStruct is string declaringStruct)
             {
                 if (ownerTypes is null)
@@ -386,7 +387,7 @@ public static partial class SemanticVerifier
                         ownerTypes.Add(program.Classes[type].Name, ManagedClassTypes.First + type);
                     }
                 }
-                var declaringType = ownerTypes.TryGetValue(declaringStruct, out var ownerType)
+                declaringType = ownerTypes.TryGetValue(declaringStruct, out var ownerType)
                     ? ownerType : -1;
                 var primitiveOwner = declaringType < 0
                     && Binder.TryPrimitiveType(declaringStruct, out var primitive)
@@ -433,10 +434,10 @@ public static partial class SemanticVerifier
                     || function.IsCleanup || function.DoesNotReturn || function.ParameterCount != 1
                     || function.Variables[0].IsMutable || IsUnique(program, function.Variables[0].Type)
                     || !IsClassArgumentType(function.ReturnType, program.Structures)
-                    || program.Structures.Any(structure => structure.Name == owner
-                        && structure.Fields.Any(field => field.Name == propertyName))
-                    || program.Classes.Any(@class => @class.Name == owner
-                        && @class.Fields.Any(field => field.Name == propertyName))))
+                    || (declaringType >= 0 && (declaringType >= ManagedClassTypes.First
+                        ? program.Classes[declaringType - ManagedClassTypes.First].Fields
+                            .Any(field => field.Name == propertyName)
+                        : program.Structures[declaringType].Fields.Any(field => field.Name == propertyName)))))
             {
                 throw Invalid();
             }

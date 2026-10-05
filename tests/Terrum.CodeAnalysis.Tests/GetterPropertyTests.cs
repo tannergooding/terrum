@@ -55,6 +55,26 @@ public sealed class GetterPropertyTests
         }));
     }
 
+    [Fact]
+    public void GetterVerifierRejectsFieldNameCollisionsForStructsAndClasses()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(ValueSource));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        foreach (var owner in new[] { "Counter", "Box" })
+        {
+            var index = program.Functions.IndexOf(Assert.Single(program.Functions,
+                function => function.PropertyName == "Value" && function.DeclaringStruct == owner));
+            var getter = program.Functions[index] with {
+                Name = owner + ".#get:_value",
+                PropertyName = "_value",
+            };
+            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+                Functions = program.Functions.SetItem(index, getter),
+            }));
+        }
+    }
+
     [Theory]
     [InlineData("public int32 Value { get; }", "TRM1002")]
     [InlineData("public int32 Value { get { return _value; } set { _value = 1; } }", "TRM1002")]
