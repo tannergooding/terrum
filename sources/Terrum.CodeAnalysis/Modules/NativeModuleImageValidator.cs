@@ -231,8 +231,8 @@ internal static class NativeModuleImageValidator
                 {
                     throw Invalid();
                 }
-                var names = new Dictionary<string, IReadOnlyList<string>>(providerCount, StringComparer.Ordinal);
                 var systemCount = checkedExceptions ? 2 : 1;
+                var importsMatchProviders = true;
                 string? singleProviderDll = null;
                 var expectedDlls = Array.Empty<string>();
                 if (providerCount == 1)
@@ -362,7 +362,11 @@ internal static class NativeModuleImageValidator
                     }
                     if (index >= systemCount)
                     {
-                        names.Add(dll, symbols);
+                        if (importsMatchProviders
+                            && !symbols.SequenceEqual(SortOrdinalIfNeeded(providerImports[dll])))
+                        {
+                            importsMatchProviders = false;
+                        }
                     }
                 }
                 var terminator = Offset(table.RelativeVirtualAddress + (count * 20), 20, ".idata");
@@ -371,16 +375,9 @@ internal static class NativeModuleImageValidator
                 {
                     throw Invalid();
                 }
-                if (names.Count != providerImports.Count)
+                if (!importsMatchProviders)
                 {
                     throw Invalid();
-                }
-                foreach (var pair in names)
-                {
-                    if (!pair.Value.SequenceEqual(SortOrdinalIfNeeded(providerImports[pair.Key])))
-                    {
-                        throw Invalid();
-                    }
                 }
             }
 
