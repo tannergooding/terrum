@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7ef2ac7` | Sort native imports in place before writing |
 | `10c7696` | Encode native package identities into destinations |
 | `d9901c9` | Preallocate staged package path lists |
 | `736c44d` | Remove repeated module-set import validation |
