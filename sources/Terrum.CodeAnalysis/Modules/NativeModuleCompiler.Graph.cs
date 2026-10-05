@@ -434,7 +434,8 @@ public static partial class NativeModuleCompiler
         // Aggregate only when repeated provider lookups exceed two entry probes plus one lookup per type.
         var aggregateOrigins = provenance.Length > 1
             && (long)(provenance.Length - 1) * imported.Count > 2L * originEntryCount;
-        var result = new List<GraphTypeOrigin>(structures.Length);
+        var result = new GraphTypeOrigin[structures.Length];
+        var resultIndex = 0;
         Dictionary<string, GraphTypeOrigin>? originsByType = null;
         HashSet<string>? ambiguousOrigins = null;
         Dictionary<string, GraphPackage>? providersByIdentity = null;
@@ -443,8 +444,8 @@ public static partial class NativeModuleCompiler
             if (!imported.Contains(structure.Name))
             {
                 var owner = identity ?? "@";
-                result.Add(new GraphTypeOrigin(structure.Name, owner,
-                    structure.CleanupMethod is not null ? owner : null));
+                result[resultIndex++] = new GraphTypeOrigin(structure.Name, owner,
+                    structure.CleanupMethod is not null ? owner : null);
                 continue;
             }
             GraphTypeOrigin? origin = null;
@@ -508,9 +509,9 @@ public static partial class NativeModuleCompiler
             {
                 throw new ModuleContractException($"Graph imported type '{structure.Name}' lacks its origin or cleanup.");
             }
-            result.Add(origin);
+            result[resultIndex++] = origin;
         }
-        result.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
-        return [.. result];
+        Array.Sort(result, static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
+        return result;
     }
 }
