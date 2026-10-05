@@ -285,6 +285,7 @@ public static partial class SemanticVerifier
         Dictionary<string, int>? classIndexes = null;
         int[]? classConstructorCounts = null;
         int[]? classFactoryCounts = null;
+        Dictionary<string, string>? cleanupOwners = null;
         if (!allowGenericProofDependencies && !program.Classes.IsEmpty)
         {
             classIndexes = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -521,6 +522,11 @@ public static partial class SemanticVerifier
                     classConstructorCounts[constructorClassIndex]++;
                 }
             }
+            if (function.IsCleanup && function.DeclaringStruct is string cleanupOwner)
+            {
+                cleanupOwners ??= new Dictionary<string, string>(StringComparer.Ordinal);
+                cleanupOwners.Add(function.Name, cleanupOwner);
+            }
         }
         if (classConstructorCounts is not null && classFactoryCounts is not null)
         {
@@ -538,15 +544,9 @@ public static partial class SemanticVerifier
             {
                 continue;
             }
-            var matches = 0;
-            foreach (var function in program.Functions)
-            {
-                if (function.Name == cleanup && function.IsCleanup && function.DeclaringStruct == structure.Name)
-                {
-                    matches++;
-                }
-            }
-            if (!structure.IsUnique || matches != 1)
+            if (!structure.IsUnique || cleanupOwners is null
+                || !cleanupOwners.TryGetValue(cleanup, out var cleanupOwner)
+                || cleanupOwner != structure.Name)
             {
                 throw Invalid();
             }

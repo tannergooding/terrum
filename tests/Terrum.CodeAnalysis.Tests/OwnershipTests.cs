@@ -1091,6 +1091,41 @@ public sealed class OwnershipTests
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast));
     }
 
+    [Fact]
+    public void PublicIrCannotUseAnotherStructuresCleanupMethod()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unique struct Owner {
+                public int32 Id;
+                public Owner(int32 id) { Id = id; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            unique struct Other {
+                public int32 Id;
+                public Other(int32 id) { Id = id; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var ownerIndex = -1;
+        for (var index = 0; index < program.Structures.Length; index++)
+        {
+            if (program.Structures[index].Name == "Owner")
+            {
+                ownerIndex = index;
+                break;
+            }
+        }
+        Assert.True(ownerIndex >= 0);
+        var malformed = program with {
+            Structures = program.Structures.SetItem(ownerIndex,
+                program.Structures[ownerIndex] with { CleanupMethod = "Other.Close" }),
+        };
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
