@@ -92,27 +92,28 @@ reject unknown kinds and flags rather than infer dependencies from bodies.
 obligation, distinct from unsafe operations inside its body, but the source
 to metadata mapping is open. The metadata design already reserves Effects
 bit `0x04` for exactly the unsafe-caller requirement. That function-level bit
-does not authorize a call inside a source-free executable Body: the current
-`Call` record carries no checked provenance for an explicit unsafe scope, so
-a reader cannot distinguish a scoped call from an unscoped one.
+is provisionally round-tripped by executable TRRM, but it does not authorize a
+call inside a source-free Body: the current `Call` record carries no checked
+provenance for an explicit unsafe scope, so a reader cannot distinguish a
+scoped call from an unscoped one.
 
 **Recommendation:** Map the source declaration to that assigned Effects bit
 and propagate the obligation at each call site. Only an explicit unsafe
 caller scope discharges it; an implementation's internal unsafe block or
 body analysis must not silently change the published contract. Before
 executable support admits such calls, assign and validate a Body representation
-for explicit unsafe scopes. Until then, keep caller-unsafe declarations and
-calls outside the executable TRRM profile; do not treat the callee's Effects
-bit or hosted source verification as proof that an individual call was
-authorized.
+for explicit unsafe scopes. Until then, keep caller-unsafe calls outside the
+executable TRRM profile; do not treat the callee's Effects bit or hosted
+source verification as proof that an individual call was authorized.
 
 ### 3. How should executable Bodies validate caller-unsafe scope?
 
 **Summary:** The source caller obligation and assigned Effects bit `0x04` are
 settled, and semantic-module revision 56 reconstructs authorization from
-explicit `BoundUnsafe` scopes. Executable TRRM Bodies still reject these
-declarations and calls: their current region kind `0x06` is reserved, and a
-call-site authorization bit would not prove explicit unsafe-block enclosure.
+explicit `BoundUnsafe` scopes. Executable TRRM provisionally round-trips
+caller-unsafe declarations but still rejects their calls: region kind `0x06`
+is reserved, and a call-site authorization bit would not prove explicit
+unsafe-block enclosure.
 
 **Recommendation:** Define a first executable slice for indexed, fail-fast
 Bodies with root-free Copy-scalar shapes only, using region kind `0x06` as a
