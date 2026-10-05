@@ -263,12 +263,29 @@ public static partial class NativeModuleCompiler
         var matchedImportCount = 0;
         foreach (var provider in providers)
         {
-            var names = provider.Reference.Functions
-                .Select(static item => item.Name).Where(imports.Contains).Order(StringComparer.Ordinal).ToArray();
-            if (names.Length == 0)
+            var functions = provider.Reference.Functions;
+            var nameCount = 0;
+            foreach (var function in functions)
+            {
+                if (imports.Contains(function.Name))
+                {
+                    nameCount++;
+                }
+            }
+            if (nameCount == 0)
             {
                 throw new ModuleContractException("Every selected dependency must supply a called import.");
             }
+            var names = new string[nameCount];
+            var nameIndex = 0;
+            foreach (var function in functions)
+            {
+                if (imports.Contains(function.Name))
+                {
+                    names[nameIndex++] = function.Name;
+                }
+            }
+            Array.Sort(names, StringComparer.Ordinal);
             writer.Write((byte)provider.Package.Identity.Length);
             WriteAsciiIdentity(writer, provider.Package.Identity);
             writer.Write((ushort)names.Length);
@@ -282,17 +299,27 @@ public static partial class NativeModuleCompiler
                 writer.Write((ushort)bytes.Length);
                 writer.Write(bytes);
             }
-            var actual = usedByDll.TryGetValue(DllName(provider.Package.Identity), out var providerImports)
-                ? providerImports.Order(StringComparer.Ordinal).ToArray() : [];
-            matchedImportCount += actual.Length;
-            if (actual.Any(name => Array.BinarySearch(names, name, StringComparer.Ordinal) < 0))
+            var actualCount = 0;
+            if (usedByDll.TryGetValue(DllName(provider.Package.Identity), out var providerImports))
             {
-                throw new ModuleFormatException("Native set machine import has no declaration owner.");
+                providerImports.Sort(StringComparer.Ordinal);
+                actualCount = providerImports.Count;
+                matchedImportCount += actualCount;
+                foreach (var name in providerImports)
+                {
+                    if (Array.BinarySearch(names, name, StringComparer.Ordinal) < 0)
+                    {
+                        throw new ModuleFormatException("Native set machine import has no declaration owner.");
+                    }
+                }
             }
-            writer.Write(checked((ushort)actual.Length));
-            foreach (var name in actual)
+            writer.Write(checked((ushort)actualCount));
+            if (providerImports is not null)
             {
-                PutGraphString(writer, name);
+                foreach (var name in providerImports)
+                {
+                    PutGraphString(writer, name);
+                }
             }
         }
         if (used.Count != matchedImportCount)
