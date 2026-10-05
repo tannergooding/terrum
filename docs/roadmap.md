@@ -285,6 +285,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `a300506c` | Preserve supported scalar local initializers before terminal loop exits |
 | `3e6bd6b8` | Preserve supported scalar assignment expressions before terminal loop exits |
 | `64cfabcf` | Verify compound RHS ordering and division-by-zero failure survive terminal loop erasure |
 | `c3ac3c1b` | Cover terminal-loop compound prefixes across integer widths and shifts |
