@@ -255,7 +255,8 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
-| `TBD` | Reuse struct visibility during layout |
+| `TBD` | Scan protocol application tokens without an array snapshot |
+| `abdcf32` | Reuse struct visibility during layout |
 | `426707d` | Validate buffer-view arguments without array snapshots |
 | `7f4b7b8` | Preserve cached class visibility during layout |
 | `d2d1a66` | Classify generic declaration effects with signature facts |

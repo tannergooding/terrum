@@ -1223,11 +1223,35 @@ internal sealed partial class Binder
         out string[] argumentNames)
     {
         arguments = [.. type.Children.OfType<SyntaxNode>()];
-        var tokens = type.Children.OfType<SyntaxTokenElement>().Select(static child => child.Token).ToArray();
-        var open = Array.FindIndex(tokens, static token => token.Kind == TokenKind.Less);
-        head = open > 0 ? string.Concat(tokens.Take(open).Select(static token => token.Name)) : "";
+        var typeName = NameText(type);
+        var tokenIndex = 0;
+        var headLength = 0;
+        var open = -1;
+        SyntaxToken? lastToken = null;
+        foreach (var child in type.Children)
+        {
+            if (child is not SyntaxTokenElement tokenElement)
+            {
+                continue;
+            }
+            var token = tokenElement.Token;
+            if (open < 0)
+            {
+                if (token.Kind == TokenKind.Less)
+                {
+                    open = tokenIndex;
+                }
+                else
+                {
+                    headLength += token.Name.Length;
+                }
+            }
+            lastToken = token;
+            tokenIndex++;
+        }
+        head = open > 0 ? typeName[..headLength] : "";
         if (type.Kind != SyntaxKind.TypeName || open <= 0 || arguments.Length is not (1 or 2 or 3)
-            || tokens[^1].Kind != TokenKind.Greater)
+            || lastToken?.Kind != TokenKind.Greater)
         {
             argumentNames = [];
             return false;
@@ -1237,7 +1261,7 @@ internal sealed partial class Binder
         {
             argumentNames[index] = NameText(arguments[index]);
         }
-        return NameText(type) == head + "<" + string.Join(",", argumentNames) + ">";
+        return typeName == head + "<" + string.Join(",", argumentNames) + ">";
     }
 
     private static bool MatchesProtocolArguments(StaticProtocol protocol, string[] argumentNames, string type,
