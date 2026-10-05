@@ -259,6 +259,8 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `aada8d9` | Skip empty imported graph type indexes |
+| `6e754ca` | Pre-size semantic module-set imports |
 | `2118a7d` | Check set machine imports directly |
 | `ee241f2` | Pre-size graph declaration matching |
 | `dac23be` | Pre-size lazy graph ownership sets |
