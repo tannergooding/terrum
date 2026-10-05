@@ -2139,7 +2139,7 @@ public static partial class ModuleCompiler
     {
         var structureCount = Count(reader, MaximumFunctions);
         var structures = ImmutableArray.CreateBuilder<BoundStruct>(structureCount);
-        var structureNames = new HashSet<string>(StringComparer.Ordinal);
+        var structureNames = new HashSet<string>(structureCount, StringComparer.Ordinal);
         for (var i = 0; i < structureCount; i++)
         {
             var name = GetString(reader);
@@ -2186,7 +2186,7 @@ public static partial class ModuleCompiler
     {
         var importCount = Count(reader, structureCount);
         var importedTypes = ImmutableArray.CreateBuilder<string>(importCount);
-        var importedNames = new HashSet<string>(StringComparer.Ordinal);
+        var importedNames = new HashSet<string>(importCount, StringComparer.Ordinal);
         for (var index = 0; index < importCount; index++)
         {
             var name = GetString(reader);
@@ -2239,7 +2239,7 @@ public static partial class ModuleCompiler
         ImmutableArray<BoundStruct> structures, ImmutableArray<BoundClass> classes)
     {
         var items = ImmutableArray.CreateBuilder<ModuleFunction>(count);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var seen = new HashSet<string>(count, StringComparer.Ordinal);
         var remaining = MaximumNodes;
         for (var i = 0; i < count; i++)
         {
