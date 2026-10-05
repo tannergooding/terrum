@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `c1fd39f` | Group PE imports before sorting DLL groups |
 | `2e467e1` | Reuse the contract index while loading executable TRRM |
 | `0aa9ae2` | Allocate token-span backing sets only when populated |
 | `5767080` | Allocate token-span dependency edges only when populated |
