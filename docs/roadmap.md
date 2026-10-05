@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e1f5e167` | Verify decimal digit conversion across UTF-16 values through persisted modules |
 | `7549848e` | Verify every 32-/64-bit BitOperations position and round-up boundary through modules |
 | `8b973b9c` | Verify wide decimal and radix accumulators through persisted modules |
 | `99671971` | Verify 32-/64-bit BitOperations round-up failure outputs stay unreadable |
