@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `8861bb2` | Validate exported layouts without LINQ |
 | `d78209a` | Skip empty trivia builders during scanner adaptation |
 | `000224b` | Carry decoded comment width through scanner advancement |
 | `8f62ded` | Build native function metadata in exact-capacity arrays |
