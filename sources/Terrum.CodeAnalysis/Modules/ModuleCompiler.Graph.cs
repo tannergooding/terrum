@@ -320,10 +320,8 @@ public static partial class ModuleCompiler
     private static void ValidateGraphLibrary(Module module, CompilationReference dependencies,
         CompilationReference reference, bool hasPrivateManagedState)
     {
-        IReadOnlyDictionary<string, BoundFunction> dependencyFunctions = dependencies.Functions.IsEmpty
-            ? ImmutableDictionary<string, BoundFunction>.Empty
-            : dependencies.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
-        if (ValidateGraphImports(module, dependencies, dependencyFunctions, hasPrivateManagedState))
+        if (ValidateGraphImports(module, dependencies, hasPrivateManagedState,
+            out var dependencyFunctions))
         {
             throw new ModuleContractException("Managed graph import crosses a non-Copy boundary.");
         }
@@ -408,12 +406,13 @@ public static partial class ModuleCompiler
     }
 
     private static bool ValidateGraphImports(Module module, CompilationReference dependencies,
-        IReadOnlyDictionary<string, BoundFunction> dependencyFunctions, bool hasPrivateManagedState)
+        bool hasPrivateManagedState, out IReadOnlyDictionary<string, BoundFunction> dependencyFunctions)
     {
         if (module.RuntimePolicy != dependencies.RuntimePolicy)
         {
             throw new ModuleContractException("Graph library and dependency runtime policies differ.");
         }
+        IReadOnlyDictionary<string, BoundFunction>? availableFunctions = null;
         IReadOnlyDictionary<string, BoundStruct> dependencyTypes = dependencies.Structures.IsEmpty
             ? ImmutableDictionary<string, BoundStruct>.Empty
             : dependencies.Structures.ToDictionary(static item => item.Name, StringComparer.Ordinal);
@@ -424,7 +423,11 @@ public static partial class ModuleCompiler
             {
                 continue;
             }
-            if (!dependencyFunctions.TryGetValue(item.Name, out var actual)
+            availableFunctions ??= dependencies.Functions.IsEmpty
+                ? ImmutableDictionary<string, BoundFunction>.Empty
+                : dependencies.Functions.ToDictionary(static function => function.Name,
+                    StringComparer.Ordinal);
+            if (!availableFunctions.TryGetValue(item.Name, out var actual)
                 || !CompatibleContract(item.Contract, Contract(actual, dependencies.Structures))
                 || item.HasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, dependencies.Structures))
             {
@@ -435,6 +438,7 @@ public static partial class ModuleCompiler
                 hasUnsupportedManagedImport = true;
             }
         }
+        dependencyFunctions = availableFunctions ?? ImmutableDictionary<string, BoundFunction>.Empty;
         var imported = module.ImportedStructures.ToHashSet(StringComparer.Ordinal);
         foreach (var structure in module.Structures)
         {

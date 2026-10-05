@@ -208,6 +208,29 @@ public sealed class NativeGraphTests
     }
 
     [Fact]
+    public void GraphProviderValidationAcceptsNoImportsWithDependencies()
+    {
+        var dependencyCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public struct Node { public int32 Value; }
+            public Node GetNode(Node value) { return value; }
+            """));
+        Assert.False(dependencyCompilation.HasErrors,
+            string.Join(Environment.NewLine, dependencyCompilation.Diagnostics));
+        var dependency = NativeModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(dependencyCompilation.Program), ["GetNode"], "NodeB",
+            NativeRuntimePolicy.FailFast);
+        var dependencyReference = NativeModuleCompiler.CreateGraphReference([dependency]);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public Node Identity(Node value) { return value; }"), dependencyReference);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var provider = NativeModuleCompiler.CreateGraphProducer(
+            Assert.IsType<BoundProgram>(compilation.Program), ["Identity"], "NodeA", [dependency],
+            NativeRuntimePolicy.FailFast);
+
+        Assert.NotEmpty(provider);
+    }
+
+    [Fact]
     public void GraphProvidersRejectCaseOnlyIdentityDuplicates()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
