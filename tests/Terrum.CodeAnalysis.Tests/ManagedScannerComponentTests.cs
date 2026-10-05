@@ -4591,10 +4591,11 @@ public sealed partial class ManagedScannerComponentTests
         if (parserName is not null)
         {
             names = parserName == "ScalarFrontendProjection"
-                ? [.. names, "ScalarParserTypes", "ScalarFrontend", "ScalarFrontendProgram", parserName]
+                ? [.. names, "ScalarParserTypes", "ScalarFrontend", "TokenCursor",
+                    "ScalarFrontendProgram", parserName]
                 : parserName == "ScalarFrontend"
-                    ? [.. names, "ScalarParserTypes", parserName, "ScalarFrontendProgram",
-                        "ScalarFrontendProjection"]
+                    ? [.. names, "ScalarParserTypes", parserName, "TokenCursor",
+                        "ScalarFrontendProgram", "ScalarFrontendProjection"]
                     : [.. names, "ScalarParserTypes", parserName];
         }
         var trees = new List<SyntaxTree>(names.Length + 1);

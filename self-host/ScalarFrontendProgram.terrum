@@ -82,10 +82,11 @@ bool TryPublishScalarFrontendProgram(out bool handled)
     var spacing = tokens.GetScalarOperatorSpacingError();
     if (spacing.Length != 0) { return ScalarProgramError(1, spacing, out handled); }
     if (!ManagedTokenChain.TryCreate(out var sourceTokens)) { return false; }
-    for (mut int32 index = 0; index < count; index = index + 1)
+    Span<Token> tokenView = tokens.AsSpan();
+    mut TokenCursor cursor = new TokenCursor(tokenView);
+    while (cursor.TryRead(out var scannedToken))
     {
-        require tokens.TryGet(index, init var token);
-        require sourceTokens.TryAppend(token.Kind, token.Range.Start, token.Range.Length);
+        require sourceTokens.TryAppend(scannedToken.Kind, scannedToken.Range.Start, scannedToken.Range.Length);
     }
     require SourceRange.TryCreate(0, 0, init var empty);
     mut int32 start = 0;

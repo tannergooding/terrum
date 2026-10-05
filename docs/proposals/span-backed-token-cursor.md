@@ -116,6 +116,11 @@ checks, and the stored dependency in `TokenCursor` are supported. Do not add
 mutable access, arbitrary span construction, general slicing, parser
 integration, source-level `nuint`, or a new public ABI.
 
+The complete-program scalar frontend uses this bounded cursor only while
+copying validated snapshot records into its existing managed token chain.
+Parsing and lookahead continue to use the managed token APIs. This narrow
+transfer does not establish a general parser integration contract.
+
 ## Decisions and rationale
 
 ### 1. Stored-view representation
