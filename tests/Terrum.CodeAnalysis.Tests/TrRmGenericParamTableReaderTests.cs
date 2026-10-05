@@ -61,6 +61,11 @@ public sealed class TrRmGenericParamTableReaderTests
     [Fact]
     public void RejectsOverlappingOrUnownedFormalAndConstraintRows()
     {
+        var expandedTypeRange = Type();
+        Write(expandedTypeRange, 24, 2);
+        Assert.Throws<InvalidDataException>(() =>
+            GetConstraintOwner(Formals(), 1, type: expandedTypeRange));
+
         var sig = Signature();
         Write(sig, 16, 1);
         Assert.Throws<InvalidDataException>(() => GetConstraintOwner(Formals(), 1, signature: sig));

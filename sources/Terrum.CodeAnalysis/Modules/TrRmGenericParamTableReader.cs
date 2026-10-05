@@ -29,27 +29,41 @@ public readonly ref struct TrRmGenericParamTableReader
         }
 
         Count = recordCount;
-        var owners = new uint[recordCount + 1];
         _constraintOwners = new int[constraintCount + 1];
+        long declaredFormalCount = 0;
         for (var type = 1; type <= types.Count; type++)
         {
-            var (start, count) = types.GetGenericRange(type);
-            Fill(owners, start, count, 0x1300_0000u | (uint)type);
+            declaredFormalCount += types.GetGenericRange(type).Count;
         }
 
         for (var method = 1; method <= methods.Count; method++)
         {
-            var (start, count) = signatures.GetGenericRange(methods.GetSignature(method));
-            Fill(owners, start, count, 0x1600_0000u | (uint)method);
+            declaredFormalCount += signatures.GetGenericRange(methods.GetSignature(method)).Count;
         }
 
-        var previousOwner = 0u;
-        var ordinal = 0;
+        if (declaredFormalCount != recordCount)
+        {
+            throw InvalidFormal();
+        }
+
+        // Per-row range membership plus the equal total proves an exact partition.
         for (var row = 1; row <= recordCount; row++)
         {
             var data = section.Slice((row - 1) * RowSize, RowSize);
+            var owner = Read(data, 0);
+            var ownerRow = (int)(owner & 0xFF_FFFF);
+            var (firstFormal, formalCount) = (owner >> 24) switch
+            {
+                0x13u when ownerRow > 0 && ownerRow <= types.Count
+                    => types.GetGenericRange(ownerRow),
+                0x16u when ownerRow > 0 && ownerRow <= methods.Count
+                    => signatures.GetGenericRange(methods.GetSignature(ownerRow)),
+                _ => default,
+            };
             var name = Read(data, 8);
-            if (owners[row] == 0 || Read(data, 0) != owners[row]
+            var ordinal = Read(data, 4);
+            if (formalCount == 0 || row < firstFormal || row >= firstFormal + formalCount
+                || ordinal != (uint)(row - firstFormal)
                 || name is 0 or > 0xFF_FFFF)
             {
                 throw InvalidFormal();
@@ -74,13 +88,6 @@ public readonly ref struct TrRmGenericParamTableReader
                 _constraintOwners[constraint] = row;
             }
 
-            ordinal = owners[row] == previousOwner ? ordinal + 1 : 0;
-            if (Read(data, 4) != ordinal)
-            {
-                throw InvalidFormal();
-            }
-
-            previousOwner = owners[row];
             _ = strings.DecodeName((int)name);
         }
 
@@ -101,25 +108,6 @@ public readonly ref struct TrRmGenericParamTableReader
         }
 
         return _constraintOwners[row];
-    }
-
-    private static void Fill(uint[] owners, int start, int count, uint owner)
-    {
-        if (count < 0 || (count != 0 && start <= 0)
-            || start < 0 || (long)start + count > owners.Length)
-        {
-            throw InvalidFormal();
-        }
-
-        for (var row = start; row < start + count; row++)
-        {
-            if (owners[row] != 0)
-            {
-                throw InvalidFormal();
-            }
-
-            owners[row] = owner;
-        }
     }
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)
