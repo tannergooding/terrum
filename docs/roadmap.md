@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `50290f2` | Inspect persisted readonly/mutable view features in one body pass |
 | `c99350e` | Cache native optional-assignment owner destinations |
 | `8865e0c` | Classify optional managed and node profiles in fewer function passes |
 | `c38db3a` | Reuse resolved owners for property field collision checks |
