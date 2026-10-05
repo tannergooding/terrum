@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -386,10 +387,30 @@ public static partial class NativeModuleCompiler
         return [.. result.OrderBy(static item => item.Identity, StringComparer.OrdinalIgnoreCase)];
     }
 
-    private static Dictionary<string, IReadOnlyList<string>> GraphImports(GraphPackage package) =>
-        package.Dependencies.Where(static item => item.Imports.Length != 0)
-            .ToDictionary(static item => DllName(item.Identity),
-            static item => (IReadOnlyList<string>)item.Imports, StringComparer.Ordinal);
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> GraphImports(GraphPackage package)
+    {
+        var count = 0;
+        foreach (var dependency in package.Dependencies)
+        {
+            if (dependency.Imports.Length != 0)
+            {
+                count++;
+            }
+        }
+        if (count == 0)
+        {
+            return ImmutableDictionary<string, IReadOnlyList<string>>.Empty;
+        }
+        var imports = new Dictionary<string, IReadOnlyList<string>>(count, StringComparer.Ordinal);
+        foreach (var dependency in package.Dependencies)
+        {
+            if (dependency.Imports.Length != 0)
+            {
+                imports.Add(DllName(dependency.Identity), dependency.Imports);
+            }
+        }
+        return imports;
+    }
 
     private static GraphDependency[] WithGraphUsage(GraphDependency[] declarations,
         IReadOnlyList<NativeImportBinding> used)
