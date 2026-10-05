@@ -665,14 +665,15 @@ public sealed class Compilation
         {
             throw new ArgumentException("At least one source tree is required.", nameof(trees));
         }
+        var snapshotArray = snapshots.ToImmutable();
         if (diagnostics is not null)
         {
             var sourceDiagnosticBuilder = sourceDiagnostics
                 ?? throw new InvalidOperationException("Syntax diagnostics require source provenance.");
-            return new Compilation(snapshots[0], diagnostics.ToImmutable(), null,
-                snapshots.ToImmutable(), sourceDiagnosticBuilder.ToImmutable());
+            return new Compilation(snapshotArray[0], diagnostics.ToImmutable(), null,
+                snapshotArray, sourceDiagnosticBuilder.ToImmutable());
         }
-        var binder = new Binder(snapshots.ToImmutable(), buffers, cancellationToken, isLibrary, reference,
+        var binder = new Binder(snapshotArray, buffers, cancellationToken, isLibrary, reference,
             runtimePolicy, coreLibrary);
         var program = binder.Bind();
         if (binder.Diagnostics.Count != 0)
@@ -688,8 +689,8 @@ public sealed class Compilation
         cancellationToken.ThrowIfCancellationRequested();
         var diagnosticResult = diagnostics?.MoveToImmutable() ?? ImmutableArray<Diagnostic>.Empty;
         var sourceDiagnosticResult = sourceDiagnostics?.MoveToImmutable() ?? ImmutableArray<SourceDiagnostic>.Empty;
-        return new Compilation(snapshots[0], diagnosticResult, diagnosticResult.IsEmpty ? program : null,
-            snapshots.ToImmutable(), sourceDiagnosticResult);
+        return new Compilation(snapshotArray[0], diagnosticResult, diagnosticResult.IsEmpty ? program : null,
+            snapshotArray, sourceDiagnosticResult);
     }
 
     /// <summary>Binds one source snapshot with explicit, fixed-size host buffer capabilities.</summary>

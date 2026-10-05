@@ -75,6 +75,9 @@ public sealed class CompilationTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.Empty(compilation.SourceDiagnostics);
         Assert.NotNull(compilation.Program);
+        Assert.Same(entry, compilation.SyntaxTree);
+        Assert.Same(entry, compilation.SyntaxTrees[0]);
+        Assert.Same(aliases, compilation.SyntaxTrees[1]);
         SemanticVerifier.Verify(compilation.Program);
     }
 
