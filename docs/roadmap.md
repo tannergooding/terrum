@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f3fc260` | Skip redundant PE import sort key |
 | `c6953c7` | Reuse managed-node detection during emission |
 | `4550f00` | Skip JIT snapshots when only returning exit code |
 | `1045730` | Exclude runtime metadata from JIT snapshots |
