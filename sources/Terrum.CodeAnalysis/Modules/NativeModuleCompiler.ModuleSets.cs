@@ -337,8 +337,7 @@ public static partial class NativeModuleCompiler
         var bytes = (byte[])artifact.Clone();
         if (!bytes.AsSpan(0, 4).SequenceEqual("TNSP"u8) || bytes[4] != 2
             || bytes[5] is not ((byte)NativeRuntimePolicy.FailFast or (byte)NativeRuntimePolicy.CheckedExceptions)
-            || !SHA256.HashData(bytes.AsSpan(0, bytes.Length - HashSize))
-                .AsSpan().SequenceEqual(bytes.AsSpan(bytes.Length - HashSize)))
+            || !HasValidChecksum(bytes))
         {
             throw new ModuleFormatException("Invalid native module set version, policy or checksum.");
         }

@@ -96,8 +96,7 @@ public static partial class NativeModuleCompiler
         if (!bytes.AsSpan(0, 4).SequenceEqual("TNGP"u8) || bytes[4] != 2
             || bytes[5] is not (1 or 2)
             || bytes[6] is not ((byte)NativeRuntimePolicy.FailFast or (byte)NativeRuntimePolicy.CheckedExceptions)
-            || !SHA256.HashData(bytes.AsSpan(0, bytes.Length - HashSize))
-                .AsSpan().SequenceEqual(bytes.AsSpan(bytes.Length - HashSize)))
+            || !HasValidChecksum(bytes))
         {
             throw new ModuleFormatException("Unknown graph package version, kind, policy or checksum.");
         }
@@ -357,6 +356,13 @@ public static partial class NativeModuleCompiler
         payload.CopyTo(result);
         _ = SHA256.HashData(payload, result.AsSpan(payloadLength));
         return result;
+    }
+
+    private static bool HasValidChecksum(ReadOnlySpan<byte> bytes)
+    {
+        Span<byte> checksum = stackalloc byte[HashSize];
+        _ = SHA256.HashData(bytes[..^HashSize], checksum);
+        return checksum.SequenceEqual(bytes[^HashSize..]);
     }
 
     private static GraphDependency[] GraphBindings(IReadOnlyList<GraphPackage> providers,
