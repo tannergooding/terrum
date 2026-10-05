@@ -261,6 +261,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `180fa2f` | Execute the bounded `CharacterLiteral` decoder through invocation-scoped semantic-module JIT grants |
 | `8cce660` | Persist invocation-scoped `Host.Source` requirements for semantic-module JIT execution |
 | `3fd426c` | Pre-size verifier lookup indexes |
 | `d15dd48` | Pre-size verifier uniqueness sets |
