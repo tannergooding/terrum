@@ -5,7 +5,6 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using Terrum.CodeAnalysis.Native;
@@ -243,7 +242,7 @@ public static partial class NativeModuleCompiler
             ValidatedReference = contractSnapshot.Reference,
         };
         var imported = contractSnapshot.Imports;
-        if (seenImports is null ? imported.Any() : !seenImports.SetEquals(imported))
+        if (seenImports is null ? !imported.IsEmpty : !seenImports.SetEquals(imported))
         {
             throw new ModuleFormatException("Graph declaration mapping differs from semantic declarations.");
         }
@@ -573,6 +572,19 @@ public static partial class NativeModuleCompiler
         writer.Write(bytes);
     }
 
-    private static bool ValidGraphSymbol(string value) => value.Length is >= 1 and <= 256
-        && value.All(static character => character is >= '!' and <= '~');
+    private static bool ValidGraphSymbol(string value)
+    {
+        if (value.Length is < 1 or > 256)
+        {
+            return false;
+        }
+        foreach (var character in value)
+        {
+            if (character is < '!' or > '~')
+            {
+                return false;
+            }
+        }
+        return true;
+    }
 }
