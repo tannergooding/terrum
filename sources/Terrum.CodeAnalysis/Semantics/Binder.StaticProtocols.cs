@@ -520,10 +520,37 @@ internal sealed partial class Binder
         var copies = new bool[typeNames.Length];
         var constrained = new HashSet<string>(StringComparer.Ordinal);
         var returnIndex = Array.IndexOf(typeNames, returnName);
-        var noThrow = declaration.Children.OfType<SyntaxNode>()
-            .Any(static node => node.Kind == SyntaxKind.Attribute && NameText(node) == "[NoThrow]");
-        var unsafeModifierCount = declaration.Children.OfType<SyntaxTokenElement>()
-            .Count(static element => element.Token.Kind == TokenKind.UnsafeKeyword);
+        var noThrowCount = 0;
+        var attributeCount = 0;
+        var hasInvalidAttribute = false;
+        foreach (var child in children)
+        {
+            if (child.Kind == SyntaxKind.Attribute)
+            {
+                attributeCount++;
+                if (NameText(child) == "[NoThrow]")
+                {
+                    noThrowCount++;
+                }
+                else
+                {
+                    hasInvalidAttribute = true;
+                }
+            }
+        }
+        var noThrow = noThrowCount != 0;
+        var unsafeModifierCount = 0;
+        var hasInvalidModifier = false;
+        foreach (var element in declaration.Children.OfType<SyntaxTokenElement>())
+        {
+            var tokenKind = element.Token.Kind;
+            if (tokenKind == TokenKind.UnsafeKeyword)
+            {
+                unsafeModifierCount++;
+            }
+            hasInvalidModifier |= tokenKind is TokenKind.PublicKeyword or TokenKind.PrivateKeyword
+                or TokenKind.StaticKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword;
+        }
         var requiresUnsafeCaller = unsafeModifierCount != 0;
         var valid = typeNames.Length is >= 1 and <= 8
             && typeNames.Distinct(StringComparer.Ordinal).Count() == typeNames.Length
@@ -531,13 +558,9 @@ internal sealed partial class Binder
             && (returnIndex >= 0 || scalarReturn is not null)
             && arguments.Length is >= 1 and <= 8
             && unsafeModifierCount <= 1
-            && declaration.Children.OfType<SyntaxTokenElement>().All(static element =>
-                element.Token.Kind is not (TokenKind.PublicKeyword or TokenKind.PrivateKeyword
-                    or TokenKind.StaticKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword))
-            && declaration.Children.OfType<SyntaxNode>()
-                .All(static node => node.Kind != SyntaxKind.Attribute || NameText(node) == "[NoThrow]")
-            && declaration.Children.OfType<SyntaxNode>().Count(static node =>
-                node.Kind == SyntaxKind.Attribute) <= 1;
+            && !hasInvalidModifier
+            && !hasInvalidAttribute
+            && attributeCount <= 1;
         foreach (var argument in arguments)
         {
             var isOut = argument.Children is [SyntaxTokenElement { Token.Kind: TokenKind.OutKeyword },
