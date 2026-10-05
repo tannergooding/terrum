@@ -58,6 +58,13 @@ Separately, a persisted semantic-module consumer exercises the existing
 `BigInteger` boundary expectations for 362 input pairs under both runtime
 policies. This adds persistence evidence only; it does not add arithmetic API
 or compiler support.
+Persisted semantic-module JIT also exercises all 20 existing
+`IntegerCheckedConversions` helpers across source/destination boundaries,
+including signed minima, unsigned maxima, `char16` edges and surrogate code
+units. An independent `BigInteger` oracle checks representability, output
+values and unpublished failures under both runtime policies. This adds
+persistence evidence only; general conversion policy, syntax and witnesses
+remain outside support.
 A second persisted semantic-module consumer executes private generic
 `CopyAlgorithms` specializations over scalar values, code units and nested
 `Token`/`SourceRange` aggregates. It checks conditional `init ref` publication
