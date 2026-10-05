@@ -70,7 +70,18 @@ public static partial class NativeModuleCompiler
                 }
             }
         }
-        if (bindings.Count == 0 || !imports.SetEquals(bindings.Select(static item => item.FunctionName)))
+        if (bindings.Count == 0 || bindings.Count != imports.Count)
+        {
+            throw new ModuleContractException("Persisted consumer calls differ from native import bindings.");
+        }
+        foreach (var binding in bindings)
+        {
+            if (!imports.Remove(binding.FunctionName))
+            {
+                throw new ModuleContractException("Persisted consumer calls differ from native import bindings.");
+            }
+        }
+        if (imports.Count != 0)
         {
             throw new ModuleContractException("Persisted consumer calls differ from native import bindings.");
         }
