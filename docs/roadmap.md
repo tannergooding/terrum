@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `147f7c8` | Pre-size module-set identity validation |
 | `6e8923d` | Pre-size graph provider identity validation |
 | `9edbfdb` | Bound graph usage grouping capacity |
 | `b460340` | Bound module-set import grouping capacity |
