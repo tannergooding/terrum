@@ -2290,7 +2290,11 @@ bytes before parsing. A UTF-8 BOM is transport metadata, not a source character.
 including line-break code units; the start of the next line belongs only to
 that next line, and end-of-source belongs only to the final line. Its behavior
 matches the bounded self-hosted `SourceLineIndex` without changing scanner
-records or source storage.
+records or source storage. The self-hosted `SourceText` component exposes a
+smaller invocation-scoped facade over immutable `Host.Source`: exact UTF-16
+length and code-unit reads plus source-bounded half-open range validation. It
+does not own source text, carry a path, or return a runtime string, and is not
+the hosted `SourceText` collection.
 
 `SyntaxTree` owns source, lexical tokens, root and diagnostics. Nodes/tokens are
 immutable; trees hold no mutable global tables, symbol state or parent pointers.

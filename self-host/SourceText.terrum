@@ -1,0 +1,28 @@
+namespace Terrum.CodeAnalysis;
+
+public int32 GetSourceTextLength()
+{
+    return Host.Source.Length;
+}
+
+public bool TryReadSourceCodeUnit(int32 position, init ref<char16> codeUnit)
+{
+    if (position < 0 || position >= Host.Source.Length)
+    {
+        return false;
+    }
+
+    codeUnit = Host.Source[position];
+    return true;
+}
+
+public bool TryGetSourceRange(int32 start, int32 length, init ref<SourceRange> range)
+{
+    if (start < 0 || length < 0 || start > Host.Source.Length
+        || length > Host.Source.Length - start)
+    {
+        return false;
+    }
+
+    return SourceRange.TryCreate(start, length, init range);
+}

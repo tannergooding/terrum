@@ -46,6 +46,8 @@ public sealed partial class SourceLineComponentTests
     [InlineData("bool ok = TryGetSourceOffset(0, 2, init var offset); return offset;")]
     [InlineData("bool ok = TryGetSourceLineExtent(-1, init var extent); return extent.Start;")]
     [InlineData("bool ok = TryGetSourceLineExtent(1, init var extent); return extent.Length;")]
+    [InlineData("bool ok = TryReadSourceCodeUnit(-1, init var codeUnit); return int32(codeUnit);")]
+    [InlineData("bool ok = TryGetSourceRange(-1, 0, init var range); return range.Start;")]
     public async Task FailedQueriesCannotPublishReadableOutputsAsync(string body)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
@@ -148,7 +150,10 @@ public sealed partial class SourceLineComponentTests
     private static async Task<ImmutableArray<SyntaxTree>> ReadComponentsAsync(bool includeTests)
     {
         var trees = ImmutableArray.CreateBuilder<SyntaxTree>();
-        var names = new[] { "SourceRange.terrum", "CharacterFacts.terrum", "SourceLines.terrum" };
+        var names = new[]
+        {
+            "SourceRange.terrum", "CharacterFacts.terrum", "SourceText.terrum", "SourceLines.terrum",
+        };
         foreach (var name in includeTests ? [.. names, "SourceLineTests.terrum"] : names)
         {
             var path = Path.Combine(RepositoryRoot(), "self-host", name);
