@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `ae0558c` | Reuse parsed semantic contract facts when validating graph packages |
 | `99fb9c1` | Avoid repeating consumer contract validation after validated serialization |
 | `8741761` | Avoid validating each native-set provider image twice |
 | `a65e2ac` | Reuse private managed-state analysis while reading modules |
