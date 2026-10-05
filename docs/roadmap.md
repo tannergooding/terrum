@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `4b4b274` | Reuse validated managed-import results during consumer restoration |
 | `8ff5a6f` | Reuse the validated producer structure index during linking |
 | `30c989c` | Resolve module owner visibility and export layout in one pass |
 | `88b92f3` | Resolve declared structure dependencies with one lookup pass |
