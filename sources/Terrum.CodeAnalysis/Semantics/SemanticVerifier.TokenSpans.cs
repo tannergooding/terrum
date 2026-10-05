@@ -9,6 +9,8 @@ namespace Terrum.CodeAnalysis.Semantics;
 
 public static partial class SemanticVerifier
 {
+    private static readonly IReadOnlySet<int> EmptyBackingSources = new HashSet<int>();
+
     private static bool VerifySpanContracts(BoundProgram program)
     {
         var hasSpans = TokenSpanContract.HasMetadata(program);
@@ -71,16 +73,12 @@ public static partial class SemanticVerifier
     {
         // A slot conservatively retains every source it can hold on any path. Liveness
         // remains path-sensitive in InitializationState, including unwind replay.
-        internal HashSet<int>[] Sources { get; }
-        internal List<HashSet<int>> Staged { get; } = [];
+        internal HashSet<int>?[] Sources { get; }
+        internal List<IReadOnlySet<int>> Staged { get; } = [];
 
         internal BackingDependencies(int length)
         {
-            Sources = new HashSet<int>[length];
-            for (var slot = 0; slot < length; slot++)
-            {
-                Sources[slot] = [];
-            }
+            Sources = new HashSet<int>?[length];
         }
     }
 
@@ -99,7 +97,7 @@ public static partial class SemanticVerifier
                 && TokenSpanContract.IsDependent(function.Variables[slot].Type, program.Structures))
             {
                 // Negative roots denote incoming backing, not the callee's descriptor place.
-                _ = facts.Sources[slot].Add(~slot);
+                AddBackingSource(facts, slot, ~slot);
             }
         }
         var remaining = MaximumAnalysisVisits;
@@ -126,7 +124,7 @@ public static partial class SemanticVerifier
             switch (expression)
             {
                 case BoundSnapshotSpan snapshot:
-                    _ = facts.Sources[destination].Add(snapshot.Variable);
+                    AddBackingSource(facts, destination, snapshot.Variable);
                     break;
                 case BoundRead read:
                     if ((uint)read.Variable >= (uint)edges.Length)
@@ -262,15 +260,25 @@ public static partial class SemanticVerifier
             queued[source] = false;
             if (edges[source] is { } outgoing)
             {
+                var sourceFacts = facts.Sources[source];
                 foreach (var destination in outgoing)
                 {
                     Count(ref remaining, 0);
-                    var before = facts.Sources[destination].Count;
-                    facts.Sources[destination].UnionWith(facts.Sources[source]);
-                    if (before != facts.Sources[destination].Count && !queued[destination])
+                    if (sourceFacts is { Count: > 0 })
                     {
-                        pending.Enqueue(destination);
-                        queued[destination] = true;
+                        var destinationFacts = facts.Sources[destination];
+                        if (destinationFacts is null)
+                        {
+                            destinationFacts = [];
+                            facts.Sources[destination] = destinationFacts;
+                        }
+                        var before = destinationFacts.Count;
+                        destinationFacts.UnionWith(sourceFacts);
+                        if (before != destinationFacts.Count && !queued[destination])
+                        {
+                            pending.Enqueue(destination);
+                            queued[destination] = true;
+                        }
                     }
                 }
             }
@@ -278,7 +286,18 @@ public static partial class SemanticVerifier
         return facts;
     }
 
-    private static HashSet<int> BackingOf(BoundExpression expression, BackingDependencies? facts,
+    private static void AddBackingSource(BackingDependencies facts, int slot, int source)
+    {
+        var sources = facts.Sources[slot];
+        if (sources is null)
+        {
+            sources = [];
+            facts.Sources[slot] = sources;
+        }
+        _ = sources.Add(source);
+    }
+
+    private static IReadOnlySet<int> BackingOf(BoundExpression expression, BackingDependencies? facts,
         BoundProgram program, ref int remaining, int depth)
     {
         Count(ref remaining, depth);
@@ -289,15 +308,15 @@ public static partial class SemanticVerifier
         switch (expression)
         {
             case BoundSnapshotSpan snapshot:
-                return [snapshot.Variable];
+                return new HashSet<int> { snapshot.Variable };
             case BoundRead read when (uint)read.Variable < (uint)facts.Sources.Length:
-                return facts.Sources[read.Variable];
+                return facts.Sources[read.Variable] ?? EmptyBackingSources;
             case BoundMove move when (uint)move.Variable < (uint)facts.Sources.Length:
-                return facts.Sources[move.Variable];
+                return facts.Sources[move.Variable] ?? EmptyBackingSources;
             case BoundReceiverLoan loan when (uint)loan.Variable < (uint)facts.Sources.Length:
-                return facts.Sources[loan.Variable];
+                return facts.Sources[loan.Variable] ?? EmptyBackingSources;
             case BoundMutableReceiverLoan loan when (uint)loan.Variable < (uint)facts.Sources.Length:
-                return facts.Sources[loan.Variable];
+                return facts.Sources[loan.Variable] ?? EmptyBackingSources;
             case BoundFieldRead field:
                 return BackingOf(field.Receiver, facts, program, ref remaining, depth + 1);
             case BoundSpanAdvance advance:
@@ -327,7 +346,7 @@ public static partial class SemanticVerifier
         }
         for (var slot = 0; slot < state.Length; slot++)
         {
-            if ((state.Possibilities(slot) & 2) != 0 && facts.Sources[slot].Contains(owner))
+            if ((state.Possibilities(slot) & 2) != 0 && facts.Sources[slot]?.Contains(owner) == true)
             {
                 throw InvalidEffect(span, "Ownership");
             }
@@ -375,7 +394,8 @@ public static partial class SemanticVerifier
             // Replacing backing would require caller-visible capture effect metadata.
             throw InvalidEffect(write.Span, "Ownership");
         }
-        if (initialized.Dependencies is not BackingDependencies facts || facts.Sources[0].Count == 0)
+        if (initialized.Dependencies is not BackingDependencies facts
+            || facts.Sources[0] is not { Count: > 0 })
         {
             throw InvalidEffect(write.Span, "Ownership");
         }
