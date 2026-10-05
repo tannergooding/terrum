@@ -575,8 +575,7 @@ public static partial class ModuleCompiler
             indexes.UnionWith(Enumerable.Range(0, program.Functions.Length));
         }
         var pending = new Queue<int>(indexes);
-        var functionIndexes = program.Functions.Select((function, index) => (function.Name, index))
-            .ToDictionary(static item => item.Name, static item => item.index, StringComparer.Ordinal);
+        Dictionary<string, int>? functionIndexes = null;
         while (pending.Count != 0)
         {
             var index = pending.Dequeue();
@@ -597,6 +596,10 @@ public static partial class ModuleCompiler
             {
                 if (types.Contains(structure.Name) && structure.CleanupMethod is string cleanup)
                 {
+                    functionIndexes ??= program.Functions.Select((function, functionIndex) =>
+                        (function.Name, functionIndex))
+                        .ToDictionary(static item => item.Name, static item => item.functionIndex,
+                            StringComparer.Ordinal);
                     if (!functionIndexes.TryGetValue(cleanup, out var callee))
                     {
                         throw new ModuleFormatException($"Missing cleanup declaration '{cleanup}'.");
