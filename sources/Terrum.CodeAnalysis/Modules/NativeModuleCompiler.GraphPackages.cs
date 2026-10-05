@@ -36,14 +36,24 @@ public static partial class NativeModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(artifacts);
         ValidateGraphProviderCount(artifacts.Count);
-        return ValidateGraphProviders(artifacts.Select(ReadGraphPackage).ToArray());
+        var providers = new GraphPackage[artifacts.Count];
+        for (var i = 0; i < providers.Length; i++)
+        {
+            providers[i] = ReadGraphPackage(artifacts[i]);
+        }
+        return ValidateGraphProviders(providers);
     }
 
     private static GraphPackage[] ReadGraphProviderSnapshots(IReadOnlyList<byte[]> snapshots)
     {
         ArgumentNullException.ThrowIfNull(snapshots);
         ValidateGraphProviderCount(snapshots.Count);
-        return ValidateGraphProviders(snapshots.Select(ReadGraphPackageSnapshot).ToArray());
+        var providers = new GraphPackage[snapshots.Count];
+        for (var i = 0; i < providers.Length; i++)
+        {
+            providers[i] = ReadGraphPackageSnapshot(snapshots[i]);
+        }
+        return ValidateGraphProviders(providers);
     }
 
     private static GraphPackage[] ValidateGraphProviders(GraphPackage[] providers)
