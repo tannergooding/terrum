@@ -936,6 +936,8 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid("Nonminimal indexed Body-local width.");
             }
             var result = ImmutableArray.CreateBuilder<TrRmScalarBlock>(blockCount);
+            // Reuse immutable value descriptors across block prefixes; DecodeBody only appends new values.
+            var variablesByValue = blockCount > 1 ? new BoundVariable?[valueTypes.Count] : null;
             for (var b = 0; b < blockCount; b++)
             {
                 var extent = blockData[offsets[b]..offsets[b + 1]];
@@ -979,7 +981,16 @@ public static partial class TrRmExecutableCompiler
                 var variables = ImmutableArray.CreateBuilder<BoundVariable>(variableCount);
                 for (var value = 0; value < variableCount; value++)
                 {
-                    variables.Add(new BoundVariable($"value{value + 1}", valueTypes[value], false, default));
+                    var variable = variablesByValue?[value];
+                    if (variable is null)
+                    {
+                        variable = new BoundVariable($"value{value + 1}", valueTypes[value], false, default);
+                        if (variablesByValue is not null)
+                        {
+                            variablesByValue[value] = variable;
+                        }
+                    }
+                    variables.Add(variable);
                 }
                 var statements = DecodeBody(CollectionsMarshal.AsSpan(synthetic), variables.Count,
                     variables, noThrow, types, functions);
