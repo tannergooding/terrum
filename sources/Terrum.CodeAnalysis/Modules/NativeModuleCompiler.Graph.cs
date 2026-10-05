@@ -42,7 +42,12 @@ public static partial class NativeModuleCompiler
         }
         var reference = GraphReference(providers);
         var contract = ModuleCompiler.CreateGraphLibrary(program, exports, reference);
-        var sortedExports = exports.Order(StringComparer.Ordinal).ToArray();
+        var sortedExports = new string[exports.Count];
+        for (var i = 0; i < sortedExports.Length; i++)
+        {
+            sortedExports[i] = exports[i];
+        }
+        Array.Sort(sortedExports, StringComparer.Ordinal);
         var contractSnapshot = ModuleCompiler.ReadGraphProviderSnapshot(contract);
         var imports = contractSnapshot.Imports;
         var bindings = GraphBindings(providers, imports);
