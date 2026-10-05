@@ -46,6 +46,14 @@ public sealed partial class CliTests
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct GuardedUInt64
+    {
+        public ulong Before;
+        public ulong Value;
+        public ulong After;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct GuardedSourceRange
     {
         public int Before;
@@ -58,6 +66,13 @@ public sealed partial class CliTests
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate ulong MagnitudeInt64Export(long value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int TryAccumulateDecimalExport(ulong value, uint digit, ulong maximum, ref ulong result);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int TryAccumulateBaseExport(
+        ulong value, uint digit, uint radix, ulong maximum, ref ulong result);
 
     [Theory]
     [InlineData(false)]
@@ -103,6 +118,124 @@ public sealed partial class CliTests
         {
             File.Delete(outputPath);
             File.Delete(helperPath);
+        }
+    }
+
+    private static void AssertWideIntegerAccumulatorExports(nint handle)
+    {
+        const ulong lowerCanary = 0x13579BDF2468ACE0UL;
+        const ulong outputSentinel = 0xFEDCBA9876543210UL;
+        const ulong upperCanary = 0x0ECA86425A5A5A5AUL;
+        Assert.Equal(24, Marshal.SizeOf<GuardedUInt64>());
+        Assert.Equal(0, Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.Before)).ToInt32());
+        Assert.Equal(8, Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.Value)).ToInt32());
+        Assert.Equal(16, Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.After)).ToInt32());
+
+        var decimalAccumulator = Marshal.GetDelegateForFunctionPointer<TryAccumulateDecimalExport>(
+            NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal"));
+        var baseAccumulator = Marshal.GetDelegateForFunctionPointer<TryAccumulateBaseExport>(
+            NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.Numerics64.TryAccumulateBase"));
+        ulong[] maxima = [
+            0, 1, 9, 10, uint.MaxValue - 1UL, uint.MaxValue, (ulong)uint.MaxValue + 1,
+            long.MaxValue - 1, long.MaxValue, (ulong)long.MaxValue + 1,
+            ulong.MaxValue - 1, ulong.MaxValue,
+        ];
+
+        void AssertResult(bool expectedSuccess, ulong expected, int actual, GuardedUInt64 guarded)
+        {
+            Assert.Equal(expectedSuccess ? 1 : 0, actual);
+            Assert.Equal(expectedSuccess ? expected : outputSentinel, guarded.Value);
+            Assert.Equal(lowerCanary, guarded.Before);
+            Assert.Equal(upperCanary, guarded.After);
+        }
+
+        bool TryGetExpected(ulong value, uint digit, uint radix, ulong maximum, out ulong expected)
+        {
+            if (radix is < 2 or > 36 || digit >= radix)
+            {
+                expected = 0;
+                return false;
+            }
+
+            var result = new BigInteger(value) * radix + digit;
+            if (result > new BigInteger(maximum))
+            {
+                expected = 0;
+                return false;
+            }
+
+            expected = (ulong)result;
+            return true;
+        }
+
+        void AssertDecimal(ulong value, uint digit, ulong maximum)
+        {
+            var expectedSuccess = TryGetExpected(value, digit, 10, maximum, out var expected);
+            var guarded = new GuardedUInt64 {
+                Before = lowerCanary,
+                Value = outputSentinel,
+                After = upperCanary,
+            };
+            var actual = decimalAccumulator(value, digit, maximum, ref guarded.Value);
+            AssertResult(expectedSuccess, expected, actual, guarded);
+        }
+
+        void AssertBase(ulong value, uint digit, uint radix, ulong maximum)
+        {
+            var expectedSuccess = TryGetExpected(value, digit, radix, maximum, out var expected);
+            var guarded = new GuardedUInt64 {
+                Before = lowerCanary,
+                Value = outputSentinel,
+                After = upperCanary,
+            };
+            var actual = baseAccumulator(value, digit, radix, maximum, ref guarded.Value);
+            AssertResult(expectedSuccess, expected, actual, guarded);
+        }
+
+        foreach (var maximum in maxima)
+        {
+            var cutoff = maximum / 10;
+            ulong[] values = [
+                0, 1, maximum, cutoff == 0 ? 0 : cutoff - 1, cutoff, cutoff + 1,
+            ];
+            foreach (var value in values.Distinct())
+            {
+                for (uint digit = 0; digit <= 10; digit++)
+                {
+                    AssertDecimal(value, digit, maximum);
+                }
+            }
+            AssertDecimal(cutoff, uint.MaxValue, maximum);
+        }
+
+        for (uint radix = 2; radix <= 36; radix++)
+        {
+            foreach (var maximum in maxima)
+            {
+                var cutoff = maximum / radix;
+                ulong[] values = [
+                    0, 1, maximum, cutoff == 0 ? 0 : cutoff - 1, cutoff, cutoff + 1,
+                ];
+                foreach (var value in values.Distinct())
+                {
+                    for (uint digit = 0; digit <= radix; digit++)
+                    {
+                        AssertBase(value, digit, radix, maximum);
+                    }
+                }
+                AssertBase(cutoff, uint.MaxValue, radix, maximum);
+            }
+        }
+
+        foreach (var radix in new uint[] { 0, 1, 37, uint.MaxValue })
+        {
+            foreach (var maximum in maxima)
+            {
+                foreach (var digit in new uint[] { 0, 1, 10, uint.MaxValue })
+                {
+                    AssertBase(0, digit, radix, maximum);
+                }
+            }
         }
     }
 
@@ -659,6 +792,8 @@ public sealed partial class CliTests
                 "Terrum.CodeAnalysis.DecodeUtf16Scalar",
                 "Terrum.CodeAnalysis.Utf16ScalarWidth",
                 "Terrum.CodeAnalysis.Numerics64.MagnitudeInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal",
+                "Terrum.CodeAnalysis.Numerics64.TryAccumulateBase",
             })
             {
                 Assert.True(NativeLibrary.TryGetExport(handle, export, out _),
@@ -705,6 +840,7 @@ public sealed partial class CliTests
                 Assert.Equal(expected, magnitudeInt64(value));
             }
             Assert.Equal(0x8000000000000000UL, magnitudeInt64(long.MinValue));
+            AssertWideIntegerAccumulatorExports(handle);
 
             var isAsciiDigit = Marshal.GetDelegateForFunctionPointer<Char16PredicateExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.IsAsciiDigit"));

@@ -47,7 +47,11 @@ That internal fail-fast DLL also directly invokes the existing
 `WideIntegerFacts.MagnitudeInt64` candidate export and compares its 64-bit
 unsigned result with `BigInteger` across signed boundaries, including
 `int64.MinValue`; this is Windows x64 ABI evidence, not a stable or portable
-ABI or general arithmetic support.
+ABI or general arithmetic support. It directly invokes
+`TryAccumulateDecimal` and `TryAccumulateBase` as well, comparing accepted
+full-width results with `BigInteger` and checking false-path output
+preservation and adjacent canaries; this does not establish a general native
+`init ref` contract or checked-exception DLL support.
 Persisted semantic-module JIT tests also compare
 `StringLiteral` length and encoding results for UTF-8, UTF-16
 units and LE/BE bytes, strict ASCII and Latin-1, and UTF-32 LE/BE bytes with
