@@ -27,6 +27,9 @@ public sealed partial class CliTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Utf16ScalarWidthExport(int scalar);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int HexDigitExport(ushort character, ref int digit);
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -622,6 +625,7 @@ public sealed partial class CliTests
                 "Terrum.CodeAnalysis.IsAsciiDigit",
                 "Terrum.CodeAnalysis.IsLineBreak",
                 "Terrum.CodeAnalysis.GetDecimalDigit",
+                "Terrum.CodeAnalysis.TryGetHexDigit",
                 "Terrum.CodeAnalysis.DecodeUtf16Scalar",
                 "Terrum.CodeAnalysis.Utf16ScalarWidth",
             })
@@ -656,6 +660,49 @@ public sealed partial class CliTests
             {
                 Assert.Equal(expected, scalarWidth(scalar));
             }
+
+            var tryGetHexDigit = Marshal.GetDelegateForFunctionPointer<HexDigitExport>(
+                NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.TryGetHexDigit"));
+            const int lowerCanary = 0x13579BDF;
+            const int sentinel = 0x2468ACE0;
+            const int upperCanary = unchecked((int)0xECA86420);
+            int[] words = [lowerCanary, sentinel, upperCanary];
+            foreach (var (character, expected) in new (ushort Character, int Expected)[] {
+                ((ushort)'0', 0), ((ushort)'1', 1), ((ushort)'2', 2), ((ushort)'3', 3),
+                ((ushort)'4', 4), ((ushort)'5', 5), ((ushort)'6', 6), ((ushort)'7', 7),
+                ((ushort)'8', 8), ((ushort)'9', 9),
+                ((ushort)'A', 10), ((ushort)'B', 11), ((ushort)'C', 12),
+                ((ushort)'D', 13), ((ushort)'E', 14), ((ushort)'F', 15),
+                ((ushort)'a', 10), ((ushort)'b', 11), ((ushort)'c', 12),
+                ((ushort)'d', 13), ((ushort)'e', 14), ((ushort)'f', 15),
+            })
+            {
+                words[1] = sentinel;
+                Assert.Equal(1, tryGetHexDigit(character, ref words[1]));
+                Assert.Equal(expected, words[1]);
+                Assert.Equal(lowerCanary, words[0]);
+                Assert.Equal(upperCanary, words[2]);
+            }
+
+            foreach (var character in new ushort[] {
+                (ushort)'/', (ushort)':', (ushort)'@', (ushort)'G', (ushort)'`', (ushort)'g',
+                0, 0x0661, 0xD800, 0xFFFF,
+            })
+            {
+                words[1] = sentinel;
+                Assert.Equal(0, tryGetHexDigit(character, ref words[1]));
+                Assert.Equal(sentinel, words[1]);
+                Assert.Equal(lowerCanary, words[0]);
+                Assert.Equal(upperCanary, words[2]);
+            }
+
+            words[1] = sentinel;
+            Assert.Equal(0, tryGetHexDigit(0, ref words[1]));
+            Assert.Equal(sentinel, words[1]);
+            Assert.Equal(1, tryGetHexDigit((ushort)'f', ref words[1]));
+            Assert.Equal(15, words[1]);
+            Assert.Equal(0, tryGetHexDigit((ushort)'g', ref words[1]));
+            Assert.Equal(15, words[1]);
         }
         finally
         {

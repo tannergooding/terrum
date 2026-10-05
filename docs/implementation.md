@@ -39,6 +39,9 @@ rejection under both runtime policies.
 hex-digit and line-break behavior across every UTF-16 code unit, including
 successful hex-value publication and failed-output vacancy/reuse, plus
 `GetDecimalDigit` for all ten ASCII digits under both runtime policies.
+The Windows x64 compiler-primitives DLL integration also calls the exported
+`TryGetHexDigit` helper across all accepted ASCII digits and representative
+rejections, checking preserved output storage and adjacent canaries.
 Persisted semantic-module JIT tests also compare
 `StringLiteral` length and encoding results for UTF-8, UTF-16
 units and LE/BE bytes, strict ASCII and Latin-1, and UTF-32 LE/BE bytes with
@@ -2346,12 +2349,14 @@ pass; signed unary literals reuse the scalar constant-folding helper;
 visibility remains private unless declared `public` (including explicit `internal`). Native AOT/JIT execute
 the program with test-local callers under both failure policies. This is an
 in-process bridge, not a standalone compiler or persisted native bootstrap
-artifact. The native compiler-primitives DLL now also exports the pure
-`Utf16CodeUnits` decoder and width helper. The Windows x64 integration test
-calls both exports over representative scalar and width boundaries. The DLL
+artifact. The native compiler-primitives DLL exports the source-independent
+`CharacterFacts.TryGetHexDigit` helper and the pure `Utf16CodeUnits` decoder
+and width helper. The Windows x64 integration test calls the hex helper over
+all accepted ASCII digits and representative rejections, and calls both
+UTF-16 exports over representative scalar and width boundaries. The DLL
 still excludes the `Host.Source`-dependent `Utf16Scalar` adapter and scalar
-frontend. The frontend retains its source-grant and hosted verifier/emitter
-boundaries.
+frontend. These remain internal compiler exports, not a stable native ABI.
+The frontend retains its source-grant and hosted verifier/emitter boundaries.
 `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`
 projects typed facts or scanner/shape errors for inspection. Compilation
 errors in the bundled frontend sources use source-located multi-file
