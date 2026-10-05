@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `4aed52a` | Build graph ownership indexes directly |
 | `f6e66d6` | Build leaf graph exports directly |
 | `7d11b76` | Read graph providers directly into arrays |
 | `975dd98` | Build module-set import names directly |
