@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `53ffd7f` | Reuse the validated graph profile during artifact inspection |
 | `ca1d3cb` | Reuse graph contract snapshots through creation and closure validation |
 | `ae0558c` | Reuse parsed semantic contract facts when validating graph packages |
 | `99fb9c1` | Avoid repeating consumer contract validation after validated serialization |
