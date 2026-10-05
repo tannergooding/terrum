@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `b10b0a8` | Combine graph origin and cleanup-owner construction into one structure pass |
 | `31abf0a` | Reuse consumer declaration contracts and ownership facts during packaging |
 | `6b672a3` | Detect exception imports during native JIT fixup validation |
 | `e08248d` | Resolve each native JIT module export once per setup |
