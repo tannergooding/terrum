@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `be2c547` | Reuse module call traversals for buffer-clear reachability |
 | `6392c7c` | Validate structure cleanup owners through one name index |
 | `cf26d88` | Count class construction pairs during function validation |
 | `3932fb2` | Inspect optional-handle and managed-node profile features together |
