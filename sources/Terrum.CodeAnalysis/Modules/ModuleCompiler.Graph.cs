@@ -320,8 +320,9 @@ public static partial class ModuleCompiler
     private static void ValidateGraphLibrary(Module module, CompilationReference dependencies,
         CompilationReference reference, bool hasPrivateManagedState)
     {
-        var dependencyFunctions = dependencies.Functions.ToDictionary(static item => item.Name,
-            StringComparer.Ordinal);
+        IReadOnlyDictionary<string, BoundFunction> dependencyFunctions = dependencies.Functions.IsEmpty
+            ? ImmutableDictionary<string, BoundFunction>.Empty
+            : dependencies.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
         if (ValidateGraphImports(module, dependencies, dependencyFunctions, hasPrivateManagedState))
         {
             throw new ModuleContractException("Managed graph import crosses a non-Copy boundary.");
@@ -413,8 +414,9 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Graph library and dependency runtime policies differ.");
         }
-        var dependencyTypes = dependencies.Structures.ToDictionary(static item => item.Name,
-            StringComparer.Ordinal);
+        IReadOnlyDictionary<string, BoundStruct> dependencyTypes = dependencies.Structures.IsEmpty
+            ? ImmutableDictionary<string, BoundStruct>.Empty
+            : dependencies.Structures.ToDictionary(static item => item.Name, StringComparer.Ordinal);
         var hasUnsupportedManagedImport = false;
         foreach (var item in module.Functions)
         {
