@@ -466,7 +466,12 @@ public static partial class NativeModuleCompiler
         {
             return [];
         }
-        var imported = contract.ImportedStructures.ToHashSet(StringComparer.Ordinal);
+        var importedStructures = contract.ImportedStructures;
+        var imported = new HashSet<string>(importedStructures.Length, StringComparer.Ordinal);
+        foreach (var name in importedStructures)
+        {
+            _ = imported.Add(name);
+        }
         if (provenance is null)
         {
             provenance = new Dictionary<string, GraphTypeOrigin?>[providers.Length];
@@ -549,8 +554,15 @@ public static partial class NativeModuleCompiler
             {
                 throw new ModuleContractException($"Graph imported type '{structure.Name}' has no unambiguous origin.");
             }
-            providersByIdentity ??= providers.ToDictionary(static provider => provider.Identity!,
-                StringComparer.Ordinal);
+            if (providersByIdentity is null)
+            {
+                providersByIdentity = new Dictionary<string, GraphPackage>(providers.Length,
+                    StringComparer.Ordinal);
+                foreach (var candidate in providers)
+                {
+                    providersByIdentity.Add(candidate.Identity!, candidate);
+                }
+            }
             if (!providersByIdentity.TryGetValue(origin.Identity, out var provider)
                 || (structure.CleanupMethod is not null && (origin.CleanupIdentity != origin.Identity
                     || Array.BinarySearch(provider.Exports, structure.CleanupMethod,
