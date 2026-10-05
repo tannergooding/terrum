@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `bf28c0b` | Collect generic signature nodes in one pass |
 | `3c6e58f` | Scan static protocol formals once without intermediate arrays |
 | `45e7514` | Reuse generic declaration attribute and modifier facts |
 | `f629661` | Classify static protocol declaration facts in one syntax pass |
