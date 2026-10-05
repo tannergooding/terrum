@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `28969c9` | Skip native buffer-clear scan when buffer types are absent |
 | `92035f7` | Remove obsolete managed output slot rescanner |
 | `f679574` | Reuse native machine import membership set |
 | `48fe445` | Collect managed class offsets in one pass |
