@@ -404,7 +404,8 @@ public static partial class NativeModuleCompiler
             {
                 var import = actual[index];
                 if (import.ExportName != import.FunctionName
-                    || !dependency.Declarations.Contains(import.FunctionName, StringComparer.Ordinal)
+                    || Array.BinarySearch(dependency.Declarations, import.FunctionName,
+                        StringComparer.Ordinal) < 0
                     || !names.Add(import.FunctionName))
                 {
                     throw new ModuleFormatException("Emitted graph import has no declaration owner.");
