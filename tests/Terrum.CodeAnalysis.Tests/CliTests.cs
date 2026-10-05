@@ -1782,6 +1782,26 @@ public sealed partial class CliTests
                 "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToUInt32",
                 "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToInt64",
                 "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToUInt64",
+                "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToInt64",
+                "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToUInt64",
+                "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToInt64",
+                "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToUInt64",
+                "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToInt32",
+                "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToUInt32",
+                "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToInt32",
+                "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToUInt32",
+                "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToInt32",
+                "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToUInt32",
+                "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToInt64",
+                "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToUInt64",
+                "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToChar16",
+                "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToChar16",
+                "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToChar16",
+                "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToChar16",
+                "Terrum.CodeAnalysis.Numerics64.SaturateChar16ToInt32",
+                "Terrum.CodeAnalysis.Numerics64.SaturateChar16ToUInt32",
+                "Terrum.CodeAnalysis.Numerics64.SaturateChar16ToInt64",
+                "Terrum.CodeAnalysis.Numerics64.SaturateChar16ToUInt64",
             })
             {
                 Assert.True(NativeLibrary.TryGetExport(handle, export, out _),
@@ -1834,6 +1854,7 @@ public sealed partial class CliTests
             AssertIntegerMathExports(handle);
             AssertIntegerCheckedArithmeticExports(handle);
             AssertIntegerCheckedConversionExports(handle);
+            AssertIntegerSaturationExports(handle);
 
             var isAsciiDigit = Marshal.GetDelegateForFunctionPointer<Char16PredicateExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.IsAsciiDigit"));

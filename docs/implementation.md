@@ -122,6 +122,11 @@ directly through that internal DLL. Their signed/unsigned boundaries and
 outputs and adjacent canaries. This adds ABI evidence only: it does not approve
 the named conversion APIs, add conversion witnesses, or alter the separate
 source-language checked-conversion contract.
+The internal DLL likewise invokes all twenty provisional `IntegerSaturation`
+helpers and checks each scalar return against a separate `BigInteger` clamp
+oracle over signed, unsigned and `char16` boundaries, including surrogate
+code units. This is internal ABI evidence for the provisional named helpers,
+not an adopted saturation API or implicit conversion policy.
 The provisional `BitOperations` candidate is also compared with hosted
 `System.Numerics.BitOperations` through persisted semantic-module consumers
 under both runtime policies. Separate width-specific consumers cover every
