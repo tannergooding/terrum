@@ -117,6 +117,10 @@ both policies, comparing name and namespace row bytes for ASCII, UTF-8,
 UTF-16LE and UTF-32LE with the hosted string-table writer. It also checks
 empty namespace rows and rejects empty names, non-ASCII text under ASCII, and
 embedded zero scalars across fresh grants.
+`StringRowComparisonsUseFreshSourceGrantsAcrossModuleJit` passed under both
+policies, comparing the ordinal decoded-scalar name and namespace predicates
+with hosted ordinal string equality and checking invalid empty-name and
+embedded-zero inputs.
 `SourceLineIndexModuleIndexesFreshSourceGrants` passed under both policies,
 reusing persisted provider and consumer artifacts across empty, ordinary,
 mixed-line-break and malformed-surrogate snapshots while comparing line

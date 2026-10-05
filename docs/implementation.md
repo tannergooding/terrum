@@ -19,6 +19,10 @@ The bounded adapter has executed the Terrum-authored `CharacterLiteral` and
 Persisted semantic-module JIT tests compare those rows with the hosted string
 table writer across fresh grants, including the existing empty-name,
 unrepresentable-ASCII and embedded-zero rejection behavior. They also compare
+the ordinal decoded-scalar name and namespace comparison APIs against hosted
+ordinal string equality, including invalid empty-name and embedded-zero
+requests.
+Persisted semantic-module JIT tests also compare
 `StringLiteral` length and encoding results for UTF-8, UTF-16
 units and LE/BE bytes, strict ASCII and Latin-1, and UTF-32 LE/BE bytes with
 host encoders across fresh grants under both runtime policies. They cover
