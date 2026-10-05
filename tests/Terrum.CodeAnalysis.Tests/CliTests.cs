@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using System.Numerics;
 using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -54,6 +55,9 @@ public sealed partial class CliTests
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int SourceRangeTryCreateExport(int start, int length, ref NativeSourceRange range);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong MagnitudeInt64Export(long value);
 
     [Theory]
     [InlineData(false)]
@@ -654,6 +658,7 @@ public sealed partial class CliTests
                 "Terrum.CodeAnalysis.TryGetHexDigit",
                 "Terrum.CodeAnalysis.DecodeUtf16Scalar",
                 "Terrum.CodeAnalysis.Utf16ScalarWidth",
+                "Terrum.CodeAnalysis.Numerics64.MagnitudeInt64",
             })
             {
                 Assert.True(NativeLibrary.TryGetExport(handle, export, out _),
@@ -686,6 +691,20 @@ public sealed partial class CliTests
             {
                 Assert.Equal(expected, scalarWidth(scalar));
             }
+
+            var magnitudeInt64 = Marshal.GetDelegateForFunctionPointer<MagnitudeInt64Export>(
+                NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.Numerics64.MagnitudeInt64"));
+            long[] signedValues = [
+                long.MinValue, long.MinValue + 1, -4294967297L, -4294967296L, -4294967295L,
+                int.MinValue, -1, 0, 1, int.MaxValue, 4294967295L, 4294967296L,
+                long.MaxValue - 1, long.MaxValue,
+            ];
+            foreach (var value in signedValues)
+            {
+                var expected = (ulong)BigInteger.Abs(new BigInteger(value));
+                Assert.Equal(expected, magnitudeInt64(value));
+            }
+            Assert.Equal(0x8000000000000000UL, magnitudeInt64(long.MinValue));
 
             var isAsciiDigit = Marshal.GetDelegateForFunctionPointer<Char16PredicateExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.IsAsciiDigit"));
