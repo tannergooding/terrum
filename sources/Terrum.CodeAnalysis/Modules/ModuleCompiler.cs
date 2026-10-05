@@ -128,8 +128,11 @@ public static partial class ModuleCompiler
 
     private static ImmutableArray<string> ReadConsumerCallImports(Module consumer)
     {
-        var indexes = consumer.Functions.Select((function, index) => (function.Name, index))
-            .ToDictionary(static item => item.Name, static item => item.index, StringComparer.Ordinal);
+        var indexes = new Dictionary<string, int>(consumer.Functions.Length, StringComparer.Ordinal);
+        for (var index = 0; index < consumer.Functions.Length; index++)
+        {
+            indexes.Add(consumer.Functions[index].Name, index);
+        }
         var imports = new HashSet<string>(StringComparer.Ordinal);
         foreach (var function in consumer.Functions)
         {
