@@ -12,9 +12,44 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class ModuleCompiler
 {
-    internal sealed record GraphContractSnapshot(CompilationReference? Reference,
-        BoundRuntimePolicy RuntimePolicy, string Profile, ImmutableArray<string> Imports,
-        ImmutableArray<BoundStruct> Structures, ImmutableArray<string> ImportedStructures);
+    internal sealed class GraphContractSnapshot
+    {
+        private readonly Module _module;
+
+        internal GraphContractSnapshot(Module module, CompilationReference? reference,
+            bool hasPrivateManagedState, string profile)
+        {
+            _module = module;
+            Reference = reference;
+            RuntimePolicy = module.RuntimePolicy;
+            Profile = profile;
+            Imports = [.. module.Functions.Where(static item => item.Import).Select(static item => item.Name)
+                .Order(StringComparer.Ordinal)];
+            Structures = module.Structures;
+            ImportedStructures = module.ImportedStructures;
+            HasPrivateManagedState = hasPrivateManagedState;
+        }
+
+        internal CompilationReference? Reference { get; }
+        internal BoundRuntimePolicy RuntimePolicy { get; }
+        internal string Profile { get; }
+        internal ImmutableArray<string> Imports { get; }
+        internal ImmutableArray<BoundStruct> Structures { get; }
+        internal ImmutableArray<string> ImportedStructures { get; }
+        private bool HasPrivateManagedState { get; }
+
+        internal void ValidateConsumerAgainstReference(CompilationReference reference)
+        {
+            _ = RestoreConsumerAgainstReference(_module, reference);
+        }
+
+        internal void ValidateGraphLibrary(CompilationReference dependencies)
+        {
+            var reference = Reference
+                ?? throw new InvalidOperationException("Native graph provider reference is missing.");
+            ModuleCompiler.ValidateGraphLibrary(_module, dependencies, reference, HasPrivateManagedState);
+        }
+    }
 
     internal static CompilationReference MergeGraphReferences(IReadOnlyList<CompilationReference> references,
         IReadOnlyList<IReadOnlyDictionary<string, string?>>? origins = null)
@@ -234,7 +269,14 @@ public static partial class ModuleCompiler
         CompilationReference dependencies, bool allowImportedCleanup = false)
     {
         var module = ReadGraphLibrary(contract);
-        _ = CreateGraphReference(module, exports, allowImportedCleanup, out var hasPrivateManagedState);
+        var reference = CreateGraphReference(module, exports, allowImportedCleanup,
+            out var hasPrivateManagedState);
+        ValidateGraphLibrary(module, dependencies, reference, hasPrivateManagedState);
+    }
+
+    private static void ValidateGraphLibrary(Module module, CompilationReference dependencies,
+        CompilationReference reference, bool hasPrivateManagedState)
+    {
         var dependencyFunctions = dependencies.Functions.ToDictionary(static item => item.Name,
             StringComparer.Ordinal);
         ValidateGraphImports(module, dependencies, dependencyFunctions);
@@ -271,21 +313,24 @@ public static partial class ModuleCompiler
     internal static GraphContractSnapshot ReadGraphConsumerContract(byte[] contract)
     {
         var module = Read(contract, expectedConsumer: true, out var profile);
-        return CreateGraphContractSnapshot(module, reference: null, profile: profile);
+        return CreateGraphContractSnapshot(module, reference: null,
+            HasPrivateManagedState(module), profile);
     }
 
     internal static GraphContractSnapshot ReadGraphProviderContract(byte[] contract,
         IReadOnlyList<string> exports)
     {
         var module = ReadGraphLibrary(contract, out var profile);
-        var reference = CreateGraphReference(module, exports, allowImportedCleanup: true, out _);
-        return CreateGraphContractSnapshot(module, reference, profile);
+        var reference = CreateGraphReference(module, exports, allowImportedCleanup: true,
+            out var hasPrivateManagedState);
+        return CreateGraphContractSnapshot(module, reference, hasPrivateManagedState, profile);
     }
 
     internal static GraphContractSnapshot ReadGraphProviderSnapshot(byte[] contract)
     {
         var module = ReadGraphLibrary(contract, out var profile);
-        return CreateGraphContractSnapshot(module, reference: null, profile: profile);
+        return CreateGraphContractSnapshot(module, reference: null,
+            HasPrivateManagedState(module), profile);
     }
 
     internal static string GetGraphProfile(byte[] contract)
@@ -295,11 +340,8 @@ public static partial class ModuleCompiler
     }
 
     private static GraphContractSnapshot CreateGraphContractSnapshot(Module module,
-        CompilationReference? reference, string profile) =>
-        new(reference, module.RuntimePolicy, profile,
-            [.. module.Functions.Where(static item => item.Import).Select(static item => item.Name)
-                .Order(StringComparer.Ordinal)],
-            module.Structures, module.ImportedStructures);
+        CompilationReference? reference, bool hasPrivateManagedState, string profile) =>
+        new(module, reference, hasPrivateManagedState, profile);
 
     private static BoundFunction RecordedImportPromises(string contract, BoundFunction replacement)
     {

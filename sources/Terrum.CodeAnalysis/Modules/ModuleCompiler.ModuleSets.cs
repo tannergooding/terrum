@@ -210,6 +210,11 @@ public static partial class ModuleCompiler
     internal static BoundProgram RestoreConsumerAgainstReference(byte[] consumerBytes, CompilationReference reference)
     {
         var consumer = Read(consumerBytes, expectedConsumer: true);
+        return RestoreConsumerAgainstReference(consumer, reference);
+    }
+
+    private static BoundProgram RestoreConsumerAgainstReference(Module consumer, CompilationReference reference)
+    {
         if (consumer.RuntimePolicy != reference.RuntimePolicy)
         {
             throw new ModuleContractException("Consumer and provider runtime policies differ.");

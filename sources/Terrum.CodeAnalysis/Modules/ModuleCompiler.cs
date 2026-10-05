@@ -2886,13 +2886,13 @@ public static partial class ModuleCompiler
         return StrictUtf8.GetString(bytes);
     }
 
-    private sealed record Module(bool Consumer, int EntryPoint, ImmutableArray<BoundStruct> Structures, ImmutableArray<ModuleFunction> Functions)
+    internal sealed record Module(bool Consumer, int EntryPoint, ImmutableArray<BoundStruct> Structures, ImmutableArray<ModuleFunction> Functions)
     {
         public ImmutableArray<BoundClass> Classes { get; init; } = [];
         public ImmutableArray<string> ImportedStructures { get; init; } = [];
         public BoundRuntimePolicy RuntimePolicy { get; init; }
     }
-    private sealed record ModuleFunction(string Name, string Contract, BoundFunction? Function, bool Import)
+    internal sealed record ModuleFunction(string Name, string Contract, BoundFunction? Function, bool Import)
     {
         public bool HasOwnershipTransfer { get; init; }
     }

@@ -261,14 +261,15 @@ public static partial class NativeModuleCompiler
         var provenance = providers.Select((provider, index) =>
             ProviderOrigins(provider, references[index])).ToArray();
         var reference = GraphReference(providers, references, provenance);
+        var contractSnapshot = package.ContractSnapshot
+            ?? throw new InvalidOperationException("Native graph package contract snapshot is missing.");
         if (package.Consumer)
         {
-            ModuleCompiler.ValidateConsumerAgainstReference(package.Contract, reference);
+            contractSnapshot.ValidateConsumerAgainstReference(reference);
         }
         else
         {
-            ModuleCompiler.ValidateGraphLibrary(package.Contract, package.Exports, reference,
-                allowImportedCleanup: true);
+            contractSnapshot.ValidateGraphLibrary(reference);
         }
         foreach (var (dependency, provider) in package.Dependencies.Zip(providers))
         {
@@ -278,9 +279,7 @@ public static partial class NativeModuleCompiler
                 throw new ModuleContractException($"Graph declaration does not belong to '{dependency.Identity}'.");
             }
         }
-        var expected = CreateGraphOrigins(package.ContractSnapshot
-                ?? throw new InvalidOperationException("Native graph package contract snapshot is missing."),
-            package.Consumer, package.Identity,
+        var expected = CreateGraphOrigins(contractSnapshot, package.Consumer, package.Identity,
             providers, provenance);
         if (!package.Origins.SequenceEqual(expected))
         {
