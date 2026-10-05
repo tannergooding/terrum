@@ -407,7 +407,7 @@ public static partial class NativeModuleCompiler
             var dependency = declarations[i];
             var actual = usedByDll.TryGetValue(DllName(dependency.Identity), out var providerImports)
                 ? providerImports : [];
-            var imports = new string[actual.Count];
+            var imports = actual.Count == 0 ? Array.Empty<string>() : new string[actual.Count];
             for (var index = 0; index < actual.Count; index++)
             {
                 var import = actual[index];
