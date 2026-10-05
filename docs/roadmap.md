@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `feca5db` | Read module-set providers directly into arrays |
 | `4aed52a` | Build graph ownership indexes directly |
 | `f6e66d6` | Build leaf graph exports directly |
 | `7d11b76` | Read graph providers directly into arrays |
