@@ -37,8 +37,11 @@ public static unsafe class NativeJit
     /// <summary>Emits and executes the callable entry point, returning its int32 result.</summary>
     /// <exception cref="PlatformNotSupportedException">The host is not Windows x64.</exception>
     public static int Execute(BoundProgram program, NativeRuntimePolicy runtimePolicy,
-        string? registrarAssembly = null) =>
-        ExecuteWithData(program, runtimePolicy, registrarAssembly).ExitCode;
+        string? registrarAssembly = null)
+    {
+        var code = EmitCode(program, runtimePolicy);
+        return ExecuteCode(code, [], [], registrarAssembly, null, null, false, out _);
+    }
 
     /// <summary>Executes the entry point and copies compiler-supplied buffers before releasing native memory.</summary>
     /// <exception cref="PlatformNotSupportedException">The host is not Windows x64.</exception>
@@ -49,6 +52,13 @@ public static unsafe class NativeJit
     public static NativeExecutionResult ExecuteWithData(BoundProgram program, NativeRuntimePolicy runtimePolicy,
         string? registrarAssembly = null)
     {
+        var code = EmitCode(program, runtimePolicy);
+        var exitCode = ExecuteCode(code, [], [], registrarAssembly, null, null, true, out var data);
+        return new NativeExecutionResult(exitCode, data) { BufferOffsets = code.BufferOffsets };
+    }
+
+    private static NativeCode EmitCode(BoundProgram program, NativeRuntimePolicy runtimePolicy)
+    {
         ArgumentNullException.ThrowIfNull(program);
         if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
         {
@@ -57,7 +67,7 @@ public static unsafe class NativeJit
 
         var code = NativeEmitter.EmitCode(program, runtimePolicy);
         ValidateBufferMetadata(program, code);
-        return ExecuteCode(code, [], [], registrarAssembly, null, null);
+        return code;
     }
 
     internal static int ExecuteImportedCode(NativeCode code, IReadOnlyList<NativeJitModule> modules,
@@ -77,7 +87,7 @@ public static unsafe class NativeJit
             throw new ArgumentException("Native graph consumers cannot contain host buffers.", nameof(code));
         }
         return ExecuteCode(code, modules, expectedImports, registrarAssembly,
-            registrarInputPipe, registrarOutputPipe).ExitCode;
+            registrarInputPipe, registrarOutputPipe, false, out _);
     }
 
     private static void ValidateBufferMetadata(BoundProgram program, NativeCode code)
@@ -138,9 +148,9 @@ public static unsafe class NativeJit
         }
     }
 
-    private static NativeExecutionResult ExecuteCode(NativeCode code, IReadOnlyList<NativeJitModule> modules,
+    private static int ExecuteCode(NativeCode code, IReadOnlyList<NativeJitModule> modules,
         IReadOnlyList<NativeImportBinding> expectedImports, string? registrarAssembly,
-        string? registrarInputPipe, string? registrarOutputPipe)
+        string? registrarInputPipe, string? registrarOutputPipe, bool captureHostData, out byte[] dataSnapshot)
     {
         ArgumentNullException.ThrowIfNull(code);
         ArgumentNullException.ThrowIfNull(modules);
@@ -465,12 +475,19 @@ public static unsafe class NativeJit
 
             var entryPoint = (delegate* unmanaged[Stdcall]<int>)(memory + code.EntryPoint);
             var exitCode = entryPoint();
-            var snapshot = new byte[code.HostDataLength];
-            new ReadOnlySpan<byte>((void*)(memory + readOnlyOffset), code.ReadOnlyDataLength).CopyTo(snapshot);
-            var hostWritableLength = code.HostDataLength - code.ReadOnlyDataLength;
-            new ReadOnlySpan<byte>((void*)(memory + writableOffset), hostWritableLength)
-                .CopyTo(snapshot.AsSpan(code.ReadOnlyDataLength));
-            return new NativeExecutionResult(exitCode, snapshot) { BufferOffsets = code.BufferOffsets };
+            if (captureHostData)
+            {
+                dataSnapshot = new byte[code.HostDataLength];
+                new ReadOnlySpan<byte>((void*)(memory + readOnlyOffset), code.ReadOnlyDataLength).CopyTo(dataSnapshot);
+                var hostWritableLength = code.HostDataLength - code.ReadOnlyDataLength;
+                new ReadOnlySpan<byte>((void*)(memory + writableOffset), hostWritableLength)
+                    .CopyTo(dataSnapshot.AsSpan(code.ReadOnlyDataLength));
+            }
+            else
+            {
+                dataSnapshot = Array.Empty<byte>();
+            }
+            return exitCode;
         }
         finally
         {

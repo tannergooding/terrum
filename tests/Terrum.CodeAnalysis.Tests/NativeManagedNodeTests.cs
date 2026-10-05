@@ -100,6 +100,7 @@ public sealed class NativeManagedNodeTests
         Assert.True(code.ManagedRuntimeOffset >= 0);
         Assert.Equal(0, code.HostDataLength);
 
+        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
         var result = NativeJit.ExecuteWithData(program, NativeRuntimePolicy.FailFast);
 
         Assert.Equal(42, result.ExitCode);
