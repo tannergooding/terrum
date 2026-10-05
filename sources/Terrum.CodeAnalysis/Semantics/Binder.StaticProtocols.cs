@@ -540,11 +540,26 @@ internal sealed partial class Binder
                 typeParameters.Span);
             return;
         }
-        var returnType = children.FirstOrDefault(static child => child.Kind == SyntaxKind.TypeName);
+        SyntaxNode? returnType = null;
+        SyntaxNode? parameters = null;
+        SyntaxNode? body = null;
+        foreach (var child in children)
+        {
+            if (returnType is null && child.Kind == SyntaxKind.TypeName)
+            {
+                returnType = child;
+            }
+            if (parameters is null && child.Kind == SyntaxKind.ParameterList)
+            {
+                parameters = child;
+            }
+            if (child.Kind is SyntaxKind.Block or SyntaxKind.ExpressionBody)
+            {
+                body = child;
+            }
+        }
         var returnName = returnType is null ? "" : NameText(returnType);
         var scalarReturn = GenericScalarType(returnName);
-        var parameters = children.FirstOrDefault(static child => child.Kind == SyntaxKind.ParameterList);
-        var body = children.LastOrDefault(static child => child.Kind is SyntaxKind.Block or SyntaxKind.ExpressionBody);
         var nameToken = ((SyntaxTokenElement)declaration.Children.First(element =>
             element is SyntaxTokenElement { Token.Kind: TokenKind.Identifier })).Token;
         var qualified = Qualify(nameToken.Name);
