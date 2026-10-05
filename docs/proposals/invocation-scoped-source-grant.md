@@ -62,10 +62,11 @@ source requirements. No general buffer dependency or source-aware maintained
 compiler-primitives DLL was added.
 
 The same capability also runs the bounded Terrum-authored `CharacterLiteral`
-and `StringLiteral` leaf decoders and the provisional UTF-8 namespace-row
-encoder as persisted semantic-module providers. This reuses the existing
-requirement and grant validation; it does not make `StringRow` a TRRM section
-writer or make the scanner or scalar frontend source-independent, independently
+and `StringLiteral` leaf decoders and the provisional `StringRow` name and
+namespace encoders for ASCII, UTF-8, UTF-16LE and UTF-32LE as persisted
+semantic-module providers. This reuses the existing requirement and grant
+validation; it does not make `StringRow` a TRRM section writer or make the
+scanner or scalar frontend source-independent, independently
 verified, or executable outside the hosted verifier/emitter path.
 
 The provisional contract for this slice is:
@@ -111,9 +112,11 @@ across empty and one-code-unit snapshots and resolves call-valued indexes.
 `StringLiteralModuleReadsFreshSourceGrants` additionally passed under both
 runtime policies, comparing decoded scalar results and lexical validity
 against the hosted lexer across fresh grants.
-`StringRowModuleEncodesUtf8NamespaceRowsFromFreshSourceGrants` also passed
-under both policies, comparing every emitted row byte and the end boundary
-with the hosted string-table writer across fresh grants.
+`StringRowModuleMatchesAllFormatsAcrossFreshSourceGrants` also passed under
+both policies, comparing name and namespace row bytes for ASCII, UTF-8,
+UTF-16LE and UTF-32LE with the hosted string-table writer. It also checks
+empty namespace rows and rejects empty names, non-ASCII text under ASCII, and
+embedded zero scalars across fresh grants.
 `SourceLineIndexModuleIndexesFreshSourceGrants` passed under both policies,
 reusing persisted provider and consumer artifacts across empty, ordinary,
 mixed-line-break and malformed-surrogate snapshots while comparing line

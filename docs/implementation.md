@@ -14,9 +14,12 @@ of at most 16,384 code units and copies it into fresh invocation storage.
 Artifacts do not retain source contents, concrete length or address. Graphs,
 module sets, native DLLs and persisted AOT images remain outside this support.
 The bounded adapter has executed the Terrum-authored `CharacterLiteral` and
-`StringLiteral` leaf decoders, the provisional `StringEscape` decoder and the
-provisional UTF-8 namespace-row encoder. Persisted semantic-module JIT tests
-also compare `StringLiteral` length and encoding results for UTF-8, UTF-16
+`StringLiteral` leaf decoders, the provisional `StringEscape` decoder and
+`StringRow` name/namespace encoders for ASCII, UTF-8, UTF-16LE and UTF-32LE.
+Persisted semantic-module JIT tests compare those rows with the hosted string
+table writer across fresh grants, including the existing empty-name,
+unrepresentable-ASCII and embedded-zero rejection behavior. They also compare
+`StringLiteral` length and encoding results for UTF-8, UTF-16
 units and LE/BE bytes, strict ASCII and Latin-1, and UTF-32 LE/BE bytes with
 host encoders across fresh grants under both runtime policies. They cover
 `IntegerParsing` for radices 2–36, `SourceLineIndex`
