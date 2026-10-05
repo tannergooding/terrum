@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.Text;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
@@ -79,7 +80,9 @@ public sealed class TrRmDoForTests
     public void EmptyFalsePreTestLoopsEraseWithoutChangingInitializerOrder(int expected, string source)
     {
         var original = Compile(source);
-        var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "empty-false-loop"));
+        var artifact = TrRmExecutableCompiler.Emit(original, "empty-false-loop");
+        Assert.Equal(0, IndexedLoopRegionCount(artifact, 1));
+        var loaded = TrRmExecutableCompiler.Load(artifact);
         Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
         Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
         Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
@@ -98,7 +101,9 @@ public sealed class TrRmDoForTests
         foreach (var source in sources)
         {
             var original = Compile(source);
-            var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "acyclic-return"));
+            var artifact = TrRmExecutableCompiler.Emit(original, "acyclic-return");
+            Assert.Equal(0, IndexedLoopRegionCount(artifact, 1));
+            var loaded = TrRmExecutableCompiler.Load(artifact);
             Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
             Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
             Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
@@ -116,7 +121,9 @@ public sealed class TrRmDoForTests
         foreach (var source in sources)
         {
             var original = Compile(source);
-            var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "acyclic-break"));
+            var artifact = TrRmExecutableCompiler.Emit(original, "acyclic-break");
+            Assert.Equal(0, IndexedLoopRegionCount(artifact, 1));
+            var loaded = TrRmExecutableCompiler.Load(artifact);
             Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
             Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
             Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
@@ -189,7 +196,9 @@ public sealed class TrRmDoForTests
             bool Fail() { require false; return false; }
             """;
         var original = Compile(source);
-        var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "nested-acyclic-exits"));
+        var artifact = TrRmExecutableCompiler.Emit(original, "nested-acyclic-exits");
+        Assert.Equal(0, IndexedLoopRegionCount(artifact, 1));
+        var loaded = TrRmExecutableCompiler.Load(artifact);
         Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
         Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
         Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
@@ -283,5 +292,42 @@ public sealed class TrRmDoForTests
         Assert.Equal(256, loaded.Functions[0].Variables.Length);
         Assert.Equal(iterator ? count + 1 : count,
             NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+    }
+
+    private static int IndexedLoopRegionCount(byte[] artifact, int bodyRow)
+    {
+        var sectionCount = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(12)));
+        for (var section = 0; section < sectionCount; section++)
+        {
+            var entryOffset = 32 + (section * 16);
+            if (BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(entryOffset)) != 0x20)
+            {
+                continue;
+            }
+
+            var bodyCount = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                artifact.AsSpan(entryOffset + 4)));
+            if (bodyRow < 1 || bodyRow > bodyCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(bodyRow));
+            }
+
+            var dataOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                artifact.AsSpan(entryOffset + 8)));
+            var bodyOffset = dataOffset + ((bodyCount + 1) * sizeof(uint))
+                + checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                    artifact.AsSpan(dataOffset + ((bodyRow - 1) * sizeof(uint)))));
+            var width = 1 << (artifact[bodyOffset] & 3);
+            var regionCountOffset = bodyOffset + 1 + (2 * width);
+            return width switch
+            {
+                1 => artifact[regionCountOffset],
+                2 => BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(regionCountOffset)),
+                4 => checked((int)BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(regionCountOffset))),
+                _ => throw new InvalidOperationException("Invalid indexed Body compact width."),
+            };
+        }
+
+        throw new InvalidOperationException("Executable artifact is missing its indexed Body section.");
     }
 }
