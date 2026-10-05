@@ -226,6 +226,39 @@ public sealed partial class CliTests
         }
     }
 
+    [Fact]
+    public async Task MultiSourceJsonDiagnosticsKeepTheirSourceIndexesAsync()
+    {
+        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-source-index-{Guid.NewGuid():N}");
+        var entry = prefix + "-entry.terrum";
+        var first = prefix + "-first.terrum";
+        var second = prefix + "-second.terrum";
+        try
+        {
+            await File.WriteAllTextAsync(entry, "int32 Main() { return missingEntry; }");
+            await File.WriteAllTextAsync(first, "int32 First() { return missingFirst; }");
+            await File.WriteAllTextAsync(second, "int32 Second() { return missingSecond; }");
+
+            var (exit, output, error) = await RunAsync([], "analyze", entry,
+                "--source", first, "--source", second, "--json");
+
+            Assert.Equal(1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+            var sourceIndexes = document.RootElement.GetProperty("diagnostics").EnumerateArray()
+                .Select(static diagnostic => diagnostic.GetProperty("sourceIndex").GetInt32())
+                .OrderBy(static index => index);
+            Assert.Equal([0, 1, 2], sourceIndexes);
+        }
+        finally
+        {
+            File.Delete(entry);
+            File.Delete(first);
+            File.Delete(second);
+        }
+    }
+
     [Theory]
     [InlineData("build", ".exe")]
     [InlineData("build-library", ".dll")]

@@ -321,10 +321,22 @@ internal static partial class Program
         }
         writer.WriteEndArray();
         writer.WriteStartArray("diagnostics");
+        Dictionary<SyntaxTree, int>? sourceIndices = null;
+        if (diagnostics.Length > 1)
+        {
+            sourceIndices = new Dictionary<SyntaxTree, int>(compilation.SyntaxTrees.Length);
+            for (var index = 0; index < compilation.SyntaxTrees.Length; index++)
+            {
+                _ = sourceIndices.TryAdd(compilation.SyntaxTrees[index], index);
+            }
+        }
         foreach (var located in diagnostics)
         {
             writer.WriteStartObject();
-            writer.WriteNumber("sourceIndex", compilation.SyntaxTrees.IndexOf(located.SyntaxTree));
+            var sourceIndex = sourceIndices is null
+                ? compilation.SyntaxTrees.IndexOf(located.SyntaxTree)
+                : sourceIndices[located.SyntaxTree];
+            writer.WriteNumber("sourceIndex", sourceIndex);
             WriteDiagnosticProperties(writer, located.SyntaxTree.Source, located.Diagnostic);
             writer.WriteEndObject();
         }
