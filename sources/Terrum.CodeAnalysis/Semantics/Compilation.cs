@@ -169,11 +169,25 @@ public sealed class Compilation
         }
         var composite = HasCompositeUnique(program.Structures);
         var ownedBuffer = HasOwnedNativeBuffer(program.Structures, program.Functions);
-        var readonlyView = program.Functions.Any(static function =>
-            function.Variables.Any(static variable => variable.Type == PrimitiveType.ReadonlyInt32BufferView));
-        var mutableViewOrClear = program.Functions.Any(static function =>
-            function.Variables.Any(static variable => variable.Type == PrimitiveType.MutableInt32BufferView))
-            || UsesBufferClear(program);
+        var readonlyView = false;
+        var mutableView = false;
+        foreach (var function in program.Functions)
+        {
+            foreach (var variable in function.Variables)
+            {
+                readonlyView |= variable.Type == PrimitiveType.ReadonlyInt32BufferView;
+                mutableView |= variable.Type == PrimitiveType.MutableInt32BufferView;
+                if (readonlyView && mutableView)
+                {
+                    break;
+                }
+            }
+            if (readonlyView && mutableView)
+            {
+                break;
+            }
+        }
+        var mutableViewOrClear = mutableView || UsesBufferClear(program);
         foreach (var function in program.Functions)
         {
             if (HasOwnershipTransfer(function, program.Structures))
