@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `1f26779` | Avoid unused graph producer dependency indexes |
 | `93c02b8` | Pre-size module-set reference merge collections |
 | `74b1a26` | Pre-size graph reference function materialization |
 | `be4ea09` | Build module-set references without LINQ materialization |
