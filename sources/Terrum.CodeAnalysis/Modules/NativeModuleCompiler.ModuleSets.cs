@@ -265,7 +265,7 @@ public static partial class NativeModuleCompiler
                 throw new ModuleContractException("Every selected dependency must supply a called import.");
             }
             writer.Write((byte)provider.Package.Identity.Length);
-            writer.Write(Encoding.ASCII.GetBytes(provider.Package.Identity));
+            WriteAsciiIdentity(writer, provider.Package.Identity);
             writer.Write((ushort)names.Length);
             foreach (var name in names)
             {

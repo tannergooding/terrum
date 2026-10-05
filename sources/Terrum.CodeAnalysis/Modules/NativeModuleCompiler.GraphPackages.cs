@@ -298,7 +298,7 @@ public static partial class NativeModuleCompiler
         writer.Write(package.Image.Length);
         if (package.Identity is string identity)
         {
-            writer.Write(Encoding.ASCII.GetBytes(identity));
+            WriteAsciiIdentity(writer, identity);
         }
         foreach (var dependency in package.Dependencies)
         {

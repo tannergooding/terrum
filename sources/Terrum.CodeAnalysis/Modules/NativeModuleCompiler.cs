@@ -318,7 +318,7 @@ public static partial class NativeModuleCompiler
     {
         CheckIdentity(identity);
         CheckPolicy(policy);
-        var name = Encoding.ASCII.GetBytes(identity);
+        var nameLength = identity.Length;
         if (isConsumer != (machineImports is not null))
         {
             throw new ModuleFormatException("Native package kind and machine import table differ.");
@@ -349,7 +349,7 @@ public static partial class NativeModuleCompiler
             }
         }
         var importTable = importStream.ToArray();
-        var length = checked(HeaderSize + name.Length + profile.Length + importTable.Length
+        var length = checked(HeaderSize + nameLength + profile.Length + importTable.Length
             + contract.Length + image.Length + HashSize);
         if (contract.Length is < 1 or > MaximumContractBytes || image.Length == 0 || length > MaximumBytes)
         {
@@ -360,17 +360,24 @@ public static partial class NativeModuleCompiler
         result[4] = Version;
         result[5] = isConsumer ? (byte)2 : (byte)1;
         result[6] = (byte)policy;
-        result[7] = (byte)name.Length;
+        result[7] = (byte)nameLength;
         result[8] = checked((byte)profile.Length);
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(10), contract.Length);
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(14), image.Length);
-        name.CopyTo(result, HeaderSize);
-        profile.CopyTo(result, HeaderSize + name.Length);
-        importTable.CopyTo(result, HeaderSize + name.Length + profile.Length);
-        contract.CopyTo(result, HeaderSize + name.Length + profile.Length + importTable.Length);
-        image.CopyTo(result, HeaderSize + name.Length + profile.Length + importTable.Length + contract.Length);
+        _ = Encoding.ASCII.GetBytes(identity.AsSpan(), result.AsSpan(HeaderSize, nameLength));
+        profile.CopyTo(result, HeaderSize + nameLength);
+        importTable.CopyTo(result, HeaderSize + nameLength + profile.Length);
+        contract.CopyTo(result, HeaderSize + nameLength + profile.Length + importTable.Length);
+        image.CopyTo(result, HeaderSize + nameLength + profile.Length + importTable.Length + contract.Length);
         SHA256.HashData(result.AsSpan(0, length - HashSize)).CopyTo(result, length - HashSize);
         return result;
+    }
+
+    private static void WriteAsciiIdentity(BinaryWriter writer, string identity)
+    {
+        Span<byte> bytes = stackalloc byte[64];
+        var length = Encoding.ASCII.GetBytes(identity.AsSpan(), bytes);
+        writer.Write(bytes[..length]);
     }
 
     private static Package Read(byte[] artifact)
