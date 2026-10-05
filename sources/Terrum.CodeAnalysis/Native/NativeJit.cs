@@ -352,6 +352,10 @@ public static unsafe class NativeJit
                 loaded.Add(module.DllName, handle);
             }
             var exitProcess = NativeLibrary.GetExport(exitProcessModule, "ExitProcess");
+            var resolvedExports = new Dictionary<(nint Module, string Export), nint>
+            {
+                [(exitProcessModule, "ExitProcess")] = exitProcess,
+            };
             memory = JitWindows.VirtualAlloc(0, (nuint)size, 0x3000, 0x04);
             if (memory == 0)
             {
@@ -371,7 +375,12 @@ public static unsafe class NativeJit
                 var module = fixup.DeclarationIndex >= 0 ? loaded[fixup.DllName]
                     : fixup.DllName.Equals("NTDLL.dll", StringComparison.OrdinalIgnoreCase)
                         ? handlerModule : exitProcessModule;
-                var target = NativeLibrary.GetExport(module, fixup.ExportName);
+                var key = (module, fixup.ExportName);
+                if (!resolvedExports.TryGetValue(key, out var target))
+                {
+                    target = NativeLibrary.GetExport(module, fixup.ExportName);
+                    resolvedExports.Add(key, target);
+                }
                 var pointer = pointerOffset + (sizeof(nint) * (index + 1));
                 BinaryPrimitives.WriteInt64LittleEndian(bytes.Slice(pointer, sizeof(nint)), target);
                 BinaryPrimitives.WriteInt32LittleEndian(bytes.Slice(fixup.DisplacementOffset, sizeof(int)),
