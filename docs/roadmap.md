@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `2118a7d` | Check set machine imports directly |
 | `ee241f2` | Pre-size graph declaration matching |
 | `dac23be` | Pre-size lazy graph ownership sets |
 | `e2993c0` | Pre-size graph import name validation |
