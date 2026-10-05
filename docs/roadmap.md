@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `591c1e6` | Skip producer cleanup discovery without cleanup types |
 | `5b98063` | Build cleanup function indexes on demand |
 | `27fb846` | Filter cleanup structures during producer closure |
 | `7313cd4` | Reuse structure indexes during producer closure |
