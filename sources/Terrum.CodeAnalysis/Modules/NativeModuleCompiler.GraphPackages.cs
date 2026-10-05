@@ -462,12 +462,14 @@ public static partial class NativeModuleCompiler
 
     private static void PutGraphString(BinaryWriter writer, string value)
     {
-        var bytes = StrictUtf8.GetBytes(value);
-        if (bytes.Length is < 1 or > 256)
+        var byteCount = StrictUtf8.GetByteCount(value);
+        if (byteCount is < 1 or > 256)
         {
             throw new ModuleFormatException("Graph string exceeds its bound.");
         }
-        writer.Write(checked((ushort)bytes.Length));
+        Span<byte> bytes = stackalloc byte[byteCount];
+        _ = StrictUtf8.GetBytes(value.AsSpan(), bytes);
+        writer.Write(checked((ushort)byteCount));
         writer.Write(bytes);
     }
 
