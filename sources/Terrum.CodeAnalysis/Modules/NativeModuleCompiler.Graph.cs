@@ -387,8 +387,12 @@ public static partial class NativeModuleCompiler
         bool consumer, string? identity,
         GraphPackage[] providers, Dictionary<string, GraphTypeOrigin?>[]? provenance = null)
     {
-        var imported = contract.ImportedStructures.ToHashSet(StringComparer.Ordinal);
         var structures = contract.Structures;
+        if (structures.IsEmpty)
+        {
+            return [];
+        }
+        var imported = contract.ImportedStructures.ToHashSet(StringComparer.Ordinal);
         provenance ??= providers.Select(provider => ProviderOrigins(provider)).ToArray();
         var originEntryCount = 0;
         foreach (var table in provenance)
