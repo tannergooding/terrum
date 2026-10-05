@@ -261,6 +261,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `767bd39` | Exercise decimal and all-radix integer formatting through semantic-module JIT |
 | `8878f1c` | Exercise all-radix `IntegerParsing` through persisted semantic-module JIT grants |
 | `2a8bd66` | Exercise streaming and indexed source-line queries through semantic-module JIT |
 | `f206b87` | Verify caller-unsafe semantic-module scope reconstruction and replacement compatibility |
