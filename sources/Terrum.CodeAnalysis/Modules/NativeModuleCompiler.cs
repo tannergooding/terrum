@@ -67,12 +67,25 @@ public static partial class NativeModuleCompiler
         var contract = ModuleCompiler.CreateConsumer(program, package.Contract);
         var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(contract);
         var dll = DllName(package.Identity);
-        var bindings = program.Functions.Where(static function => function.IsExternal)
-            .Select(function => new NativeImportBinding(function.Name, dll, function.Name)).ToArray();
-        var imports = contractSnapshot.CallImports;
-        if (imports.Except(bindings.Select(static binding => binding.FunctionName), StringComparer.Ordinal).Any())
+        var bindings = new List<NativeImportBinding>();
+        var bindingNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var function in program.Functions)
         {
-            throw new ModuleContractException("Persisted consumer calls differ from native import bindings.");
+            if (!function.IsExternal)
+            {
+                continue;
+            }
+            var binding = new NativeImportBinding(function.Name, dll, function.Name);
+            bindings.Add(binding);
+            bindingNames.Add(binding.FunctionName);
+        }
+        var imports = contractSnapshot.CallImports;
+        foreach (var import in imports)
+        {
+            if (!bindingNames.Contains(import))
+            {
+                throw new ModuleContractException("Persisted consumer calls differ from native import bindings.");
+            }
         }
         var (image, used) = NativeEmitter.EmitWithImportUsage(program, bindings, runtimePolicy);
         var consumer = Write(isConsumer: true, package.Identity, runtimePolicy, contract, image,
