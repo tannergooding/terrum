@@ -234,10 +234,14 @@ public static partial class NativeModuleCompiler
         if (origins.Length != 0)
         {
             var originsByName = origins.ToDictionary(static item => item.Name, StringComparer.Ordinal);
-            if (structures.Any(item => !originsByName.TryGetValue(item.Name, out var origin)
-                || (item.CleanupMethod is not null ? origin.CleanupIdentity is null : origin.CleanupIdentity is not null)))
+            foreach (var structure in structures)
             {
-                throw new ModuleFormatException("Graph origin table differs from retained semantic types.");
+                if (!originsByName.TryGetValue(structure.Name, out var origin)
+                    || (structure.CleanupMethod is not null
+                        ? origin.CleanupIdentity is null : origin.CleanupIdentity is not null))
+                {
+                    throw new ModuleFormatException("Graph origin table differs from retained semantic types.");
+                }
             }
             var importedTypes = contractSnapshot.ImportedStructures.ToHashSet(StringComparer.Ordinal);
             HashSet<string>? dependencyIdentities = null;
@@ -367,7 +371,7 @@ public static partial class NativeModuleCompiler
         IReadOnlyCollection<string> declarations)
     {
         var unmatched = declarations.ToHashSet(StringComparer.Ordinal);
-        var result = new List<GraphDependency>();
+        var result = new List<GraphDependency>(providers.Count);
         foreach (var provider in providers)
         {
             // Every leaf and graph package exposes ordinally sorted exports.
