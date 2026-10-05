@@ -150,6 +150,26 @@ public sealed class NativeLibraryTests
     }
 
     [Fact]
+    public void ValidatesRepeatedNestedValueTypesInLibrarySignatures()
+    {
+        var publicValues = Compile("""
+            public struct Leaf { public int32 Value; }
+            public struct Pair { public Leaf First; public Leaf Second; }
+            public struct Envelope { public Pair Left; public Pair Right; }
+            public Envelope Echo(Envelope value) { return value; }
+            """);
+        Assert.NotEmpty(NativeEmitter.EmitLibrary(publicValues, ["Echo"], NativeRuntimePolicy.FailFast));
+
+        var privateValues = Compile("""
+            public struct Leaf { int32 Value; }
+            public struct Pair { public Leaf First; public Leaf Second; }
+            public Pair Echo(Pair value) { return value; }
+            """);
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(privateValues, ["Echo"],
+            NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
     public void AllowsAbsentPrimitiveDeclaringStructOwner()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
