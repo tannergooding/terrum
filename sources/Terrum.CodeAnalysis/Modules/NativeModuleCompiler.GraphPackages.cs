@@ -475,7 +475,8 @@ public static partial class NativeModuleCompiler
         IReadOnlyList<NativeImportBinding> used)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
-        var usedByDll = new Dictionary<string, List<NativeImportBinding>>(StringComparer.Ordinal);
+        var usedByDll = new Dictionary<string, List<NativeImportBinding>>(
+            Math.Min(declarations.Length, used.Count), StringComparer.Ordinal);
         foreach (var import in used)
         {
             if (!usedByDll.TryGetValue(import.DllName, out var imports))
