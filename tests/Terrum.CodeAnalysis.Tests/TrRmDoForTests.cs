@@ -158,6 +158,31 @@ public sealed class TrRmDoForTests
         Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
     }
 
+    [Fact]
+    public void NestedBreaksKeepTheirLoopExitsDistinct()
+    {
+        const string source = """
+            int32 Main() {
+                mut int32 result = 0;
+                do {
+                    do {
+                        result = 40;
+                        break;
+                    } while (Fail());
+                    result += 2;
+                    break;
+                } while (Fail());
+                return result;
+            }
+            bool Fail() { require false; return false; }
+            """;
+        var original = Compile(source);
+        var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "nested-acyclic-exits"));
+        Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
+    }
+
     [Theory]
     [InlineData(42, "int32 Main() { mut int32 x = 0; do { if (x++ == 0) { break; } else { return 13; } } while (Fail()); return x == 1 ? 42 : 0; } bool Fail() { require false; return false; }")]
     [InlineData(42, "int32 Main() { while (true) { if (Check()) { return 42; } else { break; } } return 0; } bool Check() { return true; }")]
