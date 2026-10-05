@@ -97,10 +97,8 @@ public static partial class NativeModuleCompiler
     public static NativeGraphInfo InspectGraphArtifact(byte[] artifact)
     {
         var package = ReadGraphPackage(artifact);
-        var profile = package.IsLeaf
-            ? ModuleCompiler.GetNativeProfileVersion(package.Contract, false)
-            : package.Consumer ? ModuleCompiler.GetNativeProfileVersion(package.Contract, true)
-                : ModuleCompiler.GetGraphProfile(package.Contract);
+        var profile = package.ContractSnapshot?.Profile
+            ?? ModuleCompiler.GetNativeProfileVersion(package.Contract, false);
         return new NativeGraphInfo(package.Identity, package.Consumer, package.Policy, profile,
             Convert.ToHexString(SHA256.HashData(package.Image)),
             [.. package.Dependencies.Select(static item => item.Identity)], package.Exports);
