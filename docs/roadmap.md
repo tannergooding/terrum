@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `4550f00` | Skip JIT snapshots when only returning exit code |
 | `1045730` | Exclude runtime metadata from JIT snapshots |
 | `ab7214d` | Pre-size compilation snapshot collection |
 | `f72d204` | Index repeated CLI diagnostic source lookups |
