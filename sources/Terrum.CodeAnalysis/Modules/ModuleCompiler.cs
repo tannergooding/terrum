@@ -601,7 +601,7 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("A producer needs exported functions other than Main.");
         }
-        var indexes = new HashSet<int>();
+        var indexes = new HashSet<int>(names.Count);
         for (var i = 0; i < program.Functions.Length; i++)
         {
             if (names.Contains(program.Functions[i].Name))
@@ -728,7 +728,7 @@ public static partial class ModuleCompiler
         {
             if (structureIndexes is null)
             {
-                structureIndexes = new Dictionary<string, int>(StringComparer.Ordinal);
+                structureIndexes = new Dictionary<string, int>(program.Structures.Length, StringComparer.Ordinal);
                 for (var index = 0; index < program.Structures.Length; index++)
                 {
                     _ = structureIndexes.TryAdd(program.Structures[index].Name, index);
