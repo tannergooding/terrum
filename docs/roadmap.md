@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `0bfe311` | Sort graph origin records in place |
 | `41fabd1` | Reuse the empty graph dependency import array |
 | `55594d8` | Validate graph provider arrays without LINQ materialization |
 | `c2c1bdb` | Skip provider type indexing for typeless consumers |
