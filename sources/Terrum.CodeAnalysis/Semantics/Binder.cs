@@ -938,11 +938,33 @@ internal sealed partial class Binder
                 {
                     continue;
                 }
-                var typeParameters = typeParameterList is null ? [] : typeParameterList.Children
-                    .OfType<SyntaxTokenElement>()
-                    .Where(static element => element.Token.Kind == TokenKind.Identifier)
-                    .Select(static element => element.Token.Name).ToImmutableArray();
-                if (typeParameters.Distinct(StringComparer.Ordinal).Count() != typeParameters.Length)
+                var typeParameterBuilder = ImmutableArray.CreateBuilder<string>();
+                HashSet<string>? seenTypeParameters = null;
+                var hasDuplicateTypeParameter = false;
+                if (typeParameterList is not null)
+                {
+                    foreach (var child in typeParameterList.Children)
+                    {
+                        if (child is not SyntaxTokenElement { Token.Kind: TokenKind.Identifier } element)
+                        {
+                            continue;
+                        }
+                        var typeParameter = element.Token.Name;
+                        typeParameterBuilder.Add(typeParameter);
+                        if (seenTypeParameters is null && typeParameterBuilder.Count > 1)
+                        {
+                            seenTypeParameters = new HashSet<string>(StringComparer.Ordinal) {
+                                typeParameterBuilder[0],
+                            };
+                        }
+                        if (seenTypeParameters is not null && !seenTypeParameters.Add(typeParameter))
+                        {
+                            hasDuplicateTypeParameter = true;
+                        }
+                    }
+                }
+                var typeParameters = typeParameterBuilder.ToImmutable();
+                if (hasDuplicateTypeParameter)
                 {
                     Report("TRM3001", "A type alias cannot repeat a type parameter.", declaration.Span);
                     continue;

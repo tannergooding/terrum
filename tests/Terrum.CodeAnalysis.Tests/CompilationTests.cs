@@ -260,6 +260,11 @@ public sealed class CompilationTests
         Assert.Contains(extra.Diagnostics, static diagnostic =>
             diagnostic.Code == "TRM3005" && diagnostic.Message.Contains("expects 1 type arguments but received 2", StringComparison.Ordinal));
 
+        var duplicateParameters = Compilation.Create(SyntaxTree.Parse(
+            "alias Identity<T, T> = T; int32 Main() { return 0; }"));
+        Assert.Contains(duplicateParameters.Diagnostics, static diagnostic =>
+            diagnostic.Code == "TRM3001" && diagnostic.Message.Contains("repeat a type parameter", StringComparison.Ordinal));
+
         var cycle = Compilation.Create(SyntaxTree.Parse("""
             alias First<T> = Second<T>;
             alias Second<U> = First<U>;
