@@ -257,7 +257,7 @@ public static partial class ModuleCompiler
                 throw new ModuleContractException($"Incompatible provider value layout '{expected.Name}'.");
             }
         }
-        RejectImportedTypeMembers(consumer.Functions, consumer.ImportedStructures);
+        RejectImportedTypeMembers(consumer.Functions, importedNames);
         if (hasPrivateManagedState && hasUnsupportedManagedImport)
         {
             throw new ModuleContractException("Managed graph import crosses a non-Copy boundary.");
@@ -306,7 +306,12 @@ public static partial class ModuleCompiler
     private static void RejectImportedTypeMembers(IEnumerable<ModuleFunction> functions,
         IEnumerable<string> importedTypes)
     {
-        var imported = importedTypes.ToHashSet(StringComparer.Ordinal);
+        RejectImportedTypeMembers(functions, importedTypes.ToHashSet(StringComparer.Ordinal));
+    }
+
+    private static void RejectImportedTypeMembers(IEnumerable<ModuleFunction> functions,
+        HashSet<string> imported)
+    {
         if (functions.Any(item => !item.Import && item.Function?.DeclaringStruct is string owner
             && imported.Contains(owner)))
         {

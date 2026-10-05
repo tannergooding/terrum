@@ -211,7 +211,7 @@ public static partial class ModuleCompiler
                     ? ownershipTransfers[index] : Compilation.HasOwnershipTransfer(function, program.Structures),
             };
         }).ToImmutableArray();
-        RejectImportedTypeMembers(functions, importedTypes.ToImmutable());
+        RejectImportedTypeMembers(functions, importedTypeNames);
         var module = new Module(true, -1, structures, functions) {
             Classes = [.. program.Classes.Select(@class => RemapClass(@class, program.Structures, structures))],
             ImportedStructures = importedTypes.ToImmutable(),
@@ -399,7 +399,7 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Graph dependency type is missing.");
         }
-        RejectImportedTypeMembers(module.Functions, module.ImportedStructures);
+        RejectImportedTypeMembers(module.Functions, imported);
     }
 
     private static Module ReadGraphLibrary(byte[] bytes) =>
