@@ -294,6 +294,18 @@ public sealed class CompilationTests
         Assert.Contains(inaccessible.Diagnostics, static diagnostic =>
             diagnostic.Code == "TRM3005" && diagnostic.Message.Contains("non-public target", StringComparison.Ordinal));
 
+        var inaccessibleClass = Compilation.Create(SyntaxTree.Parse(
+            "class Hidden { public int32 Value; public Hidden(int32 value) { Value = value; } } "
+                + "public alias PublicHidden = Hidden; int32 Main() { return 0; }"));
+        Assert.True(inaccessibleClass.HasErrors);
+        Assert.Contains(inaccessibleClass.Diagnostics, static diagnostic =>
+            diagnostic.Code == "TRM3005" && diagnostic.Message.Contains("non-public target", StringComparison.Ordinal));
+
+        var publicClass = Compilation.Create(SyntaxTree.Parse(
+            "public class Visible { public int32 Value; public Visible(int32 value) { Value = value; } } "
+                + "public alias PublicVisible = Visible; int32 Main() { return 0; }"));
+        Assert.False(publicClass.HasErrors, string.Join(Environment.NewLine, publicClass.Diagnostics));
+
         var inaccessibleInstantiation = Compilation.Create(SyntaxTree.Parse("""
             struct Hidden { int32 Value; }
             public alias Identity<T> = T;

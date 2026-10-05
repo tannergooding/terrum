@@ -37,9 +37,20 @@ internal sealed partial class Binder
             return;
         }
         var index = _classes.Count;
+        var isMutable = false;
+        var isPublic = false;
+        foreach (var child in declaration.Children)
+        {
+            if (child is not SyntaxTokenElement token)
+            {
+                continue;
+            }
+            isMutable |= token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.MutKeyword;
+            isPublic |= token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.PublicKeyword;
+        }
         _classes.Add(new BoundClass(qualified, [], 0) {
-            IsMutable = declaration.Children.OfType<SyntaxTokenElement>().Any(static child =>
-                child.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.MutKeyword),
+            IsInternal = !isPublic,
+            IsMutable = isMutable,
         });
         _classDeclarations.Add(index, (tree, declaration));
     }

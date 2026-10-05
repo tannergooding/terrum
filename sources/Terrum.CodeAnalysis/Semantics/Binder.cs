@@ -290,7 +290,11 @@ internal sealed partial class Binder
                         Report("TRM3003", $"Duplicate struct '{name}'.", structure.Span);
                         continue;
                     }
-                    _structs.Add(new BoundStruct(qualified, [], 0));
+                    var isPublic = structure.Children.OfType<SyntaxTokenElement>()
+                        .Any(static element => element.Token.Kind == TokenKind.PublicKeyword);
+                    _structs.Add(new BoundStruct(qualified, [], 0) {
+                        IsInternal = !isPublic,
+                    });
                     _structDeclarations.Add(index, (tree, structure));
                 }
             }
@@ -1239,16 +1243,12 @@ internal sealed partial class Binder
         if (IsStruct(type))
         {
             var index = (int)type - 100;
-            return !_structDeclarations.TryGetValue(index, out var declaration)
-                || declaration.Declaration.Children.OfType<SyntaxTokenElement>()
-                    .Any(static element => element.Token.Kind == TokenKind.PublicKeyword);
+            return !_structDeclarations.ContainsKey(index) || !_structs[index].IsInternal;
         }
         if (IsClass(type) || (ManagedClassTypes.IsOptional(type) && (int)type >= ManagedClassTypes.First))
         {
             var index = ManagedClassTypes.ClassIndex(type);
-            return !_classDeclarations.TryGetValue(index, out var declaration)
-                || declaration.Declaration.Children.OfType<SyntaxTokenElement>()
-                    .Any(static element => element.Token.Kind == TokenKind.PublicKeyword);
+            return !_classDeclarations.ContainsKey(index) || !_classes[index].IsInternal;
         }
         return true;
     }
