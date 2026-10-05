@@ -83,10 +83,10 @@ Separately, a persisted semantic-module consumer exercises the existing
 policies. This adds persistence evidence only; it does not add arithmetic API
 or compiler support.
 The native executable tests also invoke all twenty-four `IntegerFacts`
-predicates and compare their result masks with independent `BigInteger`
-range, divisor and signed-minimum expectations. This is native execution
-evidence for the existing private `[ConstEval]` predicates, not an arithmetic
-API or compiler-support claim.
+predicates under both runtime policies and compare their result masks with
+independent `BigInteger` range, divisor and signed-minimum expectations. This
+is native execution evidence for the existing private `[ConstEval]` predicates,
+not an arithmetic API or compiler-support claim.
 Persisted semantic-module JIT also exercises all 20 existing
 `IntegerCheckedConversions` helpers across source/destination boundaries,
 including signed minima, unsigned maxima, `char16` edges and surrogate code

@@ -7,6 +7,9 @@ using System.IO;
 using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -85,11 +88,14 @@ public sealed partial class NativeTests
             .Append(assertions)
             .AppendLine("return 0; }");
 
-        var actual = await ExecuteAsync(Emit(source.ToString())).ConfigureAwait(true);
-        Assert.True(actual == 0,
-            actual > 0 && actual <= failureCases.Count
-                ? $"IntegerFacts boundary case {actual} failed: {failureCases[actual - 1]}."
-                : $"Expected all IntegerFacts native checks to pass, got exit code {actual}.");
+        foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
+        {
+            var actual = await ExecuteAsync(Emit(source.ToString(), policy)).ConfigureAwait(true);
+            Assert.True(actual == 0,
+                actual > 0 && actual <= failureCases.Count
+                    ? $"{policy} IntegerFacts boundary case {actual} failed: {failureCases[actual - 1]}."
+                    : $"Expected all {policy} IntegerFacts native checks to pass, got exit code {actual}.");
+        }
     }
 
     private static void AddPairwiseChecks<T>(
@@ -162,4 +168,11 @@ public sealed partial class NativeTests
 
     private static string UInt64Literal(ulong value) =>
         value == ulong.MaxValue ? "uint64.MaxValue" : value.ToString(CultureInfo.InvariantCulture);
+
+    private static byte[] Emit(string source, BoundRuntimePolicy policy)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return NativeEmitter.Emit(Assert.IsType<BoundProgram>(compilation.Program), (NativeRuntimePolicy)policy);
+    }
 }
