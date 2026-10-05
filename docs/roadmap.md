@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `a6c8b305` | Verify checked wide-integer helpers through persisted semantic modules |
 | `089e2800` | Verify checked conversion helpers through persisted semantic modules |
 | `4199a815` | Add provisional persisted scanner-profile JIT support |
 | `35db563a` | Return precise source spans for rejected scalar aliases |
