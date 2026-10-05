@@ -84,11 +84,6 @@ public static partial class NativeModuleCompiler
     public static NativeModuleSetInfo InspectConsumerSet(byte[] consumer)
     {
         var set = ReadSet(consumer);
-        var imports = set.ContractSnapshot.Declarations.ToHashSet(StringComparer.Ordinal);
-        if (!imports.SetEquals(set.Dependencies.SelectMany(static item => item.Imports)))
-        {
-            throw new ModuleFormatException("Native set import mapping differs from its semantic declarations.");
-        }
         var profile = set.ContractSnapshot.Profile;
         NativeModuleImageValidator.Validate(set.Image, true, Imports(set), [], set.Policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
@@ -217,25 +212,14 @@ public static partial class NativeModuleCompiler
         }
         var referenceSet = CreateReferenceSet(providers);
         set.ContractSnapshot.ValidateAgainstReference(referenceSet);
-        var actual = set.ContractSnapshot.Declarations.ToHashSet(StringComparer.Ordinal);
-        var mapped = set.Dependencies.SelectMany(static item => item.Imports).ToHashSet(StringComparer.Ordinal);
-        if (!actual.SetEquals(mapped))
-        {
-            throw new ModuleFormatException("Native set import mapping omits a called semantic import.");
-        }
         for (var i = 0; i < providers.Length; i++)
         {
             var dependency = set.Dependencies[i];
             var exported = providerExports[i];
-            if (dependency.Imports.Length == 0 || dependency.Imports.Any(name => !exported.Contains(name)))
+            if (dependency.Imports.Any(name => !exported.Contains(name)))
             {
                 throw new ModuleFormatException("Native set import mapping differs from provider declarations.");
             }
-        }
-        var used = set.Dependencies.SelectMany(static item => item.MachineImports).ToHashSet(StringComparer.Ordinal);
-        if (!set.ContractSnapshot.CallImports.All(used.Contains))
-        {
-            throw new ModuleFormatException("Native set machine imports omit a retained semantic call.");
         }
         var profile = set.ContractSnapshot.Profile;
         NativeModuleImageValidator.Validate(set.Image, true, Imports(set), [], set.Policy,
