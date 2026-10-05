@@ -121,6 +121,54 @@ copying validated snapshot records into its existing managed token chain.
 Parsing and lookahead continue to use the managed token APIs. This narrow
 transfer does not establish a general parser integration contract.
 
+## Proposed next unit: indexed scalar-parser integration
+
+**Status: unapproved proposal; no parser support is implemented by this
+section.** The recommendation is to replace the scalar frontend's repeated
+managed-chain reads with indexed reads from the already validated
+`TokenSnapshot`, while keeping parser position and parse state as ordinary
+scalar/managed state. This is an internal representation change only: preserve
+the accepted source subset, diagnostics, resource limits, v85 output and
+hosted verifier/emitter boundary. Do not wait for general `Span<T>` support,
+but do not treat sequential `TokenCursor.TryRead` plus fixed lookahead as
+sufficient.
+
+The current parser requires non-consuming indexed access, repeatable reads,
+variable-distance forward probes within its 64-token input, backward reads,
+speculative position restoration and complete parser retries. A bounded
+implementation therefore needs a readonly view of the original validated
+snapshot and an external integer position; it must not use an advanced
+remaining-view cursor as the parser's sole state. The new bounded
+`TokenCursor.TryGet` operation supplies repeatable by-value access relative to
+the cursor's current remaining view: it checks a zero-based index against the
+view length before converting to the existing unsigned native-width index
+carrier and publishes no token on failure. That operation is implemented and
+tested, but the parser does not yet use it.
+Passing the view through parsing calls is preferred to storing it in
+`ScalarFrontendState`, which is a managed class and must not become a general
+stored-view exception. Keep all view use inside the scope that owns the
+snapshot; borrowed views do not retain that owner.
+
+For complete-program parsing, each function frame must still observe a
+function-local terminal EOF at the last included token's `Range.End`, not the
+next declaration or the whole-program EOF. Preserve the global scanner-token
+index used to address integer snapshot values separately from function-local
+parser indices. Keep inventory order, legacy/tree/structured retry order,
+fallback publication, and the existing 64-token bound unchanged. The snapshot
+owner must remain live through every inventory and parse attempt, including
+the single-function fallback; fallback must not require a returned borrowed
+view or trigger a scanner rescan.
+
+Before replacing `ManagedTokenChain` parsing, prove the limited view-parameter
+call shape with focused lifetime tests. Regression acceptance should cover
+grouped/speculative expressions, rewind and previous-token spans, label and
+literal searches, per-function synthetic EOF, later-frame integer operands,
+all parser retries and diagnostics, exact 64/65-token boundaries, owner
+invalidation rejection, and differential equality of complete frontend
+buffers. Continue to audit and execute through the existing hosted pipeline;
+this proposal does not expand general Span construction, storage, slicing,
+parser APIs, persistence or ABI.
+
 ## Decisions and rationale
 
 ### 1. Stored-view representation

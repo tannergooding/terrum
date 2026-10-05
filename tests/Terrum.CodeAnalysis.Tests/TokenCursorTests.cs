@@ -140,6 +140,42 @@ public sealed class TokenCursorTests
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData("alpha 42")]
+    public async Task IndexedReadsAreRepeatableAndDoNotAdvanceAsync(string text)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var scanned);
+                mut TokenSnapshot owner = move scanned;
+                mut TokenCursor cursor = new TokenCursor(owner.AsSpan());
+                int32 count = owner.GetCount();
+                if (!cursor.TryGet(0, init var first)
+                    || !cursor.TryGet(0, init var repeated)
+                    || first.Kind != repeated.Kind
+                    || first.Range.Start != repeated.Range.Start
+                    || first.Range.Length != repeated.Range.Length) { return 1; }
+                if (!cursor.TryGet(count - 1, init var last) || last.Kind != 0) { return 2; }
+                if (cursor.TryGet(-1, init var negative)
+                    || cursor.TryGet(count, init var beyond)) { return 3; }
+                if (!cursor.TryRead(out var next)
+                    || next.Kind != first.Kind
+                    || next.Range.Start != first.Range.Start
+                    || next.Range.Length != first.Range.Length) { return 4; }
+                cursor = _;
+                owner = _;
+                return 42;
+            }
+            """;
+
+        foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
+        {
+            await ExecuteAsync(Program(await CompileAsync(text, Entry, policy)), policy);
+        }
+    }
+
+    [Theory]
     [InlineData("Span<Token> tokens = owner.AsSpan(); owner = _; return 42;")]
     [InlineData("Span<Token> tokens = owner.AsSpan(); TokenSnapshot moved = move owner; return 42;")]
     [InlineData("Span<Token> tokens = owner.AsSpan(); require Replace(out owner); return 42;")]

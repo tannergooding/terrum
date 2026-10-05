@@ -2404,8 +2404,14 @@ stored dependency facts follow copies, moves, joins, staged arguments and
 exceptional cleanup; the mandatory verifier rejects owner invalidation while
 any dependent view or cursor remains live. Span values cannot escape through
 returns, outputs, arbitrary fields, semantic modules or native exports.
-General `Span<T>`, mutable/writable views, slicing, parser integration and
-source-level `nuint` remain unsupported. These hosted verifier/emitter
+`TokenCursor.TryGet` performs repeatable indexed reads without advancing its
+remaining view; negative or out-of-range indices publish no token. The
+complete-program scalar frontend still uses the cursor only for sequential
+transfer into its managed token chain, and parsing/lookahead remain on managed
+token APIs. Indexed parser integration is proposed separately in the
+[bounded cursor proposal](proposals/span-backed-token-cursor.md#proposed-next-unit-indexed-scalar-parser-integration),
+not implemented support. General `Span<T>`, mutable/writable views, slicing
+and source-level `nuint` remain unsupported. These hosted verifier/emitter
 capabilities do not extend the separate Terrum-authored scalar frontend.
 
 ## Executable TRRM scalar interchange

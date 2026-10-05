@@ -23,4 +23,21 @@ public unique struct TokenCursor
 
         return true;
     }
+
+    public bool TryGet(int32 index, init ref<Token> token)
+    {
+        if (index < 0)
+        {
+            return false;
+        }
+
+        uint64 unsignedIndex = uint64(index);
+        if (unsignedIndex >= _tokens.Length)
+        {
+            return false;
+        }
+
+        token = _tokens[unsignedIndex];
+        return true;
+    }
 }
