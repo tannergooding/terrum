@@ -54,49 +54,23 @@ bool ScalarProgramError(int32 code, SourceRange span, out bool handled)
     return true;
 }
 
-bool CopyScalarProgramTokens(ManagedTokenChain tokens, int32 start, int32 end,
-    init ref<ManagedTokenChain> chain)
-{
-    if (!ManagedTokenChain.TryCreate(out var created)) { return false; }
-    for (mut int32 index = start; index < end; index = index + 1)
-    {
-        require tokens.TryGet(index, init var token);
-        require created.TryAppend(token.Kind, token.Range.Start, token.Range.Length);
-    }
-    require tokens.TryGet(end - 1, init var last);
-    require created.TryAppend(0, last.Range.End, 0);
-    chain = created;
-    return true;
-}
-
-bool TryPublishScalarFrontendProgram(init ref<ManagedTokenChain> fallbackTokens, out bool handled)
+bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
+    SourceRange spacingError, out bool handled)
 {
     handled = false;
-    if (!TokenSnapshot.TryScan(init var tokens)) { return false; }
-    if (!ManagedTokenChain.TryCreate(out var sourceTokens)) { return false; }
-    fallbackTokens = sourceTokens;
-    int32 count = tokens.GetCount();
     if (count > 64)
     {
-        require tokens.TryGet(64, init var excess);
+        require TryGetScalarWindowToken(tokenView, 0, count, false, 64, init var excess);
         return ScalarProgramError(1, excess.Range, out handled);
     }
-    var spacing = tokens.GetScalarOperatorSpacingError();
-    if (spacing.Length != 0) { return ScalarProgramError(1, spacing, out handled); }
-    Span<Token> tokenView = tokens.AsSpan();
-    mut TokenCursor cursor = new TokenCursor(tokenView);
-    while (cursor.TryRead(out var scannedToken))
-    {
-        require sourceTokens.TryAppend(scannedToken.Kind, scannedToken.Range.Start, scannedToken.Range.Length);
-    }
+    if (spacingError.Length != 0) { return ScalarProgramError(1, spacingError, out handled); }
     require SourceRange.TryCreate(0, 0, init var empty);
     mut int32 start = 0;
     mut int32 functions = 0;
     while (start < count - 1)
     {
-        if (!CopyScalarProgramTokens(sourceTokens, start, count - 1, init var remaining)
-            || !ScalarFrontendState.TryCreate(remaining, empty, out var probe)
-            || !probe.TryInventoryHeader(init var header, out var headerEnd))
+        if (!ScalarFrontendState.TryCreate(start, count - 1, true, empty, out var probe)
+            || !probe.TryInventoryHeader(init var header, out var headerEnd, tokenView))
         {
             return false;
         }
@@ -111,13 +85,13 @@ bool TryPublishScalarFrontendProgram(init ref<ManagedTokenChain> fallbackTokens,
             return ScalarProgramError(header.ErrorCode, header.ErrorSpan, out handled);
         }
         int32 body = start + headerEnd;
-        require tokens.TryGet(body, init var opening);
+        require TryGetScalarWindowToken(tokenView, 0, count, false, body, init var opening);
         mut int32 end = body;
         if (opening.Kind == 82)
         {
             while (end < count - 1)
             {
-                require tokens.TryGet(end, init var token);
+                require TryGetScalarWindowToken(tokenView, 0, count, false, end, init var token);
                 end = end + 1;
                 if (token.Kind == 52) { break; }
             }
@@ -128,7 +102,7 @@ bool TryPublishScalarFrontendProgram(init ref<ManagedTokenChain> fallbackTokens,
             end = body + 1;
             while (end < count - 1 && depth != 0)
             {
-                require tokens.TryGet(end, init var token);
+                require TryGetScalarWindowToken(tokenView, 0, count, false, end, init var token);
                 if (token.Kind == 48) { depth = depth + 1; }
                 if (token.Kind == 49) { depth = depth - 1; }
                 end = end + 1;
@@ -141,8 +115,8 @@ bool TryPublishScalarFrontendProgram(init ref<ManagedTokenChain> fallbackTokens,
         }
         if (functions == 10) { return ScalarProgramError(1, header.Name, out handled); }
         int32 frame = 4 + functions * 428;
-        require tokens.TryGet(start, init var first);
-        require tokens.TryGet(end - 1, init var last);
+        require TryGetScalarWindowToken(tokenView, 0, count, false, start, init var first);
+        require TryGetScalarWindowToken(tokenView, 0, count, false, end - 1, init var last);
         Host.FrontendProgram[frame] = start;
         Host.FrontendProgram[frame + 1] = end;
         Host.FrontendProgram[frame + 2] = first.Range.Start;
@@ -199,10 +173,10 @@ bool TryPublishScalarFrontendProgram(init ref<ManagedTokenChain> fallbackTokens,
         int32 frame = 4 + index * 428;
         Host.FrontendProgram[3] = index;
         for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
-        if (!CopyScalarProgramTokens(sourceTokens, Host.FrontendProgram[frame],
-                Host.FrontendProgram[frame + 1], init var chain)
-            || !ScalarFrontendState.TryCreate(chain, empty, out var tree)
-            || !tree.TryParseTree(init var treeResult))
+        int32 tokenStart = Host.FrontendProgram[frame];
+        int32 tokenEnd = Host.FrontendProgram[frame + 1];
+        if (!ScalarFrontendState.TryCreate(tokenStart, tokenEnd, true, empty, out var tree)
+            || !tree.TryParseTree(init var treeResult, tokenView))
         {
             return false;
         }
@@ -214,8 +188,8 @@ bool TryPublishScalarFrontendProgram(init ref<ManagedTokenChain> fallbackTokens,
             {
                 Host.FrontendProgram[frame + 396 + node] = -1;
             }
-            if (!ScalarFrontendState.TryCreate(chain, empty, out var structured)
-                || !structured.TryParseStructuredReturns(init var completed))
+            if (!ScalarFrontendState.TryCreate(tokenStart, tokenEnd, true, empty, out var structured)
+                || !structured.TryParseStructuredReturns(init var completed, tokenView))
             {
                 return false;
             }

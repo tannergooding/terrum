@@ -7,9 +7,11 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Text;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -58,6 +60,55 @@ public sealed partial class CliTests
         {
             File.Delete(native);
             File.Delete(hosted);
+        }
+    }
+
+    [Theory]
+    [InlineData(64, true)]
+    [InlineData(65, false)]
+    public async Task ScalarFrontendEnforcesGlobalScannerTokenLimitAndPreservesLaterFrameIndexesAsync(
+        int scannerTokens, bool valid)
+    {
+        var firstModifier = scannerTokens == 65 ? "public " : "";
+        var source = firstModifier + "int32 First() { "
+            + string.Concat(Enumerable.Range(0, 6).Select(index => $"int32 x{index} = {index}; "))
+            + "_ = true; return 1; } "
+            + "int32 Second() { return 42; } "
+            + "int32 Main() { return Second(); }";
+        Assert.Equal(scannerTokens, Lexer.Lex(SourceText.From(source)).Tokens.Length);
+
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.Equal(valid ? 0 : 1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.Equal(valid, document.RootElement.GetProperty("success").GetBoolean());
+            if (!valid)
+            {
+                continue;
+            }
+
+            var functions = document.RootElement.GetProperty("result").GetProperty("functions");
+            Assert.Equal(3, functions.GetArrayLength());
+            Assert.Equal(1, functions[1].GetProperty("index").GetInt32());
+            var literalStart = source.IndexOf("42", StringComparison.Ordinal);
+            Assert.Contains(functions[1].GetProperty("nodes").EnumerateArray(), node =>
+                node.GetProperty("operation").GetInt32() == 3
+                    && node.GetProperty("low").GetInt32() == 42
+                    && node.GetProperty("span").GetProperty("start").GetInt32() == literalStart
+                    && node.GetProperty("span").GetProperty("length").GetInt32() == 2);
+            Assert.Contains(functions[2].GetProperty("nodes").EnumerateArray(), static node =>
+                node.GetProperty("operation").GetInt32() == 105
+                    && node.GetProperty("function").GetInt32() == 1);
+
+            var (runExit, runOutput, runError) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                "frontend-run", directory, "-", "--runtime", policy, "--json");
+            Assert.Equal(42, runExit);
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
         }
     }
 

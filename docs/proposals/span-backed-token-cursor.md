@@ -1,8 +1,8 @@
 # Span-backed token cursor proposal
 
-**Status: the bounded compilation-local `TokenCursor` slice is implemented and
-verified. General `Span<T>` support and source-level native-sized integers
-remain unapproved.**
+**Status: the bounded compilation-local `TokenCursor` and indexed scalar-parser
+integration are implemented. General `Span<T>` support and source-level
+native-sized integers remain unapproved.**
 This proposal identifies the smallest runtime and source-binding contracts
 needed to execute the existing [`TokenCursor`](../../self-host/TokenCursor.terrum)
 candidate without copying its `Span<Token>` backing or claiming ownership of
@@ -44,19 +44,19 @@ instead of storing a second position counter. A successful read checks for a
 nonempty view, reads element zero, and advances that descriptor by one
 element. Validate all fields and captures before publishing the cursor.
 
-This direction does not add writable views, ref-returning element loans,
-arbitrary view construction or slicing, owner/guard retention, persisted
-cross-module capture metadata, or a parser integration contract. The
-cursor-only `AdvanceOne` operation requires a nonempty descriptor, rebinds
-only the descriptor, and preserves its complete dependency set; it does not
-establish a general slicing API. Broader `Span<T>` construction and escape
-rules remain open; this initial slice must not be described as general
-stored-view support.
+This cursor-specific slice does not add writable views, ref-returning element
+loans, arbitrary view construction or slicing, owner/guard retention, persisted
+cross-module capture metadata, or a parser contract. The cursor-only
+`AdvanceOne` operation requires a nonempty descriptor, rebinds only the
+descriptor, and preserves its complete dependency set; it does not establish
+a general slicing API. The separate bounded parser contract is described
+below. Broader `Span<T>` construction and escape rules remain open; neither
+slice is general stored-view support.
 
 ## Input-view bridge and execution
 
-The cursor reads a `Span<Token>` projected from a completed `TokenSnapshot`.
-This does not define general parser integration or convert `HostBuffer` or
+The cursor and bounded scalar parser read a `Span<Token>` projected from a
+completed `TokenSnapshot`. This does not convert `HostBuffer` or
 `ManagedTokenChain` into spans; those remain separate contracts.
 
 **Summary:** An end-to-end cursor needs both a specified source for its input
@@ -110,44 +110,56 @@ family remains open and unsupported. `[Captures(nameof(tokens))]` forwards
 backing dependencies as compiler-checked facts, not runtime references,
 owners or leases.
 
-**Implemented boundary:** Only readonly `Span<Token>` projection from a
-validated `TokenSnapshot`, by-value indexing with full-width unsigned bounds
-checks, and the stored dependency in `TokenCursor` are supported. Do not add
-mutable access, arbitrary span construction, general slicing, parser
-integration, source-level `nuint`, or a new public ABI.
+**Implemented boundary:** Readonly `Span<Token>` projection from a validated
+`TokenSnapshot`, by-value indexing with full-width unsigned bounds checks, the
+stored dependency in `TokenCursor`, and the bounded scalar-parser use below
+are supported. Do not add mutable access, arbitrary span construction,
+general slicing, source-level `nuint`, or a new public ABI.
 
-The complete-program scalar frontend uses this bounded cursor only while
-copying validated snapshot records into its existing managed token chain.
-Parsing and lookahead continue to use the managed token APIs. This narrow
-transfer does not establish a general parser integration contract.
+## Implemented bounded indexed parser integration
 
-## Proposed next unit: indexed scalar-parser integration
+The scalar frontend now reads directly from the original validated snapshot
+through its unadvanced borrowed `Span<Token>`. `ScalarFrontendState` retains
+its managed parser state and function-local `_at`, stores only compact integer
+window bounds, and receives the view on token-dependent method calls. It does
+not store a view or cursor. One logical window accessor handles current,
+lookahead, previous-token, label/literal scans and retries; failed negative or
+out-of-window indexes publish no token. No token-chain copy or slice is used
+for parser access.
 
-**Status: unapproved proposal; no parser support is implemented by this
-section.** The recommendation is to replace the scalar frontend's repeated
-managed-chain reads with indexed reads from the already validated
-`TokenSnapshot`, while keeping parser position and parse state as ordinary
-scalar/managed state. This is an internal representation change only: preserve
-the accepted source subset, diagnostics, resource limits, v85 output and
-hosted verifier/emitter boundary. Do not wait for general `Span<T>` support,
-but do not treat sequential `TokenCursor.TryRead` plus fixed lookahead as
-sufficient.
+The whole-snapshot single-function fallback exposes all physical scanner
+tokens, including the scanner's real EOF after trailing trivia. In complete
+program inventory, each suffix window is `[start,count-1)` followed by one
+synthetic EOF at the last included token's `Range.End`. Once body bounds are
+known, each function parser receives only its physical `[start,end)` tokens
+followed by exactly one synthetic EOF at that function's last included
+`Range.End`; the following function's tokens cannot leak into its window.
+The full-snapshot owner and view remain live synchronously through inventory,
+tree/structured retries and the legacy single-function fallback, without a
+scanner rescan or an escaping borrowed view.
 
-The current parser requires non-consuming indexed access, repeatable reads,
+Parser positions remain local to each window. Numeric lookup translates a
+local token index to the global scanner-token index exactly once, preserving
+the integer snapshot contract for later function frames. Existing inventory
+order, legacy/tree/structured parser selection, rewinds, first-error retention,
+diagnostic ranges, output clearing/publication and the 64-token bound remain
+unchanged. The producer remains a Terrum-authored source projection whose
+result is independently audited by the hosted verifier/emitter; this does not
+move or widen that boundary.
+
+The parser requires non-consuming indexed access, repeatable reads,
 variable-distance forward probes within its 64-token input, backward reads,
-speculative position restoration and complete parser retries. A bounded
-implementation therefore needs a readonly view of the original validated
-snapshot and an external integer position; it must not use an advanced
-remaining-view cursor as the parser's sole state. The new bounded
-`TokenCursor.TryGet` operation supplies repeatable by-value access relative to
-the cursor's current remaining view: it checks a zero-based index against the
-view length before converting to the existing unsigned native-width index
-carrier and publishes no token on failure. That operation is implemented and
-tested, but the parser does not yet use it.
-Passing the view through parsing calls is preferred to storing it in
-`ScalarFrontendState`, which is a managed class and must not become a general
-stored-view exception. Keep all view use inside the scope that owns the
-snapshot; borrowed views do not retain that owner.
+speculative position restoration and complete parser retries. The bounded
+implementation passes the original view through parser calls and keeps the
+integer position in `ScalarFrontendState`; it does not use an advanced
+remaining-view cursor as the parser's sole state. `TokenCursor.TryGet` remains
+the cursor-level repeatable read operation. The parser's single window
+accessor applies equivalent checked indexing directly to the borrowed view,
+also providing its virtual-terminal-EOF behavior. Passing the view through
+calls avoids storing it in `ScalarFrontendState`, a managed class that must not
+become a general stored-view exception. All view use stays inside the
+synchronous scope that owns the snapshot; borrowed views do not retain that
+owner.
 
 For complete-program parsing, each function frame must still observe a
 function-local terminal EOF at the last included token's `Range.End`, not the
@@ -159,17 +171,13 @@ owner must remain live through every inventory and parse attempt, including
 the single-function fallback; fallback must not require a returned borrowed
 view or trigger a scanner rescan.
 
-The limited view-parameter call shape is verified for a method on an ordinary
-managed class: the class can consume a borrowed `Span<Token>` parameter without
-storing it. This prerequisite does not implement parser integration.
-Regression acceptance for replacing `ManagedTokenChain` parsing should cover
-grouped/speculative expressions, rewind and previous-token spans, label and
+This parser use adds no general Span construction, storage, slicing, parser
+API, persistence or ABI. The separate regression work should cover
+grouped/speculative expressions, rewinds and previous-token spans, label and
 literal searches, per-function synthetic EOF, later-frame integer operands,
 all parser retries and diagnostics, exact 64/65-token boundaries, owner
 invalidation rejection, and differential equality of complete frontend
-buffers. Continue to audit and execute through the existing hosted pipeline;
-this proposal does not expand general Span construction, storage, slicing,
-parser APIs, persistence or ABI.
+buffers.
 
 ## Decisions and rationale
 
@@ -241,11 +249,11 @@ provenance, and does not add general slicing or enlarge inline values.
 
 ## Scope of the implemented slice
 
-The implemented target is the existing readonly `TokenCursor`:
-checked length/index reads, `Copy` token results, and dependency forwarding
-through its constructor and cursor value. It does not add arbitrary stored
-views, general slicing, generic collection iteration, writable spans, new
-cleanup rules or a parser integration contract. The bridge does not repurpose
-the separate [`HostBuffer`](../native.md) interchange surfaces or
-`ManagedTokenChain`; both remain distinct contracts and neither is a Span
-substitute.
+The implemented target includes the readonly `TokenCursor` and its bounded
+use by the scalar parser: checked indexed reads of `Copy` tokens from validated
+snapshots, cursor dependency forwarding, and windowed parsing without storing
+the borrowed view. It does not add arbitrary stored views, general slicing,
+generic collection iteration, writable spans, new cleanup rules or public
+parser APIs. The bridge does not repurpose the separate
+[`HostBuffer`](../native.md) interchange surfaces or `ManagedTokenChain`;
+both remain distinct contracts and neither is a Span substitute.

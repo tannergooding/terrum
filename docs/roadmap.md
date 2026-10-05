@@ -708,10 +708,11 @@ with that compiler, and a further rebuild plus native execution against shared
 fixtures. Require byte equality only for output whose ordering, layout and
 tie-breaking are specified; explain other differences rather than normalizing
 them away. Current scanner/library components are precursors, not evidence that
-the gate passes. The hosted compiler now supports a compilation-local readonly
-`TokenCursor` over a validated `TokenSnapshot`; this does not add general
-stored views or extend the Terrum scalar frontend beyond its hosted
-verifier/emitter.
+the gate passes. The hosted compiler supports a compilation-local readonly
+`TokenCursor` over a validated `TokenSnapshot`, and the Terrum-authored scalar
+frontend now consumes that snapshot through bounded indexed parser windows.
+This does not add general stored views or move the frontend's independently
+audited result beyond the hosted verifier/emitter boundary.
 
 Do not translate every design sample at once or build a plugin loader first.
 Extend the verified executable corpus and semantic checks in coherent slices;

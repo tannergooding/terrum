@@ -2108,9 +2108,10 @@ end-of-chain and invalidated cursors leave the destination vacant; copied
 tokens remain valid after their source links are collected.
 
 The bounded [Terrum-authored scalar frontend](../self-host/ScalarFrontend.terrum)
-consumes one successful scanner token snapshot. Its single-function fallback
-reuses the managed token chain materialized during program inventory rather
-than rescanning source. The published in-process typed result contains
+consumes one successful scanner token snapshot through a borrowed indexed
+view. Its single-function fallback parses that same view, preserving the real
+scanner EOF, rather than materializing a managed token chain or rescanning
+source. The published in-process typed result contains
 parameter types and names, expression operators and parameter references,
 optional conditional branches, declared `public`/`internal` visibility, and
 UTF-16 spans. It accepts one
@@ -2405,14 +2406,23 @@ exceptional cleanup; the mandatory verifier rejects owner invalidation while
 any dependent view or cursor remains live. Span values cannot escape through
 returns, outputs, arbitrary fields, semantic modules or native exports.
 `TokenCursor.TryGet` performs repeatable indexed reads without advancing its
-remaining view; negative or out-of-range indices publish no token. The
-complete-program scalar frontend still uses the cursor only for sequential
-transfer into its managed token chain, and parsing/lookahead remain on managed
-token APIs. Indexed parser integration is proposed separately in the
-[bounded cursor proposal](proposals/span-backed-token-cursor.md#proposed-next-unit-indexed-scalar-parser-integration),
-not implemented support. General `Span<T>`, mutable/writable views, slicing
-and source-level `nuint` remain unsupported. These hosted verifier/emitter
-capabilities do not extend the separate Terrum-authored scalar frontend.
+remaining view; negative or out-of-range indices publish no token.
+
+The Terrum-authored scalar frontend uses the original unadvanced snapshot view
+for bounded indexed parsing. `ScalarFrontendState` keeps `_at` local to its
+window and receives the borrowed view as a method argument; it stores no view
+or cursor. The logical window accessor returns physical records plus exactly
+one function-local synthetic EOF for inventory and function frames. Inventory
+uses `[start,count-1)` plus that EOF, while function parsing uses `[start,end)`
+plus EOF at the last included token's `Range.End`. The single-function
+fallback instead retains the scanner's physical EOF, including its position
+after trailing trivia. The snapshot owner remains live through inventory,
+parser retries and fallback in one synchronous call, without rescanning.
+Parser indexes remain local; integer-snapshot reads translate to the global
+scanner index once. This bounded use does not broaden general `Span<T>`,
+mutable/writable views, slicing, source-level `nuint`, exports or persistence,
+and it does not change the independently audited hosted verifier/emitter
+boundary.
 
 ## Executable TRRM scalar interchange
 

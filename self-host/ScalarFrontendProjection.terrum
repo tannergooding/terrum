@@ -24,10 +24,17 @@ void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expres
 bool TryPublishScalarFrontend()
 {
     if (Host.FrontendProgram.Length != 4284) { return false; }
-    if (!TryPublishScalarFrontendProgram(init var fallbackTokens, out var handled)) { return false; }
+    if (!TokenSnapshot.TryScan(init var tokens)) { return false; }
+    int32 count = tokens.GetCount();
+    var spacing = tokens.GetScalarOperatorSpacingError();
+    Span<Token> tokenView = tokens.AsSpan();
+    if (!TryPublishScalarFrontendProgram(tokenView, count, spacing, out var handled)) { return false; }
     if (handled) { return true; }
     if (Host.Frontend.Length != 392
-        || !TryParseScalarFrontendChain(fallbackTokens, fallbackTokens.GetCount(), init var result))
+        || count < 1
+        || Host.IntegerValues[0] != 0
+            && !TokenIntegerSnapshot.TryBuild(count, init var integers)
+        || !TryParseScalarFrontendWindow(tokenView, 0, count, false, init var result))
     {
         return false;
     }
