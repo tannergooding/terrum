@@ -95,6 +95,13 @@ infinities, signed-zero selection and NaN classification. This exercises the
 Terrum internal floating-value ABI, not the standard C floating ABI, and does
 not approve either candidate API or settle NaN payload, signaling or status
 behavior.
+The same DLL directly invokes all five existing `IntegerFormatting` radix
+length queries for signed/unsigned 32-/64-bit values and `char16` code units.
+Across radices 2 through 36, their output lengths match an independent
+`BigInteger` digit-count oracle; invalid radices preserve the output and
+adjacent canaries. The owned-buffer formatters are not part of this evidence,
+and this does not establish a general `init ref` contract or approve the
+candidate API.
 Persisted semantic-module JIT also exercises all 20 existing
 `IntegerCheckedConversions` helpers across source/destination boundaries,
 including signed minima, unsigned maxima, `char16` edges and surrogate code
