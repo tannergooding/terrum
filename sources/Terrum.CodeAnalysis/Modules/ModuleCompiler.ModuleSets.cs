@@ -354,10 +354,12 @@ public static partial class ModuleCompiler
     private static void RejectImportedTypeMembers(IEnumerable<ModuleFunction> functions,
         HashSet<string> imported)
     {
-        if (functions.Any(item => !item.Import && item.Function?.DeclaringStruct is string owner
-            && imported.Contains(owner)))
+        foreach (var item in functions)
         {
-            throw new ModuleContractException("Consumer cannot define members of an imported value type.");
+            if (!item.Import && item.Function?.DeclaringStruct is string owner && imported.Contains(owner))
+            {
+                throw new ModuleContractException("Consumer cannot define members of an imported value type.");
+            }
         }
     }
 }
