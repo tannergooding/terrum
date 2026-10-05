@@ -183,18 +183,46 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Readonly buffer views cannot cross module value contracts.");
         }
         if (module.Classes.Any(static item => item.Fields.Any(
-                static field => ManagedClassTypes.IsOptional(field.Type)))
-            || module.Functions.Any(static item => item.Function is BoundFunction function
-                && (ManagedClassTypes.IsOptional(function.ReturnType)
-                    || function.Variables.Any(static variable => ManagedClassTypes.IsOptional(variable.Type)))))
+                static field => ManagedClassTypes.IsOptional(field.Type))))
         {
             return "native-20";
         }
         if (!module.Classes.IsEmpty)
         {
+            if (module.Functions.Any(static item => item.Function is BoundFunction function
+                && (ManagedClassTypes.IsOptional(function.ReturnType)
+                    || function.Variables.Any(static variable => ManagedClassTypes.IsOptional(variable.Type)))))
+            {
+                return "native-20";
+            }
             return "native-19";
         }
-        if (HasManagedNodes(module.Functions))
+        var usesManagedNodes = false;
+        foreach (var item in module.Functions)
+        {
+            if (item.Function is not BoundFunction function)
+            {
+                continue;
+            }
+            if (ManagedClassTypes.IsOptional(function.ReturnType))
+            {
+                return "native-20";
+            }
+            var functionUsesManagedNodes = function.Intrinsic is >= BoundIntrinsic.NodeTryCreate
+                and <= BoundIntrinsic.NodeCollect
+                || function.ReturnType is PrimitiveType.ManagedNode or PrimitiveType.WriteManagedNode;
+            foreach (var variable in function.Variables)
+            {
+                if (ManagedClassTypes.IsOptional(variable.Type))
+                {
+                    return "native-20";
+                }
+                functionUsesManagedNodes |= variable.Type is PrimitiveType.ManagedNode
+                    or PrimitiveType.WriteManagedNode;
+            }
+            usesManagedNodes |= functionUsesManagedNodes;
+        }
+        if (usesManagedNodes)
         {
             return "native-18";
         }
