@@ -1,0 +1,32 @@
+namespace Terrum.CodeAnalysis;
+
+public static int32 DecodeUtf16Scalar(char16 first, char16 second)
+{
+    int32 firstValue = int32(first);
+    if (firstValue >= 55296 && firstValue <= 56319)
+    {
+        int32 secondValue = int32(second);
+        if (secondValue >= 56320 && secondValue <= 57343)
+        {
+            return 65536 + (firstValue - 55296) * 1024 + secondValue - 56320;
+        }
+        return -1;
+    }
+
+    if (firstValue >= 56320 && firstValue <= 57343)
+    {
+        return -1;
+    }
+
+    return firstValue;
+}
+
+public static int32 Utf16ScalarWidth(int32 scalar)
+{
+    if (scalar >= 65536)
+    {
+        return 2;
+    }
+
+    return 1;
+}

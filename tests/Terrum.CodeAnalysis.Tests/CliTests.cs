@@ -7,6 +7,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection.PortableExecutable;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -546,7 +547,7 @@ public sealed partial class CliTests
         try
         {
             Directory.CreateDirectory(bundle);
-            foreach (var name in new[] { "SourceRange.terrum", "Utf16Scalar.terrum", "CharacterLiteral.terrum",
+            foreach (var name in new[] { "SourceRange.terrum", "Utf16CodeUnits.terrum", "Utf16Scalar.terrum", "CharacterLiteral.terrum",
                 "StringEscape.terrum", "Scanner.terrum" })
             {
                 var source = await File.ReadAllTextAsync(Path.Combine(selfHost, name)).ConfigureAwait(true);
@@ -590,6 +591,41 @@ public sealed partial class CliTests
                 Directory.Delete(bundle, recursive: true);
             }
             File.Delete(artifact);
+        }
+    }
+
+    [Fact]
+    public void CompilerPrimitivesLibraryExportsExpectedSymbols()
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64,
+            "Compiler-primitives exports require Windows x64.");
+
+        var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = frameworkDirectory.Parent?.Name
+            ?? throw new InvalidOperationException("Missing configuration directory.");
+        var root = RepositoryRoot();
+        var libraryPath = Path.Combine(root, "artifacts", "bin", "self-host", configuration,
+            "terrum-compiler-primitives.dll");
+        Assert.True(File.Exists(libraryPath), $"Compiler-primitives library was not built: {libraryPath}");
+
+        var handle = NativeLibrary.Load(libraryPath);
+        try
+        {
+            foreach (var export in new[] {
+                "Terrum.CodeAnalysis.IsAsciiDigit",
+                "Terrum.CodeAnalysis.IsLineBreak",
+                "Terrum.CodeAnalysis.GetDecimalDigit",
+                "Terrum.CodeAnalysis.DecodeUtf16Scalar",
+                "Terrum.CodeAnalysis.Utf16ScalarWidth",
+            })
+            {
+                Assert.True(NativeLibrary.TryGetExport(handle, export, out _),
+                    $"Compiler-primitives library is missing export '{export}'.");
+            }
+        }
+        finally
+        {
+            NativeLibrary.Free(handle);
         }
     }
 

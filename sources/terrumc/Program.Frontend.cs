@@ -38,7 +38,8 @@ internal static partial class Program
         SourceText source;
         string? outputPath = null;
         List<SyntaxTree> trees = new();
-        string[] names = ["SourceRange", "Utf16Scalar", "Token", "ManagedTokenChain", "StringEscape", "Scanner",
+        string[] names = ["SourceRange", "Utf16CodeUnits", "Utf16Scalar", "Token", "ManagedTokenChain",
+            "StringEscape", "Scanner",
             "ManagedScanner", "TokenSnapshot", "TokenTriviaSnapshot",
             "TokenIntegerSnapshot", "TokenDiagnosticSnapshot", "ScalarParserTypes",
             "CharacterLiteral", "ScalarFrontend", "TokenCursor",

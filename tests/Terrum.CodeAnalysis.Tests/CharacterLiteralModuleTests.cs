@@ -21,7 +21,7 @@ public sealed class CharacterLiteralModuleTests
     public async Task CharacterLiteralModuleUsesFreshSourceGrantsAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
-        var componentNames = new[] { "SourceRange", "Utf16Scalar", "CharacterLiteral" };
+        var componentNames = new[] { "SourceRange", "Utf16CodeUnits", "Utf16Scalar", "CharacterLiteral" };
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)
         {

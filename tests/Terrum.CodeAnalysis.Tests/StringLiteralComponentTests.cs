@@ -787,7 +787,7 @@ public sealed class StringLiteralComponentTests
     {
         var trees = ImmutableArray.CreateBuilder<SyntaxTree>();
         var names = new[] {
-            "SourceRange.terrum", "CharacterFacts.terrum", "Utf16Scalar.terrum", "StringEscape.terrum",
+            "SourceRange.terrum", "CharacterFacts.terrum", "Utf16CodeUnits.terrum", "Utf16Scalar.terrum", "StringEscape.terrum",
             "StringLiteral.terrum", "StringRow.terrum",
         };
         foreach (var name in includeTests ? [.. names, "StringLiteralTests.terrum"] : names)

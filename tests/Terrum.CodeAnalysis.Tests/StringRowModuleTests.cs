@@ -81,7 +81,7 @@ public sealed class StringRowModuleTests
     {
         var root = RepositoryRoot();
         var componentNames = new[] {
-            "SourceRange", "CharacterFacts", "Utf16Scalar", "StringEscape", "StringLiteral", "StringRow",
+            "SourceRange", "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "StringEscape", "StringLiteral", "StringRow",
         };
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)

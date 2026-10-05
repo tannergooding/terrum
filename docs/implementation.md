@@ -22,7 +22,8 @@ of at most 16,384 code units and copies it into fresh invocation storage.
 Neither profile persists source contents, concrete lengths or addresses.
 Graphs, module sets, native DLLs and persisted AOT images remain outside this
 support.
-The bounded adapter has executed the Terrum-authored `Utf16Scalar`,
+The bounded adapter has executed the Terrum-authored `Utf16CodeUnits` pure
+code-unit decoder and the source-grant-dependent `Utf16Scalar` adapter,
 `CharacterLiteral` and `StringLiteral` leaf decoders, the provisional `StringEscape` decoder and
 `StringRow` name/namespace encoders for ASCII, UTF-8, UTF-16LE and UTF-32LE.
 Persisted semantic-module JIT tests compare those rows with the hosted string
@@ -2344,9 +2345,11 @@ pass; signed unary literals reuse the scalar constant-folding helper;
 visibility remains private unless declared `public` (including explicit `internal`). Native AOT/JIT execute
 the program with test-local callers under both failure policies. This is an
 in-process bridge, not a standalone compiler or persisted native bootstrap
-artifact. The native compiler-primitives DLL does not include the frontend
-because its token and `Host.Source` dependencies still require a source
-adapter. `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`
+artifact. The native compiler-primitives DLL now also exports the pure
+`Utf16CodeUnits` decoder and width helper; it still excludes the
+`Host.Source`-dependent `Utf16Scalar` adapter and scalar frontend. The frontend
+retains its source-grant and hosted verifier/emitter boundaries.
+`terrumc frontend-component self-host <input|-> --runtime fail-fast --json`
 projects typed facts or scanner/shape errors for inspection. Compilation
 errors in the bundled frontend sources use source-located multi-file
 diagnostics rather than being attributed to the input or first component.

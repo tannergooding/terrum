@@ -3,34 +3,13 @@ namespace Terrum.CodeAnalysis;
 // The caller bounds at/end; -1 marks an unpaired surrogate.
 int32 ReadUtf16Scalar(int32 at, int32 end)
 {
-    int32 first = int32(Host.Source[at]);
-    if (first >= 55296 && first <= 56319)
+    char16 first = Host.Source[at];
+    mut char16 second = char16(0);
+    int32 firstValue = int32(first);
+    if (firstValue >= 55296 && firstValue <= 56319 && at + 1 < end)
     {
-        if (at + 1 < end)
-        {
-            int32 second = int32(Host.Source[at + 1]);
-            if (second >= 56320 && second <= 57343)
-            {
-                return 65536 + (first - 55296) * 1024 + second - 56320;
-            }
-        }
-        return -1;
+        second = Host.Source[at + 1];
     }
 
-    if (first >= 56320 && first <= 57343)
-    {
-        return -1;
-    }
-
-    return first;
-}
-
-int32 Utf16ScalarWidth(int32 scalar)
-{
-    if (scalar >= 65536)
-    {
-        return 2;
-    }
-
-    return 1;
+    return DecodeUtf16Scalar(first, second);
 }

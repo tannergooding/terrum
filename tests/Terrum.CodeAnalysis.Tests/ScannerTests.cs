@@ -816,6 +816,8 @@ public sealed class ScannerTests
         var selfHostDirectory = Path.Combine(root, "self-host");
         var sourceRange = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "SourceRange.terrum"))
             .ConfigureAwait(true);
+        var utf16CodeUnits = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "Utf16CodeUnits.terrum"))
+            .ConfigureAwait(true);
         var utf16Scalar = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "Utf16Scalar.terrum"))
             .ConfigureAwait(true);
         var characterLiteral = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "CharacterLiteral.terrum"))
@@ -824,7 +826,8 @@ public sealed class ScannerTests
             .ConfigureAwait(true);
         var scanner = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "Scanner.terrum"))
             .ConfigureAwait(true);
-        return sourceRange + RemoveFileScopedNamespace(utf16Scalar)
+        return sourceRange + RemoveFileScopedNamespace(utf16CodeUnits)
+            + RemoveFileScopedNamespace(utf16Scalar)
             + RemoveFileScopedNamespace(characterLiteral)
             + RemoveFileScopedNamespace(stringEscape) + RemoveFileScopedNamespace(scanner);
     }

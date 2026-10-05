@@ -1,13 +1,16 @@
 # Compiled Terrum scanner component
 
-The `self-host` source bundle (`SourceRange.terrum`, `Utf16Scalar.terrum`,
-`CharacterLiteral.terrum`, `StringEscape.terrum`, then `Scanner.terrum`)
+The `self-host` source bundle (`SourceRange.terrum`, `Utf16CodeUnits.terrum`,
+`Utf16Scalar.terrum`, `CharacterLiteral.terrum`, `StringEscape.terrum`, then
+`Scanner.terrum`)
 contains an executable
 lossless scanner component, not a bootstrapped compiler. `Scanner.terrum`
 implements scalar decoding, Unicode identifier
 classification, keyword and operator selection, numeric token boundaries,
 quoted strings, leading trivia and lexical diagnostics in Terrum. Character
-literal validation and string-escape parsing reuse `Utf16Scalar.terrum`.
+literal validation and string-escape parsing reuse `Utf16Scalar.terrum`, whose
+bounded `Host.Source` adapter delegates pure code-unit decoding to
+`Utf16CodeUnits.terrum`.
 Character literal diagnostics come from the shared
 `CharacterLiteralDecodeResult`; string-escape diagnostics come from
 `StringEscapeDecodeResult`. The scanner retains responsibility for finding
@@ -91,8 +94,9 @@ dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-component s
 ```
 
 For these commands a directory argument explicitly selects the ordered
-`SourceRange.terrum`, `Utf16Scalar.terrum`, `CharacterLiteral.terrum`,
-`StringEscape.terrum`, and `Scanner.terrum` bundle. The files compile as
+`SourceRange.terrum`, `Utf16CodeUnits.terrum`, `Utf16Scalar.terrum`,
+`CharacterLiteral.terrum`, `StringEscape.terrum`, and `Scanner.terrum` bundle.
+The files compile as
 separate syntax trees so component diagnostics retain their owning file paths
 and source indexes.
 Single-file `scan-component`/`build-component` inputs remain available for

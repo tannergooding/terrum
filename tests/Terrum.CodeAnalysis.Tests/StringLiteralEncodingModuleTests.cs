@@ -105,7 +105,7 @@ public sealed class StringLiteralEncodingModuleTests
         BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
-        var componentNames = new[] { "SourceRange", "CharacterFacts", "Utf16Scalar", "StringEscape", "StringLiteral" };
+        var componentNames = new[] { "SourceRange", "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "StringEscape", "StringLiteral" };
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)
         {

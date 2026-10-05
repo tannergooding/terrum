@@ -1,7 +1,10 @@
 using System;
+using System.Buffers;
 using System.Collections.Immutable;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
@@ -16,12 +19,12 @@ public sealed class Utf16ScalarModuleTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
-        int32 Main() { return DecodeRequestedScalar(); }
+        int32 Main() { return DecodeRequestedScalar(0); }
 
-        public int32 DecodeRequestedScalar() {
+        public int32 DecodeRequestedScalar(int32 endOffset) {
             if (Host.Source.Length < 1) { return -2; }
             int32 position = int32(Host.Source[0]) + 1;
-            int32 scalar = ReadUtf16Scalar(position, Host.Source.Length);
+            int32 scalar = ReadUtf16Scalar(position, Host.Source.Length - endOffset);
             if (scalar < 0) { return -1; }
             return scalar * 2 + Utf16ScalarWidth(scalar);
         }
@@ -33,7 +36,7 @@ public sealed class Utf16ScalarModuleTests
     public async Task Utf16ScalarModuleDecodesFreshSourceGrants(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
-        var componentNames = new[] { "Utf16Scalar" };
+        var componentNames = new[] { "Utf16CodeUnits", "Utf16Scalar" };
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)
         {
@@ -56,7 +59,7 @@ public sealed class Utf16ScalarModuleTests
 
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
-            int32 Main() { return DecodeRequestedScalar(); }
+            int32 Main() { return DecodeRequestedScalar(0); }
             """, "utf16-scalar-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
         Assert.False(consumerCompilation.HasErrors,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
@@ -83,24 +86,111 @@ public sealed class Utf16ScalarModuleTests
             var actual = NativeJit.ExecuteWithSourceGrant(linked, [grant], (NativeRuntimePolicy)policy);
             Assert.Equal(expected, actual);
         }
+
+        const string boundedText = "A\uD800\uDC00";
+        var boundedConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return DecodeRequestedScalar(1); }
+            """, "utf16-scalar-bounded-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(boundedConsumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, boundedConsumerCompilation.Diagnostics));
+        var boundedConsumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(boundedConsumerCompilation.Program), producer);
+        var boundedLinked = ModuleCompiler.Link(boundedConsumer, producer);
+        var boundedGrant = CreateSourceGrant(boundedText, 1);
+        Assert.Equal(ExpectedResult(boundedText, 1, endOffset: 1),
+            NativeJit.ExecuteWithSourceGrant(boundedLinked, [boundedGrant], (NativeRuntimePolicy)policy));
     }
 
-    private static int ExpectedResult(string text, int position)
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task Utf16CodeUnitsModuleDecodesScalarsAndWidthsWithoutHostSource(BoundRuntimePolicy policy)
     {
-        var first = text[position];
-        if (char.IsHighSurrogate(first))
+        var root = RepositoryRoot();
+        var componentPath = Path.Combine(root, "self-host", "Utf16CodeUnits.terrum");
+        var componentText = await File.ReadAllTextAsync(componentPath).ConfigureAwait(true);
+        var componentTree = SyntaxTree.Parse(componentText, componentPath);
+        Assert.False(componentTree.HasErrors, string.Join(Environment.NewLine, componentTree.Diagnostics));
+        var producerEntry = SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return 0; }
+            """, "utf16-code-units-module.terrum");
+        var producerCompilation = Compilation.Create([componentTree, producerEntry], policy);
+        Assert.False(producerCompilation.HasErrors,
+            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(producerCompilation.Program),
+            ["Terrum.CodeAnalysis.DecodeUtf16Scalar", "Terrum.CodeAnalysis.Utf16ScalarWidth"]);
+
+        var fixtures = new (char First, char Second, bool HasSecond)[] {
+            ('\0', '\uDC00', true),
+            ('\uFDD0', '\0', false),
+            ('\uFFFF', '\0', false),
+            ('\uD800', '\uDC00', true),
+            ('\uDBFF', '\uDFFF', true),
+            ('\uD800', '\0', false),
+            ('\uDC00', '\0', false),
+            ('\uD800', 'A', true),
+            ('\uD800', '\uDBFF', true),
+        };
+        var expectedResults = fixtures.Select(static fixture =>
+            ExpectedDecode(fixture.First, fixture.Second, fixture.HasSecond)).ToArray();
+        var checks = new StringBuilder();
+        for (var index = 0; index < fixtures.Length; index++)
         {
-            if (position + 1 >= text.Length || !char.IsLowSurrogate(text[position + 1]))
-            {
-                return -1;
-            }
-            return char.ConvertToUtf32(first, text[position + 1]) * 2 + 2;
+            var fixture = fixtures[index];
+            var expected = expectedResults[index];
+            checks.Append("int32 scalar").Append(index).Append(" = DecodeUtf16Scalar(char16(")
+                .Append(((int)fixture.First).ToString(CultureInfo.InvariantCulture)).Append("), char16(")
+                .Append(((int)fixture.Second).ToString(CultureInfo.InvariantCulture)).AppendLine("));");
+            checks.Append("if (scalar").Append(index).Append(" != ")
+                .Append(expected.Scalar.ToString(CultureInfo.InvariantCulture))
+                .Append(") { return ").Append((index + 1).ToString(CultureInfo.InvariantCulture)).AppendLine("; }");
+            checks.Append("if (Utf16ScalarWidth(scalar").Append(index).Append(") != ")
+                .Append(expected.Width.ToString(CultureInfo.InvariantCulture)).Append(") { return ")
+                .Append((fixtures.Length + index + 1).ToString(CultureInfo.InvariantCulture)).AppendLine("; }");
         }
-        if (char.IsLowSurrogate(first))
+        var consumerTree = SyntaxTree.Parse(
+            "namespace Terrum.CodeAnalysis;\nint32 Main() {\n" + checks + "return 0;\n}",
+            "utf16-code-units-consumer.terrum");
+        Assert.False(consumerTree.HasErrors, string.Join(Environment.NewLine, consumerTree.Diagnostics));
+        var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        var actual = NativeJit.Execute(linked, (NativeRuntimePolicy)policy);
+        Assert.True(actual == 0,
+            actual > 0 && actual <= fixtures.Length * 2
+                ? $"UTF-16 fixture {((actual - 1) % fixtures.Length) + 1} failed: "
+                    + $"expected {expectedResults[(actual - 1) % fixtures.Length].Status} "
+                    + $"with scalar {expectedResults[(actual - 1) % fixtures.Length].Scalar}."
+                : $"Expected no failed UTF-16 checks, got consumer result {actual}.");
+    }
+
+    private static int ExpectedResult(string text, int position, int endOffset = 0)
+    {
+        var (scalar, width, _) = ExpectedDecode(text[position], position + 1 < text.Length - endOffset
+            ? text[position + 1]
+            : '\0', position + 1 < text.Length - endOffset);
+        return scalar < 0 ? -1 : scalar * 2 + width;
+    }
+
+    private static (int Scalar, int Width, OperationStatus Status) ExpectedDecode(
+        char first, char second, bool hasSecond)
+    {
+        Span<char> units = stackalloc char[2];
+        units[0] = first;
+        var length = 1;
+        if (hasSecond)
         {
-            return -1;
+            units[1] = second;
+            length = 2;
         }
-        return first * 2 + 1;
+        var status = Rune.DecodeFromUtf16(units[..length], out var rune, out _);
+        var scalar = status == OperationStatus.Done ? rune.Value : -1;
+        return (scalar, scalar >= 65536 ? 2 : 1, status);
     }
 
     private static HostBuffer CreateSourceGrant(string text, int position)
