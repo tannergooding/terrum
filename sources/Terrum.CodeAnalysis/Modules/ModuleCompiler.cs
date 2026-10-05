@@ -2203,7 +2203,8 @@ public static partial class ModuleCompiler
     {
         var count = Count(reader, 256);
         var classes = ImmutableArray.CreateBuilder<BoundClass>(count);
-        var names = new HashSet<string>(structureNames, StringComparer.Ordinal);
+        var names = new HashSet<string>(structureNames.Count + count, StringComparer.Ordinal);
+        names.UnionWith(structureNames);
         for (var index = 0; index < count; index++)
         {
             var name = GetString(reader);
