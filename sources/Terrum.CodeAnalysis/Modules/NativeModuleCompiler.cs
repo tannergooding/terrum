@@ -370,8 +370,7 @@ public static partial class NativeModuleCompiler
         if (nameLength is < 1 or > 64 || profileLength is < 1 or > 32
             || contractLength is < 1 or > MaximumContractBytes || imageLength < 1
             || required + 2 > bytes.Length
-            || !SHA256.HashData(bytes.AsSpan(0, bytes.Length - HashSize))
-                .AsSpan().SequenceEqual(bytes.AsSpan(bytes.Length - HashSize)))
+            || !HasValidChecksum(bytes))
         {
             throw new ModuleFormatException("Invalid native module package bounds or checksum.");
         }
