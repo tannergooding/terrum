@@ -80,8 +80,7 @@ public readonly ref struct TrRmSourceMapTableReader
 
             var instruction = slots.Slice(((int)instructionSlot - 1) * 16, 16);
             var file = slots.Slice(((int)fileSlot - 1) * 16, 16);
-            if (ReadU16(instruction, 0) != 0x0020 || ReadU16(instruction, 2) != 1
-                || ReadU16(file, 0) != 0x001F || ReadU16(file, 2) != 0)
+            if (ReadU16(instruction, 0) != 0x0020 || ReadU16(file, 0) != 0x001F)
             {
                 throw InvalidMap();
             }

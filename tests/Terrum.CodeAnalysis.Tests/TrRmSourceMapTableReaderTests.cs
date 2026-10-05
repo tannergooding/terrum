@@ -50,6 +50,14 @@ public sealed class TrRmSourceMapTableReaderTests
     }
 
     [Fact]
+    public void RejectsRowsThatReferenceSlotsOfTheWrongKind()
+    {
+        var bytes = Map();
+        Write(bytes, 36, 2);
+        Assert.Throws<InvalidDataException>(() => Create(bytes));
+    }
+
+    [Fact]
     public void MultipleMappedInstructionsMustFollowSlotOrder()
     {
         var section = new byte[84];
