@@ -119,18 +119,26 @@ public sealed class WideCandidateTests
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
 
-    [Fact]
-    public void BitOperationsRoundUpCannotReadFailureOutput()
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast, "UInt32", "uint32.MaxValue")]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions, "UInt32", "uint32.MaxValue")]
+    [InlineData(BoundRuntimePolicy.FailFast, "UInt64", "uint64.MaxValue")]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions, "UInt64", "uint64.MaxValue")]
+    public void BitOperationsRoundUpCannotReadFailureOutput(
+        BoundRuntimePolicy policy, string suffix, string input)
     {
-        var producer = CreateNumericsLibrary("BitOperations.terrum", NativeRuntimePolicy.FailFast,
-            "Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt32");
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var producer = CreateNumericsLibrary("BitOperations.terrum", (NativeRuntimePolicy)policy,
+            $"Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwo{suffix}");
+        var invalidConsumer = SyntaxTree.Parse($$"""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
-                bool succeeded = TryRoundUpToPowerOfTwoUInt32(0, init var rounded);
-                return int32(rounded);
+                if (!TryRoundUpToPowerOfTwo{{suffix}}({{input}}, init var rounded)) {
+                    return int32(rounded);
+                }
+                return 0;
             }
-            """), ModuleCompiler.CreateReference(producer));
+            """);
+        var compilation = Compilation.Create(invalidConsumer, ModuleCompiler.CreateReference(producer), policy);
         Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
         Assert.Null(compilation.Program);
     }
