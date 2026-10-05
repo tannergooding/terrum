@@ -46,6 +46,11 @@ Separately, a persisted semantic-module consumer exercises the existing
 `BigInteger` boundary expectations for 362 input pairs under both runtime
 policies. This adds persistence evidence only; it does not add arithmetic API
 or compiler support.
+A second persisted semantic-module consumer executes private generic
+`CopyAlgorithms` specializations over scalar values, code units and nested
+`Token`/`SourceRange` aggregates. It checks conditional `init ref` publication
+and the explicit `out` adapter under both policies; this adds neither general
+reference support nor a new public library API.
 This bounded implementation is recorded by the still-unapproved
 [invocation-scoped source grant proposal](proposals/invocation-scoped-source-grant.md);
 it does not extend the native profile or move the scalar frontend beyond the
