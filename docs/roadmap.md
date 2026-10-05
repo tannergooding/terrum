@@ -261,6 +261,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `fa84e73` | Exercise provisional UTF-8 `StringRow` encoding through invocation-scoped semantic-module JIT grants |
 | `d94ffcd` | Execute the bounded `StringLiteral` decoder through invocation-scoped semantic-module JIT grants |
 | `180fa2f` | Execute the bounded `CharacterLiteral` decoder through invocation-scoped semantic-module JIT grants |
 | `8cce660` | Persist invocation-scoped `Host.Source` requirements for semantic-module JIT execution |
