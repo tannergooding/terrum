@@ -533,7 +533,15 @@ internal static class NativeModuleImageValidator
                 var functions = Read32(at + 28);
                 var names = Read32(at + 32);
                 var ordinals = Read32(at + 36);
-                var sorted = expected.Order(StringComparer.Ordinal).ToArray();
+                IReadOnlyList<string> sorted = expected;
+                for (var index = 1; index < expected.Count; index++)
+                {
+                    if (StringComparer.Ordinal.Compare(expected[index - 1], expected[index]) > 0)
+                    {
+                        sorted = expected.Order(StringComparer.Ordinal).ToArray();
+                        break;
+                    }
+                }
                 for (var index = 0; index < count; index++)
                 {
                     var ordinal = BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(Offset(ordinals + (index * 2), 2), 2));

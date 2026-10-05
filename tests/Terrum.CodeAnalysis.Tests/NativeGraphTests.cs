@@ -156,6 +156,20 @@ public sealed class NativeGraphTests
     }
 
     [Fact]
+    public void ProducerValidationAcceptsUnsortedExportNames()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Zebra() { return 2; }
+            public int32 Alpha() { return 1; }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program),
+            ["Zebra", "Alpha"], "UnsortedExports", NativeRuntimePolicy.FailFast);
+
+        Assert.False(NativeModuleCompiler.Inspect(producer).IsConsumer);
+    }
+
+    [Fact]
     public void GraphProvidersRejectCaseOnlyIdentityDuplicates()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
