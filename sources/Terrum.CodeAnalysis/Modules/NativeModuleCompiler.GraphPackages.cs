@@ -409,7 +409,11 @@ public static partial class NativeModuleCompiler
     private static GraphDependency[] GraphBindings(IReadOnlyList<GraphPackage> providers,
         IReadOnlyCollection<string> declarations)
     {
-        var unmatched = declarations.ToHashSet(StringComparer.Ordinal);
+        var unmatched = new HashSet<string>(declarations.Count, StringComparer.Ordinal);
+        foreach (var declaration in declarations)
+        {
+            _ = unmatched.Add(declaration);
+        }
         var result = new GraphDependency[providers.Count];
         for (var i = 0; i < providers.Count; i++)
         {
