@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `1c78294` | Reuse completed struct alignments during layout |
 | `e29a0d8` | Reuse the declaring struct name across conformance checks |
 | `39ba720` | Collect protocol operator operands without array snapshots |
 | `0884680` | Capture static protocol names during interface classification |
