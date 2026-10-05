@@ -1605,6 +1605,13 @@ public static partial class TrRmExecutableCompiler
                         }
                         break;
                     }
+                    if (loop.IsPostTested
+                        && loop.Condition is BoundConstant { Type: PrimitiveType.Bool, Value: 0 }
+                        && AcyclicTerminalPrefix(loop.Body))
+                    {
+                        Statement(loop.Body);
+                        break;
+                    }
                     var parent = _current.Region;
                     var header = NewBlock(_regions.Count + 1);
                     header.IsLoopHeader = true;

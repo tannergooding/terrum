@@ -88,6 +88,21 @@ public sealed class TrRmDoForTests
         Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
     }
 
+    [Theory]
+    [InlineData(42, "int32 Main() { mut int32 value = 0; do { value = 42; } while (false); return value; }")]
+    [InlineData(42, "int32 Main() { mut int32 value = 0; do { if (Choose()) { int32 local = Compute(40, 2); value = local; } else { value = 13; } } while (false); return value; } bool Choose() { return true; } int32 Compute(int32 left, int32 right) { return left + right; }")]
+    [InlineData(13, "int32 Main() { mut int32 value = 0; do { if (Choose()) { int32 local = Compute(40, 2); value = local; } else { value = 13; } } while (false); return value; } bool Choose() { return false; } int32 Compute(int32 left, int32 right) { return left + right; }")]
+    public void LiteralFalseDoLoopsExecuteSupportedBodyOnceWithoutRegions(int expected, string source)
+    {
+        var original = Compile(source);
+        var artifact = TrRmExecutableCompiler.Emit(original, "false-do-loop");
+        Assert.Equal(0, IndexedLoopRegionCount(artifact, 1));
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
+    }
+
     [Fact]
     public void ReturnOnlyAcyclicLoopsEraseToTheirTerminalReturn()
     {
@@ -261,6 +276,7 @@ public sealed class TrRmDoForTests
 
     [Theory]
     [InlineData("int32 Main() { do { Stop(); break; } while (false); return 42; } [DoesNotReturn] void Stop() { require false; }")]
+    [InlineData("int32 Main() { do { init int32 value; } while (false); return 42; }")]
     [InlineData("int32 Main() { do { if (true) { init int32 value; } return 42; } while (false); }")]
     public void AcyclicLoopShapesRejectWithoutInventedBackedges(string source)
         => Assert.Throws<NotSupportedException>(() =>
