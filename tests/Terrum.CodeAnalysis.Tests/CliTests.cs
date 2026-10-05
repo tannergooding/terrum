@@ -1822,6 +1822,14 @@ public sealed partial class CliTests
                 "Terrum.CodeAnalysis.Numerics64.WrapChar16ToUInt32",
                 "Terrum.CodeAnalysis.Numerics64.WrapChar16ToInt64",
                 "Terrum.CodeAnalysis.Numerics64.WrapChar16ToUInt64",
+                "Terrum.CodeAnalysis.Numerics64.AbsFloat32",
+                "Terrum.CodeAnalysis.Numerics64.MinFloat32",
+                "Terrum.CodeAnalysis.Numerics64.MaxFloat32",
+                "Terrum.CodeAnalysis.Numerics64.ClampFloat32",
+                "Terrum.CodeAnalysis.Numerics64.AbsFloat64",
+                "Terrum.CodeAnalysis.Numerics64.MinFloat64",
+                "Terrum.CodeAnalysis.Numerics64.MaxFloat64",
+                "Terrum.CodeAnalysis.Numerics64.ClampFloat64",
             })
             {
                 Assert.True(NativeLibrary.TryGetExport(handle, export, out _),
@@ -1876,6 +1884,7 @@ public sealed partial class CliTests
             AssertIntegerCheckedConversionExports(handle);
             AssertIntegerSaturationExports(handle);
             AssertIntegerWrappingExports(handle);
+            AssertFloatingMathSelectionExports(handle);
 
             var isAsciiDigit = Marshal.GetDelegateForFunctionPointer<Char16PredicateExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.IsAsciiDigit"));

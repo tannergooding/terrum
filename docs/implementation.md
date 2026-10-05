@@ -87,6 +87,14 @@ predicates under both runtime policies and compare their result masks with
 independent `BigInteger` range, divisor and signed-minimum expectations. This
 is native execution evidence for the existing private `[ConstEval]` predicates,
 not an arithmetic API or compiler-support claim.
+The Windows x64 compiler-primitives DLL also directly invokes the existing
+`Float32MathSelection` and `Float64MathSelection` candidates for absolute
+value, min, max and clamp. Tests pass floating representations through integer
+bit carriers and compare finite results, subnormal and adjacent values,
+infinities, signed-zero selection and NaN classification. This exercises the
+Terrum internal floating-value ABI, not the standard C floating ABI, and does
+not approve either candidate API or settle NaN payload, signaling or status
+behavior.
 Persisted semantic-module JIT also exercises all 20 existing
 `IntegerCheckedConversions` helpers across source/destination boundaries,
 including signed minima, unsigned maxima, `char16` edges and surrogate code
