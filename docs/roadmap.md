@@ -281,6 +281,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `45a5f7e3` | Round-trip top-level caller-unsafe Effects in executable TRRM while rejecting calls without validated Body scopes |
 | `a7780a64` | Exercise both existing SourceRange end-query forms through the internal Windows x64 compiler-primitives DLL |
 | `bca63d3d` | Exercise the existing Token constructor and aggregate argument/return path through the internal Windows x64 compiler-primitives DLL |
 | `a1e83b6a` | Exercise existing IntegerFormatting decimal and radix formatters through the internal Windows x64 compiler-primitives DLL |
