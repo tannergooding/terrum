@@ -151,19 +151,24 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Graph library exports must be distinct functions.");
         }
-        var allNames = program.Functions.Select(static item => item.Name).ToHashSet(StringComparer.Ordinal);
+        var unmatchedExports = new HashSet<string>(names, StringComparer.Ordinal);
         var available = dependencies.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
         var hasPrivateManagedState = HasPrivateManagedState(program);
         var ownershipTransfers = new bool[program.Functions.Length];
         for (var index = 0; index < program.Functions.Length; index++)
         {
             var function = program.Functions[index];
-            if (hasPrivateManagedState && (function.IsExternal || names.Contains(function.Name))
+            var isExport = names.Contains(function.Name);
+            if (isExport)
+            {
+                _ = unmatchedExports.Remove(function.Name);
+            }
+            if (hasPrivateManagedState && (function.IsExternal || isExport)
                 && !ManagedExportShape.Supported(function, program.Structures))
             {
                 throw new ModuleContractException($"Managed graph boundary '{function.Name}' requires public Copy values.");
             }
-            if (names.Contains(function.Name) && (function.IsExternal || !Exportable(function, program.Structures)))
+            if (isExport && (function.IsExternal || !Exportable(function, program.Structures)))
             {
                 throw new ModuleContractException($"Graph export '{function.Name}' is not a public implementation.");
             }
@@ -183,7 +188,7 @@ public static partial class ModuleCompiler
                 ownershipTransfers[index] = hasOwnershipTransfer;
             }
         }
-        if (!names.IsSubsetOf(allNames))
+        if (unmatchedExports.Count != 0)
         {
             throw new ModuleContractException("Graph library must export owned functions.");
         }
