@@ -75,7 +75,7 @@ public static class NativeEmitter
         {
             throw new ArgumentException("Native consumers require 1 to 1024 explicit import bindings.", nameof(bindings));
         }
-        var externals = new Dictionary<string, int>(StringComparer.Ordinal);
+        var externals = new Dictionary<string, int>(bindings.Count, StringComparer.Ordinal);
         for (var index = 0; index < program.Functions.Length; index++)
         {
             if (program.Functions[index].IsExternal)
@@ -87,8 +87,8 @@ public static class NativeEmitter
         {
             throw new ArgumentException("Every external function needs exactly one native import binding.", nameof(bindings));
         }
-        var selected = new Dictionary<int, NativeImportBinding>();
-        var importNames = new HashSet<string>(StringComparer.Ordinal);
+        var selected = new Dictionary<int, NativeImportBinding>(bindings.Count);
+        var importNames = new HashSet<string>(bindings.Count, StringComparer.Ordinal);
         foreach (var binding in bindings)
         {
             cancellationToken.ThrowIfCancellationRequested();
