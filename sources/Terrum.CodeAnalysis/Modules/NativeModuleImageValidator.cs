@@ -412,8 +412,8 @@ internal static class NativeModuleImageValidator
                 var sawSourceFrame = false;
                 var sawCleanupFrame = false;
                 var sawManagedCollector = false;
-                var cleanupStarts = new HashSet<int>();
-                var exceptionalCleanups = new List<int>();
+                var cleanupStarts = checkedExceptions ? new HashSet<int>() : null;
+                var exceptionalCleanups = checkedExceptions ? new List<int>() : null;
                 for (var index = 0; index < table.Size / 12; index++)
                 {
                     var at = Offset(table.RelativeVirtualAddress + (index * 12), 12, ".pdata");
@@ -460,7 +460,7 @@ internal static class NativeModuleImageValidator
                             }
                             if (target == 0)
                             {
-                                exceptionalCleanups.Add(handlerAddress);
+                                exceptionalCleanups?.Add(handlerAddress);
                             }
                             else
                             {
@@ -533,7 +533,7 @@ internal static class NativeModuleImageValidator
                             throw Invalid();
                         }
                         sawCleanupFrame = true;
-                        _ = cleanupStarts.Add(begin);
+                        _ = cleanupStarts?.Add(begin);
                     }
                     else
                     {
@@ -554,11 +554,14 @@ internal static class NativeModuleImageValidator
                 {
                     throw Invalid();
                 }
-                for (var index = 0; index < exceptionalCleanups.Count; index++)
+                if (exceptionalCleanups is not null)
                 {
-                    if (!cleanupStarts.Contains(exceptionalCleanups[index]))
+                    for (var index = 0; index < exceptionalCleanups.Count; index++)
                     {
-                        throw Invalid();
+                        if (cleanupStarts is null || !cleanupStarts.Contains(exceptionalCleanups[index]))
+                        {
+                            throw Invalid();
+                        }
                     }
                 }
                 if (nextInfo != infoSection.VirtualAddress + infoSection.VirtualSize)
