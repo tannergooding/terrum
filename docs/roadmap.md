@@ -285,6 +285,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `284f62a2` | Execute fallthrough bodies once when erasing literal-false post-tests |
 | `e3c4cabd` | Preserve returning direct calls before terminal loop exits |
 | `a1737884` | Lower scalar-only conditional prefixes before acyclic loop tails |
 | `1db31f72` | Preserve requirement checks and their fail-fast status before terminal loop exits |
