@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e9942cb` | Reuse graph import lookups during managed-boundary validation |
 | `db76eb0` | Reuse cleanup structure traversal state |
 | `71ac1b0` | Reuse cleanup dependency function buffer |
 | `9028f1e` | Sort graph providers in place after validation |
