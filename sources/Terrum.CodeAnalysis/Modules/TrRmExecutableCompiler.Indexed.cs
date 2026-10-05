@@ -1582,10 +1582,10 @@ public static partial class TrRmExecutableCompiler
                         null);
                     break;
                 case BoundWhile loop:
-                    if (loop.Iterator is null
-                        && (loop.IsPostTested
+                    var acyclicBody = AcyclicLoopBody(loop);
+                    if ((loop.IsPostTested
                             || loop.Condition is BoundConstant { Type: PrimitiveType.Bool, Value: not 0 })
-                        && TerminalAcyclicBody(loop.Body, out var hasAcyclicBreak))
+                        && TerminalAcyclicBody(acyclicBody, out var hasAcyclicBreak))
                     {
                         var acyclicParent = _current.Region;
                         var acyclicEntrySlots = (int[])_slots.Clone();
@@ -1596,7 +1596,7 @@ public static partial class TrRmExecutableCompiler
                             acyclicExit = NewBlock(acyclicParent);
                             acyclicExitSlots = Parameters(acyclicExit, acyclicEntrySlots);
                         }
-                        AcyclicTerminalStatement(loop.Body, acyclicExit, acyclicEntrySlots);
+                        AcyclicTerminalStatement(acyclicBody, acyclicExit, acyclicEntrySlots);
                         if (acyclicExit is not null)
                         {
                             _current = acyclicExit;
@@ -1843,6 +1843,23 @@ public static partial class TrRmExecutableCompiler
             }
             hasBreak = false;
             return false;
+        }
+
+        private static BoundStatement AcyclicLoopBody(BoundWhile loop)
+        {
+            if (loop.Iterator is null
+                && loop.Body is BoundBlock { RetiredManagedLocals.IsEmpty: true } block
+                && block.Span == loop.Span
+                && block.Statements.Length == 2
+                && block.Statements[0] is BoundBlock body
+                && block.Statements[1] is BoundAssignment or BoundExpressionStatement
+                && block.Statements[1].Span.End <= body.Span.Start
+                && body.Span.End <= block.Span.End)
+            {
+                return body;
+            }
+
+            return loop.Body;
         }
 
         private void AcyclicTerminalStatement(BoundStatement statement, IndexedBlock? exit, int[] visible)
