@@ -88,8 +88,13 @@ public static partial class NativeModuleCompiler
         NativeModuleImageValidator.Validate(set.Image, true, Imports(set), [], set.Policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
             allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
+        var dependencies = new string[set.Dependencies.Length];
+        for (var i = 0; i < dependencies.Length; i++)
+        {
+            dependencies[i] = set.Dependencies[i].Identity;
+        }
         return new NativeModuleSetInfo(profile, set.Policy,
-            Convert.ToHexString(SHA256.HashData(set.Image)), [.. set.Dependencies.Select(static item => item.Identity)]);
+            Convert.ToHexString(SHA256.HashData(set.Image)), dependencies);
     }
 
     /// <summary>Stages only checked image snapshots and executes one unchanged consumer with all selected DLLs.</summary>
