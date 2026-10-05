@@ -251,16 +251,28 @@ public static partial class NativeModuleCompiler
 
     private static void ValidateGraphDirect(GraphPackage package, GraphPackage[] providers)
     {
-        if (package.IsLeaf || providers.Length != package.Dependencies.Length
-            || providers.Any(item => item.Policy != package.Policy)
-            || !providers.Select(static item => item.Identity).SequenceEqual(
-                package.Dependencies.Select(static item => (string?)item.Identity)))
+        if (package.IsLeaf || providers.Length != package.Dependencies.Length)
         {
             throw new ModuleContractException("Graph direct dependencies or policies differ.");
         }
-        var references = providers.Select(GetValidatedProviderReference).ToArray();
-        var provenance = providers.Select((provider, index) =>
-            ProviderOrigins(provider, references[index])).ToArray();
+        var references = new CompilationReference[providers.Length];
+        var provenance = new Dictionary<string, GraphTypeOrigin?>[providers.Length];
+        for (var index = 0; index < providers.Length; index++)
+        {
+            var provider = providers[index];
+            if (provider.Policy != package.Policy
+                || !string.Equals(provider.Identity, package.Dependencies[index].Identity,
+                    StringComparison.Ordinal))
+            {
+                throw new ModuleContractException("Graph direct dependencies or policies differ.");
+            }
+        }
+        for (var index = 0; index < providers.Length; index++)
+        {
+            var provider = providers[index];
+            references[index] = GetValidatedProviderReference(provider);
+            provenance[index] = ProviderOrigins(provider, references[index]);
+        }
         var reference = GraphReference(providers, references, provenance);
         var contractSnapshot = package.ContractSnapshot
             ?? throw new InvalidOperationException("Native graph package contract snapshot is missing.");
@@ -272,12 +284,16 @@ public static partial class NativeModuleCompiler
         {
             contractSnapshot.ValidateGraphLibrary(reference);
         }
-        foreach (var (dependency, provider) in package.Dependencies.Zip(providers))
+        for (var index = 0; index < providers.Length; index++)
         {
-            if (dependency.Declarations.Any(name =>
-                Array.BinarySearch(provider.Exports, name, StringComparer.Ordinal) < 0))
+            var dependency = package.Dependencies[index];
+            var exports = providers[index].Exports;
+            foreach (var name in dependency.Declarations)
             {
-                throw new ModuleContractException($"Graph declaration does not belong to '{dependency.Identity}'.");
+                if (Array.BinarySearch(exports, name, StringComparer.Ordinal) < 0)
+                {
+                    throw new ModuleContractException($"Graph declaration does not belong to '{dependency.Identity}'.");
+                }
             }
         }
         var expected = CreateGraphOrigins(contractSnapshot, package.Consumer, package.Identity,
