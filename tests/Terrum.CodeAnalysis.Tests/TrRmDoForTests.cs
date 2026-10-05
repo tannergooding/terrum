@@ -95,6 +95,7 @@ public sealed class TrRmDoForTests
             "int32 Main() { do { return 42; } while (Fail()); } bool Fail() { require false; return false; }",
             "int32 Main() { while (true) { return 42; } }",
             "int32 Main() { for (;;) { return 42; } }",
+            "int32 Main() { do { require Check(); return 42; } while (FailCondition()); } bool Check() { return true; } bool FailCondition() { require false; return false; }",
             "int32 Main() { while (true) { do { return 42; } while (Fail()); } } bool Fail() { require false; return false; }",
             "int32 Main() { do { for (mut int32 value = Start();; value = FailIterator()) { return value; } } while (FailCondition()); } int32 Start() { return 42; } int32 FailIterator() { require false; return 0; } bool FailCondition() { require false; return false; }",
         ];

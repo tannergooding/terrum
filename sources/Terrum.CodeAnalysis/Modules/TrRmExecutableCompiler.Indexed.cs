@@ -1907,6 +1907,7 @@ public static partial class TrRmExecutableCompiler
                 }
                 if (block.Statements[index] is not (BoundLocal { Initializer: not null }
                     or BoundAssignment
+                    or BoundRequire
                     or BoundExpressionStatement
                         { Expression: BoundCompoundAssignment
                             { Place: BoundRead, Type: PrimitiveType.Int32 or PrimitiveType.UInt32

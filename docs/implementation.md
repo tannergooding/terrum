@@ -2902,12 +2902,12 @@ whose two explicit arms are terminal, or whose terminal `then` arm is followed
 by a terminal statement for its implicit `else` path. The lowering keeps those
 branch conditions and their effects, routes breaks to the existing
 fallthrough, and retains returns. Before terminal leaves it preserves
-supported scalar local initializations, assignments and expression statements
-lowered by the existing paths, plus primitive integer local updates and
-compound assignments. Nested constant-true or post-tested loops erase
-recursively as return-only terminal tails, or as terminal prefixes with a
-direct break before an enclosing terminal tail; inner breaks route only to
-their own fallthrough and cannot satisfy an enclosing loop's break proof. The
+supported scalar local initializations, assignments, requirement checks and
+expression statements lowered by the existing paths, plus primitive integer
+local updates and compound assignments. Nested constant-true or post-tested
+loops erase recursively as return-only terminal tails, or as terminal prefixes
+with a direct break before an enclosing terminal tail; inner breaks route only
+to their own fallthrough and cannot satisfy an enclosing loop's break proof. The
 lowering omits the unreachable loop condition and iterator and adds no loop
 region or backedge. A literal-false pre-test with an empty cleanup-free body
 also erases to fallthrough. `for` initializers remain in source order; an
