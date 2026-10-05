@@ -210,9 +210,8 @@ public static partial class NativeModuleCompiler
             {
                 throw new ModuleContractException("Missing, extra or identity-incompatible native dependency.");
             }
-            var functions = provider.Reference.Functions;
-            var exports = functions.Select(static item => item.Name).ToArray();
-            providerExports[i] = exports.ToHashSet(StringComparer.Ordinal);
+            providerExports[i] = provider.Reference.Functions
+                .Select(static item => item.Name).ToHashSet(StringComparer.Ordinal);
         }
         var referenceSet = CreateReferenceSet(providers);
         set.ContractSnapshot.ValidateAgainstReference(referenceSet);
