@@ -286,6 +286,7 @@ public static partial class SemanticVerifier
         int[]? classConstructorCounts = null;
         int[]? classFactoryCounts = null;
         Dictionary<string, string>? cleanupOwners = null;
+        HashSet<string>?[]? fieldNamesByOwner = null;
         if (!allowGenericProofDependencies && !program.Classes.IsEmpty)
         {
             classIndexes = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -454,10 +455,7 @@ public static partial class SemanticVerifier
                     || function.IsCleanup || function.DoesNotReturn || function.ParameterCount != 1
                     || function.Variables[0].IsMutable || IsUnique(program, function.Variables[0].Type)
                     || !IsClassArgumentType(function.ReturnType, program.Structures)
-                    || (declaringType >= 0 && (declaringType >= ManagedClassTypes.First
-                        ? program.Classes[declaringType - ManagedClassTypes.First].Fields
-                            .Any(field => field.Name == propertyName)
-                        : program.Structures[declaringType].Fields.Any(field => field.Name == propertyName)))))
+                    || (declaringType >= 0 && HasFieldName(declaringType, propertyName))))
             {
                 throw Invalid();
             }
@@ -637,6 +635,34 @@ public static partial class SemanticVerifier
                 exception.Data[FunctionIndexKey] = functionIndex;
                 throw;
             }
+        }
+
+        bool HasFieldName(int owner, string name)
+        {
+            fieldNamesByOwner ??= new HashSet<string>?[program.Structures.Length + program.Classes.Length];
+            var ownerIndex = owner >= ManagedClassTypes.First
+                ? program.Structures.Length + owner - ManagedClassTypes.First : owner;
+            var names = fieldNamesByOwner[ownerIndex];
+            if (names is null)
+            {
+                names = new HashSet<string>(StringComparer.Ordinal);
+                if (owner >= ManagedClassTypes.First)
+                {
+                    foreach (var field in program.Classes[owner - ManagedClassTypes.First].Fields)
+                    {
+                        _ = names.Add(field.Name);
+                    }
+                }
+                else
+                {
+                    foreach (var field in program.Structures[owner].Fields)
+                    {
+                        _ = names.Add(field.Name);
+                    }
+                }
+                fieldNamesByOwner[ownerIndex] = names;
+            }
+            return names.Contains(name);
         }
     }
 

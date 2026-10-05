@@ -65,12 +65,17 @@ public sealed class GetterPropertyTests
         {
             var index = program.Functions.IndexOf(Assert.Single(program.Functions,
                 function => function.PropertyName == "Value" && function.DeclaringStruct == owner));
-            var getter = program.Functions[index] with {
+            var getter = program.Functions[index];
+            var otherGetter = getter with {
+                Name = owner + ".#get:Other",
+                PropertyName = "Other",
+            };
+            var collidingGetter = getter with {
                 Name = owner + ".#get:_value",
                 PropertyName = "_value",
             };
             _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
-                Functions = program.Functions.SetItem(index, getter),
+                Functions = program.Functions.SetItem(index, otherGetter).Add(collidingGetter),
             }));
         }
     }
