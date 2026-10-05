@@ -21,6 +21,12 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Utf16ScalarDecoderExport(ushort first, ushort second);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Utf16ScalarWidthExport(int scalar);
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -621,6 +627,33 @@ public sealed partial class CliTests
             {
                 Assert.True(NativeLibrary.TryGetExport(handle, export, out _),
                     $"Compiler-primitives library is missing export '{export}'.");
+            }
+
+            var decode = Marshal.GetDelegateForFunctionPointer<Utf16ScalarDecoderExport>(
+                NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.DecodeUtf16Scalar"));
+            foreach (var (first, second, expected) in new (ushort First, ushort Second, int Expected)[] {
+                (0, 0xDC00, 0),
+                (0xFDD0, 0, 0xFDD0),
+                (0xD800, 0xDC00, 0x10000),
+                (0xDBFF, 0xDFFF, 0x10FFFF),
+                (0xD800, (ushort)'A', -1),
+                (0xD800, 0xDBFF, -1),
+                (0xDC00, 0, -1),
+            })
+            {
+                Assert.Equal(expected, decode(first, second));
+            }
+
+            var scalarWidth = Marshal.GetDelegateForFunctionPointer<Utf16ScalarWidthExport>(
+                NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.Utf16ScalarWidth"));
+            foreach (var (scalar, expected) in new[] {
+                (-1, 1),
+                (0xFFFF, 1),
+                (0x10000, 2),
+                (0x10FFFF, 2),
+            })
+            {
+                Assert.Equal(expected, scalarWidth(scalar));
             }
         }
         finally

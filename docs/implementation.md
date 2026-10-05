@@ -2346,9 +2346,11 @@ visibility remains private unless declared `public` (including explicit `interna
 the program with test-local callers under both failure policies. This is an
 in-process bridge, not a standalone compiler or persisted native bootstrap
 artifact. The native compiler-primitives DLL now also exports the pure
-`Utf16CodeUnits` decoder and width helper; it still excludes the
-`Host.Source`-dependent `Utf16Scalar` adapter and scalar frontend. The frontend
-retains its source-grant and hosted verifier/emitter boundaries.
+`Utf16CodeUnits` decoder and width helper. The Windows x64 integration test
+calls both exports over representative scalar and width boundaries. The DLL
+still excludes the `Host.Source`-dependent `Utf16Scalar` adapter and scalar
+frontend. The frontend retains its source-grant and hosted verifier/emitter
+boundaries.
 `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`
 projects typed facts or scanner/shape errors for inspection. Compilation
 errors in the bundled frontend sources use source-located multi-file
