@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `199b23d` | Sort validated module set providers in place |
 | `a42e57f` | Write graph strings without temporary arrays |
 | `36eedc8` | Populate graph JIT package indexes together |
 | `cdc3dff` | Skip empty graph type-origin indexes |
