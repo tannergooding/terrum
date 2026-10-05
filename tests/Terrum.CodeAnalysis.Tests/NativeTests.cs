@@ -14,7 +14,7 @@ using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
 
-public sealed class NativeTests
+public sealed partial class NativeTests
 {
     [Theory]
     [InlineData("require true; return 7;", 7)]
