@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `fb87f8f` | Write PE names without temporary byte arrays |
 | `3803df5` | Reuse PE unwind record sizes |
 | `f3fc260` | Skip redundant PE import sort key |
 | `c6953c7` | Reuse managed-node detection during emission |
