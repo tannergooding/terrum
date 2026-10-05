@@ -59,7 +59,7 @@ public static partial class NativeModuleCompiler
     private static GraphPackage[] ValidateGraphProviders(GraphPackage[] providers)
     {
         ValidateGraphProviderCount(providers.Length);
-        var identities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var identities = new HashSet<string>(providers.Length, StringComparer.OrdinalIgnoreCase);
         foreach (var provider in providers)
         {
             if (provider.Consumer || provider.Identity is not string identity || !identities.Add(identity))
