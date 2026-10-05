@@ -48,7 +48,7 @@ public readonly ref struct TrRmModuleTableReader
         _typeDefCount = typeDefCount;
         _methodDefCount = methodDefCount;
         _sourceFileCount = sourceFileCount;
-        _identities = new Dictionary<string, int>(StringComparer.Ordinal);
+        _identities = new Dictionary<string, int>(recordCount, StringComparer.Ordinal);
 
         Span<int> cursorOffsets = [28, 32, 36, 40];
         Span<int> tableCounts = [moduleRefCount, typeDefCount, methodDefCount, sourceFileCount];
