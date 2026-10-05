@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `41cb712` | Materialize graph module functions without LINQ |
 | `9b4b317` | Build graph function indexes directly |
 | `02d8f0c` | Materialize verified graph functions directly |
 | `7840941` | Pre-size and directly remap graph export declarations |
