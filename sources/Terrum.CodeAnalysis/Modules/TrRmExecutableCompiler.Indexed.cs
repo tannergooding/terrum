@@ -1582,10 +1582,7 @@ public static partial class TrRmExecutableCompiler
                         null);
                     break;
                 case BoundWhile loop:
-                    var acyclicBody = AcyclicLoopBody(loop);
-                    if ((loop.IsPostTested
-                            || loop.Condition is BoundConstant { Type: PrimitiveType.Bool, Value: not 0 })
-                        && TerminalAcyclicBody(acyclicBody, out var hasAcyclicBreak))
+                    if (TerminalAcyclicLoop(loop, out var acyclicBody, out var hasAcyclicBreak))
                     {
                         var acyclicParent = _current.Region;
                         var acyclicEntrySlots = (int[])_slots.Clone();
@@ -1815,6 +1812,13 @@ public static partial class TrRmExecutableCompiler
                 hasBreak = false;
                 return true;
             }
+            if (statement is BoundWhile loop
+                && TerminalAcyclicLoop(loop, out _, out var loopHasBreak)
+                && !loopHasBreak)
+            {
+                hasBreak = false;
+                return true;
+            }
             if (statement is BoundBreak { TargetDepth: 1 })
             {
                 hasBreak = true;
@@ -1858,6 +1862,19 @@ public static partial class TrRmExecutableCompiler
             }
             hasBreak = false;
             return false;
+        }
+
+        private static bool TerminalAcyclicLoop(BoundWhile loop, out BoundStatement body, out bool hasBreak)
+        {
+            body = AcyclicLoopBody(loop);
+            if (!loop.IsPostTested
+                && loop.Condition is not BoundConstant { Type: PrimitiveType.Bool, Value: not 0 })
+            {
+                hasBreak = false;
+                return false;
+            }
+
+            return TerminalAcyclicBody(body, out hasBreak);
         }
 
         private static bool HasAcyclicTerminalPrefixes(BoundBlock block)
@@ -1942,6 +1959,13 @@ public static partial class TrRmExecutableCompiler
                             { Statements.IsEmpty: true, RetiredManagedLocals.IsEmpty: true }))
             {
                 AcyclicTerminalStatement(blockWithSingleStatement.Statements[0], exit, visible);
+                return;
+            }
+            if (statement is BoundWhile loop
+                && TerminalAcyclicLoop(loop, out _, out var hasBreak)
+                && !hasBreak)
+            {
+                Statement(loop);
                 return;
             }
             throw Unsupported("Acyclic loop terminal shape changed during lowering.");
