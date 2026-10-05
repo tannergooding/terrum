@@ -355,8 +355,15 @@ public static partial class NativeModuleCompiler
         return AppendChecksum(stream);
     }
 
-    private static CompilationReference CreateReferenceSet(ValidatedProvider[] providers) =>
-        ModuleCompiler.CreateReferenceSetFromReferences([.. providers.Select(static item => item.Reference)]);
+    private static CompilationReference CreateReferenceSet(ValidatedProvider[] providers)
+    {
+        var references = new CompilationReference[providers.Length];
+        for (var i = 0; i < references.Length; i++)
+        {
+            references[i] = providers[i].Reference;
+        }
+        return ModuleCompiler.CreateReferenceSetFromReferences(references);
+    }
 
     private static SetPackage ReadSet(byte[] artifact)
     {
