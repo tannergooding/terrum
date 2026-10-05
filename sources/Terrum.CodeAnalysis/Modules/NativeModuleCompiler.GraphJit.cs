@@ -88,7 +88,7 @@ public static partial class NativeModuleCompiler
             StringComparer.Ordinal);
         cancellationToken.ThrowIfCancellationRequested();
         var directory = Directory.CreateTempSubdirectory("terrum-graph-jit-").FullName;
-        var paths = new List<string>();
+        var paths = new List<string>(1 + providers.Length * 2);
         try
         {
             var rootPath = Path.Combine(directory, "consumer.trng");

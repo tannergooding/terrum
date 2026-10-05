@@ -115,7 +115,7 @@ public static partial class NativeModuleCompiler
         ValidateSet(set, providers);
         cancellationToken.ThrowIfCancellationRequested();
         var directory = Directory.CreateTempSubdirectory("terrum-native-set-").FullName;
-        var paths = new List<string>();
+        var paths = new List<string>(providers.Length + 1);
         try
         {
             var executable = Path.Combine(directory, "consumer.exe");
