@@ -51,7 +51,11 @@ ABI or general arithmetic support. It directly invokes
 `TryAccumulateDecimal` and `TryAccumulateBase` as well, comparing accepted
 full-width results with `BigInteger` and checking false-path output
 preservation and adjacent canaries; this does not establish a general native
-`init ref` contract or checked-exception DLL support.
+`init ref` contract or checked-exception DLL support. It also directly invokes
+all twelve checked 64-bit add/subtract/multiply/divide/remainder and signed
+negate/absolute helpers, checking their results and conditional outputs
+against `BigInteger` boundary expectations; these remain named internal
+candidate functions, not language operators or general arithmetic support.
 Persisted semantic-module JIT tests also compare
 `StringLiteral` length and encoding results for UTF-8, UTF-16
 units and LE/BE bytes, strict ASCII and Latin-1, and UTF-32 LE/BE bytes with

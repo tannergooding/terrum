@@ -54,6 +54,14 @@ public sealed partial class CliTests
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct GuardedInt64
+    {
+        public long Before;
+        public long Value;
+        public long After;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct GuardedSourceRange
     {
         public int Before;
@@ -73,6 +81,15 @@ public sealed partial class CliTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int TryAccumulateBaseExport(
         ulong value, uint digit, uint radix, ulong maximum, ref ulong result);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int SignedInt64BinaryExport(long left, long right, ref long result);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int UnsignedUInt64BinaryExport(ulong left, ulong right, ref ulong result);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Int64UnaryExport(long value, ref long result);
 
     [Theory]
     [InlineData(false)]
@@ -236,6 +253,224 @@ public sealed partial class CliTests
                     AssertBase(0, digit, radix, maximum);
                 }
             }
+        }
+    }
+
+    private static void AssertWideIntegerArithmeticExports(nint handle)
+    {
+        const long lowerSignedCanary = 0x13579BDF2468ACE0L;
+        const long signedOutputSentinel = unchecked((long)0xFEDCBA9876543210UL);
+        const long upperSignedCanary = 0x0ECA86425A5A5A5AL;
+        const ulong lowerUnsignedCanary = 0x13579BDF2468ACE0UL;
+        const ulong unsignedOutputSentinel = 0xFEDCBA9876543210UL;
+        const ulong upperUnsignedCanary = 0x0ECA86425A5A5A5AUL;
+        const string ExportPrefix = "Terrum.CodeAnalysis.Numerics64.";
+
+        Assert.Equal(24, Marshal.SizeOf<GuardedInt64>());
+        Assert.Equal(0, Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.Before)).ToInt32());
+        Assert.Equal(8, Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.Value)).ToInt32());
+        Assert.Equal(16, Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.After)).ToInt32());
+
+        SignedInt64BinaryExport GetSignedBinary(string name) =>
+            Marshal.GetDelegateForFunctionPointer<SignedInt64BinaryExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        UnsignedUInt64BinaryExport GetUnsignedBinary(string name) =>
+            Marshal.GetDelegateForFunctionPointer<UnsignedUInt64BinaryExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+
+        var signedOperations = new (string Name, SignedInt64BinaryExport Function)[] {
+            ("TryAddInt64", GetSignedBinary("TryAddInt64")),
+            ("TrySubtractInt64", GetSignedBinary("TrySubtractInt64")),
+            ("TryMultiplyInt64", GetSignedBinary("TryMultiplyInt64")),
+            ("TryDivideInt64", GetSignedBinary("TryDivideInt64")),
+            ("TryRemainderInt64", GetSignedBinary("TryRemainderInt64")),
+        };
+        var unsignedOperations = new (string Name, UnsignedUInt64BinaryExport Function)[] {
+            ("TryAddUInt64", GetUnsignedBinary("TryAddUInt64")),
+            ("TrySubtractUInt64", GetUnsignedBinary("TrySubtractUInt64")),
+            ("TryMultiplyUInt64", GetUnsignedBinary("TryMultiplyUInt64")),
+            ("TryDivideUInt64", GetUnsignedBinary("TryDivideUInt64")),
+            ("TryRemainderUInt64", GetUnsignedBinary("TryRemainderUInt64")),
+        };
+        var negate = Marshal.GetDelegateForFunctionPointer<Int64UnaryExport>(
+            NativeLibrary.GetExport(handle, ExportPrefix + "TryNegateInt64"));
+        var absolute = Marshal.GetDelegateForFunctionPointer<Int64UnaryExport>(
+            NativeLibrary.GetExport(handle, ExportPrefix + "TryAbsoluteInt64"));
+        long[] signedValues = [
+            long.MinValue, long.MinValue + 1, -4294967297L, -4294967296L, -4294967295L,
+            int.MinValue - 1L, int.MinValue, int.MinValue + 1L,
+            -3037000501L, -3037000500L, -3037000499L, -1, 0, 1,
+            3037000499L, 3037000500L, 3037000501L,
+            int.MaxValue - 1L, int.MaxValue, int.MaxValue + 1L,
+            4294967295L, 4294967296L, 4294967297L, long.MaxValue - 1, long.MaxValue,
+        ];
+        ulong[] unsignedValues = [
+            0, 1, 2, uint.MaxValue - 1UL, uint.MaxValue, (ulong)uint.MaxValue + 1,
+            (ulong)uint.MaxValue + 2, long.MaxValue - 1UL, long.MaxValue,
+            (ulong)long.MaxValue + 1, (ulong)long.MaxValue + 2, ulong.MaxValue - 1, ulong.MaxValue,
+        ];
+
+        bool TryExpectedSigned(string operation, long leftValue, long rightValue, out long expected)
+        {
+            var left = new BigInteger(leftValue);
+            var right = new BigInteger(rightValue);
+            BigInteger result;
+            switch (operation)
+            {
+                case "TryAddInt64":
+                    result = left + right;
+                    break;
+                case "TrySubtractInt64":
+                    result = left - right;
+                    break;
+                case "TryMultiplyInt64":
+                    result = left * right;
+                    break;
+                case "TryDivideInt64":
+                    if (rightValue == 0 || (leftValue == long.MinValue && rightValue == -1))
+                    {
+                        expected = 0;
+                        return false;
+                    }
+                    result = left / right;
+                    break;
+                case "TryRemainderInt64":
+                    if (rightValue == 0)
+                    {
+                        expected = 0;
+                        return false;
+                    }
+                    result = left % right;
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(operation));
+            }
+
+            if (result < long.MinValue || result > long.MaxValue)
+            {
+                expected = 0;
+                return false;
+            }
+
+            expected = (long)result;
+            return true;
+        }
+
+        bool TryExpectedUnsigned(string operation, ulong leftValue, ulong rightValue, out ulong expected)
+        {
+            var left = new BigInteger(leftValue);
+            var right = new BigInteger(rightValue);
+            BigInteger result;
+            switch (operation)
+            {
+                case "TryAddUInt64":
+                    result = left + right;
+                    break;
+                case "TrySubtractUInt64":
+                    result = left - right;
+                    break;
+                case "TryMultiplyUInt64":
+                    result = left * right;
+                    break;
+                case "TryDivideUInt64":
+                    if (rightValue == 0)
+                    {
+                        expected = 0;
+                        return false;
+                    }
+                    result = left / right;
+                    break;
+                case "TryRemainderUInt64":
+                    if (rightValue == 0)
+                    {
+                        expected = 0;
+                        return false;
+                    }
+                    result = left % right;
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(operation));
+            }
+
+            if (result < BigInteger.Zero || result > ulong.MaxValue)
+            {
+                expected = 0;
+                return false;
+            }
+
+            expected = (ulong)result;
+            return true;
+        }
+
+        foreach (var (name, function) in signedOperations)
+        {
+            foreach (var left in signedValues)
+            {
+                foreach (var right in signedValues)
+                {
+                    var expectedSuccess = TryExpectedSigned(name, left, right, out var expected);
+                    var guarded = new GuardedInt64 {
+                        Before = lowerSignedCanary,
+                        Value = signedOutputSentinel,
+                        After = upperSignedCanary,
+                    };
+                    var actual = function(left, right, ref guarded.Value);
+                    Assert.Equal(expectedSuccess ? 1 : 0, actual);
+                    Assert.Equal(expectedSuccess ? expected : signedOutputSentinel, guarded.Value);
+                    Assert.Equal(lowerSignedCanary, guarded.Before);
+                    Assert.Equal(upperSignedCanary, guarded.After);
+                }
+            }
+        }
+
+        foreach (var (name, function) in unsignedOperations)
+        {
+            foreach (var left in unsignedValues)
+            {
+                foreach (var right in unsignedValues)
+                {
+                    var expectedSuccess = TryExpectedUnsigned(name, left, right, out var expected);
+                    var guarded = new GuardedUInt64 {
+                        Before = lowerUnsignedCanary,
+                        Value = unsignedOutputSentinel,
+                        After = upperUnsignedCanary,
+                    };
+                    var actual = function(left, right, ref guarded.Value);
+                    Assert.Equal(expectedSuccess ? 1 : 0, actual);
+                    Assert.Equal(expectedSuccess ? expected : unsignedOutputSentinel, guarded.Value);
+                    Assert.Equal(lowerUnsignedCanary, guarded.Before);
+                    Assert.Equal(upperUnsignedCanary, guarded.After);
+                }
+            }
+        }
+
+        foreach (var value in signedValues)
+        {
+            var bigValue = new BigInteger(value);
+            var expectedNegation = value == long.MinValue ? 0 : (long)-bigValue;
+            var expectedSuccess = value != long.MinValue;
+            var negateGuard = new GuardedInt64 {
+                Before = lowerSignedCanary,
+                Value = signedOutputSentinel,
+                After = upperSignedCanary,
+            };
+            var negateResult = negate(value, ref negateGuard.Value);
+            Assert.Equal(expectedSuccess ? 1 : 0, negateResult);
+            Assert.Equal(expectedSuccess ? expectedNegation : signedOutputSentinel, negateGuard.Value);
+            Assert.Equal(lowerSignedCanary, negateGuard.Before);
+            Assert.Equal(upperSignedCanary, negateGuard.After);
+
+            var expectedAbsolute = value == long.MinValue ? 0 : (long)BigInteger.Abs(bigValue);
+            var absoluteGuard = new GuardedInt64 {
+                Before = lowerSignedCanary,
+                Value = signedOutputSentinel,
+                After = upperSignedCanary,
+            };
+            var absoluteResult = absolute(value, ref absoluteGuard.Value);
+            Assert.Equal(expectedSuccess ? 1 : 0, absoluteResult);
+            Assert.Equal(expectedSuccess ? expectedAbsolute : signedOutputSentinel, absoluteGuard.Value);
+            Assert.Equal(lowerSignedCanary, absoluteGuard.Before);
+            Assert.Equal(upperSignedCanary, absoluteGuard.After);
         }
     }
 
@@ -794,6 +1029,18 @@ public sealed partial class CliTests
                 "Terrum.CodeAnalysis.Numerics64.MagnitudeInt64",
                 "Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal",
                 "Terrum.CodeAnalysis.Numerics64.TryAccumulateBase",
+                "Terrum.CodeAnalysis.Numerics64.TryAddInt64",
+                "Terrum.CodeAnalysis.Numerics64.TrySubtractInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryMultiplyInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryDivideInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryRemainderInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryNegateInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryAbsoluteInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryAddUInt64",
+                "Terrum.CodeAnalysis.Numerics64.TrySubtractUInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryMultiplyUInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryDivideUInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryRemainderUInt64",
             })
             {
                 Assert.True(NativeLibrary.TryGetExport(handle, export, out _),
@@ -841,6 +1088,7 @@ public sealed partial class CliTests
             }
             Assert.Equal(0x8000000000000000UL, magnitudeInt64(long.MinValue));
             AssertWideIntegerAccumulatorExports(handle);
+            AssertWideIntegerArithmeticExports(handle);
 
             var isAsciiDigit = Marshal.GetDelegateForFunctionPointer<Char16PredicateExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.IsAsciiDigit"));
