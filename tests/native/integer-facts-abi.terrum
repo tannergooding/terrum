@@ -1,0 +1,29 @@
+namespace Terrum.CodeAnalysis;
+
+public bool CanAddInt32ForAbiTest(int32 left, int32 right) { return CanAddInt32(left, right); }
+public bool CanSubtractInt32ForAbiTest(int32 left, int32 right) { return CanSubtractInt32(left, right); }
+public bool CanMultiplyInt32ForAbiTest(int32 left, int32 right) { return CanMultiplyInt32(left, right); }
+public bool CanDivideInt32ForAbiTest(int32 left, int32 right) { return CanDivideInt32(left, right); }
+public bool CanRemainderInt32ForAbiTest(int32 left, int32 right) { return CanRemainderInt32(left, right); }
+public bool CanNegateInt32ForAbiTest(int32 value) { return CanNegateInt32(value); }
+public bool CanAbsoluteInt32ForAbiTest(int32 value) { return CanAbsoluteInt32(value); }
+
+public bool CanAddUInt32ForAbiTest(uint32 left, uint32 right) { return CanAddUInt32(left, right); }
+public bool CanSubtractUInt32ForAbiTest(uint32 left, uint32 right) { return CanSubtractUInt32(left, right); }
+public bool CanMultiplyUInt32ForAbiTest(uint32 left, uint32 right) { return CanMultiplyUInt32(left, right); }
+public bool CanDivideUInt32ForAbiTest(uint32 left, uint32 right) { return CanDivideUInt32(left, right); }
+public bool CanRemainderUInt32ForAbiTest(uint32 left, uint32 right) { return CanRemainderUInt32(left, right); }
+
+public bool CanAddInt64ForAbiTest(int64 left, int64 right) { return CanAddInt64(left, right); }
+public bool CanSubtractInt64ForAbiTest(int64 left, int64 right) { return CanSubtractInt64(left, right); }
+public bool CanMultiplyInt64ForAbiTest(int64 left, int64 right) { return CanMultiplyInt64(left, right); }
+public bool CanDivideInt64ForAbiTest(int64 left, int64 right) { return CanDivideInt64(left, right); }
+public bool CanRemainderInt64ForAbiTest(int64 left, int64 right) { return CanRemainderInt64(left, right); }
+public bool CanNegateInt64ForAbiTest(int64 value) { return CanNegateInt64(value); }
+public bool CanAbsoluteInt64ForAbiTest(int64 value) { return CanAbsoluteInt64(value); }
+
+public bool CanAddUInt64ForAbiTest(uint64 left, uint64 right) { return CanAddUInt64(left, right); }
+public bool CanSubtractUInt64ForAbiTest(uint64 left, uint64 right) { return CanSubtractUInt64(left, right); }
+public bool CanMultiplyUInt64ForAbiTest(uint64 left, uint64 right) { return CanMultiplyUInt64(left, right); }
+public bool CanDivideUInt64ForAbiTest(uint64 left, uint64 right) { return CanDivideUInt64(left, right); }
+public bool CanRemainderUInt64ForAbiTest(uint64 left, uint64 right) { return CanRemainderUInt64(left, right); }
