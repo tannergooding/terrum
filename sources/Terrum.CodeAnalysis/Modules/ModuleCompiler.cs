@@ -556,7 +556,9 @@ public static partial class ModuleCompiler
         Dictionary<string, int>? structureIndexes = null;
         var exportedTypes = RequiredStructures(indexes.Select(index => Declaration(program.Functions[index])),
             program.Structures, findStructureIndex: FindStructureIndex);
-        foreach (var structure in program.Structures)
+        var cleanupStructures = program.Structures.Where(static structure => structure.CleanupMethod is not null)
+            .ToArray();
+        foreach (var structure in cleanupStructures)
         {
             if (exportedTypes.Contains(structure.Name) && structure.CleanupMethod is string cleanup
                 && !names.Contains(cleanup))
@@ -591,7 +593,7 @@ public static partial class ModuleCompiler
             }
             var types = RequiredStructures([program.Functions[index]], program.Structures,
                 findStructureIndex: FindStructureIndex);
-            foreach (var structure in program.Structures)
+            foreach (var structure in cleanupStructures)
             {
                 if (types.Contains(structure.Name) && structure.CleanupMethod is string cleanup)
                 {
