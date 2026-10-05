@@ -186,7 +186,7 @@ public static partial class ModuleCompiler
                 imported.Add(structure.Name);
             }
         }
-        RejectImportedTypeMembers(declarations, imported.ToImmutable());
+        RejectImportedTypeMembers(declarations, imported);
         var functions = declarations.Select(declaration => declaration with {
             Function = declaration.Import ? null : RemapFunction(declaration.Function
                 ?? throw new ModuleFormatException("Missing consumer function."), program.Structures, structures),
