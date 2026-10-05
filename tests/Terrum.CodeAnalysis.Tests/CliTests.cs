@@ -63,6 +63,14 @@ public sealed partial class CliTests
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct GuardedInt32
+    {
+        public int Before;
+        public int Value;
+        public int After;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct GuardedInt64
     {
         public long Before;
@@ -129,6 +137,42 @@ public sealed partial class CliTests
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int UInt64RoundUpExport(ulong value, ref ulong result);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Int32UnaryMathExport(int value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Int32TryAbsMathExport(int value, ref int result);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Int32BinaryMathExport(int left, int right);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Int32ClampMathExport(int value, int minimum, int maximum);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Int32ProductMathExport(int left, int right);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint Int32GcdMathExport(int left, int right);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Int64UnaryMathExport(long value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Int64SignMathExport(long value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Int64TryAbsMathExport(long value, ref long result);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Int64BinaryMathExport(long left, long right);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Int64ClampMathExport(long value, long minimum, long maximum);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong Int64GcdMathExport(long left, long right);
 
     [Theory]
     [InlineData(false)]
@@ -698,6 +742,178 @@ public sealed partial class CliTests
                 value >>= 1;
             }
             return reversed;
+        }
+    }
+
+    private static void AssertIntegerMathExports(nint handle)
+    {
+        const int LowerInt32Canary = 0x13579BDF;
+        const int Int32OutputSentinel = unchecked((int)0xA5A55A5A);
+        const int UpperInt32Canary = 0x0ECA8642;
+        const long LowerInt64Canary = 0x13579BDF2468ACE0L;
+        const long Int64OutputSentinel = unchecked((long)0xFEDCBA9876543210UL);
+        const long UpperInt64Canary = 0x0ECA86425A5A5A5AL;
+        const string ExportPrefix = "Terrum.CodeAnalysis.Numerics64.";
+
+        Assert.Equal(12, Marshal.SizeOf<GuardedInt32>());
+        Assert.Equal(0, Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.Before)).ToInt32());
+        Assert.Equal(4, Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.Value)).ToInt32());
+        Assert.Equal(8, Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.After)).ToInt32());
+        Assert.Equal(24, Marshal.SizeOf<GuardedInt64>());
+        Assert.Equal(0, Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.Before)).ToInt32());
+        Assert.Equal(8, Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.Value)).ToInt32());
+        Assert.Equal(16, Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.After)).ToInt32());
+
+        Int32UnaryMathExport GetInt32Unary(string name) =>
+            Marshal.GetDelegateForFunctionPointer<Int32UnaryMathExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        Int32TryAbsMathExport GetInt32TryAbs(string name) =>
+            Marshal.GetDelegateForFunctionPointer<Int32TryAbsMathExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        Int32BinaryMathExport GetInt32Binary(string name) =>
+            Marshal.GetDelegateForFunctionPointer<Int32BinaryMathExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        Int32ClampMathExport GetInt32Clamp(string name) =>
+            Marshal.GetDelegateForFunctionPointer<Int32ClampMathExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        Int32ProductMathExport GetInt32Product(string name) =>
+            Marshal.GetDelegateForFunctionPointer<Int32ProductMathExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        Int32GcdMathExport GetInt32Gcd(string name) =>
+            Marshal.GetDelegateForFunctionPointer<Int32GcdMathExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        Int64UnaryMathExport GetInt64Unary(string name) =>
+            Marshal.GetDelegateForFunctionPointer<Int64UnaryMathExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        Int64SignMathExport GetInt64Sign(string name) =>
+            Marshal.GetDelegateForFunctionPointer<Int64SignMathExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        Int64TryAbsMathExport GetInt64TryAbs(string name) =>
+            Marshal.GetDelegateForFunctionPointer<Int64TryAbsMathExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        Int64BinaryMathExport GetInt64Binary(string name) =>
+            Marshal.GetDelegateForFunctionPointer<Int64BinaryMathExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        Int64ClampMathExport GetInt64Clamp(string name) =>
+            Marshal.GetDelegateForFunctionPointer<Int64ClampMathExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        Int64GcdMathExport GetInt64Gcd(string name) =>
+            Marshal.GetDelegateForFunctionPointer<Int64GcdMathExport>(
+                NativeLibrary.GetExport(handle, ExportPrefix + name));
+
+        var abs32 = GetInt32Unary("AbsInt32");
+        var tryAbs32 = GetInt32TryAbs("TryAbsInt32");
+        var sign32 = GetInt32Unary("SignInt32");
+        var min32 = GetInt32Binary("MinInt32");
+        var max32 = GetInt32Binary("MaxInt32");
+        var clamp32 = GetInt32Clamp("ClampInt32");
+        var multiply32 = GetInt32Product("BigMultiplyInt32");
+        var gcd32 = GetInt32Gcd("GreatestCommonDivisorInt32");
+        var abs64 = GetInt64Unary("AbsInt64");
+        var tryAbs64 = GetInt64TryAbs("TryAbsInt64");
+        var sign64 = GetInt64Sign("SignInt64");
+        var min64 = GetInt64Binary("MinInt64");
+        var max64 = GetInt64Binary("MaxInt64");
+        var clamp64 = GetInt64Clamp("ClampInt64");
+        var gcd64 = GetInt64Gcd("GreatestCommonDivisorInt64");
+
+        int[] values32 = [
+            int.MinValue, int.MinValue + 1, -65537, -17, -1, 0, 1, 17, 65537,
+            int.MaxValue - 1, int.MaxValue,
+        ];
+        long[] values64 = [
+            long.MinValue, long.MinValue + 1, -4294967297L, -3037000501L,
+            -17, -1, 0, 1, 17, 3037000500L, 4294967295L,
+            long.MaxValue - 1, long.MaxValue,
+        ];
+
+        foreach (var value in values32)
+        {
+            if (value != int.MinValue)
+            {
+                Assert.Equal(Math.Abs(value), abs32(value));
+            }
+            Assert.Equal(Math.Sign(value), sign32(value));
+
+            var expectedSuccess = value != int.MinValue;
+            var guarded = new GuardedInt32 {
+                Before = LowerInt32Canary,
+                Value = Int32OutputSentinel,
+                After = UpperInt32Canary,
+            };
+            var actual = tryAbs32(value, ref guarded.Value);
+            Assert.Equal(expectedSuccess ? 1 : 0, actual);
+            Assert.Equal(expectedSuccess ? Math.Abs(value) : Int32OutputSentinel, guarded.Value);
+            Assert.Equal(LowerInt32Canary, guarded.Before);
+            Assert.Equal(UpperInt32Canary, guarded.After);
+        }
+
+        foreach (var left in values32)
+        {
+            foreach (var right in values32)
+            {
+                Assert.Equal(Math.Min(left, right), min32(left, right));
+                Assert.Equal(Math.Max(left, right), max32(left, right));
+                Assert.Equal((long)left * right, multiply32(left, right));
+                var expectedGcd = BigInteger.GreatestCommonDivisor(
+                    BigInteger.Abs(new BigInteger(left)), BigInteger.Abs(new BigInteger(right)));
+                Assert.Equal((uint)expectedGcd, gcd32(left, right));
+            }
+        }
+
+        (int Minimum, int Maximum)[] clampRanges32 = [
+            (int.MinValue, int.MaxValue), (int.MinValue, -1), (-5, 5), (0, int.MaxValue), (int.MaxValue, int.MaxValue),
+        ];
+        foreach (var value in values32)
+        {
+            foreach (var (minimum, maximum) in clampRanges32)
+            {
+                Assert.Equal(Math.Clamp(value, minimum, maximum), clamp32(value, minimum, maximum));
+            }
+        }
+
+        foreach (var value in values64)
+        {
+            if (value != long.MinValue)
+            {
+                Assert.Equal(Math.Abs(value), abs64(value));
+            }
+            Assert.Equal(Math.Sign(value), sign64(value));
+
+            var expectedSuccess = value != long.MinValue;
+            var guarded = new GuardedInt64 {
+                Before = LowerInt64Canary,
+                Value = Int64OutputSentinel,
+                After = UpperInt64Canary,
+            };
+            var actual = tryAbs64(value, ref guarded.Value);
+            Assert.Equal(expectedSuccess ? 1 : 0, actual);
+            Assert.Equal(expectedSuccess ? Math.Abs(value) : Int64OutputSentinel, guarded.Value);
+            Assert.Equal(LowerInt64Canary, guarded.Before);
+            Assert.Equal(UpperInt64Canary, guarded.After);
+        }
+
+        foreach (var left in values64)
+        {
+            foreach (var right in values64)
+            {
+                Assert.Equal(Math.Min(left, right), min64(left, right));
+                Assert.Equal(Math.Max(left, right), max64(left, right));
+                var expectedGcd = BigInteger.GreatestCommonDivisor(
+                    BigInteger.Abs(new BigInteger(left)), BigInteger.Abs(new BigInteger(right)));
+                Assert.Equal((ulong)expectedGcd, gcd64(left, right));
+            }
+        }
+
+        (long Minimum, long Maximum)[] clampRanges64 = [
+            (long.MinValue, long.MaxValue), (long.MinValue, -1), (-5, 5), (0, long.MaxValue), (long.MaxValue, long.MaxValue),
+        ];
+        foreach (var value in values64)
+        {
+            foreach (var (minimum, maximum) in clampRanges64)
+            {
+                Assert.Equal(Math.Clamp(value, minimum, maximum), clamp64(value, minimum, maximum));
+            }
         }
     }
 
@@ -1286,6 +1502,21 @@ public sealed partial class CliTests
                 "Terrum.CodeAnalysis.Numerics64.ReverseEndiannessUInt64",
                 "Terrum.CodeAnalysis.Numerics64.IsPow2UInt64",
                 "Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt64",
+                "Terrum.CodeAnalysis.Numerics64.AbsInt32",
+                "Terrum.CodeAnalysis.Numerics64.TryAbsInt32",
+                "Terrum.CodeAnalysis.Numerics64.SignInt32",
+                "Terrum.CodeAnalysis.Numerics64.MinInt32",
+                "Terrum.CodeAnalysis.Numerics64.MaxInt32",
+                "Terrum.CodeAnalysis.Numerics64.ClampInt32",
+                "Terrum.CodeAnalysis.Numerics64.BigMultiplyInt32",
+                "Terrum.CodeAnalysis.Numerics64.GreatestCommonDivisorInt32",
+                "Terrum.CodeAnalysis.Numerics64.AbsInt64",
+                "Terrum.CodeAnalysis.Numerics64.TryAbsInt64",
+                "Terrum.CodeAnalysis.Numerics64.SignInt64",
+                "Terrum.CodeAnalysis.Numerics64.MinInt64",
+                "Terrum.CodeAnalysis.Numerics64.MaxInt64",
+                "Terrum.CodeAnalysis.Numerics64.ClampInt64",
+                "Terrum.CodeAnalysis.Numerics64.GreatestCommonDivisorInt64",
             })
             {
                 Assert.True(NativeLibrary.TryGetExport(handle, export, out _),
@@ -1335,6 +1566,7 @@ public sealed partial class CliTests
             AssertWideIntegerAccumulatorExports(handle);
             AssertWideIntegerArithmeticExports(handle);
             AssertBitOperationsExports(handle);
+            AssertIntegerMathExports(handle);
 
             var isAsciiDigit = Marshal.GetDelegateForFunctionPointer<Char16PredicateExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.IsAsciiDigit"));

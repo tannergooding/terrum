@@ -115,6 +115,14 @@ under both runtime policies. Separate width-specific consumers cover every
 one-hot and one-cold bit position, rotation count extremes, and the values
 immediately around every power of two for round-up, including unrepresentable
 results. This remains candidate evidence; the API is not approved.
+The same internal DLL directly invokes all fifteen existing `IntegerMath`
+helpers on valid inputs, comparing checked absolute value, sign, min/max,
+clamp, widened `int32` multiplication and signed-input GCD with hosted
+arithmetic and `BigInteger`. `TryAbs` minimum failures preserve the output and
+adjacent canaries. This is Windows x64 fail-fast ABI evidence only; invalid
+`require` and non-fallible signed-minimum absolute-value failures remain
+covered by the candidate's separate module/runtime-policy tests, and its API
+remains unapproved.
 A separate revision-56 persisted semantic-module JIT comparison checks all 20
 existing `IntegerSaturation` candidate helpers against a `BigInteger` clamp
 oracle at source/destination boundaries and code-unit edges, including
