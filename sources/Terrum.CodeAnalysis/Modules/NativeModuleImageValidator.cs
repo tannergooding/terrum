@@ -245,8 +245,17 @@ internal static class NativeModuleImageValidator
                 }
                 else if (providerCount > 1)
                 {
-                    expectedDlls = providerImports.Keys.Order(StringComparer.OrdinalIgnoreCase)
-                        .ThenBy(static (string item) => item, StringComparer.Ordinal).ToArray();
+                    expectedDlls = new string[providerCount];
+                    var providerIndex = 0;
+                    foreach (var providerDll in providerImports.Keys)
+                    {
+                        expectedDlls[providerIndex++] = providerDll;
+                    }
+                    Array.Sort(expectedDlls, static (left, right) =>
+                    {
+                        var comparison = StringComparer.OrdinalIgnoreCase.Compare(left, right);
+                        return comparison != 0 ? comparison : StringComparer.Ordinal.Compare(left, right);
+                    });
                 }
                 for (var index = 0; index < count; index++)
                 {
