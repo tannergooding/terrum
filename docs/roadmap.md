@@ -275,6 +275,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `dbc534a2` | Exercise the existing 32-/64-bit BitOperations candidates through the internal Windows x64 compiler-primitives DLL |
 | `c5e9e400` | Exercise checked wide arithmetic through the internal Windows x64 compiler-primitives DLL |
 | `79155d79` | Exercise checked wide accumulators through the internal Windows x64 compiler-primitives DLL |
 | `13eb3cc8` | Invoke wide signed magnitude through the internal Windows x64 compiler-primitives DLL |
