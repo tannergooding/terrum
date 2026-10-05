@@ -562,7 +562,9 @@ internal sealed partial class PeCompiler
                 continue;
             }
             var maximumArguments = 0;
-            var spillSlots = StatementSpills(function.Body, ref maximumArguments);
+            var needsReturnSnapshot = false;
+            var spillSlots = StatementSpills(function.Body, ref maximumArguments, ref needsReturnSnapshot,
+                _checkedExceptions && _managedNodes);
             if (function.IndexedBody is TrRmScalarGraph indexed)
             {
                 foreach (var block in indexed.Blocks)
@@ -628,7 +630,6 @@ internal sealed partial class PeCompiler
                 && function.ReturnType is not (PrimitiveType.Bool or PrimitiveType.Void);
             // Publishing outputs uses the return registers, so preserve non-Boolean results first.
             var required = _returnSlots[i] + (IsIndirect(function.ReturnType) || snapshotsOutputReturn ? 8L : 0L);
-            var needsReturnSnapshot = ContainsCleanup(function.Body, _checkedExceptions && _managedNodes);
             if (needsReturnSnapshot)
             {
                 required = ((required + 15) & ~15L) + 16;
@@ -1005,32 +1006,26 @@ internal sealed partial class PeCompiler
 
     private static int AlignFrame(int bytes) => ((bytes + 8 + 15) & ~15) - 8;
 
-    private static bool ContainsCleanup(BoundStatement statement, bool managedScopes = false) => statement switch {
-        BoundTryFinally => true,
-        BoundTryCatch recovery => recovery.Finally is not null || ContainsCleanup(recovery.Body, managedScopes)
-            || ContainsCleanup(recovery.Catch, managedScopes),
-        BoundUnsafe unsafeBlock => ContainsCleanup(unsafeBlock.Body, managedScopes),
-        BoundBlock block => (managedScopes && !block.RetiredManagedLocals.IsEmpty)
-            || block.Statements.Any(child => ContainsCleanup(child, managedScopes)),
-        BoundIf conditional => ContainsCleanup(conditional.Then, managedScopes)
-            || (conditional.Else is not null && ContainsCleanup(conditional.Else, managedScopes)),
-        BoundWhile loop => ContainsCleanup(loop.Body, managedScopes)
-            || (loop.Iterator is not null && ContainsCleanup(loop.Iterator, managedScopes)),
-        BoundViewScope view => ContainsCleanup(view.Body, managedScopes),
-        _ => false,
-    };
-
     private int PendingReturnSlot() => (_returnSlot + (IsIndirect(_program.Functions[_currentFunction].ReturnType) ? 8 : 0) + 15) & ~15;
 
     private int StatementSpills(BoundStatement statement, ref int maximumArguments)
     {
+        var ignoredCleanup = false;
+        return StatementSpills(statement, ref maximumArguments, ref ignoredCleanup, managedScopes: false);
+    }
+
+    private int StatementSpills(BoundStatement statement, ref int maximumArguments,
+        ref bool containsCleanup, bool managedScopes)
+    {
         switch (statement)
         {
             case BoundBlock block:
+                containsCleanup |= managedScopes && !block.RetiredManagedLocals.IsEmpty;
                 var maximum = 0;
                 foreach (var child in block.Statements)
                 {
-                    maximum = Math.Max(maximum, StatementSpills(child, ref maximumArguments));
+                    maximum = Math.Max(maximum,
+                        StatementSpills(child, ref maximumArguments, ref containsCleanup, managedScopes));
                 }
                 return maximum;
             case BoundLocal local:
@@ -1038,7 +1033,7 @@ internal sealed partial class PeCompiler
             case BoundViewScope view:
                 return Math.Max(2, Math.Max(ExpressionSpills(view.Start, ref maximumArguments),
                     Math.Max(1 + ExpressionSpills(view.RangeEnd ?? view.Length, ref maximumArguments),
-                        StatementSpills(view.Body, ref maximumArguments))));
+                        StatementSpills(view.Body, ref maximumArguments, ref containsCleanup, managedScopes))));
             case BoundViewSet write:
                 return Math.Max(2, Math.Max(ExpressionSpills(write.Index, ref maximumArguments),
                     1 + ExpressionSpills(write.Value, ref maximumArguments)));
@@ -1064,21 +1059,29 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(expression.Expression, ref maximumArguments);
             case BoundIf conditional:
                 return Math.Max(ExpressionSpills(conditional.Condition, ref maximumArguments),
-                    Math.Max(StatementSpills(conditional.Then, ref maximumArguments),
-                        conditional.Else is null ? 0 : StatementSpills(conditional.Else, ref maximumArguments)));
+                    Math.Max(StatementSpills(conditional.Then, ref maximumArguments,
+                            ref containsCleanup, managedScopes),
+                        conditional.Else is null ? 0 : StatementSpills(conditional.Else, ref maximumArguments,
+                            ref containsCleanup, managedScopes)));
             case BoundWhile loop:
                 return Math.Max(ExpressionSpills(loop.Condition, ref maximumArguments),
-                    Math.Max(StatementSpills(loop.Body, ref maximumArguments),
-                        loop.Iterator is null ? 0 : StatementSpills(loop.Iterator, ref maximumArguments)));
+                    Math.Max(StatementSpills(loop.Body, ref maximumArguments, ref containsCleanup, managedScopes),
+                        loop.Iterator is null ? 0 : StatementSpills(loop.Iterator, ref maximumArguments,
+                            ref containsCleanup, managedScopes)));
             case BoundTryFinally cleanup:
-                return Math.Max(StatementSpills(cleanup.Body, ref maximumArguments),
-                    StatementSpills(cleanup.Finally, ref maximumArguments));
+                containsCleanup = true;
+                return Math.Max(StatementSpills(cleanup.Body, ref maximumArguments,
+                        ref containsCleanup, managedScopes),
+                    StatementSpills(cleanup.Finally, ref maximumArguments, ref containsCleanup, managedScopes));
             case BoundUnsafe unsafeBlock:
-                return StatementSpills(unsafeBlock.Body, ref maximumArguments);
+                return StatementSpills(unsafeBlock.Body, ref maximumArguments, ref containsCleanup, managedScopes);
             case BoundTryCatch recovery:
-                return Math.Max(StatementSpills(recovery.Body, ref maximumArguments),
-                    Math.Max(StatementSpills(recovery.Catch, ref maximumArguments),
-                        recovery.Finally is null ? 0 : StatementSpills(recovery.Finally, ref maximumArguments)));
+                containsCleanup |= recovery.Finally is not null;
+                return Math.Max(StatementSpills(recovery.Body, ref maximumArguments,
+                        ref containsCleanup, managedScopes),
+                    Math.Max(StatementSpills(recovery.Catch, ref maximumArguments, ref containsCleanup, managedScopes),
+                        recovery.Finally is null ? 0 : StatementSpills(recovery.Finally, ref maximumArguments,
+                            ref containsCleanup, managedScopes)));
             case BoundRequire requirement:
                 return ExpressionSpills(requirement.Condition, ref maximumArguments);
             case BoundReturn result when result.Value is BoundExpression value:
