@@ -255,7 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
-| `TBD` | Reuse the declaring struct name across conformance checks |
+| `e29a0d8` | Reuse the declaring struct name across conformance checks |
 | `39ba720` | Collect protocol operator operands without array snapshots |
 | `0884680` | Capture static protocol names during interface classification |
 | `2a32680` | Recognize one syntax argument without array snapshots |
