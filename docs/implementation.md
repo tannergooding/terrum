@@ -2904,13 +2904,14 @@ branch conditions and their effects, routes breaks to the existing
 fallthrough, and retains returns. Before terminal leaves it preserves
 supported scalar local initializations, assignments and expression statements
 lowered by the existing paths, plus primitive integer local updates and
-compound assignments. A nested constant-true or post-tested loop also erases
-recursively when its body proves return-only; nested break-bearing loops do
-not use this recursive erasure. It omits
-the unreachable loop condition and iterator and adds no loop region or
-backedge. For initializers remain in source order. Bodies with implicit
-fallthrough, continues, managed-local cleanup or other nonterminal effects
-remain outside this erasure. All retained inactive
+compound assignments. Nested constant-true or post-tested loops erase
+recursively as return-only terminal tails, or as terminal prefixes with a
+direct break before an enclosing terminal tail; inner breaks route only to
+their own fallthrough and cannot satisfy an enclosing loop's break proof. The
+lowering omits the unreachable loop condition and iterator and adds no loop
+region or backedge. For initializers remain in source order. Bodies with
+implicit fallthrough, continues, managed-local cleanup or other nonterminal
+effects remain outside this erasure. All retained inactive
 operations and every function Body still undergo mandatory validation.
 Source scope support is
 an implementation boundary, not an unresolved language contract.

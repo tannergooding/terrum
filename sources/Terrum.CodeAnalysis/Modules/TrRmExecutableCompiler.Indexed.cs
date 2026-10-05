@@ -1885,6 +1885,15 @@ public static partial class TrRmExecutableCompiler
             }
             for (var index = 0; index < block.Statements.Length - 1; index++)
             {
+                if (block.Statements[index] is BoundWhile loop)
+                {
+                    if (!TerminalAcyclicLoop(loop, out _, out var hasBreak) || !hasBreak)
+                    {
+                        return false;
+                    }
+
+                    continue;
+                }
                 if (block.Statements[index] is not (BoundLocal { Initializer: not null }
                     or BoundAssignment
                     or BoundExpressionStatement
