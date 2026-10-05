@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `19151a0` | Validate FieldDef rows in a single pass |
 | `22ad919` | Validate TypeArg coverage without owner map |
 | `2f02671` | Build PE import targets with IAT offsets |
 | `fb87f8f` | Write PE names without temporary byte arrays |
