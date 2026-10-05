@@ -1868,7 +1868,8 @@ public static partial class TrRmExecutableCompiler
             }
             for (var index = 0; index < block.Statements.Length - 1; index++)
             {
-                if (block.Statements[index] is not (BoundAssignment { Value: BoundConstant or BoundRead }
+                if (block.Statements[index] is not (BoundLocal { Initializer: BoundConstant or BoundRead }
+                    or BoundAssignment { Value: BoundConstant or BoundRead }
                     or BoundExpressionStatement { Expression: BoundUpdate }))
                 {
                     return false;
