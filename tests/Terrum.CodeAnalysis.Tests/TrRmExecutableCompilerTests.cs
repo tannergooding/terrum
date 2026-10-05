@@ -1001,6 +1001,37 @@ public sealed class TrRmExecutableCompilerTests
         Assert.Equal(doesNotReturn, function.DoesNotReturn);
     }
 
+    [Theory]
+    [InlineData("out int32 value")]
+    [InlineData("init ref<int32> value")]
+    public void ExecutableWriterRejectsOutputParameters(string parameter)
+    {
+        var source = $"int32 Output({parameter}) {{ value = 42; return 0; }} "
+            + "int32 Main() { return 42; }";
+        var program = Compile(source);
+
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.Emit(program, "output-parameters"));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void ExecutableLoaderRejectsOutputModesInUncalledIndexedMethods(byte mode)
+    {
+        const string source = """
+            int32 Helper(int32 value) {
+                if (value == 0) { return 1; }
+                return value;
+            }
+            int32 Main() { return 42; }
+            """;
+        var artifact = TrRmExecutableCompiler.Emit(Compile(source), "output-mode");
+        var malformed = ReplaceParameterMode(artifact, mode);
+
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
     [Fact]
     public void LoadsMultipleEffectContractsFromOneTableIndex()
     {
@@ -1817,6 +1848,23 @@ public sealed class TrRmExecutableCompilerTests
             index.GetSection(section, out var kind, out var flags, out var bytes, out var count);
             sections.Add(new TrRmSection(kind, flags, (uint)count,
                 kind == 0x20 ? rewrittenBodies : bytes.ToArray()));
+        }
+        return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static byte[] ReplaceParameterMode(byte[] artifact, byte mode)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x18, out var parameterBytes, out var parameterCount));
+        Assert.Equal(1, parameterCount);
+        var parameters = parameterBytes.ToArray();
+        parameters[12] = mode;
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags, out var bytes, out var count);
+            sections.Add(new TrRmSection(kind, flags, (uint)count,
+                kind == 0x18 ? parameters : bytes.ToArray()));
         }
         return TrRmArtifactWriter.Encode(sections);
     }
