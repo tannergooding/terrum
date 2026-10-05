@@ -386,7 +386,15 @@ public static partial class NativeModuleCompiler
             }
             if (cleanupFunctions is null)
             {
-                cleanupFunctions = new HashSet<(string? DeclaringStruct, string Name)>(result.Functions.Length);
+                var cleanupFunctionCount = 0;
+                foreach (var function in result.Functions)
+                {
+                    if (function.IsCleanup)
+                    {
+                        cleanupFunctionCount++;
+                    }
+                }
+                cleanupFunctions = new HashSet<(string? DeclaringStruct, string Name)>(cleanupFunctionCount);
                 foreach (var function in result.Functions)
                 {
                     if (function.IsCleanup)
