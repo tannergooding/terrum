@@ -194,6 +194,20 @@ public sealed class NativeGraphTests
     }
 
     [Fact]
+    public void ConsumerValidationAcceptsNoImports()
+    {
+        var provider = Leaf("public int32 Leaf() { return 1; }");
+        var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return 42; }"),
+            NativeModuleCompiler.CreateReference(provider));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var consumer = NativeModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(compilation.Program), provider, NativeRuntimePolicy.FailFast);
+
+        Assert.NotEmpty(consumer);
+    }
+
+    [Fact]
     public void GraphProvidersRejectCaseOnlyIdentityDuplicates()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(

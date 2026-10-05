@@ -225,15 +225,29 @@ internal static class NativeModuleImageValidator
             void CheckImports()
             {
                 var table = header.ImportTableDirectory;
-                var count = 1 + providerImports.Count + (checkedExceptions ? 1 : 0);
+                var providerCount = providerImports.Count;
+                var count = 1 + providerCount + (checkedExceptions ? 1 : 0);
                 if (table.Size != 20 * (count + 1))
                 {
                     throw Invalid();
                 }
                 var names = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
                 var systemCount = checkedExceptions ? 2 : 1;
-                var expectedDlls = providerImports.Keys.Order(StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(static (string item) => item, StringComparer.Ordinal).ToArray();
+                string? singleProviderDll = null;
+                var expectedDlls = Array.Empty<string>();
+                if (providerCount == 1)
+                {
+                    foreach (var providerDll in providerImports.Keys)
+                    {
+                        singleProviderDll = providerDll;
+                        break;
+                    }
+                }
+                else if (providerCount > 1)
+                {
+                    expectedDlls = providerImports.Keys.Order(StringComparer.OrdinalIgnoreCase)
+                        .ThenBy(static (string item) => item, StringComparer.Ordinal).ToArray();
+                }
                 for (var index = 0; index < count; index++)
                 {
                     var at = Offset(table.RelativeVirtualAddress + (index * 20), 20, ".idata");
@@ -245,8 +259,10 @@ internal static class NativeModuleImageValidator
                         throw Invalid();
                     }
                     var dll = Name(name);
+                    var providerIndex = index - systemCount;
                     if (dll != (index == 0 ? "KERNEL32.dll"
-                        : checkedExceptions && index == 1 ? "NTDLL.dll" : expectedDlls[index - systemCount]))
+                        : checkedExceptions && index == 1 ? "NTDLL.dll"
+                        : providerCount == 1 ? singleProviderDll : expectedDlls[providerIndex]))
                     {
                         throw Invalid();
                     }
