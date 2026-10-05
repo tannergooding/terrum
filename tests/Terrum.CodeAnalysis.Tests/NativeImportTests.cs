@@ -40,7 +40,7 @@ public sealed class NativeImportTests
     public void ImportsHaveNamedRvaThunksWithoutExternalBodies()
     {
         var program = Compile();
-        var bindings = new[] { new NativeImportBinding("B", "native-import-provider.dll", "B"),
+        var bindings = new[] { new NativeImportBinding("B", "NATIVE-IMPORT-PROVIDER.DLL", "B"),
             new NativeImportBinding("A", "native-import-provider.dll", "A") };
         var image = NativeEmitter.EmitWithImports(program, bindings, NativeRuntimePolicy.FailFast);
         Assert.Equal(image, NativeEmitter.EmitWithImports(program, bindings.Reverse().ToArray(), NativeRuntimePolicy.FailFast));
@@ -63,7 +63,7 @@ public sealed class NativeImportTests
             idata.VirtualAddress + idata.VirtualSize - header.ImportAddressTableDirectory.Size);
         var import = header.ImportTableDirectory.RelativeVirtualAddress;
         Assert.Equal("KERNEL32.dll", Name(Read32(Offset(import) + 12)));
-        Assert.Equal("native-import-provider.dll", Name(Read32(Offset(import) + 32)));
+        Assert.Equal("NATIVE-IMPORT-PROVIDER.DLL", Name(Read32(Offset(import) + 32)));
         Assert.Equal(0, Read32(Offset(import) + 40));
         Assert.Equal(0, Read32(Offset(import) + 56));
         Assert.Equal("ExitProcess", Assert.Single(ImportNames(import)));

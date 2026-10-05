@@ -218,21 +218,22 @@ internal static class PeImage
     private static ImportTable BuildImports(NativeCode native)
     {
         var groups = new List<ImportGroup> { new("KERNEL32.dll") };
-        groups[0].Symbols.Add(new ImportSymbol("ExitProcess"));
+        var groupsByName = new Dictionary<string, ImportGroup>(StringComparer.OrdinalIgnoreCase)
+        {
+            [groups[0].DllName] = groups[0],
+        };
+        groups[0].AddSymbol("ExitProcess");
         foreach (var fixup in native.NativeImports.OrderBy(static item => item.DllName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(static item => item.DllName, StringComparer.Ordinal)
             .ThenBy(static item => item.ExportName, StringComparer.Ordinal))
         {
-            var group = groups.Find(item => string.Equals(item.DllName, fixup.DllName, StringComparison.OrdinalIgnoreCase));
-            if (group is null)
+            if (!groupsByName.TryGetValue(fixup.DllName, out var group))
             {
                 group = new ImportGroup(fixup.DllName);
                 groups.Add(group);
+                groupsByName.Add(fixup.DllName, group);
             }
-            if (!group.Symbols.Any(item => item.Name == fixup.ExportName))
-            {
-                group.Symbols.Add(new ImportSymbol(fixup.ExportName));
-            }
+            group.AddSymbol(fixup.ExportName);
         }
         foreach (var group in groups)
         {
@@ -299,6 +300,16 @@ internal static class PeImage
         internal int Ilt { get; set; }
         internal int Iat { get; set; }
         internal int Name { get; set; }
+
+        private HashSet<string> SymbolNames { get; } = new(StringComparer.Ordinal);
+
+        internal void AddSymbol(string name)
+        {
+            if (SymbolNames.Add(name))
+            {
+                Symbols.Add(new ImportSymbol(name));
+            }
+        }
     }
 
     private sealed class ImportSymbol(string name)
