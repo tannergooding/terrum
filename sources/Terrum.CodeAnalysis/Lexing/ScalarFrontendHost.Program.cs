@@ -26,7 +26,7 @@ public static partial class ScalarFrontendHost
         int TokenStart, int TokenEnd, TextSpan Span, TextSpan BodySpan);
 
     private sealed record ProgramReadContext(ImmutableArray<ProgramDeclaration> Declarations,
-        ImmutableArray<int> Targets)
+        ImmutableArray<int> Targets, ScalarAliasEnvironment Aliases)
     {
         public ProgramDeclaration Callee(int node)
         {
@@ -37,6 +37,16 @@ public static partial class ScalarFrontendHost
             }
             return Declarations[target];
         }
+    }
+
+    private sealed record ProgramInventory(ImmutableArray<ProgramDeclaration> Declarations,
+        ScalarAliasEnvironment Aliases);
+
+    private sealed record AliasDeclaration(string Name, string Target);
+
+    private sealed record ScalarAliasEnvironment(ImmutableDictionary<string, int> Types)
+    {
+        public bool TryGetType(string name, out int type) => Types.TryGetValue(name, out type);
     }
 
     /// <summary>Reads only current v85 complete-program and single-function projections.</summary>
@@ -67,13 +77,14 @@ public static partial class ScalarFrontendHost
             words[i] = BinaryPrimitives.ReadInt32LittleEndian(programBytes.Slice(i * sizeof(int), sizeof(int)));
         }
         if (words[0] != 85
-            || words[1] != 1 || words[2] is < 2 or > MaximumFunctions
+            || words[1] != 1 || words[2] is < 1 or > MaximumFunctions
             || words[3] != 0 || source.Length > 16_384
             || words.AsSpan(4 + words[2] * ProgramFrameWordCount).IndexOfAnyExcept(0) >= 0)
         {
             throw InvalidResult();
         }
-        var declarations = InventoryProgram(source);
+        var inventory = InventoryProgram(source);
+        var declarations = inventory.Declarations;
         if (declarations.Length != words[2])
         {
             throw InvalidResult();
@@ -108,7 +119,8 @@ public static partial class ScalarFrontendHost
                 }
                 targets.Add(target);
             }
-            var context = new ProgramReadContext(declarations, targets.MoveToImmutable());
+            var context = new ProgramReadContext(declarations, targets.MoveToImmutable(),
+                inventory.Aliases);
             var functionSource = FunctionSource(source, declaration.Span);
             functionSources.Add(functionSource);
             var function = ReadResultCore(functionSource, payload, policy, context);
@@ -188,7 +200,7 @@ public static partial class ScalarFrontendHost
         return SourceText.From(text);
     }
 
-    private static ImmutableArray<ProgramDeclaration> InventoryProgram(SourceText source)
+    private static ProgramInventory InventoryProgram(SourceText source)
     {
         var lexical = Lexer.Lex(source);
         var tokens = lexical.Tokens;
@@ -196,11 +208,16 @@ public static partial class ScalarFrontendHost
         {
             throw InvalidResult();
         }
+        var aliases = InventoryScalarAliases(tokens);
         var declarations = ImmutableArray.CreateBuilder<ProgramDeclaration>();
-        var names = new HashSet<string>(StringComparer.Ordinal);
+        var names = new HashSet<string>(aliases.Types.Keys, StringComparer.Ordinal);
         var at = 0;
         while (at < tokens.Length - 1)
         {
+            if (TrySkipAlias(tokens, ref at))
+            {
+                continue;
+            }
             var start = at;
             var effects = 0;
             while (tokens[at].Kind == TokenKind.OpenBracket)
@@ -243,7 +260,7 @@ public static partial class ScalarFrontendHost
                 }
                 at++;
             }
-            var returnType = ScalarCode(tokens[at].Text, allowVoid: true);
+            var returnType = ScalarCode(tokens[at].Name, allowVoid: true, aliases);
             if (!Take(returnType == 0 ? TokenKind.VoidKeyword : TokenKind.Identifier)
                 || at >= tokens.Length || tokens[at].Kind != TokenKind.Identifier)
             {
@@ -276,7 +293,7 @@ public static partial class ScalarFrontendHost
                 {
                     throw InvalidResult();
                 }
-                var type = ScalarCode(tokens[at].Text, allowVoid: false);
+                var type = ScalarCode(tokens[at].Name, allowVoid: false, aliases);
                 if (!Take(TokenKind.Identifier)
                     || (isInitRef && !Take(TokenKind.Greater))
                     || at >= tokens.Length
@@ -340,7 +357,7 @@ public static partial class ScalarFrontendHost
         {
             throw InvalidResult();
         }
-        return declarations.ToImmutable();
+        return new ProgramInventory(declarations.ToImmutable(), aliases);
 
         bool Take(TokenKind kind)
         {
@@ -349,11 +366,185 @@ public static partial class ScalarFrontendHost
             return true;
         }
 
-        static int ScalarCode(string text, bool allowVoid) => text switch {
+    }
+
+    private static bool TrySkipAlias(ImmutableArray<SyntaxToken> tokens, ref int at)
+    {
+        var start = at;
+        while (at < tokens.Length && tokens[at].Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword)
+        {
+            at++;
+        }
+        if (at >= tokens.Length || tokens[at].Kind != TokenKind.AliasKeyword)
+        {
+            at = start;
+            return false;
+        }
+        while (at < tokens.Length && tokens[at].Kind != TokenKind.Semicolon)
+        {
+            at++;
+        }
+        if (at >= tokens.Length)
+        {
+            throw InvalidResult();
+        }
+        at++;
+        return true;
+    }
+
+    private static ScalarAliasEnvironment InventoryScalarAliases(SourceText source)
+    {
+        var lexical = Lexer.Lex(source);
+        if (!lexical.Diagnostics.IsEmpty || lexical.Tokens.Length > 64
+            || SyntaxTree.Parse(source).HasErrors)
+        {
+            throw InvalidResult();
+        }
+        return InventoryScalarAliases(lexical.Tokens);
+    }
+
+    private static ScalarAliasEnvironment InventoryScalarAliases(ImmutableArray<SyntaxToken> tokens)
+    {
+        var declarations = new Dictionary<string, AliasDeclaration>(StringComparer.Ordinal);
+        var at = 0;
+        while (at < tokens.Length - 1)
+        {
+            var start = at;
+            var hasAttributes = false;
+            while (at < tokens.Length && tokens[at].Kind == TokenKind.OpenBracket)
+            {
+                hasAttributes = true;
+                while (at < tokens.Length && tokens[at++].Kind != TokenKind.CloseBracket)
+                {
+                }
+            }
+            var visibility = 0;
+            while (at < tokens.Length && tokens[at].Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword)
+            {
+                var currentVisibility = tokens[at++].Kind == TokenKind.PublicKeyword ? 1 : 2;
+                if (visibility != 0)
+                {
+                    throw InvalidResult();
+                }
+                visibility = currentVisibility;
+            }
+            if (at < tokens.Length && tokens[at].Kind == TokenKind.AliasKeyword)
+            {
+                if (hasAttributes || visibility == 1)
+                {
+                    throw InvalidResult();
+                }
+                at++;
+                if (at + 3 >= tokens.Length || tokens[at].Kind != TokenKind.Identifier
+                    || tokens[at + 1].Kind != TokenKind.Equals
+                    || tokens[at + 2].Kind != TokenKind.Identifier
+                    || tokens[at + 3].Kind != TokenKind.Semicolon
+                    || !declarations.TryAdd(tokens[at].Name,
+                        new AliasDeclaration(tokens[at].Name, tokens[at + 2].Name)))
+                {
+                    throw InvalidResult();
+                }
+                at += 4;
+                continue;
+            }
+
+            at = start;
+            var bodyStart = -1;
+            for (var index = at; index < tokens.Length - 1; index++)
+            {
+                if (tokens[index].Kind is TokenKind.Arrow or TokenKind.OpenBrace)
+                {
+                    bodyStart = index;
+                    break;
+                }
+            }
+            if (bodyStart < 0)
+            {
+                throw InvalidResult();
+            }
+            if (tokens[bodyStart].Kind == TokenKind.Arrow)
+            {
+                at = bodyStart + 1;
+                while (at < tokens.Length - 1 && tokens[at].Kind != TokenKind.Semicolon)
+                {
+                    at++;
+                }
+                if (at >= tokens.Length - 1)
+                {
+                    throw InvalidResult();
+                }
+                at++;
+            }
+            else
+            {
+                var depth = 1;
+                at = bodyStart + 1;
+                while (at < tokens.Length - 1 && depth != 0)
+                {
+                    if (tokens[at].Kind == TokenKind.OpenBrace) { depth++; }
+                    if (tokens[at].Kind == TokenKind.CloseBrace) { depth--; }
+                    at++;
+                }
+                if (depth != 0)
+                {
+                    throw InvalidResult();
+                }
+            }
+        }
+
+        var resolved = new Dictionary<string, int>(StringComparer.Ordinal);
+        while (resolved.Count != declarations.Count)
+        {
+            var madeProgress = false;
+            foreach (var declaration in declarations.Values)
+            {
+                if (resolved.ContainsKey(declaration.Name))
+                {
+                    continue;
+                }
+                if (!TryGetPrimitiveScalarCode(declaration.Target, allowVoid: false, out var type))
+                {
+                    if (resolved.TryGetValue(declaration.Target, out type))
+                    {
+                        resolved.Add(declaration.Name, type);
+                        madeProgress = true;
+                    }
+                    else if (!declarations.ContainsKey(declaration.Target))
+                    {
+                        throw InvalidResult();
+                    }
+                    continue;
+                }
+                resolved.Add(declaration.Name, type);
+                madeProgress = true;
+            }
+            if (!madeProgress)
+            {
+                throw InvalidResult();
+            }
+        }
+        return new ScalarAliasEnvironment(resolved.ToImmutableDictionary(StringComparer.Ordinal));
+    }
+
+    private static int ScalarCode(string text, bool allowVoid, ScalarAliasEnvironment? aliases)
+    {
+        if (TryGetPrimitiveScalarCode(text, allowVoid, out var type))
+        {
+            return type;
+        }
+        return aliases is not null && aliases.TryGetType(text, out type)
+            ? type
+            : throw InvalidResult();
+    }
+
+    private static bool TryGetPrimitiveScalarCode(string text, bool allowVoid, out int type)
+    {
+        type = text switch {
             "void" when allowVoid => 0,
             "int32" => 1, "uint32" => 2, "int64" => 3, "uint64" => 4,
             "bool" => 5, "char16" => 6, "float32" => 7, "float64" => 8,
-            _ => throw InvalidResult(),
+            _ => -1,
         };
+        return type >= 0;
     }
 }

@@ -3443,7 +3443,7 @@ mut class ScalarFrontendState
                 node = callNode;
                 return true;
             }
-            if (!TryGetScalarType(token, init var target)
+            if (!TryGetPrimitiveScalarType(token, init var target)
                 || target == 5)
             {
                 if (SameTokenSpelling(_function, token))
@@ -4261,7 +4261,7 @@ bool TryParseScalarFrontendWindow(Span<Token> tokenView, int32 tokenStart,
         if (IsScalarFrontendTreeMarker(token.Kind)
             || (token.Kind == 2 && TryGetScalarWindowToken(tokenView, tokenStart,
                 tokenEnd, syntheticEof, index + 1, init var opener)
-                && opener.Kind == 46 && TryGetScalarType(token, init var conversionType)))
+                && opener.Kind == 46 && TryGetPrimitiveScalarType(token, init var conversionType)))
         {
             result = modern;
             return true;

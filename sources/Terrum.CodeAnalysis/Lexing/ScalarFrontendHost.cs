@@ -94,6 +94,7 @@ public static partial class ScalarFrontendHost
         {
             throw InvalidResult();
         }
+        var aliases = context?.Aliases ?? InventoryScalarAliases(source);
         var firstName = Span(11);
         var secondName = Span(13);
         var thirdName = Span(35);
@@ -993,7 +994,7 @@ public static partial class ScalarFrontendHost
                         }
                         var inferred = tokens[at - 1].Kind == TokenKind.VarKeyword;
                         if (constant && inferred
-                            || !inferred && tokens[at - 1].Text != TypeName(local.Type)
+                            || !inferred && !MatchesScalarType(tokens[at - 1], local.Type, aliases)
                             || !Take(TokenKind.Identifier)
                             || tokens[at - 1].Span != local.Name
                             || seenNames.Contains(tokens[at - 1].Name)
@@ -1024,7 +1025,7 @@ public static partial class ScalarFrontendHost
                         if (!local.IsInitialization || local.IsMutable
                             || !Take(TokenKind.Identifier) || tokens[at - 1].Text != "init"
                             || !Take(inferred ? TokenKind.VarKeyword : TokenKind.Identifier)
-                            || !inferred && tokens[at - 1].Text != TypeName(local.Type)
+                            || !inferred && !MatchesScalarType(tokens[at - 1], local.Type, aliases)
                             || !Take(TokenKind.Identifier) || tokens[at - 1].Span != local.Name
                             || clause == 0 && !Take(TokenKind.Semicolon))
                         {
@@ -1295,7 +1296,7 @@ public static partial class ScalarFrontendHost
                 else if (node.Operation == 83)
                 {
                     if (!Take(TokenKind.Identifier)
-                        || tokens[at - 1].Text != TypeName(node.Type)
+                        || !MatchesPrimitiveScalarType(tokens[at - 1], node.Type)
                         || tokens[at - 1].Name == SourceName(source, name)
                         || context is not null && context.Declarations.Any(
                             declaration => declaration.Name == tokens[at - 1].Name)
@@ -1601,7 +1602,7 @@ public static partial class ScalarFrontendHost
             var offset = attributeEnd;
             if (!lexical.Diagnostics.IsEmpty || tokens.Length <= offset + 1
                 || tokens[offset].Kind != (words[5] == 0 ? TokenKind.VoidKeyword : TokenKind.Identifier)
-                || tokens[offset].Text != TypeName(words[5])
+                || !MatchesScalarType(tokens[offset], words[5], aliases)
                 || tokens[offset + 1].Kind != TokenKind.Identifier
                 || tokens[offset + 1].Span != name)
             {
@@ -1654,7 +1655,7 @@ public static partial class ScalarFrontendHost
                 var expectedName = parameter switch { 0 => firstName, 1 => secondName, _ => thirdName };
                 if (at >= tokens.Length - 1
                     || tokens[at].Kind != TokenKind.Identifier
-                    || tokens[at].Text != TypeName(expectedType))
+                    || !MatchesScalarType(tokens[at], expectedType, aliases))
                 {
                     return false;
                 }
@@ -2524,6 +2525,37 @@ public static partial class ScalarFrontendHost
         _ => throw InvalidResult(),
     };
 
+    private static bool MatchesScalarType(SyntaxToken token, int code,
+        ScalarAliasEnvironment aliases)
+    {
+        if (code == 0)
+        {
+            return token.Kind == TokenKind.VoidKeyword;
+        }
+        return token.Kind == TokenKind.Identifier
+            && (token.Name == TypeName(code)
+                || aliases.TryGetType(token.Name, out var aliasType) && aliasType == code);
+    }
+
+    private static bool MatchesPrimitiveScalarType(SyntaxToken token, int code)
+        => code is >= 1 and <= 8 && token.Kind == TokenKind.Identifier
+            && token.Name == TypeName(code);
+
+    private static TextSpan ConstantLocalSpan(SourceText source, TextSpan declaration)
+    {
+        var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
+            declaration.Start, declaration.Length)));
+        if (!lexical.Diagnostics.IsEmpty || lexical.Tokens.Length < 3
+            || lexical.Tokens[0].Kind != TokenKind.Identifier
+            || lexical.Tokens[0].Text != "const"
+            || lexical.Tokens[1].Kind != TokenKind.Identifier)
+        {
+            throw InvalidResult();
+        }
+        var start = declaration.Start + lexical.Tokens[1].Span.Start;
+        return new TextSpan(start, declaration.End - start);
+    }
+
     /// <summary>Builds a verifier-checked scalar library with source-declared visibility from native frontend facts.</summary>
     public static BoundProgram BindLibrary(SourceText source, ReadOnlySpan<byte> bytes,
         BoundRuntimePolicy policy)
@@ -2536,17 +2568,20 @@ public static partial class ScalarFrontendHost
         return BindLibraryCore(source, result, policy);
     }
 
-    private static BoundExpression FoldBoundedConstantExpression(BoundExpression expression)
+    private static BoundExpression FoldBoundedConstantExpression(BoundExpression expression,
+        BoundConstant?[] constantLocals)
     {
         switch (expression)
         {
+            case BoundRead read when constantLocals[read.Variable] is { } constant:
+                return constant with { Span = read.Span };
             case BoundConditional conditional:
             {
-                var condition = FoldBoundedConstantExpression(conditional.Condition);
+                var condition = FoldBoundedConstantExpression(conditional.Condition, constantLocals);
                 if (condition is BoundConstant { Type: PrimitiveType.Bool } value)
                 {
                     var selected = FoldBoundedConstantExpression(value.Value != 0
-                        ? conditional.WhenTrue : conditional.WhenFalse);
+                        ? conditional.WhenTrue : conditional.WhenFalse, constantLocals);
                     return selected is BoundConstant constant && constant.Type == conditional.Type
                         ? constant with { Span = conditional.Span }
                         : expression;
@@ -2555,11 +2590,11 @@ public static partial class ScalarFrontendHost
             }
             case BoundUnary unary:
                 return Binder.FoldScalarConstant(unary with {
-                    Operand = FoldBoundedConstantExpression(unary.Operand),
+                    Operand = FoldBoundedConstantExpression(unary.Operand, constantLocals),
                 });
             case BoundBinary binary:
             {
-                var left = FoldBoundedConstantExpression(binary.Left);
+                var left = FoldBoundedConstantExpression(binary.Left, constantLocals);
                 if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe
                     && left is BoundConstant { Type: PrimitiveType.Bool } boolean
                     && (binary.Operator == TokenKind.AmpersandAmpersand && boolean.Value == 0
@@ -2570,12 +2605,12 @@ public static partial class ScalarFrontendHost
                 }
                 return Binder.FoldScalarConstant(binary with {
                     Left = left,
-                    Right = FoldBoundedConstantExpression(binary.Right),
+                    Right = FoldBoundedConstantExpression(binary.Right, constantLocals),
                 });
             }
             case BoundCast cast:
                 return Binder.FoldScalarConstant(cast with {
-                    Operand = FoldBoundedConstantExpression(cast.Operand),
+                    Operand = FoldBoundedConstantExpression(cast.Operand, constantLocals),
                 });
             default:
                 return expression;
@@ -2660,9 +2695,7 @@ public static partial class ScalarFrontendHost
                 }
                 else if (node.Operation == 0)
                 {
-                    bound = constantLocals[node.Left - 1] is { } constant
-                        ? constant with { Span = node.Span }
-                        : new BoundRead(node.Left - 1, type, node.Span);
+                    bound = new BoundRead(node.Left - 1, type, node.Span);
                 }
                 else if (node.Operation is 20 or 21)
                 {
@@ -2768,12 +2801,11 @@ public static partial class ScalarFrontendHost
                 treeExpressions[i] = bound;
                 if (constantDeclarations.TryGetValue(i, out var localIndex))
                 {
-                    if (FoldBoundedConstantExpression(bound) is not BoundConstant constant
+                    if (FoldBoundedConstantExpression(bound, constantLocals) is not BoundConstant constant
                         || constant.Type != types[localIndex].Type)
                     {
                         throw InvalidResult();
                     }
-                    treeExpressions[i] = constant;
                     constantLocals[localIndex] = constant;
                 }
             }
@@ -2783,7 +2815,7 @@ public static partial class ScalarFrontendHost
             foreach (var proof in result.Statements.Where(static statement => statement.Kind is 35 or 36))
             {
                 if (treeExpressions is null
-                    || FoldBoundedConstantExpression(treeExpressions[proof.Root]) is not BoundConstant {
+                    || FoldBoundedConstantExpression(treeExpressions[proof.Root], constantLocals) is not BoundConstant {
                         Type: PrimitiveType.Bool, Value: 1,
                     })
                 {
@@ -2965,7 +2997,10 @@ public static partial class ScalarFrontendHost
                     {
                         var value = expressions[statement.Root];
                         statements.Add(statement.Kind is 1 or 27 or 28
-                            ? new BoundLocal(statement.Slot - 1, value, statement.Span)
+                            ? new BoundLocal(statement.Slot - 1, value,
+                                statement.Kind is 27 or 28
+                                    ? ConstantLocalSpan(source, statement.Span)
+                                    : statement.Span)
                             : new BoundAssignment(statement.Slot - 1, value, statement.Span));
                     }
                 }

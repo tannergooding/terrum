@@ -76,6 +76,131 @@ public sealed partial class ManagedScannerComponentTests
         }
     }
 
+    [Theory]
+    [InlineData("alias Scalar = Wide; alias Wide = int32; public Scalar Main() { const Wide value = 40; return Bump(int32(value)); } Scalar Bump(Scalar value) => value + 2;", 2, 42)]
+    [InlineData("public Number Main() { init Number value; Set(init value); return int32(value) + 2; } void Set(init ref<Scalar> value) { value = 40; } alias Number = Scalar; alias Scalar = int32;", 2, 42)]
+    [InlineData("alias Number = int32; public Number Main() => 42;", 1, 42)]
+    [InlineData("alias A = int32; alias B = int32; alias C = int32; alias D = int32; alias E = int32; alias F = int32; alias G = int32; alias H = int32; alias I = int32; alias J = int32; alias K = int32; public K Main() => 42;", 1, 42)]
+    [InlineData("alias Number = int32; void A() {} void B() {} void C() {} void D() {} void E() {} void F() {} void G() {} void H() {} public Number Main() => 42;", 9, 42)]
+    public async Task ScalarFrontendProjectsInternalScalarAliasChainsAsync(string text,
+        int expectedFunctions, int expected)
+    {
+        var source = SourceText.From(text);
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var (bytes, programBytes, stage) = await ProduceScalarProgramAsync(text, policy);
+            var read = ScalarFrontendHost.ReadProgram(source, bytes, programBytes,
+                (BoundRuntimePolicy)policy);
+            Assert.True(read.Projection.IsValid);
+            Assert.Equal(expectedFunctions, read.Projection.Functions.Length);
+
+            var actual = Assert.IsType<BoundProgram>(read.Program);
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+                (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.Equal(hosted.Functions.Select(static function => function.Name),
+                actual.Functions.Select(static function => function.Name));
+            Assert.Equal(hosted.Functions.Select(static function => function.ReturnType),
+                actual.Functions.Select(static function => function.ReturnType));
+            Assert.Equal(hosted.Functions.Select(static function => function.Span),
+                actual.Functions.Select(static function => function.Span));
+            Assert.Equal(hosted.Functions.Select(static function => function.Body.Span),
+                actual.Functions.Select(static function => function.Body.Span));
+            Assert.Equal(hosted.Functions.Select(static function =>
+                    (function.ParameterCount, function.IsInternal, function.IsNoThrow,
+                        function.DoesNotReturn, function.RequiresUnsafeCaller)),
+                actual.Functions.Select(static function =>
+                    (function.ParameterCount, function.IsInternal, function.IsNoThrow,
+                        function.DoesNotReturn, function.RequiresUnsafeCaller)));
+            Assert.Equal(hosted.Functions.Select(static function => function.Variables
+                    .Select(static variable => (variable.Name, variable.Type, variable.IsMutable,
+                        variable.IsOut, variable.IsInit, variable.IsInitializationLocal)).ToArray()),
+                actual.Functions.Select(static function => function.Variables
+                    .Select(static variable => (variable.Name, variable.Type, variable.IsMutable,
+                        variable.IsOut, variable.IsInit, variable.IsInitializationLocal)).ToArray()));
+            Assert.Equal(hosted.Functions.SelectMany(static function => function.Body.Statements)
+                    .OfType<BoundLocal>().Select(static local => (local.Variable, local.Span,
+                        local.Initializer.Type, local.Initializer.Span)),
+                actual.Functions.SelectMany(static function => function.Body.Statements)
+                    .OfType<BoundLocal>().Select(static local => (local.Variable, local.Span,
+                        local.Initializer.Type, local.Initializer.Span)));
+            var hostedMain = hosted.Functions.Single(static function => function.Name == "Main");
+            var actualMain = actual.Functions.Single(static function => function.Name == "Main");
+            if (hostedMain.Body.Statements.OfType<BoundReturn>().Single().Value is BoundCall hostedCall)
+            {
+                var actualCall = Assert.IsType<BoundCall>(actualMain.Body.Statements
+                    .OfType<BoundReturn>().Single().Value);
+                Assert.Equal(hostedCall.Function, actualCall.Function);
+                Assert.Equal(hostedCall.Arguments.Select(static argument =>
+                        (argument.GetType(), argument.Type, argument.Span,
+                            argument is BoundRead read ? read.Variable : -1,
+                            argument is BoundConstant constant ? constant.Value : 0)),
+                    actualCall.Arguments.Select(static argument =>
+                        (argument.GetType(), argument.Type, argument.Span,
+                            argument is BoundRead read ? read.Variable : -1,
+                            argument is BoundConstant constant ? constant.Value : 0)));
+            }
+            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Main"], policy),
+                NativeEmitter.EmitLibrary(actual, ["Main"], policy));
+            var entry = actual.Functions.IndexOf(actual.Functions.Single(
+                static function => function.Name == "Main"));
+            Assert.Equal(expected, NativeJit.Execute(actual with { EntryPoint = entry }, policy));
+            Assert.Equal(expected, NativeJit.Execute(hosted with { EntryPoint = entry }, policy));
+            await ExecuteAotAsync(stage, policy);
+        }
+    }
+
+    [Theory]
+    [InlineData("alias Scalar = Missing; int32 Main() => 42;")]
+    [InlineData("alias Scalar = int32; alias Scalar = bool; int32 Main() => 42;")]
+    [InlineData("alias Scalar = Scalar; int32 Main() => 42;")]
+    [InlineData("alias First = Second; alias Second = First; int32 Main() => 42;")]
+    [InlineData("public alias Scalar = int32; int32 Main() => 42;")]
+    [InlineData("alias Identity<T> = T; int32 Main() => 42;")]
+    [InlineData("alias Scalar = int32; int32 Main() => Scalar(42);")]
+    public async Task ScalarFrontendRejectsUnsupportedOrInvalidAliasesAsync(string text)
+    {
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text,
+            NativeRuntimePolicy.FailFast);
+        var result = ScalarFrontendHost.ReadResult(SourceText.From(text), bytes,
+            programBytes, BoundRuntimePolicy.FailFast);
+        Assert.False(result.IsValid);
+        Assert.Equal(1, result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ScalarFrontendReaderResolvesAliasesFromOriginalSourceAsync()
+    {
+        const string text = "alias Number = int32; public Number Main() => 42; Number Next() => 0;";
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text,
+            NativeRuntimePolicy.FailFast);
+        var changedSource = SourceText.From(text.Replace("int32", "int64", StringComparison.Ordinal));
+
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(changedSource,
+            bytes, programBytes, BoundRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public async Task ScalarFrontendPreservesTenFunctionLimitWithoutAliasesAsync()
+    {
+        const string text = "void A() {} void B() {} void C() {} void D() {} void E() {} void F() {} void G() {} void H() {} void I() {} public int32 Main() => 42;";
+        var source = SourceText.From(text);
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text,
+            NativeRuntimePolicy.FailFast);
+
+        var read = ScalarFrontendHost.ReadProgram(source, bytes, programBytes,
+            BoundRuntimePolicy.FailFast);
+
+        Assert.True(read.Projection.IsValid);
+        Assert.Equal(10, read.Projection.Functions.Length);
+        var program = Assert.IsType<BoundProgram>(read.Program);
+        var entry = program.Functions.IndexOf(program.Functions.Single(
+            static function => function.Name == "Main"));
+        Assert.Equal(42, NativeJit.Execute(program with { EntryPoint = entry },
+            NativeRuntimePolicy.FailFast));
+    }
+
     [Fact]
     public async Task ScalarFrontendProgramProjectsCallerUnsafeCallsInsideExplicitScopesAsync()
     {

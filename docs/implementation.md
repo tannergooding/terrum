@@ -153,10 +153,16 @@ nesting limit. This does not add generic structs/classes or broaden the
 supported type system. A public alias may be used in ordinary source
 compilation only when its expanded target is public; library emission rejects
 public aliases because their metadata encoding remains open. Internal aliases
-can be erased during library compilation. This support does not extend the
-bounded scalar frontend or add alias declarations to source-free TRRM;
-Terrum-authored scalar frontend components still use the hosted
-verifier/emitter.
+can be erased during library compilation. Separately, complete-program v85
+scalar projections resolve up to eleven top-level internal, non-generic
+aliases to scalar types, including forward alias chains, in function return,
+parameter and local type positions. The projection reader independently
+re-inventories and resolves aliases from the original source; duplicate,
+unresolved, cyclic, public, attributed and generic alias declarations reject.
+Alias names do not become explicit conversion-call targets; those remain
+primitive-only. This bounded frontend support does not change v85 layouts or
+the hosted verifier/emitter dependency, and does not add aliases to source-free
+TRRM.
 
 A single loop label and its `while`, `do` or `for` introducer must occupy the
 same physical source line (`TRM1012`). The colon attaches to the label; trivia

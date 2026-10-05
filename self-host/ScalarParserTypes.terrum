@@ -9,6 +9,41 @@ bool TokensAttach(Token receiver, Token opener)
 // 6=char16, 7=float32, 8=float64.
 bool TryGetScalarType(Token type, init ref<int32> scalarType)
 {
+    if (TryGetPrimitiveScalarType(type, init var primitive))
+    {
+        scalarType = primitive;
+        return true;
+    }
+    if (type.Kind != 2 || Host.FrontendProgram.Length != 4284)
+    {
+        return false;
+    }
+    int32 count = Host.FrontendProgram[Host.FrontendProgram.Length - 1];
+    if (count < 0 || count > 12)
+    {
+        return false;
+    }
+    for (mut int32 index = 0; index < count; index = index + 1)
+    {
+        int32 entry = Host.FrontendProgram.Length - 1 - (index + 1) * 5;
+        require SourceRange.TryCreate(Host.FrontendProgram[entry],
+            Host.FrontendProgram[entry + 1], init var nameSpan);
+        if (SameTokenSpelling(type, new Token(2, nameSpan)))
+        {
+            int32 selected = Host.FrontendProgram[entry + 4];
+            if (selected < 1 || selected > 8)
+            {
+                return false;
+            }
+            scalarType = selected;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool TryGetPrimitiveScalarType(Token type, init ref<int32> scalarType)
+{
     if (type.Kind != 2)
     {
         return false;

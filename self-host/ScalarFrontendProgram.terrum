@@ -54,10 +54,277 @@ bool ScalarProgramError(int32 code, SourceRange span, out bool handled)
     return true;
 }
 
+void ClearScalarAliasTable(int32 count)
+{
+    for (mut int32 word = 0; word <= count * 5; word = word + 1)
+    {
+        Host.FrontendProgram[Host.FrontendProgram.Length - 1 - word] = 0;
+    }
+}
+
+// The 64-token bound leaves at most nine function frames when aliases are present.
+bool TryBuildScalarAliasTable(Span<Token> tokenView, int32 count,
+    out int32 aliasCount, out SourceRange errorSpan)
+{
+    aliasCount = 0;
+    require SourceRange.TryCreate(0, 0, init errorSpan);
+    Host.FrontendProgram[Host.FrontendProgram.Length - 1] = 0;
+    mut int32 at = 0;
+    while (at < count - 1)
+    {
+        int32 declarationStart = at;
+        mut bool hasAttributes = false;
+        while (at < count - 1
+            && TryGetScalarWindowToken(tokenView, 0, count, false, at, init var attribute)
+            && attribute.Kind == 50)
+        {
+            hasAttributes = true;
+            at = at + 1;
+            while (at < count - 1
+                && TryGetScalarWindowToken(tokenView, 0, count, false, at, init var part)
+                && part.Kind != 51)
+            {
+                at = at + 1;
+            }
+            if (at >= count - 1
+                || !TryGetScalarWindowToken(tokenView, 0, count, false, at, init var closeAttribute)
+                || closeAttribute.Kind != 51)
+            {
+                require TryGetScalarWindowToken(tokenView, 0, count, false,
+                    declarationStart, init var startToken);
+                errorSpan = startToken.Range;
+                return false;
+            }
+            at = at + 1;
+        }
+
+        mut int32 visibility = 0;
+        while (at < count - 1
+            && TryGetScalarWindowToken(tokenView, 0, count, false, at, init var modifier)
+            && (modifier.Kind == 7 || modifier.Kind == 8))
+        {
+            if (visibility != 0)
+            {
+                errorSpan = modifier.Range;
+                return false;
+            }
+            visibility = modifier.Kind;
+            at = at + 1;
+        }
+
+        if (at < count - 1
+            && TryGetScalarWindowToken(tokenView, 0, count, false, at, init var aliasToken)
+            && aliasToken.Kind == 102)
+        {
+            if (hasAttributes || visibility == 7)
+            {
+                errorSpan = aliasToken.Range;
+                return false;
+            }
+            if (aliasCount == 12)
+            {
+                errorSpan = aliasToken.Range;
+                return false;
+            }
+            at = at + 1;
+            if (!TryGetScalarWindowToken(tokenView, 0, count, false, at, init var name)
+                || name.Kind != 2
+                || !TryGetScalarWindowToken(tokenView, 0, count, false, at + 1, init var equals)
+                || equals.Kind != 64
+                || !TryGetScalarWindowToken(tokenView, 0, count, false, at + 2, init var target)
+                || target.Kind != 2
+                || !TryGetScalarWindowToken(tokenView, 0, count, false, at + 3, init var semicolon)
+                || semicolon.Kind != 52)
+            {
+                errorSpan = aliasToken.Range;
+                return false;
+            }
+            for (mut int32 index = 0; index < aliasCount; index = index + 1)
+            {
+                int32 entry = Host.FrontendProgram.Length - 1 - (index + 1) * 5;
+                require SourceRange.TryCreate(Host.FrontendProgram[entry],
+                    Host.FrontendProgram[entry + 1], init var priorName);
+                if (SameTokenSpelling(name, new Token(2, priorName)))
+                {
+                    errorSpan = name.Range;
+                    return false;
+                }
+            }
+            int32 entry = Host.FrontendProgram.Length - 1 - (aliasCount + 1) * 5;
+            Host.FrontendProgram[entry] = name.Range.Start;
+            Host.FrontendProgram[entry + 1] = name.Range.Length;
+            Host.FrontendProgram[entry + 2] = target.Range.Start;
+            Host.FrontendProgram[entry + 3] = target.Range.Length;
+            Host.FrontendProgram[entry + 4] = 0;
+            aliasCount = aliasCount + 1;
+            at = at + 4;
+            continue;
+        }
+
+        at = declarationStart;
+        mut int32 body = at;
+        while (body < count - 1
+            && TryGetScalarWindowToken(tokenView, 0, count, false, body, init var headerToken)
+            && headerToken.Kind != 82 && headerToken.Kind != 48)
+        {
+            body = body + 1;
+        }
+        if (body >= count - 1)
+        {
+            require TryGetScalarWindowToken(tokenView, 0, count, false, at,
+                init var startToken);
+            errorSpan = startToken.Range;
+            return false;
+        }
+        require TryGetScalarWindowToken(tokenView, 0, count, false, body, init var opening);
+        if (opening.Kind == 82)
+        {
+            at = body + 1;
+            while (at < count - 1
+                && TryGetScalarWindowToken(tokenView, 0, count, false, at, init var arrowToken)
+                && arrowToken.Kind != 52)
+            {
+                at = at + 1;
+            }
+            if (at >= count - 1)
+            {
+                errorSpan = opening.Range;
+                return false;
+            }
+            at = at + 1;
+        }
+        else
+        {
+            mut int32 depth = 1;
+            at = body + 1;
+            while (at < count - 1 && depth != 0)
+            {
+                require TryGetScalarWindowToken(tokenView, 0, count, false, at, init var blockToken);
+                if (blockToken.Kind == 48) { depth = depth + 1; }
+                if (blockToken.Kind == 49) { depth = depth - 1; }
+                at = at + 1;
+            }
+            if (depth != 0)
+            {
+                errorSpan = opening.Range;
+                return false;
+            }
+        }
+    }
+
+    Host.FrontendProgram[Host.FrontendProgram.Length - 1] = aliasCount;
+    return TryResolveScalarAliases(aliasCount, out errorSpan);
+}
+
+bool TryResolveScalarAliases(int32 aliasCount, out SourceRange errorSpan)
+{
+    require SourceRange.TryCreate(0, 0, init errorSpan);
+    if (Host.FrontendProgram.Length != 4284 || aliasCount < 0 || aliasCount > 12)
+    {
+        return false;
+    }
+    for (mut int32 index = 0; index < aliasCount; index = index + 1)
+    {
+        if (!TryResolveScalarAlias(index, 0, aliasCount, out errorSpan))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool TryResolveScalarAlias(int32 index, int32 depth, int32 aliasCount,
+    out SourceRange errorSpan)
+{
+    require SourceRange.TryCreate(0, 0, init errorSpan);
+    if (Host.FrontendProgram.Length != 4284 || aliasCount < 0 || aliasCount > 12
+        || index < 0 || index >= aliasCount)
+    {
+        return false;
+    }
+    int32 entry = Host.FrontendProgram.Length - 1 - (index + 1) * 5;
+    require entry >= 0 && entry + 4 < Host.FrontendProgram.Length;
+    int32 selected = Host.FrontendProgram[entry + 4];
+    if (selected > 0 && selected <= 8)
+    {
+        return true;
+    }
+    require SourceRange.TryCreate(Host.FrontendProgram[entry],
+        Host.FrontendProgram[entry + 1], init var nameSpan);
+    if (selected != 0 || depth >= 12)
+    {
+        errorSpan = nameSpan;
+        return false;
+    }
+    Host.FrontendProgram[entry + 4] = -1;
+    require SourceRange.TryCreate(Host.FrontendProgram[entry + 2],
+        Host.FrontendProgram[entry + 3], init var targetSpan);
+    var target = new Token(2, targetSpan);
+    if (TryGetPrimitiveScalarType(target, init var primitive))
+    {
+        Host.FrontendProgram[entry + 4] = primitive;
+        return true;
+    }
+    for (mut int32 candidate = 0; candidate < aliasCount; candidate = candidate + 1)
+    {
+        int32 candidateEntry = Host.FrontendProgram.Length - 1 - (candidate + 1) * 5;
+        require candidateEntry >= 0 && candidateEntry + 4 < Host.FrontendProgram.Length;
+        require SourceRange.TryCreate(Host.FrontendProgram[candidateEntry],
+            Host.FrontendProgram[candidateEntry + 1], init var candidateName);
+        if (SameTokenSpelling(target, new Token(2, candidateName)))
+        {
+            if (!TryResolveScalarAlias(candidate, depth + 1, aliasCount, out errorSpan))
+            {
+                return false;
+            }
+            Host.FrontendProgram[entry + 4] =
+                Host.FrontendProgram[candidateEntry + 4];
+            return true;
+        }
+    }
+    errorSpan = targetSpan;
+    return false;
+}
+
+bool TrySkipScalarAlias(Span<Token> tokenView, int32 count, int32 start, out int32 end)
+{
+    end = start;
+    mut int32 at = start;
+    while (at < count - 1
+        && TryGetScalarWindowToken(tokenView, 0, count, false, at, init var modifier)
+        && (modifier.Kind == 7 || modifier.Kind == 8))
+    {
+        at = at + 1;
+    }
+    if (at >= count - 1
+        || !TryGetScalarWindowToken(tokenView, 0, count, false, at, init var aliasToken)
+        || aliasToken.Kind != 102)
+    {
+        return false;
+    }
+    while (at < count - 1
+        && TryGetScalarWindowToken(tokenView, 0, count, false, at, init var token)
+        && token.Kind != 52)
+    {
+        at = at + 1;
+    }
+    if (at >= count - 1)
+    {
+        return false;
+    }
+    at = at + 1;
+    end = at;
+    return true;
+}
+
 bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
     SourceRange spacingError, out bool handled)
 {
     handled = false;
+    for (mut int32 word = 0; word < Host.FrontendProgram.Length; word = word + 1)
+    {
+        Host.FrontendProgram[word] = 0;
+    }
     if (count > 64)
     {
         require TryGetScalarWindowToken(tokenView, 0, count, false, 64, init var excess);
@@ -65,10 +332,19 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
     }
     if (spacingError.Length != 0) { return ScalarProgramError(1, spacingError, out handled); }
     require SourceRange.TryCreate(0, 0, init var empty);
+    if (!TryBuildScalarAliasTable(tokenView, count, out var aliasCount, out var aliasError))
+    {
+        return ScalarProgramError(1, empty, out handled);
+    }
     mut int32 start = 0;
     mut int32 functions = 0;
     while (start < count - 1)
     {
+        if (TrySkipScalarAlias(tokenView, count, start, out var afterAlias))
+        {
+            start = afterAlias;
+            continue;
+        }
         if (!ScalarFrontendState.TryCreate(start, count - 1, true, empty, out var probe)
             || !probe.TryInventoryHeader(init var header, out var headerEnd, tokenView))
         {
@@ -77,7 +353,7 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
         if (!header.IsValid)
         {
             // A single declaration retains the legacy parser's diagnostics.
-            if (functions == 0)
+            if (functions == 0 && aliasCount == 0)
             {
                 for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
                 return true;
@@ -131,7 +407,7 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
         functions = functions + 1;
         start = end;
     }
-    if (functions < 2)
+    if (functions == 0 || functions < 2 && aliasCount == 0)
     {
         for (mut int32 word = 0; word < Host.FrontendProgram.Length; word = word + 1)
         {
@@ -210,6 +486,8 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
         }
     }
     for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
+    // Without aliases, word 4283 may be the tenth frame's final call-target slot.
+    if (aliasCount != 0) { ClearScalarAliasTable(aliasCount); }
     Host.FrontendProgram[1] = 1;
     Host.FrontendProgram[3] = 0;
     handled = true;
