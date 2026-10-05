@@ -494,6 +494,7 @@ internal sealed partial class Binder
             {
                 continue;
             }
+            var simpleTypeName = StructName(declaration).Name;
             var witnesses = new Dictionary<string, PrimitiveType>(StringComparer.Ordinal);
             if (!_structs[index].IsInternal)
             {
@@ -505,7 +506,7 @@ internal sealed partial class Binder
                 var protocolName = shape ? FindProtocol(head) : null;
                 if (protocolName is null
                     || !MatchesProtocolArguments(_protocols[protocolName], partNames,
-                        StructName(declaration).Name, typeName))
+                        simpleTypeName, typeName))
                 {
                     Report("TRM3007", "Conformance requires a distinct declared local protocol with exact operand and result types.", name.Span);
                     continue;
