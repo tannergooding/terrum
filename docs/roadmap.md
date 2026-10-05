@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `1c07d66` | Reuse validated frontend tokens for the single-function fallback |
 | `acc45de` | Add an invocation-scoped UTF-16 `SourceText` facade over the immutable host grant |
 | `3b53fa2` | Transfer validated scalar frontend snapshots through `TokenCursor` before existing managed parsing |
 | `5e9816f` | Pre-size module class identity index |
