@@ -455,9 +455,12 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Graph library has no functions.");
             }
             var functions = ReadFunctions(reader, count, expectedConsumer: true, structures, classes);
-            if (functions.Any(HasUnsupportedModuleCallerUnsafeContract))
+            foreach (var function in functions)
             {
-                throw new ModuleFormatException("Graph library contains an unsupported caller-unsafe contract.");
+                if (HasUnsupportedModuleCallerUnsafeContract(function))
+                {
+                    throw new ModuleFormatException("Graph library contains an unsupported caller-unsafe contract.");
+                }
             }
             var module = new Module(true, -1, structures, functions) {
                 Classes = classes,
