@@ -80,6 +80,16 @@ public sealed class NativeModuleSetsTests
     }
 
     [Fact]
+    public void PersistedConsumerSetWithoutImportsValidatesAgainstPopulatedProviders()
+    {
+        var alpha = Producer(Alpha, "Alpha", "First");
+        var beta = Producer(Beta, "Beta", "Second");
+        var consumer = MakeConsumerSource("int32 Main() { return 42; }", alpha, beta);
+
+        NativeModuleCompiler.ValidateConsumerSet(consumer, [alpha, beta]);
+    }
+
+    [Fact]
     public void ProviderIdentityOrderControlsReferenceAndPersistedDependencyOrder()
     {
         var firstByIdentity = Producer(Beta, "Beta", "AProvider");
