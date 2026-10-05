@@ -553,17 +553,20 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Producer exports must have public, supported native declarations.");
         }
-        Dictionary<string, int>? structureIndexes = null;
-        var exportedTypes = RequiredStructures(indexes.Select(index => Declaration(program.Functions[index])),
-            program.Structures, findStructureIndex: FindStructureIndex);
         var cleanupStructures = program.Structures.Where(static structure => structure.CleanupMethod is not null)
             .ToArray();
-        foreach (var structure in cleanupStructures)
+        Dictionary<string, int>? structureIndexes = null;
+        if (cleanupStructures.Length != 0)
         {
-            if (exportedTypes.Contains(structure.Name) && structure.CleanupMethod is string cleanup
-                && !names.Contains(cleanup))
+            var exportedTypes = RequiredStructures(indexes.Select(index => Declaration(program.Functions[index])),
+                program.Structures, findStructureIndex: FindStructureIndex);
+            foreach (var structure in cleanupStructures)
             {
-                throw new ModuleContractException($"Exported unique type '{structure.Name}' requires its cleanup method to be exported.");
+                if (exportedTypes.Contains(structure.Name) && structure.CleanupMethod is string cleanup
+                    && !names.Contains(cleanup))
+                {
+                    throw new ModuleContractException($"Exported unique type '{structure.Name}' requires its cleanup method to be exported.");
+                }
             }
         }
         if (hasPrivateManagedState)
