@@ -250,10 +250,9 @@ public static partial class NativeModuleCompiler
 
     private static void ValidateProducerImage(Package producer, IReadOnlyList<string> exports)
     {
-        var profile = ModuleCompiler.GetNativeProfileVersion(producer.Contract, false);
         NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity), exports,
-            producer.Policy, allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),
-            allowManagedRuntimeData: AllowsManagedRuntimeData(profile));
+            producer.Policy, allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(producer.Profile),
+            allowManagedRuntimeData: AllowsManagedRuntimeData(producer.Profile));
     }
 
     private static void ValidateConsumerImage(Package consumer)
