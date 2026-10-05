@@ -306,24 +306,60 @@ internal sealed partial class Binder
                         }
                     }
                 }
-                var formalTokens = parameters?.Children.OfType<SyntaxTokenElement>().ToArray() ?? [];
-                var selfMarkers = formalTokens.Where(static child =>
-                    child.Token.Kind == TokenKind.Identifier && child.Token.Text == "this").ToArray();
-                var hasSelf = selfMarkers.Length == 1 && formalTokens.Length > 2
-                    && ReferenceEquals(formalTokens[1], selfMarkers[0]);
-                var variables = formalTokens
-                    .Where(static child => child.Token.Kind == TokenKind.Identifier)
-                    .Where(static child => child.Token.Text != "this")
-                    .Select(static child => child.Token.Name).ToArray();
-                if (variables.Any(static variable => TryPrimitiveType(variable, out _)))
+                var variables = new string[3];
+                var variableCount = 0;
+                var formalTokenCount = 0;
+                var selfMarkerCount = 0;
+                var selfMarkerPosition = -1;
+                var hasPrimitiveVariable = false;
+                var hasDuplicateVariable = false;
+                if (parameters is not null)
+                {
+                    foreach (var child in parameters.Children)
+                    {
+                        if (child is not SyntaxTokenElement tokenElement)
+                        {
+                            continue;
+                        }
+                        var token = tokenElement.Token;
+                        if (token.Kind == TokenKind.Identifier)
+                        {
+                            if (token.Text == "this")
+                            {
+                                selfMarkerCount++;
+                                if (selfMarkerPosition < 0)
+                                {
+                                    selfMarkerPosition = formalTokenCount;
+                                }
+                            }
+                            else
+                            {
+                                var variable = token.Name;
+                                hasPrimitiveVariable |= TryPrimitiveType(variable, out _);
+                                if (variableCount < variables.Length)
+                                {
+                                    for (var index = 0; index < variableCount; index++)
+                                    {
+                                        hasDuplicateVariable |= StringComparer.Ordinal.Equals(
+                                            variables[index], variable);
+                                    }
+                                    variables[variableCount] = variable;
+                                }
+                                variableCount++;
+                            }
+                        }
+                        formalTokenCount++;
+                    }
+                }
+                var hasSelf = selfMarkerCount == 1 && formalTokenCount > 2 && selfMarkerPosition == 1;
+                if (hasPrimitiveVariable)
                 {
                     Report("TRM3003", "Primitive type names cannot be used as interface type parameters.",
                         node.Span);
                     continue;
                 }
-                if (selfMarkers.Length > 1 || (selfMarkers.Length == 1 && !hasSelf)
-                    || variables.Length is not (2 or 3)
-                    || variables.Distinct(StringComparer.Ordinal).Count() != variables.Length
+                if (selfMarkerCount > 1 || (selfMarkerCount == 1 && !hasSelf)
+                    || variableCount is not (2 or 3) || hasDuplicateVariable
                     || hasInvalidInterfaceModifier)
                 {
                     Report("TRM3001", "Local static operator interfaces require two or three distinct type parameters and internal visibility.", node.Span);
@@ -381,9 +417,9 @@ internal sealed partial class Binder
                 if (op is not TokenKind operation
                     || !((arity == 1 && IsStaticUnaryOperator(operation))
                         || (arity == 2 && IsStaticBinaryOperator(operation)))
-                    || variables.Length != arity + 1 || signature.Length != 2
+                    || variableCount != arity + 1 || signature.Length != 2
                     || signature[0].Kind != SyntaxKind.TypeName
-                    || NameText(signature[0]) != variables[^1]
+                    || NameText(signature[0]) != variables[variableCount - 1]
                     || arguments[0].Children is not [SyntaxNode first, SyntaxTokenElement]
                     || NameText(first) != variables[0]
                     || (arity == 2 && (arguments[1].Children is not [SyntaxNode second, SyntaxTokenElement]
