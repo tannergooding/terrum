@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f1ac891` | Seed token-span dependency facts without LINQ snapshots |
 | `e8f7274` | Validate GenericParam ownership without owner map |
 | `05c0f85` | Check method ownership against current module range |
 | `19151a0` | Validate FieldDef rows in a single pass |
