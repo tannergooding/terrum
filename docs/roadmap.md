@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f8ed4aa` | Index struct visibility for library exports |
 | `794ee9f` | Index functions during library export selection |
 | `f549b2f` | Fuse cleanup detection into spill sizing |
 | `76f170b` | Reuse validated source-map slot selectors |
