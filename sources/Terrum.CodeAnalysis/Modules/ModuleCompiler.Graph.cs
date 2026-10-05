@@ -311,8 +311,11 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Managed graph import crosses a non-Copy boundary.");
         }
-        var indexes = module.Functions.Select((item, index) => (item.Name, index))
-            .ToDictionary(static item => item.Name, static item => item.index, StringComparer.Ordinal);
+        var indexes = new Dictionary<string, int>(module.Functions.Length, StringComparer.Ordinal);
+        for (var index = 0; index < module.Functions.Length; index++)
+        {
+            indexes.Add(module.Functions[index].Name, index);
+        }
         var functions = ImmutableArray.CreateBuilder<BoundFunction>(module.Functions.Length);
         for (var index = 0; index < module.Functions.Length; index++)
         {
