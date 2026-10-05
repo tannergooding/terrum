@@ -246,13 +246,18 @@ internal static class PeImage
             group.Ilt = at;
             at = checked(at + (8 * (group.Symbols.Count + 1)));
         }
+
         var iatStart = at;
+        var targets = new Dictionary<(string DllName, string ExportName), int>();
         foreach (var group in groups)
         {
             group.Iat = at;
+            var dllName = group.DllName.ToUpperInvariant();
             for (var index = 0; index < group.Symbols.Count; index++)
             {
-                group.Symbols[index].Iat = at + (8 * index);
+                var symbol = group.Symbols[index];
+                symbol.Iat = at + (8 * index);
+                targets.Add((dllName, symbol.Name), symbol.Iat);
             }
             at = checked(at + (8 * (group.Symbols.Count + 1)));
         }
@@ -281,14 +286,6 @@ internal static class PeImage
                 WriteAscii(bytes, symbol.HintName + 2, symbol.Name);
             }
             WriteAscii(bytes, group.Name, group.DllName);
-        }
-        var targets = new Dictionary<(string DllName, string ExportName), int>();
-        foreach (var group in groups)
-        {
-            foreach (var symbol in group.Symbols)
-            {
-                targets.Add((group.DllName.ToUpperInvariant(), symbol.Name), symbol.Iat);
-            }
         }
         return new ImportTable(bytes, groups, targets, descriptors, iatStart, iatSize);
     }
