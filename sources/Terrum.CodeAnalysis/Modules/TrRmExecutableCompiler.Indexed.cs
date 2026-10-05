@@ -1923,6 +1923,13 @@ public static partial class TrRmExecutableCompiler
 
         private static bool AcyclicTerminalPrefix(BoundStatement statement)
         {
+            if (statement is BoundWhile loop)
+            {
+                return EmptyFalsePreTestLoop(loop)
+                    || (loop.IsPostTested
+                        && loop.Condition is BoundConstant { Type: PrimitiveType.Bool, Value: 0 }
+                        && AcyclicTerminalPrefix(loop.Body));
+            }
             if (statement is BoundIf conditional)
             {
                 return AcyclicTerminalPrefix(conditional.Then)

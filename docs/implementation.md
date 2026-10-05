@@ -2916,8 +2916,9 @@ satisfy an enclosing loop's break proof. The
 lowering omits the unreachable loop condition and iterator and adds no loop
 region or backedge. A literal-false pre-test with an empty cleanup-free body
 also erases to fallthrough. A literal-false post-test executes a supported
-cleanup-free fallthrough body once, then omits the condition without adding a
-loop region or backedge. `for` initializers remain in source order; an
+cleanup-free fallthrough body once, recursively erasing eligible nested
+literal-false loops, then omits the condition without adding a loop region or
+backedge. `for` initializers remain in source order; an
 iterator is omitted only in the exact recognized embedded-body shape. Bodies
 with implicit fallthrough, continues, managed-local cleanup or other
 nonterminal effects remain outside this erasure. All retained inactive
