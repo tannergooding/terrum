@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `28996b4` | Skip sorting canonical native import lists |
 | `6a37644` | Skip extent sorting for ordered TRRM section payloads |
 | `2e0b2e1` | Skip sorting canonical native image export lists |
 | `f7c83a4` | Build sorted graph import snapshots without LINQ materialization |
