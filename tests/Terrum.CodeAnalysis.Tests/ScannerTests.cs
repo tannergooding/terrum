@@ -69,7 +69,7 @@ public sealed class ScannerTests
     [InlineData("int32 Main() { Host.State[2] = Fail(); return 0; } int32 Fail() { require false; return 0; }", unchecked((int)0xE0540004))]
     [InlineData("int32 Offset() { return -1; } int32 Main() { return Host.State[^Offset()]; }", unchecked((int)0xE0540004))]
     [InlineData("int32 Offset() { return 0; } int32 Main() { return Host.State[^Offset()]; }", unchecked((int)0xE0540004))]
-    [InlineData("int32 Offset() { return 2; } int32 Main() { return Host.State[^Offset()]; }", unchecked((int)0xE0540004))]
+    [InlineData("int32 Offset() { return 2; } int32 Main() { Host.State[0] = 42; return Host.State[^Offset()]; }", 42)]
     [InlineData("int32 Main() { Host.State[Index()] = Value(); return Host.State[0] * 10 + Host.State[1]; } int32 Index() { Host.State[0] = Host.State[0] + 1; return 1; } int32 Value() { return Host.State[0] + 6; }", 17)]
     public async Task BufferAccessChecksBoundsAndPreservesEvaluationOrderAsync(string source, int expected)
     {
