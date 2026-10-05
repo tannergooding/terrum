@@ -355,7 +355,8 @@ internal static class NativeModuleImageValidator
                     {
                         throw Invalid();
                     }
-                    if (checkedExceptions && index == 1 && !symbols.SequenceEqual(["__C_specific_handler"]))
+                    if (checkedExceptions && index == 1
+                        && (symbols.Count != 1 || symbols[0] != "__C_specific_handler"))
                     {
                         throw Invalid();
                     }
