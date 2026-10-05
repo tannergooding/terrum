@@ -23,7 +23,7 @@ public static class TrRmSourceMapTableWriter
             throw new ArgumentOutOfRangeException(nameof(mappings));
         }
 
-        var seen = new HashSet<(int Body, int Block, int Ordinal)>();
+        var seen = new HashSet<(int Body, int Block, int Ordinal)>(mappings.Count);
         var fileSlots = new Dictionary<int, (int Slot, int OwnerModule)>();
         var fileRows = new List<int>();
         var hasLastBody = false;
