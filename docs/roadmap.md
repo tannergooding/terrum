@@ -167,7 +167,10 @@ prerequisite has already been met.
    implementation does not settle the general schema or approve the
    [reference-call metadata proposal](proposals/reference-call-metadata.md),
    which recommends a narrow first dependency registry and reuse of the
-   assigned caller-unsafe effect bit.
+   assigned caller-unsafe effect bit. The proposal also recommends, but does
+   not implement, a structurally validated indexed-Body region for explicit
+   caller-unsafe scopes; compact-linear Bodies and caller-unsafe TRRM calls
+   remain unsupported.
 2. **Full runtime/structured contracts — initialization and outputs.** Complete
    general `out`/`init ref<T>` declaration and call migration with definite
    initialization, cleanup and publication rules. Preserve their distinct

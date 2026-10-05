@@ -97,7 +97,33 @@ calls outside the executable TRRM profile; do not treat the callee's Effects
 bit or hosted source verification as proof that an individual call was
 authorized.
 
-### 3. Which source rules and metadata gate general output-call migration?
+### 3. How should executable Bodies validate caller-unsafe scope?
+
+**Summary:** The source caller obligation and assigned Effects bit `0x04` are
+settled, and semantic-module revision 56 reconstructs authorization from
+explicit `BoundUnsafe` scopes. Executable TRRM Bodies still reject these
+declarations and calls: their current region kind `0x06` is reserved, and a
+call-site authorization bit would not prove explicit unsafe-block enclosure.
+
+**Recommendation:** Define a first executable slice for indexed, fail-fast
+Bodies with root-free Copy-scalar shapes only, using region kind `0x06` as a
+structurally validated lexical unsafe region. Specify parent nesting, block
+membership, legal entry and exit edges, normal continuation, returns,
+fail-fast departure and loop transfers before enabling it; split blocks at
+unsafe-scope boundaries and derive authorization only from validated
+enclosing-region membership. Keep compact-linear Bodies scope-free.
+Unsafe regions add no cleanup, exception-unwind or lifetime authority; reject
+Bodies that require those behaviors. Limit the slice to top-level
+caller-unsafe declarations and local calls; keep `unsafe(expr)`, imports,
+unsafe fields, accessors and operators rejected.
+Writers and readers must audit every call and every Body, including uncalled
+functions, and reject malformed, stripped, bypassed or leaking scope
+structures. This validates Body structure under the existing producer-trust
+model; it does not authenticate original source authorship. Gate support behind
+assigned Body feature requirements. This is a representation proposal, not
+executable support or source-contract approval.
+
+### 4. Which source rules and metadata gate general output-call migration?
 
 **Summary:** Grammar §5.1 accepts the explicit `init` call-site spelling but
 leaves complete place matching, overload binding and conditional-output
