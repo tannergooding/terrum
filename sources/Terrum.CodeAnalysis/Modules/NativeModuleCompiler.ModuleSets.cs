@@ -193,7 +193,9 @@ public static partial class NativeModuleCompiler
             }
             providers[i] = new ValidatedProvider(package, reference);
         }
-        return [.. providers.OrderBy(static item => item.Package.Identity, StringComparer.OrdinalIgnoreCase)];
+        Array.Sort(providers, static (left, right) =>
+            StringComparer.OrdinalIgnoreCase.Compare(left.Package.Identity, right.Package.Identity));
+        return providers;
     }
 
     private static void ValidateSet(SetPackage set, ValidatedProvider[] providers)
