@@ -108,9 +108,7 @@ public static partial class ModuleCompiler
     internal static byte[] CreateConsumerSet(BoundProgram program, IReadOnlyList<byte[]> producers)
     {
         var reference = CreateReferenceSet(producers);
-        var result = CreateConsumerAgainstReference(program, reference, allowManagedParticipant: true);
-        ValidateConsumerAgainstReference(result, reference);
-        return result;
+        return CreateConsumerAgainstReference(program, reference, allowManagedParticipant: true);
     }
 
     internal static byte[] CreateConsumerAgainstReference(BoundProgram program, CompilationReference reference,

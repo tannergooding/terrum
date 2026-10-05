@@ -48,7 +48,6 @@ public static partial class NativeModuleCompiler
         var referenceSet = CreateReferenceSet(providers);
         var semantic = ModuleCompiler.CreateConsumerAgainstReference(program, referenceSet,
             allowManagedParticipant: true);
-        ModuleCompiler.ValidateConsumerAgainstReference(semantic, referenceSet);
         var imports = ModuleCompiler.GetConsumerSetDeclarations(semantic).ToHashSet(StringComparer.Ordinal);
         var externalFunctionNames = program.Functions.Where(static item => item.IsExternal)
             .Select(static item => item.Name).ToHashSet(StringComparer.Ordinal);
