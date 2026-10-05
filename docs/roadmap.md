@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `5516431` | Build native consumer call indexes directly |
 | `91672b2` | Build native producer validation inputs directly |
 | `7a8a7f3` | Materialize native producer declarations directly |
 | `9f30b3c` | Skip empty graph validation lookups |
