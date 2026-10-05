@@ -2350,13 +2350,13 @@ pass; signed unary literals reuse the scalar constant-folding helper;
 visibility remains private unless declared `public` (including explicit `internal`). Native AOT/JIT execute
 the program with test-local callers under both failure policies. This is an
 in-process bridge, not a standalone compiler or persisted native bootstrap
-artifact. The native compiler-primitives DLL exports the source-independent
-`CharacterFacts` helpers and the pure `Utf16CodeUnits` decoder and width
-helper. The Windows x64 integration test invokes every `CharacterFacts`
-export, exhaustively checks digit and line-break classification, verifies
-decimal and hexadecimal mapping/rejection with output preservation and
-canaries, and calls both UTF-16 exports over representative scalar and width
-boundaries. The DLL
+artifact. The native compiler-primitives DLL exports `SourceRange.TryCreate`, the
+source-independent `CharacterFacts` helpers and the pure `Utf16CodeUnits`
+decoder and width helper. The Windows x64 integration test compares the
+source-range export with hosted `TextSpan` boundaries, verifies two-word
+publication and false-path preservation with canaries, invokes every
+`CharacterFacts` export and calls both UTF-16 exports over representative
+scalar and width boundaries. The DLL
 still excludes the `Host.Source`-dependent `Utf16Scalar` adapter and scalar
 frontend. These remain internal compiler exports, not a stable native ABI.
 The frontend retains its source-grant and hosted verifier/emitter boundaries.

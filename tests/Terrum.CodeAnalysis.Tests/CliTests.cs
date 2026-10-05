@@ -15,6 +15,7 @@ using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Text;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -35,6 +36,24 @@ public sealed partial class CliTests
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Char16ValueExport(ushort character);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeSourceRange
+    {
+        public int Start;
+        public int Length;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GuardedSourceRange
+    {
+        public int Before;
+        public NativeSourceRange Range;
+        public int After;
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int SourceRangeTryCreateExport(int start, int length, ref NativeSourceRange range);
 
     [Theory]
     [InlineData(false)]
@@ -628,6 +647,7 @@ public sealed partial class CliTests
         try
         {
             foreach (var export in new[] {
+                "Terrum.CodeAnalysis.SourceRange.TryCreate",
                 "Terrum.CodeAnalysis.IsAsciiDigit",
                 "Terrum.CodeAnalysis.IsLineBreak",
                 "Terrum.CodeAnalysis.GetDecimalDigit",
@@ -685,6 +705,87 @@ public sealed partial class CliTests
                     Assert.Equal(value - 48, getDecimalDigit(character));
                 }
             }
+
+            Assert.Equal(8, Marshal.SizeOf<NativeSourceRange>());
+            Assert.Equal(0, Marshal.OffsetOf<NativeSourceRange>(nameof(NativeSourceRange.Start)).ToInt32());
+            Assert.Equal(4, Marshal.OffsetOf<NativeSourceRange>(nameof(NativeSourceRange.Length)).ToInt32());
+            Assert.Equal(16, Marshal.SizeOf<GuardedSourceRange>());
+            Assert.Equal(4, Marshal.OffsetOf<GuardedSourceRange>(nameof(GuardedSourceRange.Range)).ToInt32());
+            Assert.Equal(12, Marshal.OffsetOf<GuardedSourceRange>(nameof(GuardedSourceRange.After)).ToInt32());
+
+            var tryCreateRange = Marshal.GetDelegateForFunctionPointer<SourceRangeTryCreateExport>(
+                NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.SourceRange.TryCreate"));
+            const int lowerRangeCanary = 0x13579BDF;
+            const int sentinelStart = 0x2468ACE0;
+            const int sentinelLength = unchecked((int)0xECA86420);
+            const int upperRangeCanary = 0x5A5A5A5A;
+            foreach (var (start, length, expectedSuccess) in new (int Start, int Length, bool ExpectedSuccess)[] {
+                (0, 0, true),
+                (0, 1, true),
+                (1, 0, true),
+                (7, 19, true),
+                (int.MaxValue, 0, true),
+                (int.MaxValue - 1, 1, true),
+                (0, int.MaxValue, true),
+                (1, int.MaxValue - 1, true),
+                (-1, 0, false),
+                (0, -1, false),
+                (-1, -1, false),
+                (int.MinValue, 0, false),
+                (0, int.MinValue, false),
+                (int.MinValue, int.MaxValue, false),
+                (int.MaxValue, int.MinValue, false),
+                (int.MaxValue, 1, false),
+                (1, int.MaxValue, false),
+                (int.MaxValue - 1, 2, false),
+                (2, int.MaxValue - 1, false),
+                (int.MaxValue, int.MaxValue, false),
+            })
+            {
+                TextSpan? expectedRange = null;
+                try
+                {
+                    expectedRange = new TextSpan(start, length);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                }
+
+                Assert.Equal(expectedSuccess, expectedRange.HasValue);
+                var guarded = new GuardedSourceRange {
+                    Before = lowerRangeCanary,
+                    Range = new NativeSourceRange { Start = sentinelStart, Length = sentinelLength },
+                    After = upperRangeCanary,
+                };
+                Assert.Equal(expectedSuccess ? 1 : 0,
+                    tryCreateRange(start, length, ref guarded.Range));
+                Assert.Equal(expectedSuccess ? expectedRange.GetValueOrDefault().Start : sentinelStart,
+                    guarded.Range.Start);
+                Assert.Equal(expectedSuccess ? expectedRange.GetValueOrDefault().Length : sentinelLength,
+                    guarded.Range.Length);
+                Assert.Equal(lowerRangeCanary, guarded.Before);
+                Assert.Equal(upperRangeCanary, guarded.After);
+            }
+
+            var reusedRange = new GuardedSourceRange {
+                Before = lowerRangeCanary,
+                Range = new NativeSourceRange { Start = sentinelStart, Length = sentinelLength },
+                After = upperRangeCanary,
+            };
+            Assert.Equal(0, tryCreateRange(-1, 0, ref reusedRange.Range));
+            Assert.Equal(sentinelStart, reusedRange.Range.Start);
+            Assert.Equal(sentinelLength, reusedRange.Range.Length);
+            Assert.Equal(1, tryCreateRange(5, 7, ref reusedRange.Range));
+            Assert.Equal(5, reusedRange.Range.Start);
+            Assert.Equal(7, reusedRange.Range.Length);
+            Assert.Equal(0, tryCreateRange(int.MaxValue, 1, ref reusedRange.Range));
+            Assert.Equal(5, reusedRange.Range.Start);
+            Assert.Equal(7, reusedRange.Range.Length);
+            Assert.Equal(1, tryCreateRange(0, int.MaxValue, ref reusedRange.Range));
+            Assert.Equal(0, reusedRange.Range.Start);
+            Assert.Equal(int.MaxValue, reusedRange.Range.Length);
+            Assert.Equal(lowerRangeCanary, reusedRange.Before);
+            Assert.Equal(upperRangeCanary, reusedRange.After);
 
             var tryGetHexDigit = Marshal.GetDelegateForFunctionPointer<HexDigitExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.TryGetHexDigit"));
