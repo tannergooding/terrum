@@ -503,7 +503,19 @@ internal sealed partial class PeCompiler
         {
             throw new NotSupportedException("Native text exceeds the 8 MiB image ceiling.");
         }
-        var functions = new List<NativeFunctionRange>();
+        var functionCount = checked((_library ? 0 : 2) + _failureStarts.Length + _funclets.Count
+            + (_managedNodes ? 1 : 0));
+        var sourceFunctionOffsets = ImmutableArray.CreateBuilder<int>(_program.Functions.Length);
+        for (var i = 0; i < _program.Functions.Length; i++)
+        {
+            var function = _program.Functions[i];
+            sourceFunctionOffsets.Add(function.IsExternal ? -1 : _starts[i]);
+            if (!function.IsExternal)
+            {
+                functionCount = checked(functionCount + 1);
+            }
+        }
+        var functions = ImmutableArray.CreateBuilder<NativeFunctionRange>(functionCount);
         if (!_library)
         {
             functions.Add(new NativeFunctionRange(_entryStart, _entryEnd, 40) {
@@ -542,14 +554,13 @@ internal sealed partial class PeCompiler
         }
 
         return new NativeCode(_code.ToArray(), _entryStart,
-            [.. functions],
+            functions.MoveToImmutable(),
             [.. _imports]) {
             AotEntryPoint = processEntry,
             Data = _data,
             ReadOnlyDataLength = _readOnlyDataLength,
             BufferOffsets = [.. _bufferOffsets],
-            SourceFunctionOffsets = [.. _program.Functions.Select((function, index) =>
-                function.IsExternal ? -1 : _starts[index])],
+            SourceFunctionOffsets = sourceFunctionOffsets.MoveToImmutable(),
             DataFixups = [.. _dataFixups],
             NativeImports = [.. _nativeImportFixups],
             ManagedRuntimeOffset = _managedRuntimeOffset,
