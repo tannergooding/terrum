@@ -217,16 +217,20 @@ public static partial class ModuleCompiler
                 throw new ModuleContractException($"Graph-owned type requires exported cleanup '{cleanup}'.");
             }
         }
-        var functions = program.Functions.Select((function, index) => {
+        var functions = ImmutableArray.CreateBuilder<ModuleFunction>(program.Functions.Length);
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            var function = program.Functions[index];
             var remapped = RemapFunction(function, program.Structures, structures);
-            return new ModuleFunction(function.Name,
+            functions.Add(new ModuleFunction(function.Name,
                 Contract(remapped, structures), function.IsExternal ? null : remapped, function.IsExternal) {
                 HasOwnershipTransfer = function.IsExternal
                     ? ownershipTransfers[index] : Compilation.HasOwnershipTransfer(function, program.Structures),
-            };
-        }).ToImmutableArray();
-        RejectImportedTypeMembers(functions, importedTypeNames);
-        var module = new Module(true, -1, structures, functions) {
+            });
+        }
+        var immutableFunctions = functions.MoveToImmutable();
+        RejectImportedTypeMembers(immutableFunctions, importedTypeNames);
+        var module = new Module(true, -1, structures, immutableFunctions) {
             Classes = [.. program.Classes.Select(@class => RemapClass(@class, program.Structures, structures))],
             ImportedStructures = importedTypes.ToImmutable(),
             RuntimePolicy = program.RuntimePolicy,
