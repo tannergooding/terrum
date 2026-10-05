@@ -259,6 +259,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `d05d654` | Pre-size linked module name index |
 | `f22939d` | Pre-size producer contract indexes |
 | `d60a6d7` | Reuse empty consumer import map |
 | `b5eefaa` | Pre-size graph declaration tracking |
