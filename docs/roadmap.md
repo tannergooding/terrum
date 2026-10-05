@@ -261,6 +261,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f206b87` | Verify caller-unsafe semantic-module scope reconstruction and replacement compatibility |
 | `1e4d06c` | Exercise decimal `IntegerParsing` through invocation-scoped semantic-module JIT grants |
 | `335ecc7` | Exercise `StringEscape` decoding through invocation-scoped semantic-module JIT grants |
 | `025e2c8` | Exercise `SourceLineIndex` counts and extents through invocation-scoped semantic-module JIT grants |
