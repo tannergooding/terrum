@@ -2909,9 +2909,11 @@ recursively as return-only terminal tails, or as terminal prefixes with a
 direct break before an enclosing terminal tail; inner breaks route only to
 their own fallthrough and cannot satisfy an enclosing loop's break proof. The
 lowering omits the unreachable loop condition and iterator and adds no loop
-region or backedge. For initializers remain in source order. Bodies with
-implicit fallthrough, continues, managed-local cleanup or other nonterminal
-effects remain outside this erasure. All retained inactive
+region or backedge. A literal-false pre-test with an empty cleanup-free body
+also erases to fallthrough. `for` initializers remain in source order; an
+iterator is omitted only in the exact recognized embedded-body shape. Bodies
+with implicit fallthrough, continues, managed-local cleanup or other
+nonterminal effects remain outside this erasure. All retained inactive
 operations and every function Body still undergo mandatory validation.
 Source scope support is
 an implementation boundary, not an unresolved language contract.

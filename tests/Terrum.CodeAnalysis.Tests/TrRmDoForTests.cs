@@ -73,6 +73,18 @@ public sealed class TrRmDoForTests
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(original, "checked-do"));
     }
 
+    [Theory]
+    [InlineData(42, "int32 Main() { while (false) { } return 42; }")]
+    [InlineData(42, "int32 Main() { mut int32 result = 0; for (result = Start(); false; result = Fail()) { } return result; } int32 Start() { return 42; } int32 Fail() { require false; return 0; }")]
+    public void EmptyFalsePreTestLoopsEraseWithoutChangingInitializerOrder(int expected, string source)
+    {
+        var original = Compile(source);
+        var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "empty-false-loop"));
+        Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
+    }
+
     [Fact]
     public void ReturnOnlyAcyclicLoopsEraseToTheirTerminalReturn()
     {

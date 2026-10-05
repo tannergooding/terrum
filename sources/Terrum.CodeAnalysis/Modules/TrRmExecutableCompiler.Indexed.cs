@@ -1582,6 +1582,10 @@ public static partial class TrRmExecutableCompiler
                         null);
                     break;
                 case BoundWhile loop:
+                    if (EmptyFalsePreTestLoop(loop))
+                    {
+                        break;
+                    }
                     if (TerminalAcyclicLoop(loop, out var acyclicBody, out var hasAcyclicBreak))
                     {
                         var acyclicParent = _current.Region;
@@ -1863,6 +1867,13 @@ public static partial class TrRmExecutableCompiler
             hasBreak = false;
             return false;
         }
+
+        private static bool EmptyFalsePreTestLoop(BoundWhile loop) =>
+            !loop.IsPostTested
+                && loop.Condition is BoundConstant { Type: PrimitiveType.Bool, Value: 0 }
+                && loop.Iterator is null
+                && AcyclicLoopBody(loop) is BoundBlock
+                    { Statements.IsEmpty: true, RetiredManagedLocals.IsEmpty: true };
 
         private static bool TerminalAcyclicLoop(BoundWhile loop, out BoundStatement body, out bool hasBreak)
         {
