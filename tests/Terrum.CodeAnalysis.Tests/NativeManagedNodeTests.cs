@@ -110,6 +110,29 @@ public sealed class NativeManagedNodeTests
     }
 
     [Fact]
+    public async Task InterleavedManagedAndScalarOutputsKeepTheirRootSlotsAsync()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            bool Create(out int32 count, out write ManagedNode first, out int32 marker,
+                out write ManagedNode second) {
+                count = 40;
+                marker = 2;
+                require ManagedNode.TryCreate(1, out first);
+                require ManagedNode.TryCreate(2, out second);
+                return true;
+            }
+            int32 Main() {
+                require Create(out var count, out var first, out var marker, out var second);
+                if (marker != 2) { return 0; }
+                require ManagedHeap.Collect() == 0;
+                return count + first.Value + second.Value;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(43, await RunAsync(Assert.IsType<BoundProgram>(compilation.Program)).ConfigureAwait(true));
+    }
+
+    [Fact]
     public async Task ForConditionAndIteratorManagedOutputsRetireAfterTheLoopAsync()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
