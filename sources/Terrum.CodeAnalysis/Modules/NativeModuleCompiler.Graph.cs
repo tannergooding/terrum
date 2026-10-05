@@ -299,21 +299,25 @@ public static partial class NativeModuleCompiler
     private static CompilationReference GraphReference(GraphPackage[] providers,
         CompilationReference[] references, Dictionary<string, GraphTypeOrigin?>[] provenance)
     {
-        var origins = references.Select((reference, index) => (IReadOnlyDictionary<string, string?>)
-            reference.Structures.ToDictionary(static item => item.Name,
-                item => provenance[index].GetValueOrDefault(item.Name)?.Identity, StringComparer.Ordinal)).ToArray();
+        var origins = new IReadOnlyDictionary<string, string?>[references.Length];
         var cleanupOwners = new Dictionary<string, string?>(StringComparer.Ordinal);
         for (var index = 0; index < references.Length; index++)
         {
-            foreach (var structure in references[index].Structures)
+            var reference = references[index];
+            var providerOrigins = provenance[index];
+            var originsByName = new Dictionary<string, string?>(reference.Structures.Length, StringComparer.Ordinal);
+            foreach (var structure in reference.Structures)
             {
-                var cleanup = provenance[index].GetValueOrDefault(structure.Name)?.CleanupIdentity;
+                var origin = providerOrigins.GetValueOrDefault(structure.Name);
+                originsByName.Add(structure.Name, origin?.Identity);
+                var cleanup = origin?.CleanupIdentity;
                 if (cleanupOwners.TryGetValue(structure.Name, out var previous) && previous != cleanup)
                 {
                     throw new ModuleContractException($"Ambiguous graph cleanup owner for '{structure.Name}'.");
                 }
                 cleanupOwners[structure.Name] = cleanup;
             }
+            origins[index] = originsByName;
         }
         var result = ModuleCompiler.MergeGraphReferences(references, origins);
         if (result.Structures.Any(static item => item.CleanupMethod is not null))
