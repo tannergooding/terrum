@@ -255,6 +255,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `76f170b` | Reuse validated source-map slot selectors |
 | `226831c` | Reuse field names when validating getters |
 | `97e647d` | Skip compact body scans when no bodies exist |
 | `02bd15c` | Reuse generic parameter indexes during constraint binding |
