@@ -65,6 +65,13 @@ units. An independent `BigInteger` oracle checks representability, output
 values and unpublished failures under both runtime policies. This adds
 persistence evidence only; general conversion policy, syntax and witnesses
 remain outside support.
+Persisted semantic-module JIT also exercises all ten signed and unsigned
+checked 64-bit binary helpers, both signed unary helpers, and total
+`MagnitudeInt64` across 935 boundary cases under both runtime policies. An
+independent `BigInteger` oracle checks results, rejection and the distinct
+signed-minimum/-1 quotient and remainder behavior; failed outputs remain
+unreadable. This adds persisted-execution evidence only, not new operators or
+conversion policy.
 A second persisted semantic-module consumer executes private generic
 `CopyAlgorithms` specializations over scalar values, code units and nested
 `Token`/`SourceRange` aggregates. It checks conditional `init ref` publication
