@@ -196,6 +196,12 @@ public static class NativeEmitter
         var selected = new List<(string Name, int Index)>(exports.Count);
         var names = new HashSet<string>(StringComparer.Ordinal);
         var managedExports = UsesManagedNodes(program);
+        var functionIndices = new Dictionary<string, int>(program.Functions.Length, StringComparer.Ordinal);
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            functionIndices.Add(program.Functions[index].Name, index);
+        }
         foreach (var name in exports)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -204,16 +210,8 @@ public static class NativeEmitter
             {
                 throw new ArgumentException("Export names must be unique printable ASCII names of at most 256 bytes.", nameof(exports));
             }
-            var index = -1;
-            for (var i = 0; i < program.Functions.Length; i++)
-            {
-                if (program.Functions[i].Name == name)
-                {
-                    index = i;
-                    break;
-                }
-            }
-            if (index < 0 || !Exportable(program, program.Functions[index], managedExports))
+            if (!functionIndices.TryGetValue(name, out var index)
+                || !Exportable(program, program.Functions[index], managedExports))
             {
                 throw new ArgumentException($"'{name}' is not an accessible native library export.", nameof(exports));
             }
