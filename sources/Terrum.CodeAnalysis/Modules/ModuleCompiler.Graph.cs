@@ -177,18 +177,19 @@ public static partial class ModuleCompiler
     internal static CompilationReference CreateGraphReference(byte[] contract, IReadOnlyList<string> exports,
         bool allowImportedCleanup = false)
     {
-        return CreateGraphReference(ReadGraphLibrary(contract), exports, allowImportedCleanup);
+        return CreateGraphReference(ReadGraphLibrary(contract), exports, allowImportedCleanup,
+            out _);
     }
 
     private static CompilationReference CreateGraphReference(Module module, IReadOnlyList<string> exports,
-        bool allowImportedCleanup)
+        bool allowImportedCleanup, out bool hasPrivateManagedState)
     {
         var names = exports.ToHashSet(StringComparer.Ordinal);
         if (names.Count == 0 || names.Count != exports.Count)
         {
             throw new ModuleFormatException("Graph library requires distinct exported declarations.");
         }
-        var hasPrivateManagedState = HasPrivateManagedState(module);
+        hasPrivateManagedState = HasPrivateManagedState(module);
         var declarations = ImmutableArray.CreateBuilder<BoundFunction>();
         foreach (var item in module.Functions)
         {
@@ -229,11 +230,11 @@ public static partial class ModuleCompiler
         CompilationReference dependencies, bool allowImportedCleanup = false)
     {
         var module = ReadGraphLibrary(contract);
-        _ = CreateGraphReference(module, exports, allowImportedCleanup);
+        _ = CreateGraphReference(module, exports, allowImportedCleanup, out var hasPrivateManagedState);
         var dependencyFunctions = dependencies.Functions.ToDictionary(static item => item.Name,
             StringComparer.Ordinal);
         ValidateGraphImports(module, dependencies, dependencyFunctions);
-        if (HasPrivateManagedState(module) && module.Functions.Any(item => item.Import
+        if (hasPrivateManagedState && module.Functions.Any(item => item.Import
             && (!dependencyFunctions.TryGetValue(item.Name, out var function)
                 || !ManagedExportShape.Supported(function, dependencies.Structures))))
         {
