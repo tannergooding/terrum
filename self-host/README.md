@@ -20,8 +20,8 @@ consumption, `tests\native\token-abi.terrum` for aggregate ABI selection,
 these helper exports are test-only. The build also emits a separate
 provisional `terrum-compiler-primitives-source-grant.dll` from
 `CharacterFacts`, `SourceCodeUnit`, `SourceLineCount`, `SourceLineEnd`,
-`CharacterLiteralPacked`, `CharacterLiteralScalar`, `HexDigitValue`, `HexFloatLiteral`,
-`SourceRangeValidation`,
+`CharacterLiteralPacked`, `CharacterLiteralScalar`, `HexDigitValue`,
+`BasedIntegerFloatLiteral`, `HexFloatLiteral`, `SourceRangeValidation`,
 `SourceTextLength`, `SourceOffset`, `SourcePosition`, `StringEscapePacked`,
 `StringLiteralEncodedLength`, `StringLiteralScalarAt`, `StringLiteralScalarCount`,
 `WideIntegerFacts`, `SourceIntegerParsing`,
@@ -98,6 +98,7 @@ outside the source-free DLL. The separate companion exports its checked
 `GetStringLiteralScalarOrMinusOne`,
 `GetStringLiteralEncodedLengthOrMinusOne`,
 `GetHexFloat32LiteralBitsOrMinusOne`, `GetHexFloat64LiteralBitsOrMinusOne`,
+`GetBasedIntegerFloat32BitsOrMinusOne`, `GetBasedIntegerFloat64BitsOrMinusOne`,
 integer-parsing query pairs and the unchanged source-free decoder. The scalar
 length, code-unit, offset, position, line-end
 and range-validation components isolate `SourceText`/`SourceLines` behavior;

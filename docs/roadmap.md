@@ -63,6 +63,13 @@ its still-unapproved eligibility proposal; verification and emission remain
 hosted. The frontend also provisionally projects float-to-integer
 conversions under the still-unapproved pair-matrix proposal; verification and
 emission remain hosted. Source-free TRRM provisionally
+The separate Terrum-authored `BasedIntegerFloatLiteral` component also
+constructs target-format bits directly from caller-delimited hexadecimal and
+binary integer slices, matching hosted bound constants through significand
+rounding boundaries and long inputs. Its scalar raw-bit queries are
+provisionally included in the maintained source-grant companion; they do not
+change the source-free library or classifier and do not extend scalar
+frontend verification/emission. Source-free TRRM provisionally
 supports same-format floating add, subtract, multiply and divide under an
 unapproved proposal. Same-format comparisons and exact-bit constants,
 explicit conversion between the two floating formats, conversion from the
@@ -269,7 +276,7 @@ prerequisite has already been met.
     character-literal value query, scalar string-literal
     validation/count/indexed-value/encoded-length queries and paired scalar
     integer-parsing queries and target-typed hexadecimal-float raw-bit
-    queries, with selected-export
+    and based-integer floating-bit queries, with selected-export
     descriptors bound to the image hash and end-relative
     reads based on invocation length. The source-free
     compiler-primitives DLL remains unchanged; this does not promote the

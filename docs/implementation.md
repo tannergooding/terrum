@@ -2779,6 +2779,15 @@ rounding boundaries, repeated separators, malformed spellings, deterministic
 random valid spellings and 16,000 fractional hex digits. This does not wire
 the helper into scalar-frontend token reconstruction or move verification and
 emission out of the hosted compiler.
+`GetBasedIntegerFloat32BitsOrMinusOne(start, length)` and
+`GetBasedIntegerFloat64BitsOrMinusOne(start, length)` provisionally construct
+positive target-format bits from exact hexadecimal or binary integer slices.
+They validate the prefix and every digit/separator, round retained, guard and
+sticky bits directly, return positive IEEE-754 bits in `int64`, and use `-1`
+only for invalid slices. Persisted semantic-module and maintained companion
+tests compare them with hosted contextual binding at ties, precision limits,
+overflow, malformed spellings, deterministic generated inputs and a
+16,000-digit source. They do not add literal typing or frontend support.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under

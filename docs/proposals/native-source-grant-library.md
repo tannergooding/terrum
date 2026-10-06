@@ -579,6 +579,35 @@ very long mantissas. Do not widen the classifier, change the source-free DLL,
 or connect the converter to frontend verification or emission. This does not
 approve the ABI.
 
+### Provisional scalar based-integer floating-bit exports
+
+**Question:** Should the maintained source-grant companion expose direct
+target-format conversion of hexadecimal and binary integer slices?
+
+**Summary:** The hosted floating-literal binder accepts exact based integer
+tokens as positive arbitrary-precision values and rounds directly to the
+contextual `float32` or `float64` format. The candidate
+`GetBasedIntegerFloat32BitsOrMinusOne(start, length) -> int64` and
+`GetBasedIntegerFloat64BitsOrMinusOne(start, length) -> int64` queries preserve
+those raw result bits without exposing a floating ABI. Integer literal signs
+remain separate unary operators, so valid results are nonnegative bit
+patterns and `-1` remains disjoint as the invalid-slice sentinel. The queries
+accept only hexadecimal or binary integer spellings, including the existing
+repeated-separator and prefix-separator forms; they do not parse hex-float
+exponents or decimal integers.
+
+**Recommendation:** Keep these two source-dependent exports provisional.
+Validate the complete token slice and exact radix digits before constructing
+the value; round the significant-bit stream directly with guard/sticky and
+ties-to-even behavior, preserving positive zero and overflowing to positive
+infinity as hosted target-format conversion does. Compare against hosted
+bound constants under both runtime policies for semantic-module execution and
+through the fail-fast companion, including ties at both significand
+precisions, long inputs, overflow, leading zeroes, repeated separators,
+prefix separators and malformed radix/suffix/bound cases. Do not widen the
+source-grant classifier, alter source-free exports or imply frontend
+verification/emission support. This does not approve the ABI.
+
 ## Promotion decisions still required
 
 ### Where source-grant shape is validated

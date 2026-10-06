@@ -1,0 +1,273 @@
+namespace Terrum.CodeAnalysis;
+
+public static int64 GetBasedIntegerFloat32BitsOrMinusOne(int32 start, int32 length)
+{
+    return ParseBasedIntegerFloatBitsOrMinusOne(start, length, true);
+}
+
+public static int64 GetBasedIntegerFloat64BitsOrMinusOne(int32 start, int32 length)
+{
+    return ParseBasedIntegerFloatBitsOrMinusOne(start, length, false);
+}
+
+int64 ParseBasedIntegerFloatBitsOrMinusOne(int32 start, int32 length, bool isFloat32)
+{
+    int32 sourceLength = Host.Source.Length;
+    if (start < 0 || length < 3 || start > sourceLength || length > sourceLength - start)
+    {
+        return -1;
+    }
+
+    char16 firstPrefixUnit = Host.Source[start];
+    char16 secondPrefixUnit = Host.Source[start + 1];
+    if (firstPrefixUnit != char16(48)
+        || (secondPrefixUnit != char16(120) && secondPrefixUnit != char16(88)
+            && secondPrefixUnit != char16(98) && secondPrefixUnit != char16(66)))
+    {
+        return -1;
+    }
+
+    bool isHexadecimal = secondPrefixUnit == char16(120) || secondPrefixUnit == char16(88);
+    int32 bitsPerDigit = isHexadecimal ? 4 : 1;
+    int32 tokenEnd = start + length;
+    mut bool sawDigit = false;
+    mut bool previousDigit = false;
+    mut bool previousSeparator = false;
+    mut bool sawNonzero = false;
+    mut int32 significandBitLength = 0;
+    mut int32 at = start + 2;
+    while (at < tokenEnd)
+    {
+        char16 unit = Host.Source[at];
+        if (unit == char16(95))
+        {
+            mut int32 next = at + 1;
+            while (next < tokenEnd && Host.Source[next] == char16(95))
+            {
+                next = next + 1;
+            }
+            int32 nextDigit = next < tokenEnd ? GetHexDigitOrMinusOne(Host.Source[next]) : -1;
+            if (nextDigit < 0 || (!isHexadecimal && nextDigit > 1)
+                || (!previousDigit && !previousSeparator && sawDigit))
+            {
+                return -1;
+            }
+
+            previousDigit = false;
+            previousSeparator = true;
+            at = next - 1;
+        }
+        else
+        {
+            int32 digit = GetHexDigitOrMinusOne(unit);
+            if (digit < 0 || (!isHexadecimal && digit > 1))
+            {
+                return -1;
+            }
+
+            sawDigit = true;
+            previousDigit = true;
+            previousSeparator = false;
+            if (digit != 0)
+            {
+                if (!sawNonzero)
+                {
+                    sawNonzero = true;
+                    if (bitsPerDigit == 1)
+                    {
+                        significandBitLength = 1;
+                    }
+                    else if (digit >= 8)
+                    {
+                        significandBitLength = 4;
+                    }
+                    else if (digit >= 4)
+                    {
+                        significandBitLength = 3;
+                    }
+                    else if (digit >= 2)
+                    {
+                        significandBitLength = 2;
+                    }
+                    else
+                    {
+                        significandBitLength = 1;
+                    }
+                }
+                else
+                {
+                    significandBitLength = significandBitLength + bitsPerDigit;
+                }
+            }
+            else if (sawNonzero)
+            {
+                significandBitLength = significandBitLength + bitsPerDigit;
+            }
+        }
+
+        at = at + 1;
+    }
+
+    if (!sawDigit || previousSeparator)
+    {
+        return -1;
+    }
+    if (!sawNonzero)
+    {
+        return 0;
+    }
+
+    mut int32 precision = 53;
+    mut int32 minimumExponent = -1022;
+    mut int32 maximumExponent = 1023;
+    mut int32 exponentBias = 1023;
+    if (isFloat32)
+    {
+        precision = 24;
+        minimumExponent = -126;
+        maximumExponent = 127;
+        exponentBias = 127;
+    }
+
+    mut int64 unbiasedExponent = int64(significandBitLength) - 1;
+    int32 fractionBits = precision - 1;
+    uint64 fractionMask = (uint64(1) << fractionBits) - 1;
+    uint64 minimumNormalSignificand = uint64(1) << fractionBits;
+    if (unbiasedExponent > int64(maximumExponent))
+    {
+        return int64(uint64(maximumExponent * 2 + 1) << fractionBits);
+    }
+
+    int64 roundedValue = RoundBasedSignificandOrMinusOne(
+        start + 2, tokenEnd, bitsPerDigit, significandBitLength,
+        int64(significandBitLength) - int64(precision));
+    if (roundedValue < 0)
+    {
+        return -1;
+    }
+
+    mut uint64 roundedSignificand = uint64(roundedValue);
+    if (roundedSignificand >= minimumNormalSignificand << 1)
+    {
+        roundedSignificand = roundedSignificand >> 1;
+        unbiasedExponent = unbiasedExponent + 1;
+    }
+    if (unbiasedExponent > int64(maximumExponent))
+    {
+        return int64(uint64(maximumExponent * 2 + 1) << fractionBits);
+    }
+
+    uint64 exponentField = uint64(unbiasedExponent + int64(exponentBias));
+    return int64((exponentField << fractionBits) | (roundedSignificand & fractionMask));
+}
+
+int64 RoundBasedSignificandOrMinusOne(
+    int32 start,
+    int32 end,
+    int32 bitsPerDigit,
+    int32 bitLength,
+    int64 rightShift
+)
+{
+    if (rightShift <= 0)
+    {
+        int64 significand = GetBasedSignificandOrMinusOne(start, end, bitsPerDigit);
+        if (significand < 0)
+        {
+            return -1;
+        }
+
+        int32 leftShift = int32(0 - rightShift);
+        return int64(uint64(significand) << leftShift);
+    }
+    if (rightShift > int64(bitLength))
+    {
+        return 0;
+    }
+
+    int32 retainedBits = bitLength - int32(rightShift);
+    mut uint64 quotient = 0;
+    mut bool sawLeadingBit = false;
+    mut bool guardBit = false;
+    mut bool stickyBit = false;
+    mut int32 bitIndex = 0;
+    mut int32 at = start;
+    while (at < end)
+    {
+        char16 unit = Host.Source[at];
+        if (unit != char16(95))
+        {
+            uint32 digit = uint32(GetHexDigitOrMinusOne(unit));
+            mut int32 digitBit = bitsPerDigit - 1;
+            while (digitBit >= 0)
+            {
+                uint32 bit = (digit >> digitBit) & uint32(1);
+                if (sawLeadingBit || bit != 0)
+                {
+                    sawLeadingBit = true;
+                    if (bitIndex < retainedBits)
+                    {
+                        quotient = (quotient << 1) | uint64(bit);
+                    }
+                    else if (bitIndex == retainedBits)
+                    {
+                        guardBit = bit != 0;
+                    }
+                    else if (bit != 0)
+                    {
+                        stickyBit = true;
+                    }
+
+                    bitIndex = bitIndex + 1;
+                }
+
+                digitBit = digitBit - 1;
+            }
+        }
+
+        at = at + 1;
+    }
+
+    if (guardBit && (stickyBit || (quotient & uint64(1)) != 0))
+    {
+        quotient = quotient + 1;
+    }
+
+    return int64(quotient);
+}
+
+int64 GetBasedSignificandOrMinusOne(int32 start, int32 end, int32 bitsPerDigit)
+{
+    mut uint64 value = 0;
+    mut bool sawLeadingBit = false;
+    mut int32 at = start;
+    while (at < end)
+    {
+        char16 unit = Host.Source[at];
+        if (unit != char16(95))
+        {
+            uint32 digit = uint32(GetHexDigitOrMinusOne(unit));
+            mut int32 digitBit = bitsPerDigit - 1;
+            while (digitBit >= 0)
+            {
+                uint32 bit = (digit >> digitBit) & uint32(1);
+                if (sawLeadingBit || bit != 0)
+                {
+                    sawLeadingBit = true;
+                    value = (value << 1) | uint64(bit);
+                }
+
+                digitBit = digitBit - 1;
+            }
+        }
+
+        at = at + 1;
+    }
+
+    if (!sawLeadingBit)
+    {
+        return -1;
+    }
+
+    return int64(value);
+}
