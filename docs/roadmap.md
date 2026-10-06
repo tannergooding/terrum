@@ -310,6 +310,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `1ea672d0` | Verify conditional Boolean `out` vacancy, later initialization and compatible provider replacement across native consumer sets under both runtime policies |
 | `ec530cda` | Lower end-relative source-grant reads from the invocation's captured length, with both-policy boundary coverage |
 | `fce7db24` | Add the opt-in provisional maintained source-grant companion with hash-bound export metadata and preserve image/manifest pairs on publication failures |
 | `89a896d5` | Compare test-only native source content and including-break line extents with hosted `SourceText.Lines` under both runtime policies |
