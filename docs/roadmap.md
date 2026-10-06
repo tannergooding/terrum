@@ -312,6 +312,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `175cbe05` | Add provisional scalar source-grant integer parsing pairs with all-radix oracle coverage and a maintained manifest, without changing the source-free companion or classifier |
 | `121c2e27` | Round-trip provisional scalar source-position coordinates through the source-offset export on the same grant |
 | `b6bf45a9` | Add provisional scalar source-position queries matching hosted UTF-16 line/character coordinates, including CRLF and EOF boundaries |
 | `c62d94b4` | Add provisional scalar line/character-to-source-offset query with hosted boundary parity across both policies and the maintained manifest |
