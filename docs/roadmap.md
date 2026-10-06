@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `254bbff9` | Compare scalar frontend switch selectors with hosted conditionals at all supported type boundaries under both runtime policies |
 | `61663624` | Compare the persisted scanner-10 profile with the host lexer for every BMP `\u` escape and surrogate diagnostic |
 | `75cacbfc` | Verify all BMP `\u` character literals and surrogate diagnostic spans through source-grant JIT |
 | `b7ffa3a6` | Verify all BMP `\u` escape scalars, consumed widths and surrogate diagnostics through source-grant JIT |
