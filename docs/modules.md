@@ -227,7 +227,7 @@ test builds `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`,
 the test-only `IntegerFactsTestExports` bridge, `Token`, `CopyAlgorithms`,
 the producer-local `CopyAlgorithmsTests` wrapper, `Float32MathSelection`,
 `Float64MathSelection`, the producer-local `FloatMathSelectionTests` wrapper,
-`WideIntegerFacts`,
+`ManagedTokenChain` and its producer-local test wrapper, `WideIntegerFacts`,
 `IntegerFormatting`, the producer-local `IntegerFormattingTests` wrapper,
 `IntegerCheckedArithmetic`, `IntegerMath`, `IntegerSaturation`,
 `IntegerWrapping`, `IntegerCheckedConversions`, and `BitOperations` into one
@@ -242,6 +242,10 @@ is created, reused, and consumed inside the producer, so the candidate owner
 does not become a module export.
 The copy wrapper likewise keeps generic specializations in the producer and
 exports only its test result, not generic candidate functions.
+The managed-chain wrapper keeps owners, links, cursors, and token values within
+the producer; only its boolean result is exported. It exercises bounded
+append/clear, indexed reads, cursor invalidation, and collection, without
+establishing general owning-graph support.
 Those persisted modules execute through AOT and JIT under both runtime
 policies, including range boundaries,
 conditional-output failure, character classification, hexadecimal mapping and
@@ -304,6 +308,8 @@ $componentSources = @(
     'self-host\IntegerFacts.terrum',
     'self-host\IntegerFactsTestExports.terrum',
     'self-host\Token.terrum',
+    'self-host\ManagedTokenChain.terrum',
+    'self-host\ManagedTokenChainTests.terrum',
     'self-host\CopyAlgorithms.terrum',
     'self-host\CopyAlgorithmsTests.terrum',
     'self-host\Float32MathSelection.terrum',
@@ -336,6 +342,7 @@ $componentExports = @(
     'Terrum.CodeAnalysis.Tests.CheckIntegerFormatting',
     'Terrum.CodeAnalysis.Tests.CheckCopyAlgorithms',
     'Terrum.CodeAnalysis.Tests.CheckFiniteFloatMathSelections',
+    'Terrum.CodeAnalysis.CheckManagedTokenChain',
     'Terrum.CodeAnalysis.Token.#ctor',
     'Terrum.CodeAnalysis.Numerics64.TryAddInt64',
     'Terrum.CodeAnalysis.Numerics64.TrySubtractInt64',

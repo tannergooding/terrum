@@ -1,0 +1,118 @@
+namespace Terrum.CodeAnalysis;
+
+public bool CheckManagedTokenChain()
+{
+    // The runner repeats this fixture, so discard graphs from its previous iteration.
+    ManagedHeap.Collect();
+
+    require ManagedTokenChain.TryCreate(out var chain);
+    if (chain.Count != 0 || chain.Version != 0 || chain.TryClear())
+    {
+        return false;
+    }
+    if (!chain.TryAppend(7, 10, 2) || !chain.TryAppend(8, 12, 1)
+        || chain.Count != 2 || chain.Version != 2)
+    {
+        return false;
+    }
+    if (chain.TryAppend(-1, 13, 1) || chain.TryAppend(9, 11, 1)
+        || chain.TryAppend(9, 13, -1) || chain.TryAppend(9, int32.MaxValue, 1)
+        || chain.Count != 2 || chain.Version != 2)
+    {
+        return false;
+    }
+    if (chain.TryGet(-1, init var negative) || chain.TryGet(2, init var pastEnd))
+    {
+        return false;
+    }
+    require chain.TryGet(0, init var firstCopy);
+    require chain.TryGet(1, init var secondCopy);
+    if (firstCopy.Kind != 7 || firstCopy.Range.Start != 10
+        || firstCopy.Range.Length != 2 || firstCopy.Range.End != 12
+        || secondCopy.Kind != 8 || secondCopy.Range.Start != 12
+        || secondCopy.Range.Length != 1 || secondCopy.Range.End != 13)
+    {
+        return false;
+    }
+
+    // Keep this count isolated to the two links, before creating cursor objects.
+    require chain.TryClear();
+    if (chain.Count != 0 || chain.Version != 3 || chain.TryClear()
+        || ManagedHeap.Collect() != 2)
+    {
+        return false;
+    }
+    if (firstCopy.Kind != 7 || firstCopy.Range.Start != 10
+        || firstCopy.Range.Length != 2 || secondCopy.Kind != 8
+        || secondCopy.Range.Start != 12 || secondCopy.Range.Length != 1)
+    {
+        return false;
+    }
+
+    require ManagedTokenChain.TryCreate(out var cursorChain);
+    require cursorChain.TryAppend(7, 0, 1);
+    require cursorChain.TryAppend(8, 1, 1);
+    require cursorChain.TryAppend(9, 2, 1);
+    {
+        require cursorChain.TryCreateCursor(out var cursor);
+        if (cursor.TryPeekAhead(-1, init var negativeDistance)
+            || cursor.TryPeekAhead(3, init var outside))
+        {
+            return false;
+        }
+        require cursor.TryPeekAhead(2, init var third);
+        require cursor.TryPeekAhead(1, init var second);
+        if (third.Kind != 9 || second.Kind != 8
+            || cursor.TryReadKind(8, init var mismatch))
+        {
+            return false;
+        }
+        require cursor.TryReadKind(7, init var first);
+        if (first.Kind != 7 || first.Range.Start != 0)
+        {
+            return false;
+        }
+        require cursor.TryRead(init var next);
+        if (next.Kind != 8 || next.Range.Start != 1)
+        {
+            return false;
+        }
+        require cursor.TryPeek(init var remaining);
+        if (remaining.Kind != 9 || cursor.TryPeekAhead(2, init var beyond))
+        {
+            return false;
+        }
+        require cursor.TryReadKind(9, init var lastRead);
+        if (lastRead.Kind != 9 || cursor.TryRead(init var atEnd) || !cursor.IsCurrent)
+        {
+            return false;
+        }
+
+        require cursorChain.TryCreateCursor(out var staleByAppend);
+        require cursorChain.TryAppend(10, 3, 1);
+        if (staleByAppend.IsCurrent || staleByAppend.TryPeek(init var invalidatedByAppend))
+        {
+            return false;
+        }
+
+        require cursorChain.TryCreateCursor(out var staleByClear);
+        require cursorChain.TryClear();
+        if (cursorChain.Count != 0 || cursorChain.Version != 5
+            || staleByClear.IsCurrent || staleByClear.TryRead(init var invalidatedByClear))
+        {
+            return false;
+        }
+    }
+
+    for (mut int32 index = 0; index < 64; index = index + 1)
+    {
+        require cursorChain.TryAppend(index, index, 1);
+    }
+    if (cursorChain.Count != 64 || cursorChain.Version != 69
+        || cursorChain.TryAppend(64, 64, 1))
+    {
+        return false;
+    }
+
+    return true;
+}

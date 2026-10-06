@@ -24,6 +24,7 @@ int32 Main()
         require CheckIntegerFormatting();
         require CheckCopyAlgorithms();
         require CheckFiniteFloatMathSelections();
+        require CheckManagedTokenChain();
         require CheckIntegerMath();
         require CheckBitOperations();
         require CheckIntegerSaturation();

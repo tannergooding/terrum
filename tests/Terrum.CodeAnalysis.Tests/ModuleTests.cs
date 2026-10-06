@@ -215,6 +215,8 @@ public sealed class ModuleTests
         var integerFactsPath = Path.Combine(root, "self-host", "IntegerFacts.terrum");
         var integerFactsExportsPath = Path.Combine(root, "self-host", "IntegerFactsTestExports.terrum");
         var tokenPath = Path.Combine(root, "self-host", "Token.terrum");
+        var managedTokenChainPath = Path.Combine(root, "self-host", "ManagedTokenChain.terrum");
+        var managedTokenChainTestsPath = Path.Combine(root, "self-host", "ManagedTokenChainTests.terrum");
         var copyAlgorithmsPath = Path.Combine(root, "self-host", "CopyAlgorithms.terrum");
         var copyAlgorithmsTestsPath = Path.Combine(root, "self-host", "CopyAlgorithmsTests.terrum");
         var float32MathSelectionPath = Path.Combine(root, "self-host", "Float32MathSelection.terrum");
@@ -251,6 +253,12 @@ public sealed class ModuleTests
             await File.ReadAllTextAsync(integerFactsExportsPath).ConfigureAwait(true),
             integerFactsExportsPath);
         var token = SyntaxTree.Parse(await File.ReadAllTextAsync(tokenPath).ConfigureAwait(true), tokenPath);
+        var managedTokenChain = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(managedTokenChainPath).ConfigureAwait(true),
+            managedTokenChainPath);
+        var managedTokenChainTests = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(managedTokenChainTestsPath).ConfigureAwait(true),
+            managedTokenChainTestsPath);
         var copyAlgorithms = SyntaxTree.Parse(
             await File.ReadAllTextAsync(copyAlgorithmsPath).ConfigureAwait(true),
             copyAlgorithmsPath);
@@ -287,8 +295,9 @@ public sealed class ModuleTests
         var bitOperations = SyntaxTree.Parse(await File.ReadAllTextAsync(bitOperationsPath).ConfigureAwait(true),
             bitOperationsPath);
         var library = Compilation.CreateLibrary([range, facts, utf16CodeUnits, integerFacts, integerFactsExports,
-            token, copyAlgorithms, copyAlgorithmsTests, float32MathSelection, float64MathSelection,
-            floatMathSelectionTests, wideFacts, integerFormatting, integerFormattingTests, checkedFacts,
+            token, managedTokenChain, managedTokenChainTests, copyAlgorithms, copyAlgorithmsTests,
+            float32MathSelection, float64MathSelection, floatMathSelectionTests, wideFacts,
+            integerFormatting, integerFormattingTests, checkedFacts,
             integerMath, integerSaturation, integerWrapping, checkedConversions, bitOperations], policy);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
@@ -308,6 +317,7 @@ public sealed class ModuleTests
             "Terrum.CodeAnalysis.Tests.CheckIntegerFormatting",
             "Terrum.CodeAnalysis.Tests.CheckCopyAlgorithms",
             "Terrum.CodeAnalysis.Tests.CheckFiniteFloatMathSelections",
+            "Terrum.CodeAnalysis.CheckManagedTokenChain",
             "Terrum.CodeAnalysis.Token.#ctor",
             "Terrum.CodeAnalysis.Numerics64.TryAddInt64",
             "Terrum.CodeAnalysis.Numerics64.TrySubtractInt64",
