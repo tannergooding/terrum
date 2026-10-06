@@ -25,7 +25,7 @@ public sealed partial class NativeManagedClassModuleTests
         NativeRuntimePolicy policy, int fieldCount)
     {
         var producer = ModuleCompiler.CreateProducer(Compile(WideSource(fieldCount), policy), ["Read"]);
-        Assert.Equal(58, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(59, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         if (fieldCount > 16)
         {
             var retiredRevision = producer.ToArray();
@@ -75,7 +75,7 @@ public sealed partial class NativeManagedClassModuleTests
         var program = Compile(source, policy);
         Assert.True(Assert.Single(program.Structures).IsTransparent);
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.Equal(58, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(59, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
             policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
@@ -148,7 +148,7 @@ public sealed partial class NativeManagedClassModuleTests
             + " public int32 Read() { require Dense.TryCreate(out var value);"
             + " return value.F31 + value.F11; }";
         var producer = ModuleCompiler.CreateProducer(Compile(source, policy), ["Read"]);
-        Assert.Equal(58, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(59, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
             policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
@@ -167,7 +167,7 @@ public sealed partial class NativeManagedClassModuleTests
         var source = WideSource(32) + " int32 Main() { return Read() + Bias(); }";
         var consumer = ModuleCompiler.CreateConsumer(Compile(source, policy,
             ModuleCompiler.CreateReference(producer), library: false), producer);
-        Assert.Equal(58, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.Equal(59, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.Equal(32, Assert.Single(linked.Classes).Fields.Length);
         Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));

@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 58;
+    private const int Version = 59;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1397,35 +1397,39 @@ public static partial class ModuleCompiler
         || program.Classes.Any(static @class => @class.Fields.Any(static field => field.RequiresUnsafeCaller))
         || ContainsCallerUnsafeCalls(program);
 
-    private static bool ContainsUnsupportedModuleCallerUnsafeContracts(BoundProgram program) =>
-        program.Functions.Any(function => function.RequiresUnsafeCaller && function.DeclaringStruct is not null
-            && !IsSupportedModuleUnsafeMethod(function, program.Structures))
-        || program.Structures.Any(static structure =>
-            structure.Fields.Any(static field => field.RequiresUnsafeCaller))
-        || program.Classes.Any(static @class => @class.Fields.Any(static field => field.RequiresUnsafeCaller));
+    private static bool ContainsUnsupportedModuleCallerUnsafeContracts(BoundProgram program)
+    {
+        var valueTypes = new ModuleUnsafeValueTypeCache(program.Structures);
+        return program.Functions.Any(function => function.RequiresUnsafeCaller && function.DeclaringStruct is not null
+            && !IsSupportedModuleUnsafeMethod(function, program.Structures, valueTypes))
+            || program.Structures.Any(static structure =>
+                structure.Fields.Any(static field => field.RequiresUnsafeCaller))
+            || program.Classes.Any(static @class =>
+                @class.Fields.Any(static field => field.RequiresUnsafeCaller));
+    }
 
     private static bool HasUnsupportedModuleCallerUnsafeContract(ModuleFunction function,
-        ImmutableArray<BoundStruct> structures)
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
     {
         if (function.Function is BoundFunction body)
         {
             return body.RequiresUnsafeCaller && body.DeclaringStruct is not null
-                && !IsSupportedModuleUnsafeMethod(body, structures);
+                && !IsSupportedModuleUnsafeMethod(body, structures, valueTypes);
         }
         var parts = function.Contract.Split('|');
         return parts.Length > 5 && parts[5] != "-"
             && TryContractPromises(function.Contract.AsSpan(), out _, out _, out _, out var unsafeCaller)
-            && unsafeCaller && !IsSupportedModuleUnsafeMethodContract(function.Contract, structures);
+            && unsafeCaller && !IsSupportedModuleUnsafeMethodContract(function.Contract, structures, valueTypes);
     }
 
     private static bool IsSupportedModuleUnsafeMethod(BoundFunction function,
-        ImmutableArray<BoundStruct> structures)
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
     {
         if (function.DeclaringStruct is not string ownerName || function.IsConstructor
             || function.IsClassConstructor || function.IsCleanup || function.PropertyName is not null
             || function.Intrinsic != BoundIntrinsic.None
             || function.ParameterCount > function.Variables.Length
-            || !IsScalarModuleContractType(function.ReturnType))
+            || !valueTypes.IsSupported(function.ReturnType))
         {
             return false;
         }
@@ -1460,7 +1464,8 @@ public static partial class ModuleCompiler
         for (var index = function.IsStatic ? 0 : 1; index < function.ParameterCount; index++)
         {
             var parameter = function.Variables[index];
-            if (parameter.IsOut || parameter.IsInit || !IsScalarModuleContractType(parameter.Type))
+            if (parameter.IsOut || parameter.IsInit
+                || !valueTypes.IsSupported(parameter.Type))
             {
                 return false;
             }
@@ -1469,7 +1474,7 @@ public static partial class ModuleCompiler
     }
 
     private static bool IsSupportedModuleUnsafeMethodContract(string contract,
-        ImmutableArray<BoundStruct> structures)
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
     {
         if (!TryContractPromises(contract.AsSpan(), out var signature, out _, out _, out var unsafeCaller)
             || !unsafeCaller)
@@ -1499,7 +1504,7 @@ public static partial class ModuleCompiler
         }
         if (ownerIndex < 0 || structures[ownerIndex].IsUnique || structures[ownerIndex].IsPrivate
             || structures[ownerIndex].IsInternal
-            || !IsScalarModuleContractType(parts[1])
+            || !valueTypes.IsSupported(parts[1])
             || !PublicLayout((PrimitiveType)(100 + ownerIndex), true, structures,
                 new HashSet<(int Index, bool PublicFields)>()))
         {
@@ -1514,7 +1519,7 @@ public static partial class ModuleCompiler
         for (var index = parameterOffset; index < parts.Length; index++)
         {
             if (!parts[index].StartsWith("in:", StringComparison.Ordinal)
-                || !IsScalarModuleContractType(parts[index].AsSpan(3)))
+                || !valueTypes.IsSupported(parts[index].AsSpan(3)))
             {
                 return false;
             }
@@ -1525,6 +1530,125 @@ public static partial class ModuleCompiler
     private static bool IsScalarModuleContractType(PrimitiveType type) =>
         type is PrimitiveType.Bool or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16
             or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
+
+    private sealed class ModuleUnsafeValueTypeCache(ImmutableArray<BoundStruct> structures)
+    {
+        private readonly Dictionary<int, CopyValueTypeState> _copyValueTypeStates = [];
+
+        public bool IsSupported(PrimitiveType type)
+        {
+            if (IsScalarModuleContractType(type))
+            {
+                return true;
+            }
+            return IsSupportedCopyValueType((int)type - 100);
+        }
+
+        public bool IsSupported(ReadOnlySpan<char> type)
+        {
+            if (IsScalarModuleContractType(type))
+            {
+                return true;
+            }
+            for (var index = 0; index < structures.Length; index++)
+            {
+                var structureType = (PrimitiveType)(100 + index);
+                if (type.SequenceEqual(ContractType(structureType, structures).AsSpan()))
+                {
+                    return IsSupported(structureType);
+                }
+            }
+            return false;
+        }
+
+        private bool IsSupportedCopyValueType(int rootIndex)
+        {
+            if (rootIndex < 0 || rootIndex >= structures.Length)
+            {
+                return false;
+            }
+            if (_copyValueTypeStates.TryGetValue(rootIndex, out var rootState))
+            {
+                return rootState == CopyValueTypeState.Supported;
+            }
+
+            var pending = new Stack<(int Index, int FieldIndex)>();
+            if (!TryBegin(rootIndex))
+            {
+                return false;
+            }
+            pending.Push((rootIndex, 0));
+            while (pending.TryPop(out var frame))
+            {
+                var structure = structures[frame.Index];
+                if (frame.FieldIndex == structure.Fields.Length)
+                {
+                    _copyValueTypeStates[frame.Index] = CopyValueTypeState.Supported;
+                    continue;
+                }
+
+                var field = structure.Fields[frame.FieldIndex];
+                if (field.IsPrivate || field.IsInternal)
+                {
+                    _copyValueTypeStates[frame.Index] = CopyValueTypeState.Rejected;
+                    continue;
+                }
+                if (IsScalarModuleContractType(field.Type))
+                {
+                    pending.Push((frame.Index, frame.FieldIndex + 1));
+                    continue;
+                }
+
+                var childIndex = (int)field.Type - 100;
+                if (childIndex < 0 || childIndex >= structures.Length)
+                {
+                    _copyValueTypeStates[frame.Index] = CopyValueTypeState.Rejected;
+                    continue;
+                }
+                if (_copyValueTypeStates.TryGetValue(childIndex, out var childState))
+                {
+                    if (childState == CopyValueTypeState.Supported)
+                    {
+                        pending.Push((frame.Index, frame.FieldIndex + 1));
+                    }
+                    else
+                    {
+                        _copyValueTypeStates[frame.Index] = CopyValueTypeState.Rejected;
+                    }
+                    continue;
+                }
+                if (!TryBegin(childIndex))
+                {
+                    _copyValueTypeStates[frame.Index] = CopyValueTypeState.Rejected;
+                    continue;
+                }
+
+                pending.Push(frame);
+                pending.Push((childIndex, 0));
+            }
+            return _copyValueTypeStates[rootIndex] == CopyValueTypeState.Supported;
+        }
+
+        private bool TryBegin(int index)
+        {
+            var structure = structures[index];
+            if (structure.IsUnique || structure.IsPrivate || structure.IsInternal
+                || structure.CleanupMethod is not null || structure.Fields.IsDefaultOrEmpty)
+            {
+                _copyValueTypeStates[index] = CopyValueTypeState.Rejected;
+                return false;
+            }
+            _copyValueTypeStates[index] = CopyValueTypeState.Visiting;
+            return true;
+        }
+    }
+
+    private enum CopyValueTypeState : byte
+    {
+        Visiting,
+        Supported,
+        Rejected,
+    }
 
     private static bool IsScalarModuleContractType(ReadOnlySpan<char> type)
     {
@@ -2501,6 +2625,7 @@ public static partial class ModuleCompiler
     {
         var items = ImmutableArray.CreateBuilder<ModuleFunction>(count);
         var seen = new HashSet<string>(count, StringComparer.Ordinal);
+        var valueTypes = new ModuleUnsafeValueTypeCache(structures);
         var remaining = MaximumNodes;
         for (var i = 0; i < count; i++)
         {
@@ -2542,7 +2667,7 @@ public static partial class ModuleCompiler
             var item = new ModuleFunction(name, contract, function, import) {
                 HasOwnershipTransfer = ownershipTransfer,
             };
-            if (HasUnsupportedModuleCallerUnsafeContract(item, structures))
+            if (HasUnsupportedModuleCallerUnsafeContract(item, structures, valueTypes))
             {
                 throw new ModuleFormatException("Module contains an unsupported caller-unsafe member contract.");
             }

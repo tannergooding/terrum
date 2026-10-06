@@ -57,27 +57,45 @@ section 3. This slice changes the internal semantic-module format and must
 advance its revision. It is an implementation experiment, not approval of
 general reference metadata or the broader proposal.
 
-**Implemented provisionally:** Semantic-module revision 58 persists top-level
+**Implemented provisionally:** Semantic-module revision 59 persists top-level
 caller obligations and the bounded method contracts described below.
 Authorization is reconstructed only from explicit `BoundUnsafe` scopes. Safe
 imports reject caller-unsafe replacements; caller-unsafe imports may use a
-safe replacement. Revisions 56 and 58 are rejected rather than upgraded or
+safe replacement. Revisions 58 and 60 are rejected rather than upgraded or
 normalized. `CallerUnsafeTests` cover round trips, replacement compatibility,
 adjacent-revision rejection, writer refusal of a retained authorization
 outside its unsafe block, and reader rejection after a persisted unsafe block
-is stripped. These checks do not approve the broader proposal or add
+is stripped. Revision 59 additionally covers public `Copy` method values in
+semantic links, native graphs and module sets under both runtime policies,
+including stack-passed scalar arguments, reordered provider type tables, safe
+replacements, forged unique contracts and bounded rejection of repeated
+nested-layout imports. These checks do not approve the broader proposal or add
 source-free executable authorization.
+
+**Revision-59 recommendation:** Keep the by-value aggregate-signature
+extension provisional and limited to public, non-unique `Copy` structs whose
+complete recursively exported field layouts are likewise public `Copy` values
+or scalars. Existing semantic-module type descriptors and aggregate ABI paths
+already carry those shapes, while the explicit whitelist avoids silently
+admitting ownership transfer, cleanup, managed handles, buffers, views or
+reference/output modes. This recommendation does not approve the proposal's
+general reference metadata or change source semantics.
 
 The provisional method experiment admits ordinary readonly instance methods
 on public, non-unique `Copy` structs with exportable public layouts, scalar
 by-value explicit parameters and scalar results. Revision 58 also admits
 ordinary static methods on those owners, with no synthesized receiver and the
-same scalar by-value signature boundary. Calls still require an explicit
+same scalar by-value signature boundary. Revision 59 additionally admits
+public, non-unique `Copy` structs as explicit by-value parameters and results
+when their recursively exported layouts contain only public, non-unique `Copy`
+structs and scalar fields. The writer and bodyless reader share that strict
+shape boundary; unique, managed, buffer/view, cleanup-bearing and
+non-exportable layouts remain rejected. Calls still require an explicit
 persisted unsafe block; the unsafe declaration does not authorize operations
 in its own body. Mutable-receiver methods, constructors, class methods,
-accessors, operators, fields, reference/output modes and non-scalar signatures
-remain excluded. This is a narrow persistence experiment, not approval of
-general caller-unsafe member metadata.
+accessors, operators, fields and reference/output modes remain excluded. This
+is a narrow persistence experiment, not approval of general caller-unsafe
+member metadata.
 
 Executable TRRM also provisionally round-trips the assigned caller-unsafe
 Effects bit on top-level function declarations, including when composed with
@@ -137,7 +155,7 @@ individual call was authorized.
 ### 3. How should executable Bodies validate caller-unsafe scope?
 
 **Summary:** The source caller obligation and assigned Effects bit `0x04` are
-settled, and semantic-module revision 58 reconstructs authorization from
+settled, and semantic-module revision 59 reconstructs authorization from
 explicit `BoundUnsafe` scopes. Executable TRRM provisionally round-trips
 caller-unsafe declarations and supports calls only inside validated indexed
 Body unsafe scopes. Compact-linear Bodies still cannot prove explicit
