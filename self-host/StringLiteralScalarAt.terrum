@@ -1,0 +1,49 @@
+namespace Terrum.CodeAnalysis;
+
+public static int32 GetStringLiteralScalarOrMinusOne(int32 start, int32 length, int32 scalarIndex)
+{
+    if (scalarIndex < 0)
+    {
+        return -1;
+    }
+
+    int32 scalarCount = GetStringLiteralScalarCountOrMinusOne(start, length);
+    if (scalarCount < 0 || scalarIndex >= scalarCount)
+    {
+        return -1;
+    }
+
+    int32 end = start + length - 1;
+    mut int32 at = start + 1;
+    mut int32 index = 0;
+    while (at < end)
+    {
+        char16 character = Host.Source[at];
+        mut int32 scalar = 0;
+        mut int32 width = 1;
+        if (character == char16(92))
+        {
+            uint32 packed = AnalyzeStringEscapePacked(at, end - at);
+            scalar = int32((packed >> 5) & 0x1FFFFF) - 1;
+            width = int32((packed >> 1) & 15);
+        }
+        else if (character >= char16(55296) && character <= char16(57343))
+        {
+            scalar = ReadUtf16Scalar(at, end);
+            width = Utf16ScalarWidth(scalar);
+        }
+        else
+        {
+            scalar = int32(character);
+        }
+
+        if (index == scalarIndex)
+        {
+            return scalar;
+        }
+
+        at = at + width;
+        index = index + 1;
+    }
+    return -1;
+}

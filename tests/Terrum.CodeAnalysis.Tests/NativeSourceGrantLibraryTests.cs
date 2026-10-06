@@ -33,6 +33,7 @@ public sealed class NativeSourceGrantLibraryTests
     private const string AnalyzeStringEscapePackedExport = "Terrum.CodeAnalysis.AnalyzeStringEscapePacked";
     private const string AnalyzeCharacterLiteralPackedExport = "Terrum.CodeAnalysis.AnalyzeCharacterLiteralPacked";
     private const string StringLiteralScalarCountExport = "Terrum.CodeAnalysis.GetStringLiteralScalarCountOrMinusOne";
+    private const string StringLiteralScalarAtExport = "Terrum.CodeAnalysis.GetStringLiteralScalarOrMinusOne";
     private const string LineCountExport = "Terrum.CodeAnalysis.GetSourceLineCount";
     private const string CanParseUInt64Export = "Terrum.CodeAnalysis.Numerics64.CanParseUInt64Base";
     private const string ParseUInt64Export = "Terrum.CodeAnalysis.Numerics64.ParseUInt64Base";
@@ -770,6 +771,116 @@ public sealed class NativeSourceGrantLibraryTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void StringLiteralScalarAtMatchesHostedTryCreate(BoundRuntimePolicy policy)
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var componentNames = new[] {
+            "CharacterFacts", "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar", "StringEscapePacked",
+            "StringLiteralScalarCount", "StringLiteralScalarAt",
+        };
+        var compilation = Compilation.CreateLibrary(
+            [.. componentNames.Select(name =>
+            {
+                var path = Path.Combine(sourceDirectory, name + ".terrum");
+                return SyntaxTree.Parse(File.ReadAllText(path), path);
+            })],
+            [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+                IsInvocationScoped = true,
+            }],
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
+            Assert.IsType<BoundProgram>(compilation.Program),
+            [StringLiteralScalarAtExport], (NativeRuntimePolicy)policy);
+        var export = Assert.Single(artifact.Exports);
+        Assert.True(export.SourceDependent);
+        Assert.Equal(PrimitiveType.Int32, export.ReturnType);
+        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32],
+            export.ParameterTypes.ToArray());
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-string-literal-scalar-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(path, artifact.Image);
+        try
+        {
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var bindings = new NativeSourceGrantTestBindings(module,
+                    [.. artifact.Exports.Select(static item => (item.Name, item.SourceDependent,
+                        item.ReturnType, item.ParameterTypes))]);
+                (string Source, int Start, int Length, int Index, int ExpectedScalar, bool ExpectedValid)[] cases = [
+                    ("\"\"", 0, 2, -1, -1, true),
+                    ("\"\"", 0, 2, 0, -1, true),
+                    ("\"A\"", 0, 3, 0, (int)'A', true),
+                    ("\"A\"", 0, 3, 1, -1, true),
+                    ("\"\\0\"", 0, 4, 0, 0, true),
+                    ("\"\\uFFFF\"", 0, 8, 0, 0xFFFF, true),
+                    (new string(['"', '\uFFFF', '"']), 0, 3, 0, 0xFFFF, true),
+                    ("\"\\U0001F600\"", 0, 12, 0, 0x1F600, true),
+                    (new string(['"', '\uD83D', '\uDE00', '"']), 0, 4, 0, 0x1F600, true),
+                    ("\"A\\0\\U0001F600\\uFFFF\"", 0, 21, 0, (int)'A', true),
+                    ("\"A\\0\\U0001F600\\uFFFF\"", 0, 21, 1, 0, true),
+                    ("\"A\\0\\U0001F600\\uFFFF\"", 0, 21, 2, 0x1F600, true),
+                    ("\"A\\0\\U0001F600\\uFFFF\"", 0, 21, 3, 0xFFFF, true),
+                    ("\"A\\0\\U0001F600\\uFFFF\"", 0, 21, 4, -1, true),
+                    ("\"A\\q\"", 0, 5, 0, -1, false),
+                    ("\"A\\uD800\"", 0, 9, 0, -1, false),
+                    ("\"\\uD83D\\uDE00\"", 0, 14, 0, -1, false),
+                    (new string(['"', 'A', '\n', '"']), 0, 4, 0, -1, false),
+                    ("xx\"A\\q\"yy", 2, 5, 0, -1, false),
+                    ("\"A\"", -1, 3, 0, -1, false),
+                    ("\"A\"", 0, int.MaxValue, 0, -1, false),
+                    ("\"A\"", int.MaxValue, 3, 0, -1, false),
+                    ("\"A\"", 0, 3, -1, -1, true),
+                    ("\"A\"", 0, 3, int.MaxValue, -1, true),
+                ];
+                foreach (var item in cases)
+                {
+                    Assert.Equal(item.ExpectedScalar,
+                        bindings.Invoke<int>(StringLiteralScalarAtExport, item.Source.ToCharArray(),
+                            item.Start, item.Length, item.Index));
+                    if (item.Start >= 0 && item.Length >= 0 && item.Start <= item.Source.Length
+                        && item.Length <= item.Source.Length - item.Start)
+                    {
+                        var spelling = item.Source.Substring(item.Start, item.Length);
+                        var lexed = Lexer.Lex(SourceText.From(spelling));
+                        var isSingleValidLiteral = lexed.Diagnostics.IsEmpty && lexed.Tokens.Length == 2
+                            && lexed.Tokens[0].Kind == TokenKind.StringLiteral
+                            && lexed.Tokens[0].Span == new TextSpan(0, spelling.Length)
+                            && lexed.Tokens[1].Kind == TokenKind.EndOfFile;
+                        Assert.Equal(item.ExpectedValid, isSingleValidLiteral);
+                    }
+                }
+
+                var maximumValidSource = "\"" + new string('a', 16_382) + "\"";
+                Assert.Equal((int)'a',
+                    bindings.Invoke<int>(StringLiteralScalarAtExport, maximumValidSource.ToCharArray(),
+                        0, maximumValidSource.Length, 16_381));
+                Assert.Equal(-1,
+                    bindings.Invoke<int>(StringLiteralScalarAtExport, maximumValidSource.ToCharArray(),
+                        0, maximumValidSource.Length, 16_382));
+                var maximumEscapedSource = "\"" + new string('a', 16_380) + "\\n\"";
+                Assert.Equal(10,
+                    bindings.Invoke<int>(StringLiteralScalarAtExport, maximumEscapedSource.ToCharArray(),
+                        0, maximumEscapedSource.Length, 16_380));
+                _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    bindings.Invoke<int>(StringLiteralScalarAtExport, new char[16_385], 0, 2, 0));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public void SourceOffsetMatchesHostedTryGetOffset(BoundRuntimePolicy policy)
     {
         Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -1017,7 +1128,7 @@ public sealed class NativeSourceGrantLibraryTests
             SourceCharacterPositionExport,
             SourceCodeUnitExport,
             SourceLineContentEndExport, LineCountExport, SourceLineEndExport, SourceLineNumberExport,
-            SourceOffsetExport, SourceLengthExport, StringLiteralScalarCountExport,
+            SourceOffsetExport, SourceLengthExport, StringLiteralScalarCountExport, StringLiteralScalarAtExport,
             CanParseChar16Export,
             CanParseInt32Export, CanParseInt64Export, CanParseUInt32Export, CanParseUInt64Export,
             ParseChar16Export, ParseInt32Export, ParseInt64Export, ParseUInt32Export, ParseUInt64Export,
@@ -1038,6 +1149,12 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.True(scalarCount.SourceDependent);
         Assert.Equal(PrimitiveType.Int32, scalarCount.ReturnType);
         Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], scalarCount.ParameterTypes.ToArray());
+        var scalarAt = Assert.Single(exports,
+            static export => export.Name == StringLiteralScalarAtExport);
+        Assert.True(scalarAt.SourceDependent);
+        Assert.Equal(PrimitiveType.Int32, scalarAt.ReturnType);
+        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32],
+            scalarAt.ParameterTypes.ToArray());
 
         var module = NativeLibrary.Load(imagePath);
         try
@@ -1051,6 +1168,8 @@ public sealed class NativeSourceGrantLibraryTests
                 bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, "'\uD83D\uDE00'".ToCharArray(), 0, 4));
             Assert.Equal(2,
                 bindings.Invoke<int>(StringLiteralScalarCountExport, "\"a\\n\"".ToCharArray(), 0, 5));
+            Assert.Equal(10,
+                bindings.Invoke<int>(StringLiteralScalarAtExport, "\"a\\n\"".ToCharArray(), 0, 5, 1));
             var parserSource = "!1__2?".ToCharArray();
             Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseUInt64Export, parserSource, 1, 4, (uint)10));
             Assert.Equal(12UL, bindings.Invoke<ulong>(ParseUInt64Export, parserSource, 1, 4, (uint)10));

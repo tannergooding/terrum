@@ -25,6 +25,7 @@ public sealed class StringLiteralModuleTests
         var componentNames = new[] {
             "SourceRange", "CharacterFacts", "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar",
             "StringEscape", "StringEscapePacked", "StringLiteral", "StringLiteralScalarCount",
+            "StringLiteralScalarAt",
         };
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)
@@ -70,7 +71,8 @@ public sealed class StringLiteralModuleTests
                     if (StringLiteral.TryCreate(spelling, init var literal)) {
                         if (!expectedValid || literal.ScalarCount != 1
                             || !literal.TryReadScalar(at + 1, init var scalar, init var next)
-                            || scalar != expectedScalar || next != at + spellingLength - 1) {
+                            || scalar != expectedScalar || next != at + spellingLength - 1
+                            || GetStringLiteralScalarOrMinusOne(at, spellingLength, 0) != expectedScalar) {
                             return item + 1;
                         }
                         mut StringLiteralCursor cursor = StringLiteralCursor.Create(literal);
@@ -89,6 +91,8 @@ public sealed class StringLiteralModuleTests
                             }
                         }
                     } else if (expectedValid) {
+                        return item + 1;
+                    } else if (GetStringLiteralScalarOrMinusOne(at, spellingLength, 0) != -1) {
                         return item + 1;
                     }
                     mut int32 expectedScalarCount = -1;
@@ -114,8 +118,36 @@ public sealed class StringLiteralModuleTests
                     mut int32 expectedScalarCount = -1;
                     if (StringLiteral.TryCreate(spelling, init var literal)) {
                         expectedScalarCount = literal.ScalarCount;
-                    }
-                    if (GetStringLiteralScalarCountOrMinusOne(at, spellingLength) != expectedScalarCount) {
+                        if (GetStringLiteralScalarCountOrMinusOne(at, spellingLength) != expectedScalarCount) {
+                            return item + 1;
+                        }
+                        mut int32 scalarIndex = -1;
+                        while (scalarIndex <= expectedScalarCount) {
+                            mut int32 expectedScalar = -1;
+                            if (scalarIndex >= 0 && scalarIndex < expectedScalarCount) {
+                                mut int32 position = at + 1;
+                                mut int32 currentIndex = 0;
+                                while (currentIndex <= scalarIndex) {
+                                    if (!literal.TryReadScalar(position, init var value, init var next)) {
+                                        return -4;
+                                    }
+                                    if (currentIndex == scalarIndex) { expectedScalar = value; }
+                                    position = next;
+                                    currentIndex = currentIndex + 1;
+                                }
+                            }
+                            if (GetStringLiteralScalarOrMinusOne(at, spellingLength, scalarIndex)
+                                != expectedScalar) {
+                                return item + 1;
+                            }
+                            scalarIndex = scalarIndex + 1;
+                        }
+                        if (GetStringLiteralScalarOrMinusOne(at, spellingLength, int32.MaxValue) != -1) {
+                            return item + 1;
+                        }
+                    } else if (GetStringLiteralScalarCountOrMinusOne(at, spellingLength) != -1
+                        || GetStringLiteralScalarOrMinusOne(at, spellingLength, -1) != -1
+                        || GetStringLiteralScalarOrMinusOne(at, spellingLength, 0) != -1) {
                         return item + 1;
                     }
                     at = at + spellingLength;
@@ -260,6 +292,10 @@ public sealed class StringLiteralModuleTests
             "\"A\"",
             "\"\\0\"",
             "\"a\\n\\U0001F600b\"",
+            "\"A\\q\"",
+            "\"A\\uD800\"",
+            "\"\\uFFFF\"",
+            new string(['"', 'A', '\n', '"']),
             new string(['"', '\\', '"', '"']),
             new string(['"', '"', '"']),
             new string(['"', '\n', '"']),

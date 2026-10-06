@@ -340,6 +340,38 @@ arguments and maximum grants. This query does not expose a `StringLiteral`,
 cursor, decoder/encoder, scanner or frontend support, widen the classifier,
 change the source-free DLL, or approve a stable ABI.
 
+### Provisional scalar string-literal scalar lookup export
+
+**Question:** Should the maintained companion expose one decoded scalar from a
+validated quoted spelling without exporting the `StringLiteral` aggregate or
+its cursor?
+
+**Summary:** A bootstrap consumer needs literal scalar values as well as
+validity and count, but the aggregate literal and cursor are not admitted by
+the current source-grant classifier. An isolated
+`GetStringLiteralScalarOrMinusOne(int32 start, int32 length, int32 scalarIndex)
+-> int32` can return the decoded Unicode scalar at a zero-based scalar index,
+or `-1` for invalid bounds, spelling or index. Every valid scalar is
+nonnegative, including NUL and U+FFFF, so the sentinel is unambiguous. The
+source-grant maximum bounds a successful spelling to 16,382 scalars.
+
+**Recommendation:** Include only this scalar lookup as provisional evidence.
+First call `GetStringLiteralScalarCountOrMinusOne` so the complete exact
+quoted slice has passed `StringLiteral.TryCreate` validation, even when the
+requested scalar occurs before a malformed suffix; reject a negative or
+out-of-range scalar index, including every index for an empty literal. Then
+rescan only to the selected decoded scalar, counting raw surrogate pairs
+once and using packed escape decoding without combining adjacent escaped
+surrogate values. The two bounded scans are allocation-free and linear in the
+slice length; repeatedly enumerating every index is quadratic, so this is
+occasional indexed access rather than a cursor replacement. Compare scalar
+values and failure with the maintained `StringLiteral` semantic module and
+hosted lexical validity under both runtime policies, including exhaustive
+single-scalar inputs, malformed suffixes and multi-scalar boundary cases. Do
+not expose source positions, cursors, literal values, encoders, scanner or
+frontend support, widen the classifier, change the source-free DLL, or
+approve a stable ABI.
+
 ### Provisional scalar source-offset export
 
 **Question:** Should the maintained companion expose the hosted line/character

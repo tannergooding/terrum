@@ -2726,6 +2726,17 @@ with the hosted lexer; semantic-module tests compare validity and count with
 aggregate `StringLiteral.TryCreate`, including exhaustive single-scalar
 inputs and multi-scalar edge cases. This does not expose literal values,
 cursors, encoders, scanner or frontend support.
+`GetStringLiteralScalarOrMinusOne(start, length, scalarIndex)` provisionally
+returns the decoded scalar at a zero-based scalar index, or `-1` for an invalid
+spelling/index. It first uses the count query to validate the entire exact
+slice, then rescans to the selected scalar; each lookup is allocation-free
+and linear in the bounded slice, while enumerating all indices is quadratic
+and is not a cursor replacement. Semantic-module coverage compares values
+with `StringLiteral.TryReadScalar`, including malformed suffixes after the
+requested scalar; direct DLL coverage checks exact-slice validity against a
+single hosted lexer token. U+0000 and U+FFFF remain successful values. This
+does not expose a literal aggregate, cursor, encoder, scanner or frontend
+support.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under
