@@ -474,6 +474,7 @@ public sealed class ScannerTests
         }
         sources.Add(supplementaryEscapeSource.ToString());
         sources.Add("""
+            "\u" "\u0" "\u000" "\u000G" "\u00000"
             "\U1234567" "\U0000000G" "\U0000000" "\UFFFFFFFFF" "\U00110000"
             """);
         sources.Add("\"\\U0000000");
