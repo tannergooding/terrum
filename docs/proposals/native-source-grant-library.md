@@ -305,6 +305,41 @@ arguments and maximum grants. Use the isolated scalar hex helper; leave the
 classifier, source-free DLL and hosted scanner/frontend boundaries unchanged.
 The encoding remains provisional and does not establish a stable ABI.
 
+### Provisional scalar string-literal validation/count export
+
+**Question:** Should the maintained companion expose the existing
+`StringLiteral.TryCreate` validation and scalar count without exporting the
+literal aggregate, cursor or owned-string operations?
+
+**Summary:** `StringLiteral.TryCreate` returns false for malformed spelling or
+an invalid source range and otherwise publishes a `StringLiteral` containing
+the original range and decoded scalar count. An isolated
+`GetStringLiteralScalarCountOrMinusOne(int32 start, int32 length) -> int32`
+can preserve the validity/count result: `-1` means false and every successful
+count is nonnegative, including zero for an empty literal and one for a
+literal containing NUL. The source-grant bound limits the count to 16,382.
+For escaped units, the component can reuse `AnalyzeStringEscapePacked` and
+must reject both zero (not analyzable) and an error marker before advancing
+by the packed consumed width. It must exclude the closing quote from the
+escape range. This avoids including `StringLiteral`, `StringEscape` aggregate
+outputs or source-dependent output call closures in the maintained program.
+
+**Recommendation:** Include only the isolated scalar validation/count export
+as provisional evidence. Match the exact quoted-slice contract: require both
+quotes, reject raw interior quotes and the five hosted line breaks, accept
+escaped quotes and escaped linebreak scalars, count raw surrogate pairs once,
+and reject unpaired raw units and malformed escapes. Do not combine escaped
+surrogate pairs across escape spellings. Check bounds before computing the
+closing-quote position; preserve exact slice termination, including a
+backslash immediately before the closing quote. Compare both validity and
+count with aggregate `StringLiteral.TryCreate` and hosted lexer diagnostics
+under both policies, covering empty/NUL/mixed literals, multiple scalars,
+all line breaks versus VT/FF, quote/backslash boundaries, malformed and
+truncated escapes, surrogate distinctions, nonzero offsets, extreme
+arguments and maximum grants. This query does not expose a `StringLiteral`,
+cursor, decoder/encoder, scanner or frontend support, widen the classifier,
+change the source-free DLL, or approve a stable ABI.
+
 ### Provisional scalar source-offset export
 
 **Question:** Should the maintained companion expose the hosted line/character

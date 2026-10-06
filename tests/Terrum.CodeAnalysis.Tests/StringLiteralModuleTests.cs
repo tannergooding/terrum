@@ -22,7 +22,10 @@ public sealed class StringLiteralModuleTests
     public async Task StringLiteralModuleReadsFreshSourceGrants(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
-        var componentNames = new[] { "SourceRange", "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "StringEscape", "StringLiteral" };
+        var componentNames = new[] {
+            "SourceRange", "CharacterFacts", "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar",
+            "StringEscape", "StringEscapePacked", "StringLiteral", "StringLiteralScalarCount",
+        };
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)
         {
@@ -88,6 +91,33 @@ public sealed class StringLiteralModuleTests
                     } else if (expectedValid) {
                         return item + 1;
                     }
+                    mut int32 expectedScalarCount = -1;
+                    if (expectedValid) { expectedScalarCount = 1; }
+                    if (GetStringLiteralScalarCountOrMinusOne(at, spellingLength) != expectedScalarCount) {
+                        return item + 1;
+                    }
+                    at = at + spellingLength;
+                    item = item + 1;
+                }
+                return 0;
+            }
+            public int32 VerifyLiteralCountRecords() {
+                int32 sourceLength = Host.Source.Length;
+                mut int32 at = 0;
+                mut int32 item = 0;
+                while (at < sourceLength) {
+                    if (sourceLength - at < 1) { return -1; }
+                    int32 spellingLength = int32(Host.Source[at]);
+                    at = at + 1;
+                    if (spellingLength > sourceLength - at) { return -2; }
+                    if (!SourceRange.TryCreate(at, spellingLength, init var spelling)) { return -3; }
+                    mut int32 expectedScalarCount = -1;
+                    if (StringLiteral.TryCreate(spelling, init var literal)) {
+                        expectedScalarCount = literal.ScalarCount;
+                    }
+                    if (GetStringLiteralScalarCountOrMinusOne(at, spellingLength) != expectedScalarCount) {
+                        return item + 1;
+                    }
                     at = at + spellingLength;
                     item = item + 1;
                 }
@@ -107,6 +137,7 @@ public sealed class StringLiteralModuleTests
                 "Terrum.CodeAnalysis.ReadFirstStringScalar",
                 "Terrum.CodeAnalysis.ReadRequestedStringScalar",
                 "Terrum.CodeAnalysis.VerifyLiteralScalarRecords",
+                "Terrum.CodeAnalysis.VerifyLiteralCountRecords",
             ]);
 
         var consumerTree = SyntaxTree.Parse("""
@@ -128,6 +159,17 @@ public sealed class StringLiteralModuleTests
         var recordConsumer = ModuleCompiler.Link(
             ModuleCompiler.CreateConsumer(
                 Assert.IsType<BoundProgram>(recordConsumerCompilation.Program), producer),
+            producer);
+        var countRecordConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return VerifyLiteralCountRecords(); }
+            """, "string-literal-count-record-consumer.terrum"),
+            ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(countRecordConsumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, countRecordConsumerCompilation.Diagnostics));
+        var countRecordConsumer = ModuleCompiler.Link(
+            ModuleCompiler.CreateConsumer(
+                Assert.IsType<BoundProgram>(countRecordConsumerCompilation.Program), producer),
             producer);
 
         foreach (var (text, scalar) in new (string Text, int? Scalar)[] {
@@ -212,6 +254,39 @@ public sealed class StringLiteralModuleTests
         }
 
         ExecuteRecords();
+        var countRecords = new List<int>();
+        foreach (var spelling in new[] {
+            "\"\"",
+            "\"A\"",
+            "\"\\0\"",
+            "\"a\\n\\U0001F600b\"",
+            new string(['"', '\\', '"', '"']),
+            new string(['"', '"', '"']),
+            new string(['"', '\n', '"']),
+            new string(['"', '\r', '"']),
+            new string(['"', '\u0085', '"']),
+            new string(['"', '\u2028', '"']),
+            new string(['"', '\u2029', '"']),
+            "\"\\q\"",
+            "\"\\u12\"",
+            "\"\\uD800\"",
+            new string(['"', '\uD800', '"']),
+            new string(['"', '\uD83D', '\uDE00', '"']),
+            "\"\\uD83D\\uDE00\"",
+            new string(['"', '\u000B', '\u000C', '"']),
+            new string(['"', '\\', '"']),
+            "\"\\u0085\"",
+        })
+        {
+            countRecords.Add(spelling.Length);
+            countRecords.AddRange(spelling.Select(static unit => (int)unit));
+        }
+        var countRecordGrant = new HostBuffer("Source", PrimitiveType.Char16, [.. countRecords], false) {
+            IsInvocationScoped = true,
+        };
+        Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(
+            countRecordConsumer, [countRecordGrant], (NativeRuntimePolicy)policy));
+
         const int maximumEscapedBmpScalarsPerBatch = 1_000;
         for (var scalarStart = (int)char.MinValue;
             scalarStart <= char.MaxValue;

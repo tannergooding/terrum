@@ -2714,6 +2714,18 @@ analyzers, and semantic-module coverage includes exhaustive scalar/escape
 inputs. Both use the isolated `HexDigitValue` component, leaving source-free
 `CharacterFacts` unchanged. The tagged layout remains provisional and does
 not broaden scanner or scalar frontend support.
+`GetStringLiteralScalarCountOrMinusOne(start, length)` provisionally returns
+`-1` when the existing `StringLiteral.TryCreate` contract rejects an exact
+quoted slice, otherwise the number of decoded scalars; empty literals return
+zero and NUL counts as one. It uses the string-escape packed query without
+including aggregate literal/escape results, excludes the closing quote from
+the escape range, and rejects raw interior quotes, hosted line breaks,
+unpaired UTF-16 and malformed escapes. The source-grant maximum bounds the
+successful count to 16,382. Direct DLL tests compare representative cases
+with the hosted lexer; semantic-module tests compare validity and count with
+aggregate `StringLiteral.TryCreate`, including exhaustive single-scalar
+inputs and multi-scalar edge cases. This does not expose literal values,
+cursors, encoders, scanner or frontend support.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under

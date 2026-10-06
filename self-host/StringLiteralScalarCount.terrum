@@ -1,0 +1,54 @@
+namespace Terrum.CodeAnalysis;
+
+public static int32 GetStringLiteralScalarCountOrMinusOne(int32 start, int32 length)
+{
+    int32 sourceLength = Host.Source.Length;
+    if (start < 0 || length < 2 || start > sourceLength
+        || length > sourceLength - start)
+    {
+        return -1;
+    }
+
+    int32 end = start + length - 1;
+    if (Host.Source[start] != char16(34) || Host.Source[end] != char16(34))
+    {
+        return -1;
+    }
+
+    mut int32 at = start + 1;
+    mut int32 count = 0;
+    while (at < end)
+    {
+        char16 character = Host.Source[at];
+        if (character == char16(34) || IsLineBreak(character))
+        {
+            return -1;
+        }
+
+        if (character == char16(92))
+        {
+            uint32 packed = AnalyzeStringEscapePacked(at, end - at);
+            if (packed == 0 || (packed & 1) != 0)
+            {
+                return -1;
+            }
+            // The packed escape width is positive and bounded by the exact range ending at the closing quote.
+            at = at + int32((packed >> 1) & 15);
+        }
+        else if (character >= char16(55296) && character <= char16(57343))
+        {
+            int32 scalar = ReadUtf16Scalar(at, end);
+            if (scalar < 0)
+            {
+                return -1;
+            }
+            at = at + Utf16ScalarWidth(scalar);
+        }
+        else
+        {
+            at = at + 1;
+        }
+        count = count + 1;
+    }
+    return count;
+}
