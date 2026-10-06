@@ -464,6 +464,19 @@ public sealed class ScannerTests
         }
         sources.Add(supplementaryEscapeSource.ToString());
 
+        var supplementarySource = new StringBuilder();
+        foreach (var scalar in supplementaryEscapes)
+        {
+            if (scalar == 0 || scalar > 0x10FFFF || scalar is >= 0xD800 and <= 0xDFFF)
+            {
+                continue;
+            }
+            supplementarySource.Append('"')
+                .Append(char.ConvertFromUtf32(scalar))
+                .Append("\" ");
+        }
+        sources.Add(supplementarySource.ToString());
+
         ScannerInvocationResult? retained = null;
         foreach (var text in sources)
         {
