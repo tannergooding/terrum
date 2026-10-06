@@ -1,0 +1,51 @@
+using Terrum;
+using Terrum.CodeAnalysis;
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckCopyAlgorithms()
+{
+    int64 selected = SelectCopy(true, int64.MinValue, int64.MaxValue);
+    bool selectedBoolean = SelectCopy(false, true, false);
+    char16 selectedCodeUnit = SelectCopy(true, char16(55296), char16(65));
+    if (selected != int64.MinValue || selectedBoolean
+        || selectedCodeUnit != char16(55296))
+    {
+        return false;
+    }
+
+    if (TrySelectCopyInit(2, int64(40), int64(42), init var initialized)
+        || TrySelectCopy(-1, int64(40), int64(42), out var absentCopy))
+    {
+        return false;
+    }
+    require TrySelectCopyInit(1, int64(40), int64(42), init initialized);
+    require TrySelectCopy(0, int64(40), int64(42), out var copied);
+    if (initialized != int64(42) || copied != int64(40))
+    {
+        return false;
+    }
+
+    require SourceRange.TryCreate(12, 5, init var firstRange);
+    require SourceRange.TryCreate(42, 7, init var secondRange);
+    Token first = new Token(1, firstRange);
+    Token second = new Token(2, secondRange);
+    Token selectedToken = SelectCopy(false, first, second);
+    if (selectedToken.Kind != 2 || selectedToken.Range.Start != 42
+        || selectedToken.Range.Length != 7)
+    {
+        return false;
+    }
+
+    if (TrySelectCopyInit(2, first, second, init var initializedToken))
+    {
+        return false;
+    }
+    require TrySelectCopyInit(0, first, second, init initializedToken);
+    if (initializedToken.Kind != 1 || initializedToken.Range.Start != 12
+        || initializedToken.Range.Length != 5)
+    {
+        return false;
+    }
+
+    return true;
+}

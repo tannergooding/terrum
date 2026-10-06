@@ -22,6 +22,7 @@ int32 Main()
         require CheckCheckedUInt32Arithmetic();
         require CheckIntegerFacts();
         require CheckIntegerFormatting();
+        require CheckCopyAlgorithms();
         require CheckIntegerMath();
         require CheckBitOperations();
         require CheckIntegerSaturation();

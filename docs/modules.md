@@ -224,7 +224,8 @@ consumer source and the validated artifact-reference path.
 Both library and reference compilation accept multiple `SyntaxTree` snapshots;
 source diagnostics retain the originating snapshot. The self-host component
 test builds `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`,
-the test-only `IntegerFactsTestExports` bridge, `Token`, `WideIntegerFacts`,
+the test-only `IntegerFactsTestExports` bridge, `Token`, `CopyAlgorithms`,
+the producer-local `CopyAlgorithmsTests` wrapper, `WideIntegerFacts`,
 `IntegerFormatting`, the producer-local `IntegerFormattingTests` wrapper,
 `IntegerCheckedArithmetic`, `IntegerMath`, `IntegerSaturation`,
 `IntegerWrapping`, `IntegerCheckedConversions`, and `BitOperations` into one
@@ -237,6 +238,8 @@ producer, then independently binds `RangeTests`, `TokenTests`, `WideIntegerTests
 The formatter wrapper alone crosses the module boundary; its unique workspace
 is created, reused, and consumed inside the producer, so the candidate owner
 does not become a module export.
+The copy wrapper likewise keeps generic specializations in the producer and
+exports only its test result, not generic candidate functions.
 Those persisted modules execute through AOT and JIT, including range boundaries,
 conditional-output failure, character classification, hexadecimal mapping and
 UTF-16 scalar decoding,
@@ -295,6 +298,8 @@ $componentSources = @(
     'self-host\IntegerFacts.terrum',
     'self-host\IntegerFactsTestExports.terrum',
     'self-host\Token.terrum',
+    'self-host\CopyAlgorithms.terrum',
+    'self-host\CopyAlgorithmsTests.terrum',
     'self-host\WideIntegerFacts.terrum',
     'self-host\IntegerFormatting.terrum',
     'self-host\IntegerFormattingTests.terrum',
@@ -320,6 +325,7 @@ $componentExports = @(
     'IntegerFactsInt64Mask',
     'IntegerFactsUInt64Mask',
     'Terrum.CodeAnalysis.Tests.CheckIntegerFormatting',
+    'Terrum.CodeAnalysis.Tests.CheckCopyAlgorithms',
     'Terrum.CodeAnalysis.Token.#ctor',
     'Terrum.CodeAnalysis.Numerics64.TryAddInt64',
     'Terrum.CodeAnalysis.Numerics64.TrySubtractInt64',
