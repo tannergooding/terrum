@@ -393,6 +393,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `200c3f3f` | Provisionally allow fixed `float32`/`float64` results for compilation-local generic Copy output templates; cover both output modes, fixed scalar side outputs, checked retry and private semantic/native replacement, with target contract unapproved |
 | `e5b3b9a6` | Cover non-Boolean-result generic `bool` outputs alongside floating generic output specializations |
 | `57d41e3f` | Verify non-Boolean/void generic `out` and `init ref<T>` publication with concrete floating specializations through direct execution and private semantic/native replacement under both runtime policies |
 | `2603daf6` | Provisionally allow fixed scalar `out` and `init ref` side outputs alongside generic Copy outputs for fixed non-Boolean/void results; preserve per-mode proof/publication and private module boundaries, with target contract unapproved |
