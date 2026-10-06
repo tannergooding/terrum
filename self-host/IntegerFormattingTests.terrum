@@ -1,0 +1,50 @@
+using Terrum.CodeAnalysis.Numerics64;
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckIntegerFormatting()
+{
+    require TryGetInt64BaseLength(int64.MinValue, 16, init var minimumLength);
+    if (minimumLength != 17
+        || TryGetChar16BaseLength(char16(65), 1, init var invalidLength))
+    {
+        return false;
+    }
+
+    require OwnedInt32Buffer.TryCreate(minimumLength, out var workspace);
+    mut OwnedInt32Buffer digits = FormatInt64BaseUpper(int64.MinValue, 16, move workspace);
+    if (digits.Count != minimumLength || digits.Capacity != minimumLength
+        || digits.Read(0) != 45 || digits.Read(1) != 56)
+    {
+        return false;
+    }
+    for (mut int32 index = 2; index < digits.Count; index = index + 1)
+    {
+        if (digits.Read(index) != 48)
+        {
+            return false;
+        }
+    }
+
+    digits = FormatUInt32BaseUpper(uint32(11259375), 16, move digits);
+    if (digits.Count != 6 || digits.Read(0) != 65 || digits.Read(1) != 66
+        || digits.Read(2) != 67 || digits.Read(3) != 68
+        || digits.Read(4) != 69 || digits.Read(5) != 70)
+    {
+        return false;
+    }
+
+    digits = FormatUInt32(1234, move digits);
+    if (digits.Count != 4 || digits.Read(0) != 49 || digits.Read(1) != 50
+        || digits.Read(2) != 51 || digits.Read(3) != 52)
+    {
+        return false;
+    }
+
+    digits = FormatUInt32(0, move digits);
+    if (digits.Count != 1 || digits.Capacity != minimumLength || digits.Read(0) != 48)
+    {
+        return false;
+    }
+
+    return true;
+}

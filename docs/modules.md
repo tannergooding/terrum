@@ -225,6 +225,7 @@ Both library and reference compilation accept multiple `SyntaxTree` snapshots;
 source diagnostics retain the originating snapshot. The self-host component
 test builds `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`,
 the test-only `IntegerFactsTestExports` bridge, `Token`, `WideIntegerFacts`,
+`IntegerFormatting`, the producer-local `IntegerFormattingTests` wrapper,
 `IntegerCheckedArithmetic`, `IntegerMath`, `IntegerSaturation`,
 `IntegerWrapping`, `IntegerCheckedConversions`, and `BitOperations` into one
 producer, then independently binds `RangeTests`, `TokenTests`, `WideIntegerTests`,
@@ -233,6 +234,9 @@ producer, then independently binds `RangeTests`, `TokenTests`, `WideIntegerTests
 `IntegerSaturationTests`, `IntegerWrappingTests`,
 `IntegerCheckedConversionsTests`, `BitOperationsTests`, and the Terrum-authored
 `ComponentTestRunner` against its exported declarations.
+The formatter wrapper alone crosses the module boundary; its unique workspace
+is created, reused, and consumed inside the producer, so the candidate owner
+does not become a module export.
 Those persisted modules execute through AOT and JIT, including range boundaries,
 conditional-output failure, character classification, hexadecimal mapping and
 UTF-16 scalar decoding,
@@ -292,6 +296,8 @@ $componentSources = @(
     'self-host\IntegerFactsTestExports.terrum',
     'self-host\Token.terrum',
     'self-host\WideIntegerFacts.terrum',
+    'self-host\IntegerFormatting.terrum',
+    'self-host\IntegerFormattingTests.terrum',
     'self-host\IntegerCheckedArithmetic.terrum',
     'self-host\IntegerMath.terrum',
     'self-host\IntegerSaturation.terrum',
@@ -313,6 +319,7 @@ $componentExports = @(
     'IntegerFactsUInt32Mask',
     'IntegerFactsInt64Mask',
     'IntegerFactsUInt64Mask',
+    'Terrum.CodeAnalysis.Tests.CheckIntegerFormatting',
     'Terrum.CodeAnalysis.Token.#ctor',
     'Terrum.CodeAnalysis.Numerics64.TryAddInt64',
     'Terrum.CodeAnalysis.Numerics64.TrySubtractInt64',
