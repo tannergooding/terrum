@@ -34,10 +34,12 @@ surrogate-valued `\U` escapes with hosted diagnostic parity. The provisional
 introducer, every valid supplementary `\U` escape and all 2,048 rejected
 surrogate-valued `\U` escapes, including consumed and diagnostic widths.
 `StringLiteral` scalar decoding is checked for every scanner-delimited BMP
-code unit (including surrogate rejection), every valid supplementary scalar
-in both direct and escaped spellings, and the same invalid escaped-surrogate
-set. Its sequential cursor also matches each valid scalar and exact next
-UTF-16 offset across that exhaustive single-scalar corpus. `StringRow`
+code unit (including surrogate rejection), every BMP `\u` escape (including
+rejection of all 2,048 surrogate-valued code units), every valid supplementary
+scalar in both direct and `\U`-escaped spellings, and the same invalid
+surrogate-valued `\U` set. Scalar reads reject every interior source offset in
+each valid single-scalar spelling; the sequential cursor also matches each
+scalar and exact next UTF-16 offset across that corpus. `StringRow`
 name/namespace encoders cover ASCII, UTF-8, UTF-16LE and
 UTF-32LE. Persisted semantic-module JIT tests compare UTF-8, UTF-16LE and
 UTF-32LE name/namespace rows with the hosted string-table writer for every

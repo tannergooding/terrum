@@ -51,7 +51,7 @@ public sealed class StringLiteralModuleTests
                 if (next != spelling.Start + int32(Host.Source[1])) { return -5; }
                 return scalar;
             }
-            public int32 VerifyBmpLiteralRecords() {
+            public int32 VerifyLiteralScalarRecords() {
                 int32 sourceLength = Host.Source.Length;
                 mut int32 at = 0;
                 mut int32 item = 0;
@@ -78,6 +78,13 @@ public sealed class StringLiteralModuleTests
                             || following.TryRead(init var extraScalar, init var afterExtra)) {
                             return item + 1;
                         }
+                        for (mut int32 position = at + 2;
+                            position < at + spellingLength - 1;
+                            position = position + 1) {
+                            if (literal.TryReadScalar(position, init var interiorScalar, init var interiorNext)) {
+                                return item + 1;
+                            }
+                        }
                     } else if (expectedValid) {
                         return item + 1;
                     }
@@ -99,7 +106,7 @@ public sealed class StringLiteralModuleTests
             [
                 "Terrum.CodeAnalysis.ReadFirstStringScalar",
                 "Terrum.CodeAnalysis.ReadRequestedStringScalar",
-                "Terrum.CodeAnalysis.VerifyBmpLiteralRecords",
+                "Terrum.CodeAnalysis.VerifyLiteralScalarRecords",
             ]);
 
         var consumerTree = SyntaxTree.Parse("""
@@ -114,7 +121,7 @@ public sealed class StringLiteralModuleTests
 
         var recordConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
-            int32 Main() { return VerifyBmpLiteralRecords(); }
+            int32 Main() { return VerifyLiteralScalarRecords(); }
             """, "string-literal-record-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
         Assert.False(recordConsumerCompilation.HasErrors,
             string.Join(Environment.NewLine, recordConsumerCompilation.Diagnostics));
@@ -202,6 +209,55 @@ public sealed class StringLiteralModuleTests
             records.Add(expectedScalar >> 16);
             records.Add(spelling.Length);
             records.AddRange(spelling.Select(static unit => (int)unit));
+        }
+
+        ExecuteRecords();
+        const int maximumEscapedBmpScalarsPerBatch = 1_000;
+        for (var scalarStart = (int)char.MinValue;
+            scalarStart <= char.MaxValue;
+            scalarStart += maximumEscapedBmpScalarsPerBatch)
+        {
+            var scalarCount = Math.Min(maximumEscapedBmpScalarsPerBatch,
+                char.MaxValue + 1 - scalarStart);
+            var batchText = new StringBuilder(scalarCount * 9);
+            var invalidScalarCount = 0;
+            for (var index = 0; index < scalarCount; index++)
+            {
+                var scalar = scalarStart + index;
+                var spelling = $"\"\\u{scalar:X4}\"";
+                batchText.Append(spelling).Append(' ');
+                var valid = !char.IsSurrogate((char)scalar);
+                if (!valid)
+                {
+                    invalidScalarCount++;
+                }
+                records.Add(valid ? 1 : 0);
+                records.Add(valid ? scalar & 0xFFFF : 0);
+                records.Add(valid ? scalar >> 16 : 0);
+                records.Add(spelling.Length);
+                records.AddRange(spelling.Select(static unit => (int)unit));
+            }
+
+            var lexed = Lexer.Lex(SourceText.From(batchText.ToString()));
+            Assert.Equal(invalidScalarCount, lexed.Diagnostics.Length);
+            Assert.Equal(scalarCount + 1, lexed.Tokens.Length);
+            var diagnosticIndex = 0;
+            for (var index = 0; index < scalarCount; index++)
+            {
+                var scalar = scalarStart + index;
+                var spelling = $"\"\\u{scalar:X4}\"";
+                Assert.Equal(TokenKind.StringLiteral, lexed.Tokens[index].Kind);
+                Assert.Equal(spelling, lexed.Tokens[index].Text);
+                if (char.IsSurrogate((char)scalar))
+                {
+                    Assert.Equal("TRM0005", lexed.Diagnostics[diagnosticIndex].Code);
+                    Assert.Equal(index * 9 + 1, lexed.Diagnostics[diagnosticIndex].Span.Start);
+                    Assert.Equal(6, lexed.Diagnostics[diagnosticIndex].Span.Length);
+                    diagnosticIndex++;
+                }
+            }
+            Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[^1].Kind);
+            ExecuteRecords();
         }
 
         const int firstSupplementaryScalar = 0x10000;
