@@ -37,14 +37,14 @@ surrogate-valued `\U` escapes, including consumed and diagnostic widths.
 code unit (including surrogate rejection), every valid supplementary scalar
 in both direct and escaped spellings, and the same invalid escaped-surrogate
 set. `StringRow` name/namespace encoders cover ASCII, UTF-8, UTF-16LE and
-UTF-32LE.
-Persisted semantic-module JIT tests compare those rows with the hosted string
-table writer across fresh grants, including the existing empty-name,
-unrepresentable-ASCII and embedded-zero rejection behavior. They also compare
-the ordinal decoded-scalar name and namespace comparison APIs against hosted
-ordinal string equality for all nonzero Unicode scalar values in bounded
-batches, using case-varied `\U` spellings, including invalid empty-name and
-embedded-zero requests.
+UTF-32LE. Persisted semantic-module JIT tests compare UTF-8, UTF-16LE and
+UTF-32LE name/namespace rows with the hosted string-table writer for every
+nonzero Unicode scalar in bounded batches; ASCII batches reject non-ASCII
+contents. The fixtures also cover empty names, unrepresentable ASCII and
+embedded-zero rejection. Ordinal decoded-scalar name and namespace comparison
+APIs match hosted ordinal equality for all nonzero Unicode scalar values in
+bounded batches, using case-varied `\U` spellings, and reject invalid
+empty-name and embedded-zero requests.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.

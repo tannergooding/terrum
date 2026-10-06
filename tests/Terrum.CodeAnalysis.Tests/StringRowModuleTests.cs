@@ -2,6 +2,7 @@ using System;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
@@ -163,7 +164,7 @@ public sealed class StringRowModuleTests
             new RowFixture(false, 3, "A\0B", "\"A\\0B\"", false),
         };
 
-        foreach (var fixture in fixtures)
+        void VerifyFixture(RowFixture fixture)
         {
             int[]? expectedBytes = fixture.IsValid
                 ? GetExpectedRow(fixture)
@@ -174,6 +175,55 @@ public sealed class StringRowModuleTests
                 (NativeRuntimePolicy)policy);
             Assert.True(result == 0,
                 $"{exports[consumerIndex]} failed for {fixture.Spelling}: verification returned {result}.");
+        }
+
+        foreach (var fixture in fixtures)
+        {
+            VerifyFixture(fixture);
+        }
+
+        const int maximumScalarsPerBatch = 1_100;
+        var textBuilder = new StringBuilder(maximumScalarsPerBatch * 2);
+        var spellingBuilder = new StringBuilder(maximumScalarsPerBatch * 10);
+        var scalarCount = 0;
+        void VerifyBatch()
+        {
+            var text = textBuilder.ToString();
+            var spelling = $"\"{spellingBuilder}\"";
+            Assert.True(scalarCount * 14 + 13 <= 16_384);
+            for (var encoding = 0; encoding < 4; encoding++)
+            {
+                var valid = encoding != 0 || text.All(static unit => unit <= 0x7F);
+                foreach (var isName in new[] { true, false })
+                {
+                    VerifyFixture(new RowFixture(
+                        isName, encoding, text, spelling, valid));
+                }
+            }
+
+            textBuilder.Clear();
+            spellingBuilder.Clear();
+            scalarCount = 0;
+        }
+
+        for (var scalar = 1; scalar < 0x110000; scalar++)
+        {
+            if (scalar is >= 0xD800 and <= 0xDFFF)
+            {
+                continue;
+            }
+
+            textBuilder.Append(new Rune(scalar).ToString());
+            spellingBuilder.Append($"\\U{scalar:X8}");
+            scalarCount++;
+            if (scalarCount == maximumScalarsPerBatch)
+            {
+                VerifyBatch();
+            }
+        }
+        if (scalarCount != 0)
+        {
+            VerifyBatch();
         }
     }
 
