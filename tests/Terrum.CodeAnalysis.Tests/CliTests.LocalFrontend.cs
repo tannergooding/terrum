@@ -3,6 +3,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -104,6 +105,55 @@ public sealed partial class CliTests
                 Assert.Empty(hostedError);
                 Assert.Equal(await File.ReadAllBytesAsync(hostedPath),
                     await File.ReadAllBytesAsync(nativePath));
+            }
+        }
+        finally
+        {
+            File.Delete(nativePath);
+            File.Delete(hostedPath);
+        }
+    }
+
+    [Theory]
+    [InlineData("unsafe { return Danger() + 1; }")]
+    [InlineData("return unsafe(Danger()) + 1;")]
+    public async Task LocalFrontendCallerUnsafeLibraryMatchesHostedBytesAndExecutionAsync(string body)
+    {
+        var source = $"unsafe int32 Danger() {{ return 41; }} public int32 Value() {{ {body} }}";
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", ".."));
+        var frontend = Path.Combine(root, "self-host");
+        var nativePath = Path.Combine(root, $"local-frontend-{Guid.NewGuid():N}.native.dll");
+        var hostedPath = Path.Combine(root, $"local-frontend-{Guid.NewGuid():N}.hosted.dll");
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var input = Encoding.UTF8.GetBytes(source);
+                var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
+                    "frontend-build-library", frontend, "-", "-o", nativePath,
+                    "--runtime", policy, "--json");
+                var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
+                    "build-library", "-", "--export", "Value", "-o", hostedPath,
+                    "--runtime", policy, "--json");
+                Assert.True(nativeExit == 0, $"{nativeExit}: {nativeOutput}{nativeError}");
+                Assert.True(hostedExit == 0, $"{hostedExit}: {hostedOutput}{hostedError}");
+                Assert.Empty(nativeError);
+                Assert.Empty(hostedError);
+                Assert.Equal(await File.ReadAllBytesAsync(hostedPath),
+                    await File.ReadAllBytesAsync(nativePath));
+
+                var handle = NativeLibrary.Load(nativePath);
+                try
+                {
+                    var invoke = Marshal.GetDelegateForFunctionPointer<ScopedInt32>(
+                        NativeLibrary.GetExport(handle, "Value"));
+                    Assert.Equal(42, invoke());
+                }
+                finally
+                {
+                    NativeLibrary.Free(handle);
+                }
             }
         }
         finally

@@ -177,7 +177,9 @@ source-audited caller-unsafe callable declarations and explicit unsafe-block
 call authorization and source-audited `unsafe(expr)` call-site scopes;
 v85 maps named by-value and scalar output call arguments to formal parameters
 without changing source-order evaluation. Their verifier and emitter also
-remain hosted.
+remain hosted. Library integration tests compare both caller-unsafe scope
+forms byte-for-byte with hosted builds and execute the exported safe wrapper
+under both runtime policies.
 The single-function buffer also audits self-call authorization against enclosing
 unsafe scopes. Both current projections
 source-audit `is init` tests for named scalar locals and parameters. Verification
