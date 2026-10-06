@@ -106,6 +106,45 @@ public sealed class TokenCursorTests
     }
 
     [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CursorTraversesMaximumScannerTokenSnapshotAsync(BoundRuntimePolicy policy)
+    {
+        var identifierCount = ScannerHost.MaximumSourceLength / 2;
+        var expectedTokenCount = identifierCount + 1;
+        var input = string.Concat(Enumerable.Repeat("a ", identifierCount));
+        Assert.Equal(ScannerHost.MaximumSourceLength, input.Length);
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var scanned);
+                mut TokenSnapshot owner = move scanned;
+                mut TokenCursor cursor = new TokenCursor(owner.AsSpan());
+                mut int32 index = 0;
+                while (cursor.TryRead(out var token)) {
+                    if (index < {{identifierCount}}) {
+                        if (token.Kind != 2 || token.Range.Start != index * 2
+                            || token.Range.Length != 1) { return 1; }
+                    } else if (index == {{identifierCount}}) {
+                        if (token.Kind != 0 || token.Range.Start != {{ScannerHost.MaximumSourceLength}}
+                            || token.Range.Length != 0) { return 2; }
+                    } else {
+                        return 3;
+                    }
+                    index = index + 1;
+                }
+                if (index != {{expectedTokenCount}}
+                    || cursor.TryRead(out var exhausted)) { return 4; }
+                cursor = _;
+                owner = _;
+                return 42;
+            }
+            """;
+        var compilation = await CompileAsync(input, entry, policy).ConfigureAwait(true);
+        await ExecuteAsync(Program(compilation), policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task SnapshotConstructionPathsBothProduceAValidatedViewAsync(bool lossless)
