@@ -1312,13 +1312,29 @@ internal sealed partial class Binder
                 {
                     Report("TRM3001", "Getter effects belong on the get accessor.", attribute.Span);
                 }
-                else if (returnTarget && attributeName == "ForwardedBacking" && forwardedBacking is null)
+                else if (returnTarget && attributeName == "ForwardedBacking")
                 {
-                    forwardedBacking = attribute;
+                    if (forwardedBacking is null)
+                    {
+                        forwardedBacking = attribute;
+                    }
+                    else
+                    {
+                        Report("TRM3023", "Forwarded Span results cannot repeat the ForwardedBacking annotation.",
+                            attribute.Span);
+                    }
                 }
-                else if (returnTarget && attributeName == "DependsOn" && resultDependencies is null)
+                else if (returnTarget && attributeName == "DependsOn")
                 {
-                    resultDependencies = attribute;
+                    if (resultDependencies is null)
+                    {
+                        resultDependencies = attribute;
+                    }
+                    else
+                    {
+                        Report("TRM3023", "Forwarded Span results cannot repeat the DependsOn annotation.",
+                            attribute.Span);
+                    }
                 }
                 else if (!returnTarget && attributeName == "NoThrow" && !isNoThrow)
                 {

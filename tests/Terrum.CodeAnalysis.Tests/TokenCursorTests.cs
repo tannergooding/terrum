@@ -440,6 +440,28 @@ public sealed class TokenCursorTests
         """)]
     [InlineData("""
         [return: ForwardedBacking]
+        [return: ForwardedBacking]
+        [return: DependsOn(nameof(tokens))]
+        internal Span<Token> DuplicateMarker(Span<Token> tokens) { return tokens; }
+        """)]
+    [InlineData("""
+        [return: ForwardedBacking]
+        [return: DependsOn(nameof(tokens))]
+        [return: DependsOn(nameof(tokens))]
+        internal Span<Token> DuplicateDependencies(Span<Token> tokens) { return tokens; }
+        """)]
+    [InlineData("""
+        [return: ForwardedBacking]
+        [return: DependsOn(nameof(tokens))]
+        public Span<Token> NonInternal(Span<Token> tokens) { return tokens; }
+        """)]
+    [InlineData("""
+        [return: ForwardedBacking]
+        [DependsOn(nameof(tokens))]
+        internal Span<Token> WrongDependencyTarget(Span<Token> tokens) { return tokens; }
+        """)]
+    [InlineData("""
+        [return: ForwardedBacking]
         [return: DependsOn(nameof(select))]
         internal Span<Token> NonSpanSource(bool select, Span<Token> tokens) { return tokens; }
         """)]
