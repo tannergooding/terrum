@@ -160,7 +160,7 @@ frontend with source-audited `unsafe(expr)` scopes and caller-unsafe callable
 declarations. Both projection families use only v85; verification and emission
 remain hosted.
 
-Separately, semantic-module revision 58 provisionally persists top-level
+Separately, semantic-module revision 59 provisionally persists top-level
 caller-unsafe contracts and bounded readonly-instance and static method slices for
 public non-unique `Copy` owners; calls still require explicit `unsafe { }`
 blocks and readers reconstruct
@@ -185,9 +185,10 @@ prerequisite has already been met.
 1. **Full runtime/structured contracts — references and safety.** General
    reference/access/loan metadata and caller-unsafe member contracts still
    need definition before wider use across calls or imports. Structured
-   semantic-module revision 58 provisionally carries top-level caller-unsafe
-   obligations and narrow readonly-instance and static `Copy` method slices
-   through explicit unsafe-block scopes; this bounded implementation does not settle
+   semantic-module revision 59 provisionally carries top-level caller-unsafe
+   obligations and narrow readonly-instance and static `Copy` method slices,
+   including recursively exportable by-value Copy signatures, through explicit
+   unsafe-block scopes; this bounded implementation does not settle
    the general schema or approve the
    [reference-call metadata proposal](proposals/reference-call-metadata.md),
    which recommends a narrow first dependency registry and reuse of the
@@ -307,6 +308,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `403b51b0` | Extend caller-unsafe semantic-module method signatures to public non-unique Copy values; verify links, native graphs and module sets under both runtime policies |
 | `6a2f3fe5` | Execute persisted native consumers with replacement providers publishing `out` values from `finally` under both runtime policies |
 | `efcc7d2a` | Verify semantic and native module replacements reject `out`/`init ref<T>` mode changes under both runtime policies |
 | `b843eef0` | Verify semantic and native module replacements preserve retained `NoThrow` and `DoesNotReturn` effects under both runtime policies |
