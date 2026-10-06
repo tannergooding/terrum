@@ -105,7 +105,8 @@ host encoders across fresh grants under both runtime policies. They cover
 every valid Unicode scalar input in bounded batches across all listed
 encodings, including successful encoding of every ASCII and Latin-1 scalar
 value and strict rejection beyond those single-byte ranges. A maximum-length
-quoted ASCII source also checks exact-capacity output encoding. The persisted JIT
+quoted ASCII source also checks exact-capacity output for all eight encodings,
+including the four-byte UTF-32 output boundary. The persisted JIT
 tests additionally cover `IntegerParsing` for radices 2–36, `SourceLineIndex`
 counts/extents/position mapping/offset lookup, and streaming `SourceLines`
 ranges and coordinates across fresh grants. A test-only formatter wrapper

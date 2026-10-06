@@ -101,17 +101,29 @@ public sealed class StringLiteralEncodingModuleTests
         public int32 VerifyMaximumAsciiLiteral() {
             if (!SourceRange.TryCreate(0, Host.Source.Length, init var spelling)
                 || !StringLiteral.TryCreate(spelling, init var literal)) { return -1; }
-            int32 expectedLength = Host.Source.Length - 2;
-            if (literal.ScalarCount != expectedLength
-                || !literal.TryGetAsciiLength(init var measured)
-                || measured != expectedLength
-                || !OwnedInt32Buffer.TryCreate(expectedLength, out var workspace)) { return -2; }
-            mut OwnedInt32Buffer encoded = literal.EncodeAscii(move workspace);
-            if (encoded.Count != expectedLength || encoded.Capacity != expectedLength) { return -3; }
-            for (mut int32 index = 0; index < expectedLength; index = index + 1) {
-                if (encoded.Read(index) != int32(Host.Source[index + 1])) { return -4; }
+            int32 scalarCount = Host.Source.Length - 2;
+            if (literal.ScalarCount != scalarCount) { return -2; }
+            for (mut int32 encoding = 0; encoding < 8; encoding = encoding + 1) {
+                if (!TryGetEncodedLength(literal, encoding, init var measured)) { return -3; }
+                mut int32 width = 1;
+                if (encoding == 2 || encoding == 3) { width = 2; }
+                if (encoding == 6 || encoding == 7) { width = 4; }
+                int32 expectedLength = scalarCount * width;
+                if (measured != expectedLength
+                    || !OwnedInt32Buffer.TryCreate(expectedLength, out var workspace)) { return -4; }
+                mut OwnedInt32Buffer encoded = Encode(literal, encoding, move workspace);
+                if (encoded.Count != expectedLength || encoded.Capacity != expectedLength) { return -5; }
+                for (mut int32 index = 0; index < expectedLength; index = index + 1) {
+                    mut int32 expected = 97;
+                    int32 byteIndex = index % width;
+                    if ((encoding == 2 && byteIndex == 1)
+                        || (encoding == 3 && byteIndex == 0)
+                        || (encoding == 6 && byteIndex != 0)
+                        || (encoding == 7 && byteIndex != 3)) { expected = 0; }
+                    if (encoded.Read(index) != expected) { return -6; }
+                }
             }
-            return expectedLength;
+            return scalarCount;
         }
         """;
 
