@@ -1,0 +1,54 @@
+using Terrum.CodeAnalysis.Numerics64;
+namespace Terrum.CodeAnalysis.Tests;
+
+public static bool CheckCheckedInt32Arithmetic()
+{
+    if (TryAddInt32(int32.MaxValue, 1, init var addOverflow)
+        || TryAddInt32(int32.MinValue, -1, init var addUnderflow)
+        || TrySubtractInt32(int32.MaxValue, -1, init var subtractOverflow)
+        || TrySubtractInt32(int32.MinValue, 1, init var subtractUnderflow)
+        || TryMultiplyInt32(int32.MaxValue, 2, init var multiplyOverflow)
+        || TryMultiplyInt32(int32.MinValue, -1, init var multiplyMinimumOverflow)
+        || TryDivideInt32(int32.MinValue, -1, init var divideMinimumOverflow)
+        || TryDivideInt32(1, 0, init var divideByZero)
+        || TryRemainderInt32(1, 0, init var remainderByZero)
+        || TryNegateInt32(int32.MinValue, init var negateOverflow)
+        || TryAbsoluteInt32(int32.MinValue, init var absoluteOverflow))
+    {
+        return false;
+    }
+
+    require TryAddInt32(int32.MinValue, int32.MaxValue, init var negativeOne);
+    require TrySubtractInt32(-1, int32.MinValue, init var maximum);
+    require TryMultiplyInt32(46340, 46340, init var square);
+    require TryDivideInt32(int32.MinValue, 1, init var minimum);
+    require TryRemainderInt32(int32.MinValue, -1, init var zeroRemainder);
+    require TryNegateInt32(-42, init var negated);
+    require TryAbsoluteInt32(-42, init var absolute);
+
+    return negativeOne == -1 && maximum == int32.MaxValue && square == 2147395600
+        && minimum == int32.MinValue && zeroRemainder == 0 && negated == 42
+        && absolute == 42 && MagnitudeInt32(int32.MinValue) == uint32(0x80000000)
+        && MagnitudeInt32(-1) == 1;
+}
+
+public static bool CheckCheckedUInt32Arithmetic()
+{
+    if (TryAddUInt32(uint32.MaxValue, 1, init var addOverflow)
+        || TrySubtractUInt32(0, 1, init var subtractUnderflow)
+        || TryMultiplyUInt32(uint32.MaxValue, 2, init var multiplyOverflow)
+        || TryDivideUInt32(1, 0, init var divideByZero)
+        || TryRemainderUInt32(1, 0, init var remainderByZero))
+    {
+        return false;
+    }
+
+    require TryAddUInt32(uint32.MaxValue - 1, 1, init var maximum);
+    require TrySubtractUInt32(uint32.MaxValue, 1, init var almostMaximum);
+    require TryMultiplyUInt32(65535, 65537, init var product);
+    require TryDivideUInt32(uint32.MaxValue, 1, init var quotient);
+    require TryRemainderUInt32(uint32.MaxValue, 2, init var remainder);
+
+    return maximum == uint32.MaxValue && almostMaximum == uint32.MaxValue - 1
+        && product == uint32.MaxValue && quotient == uint32.MaxValue && remainder == 1;
+}

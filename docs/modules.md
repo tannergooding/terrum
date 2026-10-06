@@ -223,13 +223,14 @@ program and extracts selected producer definitions. The CLI uses independent
 consumer source and the validated artifact-reference path.
 Both library and reference compilation accept multiple `SyntaxTree` snapshots;
 source diagnostics retain the originating snapshot. The self-host component
-test builds `SourceRange`, `CharacterFacts`, `Token`, and `WideIntegerFacts`
-into one producer, then independently binds `RangeTests`, `TokenTests`,
-`WideIntegerTests`, and
-the Terrum-authored `ComponentTestRunner` against its exported declarations.
-Those persisted modules execute through AOT and JIT, including range
-boundaries, conditional-output failure, character classification, aggregate
-token construction, full-range checked arithmetic/accumulation, and repeated
+test builds `SourceRange`, `CharacterFacts`, `Token`, `WideIntegerFacts`, and
+`IntegerCheckedArithmetic` into one producer, then independently binds
+`RangeTests`, `TokenTests`, `WideIntegerTests`,
+`IntegerCheckedArithmeticTests`, and the Terrum-authored
+`ComponentTestRunner` against its exported declarations. Those persisted
+modules execute through AOT and JIT, including range boundaries,
+conditional-output failure, character classification, aggregate token
+construction, 32-/64-bit checked arithmetic and accumulation, and repeated
 calls. C# still orchestrates the test; the entry harness only composes these
 explicitly selected component checks.
 The CLI accepts repeatable `--source <path>` options and, for producers,
@@ -269,12 +270,13 @@ dotnet $cli compile-module consumer self-host\TokenTests.terrum artifacts\token-
 dotnet $cli run-module artifacts\token-tests.trm artifacts\token-values.trm --runtime fail-fast # exits 0
 ```
 
-The bounded `ComponentTestRunner` composes the range, token, and wide-integer
-test functions against one independently compiled producer:
+The bounded `ComponentTestRunner` composes the range, token, checked
+32-/64-bit arithmetic, and wide-integer test functions against one
+independently compiled producer:
 
 ```powershell
-dotnet $cli compile-module producer self-host\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source self-host\CharacterFacts.terrum --source self-host\Token.terrum --source self-host\WideIntegerFacts.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export "Terrum.CodeAnalysis.SourceRange.#get:End" --export Terrum.CodeAnalysis.IsAsciiDigit --export Terrum.CodeAnalysis.IsLineBreak --export Terrum.CodeAnalysis.GetDecimalDigit --export Terrum.CodeAnalysis.Token.#ctor --export Terrum.CodeAnalysis.Numerics64.TryAddInt64 --export Terrum.CodeAnalysis.Numerics64.TrySubtractInt64 --export Terrum.CodeAnalysis.Numerics64.TryMultiplyInt64 --export Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal --export Terrum.CodeAnalysis.Numerics64.TryAccumulateBase -o artifacts\component-values.trm
-dotnet $cli compile-module consumer self-host\RangeTests.terrum artifacts\component-values.trm --source self-host\TokenTests.terrum --source self-host\WideIntegerTests.terrum --source self-host\ComponentTestRunner.terrum -o artifacts\component-tests.trm
+dotnet $cli compile-module producer self-host\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source self-host\CharacterFacts.terrum --source self-host\Token.terrum --source self-host\WideIntegerFacts.terrum --source self-host\IntegerCheckedArithmetic.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export "Terrum.CodeAnalysis.SourceRange.#get:End" --export Terrum.CodeAnalysis.IsAsciiDigit --export Terrum.CodeAnalysis.IsLineBreak --export Terrum.CodeAnalysis.GetDecimalDigit --export Terrum.CodeAnalysis.Token.#ctor --export Terrum.CodeAnalysis.Numerics64.TryAddInt64 --export Terrum.CodeAnalysis.Numerics64.TrySubtractInt64 --export Terrum.CodeAnalysis.Numerics64.TryMultiplyInt64 --export Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal --export Terrum.CodeAnalysis.Numerics64.TryAccumulateBase --export Terrum.CodeAnalysis.Numerics64.TryAddInt32 --export Terrum.CodeAnalysis.Numerics64.TrySubtractInt32 --export Terrum.CodeAnalysis.Numerics64.TryMultiplyInt32 --export Terrum.CodeAnalysis.Numerics64.TryDivideInt32 --export Terrum.CodeAnalysis.Numerics64.TryRemainderInt32 --export Terrum.CodeAnalysis.Numerics64.TryNegateInt32 --export Terrum.CodeAnalysis.Numerics64.TryAbsoluteInt32 --export Terrum.CodeAnalysis.Numerics64.MagnitudeInt32 --export Terrum.CodeAnalysis.Numerics64.TryAddUInt32 --export Terrum.CodeAnalysis.Numerics64.TrySubtractUInt32 --export Terrum.CodeAnalysis.Numerics64.TryMultiplyUInt32 --export Terrum.CodeAnalysis.Numerics64.TryDivideUInt32 --export Terrum.CodeAnalysis.Numerics64.TryRemainderUInt32 -o artifacts\component-values.trm
+dotnet $cli compile-module consumer self-host\RangeTests.terrum artifacts\component-values.trm --source self-host\TokenTests.terrum --source self-host\WideIntegerTests.terrum --source self-host\IntegerCheckedArithmeticTests.terrum --source self-host\ComponentTestRunner.terrum -o artifacts\component-tests.trm
 dotnet $cli run-module artifacts\component-tests.trm artifacts\component-values.trm --runtime fail-fast # exits 0
 dotnet $cli link-module artifacts\component-tests.trm artifacts\component-values.trm -o artifacts\component-tests.exe --runtime fail-fast
 ```
