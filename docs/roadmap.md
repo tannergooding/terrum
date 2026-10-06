@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `0232c341` | Share the scanner source bound across scalar projection readers |
 | `667fbe28` | Verify frontend source-limit rejection before artifact publication |
 | `e282c0de` | Compare maximum-length scalar frontend builds with hosted output under both runtime policies |
 | `e5e5ff82` | Compare maximum-length zero and overflow inputs for `uint64` parsing in every radix |
