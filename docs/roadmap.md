@@ -312,6 +312,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `b6bf45a9` | Add provisional scalar source-position queries matching hosted UTF-16 line/character coordinates, including CRLF and EOF boundaries |
 | `c62d94b4` | Add provisional scalar line/character-to-source-offset query with hosted boundary parity across both policies and the maintained manifest |
 | `2114a1e1` | Add the provisional scalar source-code-unit query with exhaustive UTF-16 value checks, hosted `SourceText` parity and maintained manifest binding |
 | `c7063261` | Add the provisional scalar source-length query through an isolated component, preserving whole-program classifier and source-free DLL boundaries |
