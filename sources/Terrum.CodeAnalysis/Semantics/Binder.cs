@@ -1296,7 +1296,6 @@ internal sealed partial class Binder
         var isConstEval = false;
         var doesNotReturn = false;
         SyntaxNode? captures = null;
-        SyntaxNode? forwardedBacking = null;
         SyntaxNode? resultDependencies = null;
         var accessModifiers = 0;
         for (var index = 0; index < modifierCount; index++)
@@ -1311,18 +1310,6 @@ internal sealed partial class Binder
                 if (property)
                 {
                     Report("TRM3001", "Getter effects belong on the get accessor.", attribute.Span);
-                }
-                else if (returnTarget && attributeName == "ForwardedBacking")
-                {
-                    if (forwardedBacking is null)
-                    {
-                        forwardedBacking = attribute;
-                    }
-                    else
-                    {
-                        Report("TRM3023", "Forwarded Span results cannot repeat the ForwardedBacking annotation.",
-                            attribute.Span);
-                    }
                 }
                 else if (returnTarget && attributeName == "DependsOn")
                 {
@@ -1484,7 +1471,7 @@ internal sealed partial class Binder
         }
         var spanResultCandidate = returnType == PrimitiveType.TokenSpan && !constructor
             && containingType is null && body is not null && isInternal
-            && forwardedBacking is not null && resultDependencies is not null;
+            && resultDependencies is not null;
         if (returnType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
             || !constructor && TokenSpanContract.IsDependent(returnType, _structs) && !spanResultCandidate)
         {
@@ -1600,17 +1587,11 @@ internal sealed partial class Binder
             + (containingType is null ? "" : containingType + ".")
             + (constructor ? "#ctor" : property ? "#get:" + nameText : nameText);
         ImmutableArray<int> resultDependencyParameters = [];
-        if (forwardedBacking is not null || resultDependencies is not null)
+        if (resultDependencies is not null)
         {
-            if (!spanResultCandidate || forwardedBacking is null || resultDependencies is null
-                || forwardedBacking.Children is not [
-                    SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
-                    SyntaxTokenElement { Token.Kind: TokenKind.ReturnKeyword },
-                    SyntaxTokenElement { Token.Kind: TokenKind.Colon },
-                    SyntaxTokenElement { Token.Text: "ForwardedBacking" },
-                    SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket }])
+            if (!spanResultCandidate)
             {
-                Report("TRM3023", "Forwarded Span results require both return-target ForwardedBacking and DependsOn annotations on a compilation-local function.",
+                Report("TRM3023", "Forwarded Span result dependencies require an internal compilation-local function returning Span<Token>.",
                     declaration.Span);
             }
             else
@@ -1669,7 +1650,7 @@ internal sealed partial class Binder
             IsConstEval = isConstEval,
             RequiresUnsafeCaller = requiresUnsafeCaller,
             CapturedParameters = capturedParameters,
-            ReturnsForwardedBacking = forwardedBacking is not null,
+            ReturnsForwardedBacking = spanResultCandidate && !resultDependencyParameters.IsEmpty,
             ResultDependencyParameters = resultDependencyParameters,
         });
     }

@@ -3155,14 +3155,15 @@ stored dependency facts follow copies, moves, joins, staged arguments and
 exceptional cleanup; the mandatory verifier rejects owner invalidation while
 any dependent view or cursor remains live. A provisional same-compilation
 experiment also permits internal top-level functions to return readonly
-`Span<Token>` values when `[return: ForwardedBacking]` and a closed
-`[return: DependsOn(nameof(...))]` set are both declared and every result is
-verified to forward backing from those inputs. Calls conservatively retain
-every declared source through argument staging, copies, joins and cleanup;
-retiring a descriptor does not retire its backing dependency. This does not
-extend source lifetimes or allow local-owner escape. Outputs, arbitrary fields,
-semantic modules, native exports and TRRM remain unsupported for these result
-contracts; their target status remains unapproved in the
+`Span<Token>` values when a closed `[return: DependsOn(nameof(...))]` set is
+declared and every result is verified to forward backing from those inputs.
+The by-value Span descriptor carries backing dependencies, not a borrow of
+parameter descriptor storage. Calls conservatively retain every declared
+source through argument staging, copies, joins and cleanup; retiring a
+descriptor does not retire its backing dependency. This does not extend source
+lifetimes or allow local-owner escape. Outputs, arbitrary fields, semantic
+modules, native exports and TRRM remain unsupported for these result contracts;
+their target status remains unapproved in the
 [proposal](proposals/token-span-result-forwarding.md).
 `TokenCursor.TryGet` performs repeatable indexed reads without advancing its
 remaining view; negative or out-of-range indices publish no token.

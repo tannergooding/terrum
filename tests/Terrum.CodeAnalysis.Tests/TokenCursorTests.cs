@@ -21,20 +21,16 @@ public sealed class TokenCursorTests
 {
     private const string ForwardingDeclarations = """
         using Terrum.CodeAnalysis;
-        [return: ForwardedBacking]
         [return: DependsOn(nameof(tokens))]
         internal Span<Token> Identity(Span<Token> tokens) { return tokens; }
-        [return: ForwardedBacking]
         [return: DependsOn(nameof(left), nameof(right))]
         internal Span<Token> Choose(Span<Token> left, Span<Token> right, bool useLeft) {
             return useLeft ? left : right;
         }
-        [return: ForwardedBacking]
         [return: DependsOn(nameof(first), nameof(second))]
         internal Span<Token> Forward(Span<Token> first, Span<Token> second, bool useFirst) {
             return Choose(right: second, left: first, useLeft: useFirst);
         }
-        [return: ForwardedBacking]
         [return: DependsOn(nameof(tokens))]
         internal Span<Token> ForwardWithCleanup(Span<Token> tokens, bool failCleanup) {
             try {
@@ -268,7 +264,6 @@ public sealed class TokenCursorTests
     public async Task ForwardedSpanOwnershipFailureKeepsItsDeclaringSourceContextAsync()
     {
         var entry = ForwardingDeclarations + """
-            [return: ForwardedBacking]
             [return: DependsOn(nameof(left))]
             internal Span<Token> Invalid(Span<Token> left, Span<Token> right) { return right; }
             int32 Main() { return 42; }
@@ -419,49 +414,32 @@ public sealed class TokenCursorTests
 
     [Theory]
     [InlineData("""
-        [return: DependsOn(nameof(tokens))]
-        internal Span<Token> MissingMarker(Span<Token> tokens) { return tokens; }
-        """)]
-    [InlineData("""
-        [return: ForwardedBacking]
         internal Span<Token> MissingSources(Span<Token> tokens) { return tokens; }
         """)]
     [InlineData("""
-        [return: ForwardedBacking]
         [return: DependsOn(nameof(left))]
         internal Span<Token> UndeclaredSource(Span<Token> left, Span<Token> right, bool selectRight) {
             return selectRight ? right : left;
         }
         """)]
     [InlineData("""
-        [return: ForwardedBacking]
         [return: DependsOn(nameof(tokens), nameof(tokens))]
         internal Span<Token> DuplicateSource(Span<Token> tokens) { return tokens; }
         """)]
     [InlineData("""
-        [return: ForwardedBacking]
-        [return: ForwardedBacking]
-        [return: DependsOn(nameof(tokens))]
-        internal Span<Token> DuplicateMarker(Span<Token> tokens) { return tokens; }
-        """)]
-    [InlineData("""
-        [return: ForwardedBacking]
         [return: DependsOn(nameof(tokens))]
         [return: DependsOn(nameof(tokens))]
         internal Span<Token> DuplicateDependencies(Span<Token> tokens) { return tokens; }
         """)]
     [InlineData("""
-        [return: ForwardedBacking]
         [return: DependsOn(nameof(tokens))]
         public Span<Token> NonInternal(Span<Token> tokens) { return tokens; }
         """)]
     [InlineData("""
-        [return: ForwardedBacking]
         [DependsOn(nameof(tokens))]
         internal Span<Token> WrongDependencyTarget(Span<Token> tokens) { return tokens; }
         """)]
     [InlineData("""
-        [return: ForwardedBacking]
         [return: DependsOn(nameof(select))]
         internal Span<Token> NonSpanSource(bool select, Span<Token> tokens) { return tokens; }
         """)]
@@ -478,7 +456,6 @@ public sealed class TokenCursorTests
     {
         var entry = """
             using Terrum.CodeAnalysis;
-            [return: ForwardedBacking]
             [return: DependsOn(nameof(tokens))]
             internal Span<Token> Escape(Span<Token> tokens) {
                 require TokenSnapshot.TryScan(init var scanned);
