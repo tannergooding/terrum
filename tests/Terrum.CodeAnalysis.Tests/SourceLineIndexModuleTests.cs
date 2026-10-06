@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
@@ -56,6 +57,43 @@ public sealed class SourceLineIndexModuleTests
                 if (!index.TryGetOffset(line, character, init var offset)) { return -1; }
                 return offset;
             }
+            public int32 VerifyMaximumCrLfLineIndex() {
+                if (!SourceLineIndex.TryCreate(init var index)) { return -1; }
+                int32 lineCount = index.GetLineCount();
+                if (lineCount != Host.Source.Length / 2 + 1) { return -2; }
+                mut int32 line = 0;
+                while (line < lineCount) {
+                    int32 expectedStart = line * 2;
+                    mut int32 expectedLength = 2;
+                    if (line == lineCount - 1) { expectedLength = 0; }
+                    if (!index.TryGetLineExtent(line, init var indexedExtent)) { return -3; }
+                    if (!TryReadSourceLine(expectedStart,
+                        init var streamedContent, init var streamedExtent)) { return -4; }
+                    if (indexedExtent.Start != expectedStart || indexedExtent.Length != expectedLength
+                        || streamedContent.Start != expectedStart || streamedContent.Length != 0
+                        || streamedExtent.Start != indexedExtent.Start
+                        || streamedExtent.Length != indexedExtent.Length) { return -5; }
+                    if (!index.TryGetLineContentExtent(line, init var indexedContent)) { return -6; }
+                    if (indexedContent.Start != expectedStart || indexedContent.Length != 0) { return -7; }
+                    if (expectedLength == 0) {
+                        if (!index.TryGetPosition(expectedStart, init var finalLine, init var finalCharacter)
+                            || finalLine != line || finalCharacter != 0) { return -8; }
+                        if (!index.TryGetOffset(line, 0, init var finalOffset)
+                            || finalOffset != expectedStart) { return -9; }
+                    } else {
+                        for (mut int32 character = 0; character < expectedLength;
+                            character = character + 1) {
+                            if (!index.TryGetPosition(expectedStart + character,
+                                init var positionLine, init var positionCharacter)
+                                || positionLine != line || positionCharacter != character) { return -10; }
+                            if (!index.TryGetOffset(line, character, init var offset)
+                                || offset != expectedStart + character) { return -11; }
+                        }
+                    }
+                    line = line + 1;
+                }
+                return lineCount;
+            }
             """, "source-line-index-module.terrum");
         var sample = "a\r\nb\rc\nd";
         var producerCompilation = Compilation.Create(trees,
@@ -72,6 +110,7 @@ public sealed class SourceLineIndexModuleTests
                 "Terrum.CodeAnalysis.GetIndexedLineRange",
                 "Terrum.CodeAnalysis.GetIndexedPosition",
                 "Terrum.CodeAnalysis.GetIndexedOffset",
+                "Terrum.CodeAnalysis.VerifyMaximumCrLfLineIndex",
             ]);
 
         var fixtures = new[] {
@@ -194,6 +233,16 @@ public sealed class SourceLineIndexModuleTests
                     [grant], (NativeRuntimePolicy)policy));
             }
         }
+
+        var maximumCrLfSource = string.Concat(Enumerable.Repeat("\r\n", ScannerHost.MaximumSourceLength / 2));
+        Assert.Equal(ScannerHost.MaximumSourceLength, maximumCrLfSource.Length);
+        var maximumCrLfGrant = new HostBuffer("Source", PrimitiveType.Char16,
+            [.. maximumCrLfSource.Select(static unit => (int)unit)], false) {
+            IsInvocationScoped = true,
+        };
+        var maximumCrLfConsumer = CreateConsumer("return VerifyMaximumCrLfLineIndex();");
+        Assert.Equal(SourceText.From(maximumCrLfSource).Lines.Length,
+            NativeJit.ExecuteWithSourceGrant(maximumCrLfConsumer, [maximumCrLfGrant], (NativeRuntimePolicy)policy));
     }
 
     private static int PackRange(TextSpan range) => range.Start * 256 + range.Length;

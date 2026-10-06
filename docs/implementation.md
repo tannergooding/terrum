@@ -2005,8 +2005,10 @@ request may fill the same vacant destination.
 The revision-55 semantic-module JIT also reuses persisted `SourceLineIndex`
 provider and consumer artifacts across fresh source grants, comparing line
 counts, content/full-break extents, valid position mappings and offset
-round-trips with the hosted snapshot under both runtime policies. Invalid
-position and line/character boundaries are compared as well. This does not
+round-trips with the hosted snapshot under both runtime policies. A
+maximum-length all-CRLF source also exercises every indexed line, code-unit
+position and inverse offset at the source-grant bound. Invalid position and
+line/character boundaries are compared as well. This does not
 extend the source grant beyond the semantic-module JIT path or claim persisted
 AOT support. The streaming `SourceLines` component also reuses persisted
 provider and consumer artifacts across fresh grants, comparing full line
