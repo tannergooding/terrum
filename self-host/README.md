@@ -131,7 +131,8 @@ unknown records. Switch remains complete-program-only; verification and
 emission remain hosted, and bootstrap support is not claimed. CLI integration
 tests compare matching and default-arm selection for all six selector types
 with hosted conditional equivalents at integer-width, Boolean and surrogate
-code-unit boundaries under both runtime policies.
+code-unit boundaries under both runtime policies, and confirm duplicate
+constant-label rejection for all six types.
 The bounded Terrum-authored scalar frontend now projects same-format
 `float32`/`float64` unary signs, target-typed decimal and hexadecimal floating
 literals, based integer literals directly targeting either format, `+`, `-`,
