@@ -237,16 +237,20 @@ mut class ScalarFrontendState
         return _hasStructuredStatement;
     }
 
-    internal mut bool TryInventoryHeader(init ref<ScalarFrontendResult> result, out int32 end, Span<Token> tokenView)
+    internal mut bool TryInventoryHeader(init ref<ScalarFrontendResult> result,
+        init ref<int32> end, Span<Token> tokenView)
     {
-        end = 0;
         require SourceRange.TryCreate(0, 0, init var empty);
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
         if (!ParseHeader(init var selected, init var name, tokenView))
         {
-            return TryCreateScalarFrontendError(_error, _errorSpan, init result);
+            if (!TryCreateScalarFrontendError(_error, _errorSpan, init result))
+            {
+                return false;
+            }
+            end = 0;
+            return true;
         }
-        end = _at;
         if (!ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
             selected, _parameterCount, _firstType, _secondType, _thirdType,
             _outParameterMask & 63, name, _first.Range, _second.Range, _third.Range,
@@ -255,6 +259,7 @@ mut class ScalarFrontendState
             return false;
         }
         result = created;
+        end = _at;
         return true;
     }
 

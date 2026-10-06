@@ -330,7 +330,7 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
             continue;
         }
         if (!ScalarFrontendState.TryCreate(start, count - 1, true, empty, out var probe)
-            || !probe.TryInventoryHeader(init var header, out var headerEnd, tokenView))
+            || !probe.TryInventoryHeader(init var header, init var headerEnd, tokenView))
         {
             return false;
         }
