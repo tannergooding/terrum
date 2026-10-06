@@ -42,8 +42,9 @@ Persisted semantic-module JIT tests compare those rows with the hosted string
 table writer across fresh grants, including the existing empty-name,
 unrepresentable-ASCII and embedded-zero rejection behavior. They also compare
 the ordinal decoded-scalar name and namespace comparison APIs against hosted
-ordinal string equality, including invalid empty-name and embedded-zero
-requests.
+ordinal string equality for all nonzero Unicode scalar values in bounded
+batches, using case-varied `\U` spellings, including invalid empty-name and
+embedded-zero requests.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.

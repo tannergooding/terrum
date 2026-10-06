@@ -2,6 +2,7 @@ using System;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
@@ -130,6 +131,67 @@ public sealed class StringRowComparisonModuleTests
                 };
                 Assert.Equal(expectedStatus, result);
             }
+        }
+
+        const int maximumScalarsPerBatch = 818;
+        var leftBuilder = new StringBuilder(maximumScalarsPerBatch * 10 + 2);
+        var rightBuilder = new StringBuilder(maximumScalarsPerBatch * 10 + 2);
+        var expectedLeftBuilder = new StringBuilder(maximumScalarsPerBatch * 2);
+        var expectedRightBuilder = new StringBuilder(maximumScalarsPerBatch * 2);
+        var scalarCount = 0;
+        var batchStart = 0;
+        void VerifyBatch()
+        {
+            leftBuilder.Append('"');
+            rightBuilder.Append('"');
+            var leftSpelling = leftBuilder.ToString();
+            var rightSpelling = rightBuilder.ToString();
+            var expectedLeft = expectedLeftBuilder.ToString();
+            var expectedRight = expectedRightBuilder.ToString();
+            var expectedEqual = string.Equals(expectedLeft, expectedRight, StringComparison.Ordinal);
+            Assert.True(scalarCount * 20 + 6 <= 16_384);
+            var grant = CreateSourceGrant(leftSpelling, rightSpelling);
+            for (var apiIndex = 0; apiIndex < exports.Length; apiIndex++)
+            {
+                var result = NativeJit.ExecuteWithSourceGrant(consumers[apiIndex], [grant],
+                    (NativeRuntimePolicy)policy);
+                Assert.True(result == (expectedEqual ? 1 : 0),
+                    $"{exports[apiIndex]} failed for batch starting at U+{batchStart:X}: {result}.");
+            }
+
+            leftBuilder.Clear();
+            rightBuilder.Clear();
+            expectedLeftBuilder.Clear();
+            expectedRightBuilder.Clear();
+            scalarCount = 0;
+        }
+
+        for (var scalar = 1; scalar < 0x110000; scalar++)
+        {
+            if (scalar is >= 0xD800 and <= 0xDFFF)
+            {
+                continue;
+            }
+
+            if (scalarCount == 0)
+            {
+                batchStart = scalar;
+                leftBuilder.Append('"');
+                rightBuilder.Append('"');
+            }
+            leftBuilder.Append($"\\U{scalar:X8}");
+            rightBuilder.Append($"\\U{scalar:x8}");
+            expectedLeftBuilder.Append(new Rune(scalar).ToString());
+            expectedRightBuilder.Append(char.ConvertFromUtf32(scalar));
+            scalarCount++;
+            if (scalarCount == maximumScalarsPerBatch)
+            {
+                VerifyBatch();
+            }
+        }
+        if (scalarCount != 0)
+        {
+            VerifyBatch();
         }
     }
 
