@@ -308,6 +308,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `cb3fd7b8` | Compare test-only generated native source positions with hosted `SourceText.GetLinePosition` for all short-fixture offsets and maximum-boundary samples under both runtime policies |
 | `8c226927` | Compare test-only generated native source line counts with hosted `SourceText` across line-break, malformed-UTF-16 and maximum-bound cases under both runtime policies |
 | `d699fc80` | Verify test-only generated source-grant bindings follow private-callee dependence while production DLL emission remains rejected |
 | `403b51b0` | Extend caller-unsafe semantic-module method signatures to public non-unique Copy values; verify links, native graphs and module sets under both runtime policies |
