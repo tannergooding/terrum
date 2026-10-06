@@ -439,6 +439,15 @@ public sealed class ScannerTests
         var maximumTriviaSource = new string('\n', ScannerHost.MaximumSourceLength);
         sources.Add(maximumTriviaSource);
 
+        var maximumIntegerRecordSource = new StringBuilder(ScannerHost.MaximumSourceLength);
+        for (var index = 0; index < ScannerHost.MaximumSourceLength / 2; index++)
+        {
+            maximumIntegerRecordSource.Append("1 ");
+        }
+        Assert.Equal(ScannerHost.MaximumSourceLength, maximumIntegerRecordSource.Length);
+        var maximumIntegerRecordText = maximumIntegerRecordSource.ToString();
+        sources.Add(maximumIntegerRecordText);
+
         var maximumDiagnosticSource = new string('\uD800', ScannerHost.MaximumSourceLength);
         sources.Add(maximumDiagnosticSource);
 
@@ -651,6 +660,14 @@ public sealed class ScannerTests
                 Assert.Equal(1, actual.TokenCount);
                 Assert.Equal(ScannerHost.MaximumSourceLength, actual.LexResult.Tokens
                     .SelectMany(static token => token.LeadingTrivia).Count());
+            }
+            else if (text == maximumIntegerRecordText)
+            {
+                Assert.Equal(ScannerHost.MaximumSourceLength / 2, actual.IntegerValues.Length);
+                for (var index = 0; index < actual.IntegerValues.Length; index++)
+                {
+                    Assert.Equal(new ScannerIntegerValue(index, "", false, 1), actual.IntegerValues[index]);
+                }
             }
         }
 

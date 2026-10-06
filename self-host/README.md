@@ -803,7 +803,9 @@ also checked against binary, decimal and hexadecimal `uint64` maximum and
 overflow expectations. A maximum-length alternating identifier/whitespace
 source stresses dense token and trivia publication; a maximum-length newline
 source fills the trivia record bound, while a maximum-length unpaired-surrogate
-source fills the token and diagnostic bounds.
+source fills the token and diagnostic bounds. A maximum-length alternating
+integer/whitespace source validates the densest integer-record sequence under
+the source bound.
 
 `SourceLineIndex` builds on that streaming reader. It owns a fixed-capacity native
 table of line starts, publishes the completed index through a conditional output,

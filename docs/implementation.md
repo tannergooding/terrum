@@ -30,6 +30,8 @@ records are checked against expected binary, decimal and hexadecimal
 identifiers and whitespace checks dense token and trivia publication; a
 maximum-length newline source fills the trivia record bound, while a
 maximum-length unpaired-surrogate source fills the token and diagnostic bounds.
+A maximum-length alternating integer/whitespace source validates the densest
+integer-record sequence under the source bound.
 
 A source-dependent single-producer semantic-module program can be linked and executed by
 `NativeJit.ExecuteWithSourceGrant`, which requires one readonly `char16` grant
