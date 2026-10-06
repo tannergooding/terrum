@@ -122,10 +122,10 @@ quoted ASCII source also checks exact-capacity output for all eight encodings,
 including the four-byte UTF-32 output boundary. Direct source-grant DLL tests
 also check maximum-length U+0800 and U+00FF grants against strict host
 encoders under both runtime policies, including the 49,146-byte UTF-8 bound.
-The persisted JIT
-tests additionally cover `IntegerParsing` for radices 2–36 and maximum-length
-all-zero/overflow digit slices across all five APIs, with the `uint64` parser
-checked at the same input bound for every radix; `SourceLineIndex`
+The persisted JIT also checks exact-capacity UTF-8 output for a maximum-length
+U+0800 source. These tests additionally cover `IntegerParsing` for radices 2–36
+and maximum-length all-zero/overflow digit slices across all five APIs, with the
+`uint64` parser checked at the same input bound for every radix; `SourceLineIndex`
 counts/extents/position mapping/offset lookup, and streaming `SourceLines`
 ranges and coordinates across fresh grants. A test-only formatter wrapper
 also compares `IntegerFormatting` output with expected text from fresh grants;

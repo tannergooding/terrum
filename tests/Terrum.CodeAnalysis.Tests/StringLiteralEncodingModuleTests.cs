@@ -144,6 +144,27 @@ public sealed class StringLiteralEncodingModuleTests
             }
             return scalarCount;
         }
+
+        public int32 VerifyMaximumUtf8Literal() {
+            if (!SourceRange.TryCreate(0, Host.Source.Length, init var spelling)
+                || !StringLiteral.TryCreate(spelling, init var literal)) { return -1; }
+            int32 scalarCount = Host.Source.Length - 2;
+            if (literal.ScalarCount != scalarCount) { return -2; }
+            int32 expectedLength = scalarCount * 3;
+            if (!literal.TryGetUtf8Length(init var measured) || measured != expectedLength) { return -3; }
+            if (GetStringLiteralEncodedLengthOrMinusOne(
+                literal.Spelling.Start, literal.Spelling.Length, 2) != expectedLength) { return -4; }
+            if (!OwnedInt32Buffer.TryCreate(expectedLength, out var workspace)) { return -5; }
+            mut OwnedInt32Buffer encoded = literal.EncodeUtf8(move workspace);
+            if (encoded.Count != expectedLength || encoded.Capacity != expectedLength) { return -6; }
+            for (mut int32 index = 0; index < expectedLength; index = index + 1) {
+                mut int32 expected = 128;
+                if (index % 3 == 0) { expected = 224; }
+                else if (index % 3 == 1) { expected = 160; }
+                if (encoded.Read(index) != expected) { return -7; }
+            }
+            return expectedLength;
+        }
         """;
 
     [Theory]
@@ -187,6 +208,7 @@ public sealed class StringLiteralEncodingModuleTests
             "VerifyUtf32LeBytes",
             "VerifyUtf32BeBytes",
             "VerifyMaximumAsciiLiteral",
+            "VerifyMaximumUtf8Literal",
         };
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
             [.. exports.Select(static name => "Terrum.CodeAnalysis." + name)]);
@@ -328,7 +350,16 @@ public sealed class StringLiteralEncodingModuleTests
             IsInvocationScoped = true,
         };
         Assert.Equal(ScannerHost.MaximumSourceLength - 2,
-            NativeJit.ExecuteWithSourceGrant(consumers[^1], [maximumAsciiGrant], (NativeRuntimePolicy)policy));
+            NativeJit.ExecuteWithSourceGrant(consumers[^2], [maximumAsciiGrant], (NativeRuntimePolicy)policy));
+
+        var maximumUtf8Spelling = "\"" + new string('\u0800', ScannerHost.MaximumSourceLength - 2) + "\"";
+        Assert.Equal(ScannerHost.MaximumSourceLength, maximumUtf8Spelling.Length);
+        var maximumUtf8Grant = new HostBuffer("Source", PrimitiveType.Char16,
+            [.. maximumUtf8Spelling.Select(static unit => (int)unit)], false) {
+            IsInvocationScoped = true,
+        };
+        Assert.Equal(49_146,
+            NativeJit.ExecuteWithSourceGrant(consumers[^1], [maximumUtf8Grant], (NativeRuntimePolicy)policy));
     }
 
     private static int[]? TryEncode(Encoding encoding, string value)
