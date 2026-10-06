@@ -2056,9 +2056,10 @@ distinct publication contracts. Native consumer sets also bind named scalar
 policies. Under checked exceptions, a provider write followed by failure leaves
 the destination vacant in a consumer set, permitting a later provider call to
 initialize it. Ownership-set execution also covers conditional unique
-`init ref<T>` publication: false leaves the destination vacant, a later true
-call publishes the owner, and the unchanged consumer moves it once across
-compatible provider replacement under both policies.
+`init ref<T>` publication: false after constructing the value leaves the
+destination vacant, a later true call publishes the owner, and the unchanged
+consumer moves it once across compatible provider replacement under both
+policies.
 The distinct `out` mode now also accepts ordinary non-unique struct values
 for non-Boolean and void functions, provided the output is initialized on
 every normal return. Public semantic modules, native modules and native

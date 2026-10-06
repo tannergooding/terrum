@@ -37,9 +37,8 @@ public sealed class NativeOwnershipModuleSetsTests
             return success;
         }
         public bool TrySecondInit(bool success, init ref<SecondTicket> ticket) {
-            if (!success) { return false; }
             ticket = new SecondTicket(2);
-            return true;
+            return success;
         }
         public SecondTicket CreateSecond() { return new SecondTicket(0); }
         public int32 ConsumeSecond(SecondTicket ticket) {
