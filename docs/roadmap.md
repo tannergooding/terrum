@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `981042fb` | Check maximum-length scanner-profile input with a supplementary scalar at the quoted-source boundary |
 | `6cff8a90` | Compare supplementary Unicode identifier start/continue range endpoints through persisted scanner-10 against the hosted lexer |
 | `dd4cde86` | Compare raw supplementary string scalars at every Unicode-plane boundary through the persisted scanner-10 profile |
 | `c2dd22d4` | Compare persisted scanner-10 `\U` escapes at every Unicode-plane boundary and reject surrogate/out-of-range values against the host lexer |
