@@ -91,6 +91,13 @@ hosted truncation and range behavior through semantic-module parity and
 independent AOT/JIT component coverage under both runtime policies. This does
 not approve the pair-matrix proposal or add scalar-frontend,
 source-free DLL or TRRM support.
+The standalone `FloatingFormatConversion` component also converts raw bits
+between `float32` and `float64`, matching hosted IEEE rounding for finite
+values and preserving NaN classification without asserting payload equality.
+Its semantic-module and independent AOT/JIT component tests cover midpoint,
+subnormal and overflow boundaries under both runtime policies. It does not
+approve the unapproved TRRM proposal or add scalar-frontend, DLL or TRRM
+support.
 Separately, the standalone Terrum-authored `HexFloatLiteral` component now
 converts grammar-shaped, caller-delimited hexadecimal-float slices directly
 to target-format bits and matches hosted binding across rounding boundaries,
@@ -345,6 +352,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `c08257d3` | Add raw float32/float64 format conversion with hosted rounding parity, NaN classification and independent AOT/JIT boundary coverage |
 | `2e5a2b67` | Add checked raw float32/float64-to-integer conversion with hosted parity, failure-vacancy checks and independent AOT/JIT component coverage |
 | `16990787` | Add exact typed integer-to-float32/float64 raw-bit conversion with hosted parity, nearest-even boundaries and independent AOT/JIT component coverage |
 | `23eae8e5` | Add provisional target-format float-bit queries for hexadecimal and binary integer slices, including linear repeated-separator validation and maintained-manifest coverage |

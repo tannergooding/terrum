@@ -2796,6 +2796,16 @@ both tie directions, sticky-bit cases and deterministic values; the independent
 `ComponentTestRunner` also executes the helper under AOT and JIT with both
 runtime policies. This is a Terrum-authored helper, not scalar-frontend
 verification or emission support.
+`FloatingFormatConversion` separately converts between raw `float32` and
+`float64` bits. It performs widening exactly and narrows with one
+nearest/ties-to-even rounding step, including gradual underflow and overflow
+to infinity; NaN payload bits are not an exact contract. Semantic-module JIT
+compares finite results with hosted conversions under both runtime policies,
+including subnormal normalization, rounding midpoints and special-value
+classification. Its independent `ComponentTestRunner` exercises representative
+boundaries under AOT/JIT and both policies. This does not add
+scalar-frontend, source-free DLL or TRRM support; the TRRM proposal remains
+unapproved.
 `FloatingIntegerConversion` separately converts raw `float32`/`float64` bits
 to checked `int32`, `uint32`, `int64` and `uint64` results by truncating toward
 zero before range checking. Semantic-module JIT compares all eight paths
