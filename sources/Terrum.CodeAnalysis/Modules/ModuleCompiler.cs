@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 62;
+    private const int Version = 63;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1160,7 +1160,8 @@ public static partial class ModuleCompiler
         Action<BoundConditional>? visitConditional = null, Action? visitCoalesce = null,
         Action? visitUpdate = null, Action? visitNominalUpdate = null,
         Action? visitCompoundAssignment = null, Action<BoundAssignment>? visitAssignment = null,
-        Action? visitLifetimeEnd = null, Action<string>? visitSymbolicFunction = null)
+        Action? visitLifetimeEnd = null, Action<string>? visitSymbolicFunction = null,
+        Action<BoundFieldLoan>? visitFieldLoan = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -1371,6 +1372,7 @@ public static partial class ModuleCompiler
                     VisitExpression(field.Receiver);
                     break;
                 case BoundFieldLoan loan:
+                    visitFieldLoan?.Invoke(loan);
                     VisitExpression(loan.Place);
                     break;
                 case BoundMutableFieldLoan loan:
@@ -1404,10 +1406,44 @@ public static partial class ModuleCompiler
         var valueTypes = new ModuleUnsafeValueTypeCache(program.Structures);
         return program.Functions.Any(function => function.RequiresUnsafeCaller && function.DeclaringStruct is not null
             && !IsSupportedModuleUnsafeMethod(function, program.Structures, valueTypes))
-            || program.Structures.Any(static structure =>
-                structure.Fields.Any(static field => field.RequiresUnsafeCaller))
-            || program.Classes.Any(static @class =>
-                @class.Fields.Any(static field => field.RequiresUnsafeCaller));
+            || ContainsUnsupportedModuleCallerUnsafeFieldContracts(program.Structures, program.Classes)
+            || program.Functions.Any(function => ContainsCallerUnsafeFieldLoan(function.Body, program.Structures));
+    }
+
+    private static bool ContainsCallerUnsafeFieldLoan(BoundStatement body,
+        ImmutableArray<BoundStruct> structures)
+    {
+        var found = false;
+        _ = Calls(body,
+            visitFieldLoan: loan => found |= ContainsCallerUnsafeField(loan.Place, structures),
+            visitMutableFieldLoan: loan => found |= ContainsCallerUnsafeField(loan.Place, structures));
+        return found;
+    }
+
+    private static bool ContainsCallerUnsafeField(BoundFieldRead field, ImmutableArray<BoundStruct> structures)
+    {
+        var ownerIndex = (int)field.Receiver.Type - 100;
+        return (ownerIndex >= 0 && ownerIndex < structures.Length
+            && field.Field >= 0 && field.Field < structures[ownerIndex].Fields.Length
+            && structures[ownerIndex].Fields[field.Field].RequiresUnsafeCaller)
+            || field.Receiver is BoundFieldRead parent && ContainsCallerUnsafeField(parent, structures);
+    }
+
+    private static bool ContainsUnsupportedModuleCallerUnsafeFieldContracts(
+        ImmutableArray<BoundStruct> structures, ImmutableArray<BoundClass> classes)
+    {
+        var valueTypes = new ModuleUnsafeValueTypeCache(structures);
+        for (var index = 0; index < structures.Length; index++)
+        {
+            var structure = structures[index];
+            if (structure.Fields.Any(static field => field.RequiresUnsafeCaller)
+                && !valueTypes.IsSupported((PrimitiveType)(100 + index)))
+            {
+                return true;
+            }
+        }
+        return classes.Any(static @class =>
+            @class.Fields.Any(static field => field.RequiresUnsafeCaller));
     }
 
     private static bool HasUnsupportedModuleCallerUnsafeContract(ModuleFunction function,
@@ -2021,6 +2057,7 @@ public static partial class ModuleCompiler
             var y = b.Fields[field];
             if (x.Name != y.Name || x.IsPrivate != y.IsPrivate || x.IsInternal != y.IsInternal
                 || x.IsMutable != y.IsMutable
+                || x.RequiresUnsafeCaller != y.RequiresUnsafeCaller
                 || TypeName(x.Type, left) != TypeName(y.Type, right)
                 || x.Size != y.Size || x.Offset != y.Offset)
             {
@@ -2370,6 +2407,7 @@ public static partial class ModuleCompiler
                 writer.Write(field.IsPrivate);
                 writer.Write(field.IsInternal);
                 writer.Write(field.IsMutable);
+                writer.Write(field.RequiresUnsafeCaller);
             }
         }
         writer.Write(module.Classes.Length);
@@ -2439,6 +2477,10 @@ public static partial class ModuleCompiler
             var entry = reader.ReadInt32();
             var (structures, structureNames) = ReadStructures(reader);
             var classes = ReadClasses(reader, structureNames);
+            if (ContainsUnsupportedModuleCallerUnsafeFieldContracts(structures, classes))
+            {
+                throw new ModuleFormatException("Module contains an unsupported caller-unsafe field contract.");
+            }
             var importedTypes = ReadImportedTypes(reader, structures.Length, structureNames, expectedConsumer);
             var count = Count(reader, MaximumFunctions);
             if (count == 0 || (expectedConsumer ? entry < 0 || entry >= count : entry != -1))
@@ -2577,6 +2619,7 @@ public static partial class ModuleCompiler
                     IsPrivate = GetBool(reader),
                     IsInternal = GetBool(reader),
                     IsMutable = GetBool(reader),
+                    RequiresUnsafeCaller = GetBool(reader),
                 });
             }
             structures.Add(new BoundStruct(name, fields.ToImmutable(), size) {
@@ -2692,7 +2735,8 @@ public static partial class ModuleCompiler
             var item = new ModuleFunction(name, contract, function, import) {
                 HasOwnershipTransfer = ownershipTransfer,
             };
-            if (HasUnsupportedModuleCallerUnsafeContract(item, structures, valueTypes))
+            if (HasUnsupportedModuleCallerUnsafeContract(item, structures, valueTypes)
+                || function is not null && ContainsCallerUnsafeFieldLoan(function.Body, structures))
             {
                 throw new ModuleFormatException("Module contains an unsupported caller-unsafe member contract.");
             }
@@ -2921,6 +2965,11 @@ public static partial class ModuleCompiler
                 PutExpression(writer, optionalAssignment.Value, names, ref remaining, depth + 1, inUnsafe);
                 break;
             case BoundFieldAssignment field:
+                if (field.IsUnsafeAuthorized && !inUnsafe)
+                {
+                    throw new ModuleContractException(
+                        "Caller-unsafe field authorization requires an unsafe block.");
+                }
                 writer.Write(field.Variable);
                 writer.Write(field.Field);
                 writer.Write(field.NestedFields.Length);
@@ -3294,6 +3343,11 @@ public static partial class ModuleCompiler
                 PutExpression(writer, cast.Operand, names, ref remaining, depth + 1, inUnsafe);
                 break;
             case BoundFieldRead field:
+                if (field.IsUnsafeAuthorized && !inUnsafe)
+                {
+                    throw new ModuleContractException(
+                        "Caller-unsafe field authorization requires an unsafe block.");
+                }
                 writer.Write(field.Field);
                 PutExpression(writer, field.Receiver, names, ref remaining, depth + 1, inUnsafe);
                 break;
@@ -3479,7 +3533,10 @@ public static partial class ModuleCompiler
             Place = ResolveExpression(optionalAssignment.Place, names, functions, inUnsafe),
             Value = ResolveExpression(optionalAssignment.Value, names, functions, inUnsafe),
         },
-        BoundFieldAssignment field => field with { Value = ResolveExpression(field.Value, names, functions, inUnsafe) },
+        BoundFieldAssignment field => field with {
+            Value = ResolveExpression(field.Value, names, functions, inUnsafe),
+            IsUnsafeAuthorized = inUnsafe,
+        },
         BoundExpressionStatement expression => expression with {
             Expression = ResolveExpression(expression.Expression, names, functions, inUnsafe),
         },
@@ -3587,7 +3644,10 @@ public static partial class ModuleCompiler
         BoundIsVariablePattern pattern => pattern with {
             Value = ResolveExpression(pattern.Value, names, functions, inUnsafe),
         },
-        BoundFieldRead field => field with { Receiver = ResolveExpression(field.Receiver, names, functions, inUnsafe) },
+        BoundFieldRead field => field with {
+            Receiver = ResolveExpression(field.Receiver, names, functions, inUnsafe),
+            IsUnsafeAuthorized = inUnsafe,
+        },
         BoundFieldLoan loan => loan with {
             Place = (BoundFieldRead)ResolveExpression(loan.Place, names, functions, inUnsafe),
         },

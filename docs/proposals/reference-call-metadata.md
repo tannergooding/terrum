@@ -5,10 +5,10 @@ for the roadmap's general reference/access/loan call contracts. It does not
 change accepted source semantics or the approved metadata schema, and does not
 approve the broader proposal. Its marked provisional slices now include
 structured semantic-module caller obligations, bounded readonly-instance and
-static-method experiments and getter support on `Copy` structs, and validated
-indexed executable unsafe scopes;
-their boundaries are described in [the module format](../modules.md) and
-[implementation notes](../implementation.md).
+static-method experiments and getter support on `Copy` structs,
+caller-unsafe public `Copy`-struct fields, and validated indexed executable
+unsafe scopes; their boundaries are described in
+[the module format](../modules.md) and [implementation notes](../implementation.md).
 
 ## Current boundary
 
@@ -181,6 +181,32 @@ and bodyless caller-unsafe getter contracts. The source and persistence
 boundaries remain provisional; this does not approve the broader metadata
 proposal.
 
+### Provisional extension: caller-unsafe Copy-struct field access
+
+**Summary:** Same-compilation binding already requires caller authorization
+for unsafe field reads and writes, including every unsafe field along a nested
+path. Structured semantic modules currently reject those field declarations.
+
+**Recommendation:** Provisionally persist the declaration obligation for
+public instance fields on public, non-unique `Copy` structs with recursively
+exportable public Copy-value or scalar layouts. Preserve existing field
+mutability, initialization, ownership and evaluation rules. Persist the field
+obligation, not an access-site authorization bit; readers reconstruct
+authorization only from an enclosing `BoundUnsafe` block. Check every field
+along nested read/write and field-place update paths, and require exact field
+obligation compatibility across semantic links, native graphs and module
+sets. Keep classes, static/foreign storage, unique or managed layouts,
+field-reference loans, `unsafe(expr)`-only authorization, executable TRRM and
+scalar-frontend projection outside this experiment. Revision 63 is
+provisional and does not approve general caller-unsafe member metadata.
+
+**Implemented provisionally:** Structured semantic-module revision 63
+persists caller-unsafe field declarations on eligible public `Copy` layouts
+and reconstructs read/write authorization from persisted `BoundUnsafe`
+blocks. Direct nested reads and writes, existing update-place operations,
+constructors, semantic links, native graphs and module sets retain exact field
+obligations. Class fields and field-reference loans remain rejected.
+
 Executable TRRM also provisionally round-trips the assigned caller-unsafe
 Effects bit on top-level function declarations, including when composed with
 `NoThrow` or `DoesNotReturn`, and provisionally admits calls only inside
@@ -239,7 +265,7 @@ individual call was authorized.
 ### 3. How should executable Bodies validate caller-unsafe scope?
 
 **Summary:** The source caller obligation and assigned Effects bit `0x04` are
-settled, and semantic-module revision 62 reconstructs authorization from
+settled, and semantic-module revision 63 reconstructs authorization from
 explicit `BoundUnsafe` scopes. Executable TRRM provisionally round-trips
 caller-unsafe declarations and supports calls only inside validated indexed
 Body unsafe scopes. Compact-linear Bodies still cannot prove explicit

@@ -513,6 +513,10 @@ public static partial class ModuleCompiler
             }
             var (structures, names) = ReadStructures(reader);
             var classes = ReadClasses(reader, names);
+            if (ContainsUnsupportedModuleCallerUnsafeFieldContracts(structures, classes))
+            {
+                throw new ModuleFormatException("Graph contains an unsupported caller-unsafe field contract.");
+            }
             var imported = ReadImportedTypes(reader, structures.Length, names, expectedConsumer: true);
             var count = Count(reader, MaximumFunctions);
             if (count == 0)

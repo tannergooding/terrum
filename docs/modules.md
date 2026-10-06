@@ -46,8 +46,8 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 62. Writers use it for every producer,
-consumer and graph library; readers accept only revision 62. Revision 48 adds
+The current semantic-module revision is 63. Writers use it for every producer,
+consumer and graph library; readers accept only revision 63. Revision 48 adds
 the initialization-aware optional-handle pattern expression, recording its
 source expression, capture slot and whether initialized null is accepted.
 Revision 49 adds expression tag 28 for named-storage initialization tests,
@@ -98,11 +98,15 @@ those owners when the getter returns a scalar by value. Revision 62 extends
 both getter slices to return recursively exportable, non-unique `Copy`
 structs by value, while retaining their distinct property identity, static or
 readonly-instance receiver shape, and `BoundUnsafe`-only authorization.
-Mutable
-receivers, constructors, class members, operators, fields, reference/output,
-unique, managed, buffer/view and other non-Copy member contracts remain
-unsupported. Executable TRRM member support is unchanged. Revision 61 and
-older artifacts are retired and must be recreated from source.
+Revision 63 provisionally persists caller-unsafe public instance fields on
+public, non-unique `Copy` structs with recursively exportable public layouts.
+It persists field obligations, reconstructs access authorization only from
+`BoundUnsafe` blocks and requires exact field-contract compatibility across
+semantic links, native graphs and module sets. Class/static/foreign fields,
+field-reference loans, reference/output, unique, managed, buffer/view and
+other non-Copy member contracts remain unsupported. Executable TRRM member
+support is unchanged. Revision 62 and older artifacts are retired and must be
+recreated from source.
 These experiments do not approve the broader reference-call metadata proposal.
 The scanner-specific implementation is provisional and its design remains
 unapproved; see the
@@ -607,7 +611,7 @@ unsupported.
 
 The following feature notes document implementation milestones only. They do
 not describe current writer selection or reader compatibility: current
-artifacts always use revision 62, and older semantic-module revisions are
+artifacts always use revision 63, and older semantic-module revisions are
 rejected.
 
 Version 12 stored the unique layout flag, declared cleanup method, cleanup
