@@ -54,10 +54,12 @@ Arithmetic NaN bit encodings remain provisional under an unapproved proposal.
 The bounded Terrum-authored scalar frontend now projects same-format unary
 signs, target-typed decimal and hexadecimal floating literals, based integer
 literals directly targeting `float32`/`float64`, `+`, `-`, `*`, `/` and IEEE
-comparisons through v85. The hosted reader validates token spans and
-reconstructs exact target-format literal bits; verification and emission
-remain hosted. V85 also projects conversions between `float32`/`float64` and
-from `int32`, `uint32`, `int64` and `uint64` to either format.
+comparisons through v85. Terrum-authored conversion helpers populate positive
+raw-bit literal leaves; the hosted reader validates token spans and payloads
+against the hosted parser, then consumes the validated bits. Verification and
+emission remain hosted. V85 also projects conversions between
+`float32`/`float64` and from `int32`, `uint32`, `int64` and `uint64` to either
+format.
 `char16`-to-floating conversion is provisionally projected through v85 under
 its still-unapproved eligibility proposal; verification and emission remain
 hosted. The frontend also provisionally projects float-to-integer
@@ -389,6 +391,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `169b8fcc` | Populate Terrum-authored decimal, hexadecimal-float and based-integer floating literal payloads in v85; host independently audits and consumes raw bits, while verification and emission remain hosted |
 | `60e16165` | Add standalone decimal `float32`/`float64` raw-bit conversion with exact-midpoint and discarded-tail parity; source-grant DLL and scalar frontend remain unsupported, and the token-slice boundary remains proposed |
 | `455d43c3` | Add internal raw-bit `float32`/`float64` division with hosted-emitter parity across rounding, subnormal and special-value boundaries; arithmetic proposals remain unapproved |
 | `afa1deb9` | Add internal raw-bit `float32`/`float64` multiplication with controlled hosted-emitter parity across rounding, subnormal and special-value boundaries; arithmetic proposals remain unapproved |
