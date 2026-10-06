@@ -225,16 +225,17 @@ Both library and reference compilation accept multiple `SyntaxTree` snapshots;
 source diagnostics retain the originating snapshot. The self-host component
 test builds `SourceRange`, `CharacterFacts`, `Token`, `WideIntegerFacts`,
 `IntegerCheckedArithmetic`, `IntegerMath`, `IntegerSaturation`,
-`IntegerWrapping`, and `BitOperations` into one producer, then independently binds `RangeTests`,
-`TokenTests`, `WideIntegerTests`, `IntegerCheckedArithmeticTests`,
-`IntegerMathTests`, `IntegerSaturationTests`, `IntegerWrappingTests`,
-`BitOperationsTests`, and the Terrum-authored `ComponentTestRunner` against its exported
-declarations. Those persisted modules execute through AOT and JIT, including
-range boundaries, conditional-output failure, character classification,
-aggregate token construction, 32-/64-bit checked arithmetic and accumulation,
-integer-math extrema, saturation and wrapping boundaries, bit-operation
-boundaries, and repeated calls. C# still orchestrates the test; the entry harness only
-composes these explicitly selected component checks.
+`IntegerWrapping`, `IntegerCheckedConversions`, and `BitOperations` into one
+producer, then independently binds `RangeTests`, `TokenTests`, `WideIntegerTests`,
+`IntegerCheckedArithmeticTests`, `IntegerMathTests`, `IntegerSaturationTests`,
+`IntegerWrappingTests`, `IntegerCheckedConversionsTests`, `BitOperationsTests`,
+and the Terrum-authored `ComponentTestRunner` against its exported declarations.
+Those persisted modules execute through AOT and JIT, including range boundaries,
+conditional-output failure, character classification, aggregate token
+construction, 32-/64-bit checked arithmetic and accumulation, integer-math
+extrema, saturation and wrapping boundaries, checked-conversion publication,
+bit-operation boundaries, and repeated calls. C# still orchestrates the test;
+the entry harness only composes these explicitly selected component checks.
 The CLI accepts repeatable `--source <path>` options and, for producers,
 `--export <qualified-name>` options. It rejects duplicate source paths or exports,
 more than 256 sources or 1,024 exports, and more than 4 MiB of combined UTF-8
@@ -274,8 +275,8 @@ dotnet $cli run-module artifacts\token-tests.trm artifacts\token-values.trm --ru
 
 The bounded `ComponentTestRunner` composes the range, token, checked
 32-/64-bit arithmetic, wide-integer, integer-math, integer-saturation and
-integer-wrapping checks, plus 32-/64-bit bit-operation tests, against one
-independently compiled producer:
+integer-wrapping and checked-conversion checks, plus 32-/64-bit bit-operation
+tests, against one independently compiled producer:
 
 ```powershell
 $componentSources = @(
@@ -287,6 +288,7 @@ $componentSources = @(
     'self-host\IntegerMath.terrum',
     'self-host\IntegerSaturation.terrum',
     'self-host\IntegerWrapping.terrum',
+    'self-host\IntegerCheckedConversions.terrum',
     'self-host\BitOperations.terrum'
 )
 $componentExports = @(
@@ -370,6 +372,26 @@ $componentExports = @(
     'Terrum.CodeAnalysis.Numerics64.WrapChar16ToUInt32',
     'Terrum.CodeAnalysis.Numerics64.WrapChar16ToInt64',
     'Terrum.CodeAnalysis.Numerics64.WrapChar16ToUInt64',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToInt64',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToUInt64',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToInt64',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToUInt64',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToUInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToUInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToUInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToInt64',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToUInt64',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToChar16',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToChar16',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToChar16',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToChar16',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToUInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToInt64',
+    'Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToUInt64',
     'Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt32',
     'Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt32',
     'Terrum.CodeAnalysis.Numerics64.PopCountUInt32',
@@ -407,6 +429,7 @@ $componentTests = @(
     'self-host\IntegerMathTests.terrum',
     'self-host\IntegerSaturationTests.terrum',
     'self-host\IntegerWrappingTests.terrum',
+    'self-host\IntegerCheckedConversionsTests.terrum',
     'self-host\BitOperationsTests.terrum',
     'self-host\ComponentTestRunner.terrum'
 )

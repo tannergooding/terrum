@@ -213,6 +213,7 @@ public sealed class ModuleTests
         var integerMathPath = Path.Combine(root, "self-host", "IntegerMath.terrum");
         var integerSaturationPath = Path.Combine(root, "self-host", "IntegerSaturation.terrum");
         var integerWrappingPath = Path.Combine(root, "self-host", "IntegerWrapping.terrum");
+        var checkedConversionsPath = Path.Combine(root, "self-host", "IntegerCheckedConversions.terrum");
         var bitOperationsPath = Path.Combine(root, "self-host", "BitOperations.terrum");
         var rangeTestsPath = Path.Combine(root, "self-host", "RangeTests.terrum");
         var tokenTestsPath = Path.Combine(root, "self-host", "TokenTests.terrum");
@@ -221,6 +222,7 @@ public sealed class ModuleTests
         var integerMathTestsPath = Path.Combine(root, "self-host", "IntegerMathTests.terrum");
         var integerSaturationTestsPath = Path.Combine(root, "self-host", "IntegerSaturationTests.terrum");
         var integerWrappingTestsPath = Path.Combine(root, "self-host", "IntegerWrappingTests.terrum");
+        var checkedConversionsTestsPath = Path.Combine(root, "self-host", "IntegerCheckedConversionsTests.terrum");
         var bitOperationsTestsPath = Path.Combine(root, "self-host", "BitOperationsTests.terrum");
         var entryPath = Path.Combine(root, "self-host", "ComponentTestRunner.terrum");
         var range = SyntaxTree.Parse(await File.ReadAllTextAsync(rangePath).ConfigureAwait(true), rangePath);
@@ -235,10 +237,13 @@ public sealed class ModuleTests
             integerSaturationPath);
         var integerWrapping = SyntaxTree.Parse(await File.ReadAllTextAsync(integerWrappingPath).ConfigureAwait(true),
             integerWrappingPath);
+        var checkedConversions = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(checkedConversionsPath).ConfigureAwait(true),
+            checkedConversionsPath);
         var bitOperations = SyntaxTree.Parse(await File.ReadAllTextAsync(bitOperationsPath).ConfigureAwait(true),
             bitOperationsPath);
         var library = Compilation.CreateLibrary([range, facts, token, wideFacts, checkedFacts, integerMath,
-            integerSaturation, integerWrapping, bitOperations]);
+            integerSaturation, integerWrapping, checkedConversions, bitOperations]);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
             "Terrum.CodeAnalysis.SourceRange.TryCreate",
@@ -321,6 +326,26 @@ public sealed class ModuleTests
             "Terrum.CodeAnalysis.Numerics64.WrapChar16ToUInt32",
             "Terrum.CodeAnalysis.Numerics64.WrapChar16ToInt64",
             "Terrum.CodeAnalysis.Numerics64.WrapChar16ToUInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToUInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToUInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToUInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToUInt64",
             "Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt32",
             "Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt32",
             "Terrum.CodeAnalysis.Numerics64.PopCountUInt32",
@@ -353,18 +378,22 @@ public sealed class ModuleTests
         var integerWrappingTests = SyntaxTree.Parse(
             await File.ReadAllTextAsync(integerWrappingTestsPath).ConfigureAwait(true),
             integerWrappingTestsPath);
+        var checkedConversionsTests = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(checkedConversionsTestsPath).ConfigureAwait(true),
+            checkedConversionsTestsPath);
         var bitOperationsTests = SyntaxTree.Parse(await File.ReadAllTextAsync(bitOperationsTestsPath).ConfigureAwait(true),
             bitOperationsTestsPath);
         var entry = SyntaxTree.Parse(await File.ReadAllTextAsync(entryPath).ConfigureAwait(true), entryPath);
         var compilation = Compilation.Create([rangeTests, tokenTests, wideTests, checkedTests, integerMathTests,
-            integerSaturationTests, integerWrappingTests, bitOperationsTests, entry],
+            integerSaturationTests, integerWrappingTests, checkedConversionsTests, bitOperationsTests, entry],
             ModuleCompiler.CreateReference(producer));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.Collection(compilation.SyntaxTrees, tree => Assert.Same(rangeTests, tree),
             tree => Assert.Same(tokenTests, tree), tree => Assert.Same(wideTests, tree),
             tree => Assert.Same(checkedTests, tree), tree => Assert.Same(integerMathTests, tree),
             tree => Assert.Same(integerSaturationTests, tree), tree => Assert.Same(integerWrappingTests, tree),
-            tree => Assert.Same(bitOperationsTests, tree), tree => Assert.Same(entry, tree));
+            tree => Assert.Same(checkedConversionsTests, tree), tree => Assert.Same(bitOperationsTests, tree),
+            tree => Assert.Same(entry, tree));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
         var consumerPath = Path.Combine(AppContext.BaseDirectory, $"self-host-module-{Guid.NewGuid():N}.trm");
         var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");

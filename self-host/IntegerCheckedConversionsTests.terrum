@@ -1,0 +1,120 @@
+using Terrum.CodeAnalysis.Numerics64;
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckIntegerCheckedConversions()
+{
+    require TryConvertInt32ToInt64(int32.MinValue, init var int32ToInt64);
+    if (int32ToInt64 != int64(int32.MinValue))
+    {
+        return false;
+    }
+
+    if (TryConvertInt32ToUInt64(-1, init var rejectedInt32ToUInt64))
+    {
+        return false;
+    }
+    require TryConvertInt32ToUInt64(int32.MaxValue, init var int32ToUInt64);
+    if (int32ToUInt64 != uint64(int32.MaxValue))
+    {
+        return false;
+    }
+
+    require TryConvertUInt32ToInt64(uint32.MaxValue, init var uint32ToInt64);
+    require TryConvertUInt32ToUInt64(uint32.MaxValue, init var uint32ToUInt64);
+    if (uint32ToInt64 != int64(uint32.MaxValue) || uint32ToUInt64 != uint64(uint32.MaxValue))
+    {
+        return false;
+    }
+
+    if (TryConvertUInt32ToInt32(uint32.MaxValue, init var rejectedUInt32ToInt32))
+    {
+        return false;
+    }
+    require TryConvertUInt32ToInt32(uint32(int32.MaxValue), init var uint32ToInt32);
+    if (uint32ToInt32 != int32.MaxValue || TryConvertInt32ToUInt32(-1, init var rejectedInt32ToUInt32))
+    {
+        return false;
+    }
+    require TryConvertInt32ToUInt32(int32.MaxValue, init var int32ToUInt32);
+    if (int32ToUInt32 != uint32(int32.MaxValue))
+    {
+        return false;
+    }
+
+    if (TryConvertInt64ToInt32(int64.MinValue, init var rejectedInt64ToInt32))
+    {
+        return false;
+    }
+    require TryConvertInt64ToInt32(int64(int32.MinValue), init var int64ToInt32);
+    if (int64ToInt32 != int32.MinValue
+        || TryConvertInt64ToUInt32(-1, init var rejectedInt64ToUInt32))
+    {
+        return false;
+    }
+    require TryConvertInt64ToUInt32(int64(uint32.MaxValue), init var int64ToUInt32);
+    if (int64ToUInt32 != uint32.MaxValue
+        || TryConvertUInt64ToInt32(uint64(int32.MaxValue) + 1, init var rejectedUInt64ToInt32))
+    {
+        return false;
+    }
+    require TryConvertUInt64ToInt32(uint64(int32.MaxValue), init var uint64ToInt32);
+    if (uint64ToInt32 != int32.MaxValue
+        || TryConvertUInt64ToUInt32(uint64(uint32.MaxValue) + 1, init var rejectedUInt64ToUInt32))
+    {
+        return false;
+    }
+    require TryConvertUInt64ToUInt32(uint64(uint32.MaxValue), init var uint64ToUInt32);
+    if (uint64ToUInt32 != uint32.MaxValue
+        || TryConvertUInt64ToInt64(uint64(int64.MaxValue) + 1, init var rejectedUInt64ToInt64))
+    {
+        return false;
+    }
+    require TryConvertUInt64ToInt64(uint64(int64.MaxValue), init var uint64ToInt64);
+    if (uint64ToInt64 != int64.MaxValue
+        || TryConvertInt64ToUInt64(-1, init var rejectedInt64ToUInt64))
+    {
+        return false;
+    }
+    require TryConvertInt64ToUInt64(int64.MaxValue, init var int64ToUInt64);
+    if (int64ToUInt64 != uint64(int64.MaxValue))
+    {
+        return false;
+    }
+
+    if (TryConvertInt32ToChar16(-1, init var rejectedNegativeChar16)
+        || TryConvertInt32ToChar16(65536, init var rejectedLargeChar16))
+    {
+        return false;
+    }
+    require TryConvertInt32ToChar16(0xD800, init var int32ToChar16);
+    if (int32ToChar16 != char16(0xD800)
+        || TryConvertUInt32ToChar16(65536, init var rejectedUInt32Char16))
+    {
+        return false;
+    }
+    require TryConvertUInt32ToChar16(0xD800, init var uint32ToChar16);
+    if (uint32ToChar16 != char16(0xD800)
+        || TryConvertInt64ToChar16(-1, init var rejectedInt64Char16))
+    {
+        return false;
+    }
+    require TryConvertInt64ToChar16(0xD800, init var int64ToChar16);
+    if (int64ToChar16 != char16(0xD800)
+        || TryConvertUInt64ToChar16(65536, init var rejectedUInt64Char16))
+    {
+        return false;
+    }
+    require TryConvertUInt64ToChar16(0xD800, init var uint64ToChar16);
+    if (uint64ToChar16 != char16(0xD800))
+    {
+        return false;
+    }
+
+    char16 surrogate = char16(0xD800);
+    require TryConvertChar16ToInt32(surrogate, init var char16ToInt32);
+    require TryConvertChar16ToUInt32(surrogate, init var char16ToUInt32);
+    require TryConvertChar16ToInt64(surrogate, init var char16ToInt64);
+    require TryConvertChar16ToUInt64(surrogate, init var char16ToUInt64);
+    return char16ToInt32 == 0xD800 && char16ToUInt32 == 0xD800
+        && char16ToInt64 == 0xD800 && char16ToUInt64 == 0xD800;
+}
