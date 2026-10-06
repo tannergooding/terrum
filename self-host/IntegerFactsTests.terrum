@@ -1,0 +1,22 @@
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckIntegerFacts()
+{
+    if (IntegerFactsInt32Mask(int32.MaxValue, 1) != 126
+        || IntegerFactsInt32Mask(int32.MinValue, -1) != 18
+        || IntegerFactsInt32Mask(3, 0) != 103
+        || IntegerFactsUInt32Mask(uint32.MaxValue, 1) != 30
+        || IntegerFactsUInt32Mask(uint32.MaxValue, 2) != 26
+        || IntegerFactsUInt32Mask(3, 0) != 7
+        || IntegerFactsInt64Mask(int64.MaxValue, 1) != 126
+        || IntegerFactsInt64Mask(int64.MinValue, -1) != 18
+        || IntegerFactsInt64Mask(3, 0) != 103
+        || IntegerFactsUInt64Mask(uint64.MaxValue, 1) != 30
+        || IntegerFactsUInt64Mask(uint64.MaxValue, 2) != 26
+        || IntegerFactsUInt64Mask(3, 0) != 7)
+    {
+        return false;
+    }
+
+    return true;
+}

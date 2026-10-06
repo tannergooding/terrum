@@ -1,0 +1,47 @@
+public int32 IntegerFactsInt32Mask(int32 left, int32 right)
+{
+    mut int32 mask = 0;
+    if (CanAddInt32(left, right)) { mask = mask + 1; }
+    if (CanSubtractInt32(left, right)) { mask = mask + 2; }
+    if (CanMultiplyInt32(left, right)) { mask = mask + 4; }
+    if (CanDivideInt32(left, right)) { mask = mask + 8; }
+    if (CanRemainderInt32(left, right)) { mask = mask + 16; }
+    if (CanNegateInt32(left)) { mask = mask + 32; }
+    if (CanAbsoluteInt32(left)) { mask = mask + 64; }
+    return mask;
+}
+
+public int32 IntegerFactsUInt32Mask(uint32 left, uint32 right)
+{
+    mut int32 mask = 0;
+    if (CanAddUInt32(left, right)) { mask = mask + 1; }
+    if (CanSubtractUInt32(left, right)) { mask = mask + 2; }
+    if (CanMultiplyUInt32(left, right)) { mask = mask + 4; }
+    if (CanDivideUInt32(left, right)) { mask = mask + 8; }
+    if (CanRemainderUInt32(left, right)) { mask = mask + 16; }
+    return mask;
+}
+
+public int32 IntegerFactsInt64Mask(int64 left, int64 right)
+{
+    mut int32 mask = 0;
+    if (CanAddInt64(left, right)) { mask = mask + 1; }
+    if (CanSubtractInt64(left, right)) { mask = mask + 2; }
+    if (CanMultiplyInt64(left, right)) { mask = mask + 4; }
+    if (CanDivideInt64(left, right)) { mask = mask + 8; }
+    if (CanRemainderInt64(left, right)) { mask = mask + 16; }
+    if (CanNegateInt64(left)) { mask = mask + 32; }
+    if (CanAbsoluteInt64(left)) { mask = mask + 64; }
+    return mask;
+}
+
+public int32 IntegerFactsUInt64Mask(uint64 left, uint64 right)
+{
+    mut int32 mask = 0;
+    if (CanAddUInt64(left, right)) { mask = mask + 1; }
+    if (CanSubtractUInt64(left, right)) { mask = mask + 2; }
+    if (CanMultiplyUInt64(left, right)) { mask = mask + 4; }
+    if (CanDivideUInt64(left, right)) { mask = mask + 8; }
+    if (CanRemainderUInt64(left, right)) { mask = mask + 16; }
+    return mask;
+}

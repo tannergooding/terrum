@@ -17,6 +17,7 @@ int32 Main()
         require CheckWideBaseAccumulation();
         require CheckCheckedInt32Arithmetic();
         require CheckCheckedUInt32Arithmetic();
+        require CheckIntegerFacts();
         require CheckIntegerMath();
         require CheckBitOperations();
         require CheckIntegerSaturation();

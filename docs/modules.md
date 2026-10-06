@@ -223,12 +223,12 @@ program and extracts selected producer definitions. The CLI uses independent
 consumer source and the validated artifact-reference path.
 Both library and reference compilation accept multiple `SyntaxTree` snapshots;
 source diagnostics retain the originating snapshot. The self-host component
-test builds `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `Token`,
-`WideIntegerFacts`,
+test builds `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`,
+the test-only `IntegerFactsTestExports` bridge, `Token`, `WideIntegerFacts`,
 `IntegerCheckedArithmetic`, `IntegerMath`, `IntegerSaturation`,
 `IntegerWrapping`, `IntegerCheckedConversions`, and `BitOperations` into one
 producer, then independently binds `RangeTests`, `TokenTests`, `WideIntegerTests`,
-`CharacterFactsTests`, `Utf16CodeUnitsTests`,
+`CharacterFactsTests`, `Utf16CodeUnitsTests`, `IntegerFactsTests`,
 `IntegerCheckedArithmeticTests`, `IntegerMathTests`,
 `IntegerSaturationTests`, `IntegerWrappingTests`,
 `IntegerCheckedConversionsTests`, `BitOperationsTests`, and the Terrum-authored
@@ -288,6 +288,8 @@ $componentSources = @(
     'self-host\SourceRange.terrum',
     'self-host\CharacterFacts.terrum',
     'self-host\Utf16CodeUnits.terrum',
+    'self-host\IntegerFacts.terrum',
+    'self-host\IntegerFactsTestExports.terrum',
     'self-host\Token.terrum',
     'self-host\WideIntegerFacts.terrum',
     'self-host\IntegerCheckedArithmetic.terrum',
@@ -307,6 +309,10 @@ $componentExports = @(
     'Terrum.CodeAnalysis.TryGetHexDigit',
     'Terrum.CodeAnalysis.DecodeUtf16Scalar',
     'Terrum.CodeAnalysis.Utf16ScalarWidth',
+    'IntegerFactsInt32Mask',
+    'IntegerFactsUInt32Mask',
+    'IntegerFactsInt64Mask',
+    'IntegerFactsUInt64Mask',
     'Terrum.CodeAnalysis.Token.#ctor',
     'Terrum.CodeAnalysis.Numerics64.TryAddInt64',
     'Terrum.CodeAnalysis.Numerics64.TrySubtractInt64',
@@ -434,6 +440,7 @@ $componentTests = @(
     'self-host\RangeTests.terrum',
     'self-host\CharacterFactsTests.terrum',
     'self-host\Utf16CodeUnitsTests.terrum',
+    'self-host\IntegerFactsTests.terrum',
     'self-host\TokenTests.terrum',
     'self-host\WideIntegerTests.terrum',
     'self-host\IntegerCheckedArithmeticTests.terrum',
