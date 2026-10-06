@@ -308,6 +308,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `d699fc80` | Verify test-only generated source-grant bindings follow private-callee dependence while production DLL emission remains rejected |
 | `403b51b0` | Extend caller-unsafe semantic-module method signatures to public non-unique Copy values; verify links, native graphs and module sets under both runtime policies |
 | `6a2f3fe5` | Execute persisted native consumers with replacement providers publishing `out` values from `finally` under both runtime policies |
 | `efcc7d2a` | Verify semantic and native module replacements reject `out`/`init ref<T>` mode changes under both runtime policies |
