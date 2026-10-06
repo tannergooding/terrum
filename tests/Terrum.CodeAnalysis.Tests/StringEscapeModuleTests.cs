@@ -65,8 +65,10 @@ public sealed class StringEscapeModuleTests
         foreach (var (escape, errorCode, scalar) in new (string Escape, int ErrorCode, int Scalar)[] {
             ("", -1, 0), ("plain", -1, 0), ("\\n", 0, 10), ("\\r", 0, 13), ("\\t", 0, 9),
             ("\\\\", 0, 92), ("\\\"", 0, 34), ("\\0", 0, 0), ("\\u00E9", 0, 233),
+            ("\\u0000", 0, 0), ("\\uFFFF", 0, 0xFFFF), ("\\U0001F600", 0, 0x1F600),
             ("\\U0010FFFF", 0, 0x10FFFF), ("\\q", 5, 0), ("\\u", 5, 0), ("\\u123", 5, 0),
-            ("\\u12xz", 5, 0), ("\\uD800", 5, 0), ("\\U00110000", 5, 0), ("\\U1234567", 5, 0),
+            ("\\'", 5, 0), ("\\u12xz", 5, 0), ("\\uD800", 5, 0), ("\\uDC00", 5, 0),
+            ("\\U00110000", 5, 0), ("\\U1234567", 5, 0), ("\\U0000000G", 5, 0),
             ("\\\uD800", 5, -1), ("\\\uD800\uDC00", 5, 0),
         })
         {
@@ -77,9 +79,18 @@ public sealed class StringEscapeModuleTests
             };
             Assert.Equal(expected, NativeJit.ExecuteWithSourceGrant(linked, [grant], (NativeRuntimePolicy)policy));
         }
+
+        const string escapeWithTrailingText = "\\u00E9suffix";
+        var trailingTextGrant = new HostBuffer("Source", PrimitiveType.Char16,
+            [.. escapeWithTrailingText.Select(static unit => (int)unit)], false) {
+            IsInvocationScoped = true,
+        };
+        Assert.Equal(ExpectedResult(escapeWithTrailingText, 0, 233, expectedConsumedLength: 6),
+            NativeJit.ExecuteWithSourceGrant(linked, [trailingTextGrant], (NativeRuntimePolicy)policy));
     }
 
-    private static int ExpectedResult(string escape, int errorCode, int scalar)
+    private static int ExpectedResult(string escape, int errorCode, int scalar,
+        int? expectedConsumedLength = null)
     {
         if (escape.Length == 0 || escape[0] != '\\')
         {
@@ -90,7 +101,7 @@ public sealed class StringEscapeModuleTests
         if (errorCode == 0)
         {
             Assert.Empty(lexed.Diagnostics);
-            return PackResult(0, scalar, escape.Length, 0);
+            return PackResult(0, scalar, expectedConsumedLength ?? escape.Length, 0);
         }
 
         var diagnostic = Assert.Single(lexed.Diagnostics.Where(static item => item.Code == "TRM0005"));
