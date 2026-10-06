@@ -70,7 +70,7 @@ public static partial class ScalarFrontendHost
         var allowInitRefArguments = context is not null
             || isTree && words[17] != 0;
 
-        if (isTree && source.Length > 16_384
+        if (isTree && source.Length > ScannerHost.MaximumSourceLength
             || words[1] is not (1 or 2))
         {
             throw InvalidResult();

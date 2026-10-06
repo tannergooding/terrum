@@ -79,7 +79,7 @@ public static partial class ScalarFrontendHost
         }
         if (words[0] != 85
             || words[1] != 1 || words[2] is < 1 or > MaximumFunctions
-            || words[3] != 0 || source.Length > 16_384
+            || words[3] != 0 || source.Length > ScannerHost.MaximumSourceLength
             || words.AsSpan(4 + words[2] * ProgramFrameWordCount).IndexOfAnyExcept(0) >= 0)
         {
             throw InvalidResult();

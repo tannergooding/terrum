@@ -38,6 +38,11 @@ public sealed class BlockFrontendProjectionTests
         Statement(words, 5, 8, 0, 4, returnAt, returnAt + 9);
 
         var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
+        var maximumLengthSource = SourceText.From(text + new string(' ',
+            ScannerHost.MaximumSourceLength - text.Length));
+        Assert.True(ScalarFrontendHost.ReadResult(maximumLengthSource, Bytes(words)).IsValid);
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+            SourceText.From(maximumLengthSource.Text + " "), Bytes(words)));
         Assert.Equal(result.Statements[0].Span, result.Statements[0].BodySpan);
         Assert.Equal(result.Statements[3].Span, result.Statements[3].BodySpan);
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })

@@ -778,6 +778,26 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Equal(42, NativeJit.Execute(hosted with { EntryPoint = 0 }, policy));
     }
 
+    [Fact]
+    public async Task ScalarFrontendProgramReaderEnforcesMaximumSourceLengthAsync()
+    {
+        const string program = "public int32 Main() => 42;";
+        var text = program + new string(' ', ScannerHost.MaximumSourceLength - program.Length);
+        Assert.Equal(ScannerHost.MaximumSourceLength, text.Length);
+
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var source = SourceText.From(text);
+            var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
+            var result = ScalarFrontendHost.ReadProgram(source, bytes, programBytes,
+                (BoundRuntimePolicy)policy);
+            Assert.True(result.Projection.IsValid);
+
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(
+                SourceText.From(text + " "), bytes, programBytes, (BoundRuntimePolicy)policy));
+        }
+    }
+
     private static async Task<(byte[] Bytes, byte[] ProgramBytes, BoundProgram Stage)> ProduceScalarProgramAsync(
         string text, NativeRuntimePolicy policy)
     {
