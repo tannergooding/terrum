@@ -30,5 +30,16 @@ public bool CheckUtf16CodeUnits()
         }
     }
 
+    for (mut int32 scalar = 65536; scalar <= 1114111; scalar = scalar + 1)
+    {
+        int32 offset = scalar - 65536;
+        char16 high = char16(55296 + offset / 1024);
+        char16 low = char16(56320 + offset % 1024);
+        if (DecodeUtf16Scalar(high, low) != scalar || Utf16ScalarWidth(scalar) != 2)
+        {
+            return false;
+        }
+    }
+
     return true;
 }
