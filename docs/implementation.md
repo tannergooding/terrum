@@ -2062,6 +2062,9 @@ initialize it. Native graph execution likewise retains vacancy after a checked
 provider failure, allowing a later provider call to initialize the destination
 through both AOT and JIT graph paths. Graph tests also stage a scalar value on
 false, then publish on true through the unchanged consumer under both policies.
+Both scalar output modes execute through native graphs under each runtime
+policy, and graph replacement rejects switching between `out` and
+`init ref<T>` in either direction.
 Ownership-set execution also covers conditional unique `init ref<T>` publication:
 false after constructing the value leaves the destination vacant, a later true
 call publishes the owner, and the unchanged consumer moves it once across
