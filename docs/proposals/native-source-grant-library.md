@@ -217,6 +217,12 @@ bytes match ordinary source-free emission exactly.
 The reject-by-default experiment admits only self-contained structured
 `bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`, and `void` functions.
 These results establish feasibility of the provisional generated ABI only.
+They do not establish native support for the existing four-operation
+`SourceText`/`SourceLines` facade, whose current components require output
+parameters, structures and loops that the experiment rejects. Any promotion
+supported directly by this experiment is limited to its admitted structured
+scalar leaf exports; adopting the source facade would require separate
+implementation and validation evidence.
 Public library emission, native packages, production CLI paths, maintained
 compiler-primitives exports, JIT execution, scanner profiles, executables,
 graphs, module sets, AOT, and cross-DLL source propagation remain unchanged
