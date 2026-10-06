@@ -36,6 +36,11 @@ public sealed class NativeOwnershipModuleSetsTests
             ticket = new SecondTicket(22);
             return success;
         }
+        public bool TrySecondInit(bool success, init ref<SecondTicket> ticket) {
+            if (!success) { return false; }
+            ticket = new SecondTicket(2);
+            return true;
+        }
         public SecondTicket CreateSecond() { return new SecondTicket(0); }
         public int32 ConsumeSecond(SecondTicket ticket) {
             require ticket.Marker == uint64.MaxValue;
@@ -49,7 +54,7 @@ public sealed class NativeOwnershipModuleSetsTests
     public async Task OwnedCallsAndOutputsSurviveIndependentProviderReplacementAsync(NativeRuntimePolicy policy)
     {
         var first = Producer(First, ["CreateFirst", "ConsumeFirst", "FirstTicket.Close"], "First", policy);
-        string[] secondExports = ["TrySecond", "CreateSecond", "ConsumeSecond", "SecondTicket.Close"];
+        string[] secondExports = ["TrySecond", "TrySecondInit", "CreateSecond", "ConsumeSecond", "SecondTicket.Close"];
         var second = Producer(Second, secondExports, "Second", policy);
         var boundPolicy = policy == NativeRuntimePolicy.FailFast
             ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions;
@@ -67,7 +72,10 @@ public sealed class NativeOwnershipModuleSetsTests
                 mut SecondTicket second = CreateSecond();
                 require !TrySecond(false, out second);
                 require TrySecond(true, out second);
-                return ConsumeFirst(move first) + ConsumeSecond(move second);
+                if (TrySecondInit(false, init var initialized)) { return 1; }
+                require TrySecondInit(true, init initialized);
+                return ConsumeFirst(move first) + ConsumeSecond(move second)
+                    + ConsumeSecond(move initialized) - 2;
             }
             """), NativeModuleCompiler.CreateReferenceSet([second, first]), boundPolicy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
