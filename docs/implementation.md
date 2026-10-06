@@ -1258,7 +1258,9 @@ earlier constant locals. Constant-selected conditional arms and Boolean
 short-circuit paths follow only the evaluated branch. Runtime-dependent
 evaluated expressions, unsupported forms, inferred const locals and
 `for`-initializer const declarations remain outside this bounded subset. The
-projection adds no native ABI, source-free TRRM or semantic-module format.
+validated `BoundConstant` is reused for local lowering rather than reevaluating
+the source initializer. The projection adds no native ABI, source-free TRRM or
+semantic-module format.
 
 Projection v65 adds kinds 29 and 30 for nested `try { ... } finally { ... }`
 regions in the bounded scalar statement subset. The source-bound reader
