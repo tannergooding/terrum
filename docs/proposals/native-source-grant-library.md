@@ -106,9 +106,10 @@ decoder and checked source-dependent adapter with a hash-bound export
 manifest. CLI and generated-caller tests exercise this path under both
 runtime policies, while the maintained companion itself uses the fail-fast
 policy. Export descriptors admit only scalar value signatures; unsupported
-output/loan and aggregate signatures, managed-runtime use and end-relative
-source reads reject. This establishes a narrow provisional implementation
-path, not a promoted ABI.
+output/loan and aggregate signatures and managed-runtime use reject.
+End-relative source reads derive their base from the captured invocation
+count, not the empty build-time buffer length. This establishes a narrow
+provisional implementation path, not a promoted ABI.
 
 **Recommendation:** Add only an explicit opt-in source-grant build path in
 the maintained compiler-primitives build, initially producing a separate

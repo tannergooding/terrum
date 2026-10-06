@@ -62,8 +62,6 @@ internal static class NativeSourceGrantClassifier
                         case BoundBufferLength length when length.Buffer == 0:
                             dependent[functionIndex] = true;
                             break;
-                        case BoundBufferRead read when read.Buffer == 0 && read.IsEndRelativeOffset:
-                            throw Unsupported();
                         case BoundBufferRead read when read.Buffer == 0:
                             dependent[functionIndex] = true;
                             expressions.Push(read.Index);
@@ -389,7 +387,7 @@ internal static class NativeSourceGrantClassifier
                             break;
                         case BoundBufferLength length when length.Buffer == 0:
                             break;
-                        case BoundBufferRead read when read.Buffer == 0 && !read.IsEndRelativeOffset:
+                        case BoundBufferRead read when read.Buffer == 0:
                             expressions.Push(read.Index);
                             break;
                         case BoundUnary unary:

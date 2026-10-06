@@ -99,16 +99,6 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
             outputParameterProgram, ["Terrum.CodeAnalysis.TryInitializeSource"], NativeRuntimePolicy.FailFast));
 
-        var endRelative = Compilation.CreateLibrary(
-            [SyntaxTree.Parse("""
-                namespace Terrum.CodeAnalysis;
-                public int32 ReadLastSourceCodeUnit() { return int32(Host.Source[^1]); }
-                """)],
-            [sourceBuffer], BoundRuntimePolicy.FailFast);
-        var endRelativeProgram = Assert.IsType<BoundProgram>(endRelative.Program);
-        Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(endRelativeProgram,
-            ["Terrum.CodeAnalysis.ReadLastSourceCodeUnit"], NativeRuntimePolicy.FailFast));
-
         var managedCall = Compilation.CreateLibrary(
             [SyntaxTree.Parse("""
                 namespace Terrum.CodeAnalysis;
@@ -143,6 +133,67 @@ public sealed class NativeSourceGrantLibraryTests
         var unsupportedCalleeProgram = Assert.IsType<BoundProgram>(unsupportedCallee.Program);
         Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
             unsupportedCalleeProgram, ["Terrum.CodeAnalysis.ReadSourceAndCount"], NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void EndRelativeSourceReadsUseTheInvocationLength(BoundRuntimePolicy policy)
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false)
+        {
+            IsInvocationScoped = true,
+        };
+        var compilation = Compilation.CreateLibrary(
+            [SyntaxTree.Parse("""
+                namespace Terrum.CodeAnalysis;
+                public int32 ReadFromSourceEnd(int32 offset) { return int32(Host.Source[^offset]); }
+                """)],
+            [sourceBuffer], policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program,
+            ["Terrum.CodeAnalysis.ReadFromSourceEnd"], (NativeRuntimePolicy)policy);
+        Assert.True(Assert.Single(artifact.Exports).SourceDependent);
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-index-from-end-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(path, artifact.Image);
+        try
+        {
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var bindings = new NativeSourceGrantTestBindings(module,
+                    [.. artifact.Exports.Select(static export => (export.Name, export.SourceDependent,
+                        export.ReturnType, export.ParameterTypes))]);
+                var maximumSource = new string('x', 16_383) + "Z";
+                Assert.Equal((int)'A', bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", ['A'], 1));
+                Assert.Equal((int)'C', bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", ['A', 'B', 'C'], 1));
+                Assert.Equal((int)'A', bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", ['A', 'B', 'C'], 3));
+                Assert.Equal((int)'Z', bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd",
+                    maximumSource.ToCharArray(), 1));
+                Assert.Equal((int)'x', bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd",
+                    maximumSource.ToCharArray(), 16_384));
+                if (policy == BoundRuntimePolicy.CheckedExceptions)
+                {
+                    Assert.Throws<TargetInvocationException>(() =>
+                        bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", ['A'], 0));
+                    Assert.Throws<TargetInvocationException>(() =>
+                        bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", ['A'], 2));
+                    Assert.Throws<TargetInvocationException>(() =>
+                        bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", [], 1));
+                }
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Fact]

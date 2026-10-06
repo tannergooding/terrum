@@ -2962,13 +2962,29 @@ internal sealed partial class PeCompiler
         Expression(index, spill);
         if (isEndRelative)
         {
+            var invocationScoped = _sourceDependent is not null && buffer == 0;
+            if (invocationScoped)
+            {
+                _code.Bytes(0x8B, 0x8D); // mov ecx,[rbp+sourceCount]
+                _code.Int32(_sourceSlots[_currentFunction] + 8);
+            }
             _code.Bytes(0x85, 0xC0); // test eax,eax
             var negativeOffset = _code.JumpIf(0x88);
-            _code.Byte(0x3D); // cmp eax,length
-            _code.Int32(_program.Buffers[buffer].Values.Length);
+            if (invocationScoped)
+            {
+                _code.Bytes(0x3B, 0xC1); // cmp eax,ecx
+            }
+            else
+            {
+                _code.Byte(0x3D); // cmp eax,length
+                _code.Int32(_program.Buffers[buffer].Values.Length);
+            }
             var outOfRange = _code.JumpIf(0x87);
-            _code.Byte(0xB9); // mov ecx,length
-            _code.Int32(_program.Buffers[buffer].Values.Length);
+            if (!invocationScoped)
+            {
+                _code.Byte(0xB9); // mov ecx,length
+                _code.Int32(_program.Buffers[buffer].Values.Length);
+            }
             _code.Bytes(0x29, 0xC1, 0x89, 0xC8); // ecx = length - eax; eax = ecx
             var converted = _code.Jump();
             _code.PatchRelative(negativeOffset, _code.Position);

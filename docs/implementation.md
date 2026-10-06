@@ -2631,15 +2631,16 @@ The maintained Windows x64 build now also emits a separate, provisional
 source-grant companion DLL for the checked scalar adapter. The compiler
 derives hidden source parameters through local calls and emits a hash-bound
 manifest for the selected scalar value exports; output/loan or aggregate
-export signatures, managed-runtime use and end-relative source reads reject.
-Generated test bindings use the manifest to call source-dependent and
-unchanged source-free signatures under both runtime policies. The companion
-is bounded to self-contained local dependencies and does not change the
-source-free compiler-primitives DLL; ordinary `EmitLibrary` still rejects
-source grants. The CLI stages the companion and manifest together, preserving
-the previous artifact pair when either destination cannot be replaced. This
-is provisional implemented support, not approval of the proposed ABI or
-general source-grant DLL support.
+export signatures and managed-runtime use reject. End-relative source reads
+use the invocation's captured code-unit count rather than the empty
+build-time buffer length. Generated test bindings use the manifest to call
+source-dependent and unchanged source-free signatures under both runtime
+policies. The companion is bounded to self-contained local dependencies and
+does not change the source-free compiler-primitives DLL; ordinary
+`EmitLibrary` still rejects source grants. The CLI stages the companion and
+manifest together, preserving the previous artifact pair when either
+destination cannot be replaced. This is provisional implemented support, not
+approval of the proposed ABI or general source-grant DLL support.
 The frontend retains its source-grant and hosted verifier/emitter boundaries.
 `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`
 projects typed facts or scanner/shape errors for inspection. Compilation
