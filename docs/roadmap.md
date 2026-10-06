@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `9de43928` | Validate the densest scanner-10 integer record sequence under the maximum source bound |
 | `501b2645` | Fill the scanner-10 trivia record bound with maximum-length newline input |
 | `f19b42ca` | Fill the scanner-10 diagnostic record bound with maximum-length malformed UTF-16 input |
 | `8c7e000b` | Stress maximum-length scanner-10 token and trivia record publication |
