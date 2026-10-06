@@ -108,8 +108,13 @@ public bool CheckManagedTokenChain()
     {
         require cursorChain.TryAppend(index, index, 1);
     }
-    if (cursorChain.Count != 64 || cursorChain.Version != 69
-        || cursorChain.TryAppend(64, 64, 1))
+    if (cursorChain.TryAppend(64, 64, 1)
+        || cursorChain.Count != 64 || cursorChain.Version != 69)
+    {
+        return false;
+    }
+    require cursorChain.TryGet(63, init var last);
+    if (last.Kind != 63 || last.Range.Start != 63 || last.Range.Length != 1)
     {
         return false;
     }
