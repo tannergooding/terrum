@@ -73,7 +73,9 @@ Persisted semantic-module JIT tests also compare
 `StringLiteral` length and encoding results for UTF-8, UTF-16
 units and LE/BE bytes, strict ASCII and Latin-1, and UTF-32 LE/BE bytes with
 host encoders across fresh grants under both runtime policies. They cover
-`IntegerParsing` for radices 2–36, `SourceLineIndex`
+all 1,048,576 valid supplementary scalar inputs in bounded batches across
+every listed encoding, including strict ASCII/Latin-1 rejection. The persisted
+JIT tests additionally cover `IntegerParsing` for radices 2–36, `SourceLineIndex`
 counts/extents/position mapping/offset lookup, and streaming `SourceLines`
 ranges and coordinates across fresh grants. A test-only formatter wrapper
 also compares `IntegerFormatting` output with expected text from fresh grants;

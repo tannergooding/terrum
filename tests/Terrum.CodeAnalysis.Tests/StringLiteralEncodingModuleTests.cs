@@ -200,6 +200,46 @@ public sealed class StringLiteralEncodingModuleTests
                     $"{exports[encoding]} failed for {fixture.Spelling}: verification returned {actual}.");
             }
         }
+
+        const int firstSupplementaryScalar = 0x10000;
+        const int supplementaryScalarLimit = 0x110000;
+        const int maximumScalarsPerBatch = 2_700;
+        for (var scalarStart = firstSupplementaryScalar;
+            scalarStart < supplementaryScalarLimit;
+            scalarStart += maximumScalarsPerBatch)
+        {
+            var scalarCount = Math.Min(maximumScalarsPerBatch,
+                supplementaryScalarLimit - scalarStart);
+            var textBuilder = new StringBuilder(scalarCount * 2);
+            for (var index = 0; index < scalarCount; index++)
+            {
+                textBuilder.Append(new Rune(scalarStart + index).ToString());
+            }
+
+            var text = textBuilder.ToString();
+            var spelling = $"\"{text}\"";
+            Assert.True(scalarCount * 6 + 4 <= 16_384);
+            Assert.Empty(Lexer.Lex(SourceText.From(spelling)).Diagnostics);
+            var expected = new int[]?[] {
+                strictUtf8.GetBytes(text).Select(static value => (int)value).ToArray(),
+                text.Select(static unit => (int)unit).ToArray(),
+                strictUtf16Le.GetBytes(text).Select(static value => (int)value).ToArray(),
+                strictUtf16Be.GetBytes(text).Select(static value => (int)value).ToArray(),
+                TryEncode(strictAscii, text),
+                TryEncode(strictLatin1, text),
+                strictUtf32Le.GetBytes(text).Select(static value => (int)value).ToArray(),
+                strictUtf32Be.GetBytes(text).Select(static value => (int)value).ToArray(),
+            };
+
+            for (var encoding = 0; encoding < expected.Length; encoding++)
+            {
+                var grant = CreateSourceGrant(encoding, expected[encoding], spelling);
+                var actual = NativeJit.ExecuteWithSourceGrant(consumers[encoding], [grant],
+                    (NativeRuntimePolicy)policy);
+                Assert.True(actual == 0,
+                    $"{exports[encoding]} failed for supplementary scalar batch starting at U+{scalarStart:X}: verification returned {actual}.");
+            }
+        }
     }
 
     private static int[]? TryEncode(Encoding encoding, string value)
