@@ -459,6 +459,15 @@ public sealed class NativeGraphTests
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
         Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [leaf],
             CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+
+        var replacementSource = $"{ProviderTemplate}public void Leaf({outputMode} result) "
+            + "{ result = new Pair(21, 22); }";
+        var replacement = Leaf(replacementSource, policy);
+        NativeModuleCompiler.ValidateGraph(root, [replacement]);
+        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(root, [replacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(43, await NativeModuleCompiler.RunGraphJitAsync(root, [replacement],
+            CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
     }
 
     [Fact]
