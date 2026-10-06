@@ -477,6 +477,38 @@ public sealed class ScannerTests
         }
         sources.Add(supplementarySource.ToString());
 
+        var supplementaryStarts = new StringBuilder();
+        var startRanges = UnicodeIdentifierProfile.StartRanges;
+        for (var index = 0; index < startRanges.Length; index += 2)
+        {
+            var start = Math.Max(startRanges[index], 0x10000);
+            var end = startRanges[index + 1];
+            if (start > end)
+            {
+                continue;
+            }
+            supplementaryStarts.Append(char.ConvertFromUtf32(start)).Append("_x ");
+            supplementaryStarts.Append(char.ConvertFromUtf32(end)).Append("_x ");
+        }
+        Assert.InRange(supplementaryStarts.Length, 1, ScannerHost.MaximumSourceLength);
+        sources.Add(supplementaryStarts.ToString());
+
+        var supplementaryContinues = new StringBuilder();
+        var continueRanges = UnicodeIdentifierProfile.ContinueRanges;
+        for (var index = 0; index < continueRanges.Length; index += 2)
+        {
+            var start = Math.Max(continueRanges[index], 0x10000);
+            var end = continueRanges[index + 1];
+            if (start > end)
+            {
+                continue;
+            }
+            supplementaryContinues.Append('A').Append(char.ConvertFromUtf32(start)).Append("x ");
+            supplementaryContinues.Append('A').Append(char.ConvertFromUtf32(end)).Append("x ");
+        }
+        Assert.InRange(supplementaryContinues.Length, 1, ScannerHost.MaximumSourceLength);
+        sources.Add(supplementaryContinues.ToString());
+
         ScannerInvocationResult? retained = null;
         foreach (var text in sources)
         {

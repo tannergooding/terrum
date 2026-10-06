@@ -18,7 +18,8 @@ empty, varied, malformed-UTF-16 and maximum-length sources under both runtime
 policies, plus bounded batches covering every BMP `\u` escape and its
 surrogate diagnostics against the hosted lexer, and `\U` values at every
 Unicode-plane boundary, including surrogate and above-maximum rejections, plus
-raw supplementary scalars in quoted tokens at each plane boundary.
+raw supplementary scalars in quoted tokens at each plane boundary and
+supplementary Unicode identifier start/continue range endpoints.
 A source-dependent
 single-producer semantic-module program can be linked and executed by
 `NativeJit.ExecuteWithSourceGrant`, which requires one readonly `char16` grant
