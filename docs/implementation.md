@@ -2051,7 +2051,9 @@ and complete-program v82 now carry this contract for scalar `init ref<T>`
 declarations through the same hosted verifier and emitter. Semantic and native
 consumer replacement checks reject changing a same-typed output parameter
 between `out` and `init ref<T>`; compatibility does not normalize their
-distinct publication contracts.
+distinct publication contracts. Native consumer sets also bind named scalar
+`init ref<T>` outputs alongside independent providers under both runtime
+policies.
 The distinct `out` mode now also accepts ordinary non-unique struct values
 for non-Boolean and void functions, provided the output is initialized on
 every normal return. Public semantic modules, native modules and native

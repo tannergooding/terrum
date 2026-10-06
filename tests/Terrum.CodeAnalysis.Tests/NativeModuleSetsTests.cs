@@ -277,6 +277,47 @@ public sealed class NativeModuleSetsTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task InitRefOutputBindsAcrossNativeConsumerSetsAsync(NativeRuntimePolicy policy)
+    {
+        var initializerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Initialize(int32 value, init ref<int32> result) {
+                result = value;
+                return 0;
+            }
+            """), (BoundRuntimePolicy)policy);
+        Assert.False(initializerCompilation.HasErrors,
+            string.Join(Environment.NewLine, initializerCompilation.Diagnostics));
+        var initializer = NativeModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(initializerCompilation.Program), ["Initialize"], "Initializer", policy);
+
+        var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Beta() { return 22; }"), (BoundRuntimePolicy)policy);
+        Assert.False(secondCompilation.HasErrors, string.Join(Environment.NewLine, secondCompilation.Diagnostics));
+        var second = NativeModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(secondCompilation.Program), ["Beta"], "Second", policy);
+
+        const string ConsumerSource = """
+            int32 Main() {
+                init int32 result;
+                int32 status = Initialize(result: init result, value: 20);
+                return result + Beta() + status;
+            }
+            """;
+        var reference = NativeModuleCompiler.CreateReferenceSet([second, initializer]);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), reference,
+            (BoundRuntimePolicy)policy);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumerSet(
+            Assert.IsType<BoundProgram>(consumerCompilation.Program), [initializer, second], policy);
+        NativeModuleCompiler.ValidateConsumerSet(consumer, [second, initializer]);
+        Assert.Equal(42, await NativeModuleCompiler.RunConsumerSetAsync(consumer, [second, initializer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+    }
+
+    [Theory]
     [InlineData("int64", "22")]
     [InlineData("uint32", "22")]
     public async Task BothIndependentNestedValueTablesBindAndExecuteAsync(string secondType, string secondValue)
