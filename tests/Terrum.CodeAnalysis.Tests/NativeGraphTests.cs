@@ -415,27 +415,40 @@ public sealed class NativeGraphTests
     }
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task CopyStructOutOutputExecutesAcrossGraphAsync(NativeRuntimePolicy policy)
+    [InlineData(NativeRuntimePolicy.FailFast, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    public async Task CopyStructOutputExecutesAcrossGraphAsync(
+        NativeRuntimePolicy policy, bool usesInit)
     {
-        const string ProviderSource = """
+        var outputMode = usesInit ? "init ref<Pair>" : "out Pair";
+        const string ProviderTemplate = """
             public struct Pair {
                 public int64 First;
                 public int64 Second;
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
             }
-            public void Leaf(out Pair result) { result = new Pair(20, 22); }
             """;
-        const string ConsumerSource = """
+        var providerSource = $"{ProviderTemplate}public void Leaf({outputMode} result) "
+            + "{ result = new Pair(20, 22); }";
+        var consumerSource = usesInit
+            ? """
+                int32 Main() {
+                    init Pair result;
+                    Leaf(init result);
+                    return int32(result.First + result.Second);
+                }
+                """
+            : """
             int32 Main() {
                 Leaf(out var result);
                 return int32(result.First + result.Second);
             }
             """;
 
-        var leaf = Leaf(ProviderSource, policy);
-        var rootCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+        var leaf = Leaf(providerSource, policy);
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
             NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
         Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
         var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
