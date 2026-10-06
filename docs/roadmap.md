@@ -304,6 +304,9 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `a895ca24` | Exhaustively verify scanner-delimited BMP string escape introducers through source-grant JIT |
+| `ae2d4e4d` | Exhaustively verify scanner-delimited BMP character literals through source-grant JIT |
+| `c65293fd` | Exhaustively verify every UTF-16 code-unit read through source-grant JIT |
 | `b8df80c0` | Erase recursively nested literal-false loops without regions |
 | `284f62a2` | Execute fallthrough bodies once when erasing literal-false post-tests |
 | `e3c4cabd` | Preserve returning direct calls before terminal loop exits |
