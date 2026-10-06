@@ -121,8 +121,8 @@ public sealed partial class CliTests
     {
         const string source = """
             [DoesNotReturn] public void Halt() { require false; }
-            public int32 Value() {
-                if (false) { Halt(); }
+            public int32 Value(int32 stop) {
+                if (stop != 0) { Halt(); }
                 return 42;
             }
             """;
@@ -150,9 +150,9 @@ public sealed partial class CliTests
             var handle = NativeLibrary.Load(nativePath);
             try
             {
-                var invoke = Marshal.GetDelegateForFunctionPointer<ScopedInt32>(
+                var invoke = Marshal.GetDelegateForFunctionPointer<ScopedInt32Unary>(
                     NativeLibrary.GetExport(handle, "Value"));
-                Assert.Equal(42, invoke());
+                Assert.Equal(42, invoke(0));
             }
             finally
             {
@@ -165,6 +165,8 @@ public sealed partial class CliTests
             File.Delete(hostedPath);
         }
     }
+
+    private delegate int ScopedInt32Unary(int value);
 
     [Theory]
     [InlineData("unsafe { return Danger() + 1; }")]

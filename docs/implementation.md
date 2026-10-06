@@ -1335,7 +1335,7 @@ the complete program. CLI JSON includes the ordered function inventory and
 call targets; executable commands select `Main` by name rather than assuming
 function zero, and library builds export the public declarations.
 Library parity coverage includes public `[DoesNotReturn]` declarations and
-their calls in inactive branches under both runtime policies; the reachable
+calls from conditional branches under both runtime policies; the reachable
 export executes identically to its hosted build.
 
 The source bound remains 16,384 UTF-16 units and 64 tokens including EOF.
