@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `6a2f3fe5` | Execute persisted native consumers with replacement providers publishing `out` values from `finally` under both runtime policies |
 | `efcc7d2a` | Verify semantic and native module replacements reject `out`/`init ref<T>` mode changes under both runtime policies |
 | `b843eef0` | Verify semantic and native module replacements preserve retained `NoThrow` and `DoesNotReturn` effects under both runtime policies |
 | `fd64de10` | Verify native module-set replacement preserves retained `NoThrow` and `DoesNotReturn` effects under both runtime policies |

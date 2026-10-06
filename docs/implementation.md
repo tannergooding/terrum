@@ -2082,6 +2082,9 @@ Native module-set replacement tests cover both retained effects under both
 runtime policies as well. Semantic and native single-module replacement tests
 now exercise both retained effects and `out`/`init ref<T>` mode changes under
 both policies; the semantic module test class passes 81 tests.
+Persisted native consumers also execute original and compatible replacement
+providers whose `out` value is published by a `finally` block, under both
+runtime policies.
 The distinct `out` mode now also accepts ordinary non-unique struct values
 for non-Boolean and void functions, provided the output is initialized on
 every normal return. Public semantic modules, native modules and native
