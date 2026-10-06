@@ -63,7 +63,8 @@ public sealed class SourceLinesModuleTests
 
         var fixtures = new[] {
             "", "plain", "\r", "\n", "\r\n", "\r\r\n\n\r",
-            "a\r\nb\rc\nd\u0085e\u2028f\u2029", "\uD800\r\n\uDC00\0\uD800\uDC00",
+            "a\r\nb\rc\nd\u0085e\u2028f\u2029", "x\u0085", "x\u2028",
+            "\uD800\r\n\uDC00\0\uD800\uDC00",
         };
         var maximumLineCount = fixtures.Max(static text => SourceText.From(text).Lines.Length);
         var maximumSourceLength = fixtures.Max(static text => text.Length);
