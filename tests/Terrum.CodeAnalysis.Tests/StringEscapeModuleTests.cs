@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -40,6 +41,37 @@ public sealed class StringEscapeModuleTests
                 return decoded.ErrorCode * 100_000_000 + (decoded.Scalar + 1) * 64
                     + decoded.ConsumedLength * 4 + decoded.ErrorLength;
             }
+            public int32 VerifyEscapeRecords() {
+                int32 sourceLength = Host.Source.Length;
+                mut int32 at = 0;
+                mut int32 item = 0;
+                while (at < sourceLength) {
+                    if (sourceLength - at < 6) { return -1; }
+                    int32 expectedError = int32(Host.Source[at]);
+                    int32 expectedScalar = int32(Host.Source[at + 1]);
+                    bool expectedUnpaired = Host.Source[at + 2] != char16(0);
+                    int32 expectedConsumedLength = int32(Host.Source[at + 3]);
+                    int32 expectedErrorLength = int32(Host.Source[at + 4]);
+                    int32 spellingLength = int32(Host.Source[at + 5]);
+                    at = at + 6;
+                    if (spellingLength < 1 || spellingLength > sourceLength - at) { return -2; }
+                    if (!SourceRange.TryCreate(at, spellingLength, init var spelling)
+                        || !StringEscapeDecodeResult.TryAnalyze(spelling, init var decoded)) {
+                        return -3;
+                    }
+                    bool scalarMismatch = expectedUnpaired
+                        ? decoded.Scalar != -1
+                        : decoded.Scalar != expectedScalar;
+                    if (decoded.ErrorCode != expectedError || scalarMismatch
+                        || decoded.ConsumedLength != expectedConsumedLength
+                        || decoded.ErrorLength != expectedErrorLength) {
+                        return item + 1;
+                    }
+                    at = at + spellingLength;
+                    item = item + 1;
+                }
+                return 0;
+            }
             """, "string-escape-module.terrum");
         var producerCompilation = Compilation.Create(trees,
         [
@@ -50,7 +82,7 @@ public sealed class StringEscapeModuleTests
         Assert.False(producerCompilation.HasErrors,
             string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
-            ["Terrum.CodeAnalysis.AnalyzeFirstEscape"]);
+            ["Terrum.CodeAnalysis.AnalyzeFirstEscape", "Terrum.CodeAnalysis.VerifyEscapeRecords"]);
 
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
@@ -61,6 +93,17 @@ public sealed class StringEscapeModuleTests
         var consumer = ModuleCompiler.CreateConsumer(
             Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
+
+        var recordConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return VerifyEscapeRecords(); }
+            """, "string-escape-record-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(recordConsumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, recordConsumerCompilation.Diagnostics));
+        var recordConsumer = ModuleCompiler.Link(
+            ModuleCompiler.CreateConsumer(
+                Assert.IsType<BoundProgram>(recordConsumerCompilation.Program), producer),
+            producer);
 
         foreach (var (escape, errorCode, scalar) in new (string Escape, int ErrorCode, int Scalar)[] {
             ("", -1, 0), ("plain", -1, 0), ("\\n", 0, 10), ("\\r", 0, 13), ("\\t", 0, 9),
@@ -87,6 +130,81 @@ public sealed class StringEscapeModuleTests
         };
         Assert.Equal(ExpectedResult(escapeWithTrailingText, 0, 233, expectedConsumedLength: 6),
             NativeJit.ExecuteWithSourceGrant(linked, [trailingTextGrant], (NativeRuntimePolicy)policy));
+
+        const int maximumGrantLength = 16_384;
+        var records = new List<int>(maximumGrantLength);
+        void ExecuteRecords()
+        {
+            if (records.Count == 0)
+            {
+                return;
+            }
+            var grant = new HostBuffer("Source", PrimitiveType.Char16,
+                [.. records], false) { IsInvocationScoped = true };
+            Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(
+                recordConsumer, [grant], (NativeRuntimePolicy)policy));
+            records.Clear();
+        }
+
+        var emptyRecords = new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+            IsInvocationScoped = true,
+        };
+        Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(
+            recordConsumer, [emptyRecords], (NativeRuntimePolicy)policy));
+
+        for (var value = (int)char.MinValue; value <= char.MaxValue; value++)
+        {
+            var codeUnit = (char)value;
+            var escape = codeUnit switch {
+                'u' => "\\u0041Z",
+                'U' => "\\U00000041Z",
+                _ => string.Concat('\\', codeUnit, 'Z'),
+            };
+            var lexed = Lexer.Lex(SourceText.From("\"" + escape + "\""));
+            if (lexed.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM0002"))
+            {
+                continue;
+            }
+
+            var errorCode = 0;
+            var scalar = codeUnit switch {
+                'n' => 10,
+                'r' => 13,
+                't' => 9,
+                '\\' => 92,
+                '"' => 34,
+                '0' => 0,
+                'u' or 'U' => 65,
+                _ => 0,
+            };
+            var consumedLength = codeUnit is 'u' or 'U' ? escape.Length - 1 : 2;
+            var errorLength = 0;
+            if (!lexed.Diagnostics.IsEmpty)
+            {
+                var diagnostic = Assert.Single(
+                    lexed.Diagnostics.Where(static item => item.Code == "TRM0005"));
+                Assert.Equal(1, diagnostic.Span.Start);
+                errorCode = 5;
+                scalar = char.IsSurrogate(codeUnit) ? -1 : 0;
+                consumedLength = diagnostic.Span.Length;
+                errorLength = diagnostic.Span.Length;
+            }
+
+            var recordLength = 6 + escape.Length;
+            if (records.Count + recordLength > maximumGrantLength)
+            {
+                ExecuteRecords();
+            }
+
+            records.Add(errorCode);
+            records.Add(scalar < 0 ? 0 : scalar);
+            records.Add(scalar < 0 ? 1 : 0);
+            records.Add(consumedLength);
+            records.Add(errorLength);
+            records.Add(escape.Length);
+            records.AddRange(escape.Select(static unit => (int)unit));
+        }
+        ExecuteRecords();
     }
 
     private static int ExpectedResult(string escape, int errorCode, int scalar,
