@@ -25,6 +25,7 @@ public sealed class NativeSourceGrantExperimentTests
     private const string ReadExport = "Terrum.CodeAnalysis.ReadUtf16ScalarForSourceAbiTest";
     private const string FlowExport = "Terrum.CodeAnalysis.SourceFlowForSourceAbiTest";
     private const string LineCountExport = "Terrum.CodeAnalysis.SourceLineCountForSourceAbiTest";
+    private const string LinePositionExport = "Terrum.CodeAnalysis.SourceLinePositionForSourceAbiTest";
     private const string LengthExport = "Terrum.CodeAnalysis.SourceLengthForSourceAbiTest";
     private const string BoundaryExport = "Terrum.CodeAnalysis.SourceBoundaryForSourceAbiTest";
     private const string FreeExport = "Terrum.CodeAnalysis.SourceFreeForSourceAbiTest";
@@ -375,10 +376,10 @@ public sealed class NativeSourceGrantExperimentTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
-    public void GeneratedBindingsRunBoundedSourceLineScansAgainstHostedSourceText(BoundRuntimePolicy policy)
+    public void GeneratedBindingsMatchBoundedSourceLineQueriesAgainstHostedSourceText(BoundRuntimePolicy policy)
     {
         Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        const string LineCountFixture = """
+        const string LineQueryFixture = """
             public int32 SourceLineCountForSourceAbiTest() {
                 mut int32 lineCount = 1;
                 mut int32 at = 0;
@@ -398,17 +399,55 @@ public sealed class NativeSourceGrantExperimentTests
                 }
                 return lineCount;
             }
+            public int32 SourceLinePositionForSourceAbiTest(int32 position) {
+                mut int32 line = 0;
+                mut int32 start = 0;
+                mut int32 at = 0;
+                while (at < Host.Source.Length) {
+                    char16 current = Host.Source[at];
+                    mut int32 breakLength = 0;
+                    if (current == char16(13)) {
+                        breakLength = 1;
+                        if (at + 1 < Host.Source.Length && Host.Source[at + 1] == char16(10)) {
+                            breakLength = 2;
+                        }
+                    }
+                    else if (current == char16(10) || current == char16(133)
+                        || current == char16(8232) || current == char16(8233)) {
+                        breakLength = 1;
+                    }
+                    if (breakLength != 0) {
+                        int32 next = at + breakLength;
+                        if (position < next) { return line * 65536 + (position - start); }
+                        line = line + 1;
+                        start = next;
+                        at = next;
+                    }
+                    else {
+                        at = at + 1;
+                    }
+                }
+                return line * 65536 + (position - start);
+            }
             """;
-        var program = Compile(policy, [], LineCountFixture);
+        var program = Compile(policy, [], LineQueryFixture);
         var function = Assert.Single(program.Functions,
             static function => function.Name == LineCountExport);
+        var positionFunction = Assert.Single(program.Functions,
+            static function => function.Name == LinePositionExport);
         var dependencies = Classify(program);
         Assert.True(dependencies[program.Functions.IndexOf(function)]);
+        Assert.True(dependencies[program.Functions.IndexOf(positionFunction)]);
 
-        var emitted = EmitExperiment(program, [LineCountExport], (NativeRuntimePolicy)policy);
-        var export = Assert.Single(emitted.Exports);
-        Assert.True(export.SourceDependent);
-        Assert.Empty(export.ParameterTypes);
+        var emitted = EmitExperiment(program, [LineCountExport, LinePositionExport], (NativeRuntimePolicy)policy);
+        var lineCountExport = Assert.Single(emitted.Exports,
+            static export => export.Name == LineCountExport);
+        Assert.True(lineCountExport.SourceDependent);
+        Assert.Empty(lineCountExport.ParameterTypes);
+        var linePositionExport = Assert.Single(emitted.Exports,
+            static export => export.Name == LinePositionExport);
+        Assert.True(linePositionExport.SourceDependent);
+        Assert.Equal(PrimitiveType.Int32, Assert.Single(linePositionExport.ParameterTypes));
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-lines-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, emitted.Image);
         try
@@ -426,8 +465,19 @@ public sealed class NativeSourceGrantExperimentTests
                 ];
                 foreach (var text in fixtures)
                 {
-                    Assert.Equal(SourceText.From(text).Lines.Length,
-                        bindings.Invoke<int>(LineCountExport, text.ToCharArray()));
+                    var source = text.ToCharArray();
+                    var snapshot = SourceText.From(text);
+                    Assert.Equal(snapshot.Lines.Length, bindings.Invoke<int>(LineCountExport, source));
+                    int[] positions = text.Length <= 256
+                        ? Enumerable.Range(0, text.Length + 1).ToArray()
+                        : [0, 1, text.Length / 2, text.Length - 1, text.Length];
+                    foreach (var position in positions)
+                    {
+                        var expected = snapshot.GetLinePosition(position);
+                        var packed = bindings.Invoke<int>(LinePositionExport, source, position);
+                        Assert.Equal(expected.Line, packed >> 16);
+                        Assert.Equal(expected.Character, packed & 0xFFFF);
+                    }
                 }
                 Assert.Equal(1, bindings.Invoke<int>(LineCountExport, null));
                 Assert.Equal(1, bindings.Invoke<int>(LineCountExport, []));

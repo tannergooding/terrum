@@ -276,6 +276,13 @@ supported line ending, mixed and trailing endings, malformed UTF-16, NUL,
 excluded VT/FF, and maximum-length inputs. Explicit maximum-bound checks cover
 16,384 plain units, 16,384 LF units, 8,192 CRLF pairs and a final CR; the
 16,385-unit grant remains rejected before dispatch.
+The same test DLL also returns a test-local packed line/character pair and
+matches hosted `SourceText.GetLinePosition` for every offset in the short
+edge-case fixtures and selected boundary offsets in maximum-length inputs.
+Both coordinates fit unsigned 16-bit fields under the 16,384-unit source
+bound. The packing is only a scalar test carrier; it does not define a
+production return ABI or remove the full facade's output-parameter and
+aggregate requirements.
 
 **Recommendation:** Keep this admission confined to the test-only
 feasibility path. Continue rejecting post-tested loops, separate iterators,
