@@ -41,11 +41,12 @@ public sealed class StringLiteralModuleTests
                 return scalar;
             }
             public int32 ReadRequestedStringScalar() {
-                if (Host.Source.Length < 2) { return -1; }
-                if (!SourceRange.TryCreate(1, Host.Source.Length - 1, init var spelling)) { return -2; }
+                if (Host.Source.Length < 3) { return -1; }
+                if (!SourceRange.TryCreate(2, Host.Source.Length - 2, init var spelling)) { return -2; }
                 if (!StringLiteral.TryCreate(spelling, init var literal)) { return -3; }
                 int32 position = spelling.Start + int32(Host.Source[0]);
                 if (!literal.TryReadScalar(position, init var scalar, init var next)) { return -4; }
+                if (next != spelling.Start + int32(Host.Source[1])) { return -5; }
                 return scalar;
             }
             """, "string-literal-module.terrum");
@@ -106,17 +107,17 @@ public sealed class StringLiteralModuleTests
             Assert.IsType<BoundProgram>(requestedConsumer.Program), producer);
         var requestedLinked = ModuleCompiler.Link(requestedProgram, producer);
 
-        foreach (var (text, position, expected) in new (string Text, int Position, int Expected)[] {
-            ("\"A\\u00E9B\"", 1, 65), ("\"A\\u00E9B\"", 2, 233),
-            ("\"A\\u00E9B\"", 3, -4), ("\"A\\u00E9B\"", 7, -4),
-            ("\"A\\u00E9B\"", 8, 66), ("\"A\\u00E9B\"", 9, -4),
-            ("\"😀\"", 1, 0x1F600), ("\"😀\"", 2, -4), ("\"😀\"", 3, -4),
-            ("\"\\U0001F600\"", 1, 0x1F600), ("\"\\U0001F600\"", 2, -4),
-            ("\"\\U0001F600\"", 8, -4),
+        foreach (var (text, position, next, expected) in new (string Text, int Position, int Next, int Expected)[] {
+            ("\"A\\u00E9B\"", 1, 2, 65), ("\"A\\u00E9B\"", 2, 8, 233),
+            ("\"A\\u00E9B\"", 3, 0, -4), ("\"A\\u00E9B\"", 7, 0, -4),
+            ("\"A\\u00E9B\"", 8, 9, 66), ("\"A\\u00E9B\"", 9, 0, -4),
+            ("\"😀\"", 1, 3, 0x1F600), ("\"😀\"", 2, 0, -4), ("\"😀\"", 3, 0, -4),
+            ("\"\\U0001F600\"", 1, 11, 0x1F600), ("\"\\U0001F600\"", 2, 0, -4),
+            ("\"\\U0001F600\"", 8, 0, -4),
         })
         {
             var grant = new HostBuffer("Source", PrimitiveType.Char16,
-                [position, .. text.Select(static unit => (int)unit)], false) {
+                [position, next, .. text.Select(static unit => (int)unit)], false) {
                 IsInvocationScoped = true,
             };
             Assert.Equal(expected, NativeJit.ExecuteWithSourceGrant(
