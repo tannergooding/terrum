@@ -4,8 +4,9 @@
 for the roadmap's general reference/access/loan call contracts. It does not
 change accepted source semantics or the approved metadata schema, and does not
 approve the broader proposal. Its marked provisional slices now include
-structured semantic-module caller obligations, a bounded readonly `Copy`
-instance-method experiment, and validated indexed executable unsafe scopes;
+structured semantic-module caller obligations, bounded readonly-instance and
+static-method experiments on `Copy` structs, and validated indexed executable
+unsafe scopes;
 their boundaries are described in [the module format](../modules.md) and
 [implementation notes](../implementation.md).
 
