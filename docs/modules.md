@@ -227,15 +227,17 @@ test builds `SourceRange`, `CharacterFacts`, `Token`, `WideIntegerFacts`,
 `IntegerCheckedArithmetic`, `IntegerMath`, `IntegerSaturation`,
 `IntegerWrapping`, `IntegerCheckedConversions`, and `BitOperations` into one
 producer, then independently binds `RangeTests`, `TokenTests`, `WideIntegerTests`,
-`IntegerCheckedArithmeticTests`, `IntegerMathTests`, `IntegerSaturationTests`,
-`IntegerWrappingTests`, `IntegerCheckedConversionsTests`, `BitOperationsTests`,
-and the Terrum-authored `ComponentTestRunner` against its exported declarations.
+`CharacterFactsTests`, `IntegerCheckedArithmeticTests`, `IntegerMathTests`,
+`IntegerSaturationTests`, `IntegerWrappingTests`,
+`IntegerCheckedConversionsTests`, `BitOperationsTests`, and the Terrum-authored
+`ComponentTestRunner` against its exported declarations.
 Those persisted modules execute through AOT and JIT, including range boundaries,
-conditional-output failure, character classification, aggregate token
-construction, 32-/64-bit checked arithmetic and accumulation, integer-math
-extrema, saturation and wrapping boundaries, checked-conversion publication,
-bit-operation boundaries, and repeated calls. C# still orchestrates the test;
-the entry harness only composes these explicitly selected component checks.
+conditional-output failure, character classification and hexadecimal mapping,
+aggregate token construction, 32-/64-bit checked arithmetic and accumulation,
+integer-math extrema, saturation and wrapping boundaries, checked-conversion
+publication, bit-operation boundaries, and repeated calls. C# still
+orchestrates the test; the entry harness only composes these explicitly
+selected component checks.
 The CLI accepts repeatable `--source <path>` options and, for producers,
 `--export <qualified-name>` options. It rejects duplicate source paths or exports,
 more than 256 sources or 1,024 exports, and more than 4 MiB of combined UTF-8
@@ -298,6 +300,7 @@ $componentExports = @(
     'Terrum.CodeAnalysis.IsAsciiDigit',
     'Terrum.CodeAnalysis.IsLineBreak',
     'Terrum.CodeAnalysis.GetDecimalDigit',
+    'Terrum.CodeAnalysis.TryGetHexDigit',
     'Terrum.CodeAnalysis.Token.#ctor',
     'Terrum.CodeAnalysis.Numerics64.TryAddInt64',
     'Terrum.CodeAnalysis.Numerics64.TrySubtractInt64',
@@ -423,6 +426,7 @@ dotnet $cli @producerArgs
 
 $componentTests = @(
     'self-host\RangeTests.terrum',
+    'self-host\CharacterFactsTests.terrum',
     'self-host\TokenTests.terrum',
     'self-host\WideIntegerTests.terrum',
     'self-host\IntegerCheckedArithmeticTests.terrum',

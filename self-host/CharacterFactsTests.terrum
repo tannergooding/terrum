@@ -1,0 +1,42 @@
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckCharacterFacts()
+{
+    if (!IsAsciiDigit(char16(48)) || !IsAsciiDigit(char16(57))
+        || IsAsciiDigit(char16(47)) || IsAsciiDigit(char16(58))
+        || !IsLineBreak(char16(10)) || !IsLineBreak(char16(13))
+        || !IsLineBreak(char16(133)) || !IsLineBreak(char16(8232))
+        || !IsLineBreak(char16(8233)) || IsLineBreak(char16(32)))
+    {
+        return false;
+    }
+
+    if (GetDecimalDigit(char16(48)) != 0 || GetDecimalDigit(char16(49)) != 1
+        || GetDecimalDigit(char16(50)) != 2 || GetDecimalDigit(char16(51)) != 3
+        || GetDecimalDigit(char16(52)) != 4 || GetDecimalDigit(char16(53)) != 5
+        || GetDecimalDigit(char16(54)) != 6 || GetDecimalDigit(char16(55)) != 7
+        || GetDecimalDigit(char16(56)) != 8 || GetDecimalDigit(char16(57)) != 9)
+    {
+        return false;
+    }
+
+    require TryGetHexDigit(char16(48), init var zero);
+    require TryGetHexDigit(char16(57), init var nine);
+    require TryGetHexDigit(char16(65), init var upperA);
+    require TryGetHexDigit(char16(70), init var upperF);
+    require TryGetHexDigit(char16(97), init var lowerA);
+    require TryGetHexDigit(char16(102), init var lowerF);
+    if (zero != 0 || nine != 9 || upperA != 10 || upperF != 15
+        || lowerA != 10 || lowerF != 15
+        || TryGetHexDigit(char16(47), init var beforeDigits)
+        || TryGetHexDigit(char16(58), init var afterDigits)
+        || TryGetHexDigit(char16(64), init var beforeUpper)
+        || TryGetHexDigit(char16(71), init var afterUpper)
+        || TryGetHexDigit(char16(96), init var beforeLower)
+        || TryGetHexDigit(char16(103), init var afterLower))
+    {
+        return false;
+    }
+
+    return true;
+}
