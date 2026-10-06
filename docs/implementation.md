@@ -28,12 +28,16 @@ including exact reads of all 65,536 UTF-16 code units (including surrogate
 units) across fresh grants under both runtime policies, plus the `Utf16Scalar`
 adapter, `CharacterLiteral` leaf decoding for every scanner-delimited BMP code
 unit (including surrogate rejection) and every valid supplementary scalar in
-both direct and `\U`-escaped spellings, the provisional `StringEscape` decoder
-for every scanner-delimited BMP escape introducer and every valid
-supplementary `\U` escape, and `StringLiteral` scalar decoding for every
-scanner-delimited BMP code unit (including surrogate rejection) and every
-valid supplementary scalar in both direct and escaped spellings, plus
-`StringRow` name/namespace encoders for ASCII, UTF-8, UTF-16LE and UTF-32LE.
+both direct and `\U`-escaped spellings, and rejection of all 2,048
+surrogate-valued `\U` escapes with hosted diagnostic parity. The provisional
+`StringEscape` decoder is checked for every scanner-delimited BMP escape
+introducer, every valid supplementary `\U` escape and all 2,048 rejected
+surrogate-valued `\U` escapes, including consumed and diagnostic widths.
+`StringLiteral` scalar decoding is checked for every scanner-delimited BMP
+code unit (including surrogate rejection), every valid supplementary scalar
+in both direct and escaped spellings, and the same invalid escaped-surrogate
+set. `StringRow` name/namespace encoders cover ASCII, UTF-8, UTF-16LE and
+UTF-32LE.
 Persisted semantic-module JIT tests compare those rows with the hosted string
 table writer across fresh grants, including the existing empty-name,
 unrepresentable-ASCII and embedded-zero rejection behavior. They also compare

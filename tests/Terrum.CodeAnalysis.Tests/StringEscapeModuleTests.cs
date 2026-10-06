@@ -246,6 +246,45 @@ public sealed class StringEscapeModuleTests
             Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[^1].Kind);
             ExecuteRecords();
         }
+
+        const int firstSurrogateScalar = 0xD800;
+        const int surrogateScalarLimit = 0xE000;
+        const int maximumInvalidScalarsPerBatch = 900;
+        for (var scalarStart = firstSurrogateScalar;
+            scalarStart < surrogateScalarLimit;
+            scalarStart += maximumInvalidScalarsPerBatch)
+        {
+            var scalarCount = Math.Min(maximumInvalidScalarsPerBatch,
+                surrogateScalarLimit - scalarStart);
+            var batchText = new StringBuilder(scalarCount * 13);
+            for (var index = 0; index < scalarCount; index++)
+            {
+                var escape = $"\\U{scalarStart + index:X8}";
+                batchText.Append('"').Append(escape).Append("\" ");
+                records.Add(5);
+                records.Add(0);
+                records.Add(0);
+                records.Add(0);
+                records.Add(escape.Length);
+                records.Add(escape.Length);
+                records.Add(escape.Length);
+                records.AddRange(escape.Select(static unit => (int)unit));
+            }
+
+            var lexed = Lexer.Lex(SourceText.From(batchText.ToString()));
+            Assert.Equal(scalarCount, lexed.Diagnostics.Length);
+            Assert.Equal(scalarCount + 1, lexed.Tokens.Length);
+            for (var index = 0; index < scalarCount; index++)
+            {
+                Assert.Equal("TRM0005", lexed.Diagnostics[index].Code);
+                Assert.Equal(index * 13 + 1, lexed.Diagnostics[index].Span.Start);
+                Assert.Equal(10, lexed.Diagnostics[index].Span.Length);
+                Assert.Equal(TokenKind.StringLiteral, lexed.Tokens[index].Kind);
+                Assert.Equal($"\"\\U{scalarStart + index:X8}\"", lexed.Tokens[index].Text);
+            }
+            Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[^1].Kind);
+            ExecuteRecords();
+        }
     }
 
     private static int ExpectedResult(string escape, int errorCode, int scalar,
