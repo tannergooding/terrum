@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `d9990d0e` | Preserve `DoesNotReturn` promises when replacing native module-set providers |
 | `7bca6ec4` | Reject semantic/native replacement that removes a retained `NoThrow` or `DoesNotReturn` promise |
 | `ac08b34d` | Verify conditional scalar frontend calls to `[DoesNotReturn]` functions |
 | `81f586a8` | Verify scalar frontend `[DoesNotReturn]` library parity under both runtime policies |
