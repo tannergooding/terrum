@@ -21,22 +21,25 @@ public sealed partial class CliTests
     public async Task FrontendAllIntegerCompoundsAndShiftsExecuteAcrossPoliciesAsync(string type)
     {
         var frontend = Path.Combine(RepositoryRoot(), "self-host");
-        var cases = new (string Operator, int Operand, int Expected)[] {
-            ("+=", 4, 44), ("-=", 2, 38), ("*=", 2, 80),
-            ("/=", 2, 20), ("%=", 6, 4), ("&=", 7, 0),
-            ("|=", 3, 43), ("^=", 3, 43), ("<<=", 1, 80),
-            (">>=", 1, 20), (">>>=", 1, 20),
-            ("<<", 1, 80), (">>", 1, 20), (">>>", 1, 20),
+        var cases = new (string Operator, string Operand, int Expected)[] {
+            ("+=", "4", 44), ("-=", "2", 38), ("*=", "2", 80),
+            ("/=", "2", 20), ("%=", "6", 4), ("&=", "7", 0),
+            ("|=", "3", 43), ("^=", "3", 43), ("<<=", "1", 80),
+            (">>=", "1", 20), (">>>=", "1", 20),
+            ("<<", "1", 80), (">>", "1", 20), (">>>", "1", 20),
+            ("<<=", "count", 80), (">>=", "count", 20), (">>>=", "count", 20),
         };
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             foreach (var (operation, operand, expected) in cases)
             {
                 var compound = operation.EndsWith('=');
+                var declaration = operand == "count" ? "int32 count = 1; " : string.Empty;
                 var body = compound
                     ? $"x {operation} {operand}; return x == {expected} ? 42 : 1;"
                     : $"return (x {operation} {operand}) == {expected} ? 42 : 1;";
-                var input = Encoding.UTF8.GetBytes($"int32 Main() {{ mut {type} x = 40; {body} }}");
+                var input = Encoding.UTF8.GetBytes(
+                    $"int32 Main() {{ mut {type} x = 40; {declaration}{body} }}");
                 var (projectionExit, projectionOutput, projectionError) = await RunAsync(input,
                     "frontend-component", frontend, "-", "--runtime", policy, "--json");
                 Assert.True(projectionExit == 0,
