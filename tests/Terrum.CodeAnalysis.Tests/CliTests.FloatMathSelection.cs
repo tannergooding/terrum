@@ -26,6 +26,30 @@ public sealed partial class CliTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Float64ClampSelectionExport(long value, long minimum, long maximum);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint Int32ToFloat32BitsExport(int value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong Int32ToFloat64BitsExport(int value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint UInt32ToFloat32BitsExport(uint value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong UInt32ToFloat64BitsExport(uint value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint Int64ToFloat32BitsExport(long value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong Int64ToFloat64BitsExport(long value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint UInt64ToFloat32BitsExport(ulong value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong UInt64ToFloat64BitsExport(ulong value);
+
     private static void AssertFloatingMathSelectionExports(IntPtr handle)
     {
         var absFloat32 = Marshal.GetDelegateForFunctionPointer<Float32UnarySelectionExport>(
@@ -47,6 +71,97 @@ public sealed partial class CliTests
 
         AssertFloat32Selection(absFloat32, minFloat32, maxFloat32, clampFloat32);
         AssertFloat64Selection(absFloat64, minFloat64, maxFloat64, clampFloat64);
+    }
+
+    private static void AssertIntegerFloatConversionExports(IntPtr handle)
+    {
+        var int32ToFloat32 = Marshal.GetDelegateForFunctionPointer<Int32ToFloat32BitsExport>(
+            NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.Int32ToFloat32Bits"));
+        var int32ToFloat64 = Marshal.GetDelegateForFunctionPointer<Int32ToFloat64BitsExport>(
+            NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.Int32ToFloat64Bits"));
+        var uint32ToFloat32 = Marshal.GetDelegateForFunctionPointer<UInt32ToFloat32BitsExport>(
+            NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.UInt32ToFloat32Bits"));
+        var uint32ToFloat64 = Marshal.GetDelegateForFunctionPointer<UInt32ToFloat64BitsExport>(
+            NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.UInt32ToFloat64Bits"));
+        var int64ToFloat32 = Marshal.GetDelegateForFunctionPointer<Int64ToFloat32BitsExport>(
+            NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.Int64ToFloat32Bits"));
+        var int64ToFloat64 = Marshal.GetDelegateForFunctionPointer<Int64ToFloat64BitsExport>(
+            NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.Int64ToFloat64Bits"));
+        var uint64ToFloat32 = Marshal.GetDelegateForFunctionPointer<UInt64ToFloat32BitsExport>(
+            NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.UInt64ToFloat32Bits"));
+        var uint64ToFloat64 = Marshal.GetDelegateForFunctionPointer<UInt64ToFloat64BitsExport>(
+            NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.UInt64ToFloat64Bits"));
+
+        foreach (var value in new[] {
+            int.MinValue, int.MinValue + 1, -16_777_219, -16_777_217, -1, 0, 1,
+            16_777_215, 16_777_216, 16_777_217, int.MaxValue,
+        })
+        {
+            Assert.Equal(BitConverter.SingleToUInt32Bits((float)value), int32ToFloat32(value));
+            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)value), int32ToFloat64(value));
+        }
+        foreach (var value in new uint[] {
+            0, 1, 16_777_215, 16_777_216, 16_777_217, 0x8000_0000, uint.MaxValue,
+        })
+        {
+            Assert.Equal(BitConverter.SingleToUInt32Bits((float)value), uint32ToFloat32(value));
+            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)value), uint32ToFloat64(value));
+        }
+        foreach (var value in new long[] {
+            long.MinValue, long.MinValue + 1, -9_007_199_254_740_995, -9_007_199_254_740_993,
+            -16_777_219, -16_777_217, -1, 0, 1, 16_777_217, 16_777_219,
+            9_007_199_254_740_993, 9_007_199_254_740_995, long.MaxValue,
+        })
+        {
+            Assert.Equal(BitConverter.SingleToUInt32Bits((float)value), int64ToFloat32(value));
+            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)value), int64ToFloat64(value));
+        }
+        var twoTo63 = 1UL << 63;
+        var float32HalfUlpAtTwoTo63 = 1UL << 39;
+        var float32UlpAtTwoTo63 = 1UL << 40;
+        var float64HalfUlpAtTwoTo63 = 1UL << 10;
+        var float64UlpAtTwoTo63 = 1UL << 11;
+        foreach (var value in new ulong[] {
+            0, 1, 16_777_215, 16_777_216, 16_777_217, 16_777_219,
+            9_007_199_254_740_991, 9_007_199_254_740_992, 9_007_199_254_740_993,
+            9_007_199_254_740_995, twoTo63, ulong.MaxValue,
+            twoTo63 + float32HalfUlpAtTwoTo63 - 1,
+            twoTo63 + float32HalfUlpAtTwoTo63,
+            twoTo63 + float32HalfUlpAtTwoTo63 + 1,
+            twoTo63 + float32UlpAtTwoTo63 + float32HalfUlpAtTwoTo63,
+            twoTo63 + float64HalfUlpAtTwoTo63 - 1,
+            twoTo63 + float64HalfUlpAtTwoTo63,
+            twoTo63 + float64HalfUlpAtTwoTo63 + 1,
+            twoTo63 + float64UlpAtTwoTo63 + float64HalfUlpAtTwoTo63,
+        })
+        {
+            Assert.Equal(BitConverter.SingleToUInt32Bits((float)value), uint64ToFloat32(value));
+            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)value), uint64ToFloat64(value));
+        }
+
+        var random = new Random(0xF10A7);
+        for (var index = 0; index < 24; index++)
+        {
+            var signed32 = (int)random.NextInt64(int.MinValue, (long)int.MaxValue + 1);
+            var unsigned32 = (uint)random.NextInt64(0, 1L << 32);
+            var signed64 = unchecked((long)NextUInt64ForAbi(random));
+            var unsigned64 = NextUInt64ForAbi(random);
+            Assert.Equal(BitConverter.SingleToUInt32Bits((float)signed32), int32ToFloat32(signed32));
+            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)signed32), int32ToFloat64(signed32));
+            Assert.Equal(BitConverter.SingleToUInt32Bits((float)unsigned32), uint32ToFloat32(unsigned32));
+            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)unsigned32), uint32ToFloat64(unsigned32));
+            Assert.Equal(BitConverter.SingleToUInt32Bits((float)signed64), int64ToFloat32(signed64));
+            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)signed64), int64ToFloat64(signed64));
+            Assert.Equal(BitConverter.SingleToUInt32Bits((float)unsigned64), uint64ToFloat32(unsigned64));
+            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)unsigned64), uint64ToFloat64(unsigned64));
+        }
+    }
+
+    private static ulong NextUInt64ForAbi(Random random)
+    {
+        var high = (uint)random.NextInt64(0, 1L << 32);
+        var low = (uint)random.NextInt64(0, 1L << 32);
+        return ((ulong)high << 32) | low;
     }
 
     private static void AssertFloat32Selection(
