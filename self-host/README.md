@@ -3,7 +3,10 @@
 These files are parallel design candidates, not a bootstrapped compiler.
 The approved [source grammar](../docs/grammar-spec.md) defines the language
 target, not the execution status of these candidates or approval of their
-sketched library APIs.
+sketched library APIs. The unlinked `TokenCursor` candidate uses `init ref<Token>`
+for both sequential and indexed reads because exhaustion and out-of-range
+results leave their destinations vacant; this narrow migration does not settle
+the general `out`-to-`init ref<T>` migration.
 They are not linked into the C# implementation. The native profile executes
 the range, character, integer and nested token components and a bounded token scanner.
 The full-solution build also produces

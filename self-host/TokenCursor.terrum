@@ -11,7 +11,7 @@ public unique struct TokenCursor
         _tokens = tokens;
     }
 
-    public mut bool TryRead(out Token token)
+    public mut bool TryRead(init ref<Token> token)
     {
         if (_tokens.Length == 0)
         {

@@ -98,14 +98,14 @@ public sealed class TokenCursorTests
             require tokens.Length == uint64(owner.GetCount());
             mut TokenCursor cursor = new TokenCursor(tokens);
             mut int32 index = 0;
-            while (cursor.TryRead(out var token)) {
+            while (cursor.TryRead(init var token)) {
                 require token.Kind == Host.Tokens[index * 3];
                 require token.Range.Start == Host.Tokens[index * 3 + 1];
                 require token.Range.Length == Host.Tokens[index * 3 + 2];
                 index = index + 1;
             }
             require index == owner.GetCount();
-            require !cursor.TryRead(out var exhausted);
+            require !cursor.TryRead(init var exhausted);
             cursor = _;
             tokens = _;
             owner = _;
@@ -142,7 +142,7 @@ public sealed class TokenCursorTests
                 mut TokenSnapshot owner = move scanned;
                 mut TokenCursor cursor = new TokenCursor(owner.AsSpan());
                 mut int32 index = 0;
-                while (cursor.TryRead(out var token)) {
+                while (cursor.TryRead(init var token)) {
                     if (index < {{identifierCount}}) {
                         if (token.Kind != 2 || token.Range.Start != index * 2
                             || token.Range.Length != 1) { return 1; }
@@ -155,7 +155,7 @@ public sealed class TokenCursorTests
                     index = index + 1;
                 }
                 if (index != {{expectedTokenCount}}
-                    || cursor.TryRead(out var exhausted)) { return 4; }
+                    || cursor.TryRead(init var exhausted)) { return 4; }
                 cursor = _;
                 owner = _;
                 return 42;
@@ -491,7 +491,7 @@ public sealed class TokenCursorTests
                 require tokens[0].Kind == 2 && tokens[1].Kind == 3;
                 mut TokenCursor first = new TokenCursor(tokens);
                 mut TokenCursor second = move first;
-                require second.TryRead(out var token);
+                require second.TryRead(init var token);
                 require token.Range.Start == 0 && token.Range.Length == 5;
                 second = _;
                 tokens = _;
@@ -525,7 +525,7 @@ public sealed class TokenCursorTests
                 if (!cursor.TryGet(count - 1, init var last) || last.Kind != 0) { return 2; }
                 if (cursor.TryGet(-1, init var negative)
                     || cursor.TryGet(count, init var beyond)) { return 3; }
-                if (!cursor.TryRead(out var next)
+                if (!cursor.TryRead(init var next)
                     || next.Kind != first.Kind
                     || next.Range.Start != first.Range.Start
                     || next.Range.Length != first.Range.Length) { return 4; }
@@ -594,7 +594,7 @@ public sealed class TokenCursorTests
     [InlineData("Span<Token> tokens = owner.AsSpan(); require TokenSnapshot.TryScan(init var fresh); owner = move fresh; return 42;")]
     [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); owner = _; return 42;")]
     [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); mut TokenCursor moved = move cursor; owner = _; return 42;")]
-    [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); while (cursor.TryRead(out var token)) { } owner = _; return 42;")]
+    [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); while (cursor.TryRead(init var token)) { } owner = _; return 42;")]
     [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); if (Pick()) { cursor = _; } owner = _; return 42;")]
     [InlineData("return Observe(owner.AsSpan(), Replace(out owner));")]
     [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); return Consume(move cursor, Replace(out owner));")]
@@ -613,7 +613,7 @@ public sealed class TokenCursorTests
     [InlineData("{ Span<Token> tokens = owner.AsSpan(); require tokens.Length == 1; } owner = _; return 42;")]
     [InlineData("Span<Token> tokens = owner.AsSpan(); Span<Token> copied = tokens; tokens = _; require copied.Length == 1; copied = _; owner = _; return 42;")]
     [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); if (Pick()) { cursor = _; } else { cursor = _; } owner = _; return 42;")]
-    [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); while (cursor.TryRead(out var token)) { } cursor = _; owner = _; return 42;")]
+    [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); while (cursor.TryRead(init var token)) { } cursor = _; owner = _; return 42;")]
     [InlineData("unsafe { try { Span<Token> tokens = owner.AsSpan(); Token token = tokens[uint64.MaxValue]; } catch { owner = _; } } return 42;")]
     public async Task DependenciesRetireAtTheirOwnEndsJoinsAndUnwindScopesAsync(string body)
     {
@@ -685,9 +685,9 @@ public sealed class TokenCursorTests
             require last.Kind == 0 && last.Range.Start == Host.Source.Length && last.Range.Length == 0;
             mut TokenCursor cursor = new TokenCursor(tokens);
             mut int32 count = 0;
-            while (cursor.TryRead(out var token)) { count = count + 1; }
+            while (cursor.TryRead(init var token)) { count = count + 1; }
             require count == owner.GetCount();
-            require !cursor.TryRead(out var firstExhausted) && !cursor.TryRead(out var secondExhausted);
+            require !cursor.TryRead(init var firstExhausted) && !cursor.TryRead(init var secondExhausted);
             require tokens.Length == uint64(count);
             return 42;
         }
@@ -805,7 +805,7 @@ public sealed class TokenCursorTests
     {
         var entry = EntryPrefix + """
             mut TokenCursor cursor = new TokenCursor(owner.AsSpan());
-            require cursor.TryRead(out var token);
+            require cursor.TryRead(init var token);
             cursor = _;
             require Measure(move owner) == 1;
             return 42;
