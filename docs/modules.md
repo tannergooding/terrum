@@ -224,15 +224,16 @@ consumer source and the validated artifact-reference path.
 Both library and reference compilation accept multiple `SyntaxTree` snapshots;
 source diagnostics retain the originating snapshot. The self-host component
 test builds `SourceRange`, `CharacterFacts`, `Token`, `WideIntegerFacts`,
-`IntegerCheckedArithmetic`, and `BitOperations` into one producer, then
-independently binds `RangeTests`, `TokenTests`, `WideIntegerTests`,
-`IntegerCheckedArithmeticTests`, `BitOperationsTests`, and the Terrum-authored
-`ComponentTestRunner` against its exported declarations. Those persisted
-modules execute through AOT and JIT, including range boundaries,
-conditional-output failure, character classification, aggregate token
-construction, 32-/64-bit checked arithmetic and accumulation, bit-operation
-boundaries, and repeated calls. C# still orchestrates the test; the entry
-harness only composes these explicitly selected component checks.
+`IntegerCheckedArithmetic`, `IntegerMath`, and `BitOperations` into one
+producer, then independently binds `RangeTests`, `TokenTests`, `WideIntegerTests`,
+`IntegerCheckedArithmeticTests`, `IntegerMathTests`, `BitOperationsTests`,
+and the Terrum-authored `ComponentTestRunner` against its exported
+declarations. Those persisted modules execute through AOT and JIT, including
+range boundaries, conditional-output failure, character classification,
+aggregate token construction, 32-/64-bit checked arithmetic and accumulation,
+integer-math extrema, bit-operation boundaries, and repeated calls. C# still
+orchestrates the test; the entry harness only composes these explicitly
+selected component checks.
 The CLI accepts repeatable `--source <path>` options and, for producers,
 `--export <qualified-name>` options. It rejects duplicate source paths or exports,
 more than 256 sources or 1,024 exports, and more than 4 MiB of combined UTF-8
@@ -271,8 +272,8 @@ dotnet $cli run-module artifacts\token-tests.trm artifacts\token-values.trm --ru
 ```
 
 The bounded `ComponentTestRunner` composes the range, token, checked
-32-/64-bit arithmetic, wide-integer, and 32-/64-bit bit-operation test
-functions against one independently compiled producer:
+32-/64-bit arithmetic, wide-integer and integer-math checks, and 32-/64-bit
+bit-operation tests against one independently compiled producer:
 
 ```powershell
 $componentSources = @(
@@ -281,6 +282,7 @@ $componentSources = @(
     'self-host\Token.terrum',
     'self-host\WideIntegerFacts.terrum',
     'self-host\IntegerCheckedArithmetic.terrum',
+    'self-host\IntegerMath.terrum',
     'self-host\BitOperations.terrum'
 )
 $componentExports = @(
@@ -309,6 +311,21 @@ $componentExports = @(
     'Terrum.CodeAnalysis.Numerics64.TryMultiplyUInt32',
     'Terrum.CodeAnalysis.Numerics64.TryDivideUInt32',
     'Terrum.CodeAnalysis.Numerics64.TryRemainderUInt32',
+    'Terrum.CodeAnalysis.Numerics64.AbsInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryAbsInt32',
+    'Terrum.CodeAnalysis.Numerics64.SignInt32',
+    'Terrum.CodeAnalysis.Numerics64.MinInt32',
+    'Terrum.CodeAnalysis.Numerics64.MaxInt32',
+    'Terrum.CodeAnalysis.Numerics64.ClampInt32',
+    'Terrum.CodeAnalysis.Numerics64.BigMultiplyInt32',
+    'Terrum.CodeAnalysis.Numerics64.GreatestCommonDivisorInt32',
+    'Terrum.CodeAnalysis.Numerics64.AbsInt64',
+    'Terrum.CodeAnalysis.Numerics64.TryAbsInt64',
+    'Terrum.CodeAnalysis.Numerics64.SignInt64',
+    'Terrum.CodeAnalysis.Numerics64.MinInt64',
+    'Terrum.CodeAnalysis.Numerics64.MaxInt64',
+    'Terrum.CodeAnalysis.Numerics64.ClampInt64',
+    'Terrum.CodeAnalysis.Numerics64.GreatestCommonDivisorInt64',
     'Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt32',
     'Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt32',
     'Terrum.CodeAnalysis.Numerics64.PopCountUInt32',
@@ -343,6 +360,7 @@ $componentTests = @(
     'self-host\TokenTests.terrum',
     'self-host\WideIntegerTests.terrum',
     'self-host\IntegerCheckedArithmeticTests.terrum',
+    'self-host\IntegerMathTests.terrum',
     'self-host\BitOperationsTests.terrum',
     'self-host\ComponentTestRunner.terrum'
 )

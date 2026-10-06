@@ -1,0 +1,39 @@
+using Terrum.CodeAnalysis.Numerics64;
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckIntegerMath()
+{
+    if (AbsInt32(-7) != 7 || SignInt32(int32.MinValue) != -1 || SignInt32(0) != 0
+        || MinInt32(int32.MinValue, int32.MaxValue) != int32.MinValue
+        || MaxInt32(int32.MinValue, int32.MaxValue) != int32.MaxValue
+        || ClampInt32(-10, -5, 5) != -5 || ClampInt32(10, -5, 5) != 5
+        || BigMultiplyInt32(46341, 46341) != 2147488281
+        || BigMultiplyInt32(int32.MinValue, int32.MinValue) != 4611686018427387904
+        || GreatestCommonDivisorInt32(int32.MinValue, 0) != 0x80000000
+        || GreatestCommonDivisorInt32(-84, 30) != 6
+        || GreatestCommonDivisorInt32(0, 0) != 0)
+    {
+        return false;
+    }
+
+    require TryAbsInt32(-7, init var absolute32);
+    if (absolute32 != 7 || TryAbsInt32(int32.MinValue, init var minimumAbsolute32))
+    {
+        return false;
+    }
+
+    if (AbsInt64(-7) != 7 || SignInt64(int64.MinValue) != -1 || SignInt64(0) != 0
+        || MinInt64(int64.MinValue, int64.MaxValue) != int64.MinValue
+        || MaxInt64(int64.MinValue, int64.MaxValue) != int64.MaxValue
+        || ClampInt64(-10, -5, 5) != -5 || ClampInt64(10, -5, 5) != 5
+        || GreatestCommonDivisorInt64(int64.MinValue, 0) != 0x8000000000000000
+        || GreatestCommonDivisorInt64(-84, 30) != 6
+        || GreatestCommonDivisorInt64(0, 0) != 0)
+    {
+        return false;
+    }
+
+    require TryAbsInt64(-7, init var absolute64);
+    return absolute64 == 7
+        && !TryAbsInt64(int64.MinValue, init var minimumAbsolute64);
+}

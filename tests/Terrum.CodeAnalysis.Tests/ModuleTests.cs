@@ -210,11 +210,13 @@ public sealed class ModuleTests
         var tokenPath = Path.Combine(root, "self-host", "Token.terrum");
         var wideFactsPath = Path.Combine(root, "self-host", "WideIntegerFacts.terrum");
         var checkedFactsPath = Path.Combine(root, "self-host", "IntegerCheckedArithmetic.terrum");
+        var integerMathPath = Path.Combine(root, "self-host", "IntegerMath.terrum");
         var bitOperationsPath = Path.Combine(root, "self-host", "BitOperations.terrum");
         var rangeTestsPath = Path.Combine(root, "self-host", "RangeTests.terrum");
         var tokenTestsPath = Path.Combine(root, "self-host", "TokenTests.terrum");
         var wideTestsPath = Path.Combine(root, "self-host", "WideIntegerTests.terrum");
         var checkedTestsPath = Path.Combine(root, "self-host", "IntegerCheckedArithmeticTests.terrum");
+        var integerMathTestsPath = Path.Combine(root, "self-host", "IntegerMathTests.terrum");
         var bitOperationsTestsPath = Path.Combine(root, "self-host", "BitOperationsTests.terrum");
         var entryPath = Path.Combine(root, "self-host", "ComponentTestRunner.terrum");
         var range = SyntaxTree.Parse(await File.ReadAllTextAsync(rangePath).ConfigureAwait(true), rangePath);
@@ -223,9 +225,12 @@ public sealed class ModuleTests
         var wideFacts = SyntaxTree.Parse(await File.ReadAllTextAsync(wideFactsPath).ConfigureAwait(true), wideFactsPath);
         var checkedFacts = SyntaxTree.Parse(await File.ReadAllTextAsync(checkedFactsPath).ConfigureAwait(true),
             checkedFactsPath);
+        var integerMath = SyntaxTree.Parse(await File.ReadAllTextAsync(integerMathPath).ConfigureAwait(true),
+            integerMathPath);
         var bitOperations = SyntaxTree.Parse(await File.ReadAllTextAsync(bitOperationsPath).ConfigureAwait(true),
             bitOperationsPath);
-        var library = Compilation.CreateLibrary([range, facts, token, wideFacts, checkedFacts, bitOperations]);
+        var library = Compilation.CreateLibrary([range, facts, token, wideFacts, checkedFacts, integerMath,
+            bitOperations]);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
             "Terrum.CodeAnalysis.SourceRange.TryCreate",
@@ -253,6 +258,21 @@ public sealed class ModuleTests
             "Terrum.CodeAnalysis.Numerics64.TryMultiplyUInt32",
             "Terrum.CodeAnalysis.Numerics64.TryDivideUInt32",
             "Terrum.CodeAnalysis.Numerics64.TryRemainderUInt32",
+            "Terrum.CodeAnalysis.Numerics64.AbsInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryAbsInt32",
+            "Terrum.CodeAnalysis.Numerics64.SignInt32",
+            "Terrum.CodeAnalysis.Numerics64.MinInt32",
+            "Terrum.CodeAnalysis.Numerics64.MaxInt32",
+            "Terrum.CodeAnalysis.Numerics64.ClampInt32",
+            "Terrum.CodeAnalysis.Numerics64.BigMultiplyInt32",
+            "Terrum.CodeAnalysis.Numerics64.GreatestCommonDivisorInt32",
+            "Terrum.CodeAnalysis.Numerics64.AbsInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryAbsInt64",
+            "Terrum.CodeAnalysis.Numerics64.SignInt64",
+            "Terrum.CodeAnalysis.Numerics64.MinInt64",
+            "Terrum.CodeAnalysis.Numerics64.MaxInt64",
+            "Terrum.CodeAnalysis.Numerics64.ClampInt64",
+            "Terrum.CodeAnalysis.Numerics64.GreatestCommonDivisorInt64",
             "Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt32",
             "Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt32",
             "Terrum.CodeAnalysis.Numerics64.PopCountUInt32",
@@ -277,16 +297,18 @@ public sealed class ModuleTests
         var wideTests = SyntaxTree.Parse(await File.ReadAllTextAsync(wideTestsPath).ConfigureAwait(true), wideTestsPath);
         var checkedTests = SyntaxTree.Parse(await File.ReadAllTextAsync(checkedTestsPath).ConfigureAwait(true),
             checkedTestsPath);
+        var integerMathTests = SyntaxTree.Parse(await File.ReadAllTextAsync(integerMathTestsPath).ConfigureAwait(true),
+            integerMathTestsPath);
         var bitOperationsTests = SyntaxTree.Parse(await File.ReadAllTextAsync(bitOperationsTestsPath).ConfigureAwait(true),
             bitOperationsTestsPath);
         var entry = SyntaxTree.Parse(await File.ReadAllTextAsync(entryPath).ConfigureAwait(true), entryPath);
-        var compilation = Compilation.Create([rangeTests, tokenTests, wideTests, checkedTests, bitOperationsTests, entry],
-            ModuleCompiler.CreateReference(producer));
+        var compilation = Compilation.Create([rangeTests, tokenTests, wideTests, checkedTests, integerMathTests,
+            bitOperationsTests, entry], ModuleCompiler.CreateReference(producer));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.Collection(compilation.SyntaxTrees, tree => Assert.Same(rangeTests, tree),
             tree => Assert.Same(tokenTests, tree), tree => Assert.Same(wideTests, tree),
-            tree => Assert.Same(checkedTests, tree), tree => Assert.Same(bitOperationsTests, tree),
-            tree => Assert.Same(entry, tree));
+            tree => Assert.Same(checkedTests, tree), tree => Assert.Same(integerMathTests, tree),
+            tree => Assert.Same(bitOperationsTests, tree), tree => Assert.Same(entry, tree));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
         var consumerPath = Path.Combine(AppContext.BaseDirectory, $"self-host-module-{Guid.NewGuid():N}.trm");
         var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");
