@@ -35,6 +35,7 @@ public sealed partial class NativeManagedClassModuleTests
         public PublicPair Make(int64 first, int64 second) {
             return new PublicPair(first, second);
         }
+        public int32 CollectGarbage() { return ManagedHeap.Collect(); }
         """;
 
     private const string ConditionalValueSource = """
