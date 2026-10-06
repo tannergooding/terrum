@@ -2619,9 +2619,10 @@ scalar source-line-count export matches hosted `SourceText` for all supported
 line breaks, CRLF pairing, malformed UTF-16, excluded separators, empty input
 and maximum-length grants under both runtime policies. A test-only packed
 scalar also matches hosted line/character positions at every offset in short
-edge cases and selected maximum-length boundaries. These are feasibility-test
-results only: production native source-grant DLL support remains unapproved
-and unsupported.
+edge cases and selected maximum-length boundaries, then maps those valid
+positions back to the original offsets with hosted `SourceText.TryGetOffset`
+parity. These are feasibility-test results only: production native
+source-grant DLL support remains unapproved and unsupported.
 The frontend retains its source-grant and hosted verifier/emitter boundaries.
 `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`
 projects typed facts or scanner/shape errors for inspection. Compilation

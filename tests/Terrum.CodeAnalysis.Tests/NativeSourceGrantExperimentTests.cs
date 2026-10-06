@@ -26,6 +26,7 @@ public sealed class NativeSourceGrantExperimentTests
     private const string FlowExport = "Terrum.CodeAnalysis.SourceFlowForSourceAbiTest";
     private const string LineCountExport = "Terrum.CodeAnalysis.SourceLineCountForSourceAbiTest";
     private const string LinePositionExport = "Terrum.CodeAnalysis.SourceLinePositionForSourceAbiTest";
+    private const string LineOffsetExport = "Terrum.CodeAnalysis.SourceLineOffsetForSourceAbiTest";
     private const string LengthExport = "Terrum.CodeAnalysis.SourceLengthForSourceAbiTest";
     private const string BoundaryExport = "Terrum.CodeAnalysis.SourceBoundaryForSourceAbiTest";
     private const string FreeExport = "Terrum.CodeAnalysis.SourceFreeForSourceAbiTest";
@@ -429,17 +430,59 @@ public sealed class NativeSourceGrantExperimentTests
                 }
                 return line * 65536 + (position - start);
             }
+            public int32 SourceLineOffsetForSourceAbiTest(int32 line, int32 character) {
+                if (line < 0 || character < 0) { return -1; }
+                mut int32 currentLine = 0;
+                mut int32 start = 0;
+                mut int32 at = 0;
+                while (true) {
+                    mut int32 breakLength = 0;
+                    mut bool hasBreak = false;
+                    while (at < Host.Source.Length && !hasBreak) {
+                        char16 current = Host.Source[at];
+                        if (current == char16(13)) {
+                            breakLength = 1;
+                            if (at + 1 < Host.Source.Length && Host.Source[at + 1] == char16(10)) {
+                                breakLength = 2;
+                            }
+                            hasBreak = true;
+                        }
+                        else if (current == char16(10) || current == char16(133)
+                            || current == char16(8232) || current == char16(8233)) {
+                            breakLength = 1;
+                            hasBreak = true;
+                        }
+                        else {
+                            at = at + 1;
+                        }
+                    }
+                    if (currentLine == line) {
+                        int32 lineLength = at - start + breakLength;
+                        if (hasBreak && character >= lineLength) { return -1; }
+                        if (!hasBreak && character > lineLength) { return -1; }
+                        return start + character;
+                    }
+                    if (!hasBreak) { return -1; }
+                    at = at + breakLength;
+                    start = at;
+                    currentLine = currentLine + 1;
+                }
+            }
             """;
         var program = Compile(policy, [], LineQueryFixture);
         var function = Assert.Single(program.Functions,
             static function => function.Name == LineCountExport);
         var positionFunction = Assert.Single(program.Functions,
             static function => function.Name == LinePositionExport);
+        var offsetFunction = Assert.Single(program.Functions,
+            static function => function.Name == LineOffsetExport);
         var dependencies = Classify(program);
         Assert.True(dependencies[program.Functions.IndexOf(function)]);
         Assert.True(dependencies[program.Functions.IndexOf(positionFunction)]);
+        Assert.True(dependencies[program.Functions.IndexOf(offsetFunction)]);
 
-        var emitted = EmitExperiment(program, [LineCountExport, LinePositionExport], (NativeRuntimePolicy)policy);
+        var emitted = EmitExperiment(program, [LineCountExport, LinePositionExport, LineOffsetExport],
+            (NativeRuntimePolicy)policy);
         var lineCountExport = Assert.Single(emitted.Exports,
             static export => export.Name == LineCountExport);
         Assert.True(lineCountExport.SourceDependent);
@@ -448,6 +491,11 @@ public sealed class NativeSourceGrantExperimentTests
             static export => export.Name == LinePositionExport);
         Assert.True(linePositionExport.SourceDependent);
         Assert.Equal(PrimitiveType.Int32, Assert.Single(linePositionExport.ParameterTypes));
+        var lineOffsetExport = Assert.Single(emitted.Exports,
+            static export => export.Name == LineOffsetExport);
+        Assert.True(lineOffsetExport.SourceDependent);
+        Assert.Equal(2, lineOffsetExport.ParameterTypes.Length);
+        Assert.All(lineOffsetExport.ParameterTypes, static type => Assert.Equal(PrimitiveType.Int32, type));
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-lines-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, emitted.Image);
         try
@@ -477,6 +525,10 @@ public sealed class NativeSourceGrantExperimentTests
                         var packed = bindings.Invoke<int>(LinePositionExport, source, position);
                         Assert.Equal(expected.Line, packed >> 16);
                         Assert.Equal(expected.Character, packed & 0xFFFF);
+                        Assert.True(snapshot.TryGetOffset(expected.Line, expected.Character, out var expectedOffset));
+                        Assert.Equal(position, expectedOffset);
+                        Assert.Equal(expectedOffset,
+                            bindings.Invoke<int>(LineOffsetExport, source, expected.Line, expected.Character));
                     }
                 }
                 Assert.Equal(1, bindings.Invoke<int>(LineCountExport, null));

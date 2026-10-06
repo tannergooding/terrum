@@ -282,7 +282,10 @@ edge-case fixtures and selected boundary offsets in maximum-length inputs.
 Both coordinates fit unsigned 16-bit fields under the 16,384-unit source
 bound. The packing is only a scalar test carrier; it does not define a
 production return ABI or remove the full facade's output-parameter and
-aggregate requirements.
+aggregate requirements. For those same valid positions, a scalar inverse
+query maps line/character back to the original offset and agrees with hosted
+`SourceText.TryGetOffset`. Invalid line/character pairs and any production
+failure representation remain outside the experiment.
 
 **Recommendation:** Keep this admission confined to the test-only
 feasibility path. Continue rejecting post-tested loops, separate iterators,
