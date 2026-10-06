@@ -16,14 +16,14 @@ validates copied token, diagnostic, trivia and integer records through
 `ScannerHost`. Identical producer/consumer artifacts are exercised across
 empty, varied, malformed-UTF-16 and maximum-length sources under both runtime
 policies, plus bounded batches covering every BMP `\u` escape and its
-surrogate diagnostics and every valid supplementary `\U` scalar against the
-hosted lexer; invalid `\U` surrogate and above-maximum boundaries are checked
-as well. Raw supplementary scalars in quoted tokens at each plane boundary
-and supplementary Unicode identifier start/continue range endpoints are also
-checked. A quoted source at the maximum supported length ends with the valid
-U+10FFFF surrogate pair.
-A source-dependent
-single-producer semantic-module program can be linked and executed by
+surrogate diagnostics, every valid supplementary `\U` scalar, and all 2,048
+surrogate-valued `\U` rejections against the hosted lexer; above-maximum
+boundaries are checked as well. Raw supplementary scalars in quoted tokens at
+each plane boundary and supplementary Unicode identifier start/continue range
+endpoints are also checked. A quoted source at the maximum supported length
+ends with the valid U+10FFFF surrogate pair.
+
+A source-dependent single-producer semantic-module program can be linked and executed by
 `NativeJit.ExecuteWithSourceGrant`, which requires one readonly `char16` grant
 of at most 16,384 code units and copies it into fresh invocation storage.
 Neither profile persists source contents, concrete lengths or addresses.
