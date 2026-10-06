@@ -1,0 +1,96 @@
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckFloatingIntegerConversion()
+{
+    if (!TryFloat32BitsToInt32(0xCF000000, init var float32Int32Minimum)
+        || float32Int32Minimum != int32.MinValue
+        || !TryFloat32BitsToInt32(0x4EFFFFFF, init var float32Int32Maximum)
+        || float32Int32Maximum != 2_147_483_520
+        || TryFloat32BitsToInt32(0x4F000000, init var float32Int32Overflow)
+        || float32Int32Overflow is init
+        || TryFloat32BitsToInt32(0xCF000001, init var float32Int32Underflow)
+        || float32Int32Underflow is init)
+    {
+        return false;
+    }
+
+    if (!TryFloat32BitsToUInt32(0x4F7FFFFF, init var float32UInt32Maximum)
+        || float32UInt32Maximum != 4_294_967_040
+        || TryFloat32BitsToUInt32(0x4F800000, init var float32UInt32Overflow)
+        || float32UInt32Overflow is init
+        || !TryFloat32BitsToUInt32(0xBF000000, init var float32UInt32NegativeFraction)
+        || float32UInt32NegativeFraction != 0
+        || TryFloat32BitsToUInt32(0xBF800000, init var float32UInt32NegativeOne)
+        || float32UInt32NegativeOne is init)
+    {
+        return false;
+    }
+
+    if (!TryFloat32BitsToInt64(0xDF000000, init var float32Int64Minimum)
+        || float32Int64Minimum != int64.MinValue
+        || !TryFloat32BitsToInt64(0x5EFFFFFF, init var float32Int64Maximum)
+        || float32Int64Maximum != int64(9_223_371_487_098_961_920)
+        || TryFloat32BitsToInt64(0x5F000000, init var float32Int64Overflow)
+        || float32Int64Overflow is init
+        || TryFloat32BitsToInt64(0xDF000001, init var float32Int64Underflow)
+        || float32Int64Underflow is init
+        || !TryFloat32BitsToUInt64(0x5F7FFFFF, init var float32UInt64Maximum)
+        || float32UInt64Maximum != uint64(18_446_742_974_197_923_840)
+        || TryFloat32BitsToUInt64(0x5F800000, init var float32UInt64Overflow)
+        || float32UInt64Overflow is init
+        || !TryFloat32BitsToUInt64(0xBF000000, init var float32UInt64NegativeFraction)
+        || float32UInt64NegativeFraction != 0)
+    {
+        return false;
+    }
+
+    if (!TryFloat64BitsToInt32(0xC1E0000000000000, init var float64Int32Minimum)
+        || float64Int32Minimum != int32.MinValue
+        || !TryFloat64BitsToInt32(0x41DFFFFFFFC00000, init var float64Int32Maximum)
+        || float64Int32Maximum != int32.MaxValue
+        || TryFloat64BitsToInt32(0x41E0000000000000, init var float64Int32Overflow)
+        || float64Int32Overflow is init
+        || TryFloat64BitsToInt32(0xC1E0000000200000, init var float64Int32Underflow)
+        || float64Int32Underflow is init
+        || !TryFloat64BitsToUInt32(0x41EFFFFFFFE00000, init var float64UInt32Maximum)
+        || float64UInt32Maximum != uint32.MaxValue
+        || TryFloat64BitsToUInt32(0x41F0000000000000, init var float64UInt32Overflow)
+        || float64UInt32Overflow is init)
+    {
+        return false;
+    }
+
+    if (!TryFloat64BitsToInt64(0xC3E0000000000000, init var float64Int64Minimum)
+        || float64Int64Minimum != int64.MinValue
+        || !TryFloat64BitsToInt64(0x43DFFFFFFFFFFFFF, init var float64Int64Maximum)
+        || float64Int64Maximum != int64(9_223_372_036_854_774_784)
+        || TryFloat64BitsToInt64(0x43E0000000000000, init var float64Int64Overflow)
+        || float64Int64Overflow is init
+        || TryFloat64BitsToInt64(0xC3E0000000000001, init var float64Int64Underflow)
+        || float64Int64Underflow is init
+        || !TryFloat64BitsToUInt64(0x43EFFFFFFFFFFFFF, init var float64UInt64Maximum)
+        || float64UInt64Maximum != uint64(18_446_744_073_709_549_568)
+        || TryFloat64BitsToUInt64(0x43F0000000000000, init var float64UInt64Overflow)
+        || float64UInt64Overflow is init
+        || !TryFloat64BitsToUInt64(0xBFE0000000000000, init var float64UInt64NegativeFraction)
+        || float64UInt64NegativeFraction != 0
+        || TryFloat64BitsToUInt64(0xBFF0000000000000, init var float64UInt64NegativeOne)
+        || float64UInt64NegativeOne is init)
+    {
+        return false;
+    }
+
+    if (TryFloat32BitsToInt32(0x7F800000, init var float32Int32Infinity)
+        || float32Int32Infinity is init
+        || TryFloat32BitsToUInt64(0x7FC00000, init var float32UInt64Nan)
+        || float32UInt64Nan is init
+        || TryFloat64BitsToInt64(0xFFF0000000000000, init var float64Int64Infinity)
+        || float64Int64Infinity is init
+        || TryFloat64BitsToUInt32(0x7FF8000000000000, init var float64UInt32Nan)
+        || float64UInt32Nan is init)
+    {
+        return false;
+    }
+
+    return true;
+}

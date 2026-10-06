@@ -1,0 +1,284 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryFloat32BitsToInt32(uint32 bits, init ref<int32> result)
+{
+    uint64 magnitude = Float32BitsToMagnitudeOrMax(bits);
+    if (magnitude == uint64.MaxValue)
+    {
+        return false;
+    }
+
+    bool negative = (bits & uint32(0x80000000)) != 0 && magnitude != 0;
+    if (negative)
+    {
+        if (magnitude > uint64(0x80000000))
+        {
+            return false;
+        }
+
+        if (magnitude == uint64(0x80000000))
+        {
+            result = int32.MinValue;
+        }
+        else
+        {
+            result = -int32(magnitude);
+        }
+    }
+    else
+    {
+        if (magnitude > uint64(int32.MaxValue))
+        {
+            return false;
+        }
+
+        result = int32(magnitude);
+    }
+
+    return true;
+}
+
+public static bool TryFloat32BitsToUInt32(uint32 bits, init ref<uint32> result)
+{
+    uint64 magnitude = Float32BitsToMagnitudeOrMax(bits);
+    if (magnitude == uint64.MaxValue)
+    {
+        return false;
+    }
+    bool negative = (bits & uint32(0x80000000)) != 0 && magnitude != 0;
+    if (negative || magnitude > uint64(uint32.MaxValue))
+    {
+        return false;
+    }
+
+    result = uint32(magnitude);
+    return true;
+}
+
+public static bool TryFloat32BitsToInt64(uint32 bits, init ref<int64> result)
+{
+    uint64 magnitude = Float32BitsToMagnitudeOrMax(bits);
+    if (magnitude == uint64.MaxValue)
+    {
+        return false;
+    }
+
+    bool negative = (bits & uint32(0x80000000)) != 0 && magnitude != 0;
+    if (negative)
+    {
+        if (magnitude > uint64(0x8000000000000000))
+        {
+            return false;
+        }
+
+        if (magnitude == uint64(0x8000000000000000))
+        {
+            result = int64.MinValue;
+        }
+        else
+        {
+            result = -int64(magnitude);
+        }
+    }
+    else
+    {
+        if (magnitude > uint64(int64.MaxValue))
+        {
+            return false;
+        }
+
+        result = int64(magnitude);
+    }
+
+    return true;
+}
+
+public static bool TryFloat32BitsToUInt64(uint32 bits, init ref<uint64> result)
+{
+    uint64 magnitude = Float32BitsToMagnitudeOrMax(bits);
+    if (magnitude == uint64.MaxValue)
+    {
+        return false;
+    }
+
+    if ((bits & uint32(0x80000000)) != 0 && magnitude != 0)
+    {
+        return false;
+    }
+
+    result = magnitude;
+    return true;
+}
+
+public static bool TryFloat64BitsToInt32(uint64 bits, init ref<int32> result)
+{
+    uint64 magnitude = Float64BitsToMagnitudeOrMax(bits);
+    if (magnitude == uint64.MaxValue)
+    {
+        return false;
+    }
+
+    bool negative = (bits & uint64(0x8000000000000000)) != 0 && magnitude != 0;
+    if (negative)
+    {
+        if (magnitude > uint64(0x80000000))
+        {
+            return false;
+        }
+
+        if (magnitude == uint64(0x80000000))
+        {
+            result = int32.MinValue;
+        }
+        else
+        {
+            result = -int32(magnitude);
+        }
+    }
+    else
+    {
+        if (magnitude > uint64(int32.MaxValue))
+        {
+            return false;
+        }
+
+        result = int32(magnitude);
+    }
+
+    return true;
+}
+
+public static bool TryFloat64BitsToUInt32(uint64 bits, init ref<uint32> result)
+{
+    uint64 magnitude = Float64BitsToMagnitudeOrMax(bits);
+    if (magnitude == uint64.MaxValue)
+    {
+        return false;
+    }
+    bool negative = (bits & uint64(0x8000000000000000)) != 0 && magnitude != 0;
+    if (negative || magnitude > uint64(uint32.MaxValue))
+    {
+        return false;
+    }
+
+    result = uint32(magnitude);
+    return true;
+}
+
+public static bool TryFloat64BitsToInt64(uint64 bits, init ref<int64> result)
+{
+    uint64 magnitude = Float64BitsToMagnitudeOrMax(bits);
+    if (magnitude == uint64.MaxValue)
+    {
+        return false;
+    }
+
+    bool negative = (bits & uint64(0x8000000000000000)) != 0 && magnitude != 0;
+    if (negative)
+    {
+        if (magnitude > uint64(0x8000000000000000))
+        {
+            return false;
+        }
+
+        if (magnitude == uint64(0x8000000000000000))
+        {
+            result = int64.MinValue;
+        }
+        else
+        {
+            result = -int64(magnitude);
+        }
+    }
+    else
+    {
+        if (magnitude > uint64(int64.MaxValue))
+        {
+            return false;
+        }
+
+        result = int64(magnitude);
+    }
+
+    return true;
+}
+
+public static bool TryFloat64BitsToUInt64(uint64 bits, init ref<uint64> result)
+{
+    uint64 magnitude = Float64BitsToMagnitudeOrMax(bits);
+    if (magnitude == uint64.MaxValue)
+    {
+        return false;
+    }
+
+    if ((bits & uint64(0x8000000000000000)) != 0 && magnitude != 0)
+    {
+        return false;
+    }
+
+    result = magnitude;
+    return true;
+}
+
+uint64 Float32BitsToMagnitudeOrMax(uint32 bits)
+{
+    uint32 exponentField = (bits >> 23) & uint32(0xFF);
+    if (exponentField == uint32(0xFF))
+    {
+        return uint64.MaxValue;
+    }
+
+    if (exponentField == 0)
+    {
+        return 0;
+    }
+
+    uint64 significand = uint64(bits & uint32(0x7FFFFF)) | uint64(0x800000);
+    int32 exponent = int32(exponentField) - 127;
+    return TruncateMagnitudeOrMax(significand, exponent, 23);
+}
+
+uint64 Float64BitsToMagnitudeOrMax(uint64 bits)
+{
+    uint64 exponentField = (bits >> 52) & uint64(0x7FF);
+    if (exponentField == uint64(0x7FF))
+    {
+        return uint64.MaxValue;
+    }
+
+    if (exponentField == 0)
+    {
+        return 0;
+    }
+
+    uint64 significand = (bits & uint64(0x000FFFFFFFFFFFFF)) | uint64(0x0010000000000000);
+    int32 exponent = int32(exponentField) - 1023;
+    return TruncateMagnitudeOrMax(significand, exponent, 52);
+}
+
+uint64 TruncateMagnitudeOrMax(
+    uint64 significand,
+    int32 exponent,
+    int32 fractionBits)
+{
+    if (exponent < 0)
+    {
+        return 0;
+    }
+    if (exponent >= 64)
+    {
+        return uint64.MaxValue;
+    }
+
+    // The largest float64 below 2^64 is 2^64 - 2^11; float32 is farther away, so MaxValue is a disjoint sentinel.
+    mut uint64 truncated = 0;
+    if (exponent < fractionBits)
+    {
+        truncated = significand >> (fractionBits - exponent);
+    }
+    else
+    {
+        truncated = significand << (exponent - fractionBits);
+    }
+    return truncated;
+}

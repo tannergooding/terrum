@@ -23,6 +23,7 @@ int32 Main()
         require CheckIntegerFacts();
         require CheckIntegerFormatting();
         require CheckIntegerFloatConversion();
+        require CheckFloatingIntegerConversion();
         require CheckCopyAlgorithms();
         require CheckFiniteFloatMathSelections();
         require CheckManagedTokenChain();
