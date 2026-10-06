@@ -801,6 +801,7 @@ boundaries remain in the [implementation reference](implementation.md).
 | `1045730` | Exclude runtime metadata from JIT snapshots |
 | `ab7214d` | Pre-size compilation snapshot collection |
 | `f72d204` | Index repeated CLI diagnostic source lookups |
+| `cf2fdfc5` | Persist caller-unsafe readonly Copy getters |
 | `0f99f3d` | Materialize module declarations as arrays |
 | `0b23da5` | Validate image sections by index |
 | `f1cbc39` | Copy indexed scalar types directly |
