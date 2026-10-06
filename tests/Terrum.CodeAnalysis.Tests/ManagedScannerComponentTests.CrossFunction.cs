@@ -77,6 +77,33 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ScalarFrontendComputesDecimalFloat64BitsInTerrumAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string Source = "float64 Value() { return 0.1; }";
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                require TryParseScalarFrontend(move tokens, init var result);
+                if (!result.IsValid || result.WhenTrue.Operation != 3
+                    || result.WhenTrue.Type != 8
+                    || result.WhenTrue.LeftParameter != -1717986918
+                    || result.WhenTrue.RightParameter != 1069128089) {
+                    return 1;
+                }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync(Source, Entry, policy, "ScalarFrontend");
+        var nativePolicy = (NativeRuntimePolicy)policy;
+        Assert.Equal(42, NativeJit.Execute(program, nativePolicy));
+        await ExecuteAotAsync(program, nativePolicy);
+    }
+
+    [Theory]
     [InlineData("alias Scalar = Wide; alias Wide = int32; public Scalar Main() { const Wide value = 40; return Bump(int32(value)); } Scalar Bump(Scalar value) => value + 2;", 2, 42)]
     [InlineData("public Number Main() { init Number value; Set(init value); return int32(value) + 2; } void Set(init ref<Scalar> value) { value = 40; } alias Number = Scalar; alias Scalar = int32;", 2, 42)]
     [InlineData("alias Number = int32; public Number Main() => 42;", 1, 42)]

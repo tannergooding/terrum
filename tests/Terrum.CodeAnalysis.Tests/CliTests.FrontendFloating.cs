@@ -224,6 +224,11 @@ public sealed partial class CliTests
                 Assert.Contains(functions[4].GetProperty("nodes").EnumerateArray(),
                     static node => node.GetProperty("operation").GetInt32() == 67
                         && node.GetProperty("type").GetInt32() == 5);
+                Assert.Equal(0x3DCCCCCDUL, ProjectedFloatLiteralBits(functions[0], 7));
+                Assert.Equal(0UL, ProjectedFloatLiteralBits(functions[1], 7));
+                Assert.Equal(0x401F000000000000UL, ProjectedFloatLiteralBits(functions[2], 8));
+                Assert.Equal(0x3DCCCCCDUL, ProjectedFloatLiteralBits(functions[3], 7));
+                Assert.Equal(0x3DCCCCCDUL, ProjectedFloatLiteralBits(functions[4], 7));
             }
 
             var (exit, json, error) = await RunAsync(input,
@@ -242,6 +247,49 @@ public sealed partial class CliTests
             File.Delete(output);
             File.Delete(hosted);
         }
+    }
+
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task ScalarFrontendProjectsBasedAndDecimalFloatingBitsAsync(string policy)
+    {
+        const string Source = """
+            public float64 Decimal64() { return 0.1; }
+            public float32 Positive32() { return +0.1; }
+            public float32 BasedBinary32() { return 0b101; }
+            public float64 BasedHex64() { return 0x123; }
+            """;
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
+            "frontend-component", directory, "-", "--runtime", policy, "--json");
+        Assert.True(exit == 0, $"{policy}: {output}{error}");
+        using var document = JsonDocument.Parse(output);
+        var functions = document.RootElement.GetProperty("result").GetProperty("functions");
+        Assert.Equal(4, functions.GetArrayLength());
+        Assert.Equal(0x3FB999999999999AUL, ProjectedFloatLiteralBits(functions[0], 8));
+        Assert.Equal(0x3DCCCCCDUL, ProjectedFloatLiteralBits(functions[1], 7));
+        Assert.Equal(0x40A00000UL, ProjectedFloatLiteralBits(functions[2], 7));
+        Assert.Equal(0x4072300000000000UL, ProjectedFloatLiteralBits(functions[3], 8));
+    }
+
+    private static ulong ProjectedFloatLiteralBits(JsonElement function, int type)
+    {
+        JsonElement literal = default;
+        var matches = 0;
+        foreach (var node in function.GetProperty("nodes").EnumerateArray())
+        {
+            if (node.GetProperty("operation").GetInt32() == 3
+                && node.GetProperty("type").GetInt32() == type)
+            {
+                literal = node;
+                matches++;
+            }
+        }
+
+        Assert.Equal(1, matches);
+        return (ulong)(uint)literal.GetProperty("low").GetInt32()
+            | ((ulong)(uint)literal.GetProperty("high").GetInt32() << 32);
     }
 
     [Theory]

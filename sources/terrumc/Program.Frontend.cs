@@ -43,7 +43,8 @@ internal static partial class Program
             "StringEscape", "Scanner",
             "ManagedScanner", "TokenSnapshot", "TokenTriviaSnapshot",
             "TokenIntegerSnapshot", "TokenDiagnosticSnapshot", "ScalarParserTypes",
-            "CharacterLiteral", "ScalarFrontend", "TokenCursor",
+            "CharacterLiteral", "HexDigitValue", "BasedIntegerFloatLiteral", "HexFloatLiteral",
+            "DecimalFloatLiteral", "ScalarFrontend", "TokenCursor",
             "ScalarFrontendProgram", "ScalarFrontendProjection"];
         try
         {

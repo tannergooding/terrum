@@ -4699,10 +4699,14 @@ public sealed partial class ManagedScannerComponentTests
         if (parserName is not null)
         {
             names = parserName == "ScalarFrontendProjection"
-                ? [.. names, "ScalarParserTypes", "ScalarFrontend", "TokenCursor",
+                ? [.. names, "HexDigitValue", "BasedIntegerFloatLiteral",
+                    "HexFloatLiteral", "DecimalFloatLiteral", "ScalarParserTypes",
+                    "ScalarFrontend", "TokenCursor",
                     "ScalarFrontendProgram", parserName]
                 : parserName == "ScalarFrontend"
-                    ? [.. names, "ScalarParserTypes", parserName, "TokenCursor",
+                    ? [.. names, "HexDigitValue", "BasedIntegerFloatLiteral",
+                        "HexFloatLiteral", "DecimalFloatLiteral", "ScalarParserTypes",
+                        parserName, "TokenCursor",
                         "ScalarFrontendProgram", "ScalarFrontendProjection"]
                     : [.. names, "ScalarParserTypes", parserName];
         }

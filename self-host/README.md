@@ -127,8 +127,11 @@ caller-delimited token slice in invocation-scoped `Host.Source`. Persisted
 semantic-module tests compare its direct `float32`/`float64` bit results with
 hosted bound constants across IEEE rounding boundaries, malformed spellings,
 deterministic random valid spellings and 16,000 fractional hex digits
-under both runtime policies. It is not connected to scalar-frontend
-reconstruction; verification and emission remain hosted.
+under both runtime policies. It now supplies positive raw-bit literal payloads
+to the bounded scalar frontend alongside the decimal and based-integer helpers;
+the host reader independently checks those payloads against the hosted parser.
+Unary signs remain separate frontend operations, and verification and emission
+remain hosted.
 `DecimalFloatLiteral.terrum` similarly converts caller-delimited decimal
 numeric slices directly to `float32` or `float64` bits, without rounding
 `float32` through `float64`. Its exact midpoint comparisons use an owned
@@ -136,9 +139,9 @@ multi-limb workspace and are covered by semantic-module parity tests for ties,
 subnormal and overflow boundaries, malformed spellings, deterministic random
 values and long significand/exponent inputs under both runtime policies. Its
 reachable owned-buffer helper signatures are outside the maintained
-source-grant classifier's scalar subset, so this helper is not a source-grant
-DLL export or scalar-frontend integration; verification and emission remain
-hosted.
+source-grant classifier's scalar subset, so it is not a maintained source-grant
+DLL export. The scalar frontend compiles it into its semantic-module component;
+that does not move verification or emission out of the hosted implementation.
 The host test runner still orchestrates compilation and assertions in C#.
 `ComponentTestRunner.terrum` is a bounded Terrum entry harness composing the
 `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`, `Token`,
@@ -195,11 +198,13 @@ policies, and confirm duplicate constant-label rejection for all six types.
 The bounded Terrum-authored scalar frontend now projects same-format
 `float32`/`float64` unary signs, target-typed decimal and hexadecimal floating
 literals, based integer literals directly targeting either format, `+`, `-`,
-`*`, `/` and IEEE comparisons. The hosted reader validates token spans and
-reconstructs exact target-format literal bits. It also projects conversions
-between the floating formats and from `int32`, `uint32`, `int64` and `uint64`
-to either format. `char16`-to-floating conversion is also provisionally
-projected through v85 under its still-unapproved eligibility proposal;
+`*`, `/` and IEEE comparisons. Its Terrum-authored conversion helpers populate
+positive literal-leaf bits; the hosted reader validates token spans and those
+bits independently against the hosted parser, then consumes the validated
+payloads. It also projects conversions between the floating formats and from
+`int32`, `uint32`, `int64` and `uint64` to either format. `char16`-to-floating
+conversion is also provisionally projected through v85 under its
+still-unapproved eligibility proposal;
 verification and emission remain hosted. Float-to-integer conversions are
 provisionally projected through v85 under the still-unapproved pair-matrix
 proposal; verification and emission remain hosted. Source-free TRRM
@@ -1099,8 +1104,9 @@ including provisional checked conversions to fixed-width integers. Same-format
 floating arithmetic/comparisons are projected by the Terrum-authored scalar
 frontend for typed values, as are target-typed decimal/hexadecimal floating
 literals and based integer literals directly targeting those formats. The
-hosted reader validates literal token spans and reconstructs their target
-bits. Conversion projection covers the two floating formats and the four
+Terrum-authored conversion helpers populate positive raw-bit literal leaves;
+the hosted reader validates their token spans and bits independently against
+the hosted parser. Conversion projection covers the two floating formats and the four
 fixed-width integer types. `char16`-to-floating, floating-to-integer and
 custom literal parser support remain outside this subset; those authored
 components still rely on the hosted verifier/emitter. Bounded scalar

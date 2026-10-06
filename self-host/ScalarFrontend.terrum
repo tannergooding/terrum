@@ -359,8 +359,56 @@ mut class ScalarFrontendState
                 FailAt(2, errorSpan);
                 return false;
             }
-            low = 0;
-            high = 0;
+            int32 start = token.Range.Start;
+            int32 length = token.Range.Length;
+            mut int64 bits = -1;
+            if (length >= 2 && Host.Source[start] == char16(48)
+                && (Host.Source[start + 1] == char16(120)
+                    || Host.Source[start + 1] == char16(88)))
+            {
+                mut bool hasBinaryExponent = false;
+                for (mut int32 at = start + 2; at < start + length; at = at + 1)
+                {
+                    if (Host.Source[at] == char16(112) || Host.Source[at] == char16(80))
+                    {
+                        hasBinaryExponent = true;
+                    }
+                }
+                if (hasBinaryExponent)
+                {
+                    bits = type == 7
+                        ? GetHexFloat32LiteralBitsOrMinusOne(start, length)
+                        : GetHexFloat64LiteralBitsOrMinusOne(start, length);
+                }
+                else
+                {
+                    bits = type == 7
+                        ? GetBasedIntegerFloat32BitsOrMinusOne(start, length)
+                        : GetBasedIntegerFloat64BitsOrMinusOne(start, length);
+                }
+            }
+            else if (length >= 2 && Host.Source[start] == char16(48)
+                && (Host.Source[start + 1] == char16(98)
+                    || Host.Source[start + 1] == char16(66)))
+            {
+                bits = type == 7
+                    ? GetBasedIntegerFloat32BitsOrMinusOne(start, length)
+                    : GetBasedIntegerFloat64BitsOrMinusOne(start, length);
+            }
+            else
+            {
+                bits = type == 7
+                    ? GetDecimalFloat32LiteralBitsOrMinusOne(start, length)
+                    : GetDecimalFloat64LiteralBitsOrMinusOne(start, length);
+            }
+            if (bits < 0)
+            {
+                FailAt(2, errorSpan);
+                return false;
+            }
+            uint64 rawBits = uint64(bits);
+            low = EncodeWord(uint32(rawBits & uint64(uint32.MaxValue)));
+            high = type == 8 ? EncodeWord(uint32(rawBits >> 32)) : 0;
             return true;
         }
 
