@@ -372,6 +372,43 @@ not expose source positions, cursors, literal values, encoders, scanner or
 frontend support, widen the classifier, change the source-free DLL, or
 approve a stable ABI.
 
+### Provisional scalar string-literal encoded-length export
+
+**Question:** Should the maintained companion expose the existing string
+literal encoding-length contracts without exporting owned encoded buffers or
+the literal aggregate?
+
+**Summary:** `StringLiteral` measures strict ASCII and Latin-1 bytes, UTF-8
+bytes, UTF-16 code units and bytes, and UTF-32 bytes. A scalar query can
+preserve those results without returning an aggregate or output buffer. The
+candidate `GetStringLiteralEncodedLengthOrMinusOne(int32 start, int32 length,
+int32 encoding) -> int32` returns a nonnegative encoded length, or `-1` for
+invalid spelling, an invalid selector, or a scalar that strict ASCII or
+Latin-1 cannot represent. The authored selector mapping is `0` ASCII bytes,
+`1` Latin-1 bytes, `2` UTF-8 bytes, `3` UTF-16 code units, `4` UTF-16 bytes,
+and `5` UTF-32 bytes. This mapping is a provisional API choice, not an enum
+ordinal; the existing encoding-test helper uses a different ordering.
+Endianness does not change byte length, and no encoding adds a byte-order
+mark, terminator, normalization or replacement. Invalid raw source-grant
+storage remains outside the query's `-1` result contract.
+
+**Recommendation:** Consider this bounded query as provisional only. Validate
+the entire exact quoted slice, reject raw interior quotes, hosted line breaks,
+unpaired UTF-16 and malformed escapes, and preserve strict ASCII/Latin-1
+rejection rather than substituting; evaluate representability on decoded
+scalars, not spelling units. The UTF-8 width is 1/2/3/4 at U+0080, U+0800 and
+U+10000; UTF-16 units are one for BMP scalars and two for supplementary
+scalars; UTF-16 bytes are twice the unit count; UTF-32 bytes are four per
+scalar. The 16,384-unit source bound limits lengths to 16,382 UTF-16 units,
+32,764 UTF-16 bytes, 49,146 UTF-8 bytes and 65,528 UTF-32 bytes. Cover every
+selector explicitly, including the thresholds U+007F/U+0080, U+00FF/U+0100,
+U+07FF/U+0800, U+D7FF/U+E000, U+FFFF/U+10000 and U+10FFFF. Compare against
+the existing `StringLiteral.TryGet*Length` methods and strict hosted encoders
+under both policies, including empty literals, every valid scalar in bounded
+batches, unrepresentable single-byte values and maximum grants. Do not expose
+encoded buffers, literal aggregates, cursors, scanner or frontend support,
+widen the classifier, change the source-free DLL, or approve a stable ABI.
+
 ### Provisional scalar source-offset export
 
 **Question:** Should the maintained companion expose the hosted line/character

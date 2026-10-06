@@ -49,6 +49,15 @@ public sealed class StringLiteralEncodingModuleTests
             return false;
         }
 
+        int32 GetSourceGrantEncoding(int32 encoding) {
+            if (encoding == 0) { return 2; }
+            if (encoding == 1) { return 3; }
+            if (encoding == 2 || encoding == 3) { return 4; }
+            if (encoding == 4) { return 0; }
+            if (encoding == 5) { return 1; }
+            return 5;
+        }
+
         OwnedInt32Buffer Encode(
             StringLiteral literal,
             int32 encoding,
@@ -73,11 +82,18 @@ public sealed class StringLiteralEncodingModuleTests
             if (expectedLength == 65535) {
                 if (encoding != 4 && encoding != 5) { return -3; }
                 if (TryGetEncodedLength(literal, encoding, init var rejectedLength)) { return -4; }
+                if (GetStringLiteralEncodedLengthOrMinusOne(
+                    literal.Spelling.Start, literal.Spelling.Length, GetSourceGrantEncoding(encoding)) != -1) {
+                    return -10;
+                }
                 return 0;
             }
 
             if (!TryGetEncodedLength(literal, encoding, init var measuredLength)) { return -5; }
             if (measuredLength != expectedLength) { return -6; }
+            if (GetStringLiteralEncodedLengthOrMinusOne(
+                literal.Spelling.Start, literal.Spelling.Length, GetSourceGrantEncoding(encoding))
+                != measuredLength) { return -10; }
             if (!OwnedInt32Buffer.TryCreate(expectedLength, out var workspace)) { return -7; }
             mut OwnedInt32Buffer encoded = Encode(literal, encoding, move workspace);
             if (encoded.Count != expectedLength || encoded.Capacity != expectedLength) { return -8; }
@@ -109,6 +125,9 @@ public sealed class StringLiteralEncodingModuleTests
                 if (encoding == 2 || encoding == 3) { width = 2; }
                 if (encoding == 6 || encoding == 7) { width = 4; }
                 int32 expectedLength = scalarCount * width;
+                if (GetStringLiteralEncodedLengthOrMinusOne(
+                    literal.Spelling.Start, literal.Spelling.Length, GetSourceGrantEncoding(encoding))
+                    != expectedLength) { return -7; }
                 if (measured != expectedLength
                     || !OwnedInt32Buffer.TryCreate(expectedLength, out var workspace)) { return -4; }
                 mut OwnedInt32Buffer encoded = Encode(literal, encoding, move workspace);
@@ -134,7 +153,11 @@ public sealed class StringLiteralEncodingModuleTests
         BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
-        var componentNames = new[] { "SourceRange", "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "StringEscape", "StringLiteral" };
+        var componentNames = new[] {
+            "SourceRange", "CharacterFacts", "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar",
+            "StringEscape", "StringEscapePacked", "StringLiteral", "StringLiteralScalarCount",
+            "StringLiteralEncodedLength",
+        };
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)
         {

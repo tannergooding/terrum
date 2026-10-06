@@ -2737,6 +2737,18 @@ requested scalar; direct DLL coverage checks exact-slice validity against a
 single hosted lexer token. U+0000 and U+FFFF remain successful values. This
 does not expose a literal aggregate, cursor, encoder, scanner or frontend
 support.
+`GetStringLiteralEncodedLengthOrMinusOne(start, length, encoding)` provisionally
+measures selectors 0–5 as strict ASCII bytes, strict Latin-1 bytes, UTF-8
+bytes, UTF-16 code units, UTF-16 bytes and UTF-32 bytes, respectively. It
+returns `-1` for an invalid selector, spelling or unrepresentable ASCII/
+Latin-1 scalar; successful empty literals return zero. Lengths exclude BOMs
+and terminators; byte order does not affect UTF-16/UTF-32 lengths. It validates
+through the count query and performs at most one additional scalar scan,
+without producing encoded storage. Direct DLL cases compare exact-slice
+validity with a single hosted lexer token and lengths with strict host
+encoders; semantic-module tests compare all selector results with aggregate
+`StringLiteral.TryGet*Length` over the existing exhaustive scalar corpus.
+This adds sizing evidence only, not encoding, scanner or frontend support.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under
