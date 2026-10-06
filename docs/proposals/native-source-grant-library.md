@@ -252,6 +252,41 @@ outside the source extent. Reuse shared line-break classification, keep the
 source-free DLL and classifier boundary unchanged, and do not infer aggregate
 `LinePosition`, complete `SourceLines` or stable ABI support.
 
+### Provisional scalar source-line-end exports
+
+**Question:** Should the maintained companion expose both exclusive ends of a
+source line's content and including-break extents without returning aggregate
+`SourceRange` values?
+
+**Summary:** Hosted `SourceLines.TryReadSourceLine` returns both a content
+range and an including-break range, each half-open and UTF-16 based. Their
+exclusive ends are scalar offsets; the existing
+`GetSourceOffsetOrMinusOne(line, 0)` provides their shared start. The content
+end is the first line-break unit offset, while the including-break end is
+after the complete break. For CRLF, those ends differ by two; for other
+recognized breaks, they differ by one. A trailing break creates a final
+empty line whose start and both ends equal source length. The content end on
+a non-final line is a valid character coordinate at the first break unit;
+the including-break end belongs to the next line and is not valid for the
+preceding line. Combining the three scalar results reconstructs both hosted
+ranges only when calls use the same unchanged source snapshot. Each query
+scans independently, so enumerating every line this way is quadratic in
+source length.
+
+**Recommendation:** Include only
+`GetSourceLineContentEndOrMinusOne(int32 line) -> int32` and
+`GetSourceLineEndOrMinusOne(int32 line) -> int32` as provisional evidence.
+Return the hosted content and including-break exclusive ends for
+`0 <= line < SourceText.Lines.Length`, including EOF for empty final lines,
+and `-1` for invalid line numbers only. Reuse `CharacterFacts.IsLineBreak`,
+collapse only CRLF, and check CRLF lookahead before reading. Verify both
+reconstructed ranges and offset-query behavior at content and including-break
+boundaries for empty, mixed/consecutive breaks, NUL and malformed UTF-16,
+every UTF-16 successor after CR, maximum grants and extreme line numbers
+under both policies. Do not claim indexed-lookup performance or support
+aggregate `SourceRange` call closures, the complete `SourceLines` facade, raw
+pointer validation or a stable ABI.
+
 ### Provisional scalar integer-parsing exports
 
 **Question:** Should the maintained source-grant companion expose the

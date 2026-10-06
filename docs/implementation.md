@@ -2675,6 +2675,16 @@ source-offset query using the same grant. Hosted
 reads, line/character offsets and both position components for empty and
 maximum-length grants, line-break variants, malformed UTF-16, NUL and every
 code-unit value.
+`GetSourceLineContentEndOrMinusOne(line)` and
+`GetSourceLineEndOrMinusOne(line)` separately scan to return the hosted
+content and including-break extents' exclusive ends for a valid line, or
+`-1` for an invalid line. Their shared start is available from
+`GetSourceOffsetOrMinusOne(line, 0)`; callers reconstruct both ranges only
+against the same unchanged source snapshot. The content end is the first
+line-break unit and the including-break end is after the complete break, so
+the latter may be the next line's start and is not a valid character position
+on the preceding non-final line. Reconstructing extents for all lines is
+quadratic, not indexed lookup.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under

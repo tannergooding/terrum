@@ -24,6 +24,8 @@ public sealed class NativeSourceGrantLibraryTests
     private const string SourceCharacterPositionExport = "Terrum.CodeAnalysis.GetSourceCharacterPositionOrMinusOne";
     private const string SourceCodeUnitExport = "Terrum.CodeAnalysis.GetSourceCodeUnitOrMinusOne";
     private const string SourceLineNumberExport = "Terrum.CodeAnalysis.GetSourceLineNumberOrMinusOne";
+    private const string SourceLineContentEndExport = "Terrum.CodeAnalysis.GetSourceLineContentEndOrMinusOne";
+    private const string SourceLineEndExport = "Terrum.CodeAnalysis.GetSourceLineEndOrMinusOne";
     private const string SourceOffsetExport = "Terrum.CodeAnalysis.GetSourceOffsetOrMinusOne";
     private const string SourceLengthExport = "Terrum.CodeAnalysis.GetSourceTextLength";
     private const string LineCountExport = "Terrum.CodeAnalysis.GetSourceLineCount";
@@ -519,6 +521,104 @@ public sealed class NativeSourceGrantLibraryTests
         }
     }
 
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void SourceLineExtentsMatchHostedContentAndIncludingBreakExtents(BoundRuntimePolicy policy)
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var characterFactsPath = Path.Combine(sourceDirectory, "CharacterFacts.terrum");
+        var sourceOffsetPath = Path.Combine(sourceDirectory, "SourceOffset.terrum");
+        var sourceLineEndPath = Path.Combine(sourceDirectory, "SourceLineEnd.terrum");
+        var compilation = Compilation.CreateLibrary([
+            SyntaxTree.Parse(File.ReadAllText(characterFactsPath), characterFactsPath),
+            SyntaxTree.Parse(File.ReadAllText(sourceOffsetPath), sourceOffsetPath),
+            SyntaxTree.Parse(File.ReadAllText(sourceLineEndPath), sourceLineEndPath),
+        ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+            IsInvocationScoped = true,
+        }], (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
+            Assert.IsType<BoundProgram>(compilation.Program),
+            [SourceOffsetExport, SourceLineContentEndExport, SourceLineEndExport],
+            (NativeRuntimePolicy)policy);
+        var contentEnd = Assert.Single(artifact.Exports,
+            static export => export.Name == SourceLineContentEndExport);
+        Assert.True(contentEnd.SourceDependent);
+        Assert.Equal(PrimitiveType.Int32, contentEnd.ReturnType);
+        Assert.Equal([PrimitiveType.Int32], contentEnd.ParameterTypes.ToArray());
+        var lineEnd = Assert.Single(artifact.Exports,
+            static export => export.Name == SourceLineEndExport);
+        Assert.True(lineEnd.SourceDependent);
+        Assert.Equal(PrimitiveType.Int32, lineEnd.ReturnType);
+        Assert.Equal([PrimitiveType.Int32], lineEnd.ParameterTypes.ToArray());
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-line-end-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(path, artifact.Image);
+        try
+        {
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var bindings = new NativeSourceGrantTestBindings(module,
+                    [.. artifact.Exports.Select(static export => (export.Name, export.SourceDependent,
+                        export.ReturnType, export.ParameterTypes))]);
+                foreach (var sample in LineCountSamples)
+                {
+                    var source = sample.ToCharArray();
+                    var hosted = SourceText.From(sample);
+                    for (var line = 0; line <= hosted.Lines.Length; line++)
+                    {
+                        AssertSourceLineEndMatches(bindings, source, hosted, line, true);
+                    }
+                    AssertSourceLineEndMatches(bindings, source, hosted, int.MinValue);
+                    AssertSourceLineEndMatches(bindings, source, hosted, int.MaxValue);
+                }
+
+                var singleCodeUnit = new char[1];
+                for (var codeUnit = 0; codeUnit <= char.MaxValue; codeUnit++)
+                {
+                    singleCodeUnit[0] = (char)codeUnit;
+                    var hosted = SourceText.From(new string(singleCodeUnit));
+                    AssertSourceLineEndMatches(bindings, singleCodeUnit, hosted, 0);
+                    AssertSourceLineEndMatches(bindings, singleCodeUnit, hosted, 1);
+                }
+
+                var sourceAfterCr = new char[2] { '\r', '\0' };
+                for (var codeUnit = 0; codeUnit <= char.MaxValue; codeUnit++)
+                {
+                    sourceAfterCr[1] = (char)codeUnit;
+                    var hosted = SourceText.From(new string(sourceAfterCr));
+                    Assert.Equal(hosted.Lines[0].Span.End,
+                        bindings.Invoke<int>(SourceLineContentEndExport, sourceAfterCr, 0));
+                    Assert.Equal(hosted.Lines[0].SpanIncludingLineBreak.End,
+                        bindings.Invoke<int>(SourceLineEndExport, sourceAfterCr, 0));
+                }
+
+                AssertSourceLineEndCases(bindings, new string('x', 16_384), 0, 1);
+                AssertSourceLineEndCases(bindings, new string('\n', 16_384), 0, 8_192, 16_383, 16_384, 16_385);
+                AssertSourceLineEndCases(bindings, new string('\r', 16_384), 0, 8_192, 16_383, 16_384, 16_385);
+                AssertSourceLineEndCases(bindings, string.Concat(Enumerable.Repeat("\r\n", 8_192)),
+                    0, 4_096, 8_191, 8_192, 8_193);
+                AssertSourceLineEndCases(bindings, new string('x', 16_383) + '\r', 0, 1, 2);
+                AssertSourceLineEndCases(bindings, new string('x', 16_382) + "\r\n", 0, 1, 2);
+                _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    bindings.Invoke<int>(SourceLineEndExport, new char[16_385], 0));
+                _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    bindings.Invoke<int>(SourceLineContentEndExport, new char[16_385], 0));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void MaintainedCompilerPrimitivesCompanionUsesItsGeneratedManifest()
     {
@@ -549,8 +649,9 @@ public sealed class NativeSourceGrantLibraryTests
                         ?? throw new InvalidDataException("Missing parameter type.")))
                     .ToImmutableArray()))
             .ToImmutableArray();
-        Assert.Equal([DecodeScalarExport, SourceCharacterPositionExport, SourceCodeUnitExport, LineCountExport,
-            SourceLineNumberExport, SourceOffsetExport, SourceLengthExport, CanParseChar16Export,
+        Assert.Equal([DecodeScalarExport, SourceCharacterPositionExport, SourceCodeUnitExport,
+            SourceLineContentEndExport, LineCountExport, SourceLineEndExport, SourceLineNumberExport,
+            SourceOffsetExport, SourceLengthExport, CanParseChar16Export,
             CanParseInt32Export, CanParseInt64Export, CanParseUInt32Export, CanParseUInt64Export,
             ParseChar16Export, ParseInt32Export, ParseInt64Export, ParseUInt32Export, ParseUInt64Export,
             ReadScalarExport],
@@ -597,6 +698,10 @@ public sealed class NativeSourceGrantLibraryTests
                 var hosted = SourceText.From(sample);
                 AssertSourceOffsetParity(bindings, sample);
                 AssertSourcePositionParity(bindings, sample);
+                for (var line = 0; line < hosted.Lines.Length; line++)
+                {
+                    AssertSourceLineEndMatches(bindings, source, hosted, line, true);
+                }
                 Assert.Equal(SourceText.From(sample).Length,
                     bindings.Invoke<int>(SourceLengthExport, source));
                 for (var position = 0; position < hosted.Length; position++)
@@ -628,6 +733,8 @@ public sealed class NativeSourceGrantLibraryTests
             Assert.Equal(-1, bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource, int.MaxValue));
             AssertMaximumSourceOffsetCases(bindings);
             AssertMaximumSourcePositionCases(bindings);
+            AssertSourceLineEndCases(bindings, new string('\n', 16_384),
+                0, 8_192, 16_383, 16_384);
             _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
                 bindings.Invoke<int>(ReadScalarExport, new char[16_385], 0, 1));
             var singleCodeUnit = new char[1];
@@ -863,6 +970,49 @@ public sealed class NativeSourceGrantLibraryTests
         {
             Assert.Equal(position,
                 bindings.Invoke<int>(SourceOffsetExport, source, actualLine, actualCharacter));
+        }
+    }
+
+    private static void AssertSourceLineEndCases(NativeSourceGrantTestBindings bindings,
+        string sample, params int[] lines)
+    {
+        var source = sample.ToCharArray();
+        var hosted = SourceText.From(sample);
+        foreach (var line in lines)
+        {
+            AssertSourceLineEndMatches(bindings, source, hosted, line, true);
+        }
+    }
+
+    private static void AssertSourceLineEndMatches(NativeSourceGrantTestBindings bindings,
+        char[] source, SourceText hosted, int line, bool verifyOffsetBoundaries = false)
+    {
+        if (line < 0 || line >= hosted.Lines.Length)
+        {
+            Assert.Equal(-1, bindings.Invoke<int>(SourceLineContentEndExport, source, line));
+            Assert.Equal(-1, bindings.Invoke<int>(SourceLineEndExport, source, line));
+            return;
+        }
+
+        var expectedContent = hosted.Lines[line].Span;
+        var expectedIncludingBreak = hosted.Lines[line].SpanIncludingLineBreak;
+        var start = bindings.Invoke<int>(SourceOffsetExport, source, line, 0);
+        var contentEnd = bindings.Invoke<int>(SourceLineContentEndExport, source, line);
+        var includingBreakEnd = bindings.Invoke<int>(SourceLineEndExport, source, line);
+        Assert.Equal(expectedContent.Start, start);
+        Assert.Equal(expectedContent.End, contentEnd);
+        Assert.Equal(expectedIncludingBreak.Start, start);
+        Assert.Equal(expectedIncludingBreak.End, includingBreakEnd);
+        Assert.Equal(expectedContent, new TextSpan(start, contentEnd - start));
+        Assert.Equal(expectedIncludingBreak, new TextSpan(start, includingBreakEnd - start));
+        if (verifyOffsetBoundaries)
+        {
+            Assert.Equal(contentEnd,
+                bindings.Invoke<int>(SourceOffsetExport, source, line, contentEnd - start));
+            var includingBreakCharacter = includingBreakEnd - start;
+            var expectedIncludingBreakOffset = line + 1 < hosted.Lines.Length ? -1 : includingBreakEnd;
+            Assert.Equal(expectedIncludingBreakOffset,
+                bindings.Invoke<int>(SourceOffsetExport, source, line, includingBreakCharacter));
         }
     }
 

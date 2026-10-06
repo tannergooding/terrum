@@ -20,9 +20,9 @@ consumption, `tests\native\token-abi.terrum` for aggregate ABI selection,
 these helper exports are test-only. The build also emits a separate
 provisional `terrum-compiler-primitives-source-grant.dll` from
 `CharacterFacts`, `SourceCodeUnit`, `SourceLineCount`, `SourceTextLength`,
-`SourceOffset`, `SourcePosition`, `WideIntegerFacts`, `SourceIntegerParsing`,
-`Utf16CodeUnits` and `Utf16Scalar`, with a hash-bound export manifest; it does
-not change the source-free
+`SourceOffset`, `SourcePosition`, `SourceLineEnd`, `WideIntegerFacts`,
+`SourceIntegerParsing`, `Utf16CodeUnits` and `Utf16Scalar`, with a hash-bound
+export manifest; it does not change the source-free
 compiler-primitives DLL or establish a stable ABI.
 This maintained native
 compiler-primitives library exports `Terrum.CodeAnalysis.SourceRange.TryCreate`,
@@ -87,13 +87,20 @@ outside the source-free DLL. The separate companion exports its checked
 `GetSourceLineCount`, `GetSourceTextLength`,
 `GetSourceCodeUnitOrMinusOne`, `GetSourceOffsetOrMinusOne`,
 `GetSourceLineNumberOrMinusOne` and `GetSourceCharacterPositionOrMinusOne`,
-alongside the unchanged source-free decoder. The length, code-unit, offset
-and position components isolate scalar `SourceText` contracts; the code-unit
-query preserves every UTF-16 value, the offset query returns `-1` for invalid
-line/character pairs, and the position queries return `-1` for invalid source
-offsets. Position queries scan independently and must use the same unchanged
-snapshot when combined. None of these queries is the complete `SourceText`
-or `SourceLines` facade.
+`GetSourceLineContentEndOrMinusOne`, `GetSourceLineEndOrMinusOne`, the
+integer-parsing query pairs and the unchanged source-free decoder. The length,
+code-unit, offset, position and
+line-end components isolate scalar `SourceText`/`SourceLines` contracts; the
+code-unit query preserves every UTF-16 value, the offset query returns `-1`
+for invalid line/character pairs, and the position queries return `-1` for
+invalid source offsets. The two line-end queries return the content and
+including-break exclusive ends, respectively, or `-1` for an invalid line;
+callers combine either with the existing line-start offset query on the same
+unchanged snapshot. The content end is the first break unit, while the
+including-break end is after the complete break and may be the next line's
+start. Position and line-end queries scan independently; querying both ends
+for every line is not an indexed lookup. None of these queries is the
+complete `SourceText` or `SourceLines` facade.
 The persisted
 semantic-module JIT test also checks every BMP code unit at a one-unit source
 boundary under both runtime policies, ensuring that a following code unit
@@ -393,6 +400,7 @@ native emitter or compiler self-build.
 | [StringEscape](StringEscape.terrum) | Decode one string escape and report its scalar, consumed width, and hosted diagnostic boundary | Shares `CharacterFacts.TryGetHexDigit` with character literals; used by validated `StringLiteral` decoding and scanner lexical diagnostics; escaped unpaired UTF-16 retains its separate diagnostic; revision-56 semantic-module JIT compares scalar, consumed width and hosted diagnostic span across fresh grants under both policies; host-oracle cases cover simple escapes, Unicode scalar boundaries, malformed escape/hex forms, apostrophe rejection and consumption before trailing source text, every scanner-delimited BMP escape introducer, every BMP `\u` value including all 2,048 rejected surrogate-valued escapes, every valid supplementary `\U` escape, and all 2,048 rejected surrogate-valued `\U` escapes |
 | [SourceLines](SourceLines.terrum) | Streaming line ranges, line extents and bidirectional UTF-16 offset/line-position mapping over an immutable source grant | Direct AOT/JIT vacancy-only `init ref` outputs under both policies; revision-56 semantic-module JIT compares persisted full extents, positions and offsets with the hosted snapshot across fresh grants under both policies; invalid queries leave all outputs vacant, and CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
 | [SourceLineCount](SourceLineCount.terrum) | Scalar-only count of physical lines in the current immutable UTF-16 source grant, reusing shared line-break classification | Direct source-grant DLL tests compare with hosted `SourceText.Lines.Length` for empty, trailing-break, CRLF, Unicode line-break, NUL, malformed-surrogate and maximum-length inputs under both policies; the maintained fail-fast companion also binds the export and checks its edge and maximum-length behavior; this does not enable aggregate-output call closures or the complete `SourceLines` facade |
+| [SourceLineEnd](SourceLineEnd.terrum) | Scalar queries for the exclusive ends of a zero-based line's content and including-break extents, or `-1` for an invalid line | Direct source-grant DLL tests reconstruct both hosted `SourceText.Lines` extents with the existing scalar line-start offset under both policies; they cover empty/final lines, all line-break kinds, every UTF-16 code unit after CR and maximum grants; the maintained fail-fast companion binds both exports through its image-hash manifest; each query scans linearly, so this is not indexed extent lookup or the complete `SourceLines` facade |
 | [SourceTextLength](SourceTextLength.terrum) | Scalar source-grant adapter for the existing `SourceText.GetSourceTextLength` contract | Direct source-grant DLL tests compare with hosted `SourceText.Length` for empty, edge and maximum-length grants under both policies; the maintained fail-fast companion binds the export through its image-hash manifest; isolated from the complete `SourceText` module because classifier checks include unselected source-dependent functions |
 | [SourceCodeUnit](SourceCodeUnit.terrum) | Isolated scalar query for one raw UTF-16 source code unit, returning `-1` for an out-of-range position | Direct tests exhaust all 65,536 code-unit values under both policies and compare edge/maximum grants with hosted `SourceText`; the maintained fail-fast companion binds the export through its image-hash manifest; callers check the sentinel before conversion, and this does not support the complete `SourceText` facade |
 | [SourceOffset](SourceOffset.terrum) | Isolated scalar line/character-to-source-offset query, returning `-1` for invalid pairs | Direct tests compare every short-fixture line/character boundary with hosted `SourceText.TryGetOffset` under both policies and exercise maximum plain, LF, CRLF and trailing-CR grants; the maintained fail-fast companion binds the export through its manifest; aggregate `SourceRange` outputs and the complete `SourceLines` facade remain unsupported |

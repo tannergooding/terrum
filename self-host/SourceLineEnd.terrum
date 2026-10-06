@@ -1,0 +1,63 @@
+namespace Terrum.CodeAnalysis;
+
+int32 GetSourceLineBreakWidth(int32 position)
+{
+    char16 first = Host.Source[position];
+    if (!IsLineBreak(first))
+    {
+        return 0;
+    }
+    // The hosted line reader coalesces CRLF only.
+    if (first == char16(13) && position < Host.Source.Length - 1
+        && Host.Source[position + 1] == char16(10))
+    {
+        return 2;
+    }
+    return 1;
+}
+
+int32 GetSourceLineEndComponent(int32 line, bool includeBreak)
+{
+    if (line < 0)
+    {
+        return -1;
+    }
+
+    mut int32 lineIndex = 0;
+    mut int32 position = 0;
+    while (position < Host.Source.Length)
+    {
+        int32 breakWidth = GetSourceLineBreakWidth(position);
+        if (breakWidth == 0)
+        {
+            position = position + 1;
+            continue;
+        }
+        if (lineIndex == line)
+        {
+            if (includeBreak)
+            {
+                return position + breakWidth;
+            }
+            return position;
+        }
+        lineIndex = lineIndex + 1;
+        position = position + breakWidth;
+    }
+
+    if (lineIndex == line)
+    {
+        return Host.Source.Length;
+    }
+    return -1;
+}
+
+public static int32 GetSourceLineContentEndOrMinusOne(int32 line)
+{
+    return GetSourceLineEndComponent(line, false);
+}
+
+public static int32 GetSourceLineEndOrMinusOne(int32 line)
+{
+    return GetSourceLineEndComponent(line, true);
+}
