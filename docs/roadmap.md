@@ -308,6 +308,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `2a711178` | Compare generated native line counts with hosted `SourceText` for every single UTF-16 code unit under both runtime policies |
 | `983fb9a1` | Round-trip test-only native source positions through scalar line/character queries against hosted `SourceText.TryGetOffset` under both runtime policies |
 | `cb3fd7b8` | Compare test-only generated native source positions with hosted `SourceText.GetLinePosition` for all short-fixture offsets and maximum-boundary samples under both runtime policies |
 | `8c226927` | Compare test-only generated native source line counts with hosted `SourceText` across line-break, malformed-UTF-16 and maximum-bound cases under both runtime policies |
