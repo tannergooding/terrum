@@ -392,7 +392,13 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
         functions = functions + 1;
         start = end;
     }
-    if (functions == 0 || functions < 2 && aliasCount == 0)
+    mut bool hasSwitch = false;
+    for (mut int32 index = 0; index < count - 1; index = index + 1)
+    {
+        require TryGetScalarWindowToken(tokenView, 0, count, false, index, init var token);
+        if (token.Kind == 35) { hasSwitch = true; }
+    }
+    if (functions == 0 || functions < 2 && aliasCount == 0 && !hasSwitch)
     {
         for (mut int32 word = 0; word < Host.FrontendProgram.Length; word = word + 1)
         {

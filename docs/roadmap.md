@@ -101,6 +101,21 @@ against source names. Single-function v85 covers self-calls; complete-program
 v85 covers direct self/global calls. Overload selection and the hosted
 verifier/emitter boundary remain unchanged.
 
+Complete-program v85 also projects bounded `switch` statements with selectors
+of type `int32`, `uint32`, `int64`, `uint64`, `bool` or `char16`, distinct
+constant-value arms and a final `_` arm. Floating selectors are excluded
+because the projection lowers matching to hosted equality without defining NaN
+constant-pattern semantics. Arm bodies
+are braced blocks containing already-supported statements; guards, patterns,
+fallthrough forms, and missing or misplaced defaults reject. The reader
+source-audits the arm records, captures the selector once, and lowers the
+ordered arms to hosted conditionals. This reuses previously invalid statement
+kinds 38/39 and local flag 8 without changing frame layouts; the current
+reader accepts them only after source validation, while older v85 readers
+reject unknown records. Hosted verification and emission remain authoritative,
+single-function projection is unchanged, and this does not add switch support
+to source-free TRRM or claim bootstrap support.
+
 V85 complete snapshots carry the existing scalar `out`
 parameter modes, explicit destinations and `out var` call destinations.
 They also carry the existing scalar `init ref<T>` mode and matching

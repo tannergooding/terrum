@@ -2152,6 +2152,10 @@ mut class ScalarFrontendState
             {
                 if (!ParseTreeIf(depth, nearestLoop, tokenView)) { return false; }
             }
+            else if (next.Kind == 35)
+            {
+                if (!ParseTreeSwitch(depth, nearestLoop, tokenView)) { return false; }
+            }
             else if (next.Kind == 10)
             {
                 if (!ParseTreeStaticProof(depth, tokenView)) { return false; }
@@ -2344,6 +2348,11 @@ mut class ScalarFrontendState
                 returns = TreeBodyReturns(cursor + 1, blockEnd);
                 cursor = blockEnd;
             }
+            else if (kind == 38)
+            {
+                returns = TreeSwitchReturns(cursor);
+                cursor = TreeStatementWord(cursor, 1);
+            }
             else if (kind == 3 || kind == 4 || kind == 11 || kind == 12)
             {
                 int32 armEnd = TreeStatementWord(cursor, 1);
@@ -2384,6 +2393,23 @@ mut class ScalarFrontendState
             if (completes && returns) { completes = false; }
         }
         return !completes;
+    }
+
+    private bool TreeSwitchReturns(int32 header)
+    {
+        int32 end = TreeStatementWord(header, 1);
+        mut int32 arm = header + 1;
+        mut bool returns = true;
+        while (arm < end)
+        {
+            int32 armEnd = TreeStatementWord(arm, 1);
+            if (!TreeBodyReturns(arm + 1, armEnd))
+            {
+                returns = false;
+            }
+            arm = armEnd;
+        }
+        return returns;
     }
 
     private int32 TreeLiteralBoolean(int32 root)
@@ -2450,6 +2476,21 @@ mut class ScalarFrontendState
                     return true;
                 }
                 cursor = blockEnd;
+            }
+            else if (kind == 38)
+            {
+                int32 switchEnd = TreeStatementWord(cursor, 1);
+                mut int32 arm = cursor + 1;
+                while (arm < switchEnd)
+                {
+                    int32 armEnd = TreeStatementWord(arm, 1);
+                    if (TreeBodyHasTransfer(arm + 1, armEnd, loop, transfer))
+                    {
+                        return true;
+                    }
+                    arm = armEnd;
+                }
+                cursor = switchEnd;
             }
             else if (kind == 3 || kind == 11 || kind == 12)
             {
@@ -2673,6 +2714,190 @@ mut class ScalarFrontendState
         }
         Host.Frontend[332 + header * 5 + 4] = end - keyword.Range.Start;
         return true;
+    }
+
+    private mut bool ParseTreeSwitch(int32 depth, int32 nearestLoop, Span<Token> tokenView)
+    {
+        _hasStructuredStatement = true;
+        if (depth >= 6 || _statementCount >= 12 || _localCount >= 8)
+        {
+            Fail(1, tokenView);
+            return false;
+        }
+        if (!Take(35, init var keyword, tokenView)
+            || !Take(46, init var openSelector, tokenView)
+            || !ParseTreeExpression(0, 1, 0, init var selector, tokenView)
+            || !Take(47, init var closeSelector, tokenView))
+        {
+            return false;
+        }
+        mut int32 selectorType = TreeWord(selector, 1);
+        if (selectorType == 0)
+        {
+            selectorType = 1;
+        }
+        if (selectorType < 1 || selectorType > 6)
+        {
+            return FailTreeType(selector);
+        }
+        if (!ResolveTreeLiteral(selector, selectorType, false, tokenView)
+            || !Take(48, init var openBody, tokenView))
+        {
+            return false;
+        }
+
+        int32 enclosingLocals = _activeLocals;
+        int32 localIndex = _localCount;
+        int32 localOffset = 300 + localIndex * 4;
+        Host.Frontend[localOffset] = selectorType;
+        Host.Frontend[localOffset + 1] = 8;
+        Host.Frontend[localOffset + 2] = keyword.Range.Start;
+        Host.Frontend[localOffset + 3] = keyword.Range.Length;
+        _localCount = localIndex + 1;
+        Host.Frontend[299] = _localCount;
+        mut int32 localBit = 1;
+        for (mut int32 index = 0; index < localIndex; index = index + 1)
+        {
+            localBit = localBit * 2;
+        }
+        _activeLocals = _activeLocals | localBit;
+
+        int32 header = _statementCount;
+        if (!AddTreeStatement(38, 0, selector, keyword.Range.Start,
+            openBody.Range.End, tokenView))
+        {
+            return false;
+        }
+        mut int32 armCount = 0;
+        mut int32 caseCount = 0;
+        mut bool foundDefault = false;
+        require TryGetToken(tokenView, _at, init var firstArm);
+        mut Token arm = firstArm;
+        while (arm.Kind != 49 && _error == 0)
+        {
+            int32 armStart = arm.Range.Start;
+            mut int32 label = -1;
+            if (arm.Kind == 81)
+            {
+                if (foundDefault || caseCount == 0)
+                {
+                    FailAt(1, arm.Range);
+                    return false;
+                }
+                foundDefault = true;
+                _at = _at + 1;
+            }
+            else
+            {
+                if (foundDefault
+                    || !ParseTreeExpression(selectorType, 1, 0, init var value, tokenView)
+                    || !TreeConstantExpression(value)
+                    || !ResolveTreeLiteral(value, selectorType, false, tokenView))
+                {
+                    if (_error == 0) { FailAt(1, arm.Range); }
+                    return false;
+                }
+                if (TreeWord(value, 1) != selectorType)
+                {
+                    return FailTreeType(value);
+                }
+                label = value;
+                caseCount = caseCount + 1;
+                require TryGetToken(tokenView, _at, init var arrow);
+                arm = arrow;
+            }
+
+            if (!Take(82, init var armArrow, tokenView)
+                || !Take(48, init var armBody, tokenView))
+            {
+                return false;
+            }
+            int32 armHeader = _statementCount;
+            if (!AddTreeStatement(39, 0, label, armStart, armBody.Range.End, tokenView))
+            {
+                return false;
+            }
+            int32 armLocals = _activeLocals;
+            if (!ParseTreeStructuredBody(depth + 1, nearestLoop, tokenView)
+                || !Take(49, init var armEnd, tokenView))
+            {
+                return false;
+            }
+            FinishTreeBody(armHeader, armLocals, armEnd.Range.End);
+            armCount = armCount + 1;
+            require TryGetToken(tokenView, _at, init var separator);
+            if (separator.Kind == 53)
+            {
+                _at = _at + 1;
+                require TryGetToken(tokenView, _at, init var followingArm);
+                arm = followingArm;
+                if (arm.Kind == 49) { break; }
+            }
+            else if (separator.Kind == 49)
+            {
+                arm = separator;
+            }
+            else
+            {
+                FailAt(1, separator.Range);
+                return false;
+            }
+            if (arm.Kind != 49 && armCount >= 12)
+            {
+                FailAt(1, arm.Range);
+                return false;
+            }
+        }
+        if (armCount < 2 || caseCount == 0 || !foundDefault
+            || !Take(49, init var closeBody, tokenView))
+        {
+            if (_error == 0) { FailAt(1, arm.Range); }
+            return false;
+        }
+        _activeLocals = enclosingLocals;
+        int32 headerOffset = 332 + header * 5;
+        Host.Frontend[headerOffset + 1] = _statementCount;
+        Host.Frontend[headerOffset + 4] = closeBody.Range.End - keyword.Range.Start;
+        return true;
+    }
+
+    private bool TreeConstantExpression(int32 node)
+    {
+        int32 operation = TreeWord(node, 0);
+        if (operation == 3 || operation == 20 || operation == 21)
+        {
+            return true;
+        }
+        if (operation == 0)
+        {
+            int32 slot = TreeWord(node, 4);
+            if (slot <= _parameterCount || slot > _parameterCount + _localCount)
+            {
+                return false;
+            }
+            int32 local = slot - _parameterCount - 1;
+            return IsActiveLocal(local)
+                && Host.Frontend[300 + local * 4 + 1] == 4;
+        }
+        if (operation == 46 || operation == 83
+            || operation == 57 || operation == 58 || operation == 62 || operation == 63)
+        {
+            return TreeConstantExpression(TreeWord(node, 4));
+        }
+        if (operation == 84)
+        {
+            return TreeConstantExpression(TreeWord(node, 4))
+                && TreeConstantExpression(TreeWord(node, 5))
+                && TreeConstantExpression(TreeWord(node, 6));
+        }
+        if (operation >= 57 && operation <= 75
+            || operation >= 88 && operation <= 90)
+        {
+            return TreeWord(node, 5) >= 0
+                && TreeConstantExpression(TreeWord(node, 4))
+                && TreeConstantExpression(TreeWord(node, 5));
+        }
+        return false;
     }
 
     private mut bool ParseTreeTryFinally(int32 depth, int32 nearestLoop, Span<Token> tokenView)

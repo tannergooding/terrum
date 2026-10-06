@@ -86,12 +86,17 @@ switches, loops, integer operations and module-local scalar calls; non-nearest t
 use scalar routing codes and designated single-exit indexed regions. This
 source-free path remains fail-fast-only. The separate native scalar frontend
 currently supports scalar/void functions, initialized scalar locals, structured
-branches and loops, named loop transfers, standalone requirements/discards,
-and selected function-effect contracts. Projection v85 carries named by-value
-and scalar `out`/`init ref<T>` arguments through bounded scalar self/global
-calls while preserving source evaluation order; overload selection remains
-unsupported. V85 is the only produced and accepted tag for both projection
-families, every complete-program frame and diagnostic records. Exact layouts
+branches and loops, named loop transfers, bounded `switch` statements over
+`int32`, `uint32`, `int64`, `uint64`, `bool` or `char16` with distinct constant
+arms and a final `_` arm, standalone
+requirements/discards, and selected function-effect contracts. Switch arm
+bodies contain only already-supported statements; guards, patterns,
+fallthrough forms, and missing or misplaced defaults reject. The v85
+projection carries named by-value and scalar `out`/`init ref<T>` arguments
+through bounded scalar self/global calls while preserving source evaluation
+order; overload selection remains unsupported. V85 is the only produced and
+accepted tag for both projection families, every complete-program frame and
+diagnostic records. Exact layouts
 and audits are in the
 [native profile](../docs/native.md) and
 [implementation reference](../docs/implementation.md). General attributes,
@@ -105,6 +110,13 @@ type/function name spaces are retained, and alias names are not explicit
 conversion-call targets. Rejected aliases report their offending token span.
 This preserves the hosted verifier/emitter boundary and does not add aliases
 to source-free TRRM.
+Complete-program v85 also carries switch statement kinds 38/39 and hidden
+selector local flag 8 in previously invalid record values; frame layouts and
+existing record meanings do not change. The reader accepts switch records only
+after independently matching them to source and lowers them to ordered hosted
+conditionals that evaluate the selector once. Older readers reject these
+unknown records. Switch remains complete-program-only; verification and
+emission remain hosted, and bootstrap support is not claimed.
 The bounded Terrum-authored scalar frontend now projects same-format
 `float32`/`float64` unary signs, target-typed decimal and hexadecimal floating
 literals, based integer literals directly targeting either format, `+`, `-`,

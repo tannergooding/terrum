@@ -7,10 +7,12 @@ namespace Terrum.CodeAnalysis;
 // and expression-body flag. Each of 32 nodes uses eight words: opcode, type,
 // span start/length, child/parameter, right child, and magnitude low/high.
 // Words 298/299 count statements/locals; 300..331 hold eight local declarations
-// (type, flags, name start/length); 332..391 hold twelve ordered statements
+// (type, flags, name start/length); flag 8 marks a switch selector local.
+// Words 332..391 hold twelve ordered statements
 // (kind, slot, root, span start/length). Header flags in word 2 are public,
 // NoThrow, DoesNotReturn, and caller-unsafe; words 16/17 hold out/init-ref masks
-// in the tree layout. Calls retain source-order roots and packed formal maps.
+// in the tree layout. Kinds 38/39 identify source-audited switch headers/arms.
+// Calls retain source-order roots and packed formal maps.
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
     Host.Frontend[offset] = expression.Type;

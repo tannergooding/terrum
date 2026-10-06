@@ -90,7 +90,7 @@ public static partial class ScalarFrontendHost
         }
 
         var name = Span(9);
-        if (SyntaxTree.Parse(source).HasErrors)
+        if (context is null && SyntaxTree.Parse(source).HasErrors)
         {
             throw InvalidResult();
         }
@@ -202,11 +202,12 @@ public static partial class ScalarFrontendHost
                 var flags = words[offset + 1];
                 var local = new ScalarFrontendLocal(words[offset], (flags & 1) != 0,
                     Span(offset + 2)) { IsInitialization = (flags & 2) != 0, IsConstant = (flags & 4) != 0 };
-                if (!ScalarType(local.Type) || flags is not (0 or 1 or 2 or 4)
+                if (!ScalarType(local.Type) || flags is not (0 or 1 or 2 or 4 or 8)
                     || !ValidSpan(local.Name, nonempty: true))
                 {
                     throw InvalidResult();
                 }
+                local = local with { IsSwitchSelector = flags == 8 };
                 locals.Add(local);
             }
             var declaredLocals = locals.MoveToImmutable();
@@ -221,8 +222,8 @@ public static partial class ScalarFrontendHost
                 {
                     throw InvalidResult();
                 }
-                if (kind is < 1 or > 37 or >= 16 and <= 20
-                    || (kind is 3 or 4 or 5 or 11 or 12 or 14 or 23 or 29 or 30 or 31 or 32 or 33 or 34
+                if (kind is < 1 or > 39 or >= 16 and <= 20
+                    || (kind is 3 or 4 or 5 or 11 or 12 or 14 or 23 or 29 or 30 or 31 or 32 or 33 or 34 or 38 or 39
                         ? statement.Slot <= i || statement.Slot > words[298]
                         : kind is 6 or 7
                             ? statement.Slot < 0 || statement.Slot >= i
@@ -236,6 +237,7 @@ public static partial class ScalarFrontendHost
                                     : statement.Slot > count + declaredLocals.Length
                                 : statement.Slot <= count || statement.Slot > count + declaredLocals.Length)
                     || (kind is 5 or 6 or 7 or 13 or 14 or 22 or 23 or 24 or 25 or 26 or 29 or 30 or 31 or 32 or 33 or 34 ? statement.Root != -1
+                        : kind == 39 ? statement.Root < -1 || statement.Root >= words[37]
                         : kind == 12 ? statement.Root < -1 || statement.Root >= words[37]
                         : statement.Root < 0 || statement.Root >= words[37])
                     || !ValidSpan(statement.Span, nonempty: true))
@@ -510,6 +512,8 @@ public static partial class ScalarFrontendHost
             var statementCursor = 0;
             var activeLoops = new System.Collections.Generic.List<(int Header, string? Label)>();
             var seenNames = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+            var switchLocalForStatement = new int[orderedStatements.Length];
+            Array.Fill(switchLocalForStatement, -1);
             if (!TakeDeclarationEffects(tokens, ref at, effects)
                 || !TakeCallableModifiers(tokens, ref at, isPublic, true,
                     (words[2] & 8) != 0))
@@ -609,7 +613,9 @@ public static partial class ScalarFrontendHost
             {
                 throw InvalidResult();
             }
-            if (used.Any(seen => !seen))
+            if (used.Any(seen => !seen)
+                || declaredLocals.Count(static local => local.IsSwitchSelector)
+                    != switchLocalForStatement.Count(static local => local >= 0))
             {
                 throw InvalidResult();
             }
@@ -621,6 +627,7 @@ public static partial class ScalarFrontendHost
                 {
                     BodySpan = bodySpans[index],
                     LoopSpan = loopSpans[index],
+                    SwitchLocal = switchLocalForStatement[index],
                 });
             }
             var projection = new ScalarFrontendResult(true, isPublic, 0, default,
@@ -717,7 +724,121 @@ public static partial class ScalarFrontendHost
                     {
                         throw InvalidResult();
                     }
-                    if (kind is 3 or 4 or 11 or 12 or 14 or 29 or 31 or 32)
+                    if (kind == 38)
+                    {
+                        if (clause != 0 || entry.Slot <= statementCursor
+                            || entry.Root < 0 || entry.Root >= tree.Length
+                            || tree[entry.Root].Type is < 1 or > 6)
+                        {
+                            throw InvalidResult();
+                        }
+                        if (!Take(TokenKind.SwitchKeyword))
+                        {
+                            throw InvalidResult();
+                        }
+                        var keywordSpan = tokens[at - 1].Span;
+                        if (entry.Span.Start != keywordSpan.Start
+                            || !Take(TokenKind.OpenParen) || !TakeTree(entry.Root)
+                            || !Take(TokenKind.CloseParen) || !Take(TokenKind.OpenBrace))
+                        {
+                            throw InvalidResult();
+                        }
+                        var selectorScopeLocals = visibleLocals;
+                        if (activeLocals >= declaredLocals.Length)
+                        {
+                            throw InvalidResult();
+                        }
+                        var selectorLocal = declaredLocals[activeLocals];
+                        if (!selectorLocal.IsSwitchSelector
+                            || selectorLocal.Type != tree[entry.Root].Type
+                            || selectorLocal.Name != keywordSpan
+                            )
+                        {
+                            throw InvalidResult();
+                        }
+                        switchLocalForStatement[statementIndex] = count + activeLocals;
+                        visibleLocals |= 1 << activeLocals;
+                        activeLocals++;
+                        var switchLocals = visibleLocals;
+                        var caseCount = 0;
+                        var armCount = 0;
+                        var foundDefault = false;
+                        while (statementCursor < entry.Slot)
+                        {
+                            var armIndex = statementCursor++;
+                            var arm = orderedStatements[armIndex];
+                            if (arm.Kind != 39 || arm.Slot < statementCursor
+                                || arm.Slot > entry.Slot)
+                            {
+                                throw InvalidResult();
+                            }
+                            var armStart = at;
+                            if (arm.Root == -1)
+                            {
+                                if (foundDefault || caseCount == 0 || !Take(TokenKind.Underscore))
+                                {
+                                    throw InvalidResult();
+                                }
+                                foundDefault = true;
+                            }
+                            else
+                            {
+                                if (foundDefault || tree[arm.Root].Type != tree[entry.Root].Type
+                                    || !TakeTree(arm.Root))
+                                {
+                                    throw InvalidResult();
+                                }
+                                caseCount++;
+                            }
+                            if (!Take(TokenKind.Arrow) || !Take(TokenKind.OpenBrace))
+                            {
+                                throw InvalidResult();
+                            }
+                            var armBodyStart = tokens[at - 1].Span.Start;
+                            TakeStatements(arm.Slot, depth + 1, nearestLoop);
+                            if (!Take(TokenKind.CloseBrace))
+                            {
+                                throw InvalidResult();
+                            }
+                            visibleLocals = switchLocals;
+                            bodySpans[armIndex] = new TextSpan(armBodyStart,
+                                tokens[at - 1].Span.End - armBodyStart);
+                            var armSpan = new TextSpan(tokens[armStart].Span.Start,
+                                tokens[at - 1].Span.End - tokens[armStart].Span.Start);
+                            if (arm.Span != armSpan)
+                            {
+                                throw InvalidResult();
+                            }
+                            armCount++;
+                            if (at < tokens.Length - 1 && tokens[at].Kind == TokenKind.Comma)
+                            {
+                                at++;
+                                if (statementCursor == entry.Slot
+                                    && at < tokens.Length - 1
+                                    && tokens[at].Kind == TokenKind.CloseBrace)
+                                {
+                                    break;
+                                }
+                            }
+                            else if (statementCursor < entry.Slot)
+                            {
+                                throw InvalidResult();
+                            }
+                        }
+                        if (statementCursor != entry.Slot || armCount < 2 || caseCount == 0
+                            || !foundDefault || !Take(TokenKind.CloseBrace))
+                        {
+                            throw InvalidResult();
+                        }
+                        var switchSpan = new TextSpan(keywordSpan.Start,
+                            tokens[at - 1].Span.End - keywordSpan.Start);
+                        if (entry.Span != switchSpan)
+                        {
+                            throw InvalidResult();
+                        }
+                        visibleLocals = selectorScopeLocals;
+                    }
+                    else if (kind is 3 or 4 or 11 or 12 or 14 or 29 or 31 or 32)
                     {
                         if (entry.Slot < statementCursor || entry.Slot > end
                             || (entry.Root != -1 && tree[entry.Root].Type != 5))
@@ -2650,11 +2771,16 @@ public static partial class ScalarFrontendHost
             foreach (var local in result.Locals)
             {
                 var hidden = Name(local.Name) == "_";
-                var span = hidden
+                var switchSelector = local.IsSwitchSelector;
+                var span = switchSelector
+                    ? result.Statements.Single(statement => statement.Kind == 38
+                        && statement.SwitchLocal == variables.Count).Span
+                    : hidden
                     ? result.Statements.Single(statement => statement.Kind == 15
                         && statement.Slot == variables.Count + 1).Span
                     : local.Name;
-                variables.Add(new BoundVariable(hidden ? "<discard>" : Name(local.Name),
+                variables.Add(new BoundVariable(switchSelector ? "<switch-selector>"
+                    : hidden ? "<discard>" : Name(local.Name),
                     Type(local.Type), local.IsMutable, span) {
                     IsInitializationLocal = local.IsInitialization,
                 });
@@ -2665,7 +2791,9 @@ public static partial class ScalarFrontendHost
         var callableBodySpan = methodSpan;
         var hasElseIf = !result.Statements.IsDefault
             && result.Statements.Any(static statement => statement.Kind == 23);
-        var hostedScopes = hasElseIf || result.IsNoThrow || result.DoesNotReturn;
+        var hasSwitch = !result.Statements.IsDefault
+            && result.Statements.Any(static statement => statement.Kind == 38);
+        var hostedScopes = hasElseIf || hasSwitch || result.IsNoThrow || result.DoesNotReturn;
         var returnType = Type(result.ReturnType);
         var constantLocals = new BoundConstant?[types.Length];
         var constantDeclarations = new Dictionary<int, int>();
@@ -2823,6 +2951,50 @@ public static partial class ScalarFrontendHost
                 }
             }
         }
+        var switchConstants = new Dictionary<int, BoundConstant>();
+        if (!result.Statements.IsDefault)
+        {
+            for (var index = 0; index < result.Statements.Length; index++)
+            {
+                var statement = result.Statements[index];
+                if (statement.Kind != 38)
+                {
+                    continue;
+                }
+                var selectorType = Type(result.Nodes[statement.Root].Type);
+                var priorConstants = new List<BoundConstant>();
+                for (var armIndex = index + 1; armIndex < statement.Slot;)
+                {
+                    var arm = result.Statements[armIndex];
+                    if (arm.Kind != 39)
+                    {
+                        throw InvalidResult();
+                    }
+                    if (arm.Root >= 0)
+                    {
+                        if (treeExpressions is null
+                            || FoldBoundedConstantExpression(treeExpressions[arm.Root], constantLocals)
+                                is not BoundConstant constant
+                            || constant.Type != selectorType)
+                        {
+                            throw InvalidResult();
+                        }
+                        foreach (var prior in priorConstants)
+                        {
+                            if (Binder.FoldScalarConstant(new BoundBinary(TokenKind.EqualsEquals,
+                                    prior, constant, PrimitiveType.Bool, arm.Span))
+                                is BoundConstant { Value: not 0 })
+                            {
+                                throw InvalidResult();
+                            }
+                        }
+                        priorConstants.Add(constant);
+                        switchConstants.Add(armIndex, constant);
+                    }
+                    armIndex = arm.Slot;
+                }
+            }
+        }
         var body = ImmutableArray.CreateBuilder<BoundStatement>();
         if (!result.Statements.IsDefault)
         {
@@ -2886,6 +3058,44 @@ public static partial class ScalarFrontendHost
                         statements.Add(new BoundBlock(LowerStatements(statement.Slot), statement.BodySpan) {
                             IsManagedLexicalScope = true,
                         });
+                    }
+                    else if (kind == 38)
+                    {
+                        var arms = new List<(int Index, ScalarFrontendStatement Statement,
+                            ImmutableArray<BoundStatement> Body)>();
+                        while (at < statement.Slot)
+                        {
+                            var armIndex = at++;
+                            var arm = result.Statements[armIndex];
+                            arms.Add((armIndex, arm, LowerStatements(arm.Slot)));
+                        }
+                        BoundStatement? alternate = null;
+                        for (var index = arms.Count - 1; index >= 0; index--)
+                        {
+                            var (armIndex, arm, armBody) = arms[index];
+                            var block = new BoundBlock(armBody, arm.BodySpan) {
+                                IsManagedLexicalScope = hostedScopes,
+                            };
+                            if (arm.Root == -1)
+                            {
+                                alternate = block;
+                                continue;
+                            }
+                            var condition = new BoundBinary(TokenKind.EqualsEquals,
+                                new BoundRead(statement.SwitchLocal, Type(result.Nodes[statement.Root].Type),
+                                    arm.Span),
+                                switchConstants[armIndex],
+                                PrimitiveType.Bool, arm.Span);
+                            alternate = new BoundIf(condition, block, alternate, arm.Span);
+                        }
+                        if (alternate is null)
+                        {
+                            throw InvalidResult();
+                        }
+                        statements.Add(new BoundBlock([
+                            new BoundLocal(statement.SwitchLocal, expressions[statement.Root], statement.Span),
+                            alternate,
+                        ], statement.Span) { IsManagedLexicalScope = true });
                     }
                     else if (kind == 3)
                     {
@@ -3539,12 +3749,14 @@ public readonly record struct ScalarFrontendLocal(int Type, bool IsMutable, Text
 {
     public bool IsInitialization { get; init; }
     public bool IsConstant { get; init; }
+    public bool IsSwitchSelector { get; init; }
 }
 
 public readonly record struct ScalarFrontendStatement(int Kind, int Slot, int Root, TextSpan Span)
 {
     public TextSpan BodySpan { get; init; }
     public TextSpan LoopSpan { get; init; }
+    public int SwitchLocal { get; init; } = -1;
 }
 
 public readonly record struct ScalarFrontendResult(

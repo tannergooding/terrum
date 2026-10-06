@@ -452,6 +452,27 @@ V85 is the baseline for every implemented source shape, not a feature tier.
 Readers do not reinterpret it as a historical version or use version numbers
 to select capabilities. Both layouts remain because current publication uses
 them; neither is retained for historical comparison.
+Complete-program v85 also projects a bounded `switch` statement: its selector
+must be `int32`, `uint32`, `int64`, `uint64`, `bool` or `char16`, non-default
+arms must be distinct constant values of the selector type, and the final arm
+must be `_`. Floating selectors are excluded because the projection lowers
+matching to hosted equality and does not define NaN constant-pattern semantics.
+Arm bodies are braced blocks of
+already-supported statements; guards, patterns, fallthrough forms, and
+missing or misplaced defaults reject. The source-auditing reader validates
+the ordered arm records and hidden selector local, then captures the selector
+once and lowers the arms to hosted conditionals. This complete-program route
+is selected even for one function containing a switch; single-function
+projection remains unchanged.
+
+Switch uses previously invalid v85 statement kinds 38/39 and local flag 8
+without changing frame widths, offsets, or existing record meanings. The
+current reader accepts these records only when their source audit succeeds and
+rejects malformed or unsupported records. Older v85 readers that do not know
+these reserved values reject switch projections; no reader is asked to
+reinterpret an existing v85 record. Binding, verification, and emission
+remain hosted, and switch support does not extend source-free TRRM or claim
+bootstrap support.
 These syntax and
 scanner contracts do not change semantic-module, ISA, Contract, TRRM or native
 ABI formats.

@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
@@ -138,6 +139,12 @@ public static partial class ScalarFrontendHost
             functions.Add(function);
         }
         var results = functions.MoveToImmutable();
+        if (results.Any(static function => function.Statements.Any(
+            static statement => statement.Kind == 38))
+            && SyntaxTree.Parse(MaskSwitchStatements(source, results)).HasErrors)
+        {
+            throw InvalidResult();
+        }
         var program = BindProgramCore(results, declarations, functionSources.MoveToImmutable(), policy);
         return new ScalarFrontendReadResult(results[0] with { Functions = results }, program);
     }
@@ -200,11 +207,66 @@ public static partial class ScalarFrontendHost
         return SourceText.From(text);
     }
 
+    private static SourceText MaskSwitchStatements(SourceText source,
+        ImmutableArray<ScalarFrontendResult> functions)
+    {
+        var spans = new List<TextSpan>();
+        foreach (var function in functions)
+        {
+            foreach (var statement in function.Statements)
+            {
+                if (statement.Kind == 38)
+                {
+                    spans.Add(statement.Span);
+                }
+            }
+        }
+        spans.Sort(static (left, right) => left.Start != right.Start
+            ? left.Start.CompareTo(right.Start) : right.Length.CompareTo(left.Length));
+
+        var text = string.Create(source.Length, (Source: source, Spans: spans), static (destination, state) =>
+        {
+            state.Source.Text.AsSpan().CopyTo(destination);
+            var maskedUntil = -1;
+            foreach (var span in state.Spans)
+            {
+                if (span.Start < maskedUntil)
+                {
+                    continue;
+                }
+                if (span.Length < 2 || span.End > destination.Length)
+                {
+                    throw InvalidResult();
+                }
+                destination.Slice(span.Start, span.Length).Fill(' ');
+                destination[span.Start] = '{';
+                destination[span.Start + 1] = '}';
+                maskedUntil = span.End;
+            }
+        });
+        return SourceText.From(text);
+    }
+
     private static ProgramInventory InventoryProgram(SourceText source)
     {
         var lexical = Lexer.Lex(source);
         var tokens = lexical.Tokens;
-        if (!lexical.Diagnostics.IsEmpty || tokens.Length > 64 || SyntaxTree.Parse(source).HasErrors)
+        if (!lexical.Diagnostics.IsEmpty || tokens.Length > 64)
+        {
+            throw InvalidResult();
+        }
+        var hasSwitch = false;
+        foreach (var token in tokens)
+        {
+            if (token.Kind == TokenKind.SwitchKeyword)
+            {
+                hasSwitch = true;
+                break;
+            }
+        }
+        // The project parser does not recognize this switch form. ReadProgram audits each
+        // frame first, then parses the full source with only audited switch spans masked.
+        if (!hasSwitch && SyntaxTree.Parse(source).HasErrors)
         {
             throw InvalidResult();
         }
