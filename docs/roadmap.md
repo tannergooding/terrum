@@ -392,6 +392,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7c04163d` | Support `float32`/`float64` initialization-loan outputs in hosted binding and bounded v85 projections; verify publication and frontend parity under both runtime policies |
 | `5a059bc2` | Verify v85 floating literal payloads assigned to scalar `out` destinations and published through complete-program calls under both runtime policies |
 | `365521fb` | Exercise decimal, hexadecimal-float and based-integer v85 literal payload dispatch in the Terrum frontend under both runtime policies and JIT/AOT |
 | `5e921576` | Verify v85 floating literal payloads in scalar call arguments and local initializers against hosted library output under both runtime policies |
