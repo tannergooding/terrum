@@ -401,6 +401,19 @@ non-publication distinct. Until those source and verifier contracts are
 settled, retain the existing bounded hosted/scalar cases without widening
 them.
 
+**Recommended first profile (unapproved):** Admit named local destinations
+and explicitly forwarded output parameters for supported scalar values and
+recursively exportable, handle-free `Copy` structs. Preserve the selected
+declaration, source-order evaluation and exact formal-parameter mapping;
+require exact type and mode matches, and reject duplicate output destinations.
+Keep field/indexed places, dependency-bearing views, public managed handles,
+unique or cleanup-bearing values, and inferred publication contracts outside
+this profile. Verify each mode's pre-call destination state, declared
+Boolean-result publication, required full publication on normal completion,
+exceptional non-publication and import/replacement compatibility before
+adopting it. The profile adds no source syntax or clause IDs. It remains gated
+on agreement about the exact forwarded-place set and aliasing rules.
+
 ## Constraints retained
 
 Keep `ref`, writable reference access, and `init ref` distinct. Preserve the
