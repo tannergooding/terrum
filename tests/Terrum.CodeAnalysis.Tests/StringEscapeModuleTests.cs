@@ -23,7 +23,10 @@ public sealed class StringEscapeModuleTests
     public async Task StringEscapeModuleAnalyzesFreshSourceGrants(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
-        var componentNames = new[] { "SourceRange", "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "StringEscape" };
+        var componentNames = new[] {
+            "SourceRange", "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "StringEscape",
+            "StringEscapePacked",
+        };
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)
         {
@@ -64,9 +67,14 @@ public sealed class StringEscapeModuleTests
                     bool scalarMismatch = expectedUnpaired
                         ? decoded.Scalar != -1
                         : decoded.Scalar != expectedScalar;
+                    mut uint32 errorBit = 0;
+                    if (decoded.ErrorCode == 5) { errorBit = 1; }
+                    uint32 expectedPacked = (uint32(decoded.Scalar + 1) << 5)
+                        | (uint32(decoded.ConsumedLength) << 1) | errorBit;
                     if (decoded.ErrorCode != expectedError || scalarMismatch
                         || decoded.ConsumedLength != expectedConsumedLength
-                        || decoded.ErrorLength != expectedErrorLength) {
+                        || decoded.ErrorLength != expectedErrorLength
+                        || AnalyzeStringEscapePacked(at, spellingLength) != expectedPacked) {
                         return item + 1;
                     }
                     at = at + spellingLength;

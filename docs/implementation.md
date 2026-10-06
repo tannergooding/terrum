@@ -2690,6 +2690,19 @@ source-slice range can be extracted, including a zero-length range at EOF.
 It rejects negative or out-of-snapshot bounds before subtracting the start
 from source length; the scalar predicate does not export a `SourceRange`
 value or validate raw grant preconditions.
+`AnalyzeStringEscapePacked(start, length)` separately encodes the existing
+`StringEscapeDecodeResult.TryAnalyze` fields in one `uint32`: scalar plus one
+in bits 5..25, consumed length in bits 1..4 and error-code-5 in bit 0; zero
+means the analyzer would return false, while error length is reconstructed as
+consumed length for errors and zero for success. This provisional encoding
+depends on the current error-code, scalar and consumed-width domains recorded
+in the [native source-grant proposal](proposals/native-source-grant-library.md).
+The scalar-only component uses a sentinel-returning hex-digit helper and does
+not include the aggregate decoder in its source-dependent call closure. The
+analyzer is not whole-string validation: direct calls on backslash-before-
+line-break spellings retain its analyzer result rather than applying the
+hosted lexer's preceding special case. This does not move scanner or scalar
+frontend support out of the hosted verifier/emitter.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under

@@ -1,0 +1,108 @@
+namespace Terrum.CodeAnalysis;
+
+public static uint32 AnalyzeStringEscapePacked(int32 start, int32 length)
+{
+    int32 sourceLength = Host.Source.Length;
+    if (start < 0 || length < 0 || start > sourceLength)
+    {
+        return 0;
+    }
+    if (length > sourceLength - start || length == 0)
+    {
+        return 0;
+    }
+
+    int32 end = start + length;
+    if (Host.Source[start] != char16(92))
+    {
+        return 0;
+    }
+    if (length == 1)
+    {
+        return PackStringEscapeResult(0, 1, true);
+    }
+
+    int32 escapedAt = start + 1;
+    int32 escaped = int32(Host.Source[escapedAt]);
+    mut int32 scalar = escaped;
+    mut int32 width = 1;
+    if (escaped >= 55296 && escaped <= 57343)
+    {
+        scalar = ReadUtf16Scalar(escapedAt, end);
+        width = Utf16ScalarWidth(scalar);
+    }
+    if (scalar < 0)
+    {
+        return PackStringEscapeResult(-1, 2, true);
+    }
+
+    if (escaped == 110) { scalar = 10; }
+    else if (escaped == 114) { scalar = 13; }
+    else if (escaped == 116) { scalar = 9; }
+    else if (escaped == 92) { scalar = 92; }
+    else if (escaped == 34) { scalar = 34; }
+    else if (escaped == 48) { scalar = 0; }
+    else if (escaped == 117 || escaped == 85)
+    {
+        mut int32 required = 4;
+        if (escaped == 85)
+        {
+            required = 8;
+        }
+        mut int32 at = escapedAt + 1;
+        mut int32 digits = 0;
+        mut uint32 value = 0;
+        while (digits < required && at < end)
+        {
+            int32 digit = GetHexDigitOrMinusOne(Host.Source[at]);
+            if (digit < 0)
+            {
+                break;
+            }
+            value = (value << 4) | uint32(digit);
+            at = at + 1;
+            digits = digits + 1;
+        }
+
+        if (digits != required || value > uint32(0x10FFFF)
+            || (value >= uint32(0xD800) && value <= uint32(0xDFFF)))
+        {
+            return PackStringEscapeResult(0, at - start, true);
+        }
+        return PackStringEscapeResult(int32(value), at - start, false);
+    }
+    else if (escaped != 110 && escaped != 114 && escaped != 116
+        && escaped != 92 && escaped != 34 && escaped != 48)
+    {
+        return PackStringEscapeResult(0, 1 + width, true);
+    }
+
+    return PackStringEscapeResult(scalar, 1 + width, false);
+}
+
+public static uint32 PackStringEscapeResult(int32 scalar, int32 consumedLength, bool hasError)
+{
+    mut uint32 errorBit = 0;
+    if (hasError)
+    {
+        errorBit = 1;
+    }
+    return (uint32(scalar + 1) << 5) | (uint32(consumedLength) << 1) | errorBit;
+}
+
+public static int32 GetHexDigitOrMinusOne(char16 character)
+{
+    if (character >= char16(48) && character <= char16(57))
+    {
+        return int32(character) - 48;
+    }
+    if (character >= char16(65) && character <= char16(70))
+    {
+        return int32(character) - 55;
+    }
+    if (character >= char16(97) && character <= char16(102))
+    {
+        return int32(character) - 87;
+    }
+    return -1;
+}

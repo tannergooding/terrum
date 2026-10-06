@@ -221,6 +221,51 @@ before subtracting it from source length. Keep aggregate `SourceRange`
 exports and output closures, the source-free DLL, classifier boundary and ABI
 promotion decision unchanged.
 
+### Provisional packed scalar string-escape export
+
+**Question:** Should the maintained companion expose the result of
+`StringEscapeDecodeResult.TryAnalyze` through one packed scalar export rather
+than an aggregate output or several rescanning field queries?
+
+**Summary:** `TryAnalyze` returns false for an invalid/empty range or one not
+starting with a backslash. Otherwise it publishes either a valid escape
+(`ErrorCode = 0`, scalar and consumed width) or a malformed escape
+(`ErrorCode = 5`, consumed width and an equal error width); directly escaped
+unpaired UTF-16 uses scalar `-1`. The source-grant classifier validates the
+whole source-dependent program, so export selection cannot hide the
+aggregate result type or output closure. One `uint32` can retain the current
+field domain in one source scan: zero means not analyzable; bits 5..25 store
+`Scalar + 1`; bits 1..4 store consumed width; bit 0 marks error code 5.
+`ErrorLength` is derived as consumed width for an error and zero on success.
+This relies on the current decoder producing only error codes 0/5, scalar
+values from -1 through U+10FFFF and positive consumed widths no greater than
+10. Future changes to those values require revisiting the encoding. Separate
+field exports would repeatedly scan and require identical arguments and the
+same unchanged source snapshot across calls. The isolated implementation uses
+its own scalar `GetHexDigitOrMinusOne` helper so neither the aggregate decoder
+nor the source-free `CharacterFacts` component changes.
+
+**Recommendation:** Include only the isolated
+`AnalyzeStringEscapePacked(int32 start, int32 length) -> uint32` query as
+provisional evidence, preserving `TryAnalyze`'s direct range semantics rather
+than the surrounding lexer’s string-boundary behavior. Return zero for
+`TryAnalyze == false`; otherwise use the encoding above. Check slice bounds
+before computing the end or reading source, use a scalar hexadecimal-digit
+helper, and do not call the aggregate `TryAnalyze` closure. Compare
+reconstructed fields with hosted C# escape diagnostics, including truncation,
+non-hex stopping positions, Unicode boundaries, unpaired surrogates, trailing
+text, maximum grants and invalid arguments. For a backslash immediately
+followed by a line break, test `TryAnalyze` semantics directly: the hosted
+lexer handles that boundary before invoking its escape analyzer. Keep the
+classifier, source-free DLL, general string-literal/scanner support and ABI
+promotion decision unchanged. Direct native tests under both runtime policies
+cover simple and Unicode escapes, malformed/truncated forms, scalar limits,
+paired and unpaired surrogates, trailing text, direct line-break spellings,
+invalid arguments and maximum grants. Semantic-module regressions compare the
+packed fields with the aggregate analyzer across the hosted diagnostic corpus
+and exhaustive BMP/supplementary escape cases; the maintained manifest binds
+the selected export without changing the source-free export set.
+
 ### Provisional scalar source-offset export
 
 **Question:** Should the maintained companion expose the hosted line/character

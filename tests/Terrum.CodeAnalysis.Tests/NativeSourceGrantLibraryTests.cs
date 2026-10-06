@@ -29,6 +29,7 @@ public sealed class NativeSourceGrantLibraryTests
     private const string SourceOffsetExport = "Terrum.CodeAnalysis.GetSourceOffsetOrMinusOne";
     private const string SourceLengthExport = "Terrum.CodeAnalysis.GetSourceTextLength";
     private const string CanGetSourceRangeExport = "Terrum.CodeAnalysis.CanGetSourceRange";
+    private const string AnalyzeStringEscapePackedExport = "Terrum.CodeAnalysis.AnalyzeStringEscapePacked";
     private const string LineCountExport = "Terrum.CodeAnalysis.GetSourceLineCount";
     private const string CanParseUInt64Export = "Terrum.CodeAnalysis.Numerics64.CanParseUInt64Base";
     private const string ParseUInt64Export = "Terrum.CodeAnalysis.Numerics64.ParseUInt64Base";
@@ -457,6 +458,108 @@ public sealed class NativeSourceGrantLibraryTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void PackedStringEscapeMatchesHostedEscapeContract(BoundRuntimePolicy policy)
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var componentNames = new[] {
+            "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "StringEscapePacked",
+        };
+        var compilation = Compilation.CreateLibrary(
+            [.. componentNames.Select(name =>
+            {
+                var path = Path.Combine(sourceDirectory, name + ".terrum");
+                return SyntaxTree.Parse(File.ReadAllText(path), path);
+            })],
+            [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+                IsInvocationScoped = true,
+            }],
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
+            Assert.IsType<BoundProgram>(compilation.Program),
+            [AnalyzeStringEscapePackedExport], (NativeRuntimePolicy)policy);
+        var export = Assert.Single(artifact.Exports);
+        Assert.True(export.SourceDependent);
+        Assert.Equal(PrimitiveType.UInt32, export.ReturnType);
+        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], export.ParameterTypes.ToArray());
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-string-escape-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(path, artifact.Image);
+        try
+        {
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var bindings = new NativeSourceGrantTestBindings(module,
+                    [.. artifact.Exports.Select(static item => (item.Name, item.SourceDependent,
+                        item.ReturnType, item.ParameterTypes))]);
+                (string Source, int Start, int Length, int Scalar, int Consumed, bool HasError)[] cases = [
+                    ("\\", 0, 1, 0, 1, true),
+                    ("\\n", 0, 2, 10, 2, false),
+                    ("\\r", 0, 2, 13, 2, false),
+                    ("\\t", 0, 2, 9, 2, false),
+                    ("\\\\", 0, 2, 92, 2, false),
+                    ("\\\"", 0, 2, 34, 2, false),
+                    ("\\0", 0, 2, 0, 2, false),
+                    ("\\u00E9suffix", 0, 12, 233, 6, false),
+                    ("\\U0001F600!", 0, 11, 0x1F600, 10, false),
+                    ("\\U0010FFFF", 0, 10, 0x10FFFF, 10, false),
+                    ("\\q", 0, 2, 0, 2, true),
+                    ("\\u", 0, 2, 0, 2, true),
+                    ("\\u123", 0, 5, 0, 5, true),
+                    ("\\u12xz", 0, 6, 0, 4, true),
+                    ("\\uD800", 0, 6, 0, 6, true),
+                    ("\\U00110000", 0, 10, 0, 10, true),
+                    ("\\\uD800A", 0, 3, -1, 2, true),
+                    ("\\\uD83D\uDE00", 0, 3, 0, 3, true),
+                    ("\\\n", 0, 2, 0, 2, true),
+                    ("plain", 0, 5, 0, 0, false),
+                    ("\\n", -1, 2, 0, 0, false),
+                    ("\\n", 0, -1, 0, 0, false),
+                    ("\\n", 0, int.MaxValue, 0, 0, false),
+                    ("\\n", int.MaxValue, 1, 0, 0, false),
+                    ("\\n", 2, 1, 0, 0, false),
+                    ("\\n", 0, 0, 0, 0, false),
+                ];
+                foreach (var item in cases)
+                {
+                    var canAnalyze = item.Start >= 0 && item.Length > 0
+                        && item.Start <= item.Source.Length
+                        && item.Length <= item.Source.Length - item.Start
+                        && item.Source[item.Start] == '\\';
+                    var expected = canAnalyze
+                        ? PackStringEscapeResult(item.Scalar, item.Consumed, item.HasError)
+                        : 0u;
+                    Assert.Equal(expected, bindings.Invoke<uint>(AnalyzeStringEscapePackedExport,
+                        item.Source.ToCharArray(), item.Start, item.Length));
+                }
+
+                var maximumSource = new string('x', 16_382) + "\\n";
+                var maximum = maximumSource.ToCharArray();
+                Assert.Equal(PackStringEscapeResult(10, 2, false),
+                    bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, maximum, 16_382, 2));
+                var maximumTrailingEscape = new string('x', 16_383) + "\\";
+                Assert.Equal(PackStringEscapeResult(0, 1, true),
+                    bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, maximumTrailingEscape.ToCharArray(),
+                        16_383, 1));
+                _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, new char[16_385], 0, 1));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public void SourceOffsetMatchesHostedTryGetOffset(BoundRuntimePolicy policy)
     {
         Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -699,7 +802,8 @@ public sealed class NativeSourceGrantLibraryTests
                         ?? throw new InvalidDataException("Missing parameter type.")))
                     .ToImmutableArray()))
             .ToImmutableArray();
-        Assert.Equal([CanGetSourceRangeExport, DecodeScalarExport, SourceCharacterPositionExport,
+        Assert.Equal([AnalyzeStringEscapePackedExport, CanGetSourceRangeExport, DecodeScalarExport,
+            SourceCharacterPositionExport,
             SourceCodeUnitExport,
             SourceLineContentEndExport, LineCountExport, SourceLineEndExport, SourceLineNumberExport,
             SourceOffsetExport, SourceLengthExport, CanParseChar16Export,
@@ -707,11 +811,20 @@ public sealed class NativeSourceGrantLibraryTests
             ParseChar16Export, ParseInt32Export, ParseInt64Export, ParseUInt32Export, ParseUInt64Export,
             ReadScalarExport],
             [.. exports.Select(static export => export.Name).OrderBy(static name => name, StringComparer.Ordinal)]);
+        var packedEscape = Assert.Single(exports,
+            static export => export.Name == AnalyzeStringEscapePackedExport);
+        Assert.True(packedEscape.SourceDependent);
+        Assert.Equal(PrimitiveType.UInt32, packedEscape.ReturnType);
+        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], packedEscape.ParameterTypes.ToArray());
 
         var module = NativeLibrary.Load(imagePath);
         try
         {
             var bindings = new NativeSourceGrantTestBindings(module, exports);
+            Assert.Equal(PackStringEscapeResult(10, 2, false),
+                bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, "\\n".ToCharArray(), 0, 2));
+            Assert.Equal(PackStringEscapeResult(-1, 2, true),
+                bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, "\\\uD800A".ToCharArray(), 0, 3));
             var parserSource = "!1__2?".ToCharArray();
             Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseUInt64Export, parserSource, 1, 4, (uint)10));
             Assert.Equal(12UL, bindings.Invoke<ulong>(ParseUInt64Export, parserSource, 1, 4, (uint)10));
@@ -1114,6 +1227,9 @@ public sealed class NativeSourceGrantLibraryTests
         var expected = hosted.TryGetOffset(line, character, out var offset) ? offset : -1;
         Assert.Equal(expected, bindings.Invoke<int>(SourceOffsetExport, source, line, character));
     }
+
+    private static uint PackStringEscapeResult(int scalar, int consumedLength, bool hasError) =>
+        ((uint)(scalar + 1) << 5) | ((uint)consumedLength << 1) | (hasError ? 1u : 0u);
 
     private static string RepositoryRoot()
     {

@@ -257,7 +257,8 @@ prerequisite has already been met.
     scalar source-text-length, source-code-unit, source-offset and
     source-position queries, scalar source-line-count and source-line
     content/including-break end queries, a scalar source-range validity
-    predicate, and paired scalar integer-parsing queries, with selected-export
+    predicate, a packed scalar string-escape query, and paired scalar
+    integer-parsing queries, with selected-export
     descriptors bound to the image hash and end-relative
     reads based on invocation length. The source-free
     compiler-primitives DLL remains unchanged; this does not promote the
