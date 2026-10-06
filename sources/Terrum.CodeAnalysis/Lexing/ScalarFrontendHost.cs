@@ -445,7 +445,8 @@ public static partial class ScalarFrontendHost
                         or 105 or 107 or 108 or 109
                         or >= 65 and <= 70 or 72 or 74 => node.Type,
                     3 => 0,
-                    >= 88 and <= 90 => intrinsicTypes[node.Left],
+                    >= 88 and <= 90 => intrinsicTypes[node.Left] != 0
+                        ? intrinsicTypes[node.Left] : intrinsicTypes[node.Right],
                     84 => intrinsicTypes[node.Right] != 0
                         ? intrinsicTypes[node.Right] : intrinsicTypes[node.Low],
                     _ => intrinsicTypes[node.Left] != 0 || node.Right < 0
@@ -1112,6 +1113,8 @@ public static partial class ScalarFrontendHost
                             throw InvalidResult();
                         }
                         var inferred = tokens[at - 1].Kind == TokenKind.VarKeyword;
+                        var hasUncontextualShift = IsUncontextualShiftRoot(
+                            tree, intrinsicTypes, entry.Root);
                         if (constant && inferred
                             || !inferred && !MatchesScalarType(tokens[at - 1], local.Type, aliases)
                             || !Take(TokenKind.Identifier)
@@ -1122,7 +1125,7 @@ public static partial class ScalarFrontendHost
                             || tree[entry.Root].Type != local.Type
                             || entry.Kind == 27 && tree[entry.Root].Operation is not (3 or 20 or 21)
                             || entry.Kind == 28 && (tree[entry.Root].Operation is 3 or 20 or 21)
-                            || inferred && intrinsicTypes[entry.Root] == 0
+                            || inferred && (intrinsicTypes[entry.Root] == 0 || hasUncontextualShift)
                             || !TakeTree(entry.Root)
                             || entry.Slot != count + activeLocals + 1
                             || clause == 0 && !Take(TokenKind.Semicolon))
@@ -1166,6 +1169,7 @@ public static partial class ScalarFrontendHost
                             || !Take(TokenKind.Equals)
                             || tree[entry.Root].Type != local.Type
                             || intrinsicTypes[entry.Root] == 0
+                            || IsUncontextualShiftRoot(tree, intrinsicTypes, entry.Root)
                             || !TakeTree(entry.Root) || !Take(TokenKind.Semicolon))
                         {
                             throw InvalidResult();
@@ -1194,10 +1198,15 @@ public static partial class ScalarFrontendHost
                         else
                         {
                             var local = declaredLocals[entry.Slot - count - 1];
+                            var inferredInitialization = local.IsInitialization
+                                && orderedStatements.Any(statement => statement.Kind == 26
+                                    && statement.Slot == entry.Slot);
                             if (!Visible(entry.Slot) || !local.IsMutable && !local.IsInitialization
                                 || !Take(TokenKind.Identifier)
                                 || tokens[at - 1].Name != SourceName(source, local.Name)
                                 || !Take(TokenKind.Equals) || tree[entry.Root].Type != local.Type
+                                || inferredInitialization
+                                    && IsUncontextualShiftRoot(tree, intrinsicTypes, entry.Root)
                                 || !TakeTree(entry.Root)
                                 || clause == 0 && !Take(TokenKind.Semicolon))
                             {
@@ -2171,12 +2180,15 @@ public static partial class ScalarFrontendHost
                 var shift = binaryOperation % 100 is >= 88 and <= 90;
                 if ((encodedOffset != 0 && binaryOperation / 100 != (literalFirst ? 3 : 1))
                     || expression.Type != type
-                    || (shift ? literalFirst || type != parameterType
-                            || parameterType is not (1 or 2 or 3 or 4)
+                    || (shift ? (literalFirst
+                            ? parameterType != 1 || type is not (1 or 2 or 3 or 4)
+                            : type != parameterType || parameterType is not (1 or 2 or 3 or 4))
                         : comparison ? type != 5 || parameterType is not (1 or 2 or 3 or 4 or 6 or 7 or 8)
                         : type != parameterType || parameterType is not (1 or 2 or 3 or 4 or 7 or 8))
                     || parameter > parameters
-                    || negativeLiteral && !shift && parameterType is not (1 or 3 or 7 or 8)
+                    || negativeLiteral && (shift
+                        ? literalFirst && type is not (1 or 3)
+                        : parameterType is not (1 or 3 or 7 or 8))
                     || !ValidSpan(expression.Span, nonempty: true))
                 {
                     return false;
@@ -2196,7 +2208,7 @@ public static partial class ScalarFrontendHost
                     && tokens[literalFirst ? first : second].Kind == TokenKind.NumericLiteral
                     && (shift
                         ? ValidMagnitude(tokens[literalFirst ? first : second].Text.AsSpan(),
-                            1, negativeLiteral, left, right)
+                            literalFirst ? type : 1, negativeLiteral, left, right)
                         : parameterType is 7 or 8
                         ? FloatingProjectionMatches(
                             tokens[literalFirst ? first : second].Text.AsSpan(),
@@ -2574,6 +2586,27 @@ public static partial class ScalarFrontendHost
     }
 
     private static bool ScalarType(int type) => type is >= 1 and <= 8;
+
+    private static bool IsUncontextualShiftRoot(
+        ImmutableArray<ScalarFrontendNode> nodes, ReadOnlySpan<int> intrinsicTypes, int root)
+    {
+        if ((uint)root >= (uint)nodes.Length)
+        {
+            return false;
+        }
+        while (nodes[root].Operation is 46 or 110)
+        {
+            root = nodes[root].Left;
+            if ((uint)root >= (uint)nodes.Length)
+            {
+                return false;
+            }
+        }
+        var expression = nodes[root];
+        return expression.Operation is >= 88 and <= 90
+            && (uint)expression.Left < (uint)nodes.Length
+            && intrinsicTypes[expression.Left] == 0;
+    }
 
     private static bool SupportedScalarConversion(int sourceType, int targetType)
         => ((sourceType is 1 or 2 or 3 or 4 or 6)
@@ -3604,11 +3637,13 @@ public static partial class ScalarFrontendHost
                 var nameIndex = literalFirst ? second : first;
                 var parameterType = types[parameter - 1].Type;
                 var shift = binaryOperation % 100 is >= 88 and <= 90;
-                var literalType = shift ? PrimitiveType.Int32 : parameterType;
-                var value = parameterType is PrimitiveType.Float32 or PrimitiveType.Float64
-                    ? FloatingProjectionValue(parameterType == PrimitiveType.Float32 ? 7 : 8,
+                var literalType = shift
+                    ? literalFirst ? Type(expression.Type) : PrimitiveType.Int32
+                    : parameterType;
+                var value = literalType is PrimitiveType.Float32 or PrimitiveType.Float64
+                    ? FloatingProjectionValue(literalType == PrimitiveType.Float32 ? 7 : 8,
                         expression.LeftParameter, expression.RightParameter)
-                    : parameterType is PrimitiveType.Int32 or PrimitiveType.UInt32
+                    : literalType is PrimitiveType.Int32 or PrimitiveType.UInt32
                         ? expression.LeftParameter
                         : unchecked((long)((ulong)(uint)expression.RightParameter << 32
                             | (uint)expression.LeftParameter));

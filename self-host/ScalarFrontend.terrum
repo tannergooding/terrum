@@ -1279,8 +1279,10 @@ mut class ScalarFrontendState
             }
             if (TryGetToken(tokenView, _at, init var next)
                 && ((next.Kind >= 57 && next.Kind <= 61)
-                    || next.Kind == 71 || next.Kind == 73 || next.Kind == 75))
+                    || next.Kind == 71 || next.Kind == 73 || next.Kind == 75
+                    || (next.Kind >= 88 && next.Kind <= 90)))
             {
+                bool isShift = next.Kind >= 88 && next.Kind <= 90;
                 if ((expectedType < 1 || expectedType > 4)
                     && (expectedType != 7 && expectedType != 8
                         || next.Kind < 57 || next.Kind > 60))
@@ -1300,7 +1302,8 @@ mut class ScalarFrontendState
                 {
                     return false;
                 }
-                if (parameterType != expectedType)
+                if ((isShift && parameterType != 1)
+                    || (!isShift && parameterType != expectedType))
                 {
                     FailAt(2, next.Range);
                     return false;
@@ -3995,8 +3998,10 @@ mut class ScalarFrontendState
                 return false;
             }
             mut int32 rightType = TreeWord(right, 1);
-            if (!shift && leftType == 0 && rightType != 0
-                && !ResolveTreeLiteral(left, rightType, false, tokenView))
+            if (leftType == 0 && rightType != 0
+                && !ResolveTreeLiteral(left,
+                    shift ? expected >= 1 && expected <= 4 ? expected : 1 : rightType,
+                    false, tokenView))
             {
                 return false;
             }

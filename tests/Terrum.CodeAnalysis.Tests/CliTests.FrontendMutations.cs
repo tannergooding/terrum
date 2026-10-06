@@ -300,6 +300,8 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { mut int32 x = 1; return x >>> uint32(1); }")]
     [InlineData("int32 Main() { var x = 1 << 2; return 42; }")]
     [InlineData("int32 Main() { mut int32 count = 2; var x = 1 << count; return x; }")]
+    [InlineData("int32 Main() { mut int32 count = 2; _ = 1 << count; return 42; }")]
+    [InlineData("int32 Main() { mut int32 count = 2; init var x; x = 1 << count; return x; }")]
     [InlineData("int32 Main() { mut int32 x = 1; (x + 1) += 2; return x; }")]
     [InlineData("int32 Main() { int32 x = 1; (x) += 2; return x; }")]
     [InlineData("int32 Main() { mut int32 x = 4; ((x++)); (++x); return x; }")]

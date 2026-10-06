@@ -574,13 +574,13 @@ formal-position map is checked against source parameter names. Overload
 selection remains unsupported. Semantic verification and emission remain
 hosted.
 The bounded scalar frontend also projects `<<`, `>>` and `>>>` when the left
-operand is an `int32`, `uint32`, `int64` or `uint64` parameter or local. The
-shift count may be an `int32` parameter or local, or an integer literal
-representable as `int32`. The source-auditing reader checks the operator,
-operand bindings and types, and literal representation before constructing
-the existing bound operation; checked shift counts and truncation remain
-hosted semantics. This does not add a projection version, TRRM operation or
-independent verifier/emitter support.
+operand is an `int32`, `uint32`, `int64` or `uint64` parameter, local or
+contextually typed integer literal. The shift count may be an `int32` parameter
+or local, or an integer literal representable as `int32`. The source-auditing
+reader checks the operator, operand bindings and types, and literal
+representation before constructing the existing bound operation; checked
+shift counts and truncation remain hosted semantics. This does not add a
+projection version, TRRM operation or independent verifier/emitter support.
 Single-function compact expression records and tree/statement records retain
 their existing layouts. Complete-program headers and every function frame
 carry v85, as do single-function diagnostic records. No obsolete tag is accepted

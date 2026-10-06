@@ -91,9 +91,53 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return Shift(21); } int32 Shift(int32 value) { int32 count = 1; return value << count; }")]
     [InlineData("int32 Main() { uint32 value = 0x80000000; int32 count = 31; return value >>> count == 1 ? 42 : 0; }")]
     [InlineData("int32 Main() { uint32 value = 1; return value << 31 == 0x80000000 ? 42 : 0; }")]
+    [InlineData("int32 Main() { int32 count = 5; int32 value = 1 << count; return value == 32 ? 42 : 0; }")]
+    [InlineData("int32 Main() { int32 count = 5; init int32 value; value = 1 << count; return value == 32 ? 42 : 0; }")]
+    [InlineData("int32 Main() { int32 count = 2; var value = +(1 << count); return value == 4 ? 42 : 0; }")]
+    [InlineData("int32 Main() { int32 count = 2; var value = (1 << count) << count; return value == 16 ? 42 : 0; }")]
     public async Task ScalarFrontendProjectsCheckedIntegerShiftsWithLocalOperandsAsync(string source)
     {
         await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Theory]
+    [InlineData("int32 Main() { return Shift(5) == 32 ? 42 : 0; } int32 Shift(int32 count) { return 1 << count; }")]
+    [InlineData("int32 Main() { return Shift(31) == 0x80000000 ? 42 : 0; } uint32 Shift(int32 count) { return 1 << count; }")]
+    [InlineData("int32 Main() { return Shift(63) == 0x8000000000000000 ? 42 : 0; } uint64 Shift(int32 count) { return 1 << count; }")]
+    [InlineData("int32 Main() { return Shift(1) == 2147483647 ? 42 : 0; } int32 Shift(int32 count) { return -1 >>> count; }")]
+    [InlineData("int32 Main() { return Shift(0) == -2147483648 ? 42 : 0; } int32 Shift(int32 count) { return -2147483648 >>> count; }")]
+    public async Task ScalarFrontendProjectsCheckedIntegerShiftsWithLiteralLeftOperandsAsync(string source)
+    {
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Fact]
+    public async Task ScalarFrontendPreservesLiteralLeftShiftTypeThroughComparisonAsync()
+    {
+        const string source = "int32 Main() { int32 count = 5; return Shift(count) ? 42 : 0; } bool Shift(int32 count) { return 1 << count == 32; }";
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Theory]
+    [InlineData("int32 Shift(int32 count) { return 1 << count; }", 388, 1, 1)]
+    [InlineData("int64 Shift(int32 count) { return 1 >> count; }", 389, 3, 1)]
+    [InlineData("uint32 Shift(int32 count) { return 1 >>> count; }", 390, 2, 1)]
+    [InlineData("int32 Shift(int32 count) { return -2147483648 >>> count; }", 1590, 1, int.MinValue)]
+    public async Task ScalarFrontendProjectsLiteralLeftShiftsInCompactProjectionAsync(
+        string source, int operation, int type, int literalLow)
+    {
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+            "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(0, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        var result = document.RootElement.GetProperty("result");
+        Assert.True(result.GetProperty("valid").GetBoolean());
+        Assert.Equal(operation, result.GetProperty("whenTrue").GetProperty("operation").GetInt32());
+        Assert.Equal(type, result.GetProperty("whenTrue").GetProperty("type").GetInt32());
+        Assert.Equal(literalLow, result.GetProperty("whenTrue").GetProperty("leftParameter").GetInt32());
+        Assert.Equal(0, result.GetProperty("whenTrue").GetProperty("rightParameter").GetInt32());
     }
 
     [Theory]
