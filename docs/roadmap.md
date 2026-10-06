@@ -257,9 +257,10 @@ prerequisite has already been met.
     scalar source-text-length, source-code-unit, source-offset and
     source-position queries, scalar source-line-count and source-line
     content/including-break end queries, a scalar source-range validity
-    predicate, packed scalar string- and character-literal queries, and
-    scalar string-literal validation/count/indexed-value/encoded-length
-    queries and paired scalar integer-parsing queries, with selected-export
+    predicate, packed scalar string- and character-literal queries, a scalar
+    character-literal value query, scalar string-literal
+    validation/count/indexed-value/encoded-length queries and paired scalar
+    integer-parsing queries, with selected-export
     descriptors bound to the image hash and end-relative
     reads based on invocation length. The source-free
     compiler-primitives DLL remains unchanged; this does not promote the
@@ -316,6 +317,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `a15b9174` | Add a provisional scalar character-literal value export over the packed analyzer, with aggregate parity and maintained-manifest coverage |
 | `7417d62f` | Verify exact-capacity 49,146-byte UTF-8 output for a maximum-length U+0800 literal through persisted semantic-module JIT |
 | `a0738790` | Exercise maximum UTF-8 and Latin-1 encoded lengths through the maintained source-grant DLL under both runtime policies |
 | `c5afd0c8` | Add provisional scalar string-literal encoded-length query for strict single-byte, UTF-8, UTF-16 unit/byte and UTF-32 byte lengths |
