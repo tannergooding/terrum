@@ -568,6 +568,46 @@ public sealed partial class JitTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FloatingGenericNonBooleanAndVoidOutputsPublishAsync(bool checkedFailures)
+    {
+        const string Source = """
+            [NoThrow] int32 Fill<T>(T value, int32 status, out T copied, init ref<T> initialized)
+                where T : [Copy] {
+                copied = value;
+                initialized = value;
+                return status;
+            }
+            [NoThrow] void FillVoid<T>(T value, out T copied, init ref<T> initialized)
+                where T : [Copy] {
+                copied = value;
+                initialized = value;
+            }
+            int32 Main() {
+                int32 zeroStatus = Fill(float32(1.5), 0, out var first, init var firstCopy);
+                int32 status = Fill<float64>(float64(2.5), 7, out var second, init var secondCopy);
+                FillVoid(float32(3.5), out var voidCopy, init var voidInitialized);
+                if (zeroStatus != 0 || status != 7 || first != float32(1.5)
+                    || firstCopy != float32(1.5) || second != float64(2.5)
+                    || secondCopy != float64(2.5) || voidCopy != float32(3.5)
+                    || voidInitialized != float32(3.5)) {
+                    return 1;
+                }
+                return 42;
+            }
+            """;
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+    }
+
     [Fact]
     public Task GenericFixedScalarOutputsDoNotPublishAfterCheckedFailureAsync()
     {

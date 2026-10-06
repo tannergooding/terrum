@@ -54,6 +54,12 @@ public sealed partial class GenericControlFlowModuleTests
             if (marker != 42) { return 0; }
             return 7;
         }
+        [NoThrow] int32 FillFloating<T>(T value, int32 status, out T result,
+            init ref<T> initialized) where T : [Copy] {
+            result = value;
+            initialized = value;
+            return status;
+        }
         [NoThrow] void FillInitVoid<T>(T value, init ref<T> result) where T : [Copy] {
             result = value;
         }
@@ -74,6 +80,8 @@ public sealed partial class GenericControlFlowModuleTests
             FillVoid(copied, out var copiedAgain);
             int32 initStatus = FillInit(result, 42, init var initialized);
             FillInitVoid(copied, init var initializedAgain);
+            int32 floatingStatus = FillFloating(float32(40.5), 0,
+                out var floatingCopy, init var floatingInitialized);
             mut Pair mixed = new Pair(0, 0);
             int32 mixedStatus = FillMixed(result, int64(42), 7, out mixed,
                 init var initializedMixed, out var mixedCount, init var mixedScore);
@@ -81,6 +89,8 @@ public sealed partial class GenericControlFlowModuleTests
                 || copiedAgain.First != 40 || copiedAgain.Second != 2
                 || initStatus != 7 || initialized.First != 40 || initialized.Second != 2
                 || initializedAgain.First != 40 || initializedAgain.Second != 2
+                || floatingStatus != 0 || floatingCopy != float32(40.5)
+                || floatingInitialized != float32(40.5)
                 || mixedStatus != 7 || mixed.First != 40 || mixed.Second != 2
                 || initializedMixed != 42 || mixedCount != 2 || mixedScore != float64(3.5)) { return 2; }
             return int32(result.First + result.Second) + Count(result, 0);
@@ -100,6 +110,7 @@ public sealed partial class GenericControlFlowModuleTests
             .Replace("status = Fill(", "status = Fill<Pair>(", StringComparison.Ordinal)
             .Replace("FillVoid(", "FillVoid<Pair>(", StringComparison.Ordinal)
             .Replace("FillInit(", "FillInit<Pair>(", StringComparison.Ordinal)
+            .Replace("FillFloating(", "FillFloating<float32>(", StringComparison.Ordinal)
             .Replace("FillInitVoid(", "FillInitVoid<Pair>(", StringComparison.Ordinal)
             .Replace("FillMixed(", "FillMixed<Pair, int64>(", StringComparison.Ordinal)
             .Replace("Count(", "Count<Pair>(", StringComparison.Ordinal);
@@ -135,6 +146,12 @@ public sealed partial class GenericControlFlowModuleTests
             static function => function.Name == "$producer.FillInit<Pair>");
         Assert.Equal(PrimitiveType.Int32, fillInit.ReturnType);
         Assert.True(fillInit.Variables[2].IsInit);
+        var fillFloating = Assert.Single(linked.Functions,
+            static function => function.Name == "$producer.FillFloating<float32>");
+        Assert.Equal(PrimitiveType.Int32, fillFloating.ReturnType);
+        Assert.True(fillFloating.Variables[2].IsOut);
+        Assert.False(fillFloating.Variables[2].IsInit);
+        Assert.True(fillFloating.Variables[3].IsInit);
         var fillInitVoid = Assert.Single(linked.Functions,
             static function => function.Name == "$producer.FillInitVoid<Pair>");
         Assert.Equal(PrimitiveType.Void, fillInitVoid.ReturnType);
