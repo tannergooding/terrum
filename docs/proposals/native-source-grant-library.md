@@ -105,8 +105,11 @@ order, before the authored scalar parameters. The test adapter takes `at`,
 `end`, and an expected scalar so the ABI exercises a fifth argument on
 Windows x64 while returning the decoder result only when it matches. Internal
 source-dependent calls receive the same hidden source pair; source-independent
-calls and their signatures remain unchanged. No source-dependent imports,
-cross-DLL propagation, aggregate results, or general wrapper are admitted.
+calls and their signatures remain unchanged. Separate signed and unsigned
+64-bit exports read a source code unit through local callees, and a source-free
+64-bit export checks byte-identical emission against ordinary native code.
+No source-dependent imports, cross-DLL propagation, aggregate results, or
+general wrapper are admitted.
 
 A private test helper validates the 16,384-unit limit and null/empty shape,
 pins immutable-for-the-call UTF-16 storage, invokes the export, and unpins
@@ -169,6 +172,8 @@ stores before body code; and dynamic-count comparisons followed by
 source-free export remains callable without the hidden pair and its function
 bytes match ordinary source-free emission exactly.
 
+The reject-by-default experiment admits only self-contained structured
+`bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`, and `void` functions.
 These results establish feasibility of the provisional generated ABI only.
 Public library emission, native packages, production CLI paths, maintained
 compiler-primitives exports, JIT execution, scanner profiles, executables,

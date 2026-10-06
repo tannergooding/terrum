@@ -152,7 +152,7 @@ internal static class NativeSourceGrantExperiment
 
     private static bool Scalar(PrimitiveType type) =>
         type is PrimitiveType.Void or PrimitiveType.Bool or PrimitiveType.Char16
-            or PrimitiveType.Int32 or PrimitiveType.UInt32;
+            or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
 
     private static NotSupportedException Unsupported() =>
         new("The provisional source-grant DLL experiment supports only self-contained structured scalar bodies.");

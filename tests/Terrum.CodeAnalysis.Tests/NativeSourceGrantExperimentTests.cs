@@ -25,6 +25,9 @@ public sealed class NativeSourceGrantExperimentTests
     private const string LengthExport = "Terrum.CodeAnalysis.SourceLengthForSourceAbiTest";
     private const string BoundaryExport = "Terrum.CodeAnalysis.SourceBoundaryForSourceAbiTest";
     private const string FreeExport = "Terrum.CodeAnalysis.SourceFreeForSourceAbiTest";
+    private const string SignedExport = "Terrum.CodeAnalysis.SignedSourceUnitForSourceAbiTest";
+    private const string UnsignedExport = "Terrum.CodeAnalysis.UnsignedSourceUnitForSourceAbiTest";
+    private const string FreeWideExport = "Terrum.CodeAnalysis.SourceFreeWideForSourceAbiTest";
     private const int InvalidRange = -2;
     private const int Mismatch = -3;
     private const string Adapter = """
@@ -50,11 +53,16 @@ public sealed class NativeSourceGrantExperimentTests
             return Host.Source.Length + clobber - 54321;
         }
         public int32 SourceBoundaryForSourceAbiTest(int32 at) { return int32(Host.Source[at]); }
+        public int64 SignedSourceUnitForSourceAbiTest(int32 at) { return ReadSignedSourceUnit(at); }
+        int64 ReadSignedSourceUnit(int32 at) { return int64(Host.Source[at]); }
+        public uint64 UnsignedSourceUnitForSourceAbiTest(int32 at) { return ReadUnsignedSourceUnit(at); }
+        uint64 ReadUnsignedSourceUnit(int32 at) { return uint64(Host.Source[at]); }
         public int32 SourceFreeForSourceAbiTest(int32 a, int32 b, int32 c, int32 d, int32 e) {
             if (a == 1 && b == 2 && c == 3 && d == 4 && e == 5) { return 54321; }
             if (a == 5 && b == 4 && c == 3 && d == 2 && e == 1) { return 12345; }
             return -3;
         }
+        public uint64 SourceFreeWideForSourceAbiTest(uint64 value) { return value; }
         """;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -69,6 +77,15 @@ public sealed class NativeSourceGrantExperimentTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int SourceFree(int a, int b, int c, int d, int e);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long ReadSignedSourceUnit(nint source, uint count, int at);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong ReadUnsignedSourceUnit(nint source, uint count, int at);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong SourceFreeWide(ulong value);
+
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
@@ -77,7 +94,8 @@ public sealed class NativeSourceGrantExperimentTests
         Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var program = Compile(policy, [0x1357, 0x2468, 0xABCD]);
         var (image, code) = EmitExperiment(program,
-            [ReadExport, LengthExport, BoundaryExport, FreeExport], (NativeRuntimePolicy)policy);
+            [ReadExport, LengthExport, BoundaryExport, FreeExport, SignedExport, UnsignedExport, FreeWideExport],
+            (NativeRuntimePolicy)policy);
         InspectArtifact(program, image, code, policy);
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-experiment-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, image);
@@ -90,8 +108,15 @@ public sealed class NativeSourceGrantExperimentTests
                 var length = Marshal.GetDelegateForFunctionPointer<ReadLength>(NativeLibrary.GetExport(module, LengthExport));
                 var boundary = Marshal.GetDelegateForFunctionPointer<ReadBoundary>(NativeLibrary.GetExport(module, BoundaryExport));
                 var free = Marshal.GetDelegateForFunctionPointer<SourceFree>(NativeLibrary.GetExport(module, FreeExport));
+                var signed = Marshal.GetDelegateForFunctionPointer<ReadSignedSourceUnit>(
+                    NativeLibrary.GetExport(module, SignedExport));
+                var unsigned = Marshal.GetDelegateForFunctionPointer<ReadUnsignedSourceUnit>(
+                    NativeLibrary.GetExport(module, UnsignedExport));
+                var freeWide = Marshal.GetDelegateForFunctionPointer<SourceFreeWide>(
+                    NativeLibrary.GetExport(module, FreeWideExport));
                 Assert.Equal(54321, free(1, 2, 3, 4, 5));
                 Assert.Equal(12345, free(5, 4, 3, 2, 1));
+                Assert.Equal(0xFEDCBA9876543210UL, freeWide(0xFEDCBA9876543210UL));
                 Assert.Equal(0, WithPinnedSource(null, 0, length.Invoke));
                 Assert.Equal(InvalidRange, WithPinnedSource(null, 0, (pointer, count) => read(pointer, count, 0, 0, 0)));
                 Assert.Equal(0, WithPinnedSource([], 0, length.Invoke));
@@ -125,6 +150,8 @@ public sealed class NativeSourceGrantExperimentTests
                                 var expected = ExpectedScalar(storage.AsSpan(at, end - at));
                                 Assert.Equal(expected, read(pointer, count, at, end, expected));
                             }
+                            Assert.Equal((long)storage[at], signed(pointer, count, at));
+                            Assert.Equal((ulong)storage[at], unsigned(pointer, count, at));
                         }
                         Assert.Equal(Mismatch, read(pointer, count, 0, storage.Length, int.MaxValue));
                         Assert.Equal(InvalidRange, read(pointer, count, -1, storage.Length, 0));
@@ -248,7 +275,8 @@ public sealed class NativeSourceGrantExperimentTests
         Assert.Equal(-1, code.ManagedRuntimeOffset);
         var other = Compile(policy, [0xFEFF, 0xD800, 0, 0xFFFF, 0xDC00]);
         Assert.Equal(image, EmitExperiment(other,
-            [ReadExport, LengthExport, BoundaryExport, FreeExport], (NativeRuntimePolicy)policy).Image);
+            [ReadExport, LengthExport, BoundaryExport, FreeExport, SignedExport, UnsignedExport, FreeWideExport],
+            (NativeRuntimePolicy)policy).Image);
         using var reader = new PEReader(new MemoryStream(image));
         var header = Assert.IsType<PEHeader>(reader.PEHeaders.PEHeader);
         Assert.Equal(0, header.ThreadLocalStorageTableDirectory.Size);
@@ -266,7 +294,9 @@ public sealed class NativeSourceGrantExperimentTests
         {
             var index = program.Functions.IndexOf(function);
             Assert.Equal(function.Name is ReadExport or LengthExport
-                or BoundaryExport or "Terrum.CodeAnalysis.CheckScalar" or "Terrum.CodeAnalysis.ReadUtf16Scalar",
+                or BoundaryExport or SignedExport or UnsignedExport
+                or "Terrum.CodeAnalysis.CheckScalar" or "Terrum.CodeAnalysis.ReadUtf16Scalar"
+                or "Terrum.CodeAnalysis.ReadSignedSourceUnit" or "Terrum.CodeAnalysis.ReadUnsignedSourceUnit",
                 dependent[index]);
             if (dependent[index])
             {
@@ -301,16 +331,20 @@ public sealed class NativeSourceGrantExperimentTests
             }
         }
         var freeFunction = Assert.Single(program.Functions, function => function.Name == FreeExport);
+        var freeWideFunction = Assert.Single(program.Functions, function => function.Name == FreeWideExport);
         var mainFunction = Assert.Single(program.Functions, function => function.Name == "Terrum.CodeAnalysis.Main");
-        var freeProgram = new BoundProgram([freeFunction, mainFunction], 1) { RuntimePolicy = policy };
+        var freeProgram = new BoundProgram([freeFunction, freeWideFunction, mainFunction], 2) { RuntimePolicy = policy };
         var freeCode = NativeEmitter.EmitCode(freeProgram, (NativeRuntimePolicy)policy);
-        var freeIndex = program.Functions.IndexOf(freeFunction);
-        var offset = code.SourceFunctionOffsets[freeIndex];
-        var range = Assert.Single(code.Functions, range => range.Start == offset);
-        var originalOffset = freeCode.SourceFunctionOffsets[0];
-        var originalRange = Assert.Single(freeCode.Functions, range => range.Start == originalOffset);
-        Assert.Equal(freeCode.Code.AsSpan(originalOffset, originalRange.End - originalOffset).ToArray(),
-            code.Code.AsSpan(offset, range.End - offset).ToArray());
+        foreach (var (function, originalIndex) in new[] { (freeFunction, 0), (freeWideFunction, 1) })
+        {
+            var index = program.Functions.IndexOf(function);
+            var offset = code.SourceFunctionOffsets[index];
+            var range = Assert.Single(code.Functions, range => range.Start == offset);
+            var originalOffset = freeCode.SourceFunctionOffsets[originalIndex];
+            var originalRange = Assert.Single(freeCode.Functions, range => range.Start == originalOffset);
+            Assert.Equal(freeCode.Code.AsSpan(originalOffset, originalRange.End - originalOffset).ToArray(),
+                code.Code.AsSpan(offset, range.End - offset).ToArray());
+        }
     }
 
     private static (byte[] Image, NativeCode Code) EmitExperiment(
