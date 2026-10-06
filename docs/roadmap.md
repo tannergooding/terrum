@@ -394,6 +394,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `0c4ecebf` | Provisionally bind authored storage-free static getters on non-unique Copy structs and persist caller-unsafe scalar getters in revision 61; authorize calls only through unsafe blocks, with TRRM and scalar-frontend support excluded |
 | `cf2fdfc5` | Provisionally persist caller-unsafe readonly scalar-result getters for eligible public non-unique Copy structs; reconstruct authorization only from enclosing unsafe blocks |
 | `f86c6fa9` | Provisionally forward declared backing dependencies through internal compilation-local `Span<Token>` result functions; preserve source ownership through named/transitive calls, argument staging and cleanup, with target semantics unapproved |
 | `200c3f3f` | Provisionally allow fixed `float32`/`float64` results for compilation-local generic Copy output templates; cover both output modes, fixed scalar side outputs, checked retry and private semantic/native replacement, with target contract unapproved |
