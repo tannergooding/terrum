@@ -3211,6 +3211,11 @@ public static partial class ScalarFrontendHost
                     else
                     {
                         var value = expressions[statement.Root];
+                        if (statement.Kind is 27 or 28
+                            && constantLocals[statement.Slot - 1] is { } constant)
+                        {
+                            value = constant with { Span = value.Span };
+                        }
                         statements.Add(statement.Kind is 1 or 27 or 28
                             ? new BoundLocal(statement.Slot - 1, value,
                                 statement.Kind is 27 or 28
