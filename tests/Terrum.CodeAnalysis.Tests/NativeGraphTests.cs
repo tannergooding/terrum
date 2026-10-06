@@ -746,6 +746,21 @@ public sealed class NativeGraphTests
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [replacement]));
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void GraphReplacementCannotWeakenNoThrowPromise(NativeRuntimePolicy policy)
+    {
+        var leaf = Leaf("[NoThrow] public int32 Leaf() { return 40; }", policy);
+        var middle = Middle("public int32 Middle() { return Leaf() + 1; }", leaf, policy);
+        var root = Consumer(middle, policy);
+
+        NativeModuleCompiler.ValidateGraph(root, [leaf, middle]);
+        var replacement = Leaf("public int32 Leaf() { return 40; }", policy);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(root, [replacement, middle]));
+    }
+
     [Fact]
     public void LibraryMayExportOrdinaryMainWithoutCreatingAnEntryPoint()
     {
