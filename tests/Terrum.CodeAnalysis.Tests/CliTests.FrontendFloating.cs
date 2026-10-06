@@ -562,6 +562,102 @@ public sealed partial class CliTests
         }
     }
 
+    [Theory]
+    [InlineData("float32", "3.5", "fail-fast")]
+    [InlineData("float32", "3.5", "checked-exceptions")]
+    [InlineData("float64", "0x1.fp+2", "fail-fast")]
+    [InlineData("float64", "0x1.fp+2", "checked-exceptions")]
+    public async Task ScalarFrontendSingleFunctionProjectsFloatingOutAsync(
+        string floatingType, string literal, string policy)
+    {
+        var source = $$"""
+            public {{floatingType}} Fill({{floatingType}} seed, out {{floatingType}} value) {
+                if (seed == 0.0) { value = {{literal}}; return seed; }
+                return Fill(seed - 1.0, out value);
+            }
+            """;
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-single-{floatingType}-out-{Guid.NewGuid():N}.dll");
+            var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-single-{floatingType}-out-{Guid.NewGuid():N}.dll");
+            try
+            {
+            var input = Encoding.UTF8.GetBytes(source);
+            var (componentExit, componentJson, componentError) = await RunAsync(input,
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            using (var document = JsonDocument.Parse(componentJson))
+            {
+                var result = document.RootElement.GetProperty("result");
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(2, result.GetProperty("outParameterMask").GetInt32());
+                Assert.Equal(0, result.GetProperty("initRefParameterMask").GetInt32());
+            }
+
+            var (buildExit, buildJson, buildError) = await RunAsync(input,
+                "frontend-build-library", directory, "-", "-o", output,
+                "--runtime", policy, "--json");
+            Assert.True(buildExit == 0, $"{policy}: {buildJson}{buildError}");
+            var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
+                "build-library", "-", "--export", "Fill", "-o", hosted,
+                "--runtime", policy, "--json");
+            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
+            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+        }
+        finally
+        {
+            File.Delete(output);
+            File.Delete(hosted);
+        }
+    }
+
+    [Theory]
+    [InlineData("float32", "3.5", "fail-fast")]
+    [InlineData("float32", "3.5", "checked-exceptions")]
+    [InlineData("float64", "0x1.fp+2", "fail-fast")]
+    [InlineData("float64", "0x1.fp+2", "checked-exceptions")]
+    public async Task ScalarFrontendSingleFunctionProjectsFloatingInitRefAsync(
+        string floatingType, string literal, string policy)
+    {
+        var source = $$"""
+            public bool Fill({{floatingType}} seed, init ref<{{floatingType}}> value) {
+                if (seed == 0.0) { value = {{literal}}; return true; }
+                return Fill(seed - 1.0, init value);
+            }
+            """;
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-single-{floatingType}-init-ref-{Guid.NewGuid():N}.dll");
+            var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-single-{floatingType}-init-ref-{Guid.NewGuid():N}.dll");
+            try
+            {
+            var input = Encoding.UTF8.GetBytes(source);
+            var (componentExit, componentJson, componentError) = await RunAsync(input,
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            using (var document = JsonDocument.Parse(componentJson))
+            {
+                var result = document.RootElement.GetProperty("result");
+                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(0, result.GetProperty("outParameterMask").GetInt32());
+                Assert.Equal(2, result.GetProperty("initRefParameterMask").GetInt32());
+            }
+
+            var (buildExit, buildJson, buildError) = await RunAsync(input,
+                "frontend-build-library", directory, "-", "-o", output,
+                "--runtime", policy, "--json");
+            Assert.True(buildExit == 0, $"{policy}: {buildJson}{buildError}");
+            var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
+                "build-library", "-", "--export", "Fill", "-o", hosted,
+                "--runtime", policy, "--json");
+            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
+            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+        }
+        finally
+        {
+            File.Delete(output);
+            File.Delete(hosted);
+        }
+    }
+
     private static ulong ProjectedFloatLiteralBits(JsonElement function, int type)
     {
         JsonElement literal = default;
