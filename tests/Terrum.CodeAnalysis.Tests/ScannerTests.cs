@@ -445,6 +445,25 @@ public sealed class ScannerTests
             sources.Add(text.ToString());
         }
 
+        var supplementaryEscapes = new List<int> { 0, 0xD7FF, 0xD800, 0xDFFF, 0xE000, 0xFFFF };
+        for (var plane = 1; plane <= 16; plane++)
+        {
+            var planeStart = plane << 16;
+            supplementaryEscapes.Add(planeStart);
+            supplementaryEscapes.Add(planeStart + 1);
+            supplementaryEscapes.Add(planeStart + 0xFFFE);
+            supplementaryEscapes.Add(planeStart + 0xFFFF);
+        }
+        supplementaryEscapes.Add(0x110000);
+        var supplementaryEscapeSource = new StringBuilder();
+        foreach (var scalar in supplementaryEscapes)
+        {
+            supplementaryEscapeSource.Append("\"\\U")
+                .Append(scalar.ToString("X8", CultureInfo.InvariantCulture))
+                .Append("\" ");
+        }
+        sources.Add(supplementaryEscapeSource.ToString());
+
         ScannerInvocationResult? retained = null;
         foreach (var text in sources)
         {
