@@ -770,15 +770,17 @@ internal sealed partial class Binder
                 }
             }
         }
+        var outputParameters = templateParameters.Where(static parameter => parameter.IsOut).ToArray();
+        var hasMixedOutputModes = outputParameters.Any(static parameter => parameter.IsInit)
+            && outputParameters.Any(static parameter => !parameter.IsInit);
         if (body is null || copies.Any(static copy => !copy)
             || (scalarReturn == PrimitiveType.Void
-                && !templateParameters.Any(static parameter =>
-                    parameter.IsOut && !parameter.IsInit && parameter.TypeParameterIndex >= 0))
-            || (templateParameters.Any(static parameter => parameter.IsOut)
+                && !outputParameters.Any(static parameter => parameter.TypeParameterIndex >= 0))
+            || (outputParameters.Length != 0
                 && scalarReturn != PrimitiveType.Bool
                 && (scalarReturn is null
-                    || templateParameters.Any(static parameter => parameter.IsOut
-                        && (parameter.IsInit || parameter.TypeParameterIndex < 0))))
+                    || outputParameters.Any(static parameter => parameter.TypeParameterIndex < 0)
+                    || hasMixedOutputModes))
             || Enumerable.Range(0, typeNames.Length).Any(index => returnIndex != index
                 && !templateParameters.Any(parameter => parameter.TypeParameterIndex == index))
             || (noThrow && operations.Any(operators =>
@@ -987,7 +989,7 @@ internal sealed partial class Binder
             return -1;
         }
         if (template.ReturnType(types) != PrimitiveType.Bool
-            && template.Parameters.Any(parameter => parameter.IsOut
+            && template.Parameters.Any(parameter => parameter.IsOut && !parameter.IsInit
                 && !IsSupportedNonBooleanGenericOutputType(types[parameter.TypeParameterIndex])))
         {
             Report("TRM3011", "A non-Boolean generic output requires a supported scalar or non-unique Copy type.",

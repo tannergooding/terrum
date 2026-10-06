@@ -2192,9 +2192,17 @@ destination unavailable, and catch-path reads reject. Private semantic/native
 specializations execute through unchanged exports and formats. This hosted
 experiment remains under the unapproved
 [generic Copy-output proposal](proposals/generic-copy-out-publication.md);
-Boolean conditional outputs, generic `init ref<T>`, public generic contracts
-and ABI are unchanged. Floating specialization eligibility remains separately
-provisional, and this does not extend the scalar frontend or source-free TRRM.
+Boolean conditional outputs, public generic contracts and ABI are unchanged.
+Separately, generic `init ref<T>` provisionally accepts fixed `int32`, `uint32`,
+`int64`, `uint64` or `char16` results and `void`, requiring publication on
+every normal return and preserving vacancy on checked exceptional departure.
+The extension retains private managed-handle specializations and existing
+rooting/cleanup, but excludes mixed output modes and fixed-valued output
+parameters. This hosted experiment remains under the unapproved
+[generic Copy-init-output proposal](proposals/generic-init-output-publication.md);
+it does not approve a target contract, extend the scalar frontend or source-free
+TRRM, or change module formats and ABI. Floating specialization eligibility
+remains separately provisional.
 For-loop initialization runs once, followed by condition, body and iterator;
 the iterator does not run after a returning or breaking body. `continue` runs
 the iterator before testing the next condition. An omitted condition is true.

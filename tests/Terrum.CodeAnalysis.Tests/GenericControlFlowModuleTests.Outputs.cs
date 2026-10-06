@@ -49,14 +49,26 @@ public sealed partial class GenericControlFlowModuleTests
         [NoThrow] void FillVoid<T>(T value, out T result) where T : [Copy] {
             result = value;
         }
+        [NoThrow] int32 FillInit<T>(T value, int32 marker, init ref<T> result) where T : [Copy] {
+            result = value;
+            if (marker != 42) { return 0; }
+            return 7;
+        }
+        [NoThrow] void FillInitVoid<T>(T value, init ref<T> result) where T : [Copy] {
+            result = value;
+        }
         [NoThrow] int32 Count<T>(T value, int32 count) where T : [Copy] { return count; }
         public int32 PowerProbe() {
             if (TryCopy(new Pair(1, 2), false, out var missing)) { return 1; }
             require TryCopy(new Pair(40, 2), true, out var result);
             int32 status = Fill(result, 42, out var copied, out var duplicate);
             FillVoid(copied, out var copiedAgain);
+            int32 initStatus = FillInit(result, 42, init var initialized);
+            FillInitVoid(copied, init var initializedAgain);
             if (status != 7 || duplicate.First != 40 || duplicate.Second != 2
-                || copiedAgain.First != 40 || copiedAgain.Second != 2) { return 2; }
+                || copiedAgain.First != 40 || copiedAgain.Second != 2
+                || initStatus != 7 || initialized.First != 40 || initialized.Second != 2
+                || initializedAgain.First != 40 || initializedAgain.Second != 2) { return 2; }
             return int32(result.First + result.Second) + Count(result, 0);
         }
         """;
@@ -73,6 +85,8 @@ public sealed partial class GenericControlFlowModuleTests
             .Replace("TryCopy(", "TryCopy<Pair>(", StringComparison.Ordinal)
             .Replace("status = Fill(", "status = Fill<Pair>(", StringComparison.Ordinal)
             .Replace("FillVoid(", "FillVoid<Pair>(", StringComparison.Ordinal)
+            .Replace("FillInit(", "FillInit<Pair>(", StringComparison.Ordinal)
+            .Replace("FillInitVoid(", "FillInitVoid<Pair>(", StringComparison.Ordinal)
             .Replace("Count(", "Count<Pair>(", StringComparison.Ordinal);
         var original = ModuleCompiler.CreateProducer(Compile(Stub, policy), ["PowerProbe"]);
         var consumer = ModuleCompiler.CreateConsumer(Compile("""
@@ -102,6 +116,14 @@ public sealed partial class GenericControlFlowModuleTests
             static function => function.Name == "$producer.FillVoid<Pair>");
         Assert.Equal(PrimitiveType.Void, fillVoid.ReturnType);
         Assert.True(fillVoid.Variables[1].IsOut);
+        var fillInit = Assert.Single(linked.Functions,
+            static function => function.Name == "$producer.FillInit<Pair>");
+        Assert.Equal(PrimitiveType.Int32, fillInit.ReturnType);
+        Assert.True(fillInit.Variables[2].IsInit);
+        var fillInitVoid = Assert.Single(linked.Functions,
+            static function => function.Name == "$producer.FillInitVoid<Pair>");
+        Assert.Equal(PrimitiveType.Void, fillInitVoid.ReturnType);
+        Assert.True(fillInitVoid.Variables[1].IsInit);
         var helper = Assert.Single(linked.Functions,
             static function => function.Name == "$producer.TryCopy<Pair>");
         Assert.Equal(PrimitiveType.Bool, helper.ReturnType);

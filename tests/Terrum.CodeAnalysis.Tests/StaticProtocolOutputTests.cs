@@ -132,6 +132,51 @@ public sealed class StaticProtocolOutputTests
     }
 
     [Theory]
+    [InlineData("int32", false)]
+    [InlineData("int32", true)]
+    [InlineData("uint32", false)]
+    [InlineData("uint32", true)]
+    [InlineData("int64", false)]
+    [InlineData("int64", true)]
+    [InlineData("uint64", false)]
+    [InlineData("uint64", true)]
+    [InlineData("char16", false)]
+    [InlineData("char16", true)]
+    [InlineData("void", false)]
+    [InlineData("void", true)]
+    public void GenericNonBooleanInitOutputsPublishOnNormalReturn(string resultType, bool explicitType)
+    {
+        var call = explicitType
+            ? "Fill<Value>(new Value(40), init var result)"
+            : "Fill(new Value(40), init var result)";
+        var returnValue = resultType == "char16" ? "char16(7)" : "7";
+        var completion = resultType == "void"
+            ? call + "; require result.First == 40; return 42;"
+            : "var status = " + call + "; require status == " + returnValue + ";"
+                + " require result.First == 40; return 42;";
+        var body = resultType == "void"
+            ? explicitType ? "result = value; return;" : "result = value;"
+            : "result = value; return " + returnValue + ";";
+        var source = Value + "[NoThrow] " + resultType
+            + " Fill<T>(T value, init ref<T> result) where T : [Copy] { "
+            + body + "} int32 Main() { " + completion + " }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value>");
+        var expectedReturn = resultType switch {
+            "int32" => PrimitiveType.Int32,
+            "uint32" => PrimitiveType.UInt32,
+            "int64" => PrimitiveType.Int64,
+            "uint64" => PrimitiveType.UInt64,
+            "char16" => PrimitiveType.Char16,
+            _ => PrimitiveType.Void,
+        };
+        Assert.Equal(expectedReturn, fill.ReturnType);
+        Assert.True(fill.Variables[1].IsInit);
+    }
+
+    [Theory]
     [InlineData("int32", "if (publish) { result = value; } return 7;")]
     [InlineData("void", "if (publish) { result = value; }")]
     public void GenericNonBooleanOutputsRequirePublicationOnEveryNormalReturn(string resultType, string body)
@@ -144,8 +189,21 @@ public sealed class StaticProtocolOutputTests
         Assert.Null(compilation.Program);
     }
 
+    [Theory]
+    [InlineData("int32", "if (publish) { result = value; } return 7;")]
+    [InlineData("void", "if (publish) { result = value; }")]
+    public void GenericNonBooleanInitOutputsRequirePublicationOnEveryNormalReturn(string resultType, string body)
+    {
+        var source = Value + resultType
+            + " Fill<T>(T value, bool publish, init ref<T> result) where T : [Copy] { "
+            + body + "} int32 Main() { return 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
     [Fact]
-    public void GenericNonBooleanOutputsKeepInitRefAndManagedHandlesOutsideTheExtension()
+    public void GenericNonBooleanOutputsKeepVoidTemplatesAndManagedHandlesOutsideTheOutExtension()
     {
         var voidWithoutOutput = Compilation.Create(SyntaxTree.Parse("""
             void Ignore<T>(T value) where T : [Copy] { }
@@ -153,16 +211,6 @@ public sealed class StaticProtocolOutputTests
             """));
         Assert.True(voidWithoutOutput.HasErrors);
         Assert.Null(voidWithoutOutput.Program);
-
-        var initReference = Compilation.Create(SyntaxTree.Parse(Value + """
-            int32 Fill<T>(T value, init ref<T> result) where T : [Copy] {
-                result = value;
-                return 7;
-            }
-            int32 Main() { return 0; }
-            """));
-        Assert.True(initReference.HasErrors);
-        Assert.Null(initReference.Program);
 
         var managedHandle = Compilation.Create(SyntaxTree.Parse("""
             int32 Fill<T>(T value, out T result) where T : [Copy] {
@@ -177,6 +225,27 @@ public sealed class StaticProtocolOutputTests
             """));
         Assert.True(managedHandle.HasErrors);
         Assert.Null(managedHandle.Program);
+
+        var mixedModes = Compilation.Create(SyntaxTree.Parse(Value + """
+            int32 Fill<T>(T value, out T result, init ref<T> initialized) where T : [Copy] {
+                result = value;
+                initialized = value;
+                return 7;
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.True(mixedModes.HasErrors);
+        Assert.Null(mixedModes.Program);
+
+        var fixedOutput = Compilation.Create(SyntaxTree.Parse(Value + """
+            int32 Fill<T>(T value, out int32 result) where T : [Copy] {
+                result = 7;
+                return 42;
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.True(fixedOutput.HasErrors);
+        Assert.Null(fixedOutput.Program);
     }
 
     [Fact]
@@ -197,6 +266,35 @@ public sealed class StaticProtocolOutputTests
                 unsafe {
                     try {
                         Fill(new Value(40), false, out result);
+                    } catch {
+                        return int32(result.Number);
+                    }
+                }
+                return 0;
+            }
+            """), BoundRuntimePolicy.CheckedExceptions);
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void GenericNonBooleanInitOutputIsNotReadableAfterExceptionalDeparture()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Value {
+                public int64 Number;
+                public Value(int64 number) { Number = number; }
+            }
+            int32 Fill<T>(T value, bool complete, init ref<T> result) where T : [Copy] {
+                result = value;
+                require complete;
+                return 7;
+            }
+            int32 Main() {
+                init Value result;
+                unsafe {
+                    try {
+                        Fill(new Value(40), false, init result);
                     } catch {
                         return int32(result.Number);
                     }

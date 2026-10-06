@@ -2,6 +2,7 @@
 
 using System.IO;
 using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Native;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -43,6 +44,74 @@ public sealed partial class JitTests
         else
         {
             await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GenericInitNonBooleanAndVoidOutputsPublishCopyValuesAsync(bool checkedFailures)
+    {
+        const string Source = """
+            struct Counter {
+                public int64 Number;
+                public Counter(int64 number) { Number = number; }
+            }
+            [NoThrow] int32 Fill<T>(T value, int32 status, init ref<T> result) where T : [Copy] {
+                result = value;
+                return status;
+            }
+            [NoThrow] void FillVoid<T>(T value, init ref<T> result) where T : [Copy] {
+                result = value;
+            }
+            int32 Main() {
+                int32 zeroStatus = Fill(new Counter(20), 0, init var first);
+                int32 status = Fill(new Counter(20), 7, init var second);
+                FillVoid<Counter>(new Counter(2), init var third);
+                int32 boolStatus = Fill(true, 0, init var flag);
+                if (boolStatus != 0 || !flag) { return 1; }
+                return zeroStatus + status + int32(first.Number) + int32(second.Number)
+                    + int32(third.Number) - 7;
+            }
+            """;
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task GenericInitNonBooleanOutputPublishesManagedHandleAsync(NativeRuntimePolicy policy)
+    {
+        const string Source = """
+            [NoThrow] int32 Fill<T>(T value, init ref<T> result) where T : [Copy] {
+                result = value;
+                return 7;
+            }
+            int32 Make(init ref<write ManagedNode> result) {
+                require ManagedNode.TryCreate(42, out var created);
+                return Fill(created, init result);
+            }
+            int32 Main() {
+                if (ManagedHeap.Collect() != 0) { return 1; }
+                int32 status = Make(init var copy);
+                if (ManagedHeap.Collect() != 0) { return 2; }
+                return status + copy.Value;
+            }
+            """;
+        if (policy == NativeRuntimePolicy.CheckedExceptions)
+        {
+            await AssertCheckedExecutionAsync(Source, 49).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 49).ConfigureAwait(true);
         }
     }
 
@@ -373,5 +442,67 @@ public sealed partial class JitTests
             }
             """;
         return AssertCheckedExecutionAsync(Source, 42);
+    }
+
+    [Fact]
+    public Task GenericInitNonBooleanOutputFailureLeavesDestinationVacantAsync()
+    {
+        const string Source = """
+            struct Value {
+                public int64 Number;
+                public Value(int64 number) { Number = number; }
+            }
+            int32 Fill<T>(T value, bool complete, init ref<T> result) where T : [Copy] {
+                result = value;
+                require complete;
+                return 7;
+            }
+            int32 Main() {
+                init Value result;
+                unsafe {
+                    try {
+                        Fill(new Value(40), false, init result);
+                        return 1;
+                    } catch {
+                        if (result is init) { return 2; }
+                        Fill<Value>(new Value(42), true, init result);
+                        return int32(result.Number);
+                    }
+                }
+            }
+            """;
+        return AssertCheckedExecutionAsync(Source, 42);
+    }
+
+    [Fact]
+    public Task GenericInitManagedOutputFailureRetiresTemporaryRootAsync()
+    {
+        const string Source = """
+            int32 Copy<T>(T value, bool complete, init ref<T> result) where T : [Copy] {
+                result = value;
+                require complete;
+                return 7;
+            }
+            int32 Fill(bool complete, init ref<write ManagedNode> result) {
+                require ManagedNode.TryCreate(42, out var created);
+                return Copy(created, complete, init result);
+            }
+            int32 Main() {
+                init write ManagedNode node;
+                unsafe {
+                    try {
+                        Fill(false, init node);
+                        return 1;
+                    } catch {
+                        if (node is init) { return 2; }
+                        if (ManagedHeap.Collect() != 1) { return 3; }
+                        int32 status = Fill(true, init node);
+                        if (ManagedHeap.Collect() != 0) { return 4; }
+                        return status + node.Value;
+                    }
+                }
+            }
+            """;
+        return AssertCheckedExecutionAsync(Source, 49);
     }
 }

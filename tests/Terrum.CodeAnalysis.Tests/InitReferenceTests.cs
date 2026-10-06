@@ -572,12 +572,22 @@ public sealed class InitReferenceTests
                 result = value;
                 return true;
             }
+            [NoThrow] int32 Publish<T>(T value, int32 status, init ref<T> result) where T : [Copy] {
+                result = value;
+                return status;
+            }
             bool Fill(init ref<write ManagedNode> result) {
                 require ManagedNode.TryCreate(41, out var created);
                 return Copy(created, init result);
             }
+            int32 Make(init ref<write ManagedNode> result) {
+                require ManagedNode.TryCreate(41, out var created);
+                return Publish(created, 7, init result);
+            }
             public int32 Read() {
                 require Fill(init var node);
+                int32 status = Make(init var copy);
+                if (status != 7 || copy.Value != node.Value) { return 1; }
                 return node.Value + 1;
             }
             """;
@@ -595,7 +605,10 @@ public sealed class InitReferenceTests
         var updated = ModuleCompiler.CreateProducer(updatedProgram, ["Read"]);
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.DoesNotContain(reference.Functions, function => function.Name == "Fill");
+        Assert.DoesNotContain(reference.Functions, function => function.Name == "Make");
         Assert.DoesNotContain(reference.Functions, function => function.Name.StartsWith("Copy<",
+            StringComparison.Ordinal));
+        Assert.DoesNotContain(reference.Functions, function => function.Name.StartsWith("Publish<",
             StringComparison.Ordinal));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             reference, runtimePolicy: sourcePolicy);
@@ -605,6 +618,8 @@ public sealed class InitReferenceTests
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.Contains(linked.Functions, function => function.Name.StartsWith("$producer.Copy<",
             StringComparison.Ordinal) && function.Variables[1].IsInit);
+        Assert.Contains(linked.Functions, function => function.Name.StartsWith("$producer.Publish<",
+            StringComparison.Ordinal) && function.Variables[2].IsInit);
         Assert.Equal(42, NativeJit.Execute(linked, policy));
         Assert.Equal(43, NativeJit.Execute(ModuleCompiler.Link(consumer, updated), policy));
 
