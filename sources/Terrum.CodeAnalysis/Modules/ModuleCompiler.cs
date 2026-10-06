@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 57;
+    private const int Version = 58;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1421,12 +1421,16 @@ public static partial class ModuleCompiler
     private static bool IsSupportedModuleUnsafeMethod(BoundFunction function,
         ImmutableArray<BoundStruct> structures)
     {
-        if (function.DeclaringStruct is not string ownerName || function.IsStatic || function.IsConstructor
+        if (function.DeclaringStruct is not string ownerName || function.IsConstructor
             || function.IsClassConstructor || function.IsCleanup || function.PropertyName is not null
-            || function.Intrinsic != BoundIntrinsic.None || function.ParameterCount < 1
-            || function.ParameterCount > function.Variables.Length || function.Variables.IsEmpty
-            || function.Variables[0].IsMutable || function.Variables[0].IsOut || function.Variables[0].IsInit
+            || function.Intrinsic != BoundIntrinsic.None
+            || function.ParameterCount > function.Variables.Length
             || !IsScalarModuleContractType(function.ReturnType))
+        {
+            return false;
+        }
+        if (!function.IsStatic && (function.ParameterCount < 1 || function.Variables.IsEmpty
+            || function.Variables[0].IsMutable || function.Variables[0].IsOut || function.Variables[0].IsInit))
         {
             return false;
         }
@@ -1442,14 +1446,18 @@ public static partial class ModuleCompiler
         }
         if (ownerIndex < 0 || structures[ownerIndex].IsUnique || structures[ownerIndex].IsPrivate
             || structures[ownerIndex].IsInternal
-            || function.Variables[0].Type != (PrimitiveType)(100 + ownerIndex)
-            || !PublicLayout(function.Variables[0].Type, true, structures,
+            || !PublicLayout((PrimitiveType)(100 + ownerIndex), true, structures,
                 new HashSet<(int Index, bool PublicFields)>()))
         {
             return false;
         }
 
-        for (var index = 1; index < function.ParameterCount; index++)
+        if (!function.IsStatic && function.Variables[0].Type != (PrimitiveType)(100 + ownerIndex))
+        {
+            return false;
+        }
+
+        for (var index = function.IsStatic ? 0 : 1; index < function.ParameterCount; index++)
         {
             var parameter = function.Variables[index];
             if (parameter.IsOut || parameter.IsInit || !IsScalarModuleContractType(parameter.Type))
@@ -1470,10 +1478,12 @@ public static partial class ModuleCompiler
         }
 
         var parts = signature.ToString().Split('|');
-        if (parts.Length < 9 || parts[2] != "F" || parts[4] != "I" || parts[5] == "-" || parts[6] != "E"
+        var isStatic = parts.Length > 4 && parts[4] == "S";
+        if (parts.Length < 8 || parts[2] != "F" || parts[3] != "E"
+            || (!isStatic && parts[4] != "I") || parts[5] == "-" || parts[6] != "E"
             || !int.TryParse(parts[7], System.Globalization.NumberStyles.None,
                 System.Globalization.CultureInfo.InvariantCulture, out var parameterCount)
-            || parameterCount < 1 || parts.Length != 8 + parameterCount)
+            || (!isStatic && parameterCount < 1) || parts.Length != 8 + parameterCount)
         {
             return false;
         }
@@ -1489,7 +1499,6 @@ public static partial class ModuleCompiler
         }
         if (ownerIndex < 0 || structures[ownerIndex].IsUnique || structures[ownerIndex].IsPrivate
             || structures[ownerIndex].IsInternal
-            || parts[8] != "in:" + ContractType((PrimitiveType)(100 + ownerIndex), structures)
             || !IsScalarModuleContractType(parts[1])
             || !PublicLayout((PrimitiveType)(100 + ownerIndex), true, structures,
                 new HashSet<(int Index, bool PublicFields)>()))
@@ -1497,7 +1506,12 @@ public static partial class ModuleCompiler
             return false;
         }
 
-        for (var index = 9; index < parts.Length; index++)
+        var parameterOffset = isStatic ? 8 : 9;
+        if (!isStatic && parts[8] != "in:" + ContractType((PrimitiveType)(100 + ownerIndex), structures))
+        {
+            return false;
+        }
+        for (var index = parameterOffset; index < parts.Length; index++)
         {
             if (!parts[index].StartsWith("in:", StringComparison.Ordinal)
                 || !IsScalarModuleContractType(parts[index].AsSpan(3)))

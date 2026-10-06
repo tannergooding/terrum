@@ -56,7 +56,7 @@ section 3. This slice changes the internal semantic-module format and must
 advance its revision. It is an implementation experiment, not approval of
 general reference metadata or the broader proposal.
 
-**Implemented provisionally:** Semantic-module revision 57 persists top-level
+**Implemented provisionally:** Semantic-module revision 58 persists top-level
 caller obligations and the bounded method contracts described below.
 Authorization is reconstructed only from explicit `BoundUnsafe` scopes. Safe
 imports reject caller-unsafe replacements; caller-unsafe imports may use a
@@ -69,12 +69,14 @@ source-free executable authorization.
 
 The provisional method experiment admits ordinary readonly instance methods
 on public, non-unique `Copy` structs with exportable public layouts, scalar
-by-value explicit parameters and scalar results. Calls still require an
-explicit persisted unsafe block; the unsafe declaration does not authorize
-operations in its own body. Static and mutable-receiver methods, constructors,
-class methods, accessors, operators, fields, reference/output modes and
-non-scalar signatures remain excluded. This is a narrow persistence
-experiment, not approval of general caller-unsafe member metadata.
+by-value explicit parameters and scalar results. Revision 58 also admits
+ordinary static methods on those owners, with no synthesized receiver and the
+same scalar by-value signature boundary. Calls still require an explicit
+persisted unsafe block; the unsafe declaration does not authorize operations
+in its own body. Mutable-receiver methods, constructors, class methods,
+accessors, operators, fields, reference/output modes and non-scalar signatures
+remain excluded. This is a narrow persistence experiment, not approval of
+general caller-unsafe member metadata.
 
 Executable TRRM also provisionally round-trips the assigned caller-unsafe
 Effects bit on top-level function declarations, including when composed with
@@ -134,7 +136,7 @@ individual call was authorized.
 ### 3. How should executable Bodies validate caller-unsafe scope?
 
 **Summary:** The source caller obligation and assigned Effects bit `0x04` are
-settled, and semantic-module revision 57 reconstructs authorization from
+settled, and semantic-module revision 58 reconstructs authorization from
 explicit `BoundUnsafe` scopes. Executable TRRM provisionally round-trips
 caller-unsafe declarations and supports calls only inside validated indexed
 Body unsafe scopes. Compact-linear Bodies still cannot prove explicit
