@@ -2082,6 +2082,8 @@ establish public, handle-free Copy layout. Boolean `out` retains conditional
 publication; unique outputs and non-scalar `out` in the bounded scalar
 frontend remain outside this extension. This does not migrate `out` to
 `init ref<T>` or make the scalar frontend standalone.
+Native graph tests also execute a 16-byte public Copy-struct `out` value
+through AOT and JIT under both runtime policies.
 Compilation-private `init ref<T>` also supports qualified managed handles.
 The call's checked scratch and exact temporary roots retain the handle until
 successful publication; false and exceptional completion retire the scratch
