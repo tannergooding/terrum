@@ -168,6 +168,9 @@ public sealed class StringLiteralEncodingModuleTests
             new LiteralFixture("😀", "\"😀\""),
             new LiteralFixture("😀", "\"\\U0001F600\""),
             new LiteralFixture("Aé😀\0", "\"A\\u00E9\\U0001F600\\0\""),
+            new LiteralFixture("\U00010000", "\"\\U00010000\""),
+            new LiteralFixture("\U0010FFFF", "\"\\U0010FFFF\""),
+            new LiteralFixture("\U00010000\U0010FFFF", "\"\U00010000\U0010FFFF\""),
             new LiteralFixture("\u007F\u0080\u07FF\u0800\uFFFF",
                 "\"\\u007F\\u0080\\u07FF\\u0800\\uFFFF\""),
         };
