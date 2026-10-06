@@ -109,8 +109,16 @@ public bool CheckManagedTokenChain()
     {
         require cursorChain.TryAppend(index, index, 1);
     }
+    require cursorChain.TryCreateCursor(out var fullCursor);
     if (cursorChain.TryAppend(64, 64, 1)
-        || cursorChain.Count != 64 || cursorChain.Version != 69)
+        || cursorChain.Count != 64 || cursorChain.Version != 69
+        || !fullCursor.IsCurrent)
+    {
+        return false;
+    }
+    require fullCursor.TryPeek(init var firstAfterRejectedAppend);
+    if (firstAfterRejectedAppend.Kind != 0
+        || firstAfterRejectedAppend.Range.Start != 0)
     {
         return false;
     }
@@ -121,6 +129,7 @@ public bool CheckManagedTokenChain()
     }
     require cursorChain.TryClear();
     if (cursorChain.Count != 0 || cursorChain.Version != 70
+        || fullCursor.IsCurrent || fullCursor.TryPeek(init var invalidated)
         || ManagedHeap.Collect() != 64)
     {
         return false;
