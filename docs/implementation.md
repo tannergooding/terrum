@@ -18,7 +18,8 @@ empty, varied, malformed-UTF-16 and maximum-length sources under both runtime
 policies, plus bounded batches covering every BMP `\u` escape and its
 surrogate diagnostics, every valid supplementary `\U` scalar, and all 2,048
 surrogate-valued `\U` rejections against the hosted lexer; above-maximum
-boundaries are checked as well. Every valid supplementary scalar is also
+boundaries, malformed lengths/hex digits, and an unterminated escape are
+checked as well. Every valid supplementary scalar is also
 checked as raw quoted-string content and in both identifier-start and
 identifier-continue positions; every raw surrogate code unit is also checked
 in an isolated quoted token. A quoted source at the maximum supported length

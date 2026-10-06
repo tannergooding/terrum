@@ -473,6 +473,10 @@ public sealed class ScannerTests
                 .Append("\" ");
         }
         sources.Add(supplementaryEscapeSource.ToString());
+        sources.Add("""
+            "\U1234567" "\U0000000G" "\U0000000" "\UFFFFFFFFF" "\U00110000"
+            """);
+        sources.Add("\"\\U0000000");
 
         const int maximumSurrogateEscapesPerSource = 1_024;
         for (var scalarStart = 0xD800; scalarStart <= 0xDFFF;

@@ -789,7 +789,8 @@ completion. Regression coverage reuses the same producer and consumer
 artifacts across empty, differently sized, malformed-UTF-16 and maximum-length
 inputs under both runtime policies. It also compares every BMP `\u` escape and
 every valid supplementary `\U` scalar with the hosted lexer, including
-all 2,048 surrogate-valued `\U` rejections and above-maximum boundaries. Every
+all 2,048 surrogate-valued `\U` rejections, above-maximum boundaries,
+malformed lengths/hex digits and an unterminated escape. Every
 valid supplementary scalar is also checked as raw quoted-string content and
 in both identifier-start and identifier-continue positions; every raw
 surrogate code unit is tested in an isolated quoted token. A maximum-length
