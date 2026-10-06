@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `8c287c19` | Verify named `init ref<T>` output in native consumer sets under both policies |
 | `43620eb9` | Reject semantic/native replacement that changes `out` versus `init ref<T>` |
 | `74316f31` | Verify generic `init ref<T>` remains unpublished after failure across module replacement |
 | `77230db0` | Preserve hosted unsafe-caller diagnostics across scalar frontend rejection |
