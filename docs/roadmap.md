@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `43014ae1` | Compare caller-unsafe frontend library artifacts with hosted builds and execute both scope forms |
 | `dd5eb071` | Compare checked catch/finally library output and cleanup behavior with hosted builds |
 | `97685f7c` | Compare scalar switch library artifacts with hosted conditional output |
 | `8bafab14` | Verify positional argument evaluation order across linked module artifacts |
