@@ -1131,6 +1131,55 @@ public sealed class ModuleTests
             ModuleCompiler.Link(consumer, ModuleCompiler.CreateProducer(changed, ["Try"])));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RejectsOutAndInitModeChangesAcrossSemanticAndNativeModules(bool initialUsesInit)
+    {
+        var initialDeclaration = initialUsesInit
+            ? "public void Set(init ref<int32> result) { result = 42; }"
+            : "public void Set(out int32 result) { result = 42; }";
+        var replacementDeclaration = initialUsesInit
+            ? "public void Set(out int32 result) { result = 42; }"
+            : "public void Set(init ref<int32> result) { result = 42; }";
+        var consumerSource = initialUsesInit
+            ? "int32 Main() { init int32 result; Set(init result); return result; }"
+            : "int32 Main() { Set(out var result); return result; }";
+
+        var initialCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(initialDeclaration),
+            BoundRuntimePolicy.FailFast);
+        Assert.False(initialCompilation.HasErrors,
+            string.Join(Environment.NewLine, initialCompilation.Diagnostics));
+        var initialProgram = Assert.IsType<BoundProgram>(initialCompilation.Program);
+        var semanticProvider = ModuleCompiler.CreateProducer(initialProgram, ["Set"]);
+        var semanticCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
+            ModuleCompiler.CreateReference(semanticProvider), BoundRuntimePolicy.FailFast);
+        Assert.False(semanticCompilation.HasErrors,
+            string.Join(Environment.NewLine, semanticCompilation.Diagnostics));
+        var semanticConsumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(semanticCompilation.Program), semanticProvider);
+        var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(replacementDeclaration),
+            BoundRuntimePolicy.FailFast);
+        Assert.False(replacementCompilation.HasErrors,
+            string.Join(Environment.NewLine, replacementCompilation.Diagnostics));
+        var replacementProgram = Assert.IsType<BoundProgram>(replacementCompilation.Program);
+        var semanticReplacement = ModuleCompiler.CreateProducer(replacementProgram, ["Set"]);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.Link(semanticConsumer, semanticReplacement));
+
+        const NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast;
+        var nativeProvider = NativeModuleCompiler.CreateProducer(initialProgram, ["Set"], "OutputProvider", policy);
+        var nativeCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
+            NativeModuleCompiler.CreateReference(nativeProvider), BoundRuntimePolicy.FailFast);
+        Assert.False(nativeCompilation.HasErrors,
+            string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
+        var nativeConsumer = NativeModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(nativeCompilation.Program), nativeProvider, policy);
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(replacementProgram, ["Set"], "OutputProvider", policy);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.Validate(nativeConsumer, nativeReplacement));
+    }
+
     [Fact]
     public async Task ConstructorContractsUseExplicitArgumentsRatherThanReceiverSlotsAsync()
     {
