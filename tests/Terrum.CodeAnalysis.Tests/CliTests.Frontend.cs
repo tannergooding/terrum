@@ -178,6 +178,32 @@ public sealed partial class CliTests
         await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
     }
 
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task FrontendBuildRejectsSourceBeyondMaximumLengthAsync(string policy)
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-overlong-{Guid.NewGuid():N}.exe");
+        var source = new string(' ', ScannerHost.MaximumSourceLength + 1);
+        try
+        {
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "frontend-build",
+                directory, "-", "-o", outputPath, "--runtime", policy, "--json");
+            Assert.Equal(2, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.Equal("TRM2001", document.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString());
+            Assert.False(File.Exists(outputPath));
+        }
+        finally
+        {
+            File.Delete(outputPath);
+        }
+    }
+
     private static async Task AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
