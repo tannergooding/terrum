@@ -241,12 +241,14 @@ and readonly instance and storage-free static getters with scalar or
 recursively exportable non-unique `Copy` results for public non-unique owners;
 it also persists caller-unsafe public instance fields on public non-unique
 `Copy` structs with recursively exportable layouts. Calls and field reads,
-writes and updates require explicit `unsafe { }` blocks, from which readers
-reconstruct authorization. Executable TRRM provisionally round-trips
-top-level caller-unsafe Effects and supports calls only inside validated
-indexed Body unsafe scopes. Class/static/foreign fields, field-reference
-loans and other unsafe members remain unsupported; the broader reference-call
-metadata proposal remains unapproved.
+writes and updates, plus existing mutable receiver loans through eligible
+field paths, require explicit `unsafe { }` blocks, from which readers
+reconstruct authorization at every field edge. Executable TRRM provisionally
+round-trips top-level caller-unsafe Effects and supports calls only inside
+validated indexed Body unsafe scopes. Class/static/foreign fields, readonly
+field loans, cross-module reference/output loans and other unsafe members
+remain unsupported; the broader reference-call metadata proposal remains
+unapproved.
 
 ## Planned work (priority order)
 
@@ -268,9 +270,9 @@ prerequisite has already been met.
    obligations, narrow readonly-instance and static `Copy` method slices,
    recursively exportable by-value Copy signatures, and readonly instance and
    storage-free static getters with recursively exportable `Copy` results,
-   plus caller-unsafe public instance fields on eligible public `Copy` structs,
-   all through explicit unsafe-block
-   scopes; this bounded implementation does not settle
+   plus caller-unsafe public instance fields and existing mutable receiver
+   loans through eligible public `Copy` struct paths, all through explicit
+   unsafe-block scopes; this bounded implementation does not settle
    the general schema or approve the
    [reference-call metadata proposal](proposals/reference-call-metadata.md),
    which recommends a narrow first dependency registry and reuse of the
@@ -400,6 +402,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `ce67da8f` | Extend provisional revision-63 persistence to existing mutable receiver loans through caller-unsafe fields; require every owner and field value on the loan path to satisfy the public `Copy` layout gate, reconstruct authorization from `BoundUnsafe`, and retain readonly-field-loan and `unsafe(expr)` persistence exclusions |
 | `2e63135c` | Provisionally persist caller-unsafe public instance fields on eligible public, non-unique `Copy` structs in semantic-module revision 63; reconstruct `BoundUnsafe`-only access, enforce exact link compatibility, and reject unsupported graph layouts and field-reference loans |
 | `7862ad88` | Provisionally persist caller-unsafe static and readonly-instance Copy-valued getters in revision 62 using recursive layout eligibility for body-backed and bodyless contracts; keep TRRM and scalar-frontend support excluded |
 | `0c4ecebf` | Provisionally bind authored storage-free static getters on non-unique Copy structs and persist caller-unsafe scalar getters in revision 61; authorize calls only through unsafe blocks, with TRRM and scalar-frontend support excluded |
