@@ -317,6 +317,56 @@ public sealed class NativeModuleSetsTests
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
     }
 
+    [Fact]
+    public async Task InitRefOutputRemainsVacantAfterProviderFailureInNativeConsumerSetAsync()
+    {
+        const NativeRuntimePolicy policy = NativeRuntimePolicy.CheckedExceptions;
+        var initializerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public void FailAfterWrite(int32 value, init ref<int32> result) {
+                result = value;
+                require false;
+            }
+            public void Fill(int32 value, init ref<int32> result) {
+                result = value;
+            }
+            """), BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(initializerCompilation.HasErrors,
+            string.Join(Environment.NewLine, initializerCompilation.Diagnostics));
+        var initializer = NativeModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(initializerCompilation.Program),
+            ["FailAfterWrite", "Fill"], "Initializer", policy);
+
+        var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Beta() { return 22; }"), BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(secondCompilation.HasErrors, string.Join(Environment.NewLine, secondCompilation.Diagnostics));
+        var second = NativeModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(secondCompilation.Program), ["Beta"], "Second", policy);
+
+        const string ConsumerSource = """
+            int32 Main() {
+                init int32 result;
+                unsafe {
+                    try {
+                        FailAfterWrite(41, init result);
+                        return 1;
+                    } catch { }
+                }
+                Fill(20, init result);
+                return result + Beta();
+            }
+            """;
+        var reference = NativeModuleCompiler.CreateReferenceSet([initializer, second]);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), reference,
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumerSet(
+            Assert.IsType<BoundProgram>(consumerCompilation.Program), [initializer, second], policy);
+        NativeModuleCompiler.ValidateConsumerSet(consumer, [second, initializer]);
+        Assert.Equal(42, await NativeModuleCompiler.RunConsumerSetAsync(consumer, [second, initializer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+    }
+
     [Theory]
     [InlineData("int64", "22")]
     [InlineData("uint32", "22")]

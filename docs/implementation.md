@@ -2053,7 +2053,9 @@ consumer replacement checks reject changing a same-typed output parameter
 between `out` and `init ref<T>`; compatibility does not normalize their
 distinct publication contracts. Native consumer sets also bind named scalar
 `init ref<T>` outputs alongside independent providers under both runtime
-policies.
+policies. Under checked exceptions, a provider write followed by failure leaves
+the destination vacant in a consumer set, permitting a later provider call to
+initialize it.
 The distinct `out` mode now also accepts ordinary non-unique struct values
 for non-Boolean and void functions, provided the output is initialized on
 every normal return. Public semantic modules, native modules and native
