@@ -1,0 +1,53 @@
+using Terrum.CodeAnalysis.Numerics64;
+namespace Terrum.CodeAnalysis.Tests;
+
+public static bool CheckBitOperations()
+{
+    uint32 value32 = 0x01234567;
+    if (LeadingZeroCountUInt32(0) != 32 || LeadingZeroCountUInt32(1) != 31
+        || LeadingZeroCountUInt32(0x80000000) != 0
+        || TrailingZeroCountUInt32(0) != 32 || TrailingZeroCountUInt32(0x80000000) != 31
+        || PopCountUInt32(0xAAAAAAAA) != 16 || PopCountUInt32(uint32.MaxValue) != 32
+        || RotateLeftUInt32(value32, 8) != 0x23456701
+        || RotateRightUInt32(value32, 8) != 0x67012345
+        || RotateLeftUInt32(value32, -8) != 0x67012345
+        || RotateRightUInt32(value32, int32.MinValue) != value32
+        || ReverseBitsUInt32(value32) != 0xE6A2C480
+        || ReverseEndiannessUInt32(value32) != 0x67452301
+        || IsPow2UInt32(0) || !IsPow2UInt32(0x80000000) || IsPow2UInt32(uint32.MaxValue))
+    {
+        return false;
+    }
+
+    require TryRoundUpToPowerOfTwoUInt32(5, init var rounded32);
+    require TryRoundUpToPowerOfTwoUInt32(0x80000000, init var highest32);
+    if (rounded32 != 8 || highest32 != 0x80000000
+        || TryRoundUpToPowerOfTwoUInt32(0, init var zero32)
+        || TryRoundUpToPowerOfTwoUInt32(0x80000001, init var overflow32))
+    {
+        return false;
+    }
+
+    uint64 value64 = 0x0123456789ABCDEF;
+    if (LeadingZeroCountUInt64(0) != 64 || LeadingZeroCountUInt64(1) != 63
+        || LeadingZeroCountUInt64(0x8000000000000000) != 0
+        || TrailingZeroCountUInt64(0) != 64 || TrailingZeroCountUInt64(0x8000000000000000) != 63
+        || PopCountUInt64(0xAAAAAAAAAAAAAAAA) != 32 || PopCountUInt64(uint64.MaxValue) != 64
+        || RotateLeftUInt64(value64, 8) != 0x23456789ABCDEF01
+        || RotateRightUInt64(value64, 8) != 0xEF0123456789ABCD
+        || RotateLeftUInt64(value64, -8) != 0xEF0123456789ABCD
+        || RotateRightUInt64(value64, int32.MinValue) != value64
+        || ReverseBitsUInt64(value64) != 0xF7B3D591E6A2C480
+        || ReverseEndiannessUInt64(value64) != 0xEFCDAB8967452301
+        || IsPow2UInt64(0) || !IsPow2UInt64(0x8000000000000000)
+        || IsPow2UInt64(uint64.MaxValue))
+    {
+        return false;
+    }
+
+    require TryRoundUpToPowerOfTwoUInt64(5, init var rounded64);
+    require TryRoundUpToPowerOfTwoUInt64(0x8000000000000000, init var highest64);
+    return rounded64 == 8 && highest64 == 0x8000000000000000
+        && !TryRoundUpToPowerOfTwoUInt64(0, init var zero64)
+        && !TryRoundUpToPowerOfTwoUInt64(0x8000000000000001, init var overflow64);
+}

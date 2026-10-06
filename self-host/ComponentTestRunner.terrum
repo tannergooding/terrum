@@ -18,6 +18,7 @@ int32 Main()
         require CheckWideBaseAccumulation();
         require CheckCheckedInt32Arithmetic();
         require CheckCheckedUInt32Arithmetic();
+        require CheckBitOperations();
         iteration = iteration + 1;
     }
 

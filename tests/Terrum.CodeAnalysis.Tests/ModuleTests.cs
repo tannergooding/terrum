@@ -210,10 +210,12 @@ public sealed class ModuleTests
         var tokenPath = Path.Combine(root, "self-host", "Token.terrum");
         var wideFactsPath = Path.Combine(root, "self-host", "WideIntegerFacts.terrum");
         var checkedFactsPath = Path.Combine(root, "self-host", "IntegerCheckedArithmetic.terrum");
+        var bitOperationsPath = Path.Combine(root, "self-host", "BitOperations.terrum");
         var rangeTestsPath = Path.Combine(root, "self-host", "RangeTests.terrum");
         var tokenTestsPath = Path.Combine(root, "self-host", "TokenTests.terrum");
         var wideTestsPath = Path.Combine(root, "self-host", "WideIntegerTests.terrum");
         var checkedTestsPath = Path.Combine(root, "self-host", "IntegerCheckedArithmeticTests.terrum");
+        var bitOperationsTestsPath = Path.Combine(root, "self-host", "BitOperationsTests.terrum");
         var entryPath = Path.Combine(root, "self-host", "ComponentTestRunner.terrum");
         var range = SyntaxTree.Parse(await File.ReadAllTextAsync(rangePath).ConfigureAwait(true), rangePath);
         var facts = SyntaxTree.Parse(await File.ReadAllTextAsync(factsPath).ConfigureAwait(true), factsPath);
@@ -221,7 +223,9 @@ public sealed class ModuleTests
         var wideFacts = SyntaxTree.Parse(await File.ReadAllTextAsync(wideFactsPath).ConfigureAwait(true), wideFactsPath);
         var checkedFacts = SyntaxTree.Parse(await File.ReadAllTextAsync(checkedFactsPath).ConfigureAwait(true),
             checkedFactsPath);
-        var library = Compilation.CreateLibrary([range, facts, token, wideFacts, checkedFacts]);
+        var bitOperations = SyntaxTree.Parse(await File.ReadAllTextAsync(bitOperationsPath).ConfigureAwait(true),
+            bitOperationsPath);
+        var library = Compilation.CreateLibrary([range, facts, token, wideFacts, checkedFacts, bitOperations]);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
             "Terrum.CodeAnalysis.SourceRange.TryCreate",
@@ -249,19 +253,40 @@ public sealed class ModuleTests
             "Terrum.CodeAnalysis.Numerics64.TryMultiplyUInt32",
             "Terrum.CodeAnalysis.Numerics64.TryDivideUInt32",
             "Terrum.CodeAnalysis.Numerics64.TryRemainderUInt32",
+            "Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt32",
+            "Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt32",
+            "Terrum.CodeAnalysis.Numerics64.PopCountUInt32",
+            "Terrum.CodeAnalysis.Numerics64.RotateLeftUInt32",
+            "Terrum.CodeAnalysis.Numerics64.RotateRightUInt32",
+            "Terrum.CodeAnalysis.Numerics64.ReverseBitsUInt32",
+            "Terrum.CodeAnalysis.Numerics64.ReverseEndiannessUInt32",
+            "Terrum.CodeAnalysis.Numerics64.IsPow2UInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt32",
+            "Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt64",
+            "Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt64",
+            "Terrum.CodeAnalysis.Numerics64.PopCountUInt64",
+            "Terrum.CodeAnalysis.Numerics64.RotateLeftUInt64",
+            "Terrum.CodeAnalysis.Numerics64.RotateRightUInt64",
+            "Terrum.CodeAnalysis.Numerics64.ReverseBitsUInt64",
+            "Terrum.CodeAnalysis.Numerics64.ReverseEndiannessUInt64",
+            "Terrum.CodeAnalysis.Numerics64.IsPow2UInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt64",
         ]);
         var rangeTests = SyntaxTree.Parse(await File.ReadAllTextAsync(rangeTestsPath).ConfigureAwait(true), rangeTestsPath);
         var tokenTests = SyntaxTree.Parse(await File.ReadAllTextAsync(tokenTestsPath).ConfigureAwait(true), tokenTestsPath);
         var wideTests = SyntaxTree.Parse(await File.ReadAllTextAsync(wideTestsPath).ConfigureAwait(true), wideTestsPath);
         var checkedTests = SyntaxTree.Parse(await File.ReadAllTextAsync(checkedTestsPath).ConfigureAwait(true),
             checkedTestsPath);
+        var bitOperationsTests = SyntaxTree.Parse(await File.ReadAllTextAsync(bitOperationsTestsPath).ConfigureAwait(true),
+            bitOperationsTestsPath);
         var entry = SyntaxTree.Parse(await File.ReadAllTextAsync(entryPath).ConfigureAwait(true), entryPath);
-        var compilation = Compilation.Create([rangeTests, tokenTests, wideTests, checkedTests, entry],
+        var compilation = Compilation.Create([rangeTests, tokenTests, wideTests, checkedTests, bitOperationsTests, entry],
             ModuleCompiler.CreateReference(producer));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.Collection(compilation.SyntaxTrees, tree => Assert.Same(rangeTests, tree),
             tree => Assert.Same(tokenTests, tree), tree => Assert.Same(wideTests, tree),
-            tree => Assert.Same(checkedTests, tree), tree => Assert.Same(entry, tree));
+            tree => Assert.Same(checkedTests, tree), tree => Assert.Same(bitOperationsTests, tree),
+            tree => Assert.Same(entry, tree));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
         var consumerPath = Path.Combine(AppContext.BaseDirectory, $"self-host-module-{Guid.NewGuid():N}.trm");
         var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");

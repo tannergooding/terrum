@@ -223,16 +223,16 @@ program and extracts selected producer definitions. The CLI uses independent
 consumer source and the validated artifact-reference path.
 Both library and reference compilation accept multiple `SyntaxTree` snapshots;
 source diagnostics retain the originating snapshot. The self-host component
-test builds `SourceRange`, `CharacterFacts`, `Token`, `WideIntegerFacts`, and
-`IntegerCheckedArithmetic` into one producer, then independently binds
-`RangeTests`, `TokenTests`, `WideIntegerTests`,
-`IntegerCheckedArithmeticTests`, and the Terrum-authored
+test builds `SourceRange`, `CharacterFacts`, `Token`, `WideIntegerFacts`,
+`IntegerCheckedArithmetic`, and `BitOperations` into one producer, then
+independently binds `RangeTests`, `TokenTests`, `WideIntegerTests`,
+`IntegerCheckedArithmeticTests`, `BitOperationsTests`, and the Terrum-authored
 `ComponentTestRunner` against its exported declarations. Those persisted
 modules execute through AOT and JIT, including range boundaries,
 conditional-output failure, character classification, aggregate token
-construction, 32-/64-bit checked arithmetic and accumulation, and repeated
-calls. C# still orchestrates the test; the entry harness only composes these
-explicitly selected component checks.
+construction, 32-/64-bit checked arithmetic and accumulation, bit-operation
+boundaries, and repeated calls. C# still orchestrates the test; the entry
+harness only composes these explicitly selected component checks.
 The CLI accepts repeatable `--source <path>` options and, for producers,
 `--export <qualified-name>` options. It rejects duplicate source paths or exports,
 more than 256 sources or 1,024 exports, and more than 4 MiB of combined UTF-8
@@ -271,12 +271,87 @@ dotnet $cli run-module artifacts\token-tests.trm artifacts\token-values.trm --ru
 ```
 
 The bounded `ComponentTestRunner` composes the range, token, checked
-32-/64-bit arithmetic, and wide-integer test functions against one
-independently compiled producer:
+32-/64-bit arithmetic, wide-integer, and 32-/64-bit bit-operation test
+functions against one independently compiled producer:
 
 ```powershell
-dotnet $cli compile-module producer self-host\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source self-host\CharacterFacts.terrum --source self-host\Token.terrum --source self-host\WideIntegerFacts.terrum --source self-host\IntegerCheckedArithmetic.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export "Terrum.CodeAnalysis.SourceRange.#get:End" --export Terrum.CodeAnalysis.IsAsciiDigit --export Terrum.CodeAnalysis.IsLineBreak --export Terrum.CodeAnalysis.GetDecimalDigit --export Terrum.CodeAnalysis.Token.#ctor --export Terrum.CodeAnalysis.Numerics64.TryAddInt64 --export Terrum.CodeAnalysis.Numerics64.TrySubtractInt64 --export Terrum.CodeAnalysis.Numerics64.TryMultiplyInt64 --export Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal --export Terrum.CodeAnalysis.Numerics64.TryAccumulateBase --export Terrum.CodeAnalysis.Numerics64.TryAddInt32 --export Terrum.CodeAnalysis.Numerics64.TrySubtractInt32 --export Terrum.CodeAnalysis.Numerics64.TryMultiplyInt32 --export Terrum.CodeAnalysis.Numerics64.TryDivideInt32 --export Terrum.CodeAnalysis.Numerics64.TryRemainderInt32 --export Terrum.CodeAnalysis.Numerics64.TryNegateInt32 --export Terrum.CodeAnalysis.Numerics64.TryAbsoluteInt32 --export Terrum.CodeAnalysis.Numerics64.MagnitudeInt32 --export Terrum.CodeAnalysis.Numerics64.TryAddUInt32 --export Terrum.CodeAnalysis.Numerics64.TrySubtractUInt32 --export Terrum.CodeAnalysis.Numerics64.TryMultiplyUInt32 --export Terrum.CodeAnalysis.Numerics64.TryDivideUInt32 --export Terrum.CodeAnalysis.Numerics64.TryRemainderUInt32 -o artifacts\component-values.trm
-dotnet $cli compile-module consumer self-host\RangeTests.terrum artifacts\component-values.trm --source self-host\TokenTests.terrum --source self-host\WideIntegerTests.terrum --source self-host\IntegerCheckedArithmeticTests.terrum --source self-host\ComponentTestRunner.terrum -o artifacts\component-tests.trm
+$componentSources = @(
+    'self-host\SourceRange.terrum',
+    'self-host\CharacterFacts.terrum',
+    'self-host\Token.terrum',
+    'self-host\WideIntegerFacts.terrum',
+    'self-host\IntegerCheckedArithmetic.terrum',
+    'self-host\BitOperations.terrum'
+)
+$componentExports = @(
+    'Terrum.CodeAnalysis.SourceRange.TryCreate',
+    'Terrum.CodeAnalysis.SourceRange.GetEnd',
+    'Terrum.CodeAnalysis.SourceRange.#get:End',
+    'Terrum.CodeAnalysis.IsAsciiDigit',
+    'Terrum.CodeAnalysis.IsLineBreak',
+    'Terrum.CodeAnalysis.GetDecimalDigit',
+    'Terrum.CodeAnalysis.Token.#ctor',
+    'Terrum.CodeAnalysis.Numerics64.TryAddInt64',
+    'Terrum.CodeAnalysis.Numerics64.TrySubtractInt64',
+    'Terrum.CodeAnalysis.Numerics64.TryMultiplyInt64',
+    'Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal',
+    'Terrum.CodeAnalysis.Numerics64.TryAccumulateBase',
+    'Terrum.CodeAnalysis.Numerics64.TryAddInt32',
+    'Terrum.CodeAnalysis.Numerics64.TrySubtractInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryMultiplyInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryDivideInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryRemainderInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryNegateInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryAbsoluteInt32',
+    'Terrum.CodeAnalysis.Numerics64.MagnitudeInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryAddUInt32',
+    'Terrum.CodeAnalysis.Numerics64.TrySubtractUInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryMultiplyUInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryDivideUInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryRemainderUInt32',
+    'Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt32',
+    'Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt32',
+    'Terrum.CodeAnalysis.Numerics64.PopCountUInt32',
+    'Terrum.CodeAnalysis.Numerics64.RotateLeftUInt32',
+    'Terrum.CodeAnalysis.Numerics64.RotateRightUInt32',
+    'Terrum.CodeAnalysis.Numerics64.ReverseBitsUInt32',
+    'Terrum.CodeAnalysis.Numerics64.ReverseEndiannessUInt32',
+    'Terrum.CodeAnalysis.Numerics64.IsPow2UInt32',
+    'Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt32',
+    'Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt64',
+    'Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt64',
+    'Terrum.CodeAnalysis.Numerics64.PopCountUInt64',
+    'Terrum.CodeAnalysis.Numerics64.RotateLeftUInt64',
+    'Terrum.CodeAnalysis.Numerics64.RotateRightUInt64',
+    'Terrum.CodeAnalysis.Numerics64.ReverseBitsUInt64',
+    'Terrum.CodeAnalysis.Numerics64.ReverseEndiannessUInt64',
+    'Terrum.CodeAnalysis.Numerics64.IsPow2UInt64',
+    'Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt64'
+)
+$producerArgs = @('compile-module', 'producer', $componentSources[0], $componentExports[0])
+for ($index = 1; $index -lt $componentSources.Count; $index++) {
+    $producerArgs += @('--source', $componentSources[$index])
+}
+for ($index = 1; $index -lt $componentExports.Count; $index++) {
+    $producerArgs += @('--export', $componentExports[$index])
+}
+$producerArgs += @('-o', 'artifacts\component-values.trm')
+dotnet $cli @producerArgs
+
+$componentTests = @(
+    'self-host\RangeTests.terrum',
+    'self-host\TokenTests.terrum',
+    'self-host\WideIntegerTests.terrum',
+    'self-host\IntegerCheckedArithmeticTests.terrum',
+    'self-host\BitOperationsTests.terrum',
+    'self-host\ComponentTestRunner.terrum'
+)
+$consumerArgs = @('compile-module', 'consumer', $componentTests[0], 'artifacts\component-values.trm')
+for ($index = 1; $index -lt $componentTests.Count; $index++) {
+    $consumerArgs += @('--source', $componentTests[$index])
+}
+$consumerArgs += @('-o', 'artifacts\component-tests.trm')
+dotnet $cli @consumerArgs
 dotnet $cli run-module artifacts\component-tests.trm artifacts\component-values.trm --runtime fail-fast # exits 0
 dotnet $cli link-module artifacts\component-tests.trm artifacts\component-values.trm -o artifacts\component-tests.exe --runtime fail-fast
 ```
