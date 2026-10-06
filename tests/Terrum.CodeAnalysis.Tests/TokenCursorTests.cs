@@ -19,6 +19,31 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TokenCursorTests
 {
+    private const string ForwardingDeclarations = """
+        using Terrum.CodeAnalysis;
+        [return: ForwardedBacking]
+        [return: DependsOn(nameof(tokens))]
+        internal Span<Token> Identity(Span<Token> tokens) { return tokens; }
+        [return: ForwardedBacking]
+        [return: DependsOn(nameof(left), nameof(right))]
+        internal Span<Token> Choose(Span<Token> left, Span<Token> right, bool useLeft) {
+            return useLeft ? left : right;
+        }
+        [return: ForwardedBacking]
+        [return: DependsOn(nameof(first), nameof(second))]
+        internal Span<Token> Forward(Span<Token> first, Span<Token> second, bool useFirst) {
+            return Choose(right: second, left: first, useLeft: useFirst);
+        }
+        [return: ForwardedBacking]
+        [return: DependsOn(nameof(tokens))]
+        internal Span<Token> ForwardWithCleanup(Span<Token> tokens, bool failCleanup) {
+            try {
+                require !failCleanup;
+                return tokens;
+            } finally { }
+        }
+        """;
+
     [Fact]
     public void SpanMetadataInspectionPreservesFunctionShortCircuitOrder()
     {
@@ -142,6 +167,308 @@ public sealed class TokenCursorTests
             """;
         var compilation = await CompileAsync(input, entry, policy).ConfigureAwait(true);
         await ExecuteAsync(Program(compilation), policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ForwardedSpanResultsRetainDeclaredBackingThroughTransitiveCallsAsync(BoundRuntimePolicy policy)
+    {
+        var entry = ForwardingDeclarations + """
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var firstScanned);
+                require TokenSnapshot.TryScan(init var secondScanned);
+                mut TokenSnapshot first = move firstScanned;
+                mut TokenSnapshot second = move secondScanned;
+                Span<Token> result = Identity(Forward(second: second.AsSpan(), first: first.AsSpan(),
+                    useFirst: false));
+                require result.Length == uint64(first.GetCount());
+                require result[0].Kind == 2;
+                result = _;
+                first = _;
+                second = _;
+                return 42;
+            }
+            """;
+        var program = Program(await CompileAsync("alpha 42", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Main"]));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, ["Main"], (NativeRuntimePolicy)policy));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DirectCursorConstructorArgumentsRetainForwardedBackingAsync(bool throughForwarder)
+    {
+        var view = throughForwarder ? "Identity(owner.AsSpan())" : "owner.AsSpan()";
+        var entry = ForwardingDeclarations + $$"""
+            int32 Consume(TokenCursor cursor, bool ignored) { return 42; }
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var scanned);
+                mut TokenSnapshot owner = move scanned;
+                int32 result = Consume(new TokenCursor({{view}}), false);
+                owner = _;
+                if (result != 42) { return 1; }
+                return 42;
+            }
+            """;
+        var program = Program(await CompileAsync("alpha 42", entry,
+            BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        await ExecuteAsync(program, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task ForwardedSpanResultRetainsEveryDeclaredSourceUntilRetiredAsync()
+    {
+        var entry = ForwardingDeclarations + """
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var firstScanned);
+                require TokenSnapshot.TryScan(init var secondScanned);
+                mut TokenSnapshot first = move firstScanned;
+                mut TokenSnapshot second = move secondScanned;
+                Span<Token> result = Choose(first.AsSpan(), second.AsSpan(), false);
+                first = _;
+                result = _;
+                second = _;
+                return 42;
+            }
+            """;
+        var compilation = await CompileAsync("alpha 42", entry, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public async Task ForwardedSpanCannotOutliveASourceOwnersLexicalScopeAsync()
+    {
+        var entry = ForwardingDeclarations + """
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var firstScanned);
+                mut TokenSnapshot first = move firstScanned;
+                mut TokenCursor result = new TokenCursor(first.AsSpan());
+                {
+                    require TokenSnapshot.TryScan(init var scopedScanned);
+                    mut TokenSnapshot scoped = move scopedScanned;
+                    result = new TokenCursor(Forward(scoped.AsSpan(), scoped.AsSpan(), true));
+                }
+                result = _;
+                first = _;
+                return 42;
+            }
+            """;
+        var compilation = await CompileAsync("alpha 42", entry, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public async Task ForwardedSpanOwnershipFailureKeepsItsDeclaringSourceContextAsync()
+    {
+        var entry = ForwardingDeclarations + """
+            [return: ForwardedBacking]
+            [return: DependsOn(nameof(left))]
+            internal Span<Token> Invalid(Span<Token> left, Span<Token> right) { return right; }
+            int32 Main() { return 42; }
+            """;
+        var compilation = await CompileAsync("alpha 42", entry, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+        var diagnostic = Assert.Single(compilation.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3023");
+        Assert.InRange(diagnostic.Span.End, 1, entry.Length);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public async Task MandatoryVerifierRejectsForgedForwardedSpanMetadataAndMalformedCallsAsync()
+    {
+        var entry = ForwardingDeclarations + """
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var scanned);
+                mut TokenSnapshot owner = move scanned;
+                Span<Token> result = Identity(Forward(owner.AsSpan(), owner.AsSpan(), false));
+                result = _;
+                owner = _;
+                return 42;
+            }
+            """;
+        var program = Program(await CompileAsync("alpha 42", entry, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        var identity = Assert.Single(program.Functions, static function => function.Name == "Identity");
+        var identityIndex = program.Functions.IndexOf(identity);
+        var forward = Assert.Single(program.Functions, static function => function.Name == "Forward");
+        var forwardIndex = program.Functions.IndexOf(forward);
+        var mainIndex = program.EntryPoint;
+        var identityReturn = Assert.IsType<BoundReturn>(Assert.Single(identity.Body.Statements));
+        var malformedConditional = new BoundConditional(
+            new BoundConstant(1, PrimitiveType.Bool, identity.Span),
+            new BoundRead(0, PrimitiveType.TokenSpan, identity.Span), null!,
+            PrimitiveType.TokenSpan, identity.Span);
+        Reject(program with {
+            Functions = program.Functions.SetItem(identityIndex, identity with {
+                Body = identity.Body with {
+                    Statements = [identityReturn with { Value = malformedConditional }],
+                },
+            }),
+        });
+        var cursorConstructor = Assert.Single(program.Functions,
+            static function => function.Name == "Terrum.CodeAnalysis.TokenCursor.#ctor");
+        var cursorConstructorIndex = program.Functions.IndexOf(cursorConstructor);
+        Reject(program with {
+            Functions = program.Functions.SetItem(identityIndex, identity with {
+                Body = identity.Body with {
+                    Statements = [identityReturn with {
+                        Value = new BoundCall(cursorConstructorIndex, [], PrimitiveType.TokenSpan, identity.Span),
+                    }],
+                },
+            }),
+        });
+        Reject(program with {
+            Functions = program.Functions.SetItem(identityIndex, identity with { IsInternal = false }),
+        });
+
+        BoundExpression RewriteExpression(BoundExpression expression, int targetFunction) => expression switch {
+            BoundCall call when call.Function == targetFunction
+                => call with { Arguments = [] },
+            BoundCall call => call with {
+                Arguments = [.. call.Arguments.Select(argument => RewriteExpression(argument, targetFunction))],
+            },
+            BoundConditional conditional => conditional with {
+                Condition = RewriteExpression(conditional.Condition, targetFunction),
+                WhenTrue = RewriteExpression(conditional.WhenTrue, targetFunction),
+                WhenFalse = RewriteExpression(conditional.WhenFalse, targetFunction),
+            },
+            BoundFieldRead field => field with { Receiver = RewriteExpression(field.Receiver, targetFunction) },
+            BoundSpanAdvance advance => advance with { View = RewriteExpression(advance.View, targetFunction) },
+            _ => expression,
+        };
+        BoundStatement RewriteStatement(BoundStatement statement, int targetFunction) => statement switch {
+            BoundBlock block => block with {
+                Statements = [.. block.Statements.Select(child => RewriteStatement(child, targetFunction))],
+            },
+            BoundTryFinally region => region with {
+                Body = (BoundBlock)RewriteStatement(region.Body, targetFunction),
+                Finally = (BoundBlock)RewriteStatement(region.Finally, targetFunction),
+            },
+            BoundLocal { Initializer: BoundExpression initializer } local => local with {
+                Initializer = RewriteExpression(initializer, targetFunction),
+            },
+            BoundReturn { Value: BoundExpression value } result => result with {
+                Value = RewriteExpression(value, targetFunction),
+            },
+            BoundRequire requirement => requirement with {
+                Condition = RewriteExpression(requirement.Condition, targetFunction),
+            },
+            _ => statement,
+        };
+        foreach (var targetFunction in new[] { identityIndex, forwardIndex })
+        {
+            var malformedMain = program.Functions[mainIndex] with {
+                Body = (BoundBlock)RewriteStatement(program.Functions[mainIndex].Body, targetFunction),
+            };
+            Reject(program with { Functions = program.Functions.SetItem(mainIndex, malformedMain) });
+        }
+    }
+
+    [Fact]
+    public async Task ForwardedSpanArgumentIsStagedBeforeLaterArgumentEvaluationAsync()
+    {
+        var entry = ForwardingDeclarations + """
+            bool Replace(out TokenSnapshot value) {
+                require TokenSnapshot.TryScan(init var fresh);
+                value = move fresh;
+                return true;
+            }
+            int32 Observe(Span<Token> tokens, bool ignored) { return 42; }
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var scanned);
+                mut TokenSnapshot owner = move scanned;
+                return Observe(Identity(owner.AsSpan()), Replace(out owner));
+            }
+            """;
+        var compilation = await CompileAsync("alpha 42", entry, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public async Task CheckedCleanupFailureDoesNotPublishAForwardedSpanResultAsync()
+    {
+        var entry = ForwardingDeclarations + """
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var scanned);
+                mut TokenSnapshot owner = move scanned;
+                unsafe {
+                    try {
+                        Span<Token> failed = ForwardWithCleanup(owner.AsSpan(), true);
+                        return 1;
+                    } catch { }
+                }
+                Span<Token> result = ForwardWithCleanup(owner.AsSpan(), false);
+                require result.Length == uint64(owner.GetCount());
+                require result[0].Kind == 2;
+                result = _;
+                owner = _;
+                return 42;
+            }
+            """;
+        var program = Program(await CompileAsync("alpha 42", entry,
+            BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        await ExecuteAsync(program, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("""
+        [return: DependsOn(nameof(tokens))]
+        internal Span<Token> MissingMarker(Span<Token> tokens) { return tokens; }
+        """)]
+    [InlineData("""
+        [return: ForwardedBacking]
+        internal Span<Token> MissingSources(Span<Token> tokens) { return tokens; }
+        """)]
+    [InlineData("""
+        [return: ForwardedBacking]
+        [return: DependsOn(nameof(left))]
+        internal Span<Token> UndeclaredSource(Span<Token> left, Span<Token> right, bool selectRight) {
+            return selectRight ? right : left;
+        }
+        """)]
+    [InlineData("""
+        [return: ForwardedBacking]
+        [return: DependsOn(nameof(tokens), nameof(tokens))]
+        internal Span<Token> DuplicateSource(Span<Token> tokens) { return tokens; }
+        """)]
+    [InlineData("""
+        [return: ForwardedBacking]
+        [return: DependsOn(nameof(select))]
+        internal Span<Token> NonSpanSource(bool select, Span<Token> tokens) { return tokens; }
+        """)]
+    public async Task InvalidForwardedSpanContractsAreRejectedEvenWhenUncalledAsync(string declaration)
+    {
+        var entry = "using Terrum.CodeAnalysis; " + declaration + " int32 Main() { return 42; }";
+        var compilation = await CompileAsync("", entry, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public async Task ForwardedSpanCannotEscapeALocalOwnerAsync()
+    {
+        var entry = """
+            using Terrum.CodeAnalysis;
+            [return: ForwardedBacking]
+            [return: DependsOn(nameof(tokens))]
+            internal Span<Token> Escape(Span<Token> tokens) {
+                require TokenSnapshot.TryScan(init var scanned);
+                TokenSnapshot owner = move scanned;
+                Span<Token> local = owner.AsSpan();
+                return local;
+            }
+            int32 Main() { return 42; }
+            """;
+        var compilation = await CompileAsync("alpha 42", entry, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
     }
 
     [Theory]

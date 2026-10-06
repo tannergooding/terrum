@@ -287,13 +287,41 @@ internal sealed class Parser
 
         while (Current.Kind == TokenKind.OpenBracket)
         {
-            var attribute = new List<SyntaxElement> { Take(), Expect(TokenKind.Identifier) };
+            var attribute = new List<SyntaxElement> { Take() };
+            if (Current.Kind == TokenKind.ReturnKeyword && Peek(1).Kind == TokenKind.Colon)
+            {
+                attribute.Add(Take());
+                attribute.Add(Take());
+            }
+            attribute.Add(Expect(TokenKind.Identifier));
             if (Current.Kind == TokenKind.OpenParen)
             {
                 attribute.Add(ExpectAttached(TokenKind.OpenParen));
-                attribute.Add(Expect(TokenKind.Identifier));
+                if (attribute[^2] is SyntaxTokenElement { Token.Text: "DependsOn" })
+                {
+                    while (Current.Kind != TokenKind.CloseParen && Current.Kind != TokenKind.EndOfFile)
+                    {
+                        var argument = Expect(TokenKind.Identifier);
+                        attribute.Add(argument);
+                        if (argument.Token.Text == "nameof")
+                        {
+                            attribute.Add(ExpectAttached(TokenKind.OpenParen));
+                            attribute.Add(Expect(TokenKind.Identifier));
+                            attribute.Add(Expect(TokenKind.CloseParen));
+                        }
+                        if (Current.Kind != TokenKind.Comma)
+                        {
+                            break;
+                        }
+                        attribute.Add(Take());
+                    }
+                }
+                else
+                {
+                    attribute.Add(Expect(TokenKind.Identifier));
+                }
                 if (Current.Kind == TokenKind.OpenParen
-                    && attribute[1] is SyntaxTokenElement { Token.Text: "Captures" })
+                    && attribute[^3] is SyntaxTokenElement { Token.Text: "Captures" })
                 {
                     attribute.Add(ExpectAttached(TokenKind.OpenParen));
                     attribute.Add(Expect(TokenKind.Identifier));

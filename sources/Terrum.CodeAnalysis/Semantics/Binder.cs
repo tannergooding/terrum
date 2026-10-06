@@ -575,6 +575,8 @@ internal sealed partial class Binder
                    : (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".") + signature.StructName,
                 PropertyName = signature.PropertyName,
                 CapturedParameters = signature.CapturedParameters,
+                ReturnsForwardedBacking = signature.ReturnsForwardedBacking,
+                ResultDependencyParameters = signature.ResultDependencyParameters,
             });
         }
 
@@ -1294,33 +1296,48 @@ internal sealed partial class Binder
         var isConstEval = false;
         var doesNotReturn = false;
         SyntaxNode? captures = null;
+        SyntaxNode? forwardedBacking = null;
+        SyntaxNode? resultDependencies = null;
         var accessModifiers = 0;
         for (var index = 0; index < modifierCount; index++)
         {
             if (declaration.Children[index] is SyntaxNode { Kind: SyntaxKind.Attribute } attribute)
             {
+                var returnTarget = attribute.Children.Length > 2
+                    && attribute.Children[1] is SyntaxTokenElement { Token.Kind: TokenKind.ReturnKeyword }
+                    && attribute.Children[2] is SyntaxTokenElement { Token.Kind: TokenKind.Colon };
+                var attributeName = attribute.Children.OfType<SyntaxTokenElement>()
+                    .FirstOrDefault(static token => token.Token.Kind == TokenKind.Identifier)?.Token.Text;
                 if (property)
                 {
                     Report("TRM3001", "Getter effects belong on the get accessor.", attribute.Span);
                 }
-                else if (attribute.Children[1] is SyntaxTokenElement { Token.Text: "NoThrow" } && !isNoThrow)
+                else if (returnTarget && attributeName == "ForwardedBacking" && forwardedBacking is null)
+                {
+                    forwardedBacking = attribute;
+                }
+                else if (returnTarget && attributeName == "DependsOn" && resultDependencies is null)
+                {
+                    resultDependencies = attribute;
+                }
+                else if (!returnTarget && attributeName == "NoThrow" && !isNoThrow)
                 {
                     isNoThrow = true;
                 }
-                else if (attribute.Children[1] is SyntaxTokenElement { Token.Text: "DoesNotReturn" } && !doesNotReturn)
+                else if (!returnTarget && attributeName == "DoesNotReturn" && !doesNotReturn)
                 {
                     doesNotReturn = true;
                 }
-                else if (attribute.Children[1] is SyntaxTokenElement { Token.Text: "Cleanup" } && !isCleanup)
+                else if (!returnTarget && attributeName == "Cleanup" && !isCleanup)
                 {
                     isCleanup = true;
                 }
-                else if (attribute.Children is [_, SyntaxTokenElement { Token.Text: "ConstEval" }, _]
-                    && !isConstEval)
+                else if (!returnTarget && attribute.Children is [
+                    _, SyntaxTokenElement { Token.Text: "ConstEval" }, _] && !isConstEval)
                 {
                     isConstEval = true;
                 }
-                else if (attribute.Children[1] is SyntaxTokenElement { Token.Text: "Captures" }
+                else if (!returnTarget && attributeName == "Captures"
                     && captures is null)
                 {
                     captures = attribute;
@@ -1449,8 +1466,11 @@ internal sealed partial class Binder
         {
             Report("TRM3007", "A getter must return a supported by-value Copy type.", declaration.Span);
         }
+        var spanResultCandidate = returnType == PrimitiveType.TokenSpan && !constructor
+            && containingType is null && body is not null && isInternal
+            && forwardedBacking is not null && resultDependencies is not null;
         if (returnType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
-            || !constructor && TokenSpanContract.IsDependent(returnType, _structs))
+            || !constructor && TokenSpanContract.IsDependent(returnType, _structs) && !spanResultCandidate)
         {
             Report("TRM3023", "A native buffer view cannot be returned.", returnNode!.Span);
         }
@@ -1563,6 +1583,25 @@ internal sealed partial class Binder
         var qualifiedName = (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".")
             + (containingType is null ? "" : containingType + ".")
             + (constructor ? "#ctor" : property ? "#get:" + nameText : nameText);
+        ImmutableArray<int> resultDependencyParameters = [];
+        if (forwardedBacking is not null || resultDependencies is not null)
+        {
+            if (!spanResultCandidate || forwardedBacking is null || resultDependencies is null
+                || forwardedBacking.Children is not [
+                    SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
+                    SyntaxTokenElement { Token.Kind: TokenKind.ReturnKeyword },
+                    SyntaxTokenElement { Token.Kind: TokenKind.Colon },
+                    SyntaxTokenElement { Token.Text: "ForwardedBacking" },
+                    SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket }])
+            {
+                Report("TRM3023", "Forwarded Span results require both return-target ForwardedBacking and DependsOn annotations on a compilation-local function.",
+                    declaration.Span);
+            }
+            else
+            {
+                resultDependencyParameters = BindResultDependencyParameters(resultDependencies, declared.ToImmutable());
+            }
+        }
         ImmutableArray<int> capturedParameters = [];
         if (captures is not null)
         {
@@ -1614,7 +1653,83 @@ internal sealed partial class Binder
             IsConstEval = isConstEval,
             RequiresUnsafeCaller = requiresUnsafeCaller,
             CapturedParameters = capturedParameters,
+            ReturnsForwardedBacking = forwardedBacking is not null,
+            ResultDependencyParameters = resultDependencyParameters,
         });
+    }
+
+    private ImmutableArray<int> BindResultDependencyParameters(SyntaxNode attribute,
+        ImmutableArray<Parameter> parameters)
+    {
+        var children = attribute.Children;
+        if (children.Length < 10
+            || children[0] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket }
+            || children[1] is not SyntaxTokenElement { Token.Kind: TokenKind.ReturnKeyword }
+            || children[2] is not SyntaxTokenElement { Token.Kind: TokenKind.Colon }
+            || children[3] is not SyntaxTokenElement { Token.Text: "DependsOn" }
+            || children[4] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenParen }
+            || children[^2] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen }
+            || children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket })
+        {
+            Report("TRM3023", "DependsOn requires a nonempty return-target list of nameof(parameter) selectors.",
+                attribute.Span);
+            return [];
+        }
+
+        var result = ImmutableArray.CreateBuilder<int>();
+        var seen = new HashSet<int>();
+        var index = 5;
+        var end = children.Length - 2;
+        while (index < end)
+        {
+            if (index + 3 >= end
+                || children[index] is not SyntaxTokenElement { Token.Text: "nameof" }
+                || children[index + 1] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenParen }
+                || children[index + 2] is not SyntaxTokenElement { Token.Kind: TokenKind.Identifier } selector
+                || children[index + 3] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen })
+            {
+                Report("TRM3023", "DependsOn requires a nonempty return-target list of nameof(parameter) selectors.",
+                    attribute.Span);
+                return [];
+            }
+
+            var parameterIndex = -1;
+            for (var parameter = 0; parameter < parameters.Length; parameter++)
+            {
+                if (parameters[parameter].Name == selector.Token.Name)
+                {
+                    parameterIndex = parameter;
+                    break;
+                }
+            }
+            if (parameterIndex < 0 || parameters[parameterIndex] is not {
+                Type: PrimitiveType.TokenSpan,
+                IsOut: false,
+                IsInit: false,
+            } || !seen.Add(parameterIndex))
+            {
+                Report("TRM3023", "Forwarded Span dependencies must name distinct readonly Span<Token> input parameters.",
+                    selector.Token.Span);
+                return [];
+            }
+            result.Add(parameterIndex);
+            index += 4;
+            if (index < end)
+            {
+                if (children[index] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma })
+                {
+                    Report("TRM3023", "DependsOn selectors must be separated by commas.", attribute.Span);
+                    return [];
+                }
+                index++;
+            }
+        }
+        if (result.Count == 0)
+        {
+            Report("TRM3023", "DependsOn requires at least one eligible Span<Token> input.", attribute.Span);
+            return [];
+        }
+        return result.ToImmutable();
     }
 
     private PrimitiveType BindType(SyntaxNode node, bool allowVoid)
@@ -4765,5 +4880,7 @@ internal sealed partial class Binder
         internal int ClassConstructor { get; init; } = -1;
         internal bool IsConstEval { get; init; }
         internal ImmutableArray<int> CapturedParameters { get; init; } = [];
+        internal bool ReturnsForwardedBacking { get; init; }
+        internal ImmutableArray<int> ResultDependencyParameters { get; init; } = [];
     }
 }

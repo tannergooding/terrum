@@ -29,9 +29,16 @@ public static partial class SemanticVerifier
         }
         foreach (var function in program.Functions)
         {
-            if (function.CapturedParameters.IsDefault)
+            if (function.CapturedParameters.IsDefault || function.ResultDependencyParameters.IsDefault)
             {
                 throw Invalid(function.Span);
+            }
+            var forwardedSpanResult = function.ReturnType == PrimitiveType.TokenSpan
+                && function.ReturnsForwardedBacking && !function.ResultDependencyParameters.IsEmpty;
+            if (function.ReturnsForwardedBacking != forwardedSpanResult
+                || !function.ReturnsForwardedBacking && !function.ResultDependencyParameters.IsEmpty)
+            {
+                throw InvalidEffect(function.Span, "Ownership");
             }
             var cursorConstructor = function.IsConstructor
                 && TokenSpanContract.IsCursor(function.ReturnType, program.Structures);
@@ -46,9 +53,30 @@ public static partial class SemanticVerifier
                 }
             }
             else if (!function.CapturedParameters.IsEmpty
-                || TokenSpanContract.IsDependent(function.ReturnType, program.Structures))
+                || TokenSpanContract.IsDependent(function.ReturnType, program.Structures) && !forwardedSpanResult)
             {
                 throw InvalidEffect(function.Span, "Ownership");
+            }
+            if (forwardedSpanResult)
+            {
+                if (function.IsConstructor || function.IsExternal || function.Intrinsic != BoundIntrinsic.None
+                    || function.DeclaringStruct is not null || !function.IsInternal || function.ParameterCount == 0)
+                {
+                    throw InvalidEffect(function.Span, "Ownership");
+                }
+                var seen = new HashSet<int>();
+                foreach (var parameter in function.ResultDependencyParameters)
+                {
+                    if ((uint)parameter >= (uint)function.ParameterCount || !seen.Add(parameter)
+                        || function.Variables[parameter] is not {
+                            Type: PrimitiveType.TokenSpan,
+                            IsOut: false,
+                            IsInit: false,
+                        })
+                    {
+                        throw InvalidEffect(function.Span, "Ownership");
+                    }
+                }
             }
             if (function.IndexedBody is not null && hasSpans)
             {
@@ -90,6 +118,7 @@ public static partial class SemanticVerifier
         }
         var facts = new BackingDependencies(function.Variables.Length);
         var edges = new List<int>?[function.Variables.Length];
+        var forwardedSpanReturns = function.ReturnsForwardedBacking ? new List<BoundExpression>() : null;
         for (var slot = 0; slot < edges.Length; slot++)
         {
             if (slot < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -124,17 +153,27 @@ public static partial class SemanticVerifier
             switch (expression)
             {
                 case BoundSnapshotSpan snapshot:
+                    if ((uint)snapshot.Variable >= (uint)edges.Length
+                        || function.Variables[snapshot.Variable].Type
+                            != (PrimitiveType)(100 + TokenSpanContract.Find(program.Structures, TokenSpanContract.SnapshotName)))
+                    {
+                        throw Invalid(snapshot.Span);
+                    }
                     AddBackingSource(facts, destination, snapshot.Variable);
                     break;
                 case BoundRead read:
-                    if ((uint)read.Variable >= (uint)edges.Length)
+                    if ((uint)read.Variable >= (uint)edges.Length
+                        || function.Variables[read.Variable].Type != read.Type
+                        || !TokenSpanContract.IsDependent(read.Type, program.Structures))
                     {
                         throw Invalid(read.Span);
                     }
                     AddEdge(read.Variable, destination);
                     break;
                 case BoundMove move:
-                    if ((uint)move.Variable >= (uint)edges.Length)
+                    if ((uint)move.Variable >= (uint)edges.Length
+                        || function.Variables[move.Variable].Type != move.Type
+                        || !TokenSpanContract.IsDependent(move.Type, program.Structures))
                     {
                         throw Invalid(move.Span);
                     }
@@ -149,11 +188,8 @@ public static partial class SemanticVerifier
                 case BoundCall call when (uint)call.Function < (uint)program.Functions.Length
                     && program.Functions[call.Function].IsConstructor
                     && TokenSpanContract.IsCursor(call.Type, program.Structures):
-                    if (call.Arguments.IsDefault || call.Arguments.Length != 1
-                        || !call.ArgumentParameterIndices.IsDefault && call.ArgumentParameterIndices is not [0])
-                    {
-                        throw Invalid(call.Span);
-                    }
+                    var cursorConstructor = program.Functions[call.Function];
+                    ValidateSpanCall(call, cursorConstructor);
                     foreach (var capture in program.Functions[call.Function].CapturedParameters)
                     {
                         var parameter = capture - 1;
@@ -161,6 +197,16 @@ public static partial class SemanticVerifier
                         {
                             throw Invalid(call.Span);
                         }
+                        Source(destination, call.Arguments[call.ArgumentIndex(parameter)], depth + 1);
+                    }
+                    break;
+                case BoundCall call when (uint)call.Function < (uint)program.Functions.Length
+                    && call.Type == PrimitiveType.TokenSpan
+                    && program.Functions[call.Function].ReturnsForwardedBacking:
+                    var callee = program.Functions[call.Function];
+                    ValidateSpanCall(call, callee);
+                    foreach (var parameter in callee.ResultDependencyParameters)
+                    {
                         Source(destination, call.Arguments[call.ArgumentIndex(parameter)], depth + 1);
                     }
                     break;
@@ -185,6 +231,9 @@ public static partial class SemanticVerifier
                         throw Invalid(local.Span);
                     }
                     Source(local.Variable, initializer, depth + 1);
+                    break;
+                case BoundReturn { Value: BoundExpression result } when result.Type == PrimitiveType.TokenSpan:
+                    forwardedSpanReturns?.Add(result);
                     break;
                 case BoundAssignment { Value: BoundExpression value } assignment
                     when TokenSpanContract.IsDependent(value.Type, program.Structures):
@@ -283,7 +332,48 @@ public static partial class SemanticVerifier
                 }
             }
         }
+        if (forwardedSpanReturns is not null)
+        {
+            if (forwardedSpanReturns.Count == 0)
+            {
+                throw InvalidEffect(function.Span, "Ownership");
+            }
+            var permittedSources = function.ResultDependencyParameters
+                .Select(static parameter => ~parameter).ToHashSet();
+            foreach (var result in forwardedSpanReturns)
+            {
+                var actualSources = BackingOf(result, facts, program, ref remaining, 0);
+                if (actualSources.Count == 0 || actualSources.Any(source => !permittedSources.Contains(source)))
+                {
+                    throw InvalidEffect(result.Span, "Ownership");
+                }
+            }
+        }
         return facts;
+    }
+
+    private static void ValidateSpanCall(BoundCall call, BoundFunction callee)
+    {
+        var arguments = call.Arguments;
+        if (arguments.IsDefault || arguments.Length != callee.ParameterCount || call.Type != callee.ReturnType
+            || !call.ArgumentParameterIndices.IsDefault && call.ArgumentParameterIndices.Length != arguments.Length)
+        {
+            throw Invalid(call.Span);
+        }
+        var seen = new bool[callee.ParameterCount];
+        for (var argument = 0; argument < arguments.Length; argument++)
+        {
+            var parameter = call.ParameterIndex(argument);
+            var variable = parameter + (callee.IsConstructor ? 1 : 0);
+            if ((uint)parameter >= (uint)seen.Length || seen[parameter]
+                || arguments[argument] is not BoundExpression expression
+                || (uint)variable >= (uint)callee.Variables.Length
+                || expression.Type != callee.Variables[variable].Type)
+            {
+                throw Invalid(call.Span);
+            }
+            seen[parameter] = true;
+        }
     }
 
     private static void AddBackingSource(BackingDependencies facts, int slot, int source)
@@ -301,13 +391,17 @@ public static partial class SemanticVerifier
         BoundProgram program, ref int remaining, int depth)
     {
         Count(ref remaining, depth);
+        if (expression is null)
+        {
+            throw Invalid();
+        }
         if (facts is null)
         {
             throw InvalidEffect(expression.Span, "Ownership");
         }
         switch (expression)
         {
-            case BoundSnapshotSpan snapshot:
+            case BoundSnapshotSpan snapshot when (uint)snapshot.Variable < (uint)facts.Sources.Length:
                 return new HashSet<int> { snapshot.Variable };
             case BoundRead read when (uint)read.Variable < (uint)facts.Sources.Length:
                 return facts.Sources[read.Variable] ?? EmptyBackingSources;
@@ -321,15 +415,45 @@ public static partial class SemanticVerifier
                 return BackingOf(field.Receiver, facts, program, ref remaining, depth + 1);
             case BoundSpanAdvance advance:
                 return BackingOf(advance.View, facts, program, ref remaining, depth + 1);
-            case BoundCall call when (uint)call.Function < (uint)program.Functions.Length:
-                var result = new HashSet<int>();
-                foreach (var capture in program.Functions[call.Function].CapturedParameters)
+            case BoundCall call when (uint)call.Function < (uint)program.Functions.Length
+                && program.Functions[call.Function].IsConstructor
+                && TokenSpanContract.IsCursor(call.Type, program.Structures):
+                var constructor = program.Functions[call.Function];
+                ValidateSpanCall(call, constructor);
+                var cursorBacking = new HashSet<int>();
+                foreach (var capture in constructor.CapturedParameters)
                 {
-                    result.UnionWith(BackingOf(call.Arguments[call.ArgumentIndex(capture - 1)], facts,
-                        program, ref remaining, depth + 1));
+                    var parameter = capture - 1;
+                    if ((uint)parameter >= (uint)call.Arguments.Length)
+                    {
+                        throw Invalid(call.Span);
+                    }
+                    cursorBacking.UnionWith(BackingOf(call.Arguments[call.ArgumentIndex(parameter)],
+                        facts, program, ref remaining, depth + 1));
+                }
+                if (cursorBacking.Count == 0)
+                {
+                    throw InvalidEffect(call.Span, "Ownership");
+                }
+                return cursorBacking;
+            case BoundCall call when (uint)call.Function < (uint)program.Functions.Length
+                && call.Type == PrimitiveType.TokenSpan:
+                var result = new HashSet<int>();
+                var callee = program.Functions[call.Function];
+                ValidateSpanCall(call, callee);
+                if (callee.ReturnsForwardedBacking && callee.ReturnType == PrimitiveType.TokenSpan)
+                {
+                    foreach (var parameter in callee.ResultDependencyParameters)
+                    {
+                        result.UnionWith(BackingOf(call.Arguments[call.ArgumentIndex(parameter)], facts,
+                            program, ref remaining, depth + 1));
+                    }
                 }
                 return result;
-            case BoundConditional conditional:
+            case BoundConditional conditional when conditional.Condition is not null
+                && conditional.WhenTrue is not null && conditional.WhenFalse is not null
+                && conditional.WhenTrue.Type == PrimitiveType.TokenSpan
+                && conditional.WhenFalse.Type == PrimitiveType.TokenSpan:
                 var union = new HashSet<int>(BackingOf(conditional.WhenTrue, facts, program, ref remaining, depth + 1));
                 union.UnionWith(BackingOf(conditional.WhenFalse, facts, program, ref remaining, depth + 1));
                 return union;

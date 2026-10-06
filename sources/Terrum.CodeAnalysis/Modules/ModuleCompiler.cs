@@ -223,9 +223,11 @@ public static partial class ModuleCompiler
                 || item.Function is BoundFunction function
                     && (function.ReturnType == PrimitiveType.TokenSpan
                         || !function.CapturedParameters.IsDefaultOrEmpty
+                        || function.ReturnsForwardedBacking
+                        || !function.ResultDependencyParameters.IsDefaultOrEmpty
                         || function.Variables.Any(static variable => variable.Type == PrimitiveType.TokenSpan))))
         {
-            throw new ModuleFormatException("Compilation-local span and capture metadata cannot be persisted.");
+            throw new ModuleFormatException("Compilation-local span, capture, and forwarding metadata cannot be persisted.");
         }
         if (module.Structures.Any(static structure => structure.Fields.Any(
             static field => field.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView))

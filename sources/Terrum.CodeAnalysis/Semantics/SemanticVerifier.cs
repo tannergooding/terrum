@@ -605,11 +605,21 @@ public static partial class SemanticVerifier
             {
                 continue;
             }
+            BackingDependencies? backingDependencies;
+            try
+            {
+                backingDependencies = CreateBackingDependencies(function, program, hasSpanDependencies);
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+            {
+                exception.Data[FunctionIndexKey] = functionIndex;
+                throw;
+            }
             var initialized = new InitializationState(function.Variables.Length) {
                 StatementInputs = function.Variables.Any(variable => variable.Type is
                     PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
                     ? new Dictionary<BoundStatement, InitializationState>(ReferenceEqualityComparer.Instance) : null,
-                Dependencies = CreateBackingDependencies(function, program, hasSpanDependencies),
+                Dependencies = backingDependencies,
             };
             if (function.IsConstructor)
             {
@@ -2383,6 +2393,16 @@ public static partial class SemanticVerifier
                         throw Invalid();
                     }
                 }
+                IReadOnlySet<int>? forwardedBacking = null;
+                if (result.Value is { Type: PrimitiveType.TokenSpan } spanResult)
+                {
+                    forwardedBacking = BackingOf(spanResult, initialized.Dependencies, program,
+                        ref remaining, depth + 1);
+                    if (forwardedBacking.Count == 0)
+                    {
+                        throw InvalidEffect(result.Span, "Ownership");
+                    }
+                }
                 var parameterOffset = function.IsConstructor ? 1 : 0;
                 var hasOutParameter = false;
                 for (var i = parameterOffset; i < function.ParameterCount + parameterOffset; i++)
@@ -2431,17 +2451,37 @@ public static partial class SemanticVerifier
                         var returnState = initialized.Clone();
                         var returnMasks = (uint[])fieldMasks.Clone();
                         var returnDeclarations = new HashSet<int>(declarations);
-                        for (var index = cleanups.Count - 1; index >= 0; index--)
+                        var dependencies = initialized.Dependencies as BackingDependencies;
+                        var stagedCount = dependencies?.Staged.Count ?? 0;
+                        if (forwardedBacking is not null)
                         {
-                            VerifyCleanup(cleanups[index].Body, returnState, returnMasks, returnDeclarations,
-                                function, program, ref remaining, depth + 1, reachable, inUnsafe,
-                                cleanups[index].Visible, successfulReturn: true);
-                        }
-                        for (var i = parameterOffset; i < function.ParameterCount + parameterOffset; i++)
-                        {
-                            if (function.Variables[i].IsOut && !returnState[i])
+                            if (dependencies is null)
                             {
-                                throw Invalid(result.Span);
+                                throw InvalidEffect(result.Span, "Ownership");
+                            }
+                            dependencies.Staged.Add(forwardedBacking);
+                        }
+                        try
+                        {
+                            for (var index = cleanups.Count - 1; index >= 0; index--)
+                            {
+                                VerifyCleanup(cleanups[index].Body, returnState, returnMasks, returnDeclarations,
+                                    function, program, ref remaining, depth + 1, reachable, inUnsafe,
+                                    cleanups[index].Visible, successfulReturn: true);
+                            }
+                            for (var i = parameterOffset; i < function.ParameterCount + parameterOffset; i++)
+                            {
+                                if (function.Variables[i].IsOut && !returnState[i])
+                                {
+                                    throw Invalid(result.Span);
+                                }
+                            }
+                        }
+                        finally
+                        {
+                            if (dependencies is not null)
+                            {
+                                dependencies.Staged.RemoveRange(stagedCount, dependencies.Staged.Count - stagedCount);
                             }
                         }
                     }

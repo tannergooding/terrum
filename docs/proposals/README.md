@@ -55,6 +55,9 @@ approved.
 - [Span-backed token cursor](span-backed-token-cursor.md) records the open
   backing, capture, indexing and construction contracts needed for the
   existing zero-copy self-host cursor candidate.
+- [Forwarded `Span<Token>` results](token-span-result-forwarding.md)
+  recommends a same-compilation hosted experiment for forwarding declared
+  backing dependencies through bounded top-level functions.
 - [Invocation-scoped source grant](invocation-scoped-source-grant.md)
   recommends a narrow persisted-module dependency for source-aware compiler
   components without enabling arbitrary host-buffer capture.

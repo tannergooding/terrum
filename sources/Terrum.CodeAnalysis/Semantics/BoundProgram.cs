@@ -343,6 +343,12 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 
     /// <summary>Constructor input slots whose backing dependencies must be forwarded before publication. Never persisted.</summary>
     public ImmutableArray<int> CapturedParameters { get; init; } = [];
+
+    /// <summary>Whether a Span result forwards backing from its declared input parameters. Never persisted.</summary>
+    internal bool ReturnsForwardedBacking { get; init; }
+
+    /// <summary>Input parameter ordinals that conservatively constrain a forwarded Span result. Never persisted.</summary>
+    internal ImmutableArray<int> ResultDependencyParameters { get; init; } = [];
 }
 
 /// <summary>A parameter or local storage declaration.</summary>

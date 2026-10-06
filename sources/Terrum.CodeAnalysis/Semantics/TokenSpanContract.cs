@@ -46,7 +46,8 @@ internal static class TokenSpanContract
         List<BoundBlock>? bodies = null;
         foreach (var function in program.Functions)
         {
-            if (!function.CapturedParameters.IsDefaultOrEmpty
+            if (!function.CapturedParameters.IsDefaultOrEmpty || function.ReturnsForwardedBacking
+                || !function.ResultDependencyParameters.IsDefaultOrEmpty
                 || function.ReturnType == PrimitiveType.TokenSpan
                 || function.Variables.Any(static variable => variable.Type == PrimitiveType.TokenSpan))
             {
