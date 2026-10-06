@@ -21,9 +21,17 @@ public static bool CheckBitOperations()
 
     require TryRoundUpToPowerOfTwoUInt32(5, init var rounded32);
     require TryRoundUpToPowerOfTwoUInt32(0x80000000, init var highest32);
-    if (rounded32 != 8 || highest32 != 0x80000000
-        || TryRoundUpToPowerOfTwoUInt32(0, init var zero32)
-        || TryRoundUpToPowerOfTwoUInt32(0x80000001, init var overflow32))
+    if (rounded32 != 8 || highest32 != 0x80000000)
+    {
+        return false;
+    }
+    if (TryRoundUpToPowerOfTwoUInt32(0, init var reusable32)
+        || TryRoundUpToPowerOfTwoUInt32(0x80000001, init reusable32))
+    {
+        return false;
+    }
+    require TryRoundUpToPowerOfTwoUInt32(5, init reusable32);
+    if (reusable32 != 8)
     {
         return false;
     }
@@ -47,7 +55,12 @@ public static bool CheckBitOperations()
 
     require TryRoundUpToPowerOfTwoUInt64(5, init var rounded64);
     require TryRoundUpToPowerOfTwoUInt64(0x8000000000000000, init var highest64);
-    return rounded64 == 8 && highest64 == 0x8000000000000000
-        && !TryRoundUpToPowerOfTwoUInt64(0, init var zero64)
-        && !TryRoundUpToPowerOfTwoUInt64(0x8000000000000001, init var overflow64);
+    if (rounded64 != 8 || highest64 != 0x8000000000000000
+        || TryRoundUpToPowerOfTwoUInt64(0, init var reusable64)
+        || TryRoundUpToPowerOfTwoUInt64(0x8000000000000001, init reusable64))
+    {
+        return false;
+    }
+    require TryRoundUpToPowerOfTwoUInt64(5, init reusable64);
+    return reusable64 == 8;
 }
