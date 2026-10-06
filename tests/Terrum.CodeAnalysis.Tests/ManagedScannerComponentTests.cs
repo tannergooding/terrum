@@ -410,6 +410,35 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task DiagnosticSnapshotRetainsMaximumMalformedSourceRecordsAsync(NativeRuntimePolicy policy)
+    {
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (TokenSnapshot.TryScan(init var tokens)) { return 1; }
+                if (!TokenDiagnosticSnapshot.TryScan(init var diagnostics)
+                    || diagnostics.GetCount() != {{ScannerHost.MaximumSourceLength}}
+                    || diagnostics.TryGet(-1, init var negativeCode, init var negativeSpan)
+                    || diagnostics.TryGet({{ScannerHost.MaximumSourceLength}},
+                        init var beyondCode, init var beyondSpan)) { return 2; }
+                mut int32 index = 0;
+                while (index < {{ScannerHost.MaximumSourceLength}}) {
+                    if (!diagnostics.TryGet(index, init var code, init var span)
+                        || code != 1 || span.Start != index || span.Length != 1) { return 3; }
+                    index = index + 1;
+                }
+                return 42;
+            }
+            """;
+        var input = new string('\uD800', ScannerHost.MaximumSourceLength);
+        var program = await CompileAsync(input, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("  // leading\r\nalpha /* block */ beta\t")]
     [InlineData("alpha\u2028beta // trailing")]
