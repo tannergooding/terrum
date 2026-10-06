@@ -161,6 +161,28 @@ public sealed class NativeSourceGrantExperimentTests
                     });
                 }
 
+                const int codeUnitBatchSize = 16_384;
+                for (var start = 0; start <= char.MaxValue; start += codeUnitBatchSize)
+                {
+                    var count = Math.Min(codeUnitBatchSize, char.MaxValue + 1 - start);
+                    var storage = new char[count];
+                    for (var offset = 0; offset < count; offset++)
+                    {
+                        storage[offset] = (char)(start + offset);
+                    }
+
+                    Assert.Equal(0, WithPinnedSource(storage, (uint)storage.Length, (pointer, sourceCount) =>
+                    {
+                        Assert.Equal(storage.Length, length(pointer, sourceCount));
+                        for (var at = 0; at < storage.Length; at++)
+                        {
+                            Assert.Equal((long)storage[at], signed(pointer, sourceCount, at));
+                            Assert.Equal((ulong)storage[at], unsigned(pointer, sourceCount, at));
+                        }
+                        return 0;
+                    }));
+                }
+
                 var sameStorage = "\uD83D\uDE00Z".ToCharArray();
                 WithPinnedSource(sameStorage, 3, (pointer, _) =>
                 {

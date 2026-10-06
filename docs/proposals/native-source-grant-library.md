@@ -193,6 +193,10 @@ named arguments. Empty/null-zero calls use the length export and scalar
 adapter guard. Valid decoder results match hosted C# `Rune.DecodeFromUtf16`
 for maximum-size input, BMP/supplementary scalars, NUL, CR/LF and other line
 breaks, malformed surrogates, final units, and bounded lookahead.
+The signed and unsigned code-unit exports are also compared against every BMP
+code unit across four fresh maximum-size pinned grants under both policies;
+this is direct-read and zero-extension evidence only, not support for the
+`SourceText` facade or output loans.
 One pinned allocation is reused with different counts, and two
 simultaneously pinned allocations with equal counts produce distinct results.
 The test adapter returns `-2` for invalid ranges without calling the decoder,
