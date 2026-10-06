@@ -254,9 +254,9 @@ prerequisite has already been met.
     [invocation-scoped source-grant proposal](proposals/invocation-scoped-source-grant.md);
     the maintained Windows x64 build now also has an explicit opt-in,
     provisional source-grant companion for the checked UTF-16 scalar adapter,
-    scalar source-text-length query and scalar source-line-count query, with
-    selected-export descriptors bound to the image hash and end-relative
-    reads based on invocation length. The source-free
+    scalar source-text-length and source-code-unit queries, and scalar
+    source-line-count query, with selected-export descriptors bound to the
+    image hash and end-relative reads based on invocation length. The source-free
     compiler-primitives DLL remains unchanged; this does not promote the
     unapproved ABI or establish general source-dependent DLL support. The
     scanner and scalar frontend still rely on hosted verification/emission. A separate
@@ -311,6 +311,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `2114a1e1` | Add the provisional scalar source-code-unit query with exhaustive UTF-16 value checks, hosted `SourceText` parity and maintained manifest binding |
 | `c7063261` | Add the provisional scalar source-length query through an isolated component, preserving whole-program classifier and source-free DLL boundaries |
 | `7d0f7b38` | Exhaust all 65,536 `char16` inputs for all four saturation and checked-conversion widening helpers across source-free DLLs, persisted consumers and Terrum component tests |
 | `b5dee01b` | Add provisional scalar source-line-count export to the maintained companion with hosted line-count parity under both policies |
