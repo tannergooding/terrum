@@ -7,7 +7,8 @@
 The invocation-scoped source-grant proposal permits bounded source-dependent
 semantic-module JIT execution. Ordinary native-library emission still rejects
 programs that require `Host.Source`; an explicit opt-in CLI path now emits a
-separate provisional Windows x64 companion for one checked scalar adapter.
+separate provisional Windows x64 companion for a checked scalar adapter and
+a scalar source-line count query.
 This proposal addresses promotion of that native-library boundary; it does
 not extend the scanner profile or move scalar frontend verification or
 emission out of the hosted compiler.
@@ -94,39 +95,59 @@ or public native ABI is supported.
 
 **Question:** Should the proposed source-context ABI be wired into the
 maintained Windows x64 compiler-primitives DLL for one checked scalar
-`Utf16Scalar` export, with its managed caller generated from the exact export
-selection?
+`Utf16Scalar` export and a scalar source-line-count export, with its managed
+caller generated from the exact export selection?
 
 **Summary:** The separate test-only DLL has exercised hidden source context,
 generated bindings, transitive dependency changes, loop-based `SourceText`
 line count/position/offset/extent queries and exhaustive UTF-16 line-break
 parity under both runtime policies. The maintained build now emits a separate
-companion from `Utf16CodeUnits` and `Utf16Scalar`, exporting the source-free
-decoder and checked source-dependent adapter with a hash-bound export
-manifest. CLI and generated-caller tests exercise this path under both
-runtime policies, while the maintained companion itself uses the fail-fast
-policy. Export descriptors admit only scalar value signatures; unsupported
-output/loan and aggregate signatures and managed-runtime use reject.
-End-relative source reads derive their base from the captured invocation
-count, not the empty build-time buffer length. This establishes a narrow
-provisional implementation path, not a promoted ABI.
+companion from `CharacterFacts`, `Utf16CodeUnits`, `Utf16Scalar` and the
+scalar-only `SourceLineCount` component. It exports the source-free decoder,
+checked source-dependent adapter and allocation-free source-line count with a
+hash-bound manifest. The line-count loop uses shared line-break
+classification, collapses CRLF to one break and counts the final empty line
+after a trailing break; it avoids `SourceLines.TryReadSourceLine` because
+source-dependent aggregate/output call closures remain unsupported. Hosted
+`SourceText.Lines.Length` comparisons cover line-break forms, malformed
+UTF-16, NUL and the maximum 16,384-unit grant. The maintained companion itself
+uses the fail-fast policy. Export descriptors admit only scalar value
+signatures; unsupported output/loan and aggregate signatures and
+managed-runtime use reject. End-relative source reads derive their base from
+the captured invocation count, not the empty build-time buffer length. This
+establishes a narrow provisional implementation path, not a promoted ABI.
 
-**Recommendation:** Add only an explicit opt-in source-grant build path in
-the maintained compiler-primitives build, initially producing a separate
-experimental companion DLL so the existing source-free artifact remains
-unchanged. It must accept the existing readonly `Host.Source` grant, derive
-hidden parameters from transitive local dependencies, and emit a descriptor
-manifest from the same selected export set for the generated synchronous
-managed caller. Bound this provisional slice to self-contained local
-dependencies and scalar source-dependent exports; range-check the scalar
-adapter with the existing `require` failure policy. Raw native pointer/count
-shape, 16,384-unit maximum, readable aligned storage, lifetime and
-immutability remain caller preconditions. The managed caller must validate
-the bound and pin UTF-16 storage only for the call. Keep source-dependent
-imports, cross-DLL propagation, aggregates, output loans, the complete source
-facade, scanner profiles, executables, packages, graphs, module sets and AOT
-unsupported. This implementation remains experimental evidence only and
-does not approve the proposal or promise ABI stability.
+**Recommendation:** Keep the opt-in companion separate from the source-free
+artifact and the ABI unapproved. Accept only self-contained local dependency
+closures and scalar source-dependent exports; generate the descriptor
+manifest from the exact selected export set for synchronous callers. The
+checked scalar adapter and allocation-free scalar line-count query remain
+provisional implementation evidence. Raw pointer/count shape, 16,384-unit
+maximum, readable aligned storage, lifetime and immutability remain caller
+preconditions. The managed caller validates the bound and pins UTF-16 storage
+only for the call. Keep source-dependent imports, cross-DLL propagation,
+aggregate/output export and call closures, the complete source facade,
+scanner profiles, executables, packages, graphs, module sets and AOT
+unsupported. This implementation does not approve the proposal or promise
+ABI stability.
+
+### Provisional scalar source-line-count export
+
+**Question:** Should the maintained companion expose one source-line-count
+operation before supporting the complete `SourceLines` facade?
+
+**Summary:** The maintained companion can implement the count as a scalar-only
+scan of `Host.Source`, reusing `CharacterFacts.IsLineBreak` and retaining no
+source pointer. It counts CRLF once and includes the final empty line after a
+trailing break. Calling the general `SourceLines.TryReadSourceLine` helper
+would pull aggregate `SourceRange` outputs into the dependent call closure,
+which the current classifier rejects.
+
+**Recommendation:** Include only the scalar-only `GetSourceLineCount` export
+as provisional coverage of the existing per-call source ABI. Verify it
+against hosted `SourceText.Lines.Length`, including maximum-size grants, but
+do not infer support for line positions/extents, general `SourceText` APIs,
+internal aggregate/output source-dependent call closures, or a stable ABI.
 
 ## Promotion decisions still required
 

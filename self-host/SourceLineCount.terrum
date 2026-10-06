@@ -1,0 +1,27 @@
+namespace Terrum.CodeAnalysis;
+
+public int32 GetSourceLineCount()
+{
+    mut int32 count = 1;
+    mut int32 position = 0;
+    mut bool previousWasCr = false;
+    while (position < Host.Source.Length)
+    {
+        char16 value = Host.Source[position];
+        if (value == 10 && previousWasCr)
+        {
+            previousWasCr = false;
+        }
+        else if (IsLineBreak(value))
+        {
+            count = count + 1;
+            previousWasCr = value == 13;
+        }
+        else
+        {
+            previousWasCr = false;
+        }
+        position = position + 1;
+    }
+    return count;
+}

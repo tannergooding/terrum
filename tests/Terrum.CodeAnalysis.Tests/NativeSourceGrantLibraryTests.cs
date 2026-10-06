@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Text;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -20,6 +21,21 @@ public sealed class NativeSourceGrantLibraryTests
 {
     private const string ReadScalarExport = "Terrum.CodeAnalysis.ReadUtf16ScalarChecked";
     private const string DecodeScalarExport = "Terrum.CodeAnalysis.DecodeUtf16Scalar";
+    private const string LineCountExport = "Terrum.CodeAnalysis.GetSourceLineCount";
+    private static readonly string[] LineCountSamples = [
+        "",
+        "plain",
+        "\r",
+        "\n",
+        "\r\n",
+        "\r\r\n\n\r",
+        "a\r\nb\rc\nd\u0085e\u2028f\u2029",
+        "\0\uD800\uDC00\uDFFF",
+        "\0\n",
+        "\r\0\n",
+        "\r\uD800\n",
+        "\u000B\u000C\u001C\u001D\u001E\u001F\u00A0",
+    ];
 
     [Fact]
     public void SourceDependencyTracksPrivateCalleeBodyChanges()
@@ -196,6 +212,56 @@ public sealed class NativeSourceGrantLibraryTests
         }
     }
 
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void SourceLineCountMatchesHostedTextLines(BoundRuntimePolicy policy)
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var characterFactsPath = Path.Combine(RepositoryRoot(), "self-host", "CharacterFacts.terrum");
+        var lineCountPath = Path.Combine(RepositoryRoot(), "self-host", "SourceLineCount.terrum");
+        var compilation = Compilation.CreateLibrary([
+            SyntaxTree.Parse(File.ReadAllText(characterFactsPath), characterFactsPath),
+            SyntaxTree.Parse(File.ReadAllText(lineCountPath), lineCountPath),
+        ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+            IsInvocationScoped = true,
+        }], (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
+            Assert.IsType<BoundProgram>(compilation.Program), [LineCountExport], (NativeRuntimePolicy)policy);
+        Assert.True(Assert.Single(artifact.Exports).SourceDependent);
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-line-count-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(path, artifact.Image);
+        try
+        {
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var binding = new NativeSourceGrantTestBindings(module,
+                    [.. artifact.Exports.Select(static export => (export.Name, export.SourceDependent,
+                        export.ReturnType, export.ParameterTypes))]);
+                foreach (var sample in LineCountSamples)
+                {
+                    Assert.Equal(SourceText.From(sample).Lines.Length,
+                        binding.Invoke<int>(LineCountExport, sample.ToCharArray()));
+                }
+
+                var maximumSource = new string('\n', 16_384);
+                Assert.Equal(SourceText.From(maximumSource).Lines.Length,
+                    binding.Invoke<int>(LineCountExport, maximumSource.ToCharArray()));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void MaintainedCompilerPrimitivesCompanionUsesItsGeneratedManifest()
     {
@@ -226,7 +292,7 @@ public sealed class NativeSourceGrantLibraryTests
                         ?? throw new InvalidDataException("Missing parameter type.")))
                     .ToImmutableArray()))
             .ToImmutableArray();
-        Assert.Equal([DecodeScalarExport, ReadScalarExport],
+        Assert.Equal([DecodeScalarExport, LineCountExport, ReadScalarExport],
             [.. exports.Select(static export => export.Name).OrderBy(static name => name, StringComparer.Ordinal)]);
 
         var module = NativeLibrary.Load(imagePath);
@@ -239,6 +305,14 @@ public sealed class NativeSourceGrantLibraryTests
             Assert.Equal(-1, bindings.Invoke<int>(ReadScalarExport, ['\uD800', '\uDC00'], 0, 1));
             Assert.Equal((int)'Z', bindings.Invoke<int>(ReadScalarExport,
                 [.. new string('x', 16_383).ToCharArray(), 'Z'], 16_383, 16_384));
+            foreach (var sample in LineCountSamples)
+            {
+                Assert.Equal(SourceText.From(sample).Lines.Length,
+                    bindings.Invoke<int>(LineCountExport, sample.ToCharArray()));
+            }
+            var maximumLineCountSource = new string('\n', 16_384);
+            Assert.Equal(SourceText.From(maximumLineCountSource).Lines.Length,
+                bindings.Invoke<int>(LineCountExport, maximumLineCountSource.ToCharArray()));
             _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
                 bindings.Invoke<int>(ReadScalarExport, new char[16_385], 0, 1));
             var singleCodeUnit = new char[1];
