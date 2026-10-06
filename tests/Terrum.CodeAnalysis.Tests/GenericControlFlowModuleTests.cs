@@ -83,6 +83,63 @@ public sealed partial class GenericControlFlowModuleTests
             TimeSpan.FromSeconds(10)).ConfigureAwait(true));
     }
 
+    [Fact]
+    public async Task GenericInitDoesNotPublishAfterFailureAcrossIndependentModuleReplacementAsync()
+    {
+        const string ReplacementSource = """
+            bool FailAfterWrite<T>(T value, init ref<T> result) where T : [Copy] {
+                result = value;
+                require false;
+                return true;
+            }
+            [NoThrow] bool Fill<T>(T value, init ref<T> result) where T : [Copy] {
+                result = value;
+                return true;
+            }
+            [NoThrow] bool None<T>(init ref<T> result) where T : [Copy] { return false; }
+            public int32 PowerProbe() {
+                if (None<int32>(init var target)) { return 1; }
+                unsafe {
+                    try {
+                        FailAfterWrite<int32>(41, init target);
+                        return 2;
+                    } catch { }
+                }
+                require Fill(42, init target);
+                return target;
+            }
+            """;
+        const NativeRuntimePolicy policy = NativeRuntimePolicy.CheckedExceptions;
+        var stub = ModuleCompiler.CreateProducer(Compile(Stub, policy), ["PowerProbe"]);
+        var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return PowerProbe(); }",
+            policy, ModuleCompiler.CreateReference(stub), library: false), stub);
+        var consumerHash = SHA256.HashData(consumer);
+        var replacement = ModuleCompiler.CreateProducer(Compile(ReplacementSource, policy), ["PowerProbe"]);
+        var linked = ModuleCompiler.Link(consumer, replacement);
+        Assert.Contains(linked.Functions, static function =>
+            function.Name == "$producer.FailAfterWrite<int32>" && function.Variables[1].IsInit);
+        Assert.Contains(linked.Functions, static function =>
+            function.Name == "$producer.Fill<int32>" && function.Variables[1].IsInit);
+        Assert.Equal(42, NativeJit.Execute(linked, policy));
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.Equal(consumerHash, SHA256.HashData(consumer));
+
+        var nativeStub = NativeModuleCompiler.CreateProducer(Compile(Stub, policy),
+            ["PowerProbe"], "Leaf", policy);
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(
+            "int32 Main() { return PowerProbe(); }", policy,
+            NativeModuleCompiler.CreateGraphReference([nativeStub]), library: false),
+            [nativeStub], policy);
+        var nativeConsumerHash = SHA256.HashData(nativeConsumer);
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(Compile(ReplacementSource, policy),
+            ["PowerProbe"], "Leaf", policy);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
+            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.Equal(nativeConsumerHash, SHA256.HashData(nativeConsumer));
+    }
+
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]

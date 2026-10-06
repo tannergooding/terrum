@@ -2073,8 +2073,11 @@ private specialization under both policies. AOT/JIT also cover forwarding
 multiple scalar and 16-byte Copy init outputs through mixed stack arguments
 without publishing any result on false. Private managed-handle
 specializations remain image-local behind an unchanged scalar consumer,
-including compatible native producer replacement; this does not export generic
-declarations or add a new native ABI. General references and
+including compatible native producer replacement. Checked-exception
+semantic/native replacement also verifies that a generic specialization which
+writes then fails leaves its `init ref<T>` destination unpublished, allowing
+a later call to complete it; this does not export generic declarations or add
+a new native ABI. General references and
 declaration postconditions remain unsupported. Public init contracts support
 eligible scalar, Copy-struct and unique outputs; managed graph boundaries
 admit only public handle-free Copy outputs, not unique owners or managed
