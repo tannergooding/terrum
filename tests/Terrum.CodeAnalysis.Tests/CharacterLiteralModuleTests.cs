@@ -65,8 +65,15 @@ public sealed class CharacterLiteralModuleTests
 
         foreach (var (text, scalar) in new (string Text, int? Scalar)[] {
             ("'A'", 65), ("'é'", 233), ("'\\u00E9'", 233), ("'\\U0010FFFF'", 0x10FFFF),
-            ("'\\n'", 10), ("''", null), ("'\\q'", null), ("'\\uD800'", null),
-            ("'😀'", 0x1F600), ("'á'", null),
+            ("'\\n'", 10), ("'\\r'", 13), ("'\\t'", 9), ("'\\\\'", 92),
+            ("'\\\"'", 34), ("'\\''", 39), ("'\\0'", 0), ("'\\u0000'", 0),
+            ("'\\uFFFF'", 0xFFFF), ("'\\U00000000'", 0), ("'\\U0000FFFF'", 0xFFFF),
+            ("'\\U00010000'", 0x10000), ("'\\U0010FFFF'", 0x10FFFF), ("'￿'", 0xFFFF),
+            ("''", null), ("'\\q'", null), ("'\\x41'", null),
+            ("'\\uD800'", null), ("'\\uDFFF'", null), ("'\\U00110000'", null),
+            ("'\\u00G0'", null), ("'\\uFFF'", null), ("'\\u00000'", null),
+            ("'\\U0000000G'", null), ("'ab'", null), ("'😀A'", null),
+            ("'á'", null),
         })
         {
             var lexed = Lexer.Lex(SourceText.From(text));
