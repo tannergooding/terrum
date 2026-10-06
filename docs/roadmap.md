@@ -381,6 +381,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `455d43c3` | Add internal raw-bit `float32`/`float64` division with hosted-emitter parity across rounding, subnormal and special-value boundaries; arithmetic proposals remain unapproved |
 | `afa1deb9` | Add internal raw-bit `float32`/`float64` multiplication with controlled hosted-emitter parity across rounding, subnormal and special-value boundaries; arithmetic proposals remain unapproved |
 | `40305d05` | Add internal raw-bit `float32`/`float64` addition and subtraction with hosted parity across rounding, subnormal and special-value boundaries; arithmetic proposals remain unapproved |
 | `7a034ec4` | Add internal raw-bit IEEE comparisons for `float32` and `float64`, with hosted-operator parity across boundary pairs and deterministic encodings |
