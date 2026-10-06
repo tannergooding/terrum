@@ -17,6 +17,16 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeGraphTests
 {
+    private static string CompilerApphost()
+    {
+        var framework = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = framework.Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration directory.");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        return Path.Combine(root, "artifacts", "bin", "sources", "terrumc",
+            configuration, framework.Name, "terrumc.exe");
+    }
+
     private static byte[] Leaf(string source, NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
@@ -388,14 +398,8 @@ public sealed class NativeGraphTests
         NativeModuleCompiler.ValidateGraph(root, [leaf]);
         Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [leaf],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        var framework = new DirectoryInfo(AppContext.BaseDirectory);
-        var configuration = framework.Parent?.Name
-            ?? throw new InvalidOperationException("Missing test configuration directory.");
-        var apphost = Path.Combine(
-            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..")),
-            "artifacts", "bin", "sources", "terrumc", configuration, framework.Name, "terrumc.exe");
         Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [leaf],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+            CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
 
         var replacement = Leaf(ReplacementSource, policy);
         _ = Assert.Throws<ModuleContractException>(() =>
@@ -439,14 +443,48 @@ public sealed class NativeGraphTests
         NativeModuleCompiler.ValidateGraph(root, [provider]);
         Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(root, [provider],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        var framework = new DirectoryInfo(AppContext.BaseDirectory);
-        var configuration = framework.Parent?.Name
-            ?? throw new InvalidOperationException("Missing test configuration directory.");
-        var apphost = Path.Combine(
-            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..")),
-            "artifacts", "bin", "sources", "terrumc", configuration, framework.Name, "terrumc.exe");
         Assert.Equal(43, await NativeModuleCompiler.RunGraphJitAsync(root, [provider],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+            CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ConditionalInitRefOutputPublishesAcrossGraphOnlyOnTrueAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string ProviderSource = """
+            public bool TryPublish(bool publish, init ref<int32> result) {
+                result = publish ? 42 : 41;
+                return publish;
+            }
+            """;
+        const string ConsumerSource = """
+            int32 Main() {
+                init int32 result;
+                if (TryPublish(false, init result)) { return 1; }
+                if (!TryPublish(true, init result)) { return 2; }
+                return result;
+            }
+            """;
+
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(ProviderSource),
+            (BoundRuntimePolicy)policy);
+        Assert.False(providerCompilation.HasErrors,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = NativeModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(providerCompilation.Program), ["TryPublish"], "NodeB", policy);
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+            NativeModuleCompiler.CreateGraphReference([provider]), (BoundRuntimePolicy)policy);
+        Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
+            [provider], policy);
+
+        NativeModuleCompiler.ValidateGraph(root, [provider]);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [provider],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [provider],
+            CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
     }
 
     [Fact]

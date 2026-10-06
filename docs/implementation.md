@@ -2060,11 +2060,12 @@ policies. Under checked exceptions, a provider write followed by failure leaves
 the destination vacant in a consumer set, permitting a later provider call to
 initialize it. Native graph execution likewise retains vacancy after a checked
 provider failure, allowing a later provider call to initialize the destination
-through both AOT and JIT graph paths. Ownership-set execution also covers
-conditional unique `init ref<T>` publication: false after constructing the
-value leaves the destination vacant, a later true call publishes the owner,
-and the unchanged consumer moves it once across compatible provider
-replacement under both policies.
+through both AOT and JIT graph paths. Graph tests also stage a scalar value on
+false, then publish on true through the unchanged consumer under both policies.
+Ownership-set execution also covers conditional unique `init ref<T>` publication:
+false after constructing the value leaves the destination vacant, a later true
+call publishes the owner, and the unchanged consumer moves it once across
+compatible provider replacement under both policies.
 Semantic/native module and native module-set replacement reject removing a
 declared `[NoThrow]` or `[DoesNotReturn]` promise retained by the consumer.
 The distinct `out` mode now also accepts ordinary non-unique struct values
