@@ -6,8 +6,9 @@ change accepted source semantics or the approved metadata schema, and does not
 approve the broader proposal. Its marked provisional slices now include
 structured semantic-module caller obligations, bounded readonly-instance and
 static-method experiments and getter support on `Copy` structs,
-caller-unsafe public `Copy`-struct fields, and validated indexed executable
-unsafe scopes; their boundaries are described in
+caller-unsafe public `Copy`-struct fields and mutable receiver loans through
+eligible fields, and validated indexed executable unsafe scopes; their
+boundaries are described in
 [the module format](../modules.md) and [implementation notes](../implementation.md).
 
 ## Current boundary
@@ -205,7 +206,37 @@ persists caller-unsafe field declarations on eligible public `Copy` layouts
 and reconstructs read/write authorization from persisted `BoundUnsafe`
 blocks. Direct nested reads and writes, existing update-place operations,
 constructors, semantic links, native graphs and module sets retain exact field
-obligations. Class fields and field-reference loans remain rejected.
+obligations. Existing mutable receiver loans through eligible field paths are
+also persisted with authorization checked at every field edge. Class fields
+and readonly field loans remain rejected.
+
+### Provisional follow-up: caller-unsafe mutable field-receiver loans
+
+**Summary:** Revision 63 now provisionally persists existing mutable receiver
+loans through caller-unsafe fields on eligible Copy layouts. Semantic bodies
+encode `BoundMutableFieldLoan` as a loan of a `BoundFieldRead`, so its nested
+field path supports lexical authorization checks. Readonly Copy receivers are
+passed by value; the existing readonly `BoundFieldLoan` is restricted to
+unique fields, which the revision-63 Copy-layout slice excludes.
+
+**Recommendation:** Provisionally admit only existing mutable receiver loans
+through public `Copy`-struct field paths, requiring every owner and field
+value along the complete path to satisfy the existing layout gate. Every
+caller-unsafe field on that path must also be enclosed by persisted
+`BoundUnsafe` scope. Retain the existing place, initialization, mutability,
+ownership and reservation checks, adding caller-unsafe authorization
+validation at each field edge. Reuse the revision-63 field obligation; persist
+no per-loan authorization bit and add no source form or ABI. Keep readonly
+field loans, `unsafe(expr)`-only persistence, class/unique/managed layouts,
+reference/output signatures, returned or stored references, and cross-module
+loan contracts unsupported. Preserve evaluation-order and cleanup behavior.
+A reader must reject a forged loan moved outside its unsafe block. This
+bounded persistence extension does not approve the general reference-call
+metadata proposal.
+
+**Status:** Implemented provisionally in semantic-module revision 63. The
+bounded implementation and regression coverage do not approve the broader
+reference-call metadata proposal or establish a general stored-loan contract.
 
 Executable TRRM also provisionally round-trips the assigned caller-unsafe
 Effects bit on top-level function declarations, including when composed with

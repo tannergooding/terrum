@@ -79,9 +79,12 @@ Revision 63 provisionally persists caller-unsafe public instance fields on
 public, non-unique `Copy` structs with recursively exportable public layouts.
 It persists the field obligation and reconstructs read/write/update
 authorization only from `BoundUnsafe` scopes; links require exact field
-obligation compatibility. Class/static/foreign fields and field-reference
-loans remain unsupported. These slices do not change executable TRRM member
-support or approve the broader reference-call metadata proposal.
+obligation compatibility. Existing mutable receiver loans through eligible
+field paths are persisted with authorization checked at each field edge.
+Readonly field loans and `unsafe(expr)`-only persistence remain unsupported.
+Class/static/foreign fields and other reference/output contracts remain
+unsupported. These slices do not change executable TRRM member support or
+approve the broader reference-call metadata proposal.
 The bounded adapter has executed the Terrum-authored `Utf16CodeUnits` pure
 code-unit decoder and the source-grant-dependent `SourceText` facade,
 including exact reads of all 65,536 UTF-16 code units (including surrogate

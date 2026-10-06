@@ -2911,6 +2911,8 @@ public static partial class SemanticVerifier
             || !program.Structures[owner].Fields[place.Field].IsMutable
             || !CanAccessField(function, program.Structures[owner], place.Field)
             || place.Type != program.Structures[owner].Fields[place.Field].Type
+            || (program.Structures[owner].Fields[place.Field].RequiresUnsafeCaller
+                && !place.IsUnsafeAuthorized)
             || (!(allowBufferLeaf && place.Type == PrimitiveType.OwnedInt32Buffer)
                 && (!HasFields(program, place.Type) || ManagedClassTypes.IsClass(place.Type))))
         {

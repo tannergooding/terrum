@@ -95,6 +95,38 @@ public sealed class CallerUnsafeTests
             }
         }
         """;
+    private const string UnsafeMutableFieldLoanModuleSource = """
+        public struct LoanCounter {
+            public mut int32 Number;
+            public LoanCounter(int32 number) { Number = number; }
+            public mut int32 Next() { Number = Number + 1; return Number; }
+        }
+        public struct UnsafeLeafOwner {
+            public unsafe mut LoanCounter Value;
+            public UnsafeLeafOwner(LoanCounter value) { unsafe { Value = value; } }
+        }
+        public struct SafeLoanInner {
+            public mut LoanCounter Value;
+            public SafeLoanInner(LoanCounter value) { Value = value; }
+        }
+        public struct UnsafeAncestorOwner {
+            public unsafe mut SafeLoanInner Value;
+            public UnsafeAncestorOwner(SafeLoanInner value) { unsafe { Value = value; } }
+        }
+        public int32 InvokeUnsafeLeaf() {
+            mut UnsafeLeafOwner owner = new UnsafeLeafOwner(new LoanCounter(40));
+            unsafe { return owner.Value.Next(); }
+        }
+        public int32 InvokeUnsafeAncestor() {
+            mut UnsafeAncestorOwner owner =
+                new UnsafeAncestorOwner(new SafeLoanInner(new LoanCounter(0)));
+            unsafe { return owner.Value.Value.Next(); }
+        }
+        public int32 InvokeExpressionScoped() {
+            mut UnsafeLeafOwner owner = new UnsafeLeafOwner(new LoanCounter(40));
+            return unsafe(owner.Value.Next());
+        }
+        """;
     private const string CopyValueMethodSource =
         PairDeclaration + "\n\n" + TripleDeclaration + "\n\n" + EnvelopeDeclaration
             + "\n\n" + ValueDeclaration + """
@@ -554,6 +586,110 @@ public sealed class CallerUnsafeTests
         var safeConsumer = ModuleCompiler.CreateConsumer(
             Assert.IsType<BoundProgram>(safeConsumerCompilation.Program), safeReplacement);
         Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void SemanticModulesRoundTripCallerUnsafeMutableFieldReceiverLoans(BoundRuntimePolicy policy)
+    {
+        var program = CompileLibrary(UnsafeMutableFieldLoanModuleSource, policy);
+        string[] exports = ["InvokeUnsafeLeaf", "InvokeUnsafeAncestor"];
+        var producer = ModuleCompiler.CreateProducer(program, exports);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() { return InvokeUnsafeLeaf() + InvokeUnsafeAncestor(); }
+            """), reference, policy);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumerProgram = Assert.IsType<BoundProgram>(consumerCompilation.Program);
+        var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
+            ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast;
+        Assert.Equal(42, NativeJit.Execute(linked, runtimePolicy));
+
+        foreach (var export in exports)
+        {
+            var function = Assert.Single(program.Functions, function => function.Name == export);
+            var functionIndex = program.Functions.IndexOf(function);
+            var unsafeBlock = Assert.IsType<BoundUnsafe>(function.Body.Statements[^1]);
+            var forgedFunction = function with {
+                Body = function.Body with {
+                    Statements = function.Body.Statements.SetItem(
+                        function.Body.Statements.Length - 1, unsafeBlock.Body),
+                },
+            };
+            var forgedProgram = program with {
+                Functions = program.Functions.SetItem(functionIndex, forgedFunction),
+            };
+            Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(forgedProgram, [export]));
+
+            var singleExport = ModuleCompiler.CreateProducer(program, [export]);
+            var unsafeScope = new byte[1 + (2 * sizeof(int))];
+            unsafeScope[0] = 11;
+            BinaryPrimitives.WriteInt32LittleEndian(unsafeScope.AsSpan(1), unsafeBlock.Span.Start);
+            BinaryPrimitives.WriteInt32LittleEndian(unsafeScope.AsSpan(1 + sizeof(int)),
+                unsafeBlock.Span.Length);
+            var unsafeScopeOffset = singleExport.AsSpan().IndexOf(unsafeScope);
+            Assert.True(unsafeScopeOffset >= 0);
+            var forgedArtifact = new byte[singleExport.Length - unsafeScope.Length];
+            singleExport.AsSpan(0, unsafeScopeOffset).CopyTo(forgedArtifact);
+            singleExport.AsSpan(unsafeScopeOffset + unsafeScope.Length)
+                .CopyTo(forgedArtifact.AsSpan(unsafeScopeOffset));
+            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedArtifact));
+        }
+
+        Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducer(program, ["InvokeExpressionScoped"]));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task NativeModuleSetsAndGraphsRoundTripCallerUnsafeMutableFieldReceiverLoansAsync(
+        BoundRuntimePolicy policy)
+    {
+        var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
+            ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast;
+        string[] exports = ["InvokeUnsafeLeaf", "InvokeUnsafeAncestor"];
+        var provider = NativeModuleCompiler.CreateProducer(
+            CompileLibrary(UnsafeMutableFieldLoanModuleSource, policy), exports,
+            "UnsafeLoanProvider", runtimePolicy);
+        var helper = NativeModuleCompiler.CreateProducer(
+            CompileLibrary("public int32 Helper() { return 0; }", policy),
+            ["Helper"], "UnsafeLoanHelper", runtimePolicy);
+        byte[][] providers = [provider, helper];
+
+        var setCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() { return InvokeUnsafeLeaf() + InvokeUnsafeAncestor(); }
+            """), NativeModuleCompiler.CreateReferenceSet(providers), policy);
+        Assert.False(setCompilation.HasErrors,
+            string.Join(Environment.NewLine, setCompilation.Diagnostics));
+        var consumerSet = NativeModuleCompiler.CreateConsumerSet(
+            Assert.IsType<BoundProgram>(setCompilation.Program), providers, runtimePolicy);
+        NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
+        Assert.Equal(42, await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
+            TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
+
+        var middleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Forward() { return InvokeUnsafeLeaf() + InvokeUnsafeAncestor(); }
+            """), NativeModuleCompiler.CreateGraphReference([provider]), policy);
+        Assert.False(middleCompilation.HasErrors,
+            string.Join(Environment.NewLine, middleCompilation.Diagnostics));
+        var middle = NativeModuleCompiler.CreateGraphProducer(
+            Assert.IsType<BoundProgram>(middleCompilation.Program), ["Forward"],
+            "UnsafeLoanMiddle", [provider], runtimePolicy);
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return Forward(); }"),
+            NativeModuleCompiler.CreateGraphReference([middle]), policy);
+        Assert.False(rootCompilation.HasErrors,
+            string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(
+            Assert.IsType<BoundProgram>(rootCompilation.Program), [middle], runtimePolicy);
+        NativeModuleCompiler.ValidateGraph(root, [middle, provider]);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [provider, middle],
+            TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
     }
 
     [Theory]
@@ -2454,8 +2590,7 @@ public sealed class CallerUnsafeTests
                 unsafe { return owner.Value.Next(); }
             }
             """);
-        Assert.Throws<ModuleContractException>(() =>
-            ModuleCompiler.CreateProducer(fieldLoanProgram, ["Invoke"]));
+        Assert.NotEmpty(ModuleCompiler.CreateProducer(fieldLoanProgram, ["Invoke"]));
 
         var safeFieldLoanProgram = CompileLibrary("""
             public struct Counter {
@@ -2476,6 +2611,40 @@ public sealed class CallerUnsafeTests
         var forgedFieldLoanModule = (byte[])safeFieldLoanModule.Clone();
         forgedFieldLoanModule[FindModuleFieldUnsafeFlagOffset(forgedFieldLoanModule, "Owner", "Value")] = 1;
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedFieldLoanModule));
+
+        const string uniqueOwnerFieldLoanSource = """
+            public struct Counter {
+                public mut int32 Number;
+                public Counter(int32 number) { Number = number; }
+                public mut int32 Next() { Number = Number + 1; return Number; }
+            }
+            public struct Inner {
+                public mut Counter Value;
+                public Inner(Counter value) { unsafe { Value = value; } }
+            }
+            public unique struct Owner {
+                public mut Inner Nested;
+                public Owner(Inner nested) { Nested = nested; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            public int32 Invoke() {
+                mut Owner owner = new Owner(new Inner(new Counter(41)));
+                unsafe { return owner.Nested.Value.Next(); }
+            }
+            """;
+        var unsafeUniqueOwnerProgram = CompileLibrary(uniqueOwnerFieldLoanSource
+            .Replace("public mut Counter Value;", "public unsafe mut Counter Value;",
+                StringComparison.Ordinal));
+        Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducer(unsafeUniqueOwnerProgram, ["Invoke"]));
+
+        var safeUniqueOwnerModule = ModuleCompiler.CreateProducer(
+            CompileLibrary(uniqueOwnerFieldLoanSource), ["Invoke"]);
+        var forgedUnsafeUniqueOwnerModule = (byte[])safeUniqueOwnerModule.Clone();
+        forgedUnsafeUniqueOwnerModule[FindModuleFieldUnsafeFlagOffset(
+            forgedUnsafeUniqueOwnerModule, "Inner", "Value")] = 1;
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(forgedUnsafeUniqueOwnerModule));
     }
 
     private static int FindModuleFieldUnsafeFlagOffset(byte[] module, string structureName, string fieldName)

@@ -102,11 +102,13 @@ Revision 63 provisionally persists caller-unsafe public instance fields on
 public, non-unique `Copy` structs with recursively exportable public layouts.
 It persists field obligations, reconstructs access authorization only from
 `BoundUnsafe` blocks and requires exact field-contract compatibility across
-semantic links, native graphs and module sets. Class/static/foreign fields,
-field-reference loans, reference/output, unique, managed, buffer/view and
-other non-Copy member contracts remain unsupported. Executable TRRM member
-support is unchanged. Revision 62 and older artifacts are retired and must be
-recreated from source.
+semantic links, native graphs and module sets. Existing mutable receiver loans
+through eligible field paths are supported with authorization checked at each
+field edge. Readonly field loans and `unsafe(expr)`-only persistence remain
+unsupported. Class/static/foreign fields, reference/output, unique, managed,
+buffer/view and other non-Copy member contracts remain unsupported.
+Executable TRRM member support is unchanged. Revision 62 and older artifacts
+are retired and must be recreated from source.
 These experiments do not approve the broader reference-call metadata proposal.
 The scanner-specific implementation is provisional and its design remains
 unapproved; see the

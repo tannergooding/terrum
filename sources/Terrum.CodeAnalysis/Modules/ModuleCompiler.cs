@@ -1407,26 +1407,8 @@ public static partial class ModuleCompiler
         return program.Functions.Any(function => function.RequiresUnsafeCaller && function.DeclaringStruct is not null
             && !IsSupportedModuleUnsafeMethod(function, program.Structures, valueTypes))
             || ContainsUnsupportedModuleCallerUnsafeFieldContracts(program.Structures, program.Classes)
-            || program.Functions.Any(function => ContainsCallerUnsafeFieldLoan(function.Body, program.Structures));
-    }
-
-    private static bool ContainsCallerUnsafeFieldLoan(BoundStatement body,
-        ImmutableArray<BoundStruct> structures)
-    {
-        var found = false;
-        _ = Calls(body,
-            visitFieldLoan: loan => found |= ContainsCallerUnsafeField(loan.Place, structures),
-            visitMutableFieldLoan: loan => found |= ContainsCallerUnsafeField(loan.Place, structures));
-        return found;
-    }
-
-    private static bool ContainsCallerUnsafeField(BoundFieldRead field, ImmutableArray<BoundStruct> structures)
-    {
-        var ownerIndex = (int)field.Receiver.Type - 100;
-        return (ownerIndex >= 0 && ownerIndex < structures.Length
-            && field.Field >= 0 && field.Field < structures[ownerIndex].Fields.Length
-            && structures[ownerIndex].Fields[field.Field].RequiresUnsafeCaller)
-            || field.Receiver is BoundFieldRead parent && ContainsCallerUnsafeField(parent, structures);
+            || program.Functions.Any(function => ContainsUnsupportedModuleCallerUnsafeFieldLoan(
+                function.Body, program.Structures, valueTypes));
     }
 
     private static bool ContainsUnsupportedModuleCallerUnsafeFieldContracts(
@@ -1446,13 +1428,56 @@ public static partial class ModuleCompiler
             @class.Fields.Any(static field => field.RequiresUnsafeCaller));
     }
 
+    private static bool ContainsUnsupportedModuleCallerUnsafeFieldLoan(BoundStatement body,
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
+    {
+        var unsupported = false;
+        _ = Calls(body,
+            visitFieldLoan: loan => unsupported |= HasUnsupportedModuleCallerUnsafeFieldLoanPath(
+                loan.Place, structures, valueTypes),
+            visitMutableFieldLoan: loan => unsupported |= HasUnsupportedModuleCallerUnsafeFieldLoanPath(
+                loan.Place, structures, valueTypes));
+        return unsupported;
+    }
+
+    private static bool HasUnsupportedModuleCallerUnsafeFieldLoanPath(BoundFieldRead field,
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
+    {
+        if (!ContainsCallerUnsafeField(field, structures))
+        {
+            return false;
+        }
+        for (BoundFieldRead? current = field; current is not null;
+            current = current.Receiver as BoundFieldRead)
+        {
+            if (!valueTypes.IsSupported(current.Type)
+                || !valueTypes.IsSupported(current.Receiver.Type))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool ContainsCallerUnsafeField(BoundFieldRead field,
+        ImmutableArray<BoundStruct> structures)
+    {
+        var ownerIndex = (int)field.Receiver.Type - 100;
+        return (ownerIndex >= 0 && ownerIndex < structures.Length
+            && field.Field >= 0 && field.Field < structures[ownerIndex].Fields.Length
+            && structures[ownerIndex].Fields[field.Field].RequiresUnsafeCaller)
+            || field.Receiver is BoundFieldRead parent && ContainsCallerUnsafeField(parent, structures);
+    }
+
     private static bool HasUnsupportedModuleCallerUnsafeContract(ModuleFunction function,
         ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
     {
         if (function.Function is BoundFunction body)
         {
-            return body.RequiresUnsafeCaller && body.DeclaringStruct is not null
-                && !IsSupportedModuleUnsafeMethod(body, structures, valueTypes);
+            return (body.RequiresUnsafeCaller && body.DeclaringStruct is not null
+                    && !IsSupportedModuleUnsafeMethod(body, structures, valueTypes))
+                || ContainsUnsupportedModuleCallerUnsafeFieldLoan(
+                    body.Body, structures, valueTypes);
         }
         var parts = function.Contract.Split('|');
         return parts.Length > 5 && parts[5] != "-"
@@ -2735,8 +2760,7 @@ public static partial class ModuleCompiler
             var item = new ModuleFunction(name, contract, function, import) {
                 HasOwnershipTransfer = ownershipTransfer,
             };
-            if (HasUnsupportedModuleCallerUnsafeContract(item, structures, valueTypes)
-                || function is not null && ContainsCallerUnsafeFieldLoan(function.Body, structures))
+            if (HasUnsupportedModuleCallerUnsafeContract(item, structures, valueTypes))
             {
                 throw new ModuleFormatException("Module contains an unsupported caller-unsafe member contract.");
             }
