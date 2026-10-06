@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `1f763d43` | Exhaustively verify scanner-delimited BMP string literal scalars through source-grant JIT |
 | `a895ca24` | Exhaustively verify scanner-delimited BMP string escape introducers through source-grant JIT |
 | `ae2d4e4d` | Exhaustively verify scanner-delimited BMP character literals through source-grant JIT |
 | `c65293fd` | Exhaustively verify every UTF-16 code-unit read through source-grant JIT |
