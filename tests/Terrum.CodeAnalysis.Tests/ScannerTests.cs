@@ -436,6 +436,9 @@ public sealed class ScannerTests
         Assert.Equal(ScannerHost.MaximumSourceLength, maximumTokenAndTriviaSource.Length);
         sources.Add(maximumTokenAndTriviaSource.ToString());
 
+        var maximumDiagnosticSource = new string('\uD800', ScannerHost.MaximumSourceLength);
+        sources.Add(maximumDiagnosticSource);
+
         var binaryMaximum = "0b" + new string('1', 64);
         var binaryOverflow = "0b1" + new string('0', 64);
         var integerBoundarySource = string.Join(' ',
@@ -634,6 +637,11 @@ public sealed class ScannerTests
             {
                 Assert.Empty(actual.LexResult.Diagnostics);
                 Assert.Empty(actual.IntegerValues);
+            }
+            else if (text == maximumDiagnosticSource)
+            {
+                Assert.Equal(ScannerHost.MaximumSourceLength, actual.LexResult.Diagnostics.Length);
+                Assert.Equal(ScannerHost.MaximumSourceLength + 1, actual.TokenCount);
             }
         }
 
