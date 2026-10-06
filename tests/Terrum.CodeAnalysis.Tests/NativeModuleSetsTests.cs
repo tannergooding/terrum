@@ -196,6 +196,11 @@ public sealed class NativeModuleSetsTests
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(effectConsumer,
             [Producer(Alpha, "Alpha", "First"), beta]));
 
+        var noReturn = Producer("[DoesNotReturn] public void Stop() { require false; }", "Stop", "First");
+        var noReturnConsumer = MakeConsumerSource("void Main() { Stop(); }", noReturn, beta);
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(noReturnConsumer,
+            [Producer("public void Stop() { }", "Stop", "First"), beta]));
+
         const string Value = """
             public struct Box {
                 public int32 Value;
