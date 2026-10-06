@@ -393,6 +393,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `2c3b7ef6` | Verify floating `out` and `init ref<T>` publication through persisted semantic modules and native consumer sets under both runtime policies |
 | `d2217561` | Verify conditional floating `out` and `init ref<T>` publication across native graphs under both runtime policies and AOT/JIT, rejecting output-format changes |
 | `f17bcead` | Verify floating scalar `out` and `init ref<T>` modes in both single-function v85 projections under both runtime policies, with hosted library parity |
 | `d65afeb4` | Verify `float32`/`float64` `out` publication for void functions through direct JIT/AOT and bounded v85 frontend parity under both runtime policies |
