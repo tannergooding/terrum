@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 59;
+    private const int Version = 60;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1421,17 +1421,20 @@ public static partial class ModuleCompiler
         var parts = function.Contract.Split('|');
         return parts.Length > 5 && parts[5] != "-"
             && TryContractPromises(function.Contract.AsSpan(), out _, out _, out _, out var unsafeCaller)
-            && unsafeCaller && !IsSupportedModuleUnsafeMethodContract(function.Contract, structures, valueTypes);
+            && unsafeCaller && (parts[0] != function.Name
+                || !IsSupportedModuleUnsafeMethodContract(function.Contract, structures, valueTypes));
     }
 
     private static bool IsSupportedModuleUnsafeMethod(BoundFunction function,
         ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
     {
         if (function.DeclaringStruct is not string ownerName || function.IsConstructor
-            || function.IsClassConstructor || function.IsCleanup || function.PropertyName is not null
+            || function.IsClassConstructor || function.IsCleanup
             || function.Intrinsic != BoundIntrinsic.None
             || function.ParameterCount > function.Variables.Length
-            || !valueTypes.IsSupported(function.ReturnType))
+            || (function.PropertyName is null
+                ? !valueTypes.IsSupported(function.ReturnType)
+                : !IsSupportedModuleUnsafeGetter(function, ownerName)))
         {
             return false;
         }
@@ -1475,6 +1478,12 @@ public static partial class ModuleCompiler
         return true;
     }
 
+    private static bool IsSupportedModuleUnsafeGetter(BoundFunction function, string ownerName) =>
+        !function.IsStatic && function.ParameterCount == 1
+        && IsScalarModuleContractType(function.ReturnType)
+        && function.PropertyName is string propertyName && propertyName.Length != 0
+        && function.Name == ownerName + ".#get:" + propertyName;
+
     private static bool IsSupportedModuleUnsafeMethodContract(string contract,
         ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
     {
@@ -1490,7 +1499,19 @@ public static partial class ModuleCompiler
             || (!isStatic && parts[4] != "I") || parts[5] == "-" || parts[6] != "E"
             || !int.TryParse(parts[7], System.Globalization.NumberStyles.None,
                 System.Globalization.CultureInfo.InvariantCulture, out var parameterCount)
-            || (!isStatic && parameterCount < 1) || parts.Length != 8 + parameterCount)
+            || (!isStatic && parameterCount < 1))
+        {
+            return false;
+        }
+
+        var hasGetterIdentity = parts.Length == 9 + parameterCount
+            && parts[^1].StartsWith("Property:", StringComparison.Ordinal);
+        var propertyName = hasGetterIdentity ? parts[^1].AsSpan("Property:".Length) : default;
+        if (parts.Length != (hasGetterIdentity ? 9 : 8) + parameterCount
+            || (hasGetterIdentity && (isStatic || parameterCount != 1
+                || !IsScalarModuleContractType(parts[1].AsSpan())
+                || propertyName.IsEmpty
+                || parts[0] != parts[5] + ".#get:" + propertyName.ToString())))
         {
             return false;
         }
@@ -1514,11 +1535,12 @@ public static partial class ModuleCompiler
         }
 
         var parameterOffset = isStatic ? 8 : 9;
+        var parameterEnd = hasGetterIdentity ? parts.Length - 1 : parts.Length;
         if (!isStatic && parts[8] != "in:" + ContractType((PrimitiveType)(100 + ownerIndex), structures))
         {
             return false;
         }
-        for (var index = parameterOffset; index < parts.Length; index++)
+        for (var index = parameterOffset; index < parameterEnd; index++)
         {
             if (!parts[index].StartsWith("in:", StringComparison.Ordinal)
                 || !valueTypes.IsSupported(parts[index].AsSpan(3)))

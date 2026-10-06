@@ -235,9 +235,10 @@ frontend with source-audited `unsafe(expr)` scopes and caller-unsafe callable
 declarations. Both projection families use only v85; verification and emission
 remain hosted.
 
-Separately, semantic-module revision 59 provisionally persists top-level
-caller-unsafe contracts and bounded readonly-instance and static method slices for
-public non-unique `Copy` owners; calls still require explicit `unsafe { }`
+Separately, semantic-module revision 60 provisionally persists top-level
+caller-unsafe contracts, bounded readonly-instance and static method slices,
+and readonly scalar-result getters for public non-unique `Copy` owners; calls
+still require explicit `unsafe { }`
 blocks and readers reconstruct
 authorization from that scope. Executable TRRM provisionally round-trips
 top-level caller-unsafe Effects and supports calls only inside validated
@@ -260,10 +261,10 @@ prerequisite has already been met.
 1. **Full runtime/structured contracts — references and safety.** General
    reference/access/loan metadata and caller-unsafe member contracts still
    need definition before wider use across calls or imports. Structured
-   semantic-module revision 59 provisionally carries top-level caller-unsafe
-   obligations and narrow readonly-instance and static `Copy` method slices,
-   including recursively exportable by-value Copy signatures, through explicit
-   unsafe-block scopes; this bounded implementation does not settle
+   semantic-module revision 60 provisionally carries top-level caller-unsafe
+   obligations, narrow readonly-instance and static `Copy` method slices,
+   recursively exportable by-value Copy signatures, and readonly scalar-result
+   getters through explicit unsafe-block scopes; this bounded implementation does not settle
    the general schema or approve the
    [reference-call metadata proposal](proposals/reference-call-metadata.md),
    which recommends a narrow first dependency registry and reuse of the

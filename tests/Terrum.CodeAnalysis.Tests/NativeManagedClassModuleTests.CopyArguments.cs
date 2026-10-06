@@ -42,7 +42,7 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """, policy);
         var producer = ModuleCompiler.CreateProducer(program, ["Proof"]);
-        Assert.Equal(59, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(60,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         Assert.Equal("native-19", ModuleCompiler.GetNativeProfileVersion(producer, false));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.Empty(reference.Structures);
@@ -79,7 +79,7 @@ public sealed partial class NativeManagedClassModuleTests
             """, policy, ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var replacement = ModuleCompiler.CreateProducer(Compile(CopyArgumentLeaf(), policy), ["Leaf"]);
-        Assert.Equal(59, BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
+        Assert.Equal(60,BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
         var program = ModuleCompiler.Link(consumer, replacement);
         Assert.Equal(["Cell", "Stamp", "$producer.Cell", "$producer.Stamp"],
             program.Structures.Select(static structure => structure.Name));

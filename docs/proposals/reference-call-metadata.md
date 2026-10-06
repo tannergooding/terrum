@@ -5,8 +5,8 @@ for the roadmap's general reference/access/loan call contracts. It does not
 change accepted source semantics or the approved metadata schema, and does not
 approve the broader proposal. Its marked provisional slices now include
 structured semantic-module caller obligations, bounded readonly-instance and
-static-method experiments on `Copy` structs, and validated indexed executable
-unsafe scopes;
+static-method experiments and getter support on `Copy` structs, and validated
+indexed executable unsafe scopes;
 their boundaries are described in [the module format](../modules.md) and
 [implementation notes](../implementation.md).
 
@@ -49,7 +49,7 @@ obligation, retain the `BoundUnsafe` scope, and reconstruct call authorization
 from that scope when reading; do not trust a serialized authorization bit by
 itself. `unsafe(expr)` remains same-compilation-only because its scope is
 currently represented only by a bound-call authorization fact. Keep unsafe
-fields, accessors and operators outside this semantic-module slice. Top-level
+fields and operators outside this semantic-module slice. Top-level
 declarations also provisionally round-trip the assigned Effects bit in
 executable TRRM, but that metadata alone does not authorize calls; executable
 call support is limited to the separately validated indexed unsafe regions in
@@ -57,11 +57,11 @@ section 3. This slice changes the internal semantic-module format and must
 advance its revision. It is an implementation experiment, not approval of
 general reference metadata or the broader proposal.
 
-**Implemented provisionally:** Semantic-module revision 59 persists top-level
-caller obligations and the bounded method contracts described below.
+**Implemented provisionally:** Semantic-module revision 60 persists top-level
+caller obligations and the bounded method and getter contracts described below.
 Authorization is reconstructed only from explicit `BoundUnsafe` scopes. Safe
 imports reject caller-unsafe replacements; caller-unsafe imports may use a
-safe replacement. Revisions 58 and 60 are rejected rather than upgraded or
+safe replacement. Revisions 59 and 61 are rejected rather than upgraded or
 normalized. `CallerUnsafeTests` cover round trips, replacement compatibility,
 adjacent-revision rejection, writer refusal of a retained authorization
 outside its unsafe block, and reader rejection after a persisted unsafe block
@@ -92,10 +92,33 @@ structs and scalar fields. The writer and bodyless reader share that strict
 shape boundary; unique, managed, buffer/view, cleanup-bearing and
 non-exportable layouts remain rejected. Calls still require an explicit
 persisted unsafe block; the unsafe declaration does not authorize operations
-in its own body. Mutable-receiver methods, constructors, class methods,
-accessors, operators, fields and reference/output modes remain excluded. This
-is a narrow persistence experiment, not approval of general caller-unsafe
-member metadata.
+in its own body. Revision 60 additionally admits readonly instance getters on
+those owners when the result is scalar and the persisted property identity
+matches its canonical getter name. Mutable-receiver methods, constructors,
+class members, other accessors, operators, fields and reference/output modes
+remain excluded. This is a narrow persistence experiment, not approval of
+general caller-unsafe member metadata.
+
+### Provisional extension: caller-unsafe readonly getters
+
+**Summary:** The accepted source contract supports caller-unsafe getter
+accessors, and same-compilation binding requires an explicit unsafe caller
+scope. Semantic-module revision 59 already records getter identity,
+`NoThrow`, and caller-unsafe effects, but its writer and bodyless reader reject
+caller-unsafe accessors.
+
+**Recommendation:** Provisionally persist only readonly instance getters on
+public, non-unique `Copy` structs with recursively exportable layouts, exactly
+one bound receiver and no explicit parameters, and a scalar by-value result.
+Require the canonical `Owner.#get:Property` name and matching `PropertyName`;
+preserve accessor-local `NoThrow`. Reconstruct authorization only from an
+enclosing persisted `BoundUnsafe` scope. Keep mutable/static/class getters,
+Copy-valued results, setters, fields, operators, `unsafe(expr)`-only calls and
+source-free TRRM outside this extension. Revision 60 versions the eligibility
+expansion consistently with prior revisions; the prior encoding already held
+the relevant identity and effect fields, so this adds no new bytes. This
+recommendation and implementation remain provisional and do not approve the
+broader caller-unsafe member contract.
 
 Executable TRRM also provisionally round-trips the assigned caller-unsafe
 Effects bit on top-level function declarations, including when composed with
@@ -155,7 +178,7 @@ individual call was authorized.
 ### 3. How should executable Bodies validate caller-unsafe scope?
 
 **Summary:** The source caller obligation and assigned Effects bit `0x04` are
-settled, and semantic-module revision 59 reconstructs authorization from
+settled, and semantic-module revision 60 reconstructs authorization from
 explicit `BoundUnsafe` scopes. Executable TRRM provisionally round-trips
 caller-unsafe declarations and supports calls only inside validated indexed
 Body unsafe scopes. Compact-linear Bodies still cannot prove explicit

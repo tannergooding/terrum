@@ -46,8 +46,8 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 59. Writers use it for every producer,
-consumer and graph library; readers accept only revision 59. Revision 48 adds
+The current semantic-module revision is 60. Writers use it for every producer,
+consumer and graph library; readers accept only revision 60. Revision 48 adds
 the initialization-aware optional-handle pattern expression, recording its
 source expression, capture slot and whether initialized null is accepted.
 Revision 49 adds expression tag 28 for named-storage initialization tests,
@@ -63,9 +63,9 @@ retired and must be recreated from source. Revision 53 adds the `float32` and
 `float64` primitive payload types; revision 52 and older were retired and must
 be recreated from source. Revision 54 records top-level caller-unsafe function
 contracts and retains explicit unsafe-block scopes in structured semantic
-modules. Import readers derive call authorization from those scopes; calls
-authorized only by `unsafe(expr)`, unsafe fields, accessors, operators, and
-caller-unsafe TRRM Bodies remain unsupported. Revision 56 and older are retired
+modules. Import readers derive call authorization from those scopes; at
+revision 54, calls authorized only by `unsafe(expr)`, unsafe fields, accessors,
+operators, and caller-unsafe TRRM Bodies were unsupported. Revision 56 and older are retired
 by the current reader and must be recreated from source. Revision 55
 introduced a provisional invocation-scoped `Host.Source` requirement and
 symbolic source length/read operations. Revision 56 retains that contract and
@@ -87,13 +87,17 @@ structs whose layouts are exportable. Revision 58 adds ordinary static methods
 on the same owners. Revision 59 additionally admits public, non-unique `Copy`
 structs as explicit by-value parameters and results, provided their recursively
 exported layouts contain only public, non-unique `Copy` structs and scalar
-fields. All three slices remain by-value; static methods have no synthesized
+fields. The method slices remain by-value; static methods have no synthesized
 receiver. Readers reconstruct call authorization only from persisted
 `unsafe { }` scopes. An unsafe import remains compatible with a safe
 replacement across semantic links and native graph/module-set links under both
-runtime policies. Mutable-receiver, constructor, class, accessor, operator,
-field, reference/output, unique, managed, buffer/view and other non-Copy member
-contracts remain unsupported; executable TRRM member support is unchanged.
+runtime policies. Revision 60 additionally admits caller-unsafe readonly
+instance getters on those owners when the getter returns a scalar by value;
+property identity remains distinct from an ordinary method name. Mutable
+receivers, constructors, class members, operators, fields, reference/output,
+unique, managed, buffer/view and other non-Copy member contracts remain
+unsupported; getter results must be scalar. Executable TRRM member support is
+unchanged.
 These experiments do not approve the broader reference-call metadata proposal.
 The scanner-specific implementation is provisional and its design remains
 unapproved; see the
@@ -598,7 +602,7 @@ unsupported.
 
 The following feature notes document implementation milestones only. They do
 not describe current writer selection or reader compatibility: current
-artifacts always use revision 59, and older semantic-module revisions are
+artifacts always use revision 60, and older semantic-module revisions are
 rejected.
 
 Version 12 stored the unique layout flag, declared cleanup method, cleanup
