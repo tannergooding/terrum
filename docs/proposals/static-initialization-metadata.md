@@ -125,18 +125,53 @@ Within this profile, use these proposed access obligations:
 | Type-name resolution, member binding or metadata inspection without runtime access | Create no initialization demand. |
 | Imported or packed access participating in initialization | Reject in this slice; do not bind by name or omit the initialization effect. |
 
+The runtime profile must prevent concurrent entry to every operation that can
+touch the loaded module, including ordinary reads after `Complete`. The
+candidate is a single-threaded, non-reentrant load profile with no concurrent
+host entry or callbacks into that module; it does not infer safety from source
+shape, visibility or absence of an observed race. A runtime that cannot enforce
+this admission rule rejects the profile.
+
 The triggering operation carries the accepted initialization effect and
 failure behavior in its published contract. Successful group completion
-publishes all required initialized and completion facts; a failed group remains
-unpublished and retains the accepted failure outcome. The profile does not
-weaken waiting, cycle-detection, memory-publication, ownership, cleanup or
-load-scoped unload requirements. These are required runtime obligations, not
-facts that the proposed metadata can prove.
+publishes all required initialized and completion facts. Under this fail-fast
+profile, failure terminates execution and never publishes the group; no
+recoverable failure replay or retry API is exposed. The profile does not
+weaken cycle detection, memory publication, ownership, cleanup or load-scoped
+unload requirements. These are required runtime obligations, not facts that
+the proposed metadata can prove.
 
 ### Candidate access-obligation artifact contract
 
-**Recommendation, still unapproved:** define access obligations logically
-before assigning table kinds, clause IDs, operation forms or runtime handles.
+**Recommendation, still unapproved:** assign the following closed logical
+records and Body-operation forms to the first slice, without assigning wire
+IDs, opcode numbers or native handles. Use a new required schema/profile
+instead of overloading the current metadata flags or `(1, 0)` Body profile.
+The candidate static-field identity is distinct from the existing instance
+`FieldDef`; a static field must not be inserted into an instance-layout range.
+
+| Logical form | Required identity and invariant |
+|---|---|
+| `StaticInitProfile` | Required module profile identifying the single-module, non-generic, non-partial, eager-scalar, fail-fast and proved-nonconcurrent subset. Unknown or unsupported requirements reject. |
+| `StaticField` | New module-local typed static-field definition with owner type, scalar type, mutability and owning group. Every eligible static field belongs to exactly one group; no implicit default makes vacant storage live. |
+| `EagerGroup` | Owning type, normalized trigger, ordered initializer range and optional authored static constructor. Exactly one group exists per eligible type, including constructor-only types. With no authored constructor, only the synthesized grouped-field trigger is valid. |
+| `EagerInitializer` | Group, unique contiguous ordinal, destination `StaticField` and compiler-owned initializer body. The ordered range follows compiler-input order and source order; steps are not ordinary callable methods or implicit default writes. |
+| `InitializationRole` | Required method clause distinguishing ordinary methods, group initializer steps, the group's constructor and checked helpers. Constructor and helper roles are not ordinary entry points; every helper's phase authority and initialized-field facts are checked for its owning group. |
+| `InitializationDemand` | Required published method clause naming each group whose ordinary completion may be demanded. It is separate from ordinary effects and must be preserved through same-module direct calls and linking; imported methods that participate in the initialization dependency closure reject. |
+| `Access` | Typed static-field/member identity, owning group, access kind and either ordinary `None`/`Complete` demand or group-scoped initialization-phase authority. Names and row order never establish identity. |
+
+The proposed Body forms are direct, by-value operations: `StaticRead`,
+`StaticInitialize`, `StaticAssign` and `StaticCall`. Every form carries a
+validated `Access`; `StaticInitialize` is legal only for vacant storage under
+the owning group's phase authority, while ordinary assignment follows the
+field's mutability contract. `StaticCall` uses `None` demand for an ordinary
+static-member call under the grouped-field trigger and `Complete` under the
+runtime-static-member trigger. Field reads and writes demand completion under
+the grouped-field trigger. A separate `InitHelperCall` may forward phase
+authority only to a helper checked for that same group; ordinary source
+operands cannot manufacture authority. No operation returns a reference,
+creates a view or exposes unfinished storage.
+
 Each obligation identifies the selected local member, its owning group recipe,
 the access kind and one of two authorities:
 
@@ -149,17 +184,18 @@ For an ordinary demand, the referenced group and access kind must agree with
 the normalized constructor trigger, or with the synthesized grouped-field
 trigger when no constructor is authored. Normal completion guarantees the
 required group completion before the operation continues. An unfinished group
-is never exposed to ordinary callers; failure, cleanup and retained outcomes
-follow the accepted runtime policy rather than an access-specific fallback.
-Compile-time binding and inspection carry no demand.
+is never exposed to ordinary callers; failure behavior is the selected runtime
+policy, not an access-specific fallback. Compile-time binding and inspection
+carry no demand.
 
 Initialization dependencies in this slice resolve only to definitions in the
 same module. The selected operation, member and group recipe use typed
 definition references and must agree on their owning type; names, row order
 and linker remapping do not establish identity. Imported or packed
 initialization dependencies reject. This logical contract is not an encoding
-or runtime protocol, does not choose sharing or failure-policy admission, and
-does not authorize implementation.
+or runtime protocol, does not assign table kinds, opcode numbers, byte layouts
+or the runtime handle ABI, and does not authorize implementation. The
+nonconcurrent/fail-fast admission choice remains subject to approval.
 
 Proposed validation ownership for this slice:
 
@@ -168,7 +204,7 @@ Proposed validation ownership for this slice:
 | Source compiler | Resolve registered attribute identities and closed schemas; assign each field to one group; preserve initializer source order; attach the selected local member/group obligation to each triggering operation; prove authored bodies satisfy initialization-phase authority, definite-initialization, effect and constructor-policy clauses. | Reject same-named unregistered attributes, ambiguous or mismatched group ownership, reads before field initialization, unvalidated helper access and trigger effects omitted from the published contract. |
 | Metadata reader | Require the profile and every required record; validate row extents, typed owner references, selected-member/group agreement, access kind, unique field/group assignments, signatures, policy cardinality, initializer ordering, and the identity, payload shape, placement and consistency of every recognized clause. Under the selected artifact trust policy, structural validation does not re-prove accepted producer body facts. | Reject absent or unknown required schema, dangling or wrong-kind references, missing/conflicting obligations, unknown semantic clauses and unsupported trigger or authority forms. |
 | Linker or consumer | Preserve the selected definitions, obligations and trigger effects without deriving them from names or remapped row order. | Reject imported/packed initialization dependencies and incompatible group or trigger contracts before lowering. |
-| Runtime | Key state by loaded type identity within its load instance; implement the accepted waiting, cycle, completion publication, retained failure, cleanup and unload behavior. Keep initialization synchronization separate from permission to share later accesses. | Reject admission of a runtime-policy combination whose sharing, failure, publication or lifecycle obligations are not explicitly implemented; never expose unfinished state or retry a retained failure implicitly. |
+| Runtime | For the first profile, enforce nonconcurrent access for the load instance, detect same-flow cycles, publish completion once, fail fast without publishing on failure, and quiesce before unload. Later checked-sharing profiles additionally require waiters, retained failure and cleanup transport. | Reject admission unless the runtime can enforce the selected sharing, failure, publication and lifecycle obligations; never expose unfinished state. |
 
 This proposed slice is a scope boundary for staged implementation, not a new
 language restriction. Later slices must add generic closed-type identity,
@@ -185,11 +221,13 @@ types, so its key is the load-instance identity plus the loaded definition;
 artifact row numbers, type names and process-global type identities are not
 substitutes for that key.
 
-The entry has four externally meaningful states: `Unstarted`,
+The general entry has four externally meaningful states: `Unstarted`,
 `Initializing(owner)`, `Complete`, and `Failed(outcome)`. Exactly one
 permitted execution flow claims `Unstarted` and runs the ordered initializer
-sequence followed by the authored constructor. Competing permitted callers
-wait for that execution's outcome. An ordinary demand that cycles back to the
+sequence followed by the authored constructor. Under later checked-sharing
+profiles, competing permitted callers wait for that execution's outcome. The
+first nonconcurrent profile admits no competing access and needs no waiter
+mechanism. In either profile, an ordinary demand that cycles back to the
 unfinished group fails rather than observing partial state or waiting
 indefinitely. Validated initialization-phase authority is distinct from an
 ordinary demand: it permits the initializer or checked helper to participate
@@ -197,12 +235,15 @@ in the unpublished group, but does not permit reading a field before its
 required initialization.
 
 On normal completion, required field and constructor guarantees are
-established before the runtime publishes `Complete` to waiters and ordinary
-callers. Under fail-fast termination, failure does not promise cleanup. Under
-defined unwinding, acquired partial state is cleaned without publishing a
-live group or rolling back external effects; the runtime records `Failed` and
-retains the failure outcome. Later ordinary demands surface that outcome and
-do not retry. The first slice excludes unsafe recovery and suppression APIs.
+established before the runtime publishes `Complete` to ordinary callers and,
+for checked-sharing profiles, waiters. Under the first profile, fail-fast
+termination promises no cleanup and no caller survives to observe or retry a
+failed entry; `Failed(outcome)` replay belongs to a later defined-unwinding
+profile. Defined-unwinding profiles clean acquired partial state without
+publishing a live group or rolling back external effects; the runtime records
+`Failed` and retains the failure outcome. Later ordinary demands surface that
+outcome and do not retry. The first slice excludes unsafe recovery and
+suppression APIs.
 
 Checked unload first prevents new demands and waits for quiescence: active
 calls, loans, roots, pins and ownership dependencies must be discharged.
@@ -228,24 +269,25 @@ or execution is authorized.
 
 | Question | Summary | Recommendation |
 |---|---|---|
-| What is the logical access obligation before assigning its encoding? | The first slice distinguishes ordinary demand from initialization authority, but no typed selected-member/group link or cross-layer rejection matrix is assigned. | Use the candidate contract above: bind each runtime access to its selected local member and owning group, distinguish ordinary demand from validated group-scoped authority, publish the trigger effect, and reject missing or mismatched obligations. |
-| Which required metadata kinds and executable access forms carry these records? | Current TRRM assigns no static-storage records or access operations; the logical obligation does not select their representation. | Assign closed required records and access forms together, with typed ownership and checked references. Do not emit under the current profile or overload existing flags. |
+| What is the logical access obligation before assigning its encoding? | The accepted source contract distinguishes ordinary demand from initialization authority, but does not assign artifact access records or operations. | Review the candidate forms above: bind each runtime access to its selected local member and owning group, distinguish `None`/`Complete` demand from validated group-scoped authority, publish the trigger effect, and reject missing or mismatched obligations. |
+| Which required metadata kinds and executable access forms carry these records? | Current TRRM and semantic-module revision 64 assign no static-storage records or access operations; existing instance `FieldDef` rows do not identify static cells. | Use the candidate `StaticInitProfile`, `StaticField`, `EagerGroup`, `EagerInitializer`, method-role/demand clauses and typed Body access forms above. Keep wire IDs, opcode numbers and native handles unassigned until this proposal is reviewed; do not emit in current profiles or overload existing flags. |
 | How are semantic clauses validated? | The slice assigns reader validation of clause shape/placement separately from source-body proof, but exact clause identities, payloads and proof obligations remain open. | Define each typed required clause and its compiler proof, reader shape/consistency checks, linker compatibility checks and runtime enforcement. Keep body re-proof governed by the artifact trust policy; reject unknown required or unsupported clauses. |
-| What runtime identity and lifecycle ABI implements the accepted behavior? | The candidate eager-group protocol now names load-scoped identity and required state transitions, but no handle, wait mechanism, recursive-owner identity, failure transport or cleanup ABI exists. | Assign typed runtime inputs and outcomes to the required metadata/access records; preserve the protocol above and reject any runtime profile unable to publish, retain failure, clean up or retire safely. Do not inherit host static-constructor behavior. |
-| Which sharing and runtime-policy combinations are admissible in the first slice? | The accepted contract permits checked sharing or proved nonconcurrency, and distinguishes fail-fast termination from defined unwinding; current compiler profiles do not implement initialization gates or failure transport. | Start with single-module, non-generic, non-partial eager scalar storage in a runtime profile that establishes nonconcurrent access and uses fail-fast termination. Test both trigger choices, initialization order, one-time completion, cycle failure in a subprocess, load separation and quiescent unload. Keep checked sharing, defined-unwinding failure transport and non-scalar cleanup for later profiles; reject any unsupported combination rather than infer permission. |
-| How do imported field references participate? | The current module schema does not bind `FieldDef` imports; the candidate slice avoids that dependency but not the eventual cross-module contract. | Keep imported/packed initialization edges rejected in the first slice; define validated field identity, trigger effects and dependency edges before a later cross-module slice. |
+| What runtime identity and lifecycle ABI implements the accepted behavior? | The candidate names load-instance identity and state transitions, but no runtime handle or unload protocol is assigned. | Assign a load-scoped group key and phase-authority transport. The first profile needs no waiter or retained-failure ABI; later checked-sharing or defined-unwinding profiles must specify their own waiting, failure, cleanup and retirement machinery. Do not inherit host static-constructor behavior. |
+| Which sharing and runtime-policy combinations are admissible in the first slice? | The accepted contract permits checked sharing or proved nonconcurrency, and distinguishes fail-fast termination from defined unwinding; current compiler profiles enforce neither. | Start with single-module, non-generic, non-partial eager scalar storage under a single-threaded, non-reentrant load profile and fail-fast termination. Test both trigger choices, initializer order, one-time completion, cycle failure in a subprocess, load separation and quiescent unload. Keep checked sharing, defined-unwinding failure transport and non-scalar cleanup for later profiles; reject unsupported admission rather than infer permission. |
+| How do imported field references participate? | The current module schema does not bind static-field imports; the candidate slice avoids cross-module initialization dependencies. | Keep imported/packed initialization edges rejected in the first slice; define validated field identity, trigger effects and dependency edges before a later cross-module slice. |
 | What artifact revision boundary applies? | Terrum remains pre-1.0 and has no external artifact consumers. | Keep one current writer and reader during development; make any shipped-preview boundary an explicit release decision. |
 
 ## Implementation boundary
 
 This proposal does not authorize changes to the accepted trigger, initialization,
-sharing, failure/recovery, cleanup or unload semantics. It does not make the
-current `(1, 0)` metadata flags carry static-initialization policy, and it does
-not establish hosted or native compiler support. Emission and execution are
-not authorized under the current profiles. The candidate first-slice profile
-does not itself assign metadata kinds or access encodings. Implementation
-remains blocked on those assignments, exact semantic clause and verifier
-rules, and a runtime protocol implementing initialization identity,
+sharing, failure/recovery, cleanup or unload semantics. The candidate logical
+records and operations above remain unapproved and do not make the current
+`(1, 0)` metadata flags or semantic-module revision 64 carry
+static-initialization policy. They do not establish hosted or native compiler
+support. Emission and execution are not authorized under current profiles.
+Implementation remains blocked on proposal approval, assigned wire schemas
+and Body opcodes, exact semantic-clause and verifier rules, and a runtime
+protocol implementing load-scoped identity, nonconcurrent admission,
 publication, failure, cleanup and unload. Cross-module initialization remains
 excluded until field identity and dependency obligations are defined. These
 blockers do not justify changing the accepted contract or borrowing host
