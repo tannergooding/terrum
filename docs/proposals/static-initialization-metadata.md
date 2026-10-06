@@ -145,13 +145,59 @@ partial composition, lazy units, property backing storage and validated
 cross-module dependencies without changing the accepted initialization
 contract.
 
+### Candidate eager-group runtime protocol refinement
+
+**Recommendation, still unapproved:** represent each eager group in one module
+load by a runtime-owned state entry keyed by the loaded nominal definition and
+its resolved closed substitution. The candidate first slice excludes generic
+types, so its key is the load-instance identity plus the loaded definition;
+artifact row numbers, type names and process-global type identities are not
+substitutes for that key.
+
+The entry has four externally meaningful states: `Unstarted`,
+`Initializing(owner)`, `Complete`, and `Failed(outcome)`. Exactly one
+permitted execution flow claims `Unstarted` and runs the ordered initializer
+sequence followed by the authored constructor. Competing permitted callers
+wait for that execution's outcome. An ordinary demand that cycles back to the
+unfinished group fails rather than observing partial state or waiting
+indefinitely. Validated initialization-phase authority is distinct from an
+ordinary demand: it permits the initializer or checked helper to participate
+in the unpublished group, but does not permit reading a field before its
+required initialization.
+
+On normal completion, required field and constructor guarantees are
+established before the runtime publishes `Complete` to waiters and ordinary
+callers. Under fail-fast termination, failure does not promise cleanup. Under
+defined unwinding, acquired partial state is cleaned without publishing a
+live group or rolling back external effects; the runtime records `Failed` and
+retains the failure outcome. Later ordinary demands surface that outcome and
+do not retry. The first slice excludes unsafe recovery and suppression APIs.
+
+Checked unload first prevents new demands and waits for quiescence: active
+calls, loans, roots, pins and ownership dependencies must be discharged.
+Applicable cleanup retires acquired values while their cleanup code remains
+available; only then may the runtime invalidate the group storage and code.
+The state entry is load-scoped and must not itself keep an unloaded image
+alive.
+
+This protocol is an implementation recommendation derived from the accepted
+contract, not a new language rule or assigned runtime ABI. Admission remains
+conditional on explicit, validated sharing and runtime-policy contracts:
+use a checked initialization gate or a proof of nonconcurrency, and reject
+profiles for which neither is available. Do not infer sharing permission or
+failure behavior from `static`, member visibility, or host-runtime defaults.
+The exact state-entry handle, wait/notification mechanism, recursive-owner
+identity, failure transport and cleanup registration still require a typed
+runtime/metadata contract before emission or execution is authorized.
+
 ### Decisions still open
 
 | Question | Summary | Recommendation |
 |---|---|---|
 | Which required metadata kinds and executable access forms carry these records? | The slice now names the logical cases, but current TRRM assigns no static-storage records or access operations. | Assign closed required records and access forms together, with typed ownership and checked references. Do not emit under the current profile or overload existing flags. |
 | How are semantic clauses validated? | The slice assigns reader validation of clause shape/placement separately from source-body proof, but exact clause identities, payloads and proof obligations remain open. | Define each typed required clause and its compiler proof, reader shape/consistency checks, linker compatibility checks and runtime enforcement. Keep body re-proof governed by the artifact trust policy; reject unknown required or unsupported clauses. |
-| What runtime identity and lifecycle ABI implements the accepted behavior? | The accepted key is a loaded type identity plus its closed substitution within one load instance, but the current profile excludes generics and has no runtime protocol. | Specify state identity and transitions against the accepted contract before runtime adoption; do not inherit host static-constructor behavior. |
+| What runtime identity and lifecycle ABI implements the accepted behavior? | The candidate eager-group protocol now names load-scoped identity and required state transitions, but no handle, wait mechanism, recursive-owner identity, failure transport or cleanup ABI exists. | Assign typed runtime inputs and outcomes to the required metadata/access records; preserve the protocol above and reject any runtime profile unable to publish, retain failure, clean up or retire safely. Do not inherit host static-constructor behavior. |
+| Which sharing and runtime-policy combinations are admissible in the first slice? | The accepted contract permits checked sharing or proved nonconcurrency, and distinguishes fail-fast termination from defined unwinding; current compiler profiles do not implement initialization gates or failure transport. | Admit only combinations whose sharing proof/gate and failure/cleanup path are explicit and implemented. Reject every unrepresented combination rather than infer permission or return a success-shaped fallback. |
 | How do imported field references participate? | The current module schema does not bind `FieldDef` imports; the candidate slice avoids that dependency but not the eventual cross-module contract. | Keep imported/packed initialization edges rejected in the first slice; define validated field identity, trigger effects and dependency edges before a later cross-module slice. |
 | What artifact revision boundary applies? | Terrum remains pre-1.0 and has no external artifact consumers. | Keep one current writer and reader during development; make any shipped-preview boundary an explicit release decision. |
 
