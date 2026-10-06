@@ -2842,14 +2842,15 @@ support.
 `FloatingArithmetic` implements raw-bit addition and subtraction for both
 formats with integer significands, guard/round/sticky alignment and
 nearest/ties-to-even rounding, plus multiplication with an exact two-word
-significand product and gradual underflow. It handles signed zeros, infinities
-and canonical arithmetic NaNs matching the hosted emitter's provisional
-behavior. Semantic-module tests compare boundary matrices and deterministic
-raw-bit pairs with the controlled hosted emitter under both policies; the
+significand product and division with quotient-bit long division, both with
+gradual underflow. It handles signed zeros, infinities and canonical
+arithmetic NaNs matching the hosted emitter's provisional behavior.
+Semantic-module tests compare boundary matrices, underflow/sticky-rounding
+cases and 1,024 deterministic raw-bit pairs per format and operation with the
+controlled hosted emitter under both policies; the
 independent component runner covers ties, subnormal transitions, infinities,
 NaNs and zeros under AOT/JIT. The arithmetic and NaN-encoding proposals remain
-unapproved; division, scalar-frontend, source-free DLL and TRRM support are
-unchanged.
+unapproved; scalar-frontend, source-free DLL and TRRM support are unchanged.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under

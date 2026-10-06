@@ -589,8 +589,10 @@ public sealed class FloatingLiteralBindingTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "[NoThrow] public float32 Add(float32 left, float32 right) { return left + right; } "
             + "[NoThrow] public float32 Multiply(float32 left, float32 right) { return left * right; } "
+            + "[NoThrow] public float32 Divide(float32 left, float32 right) { return left / right; } "
             + "[NoThrow] public float64 Add64(float64 left, float64 right) { return left + right; } "
-            + "[NoThrow] public float64 Multiply64(float64 left, float64 right) { return left * right; }"));
+            + "[NoThrow] public float64 Multiply64(float64 left, float64 right) { return left * right; } "
+            + "[NoThrow] public float64 Divide64(float64 left, float64 right) { return left / right; }"));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var path = Path.Combine(Path.GetTempPath(), $"terrum-float-mxcsr-{Guid.NewGuid():N}.dll");
@@ -599,22 +601,29 @@ public sealed class FloatingLiteralBindingTests
         var originalControl = ReadFloatingControl();
         try
         {
-            File.WriteAllBytes(path, NativeEmitter.EmitLibrary(program, ["Add", "Multiply", "Add64", "Multiply64"],
-                NativeRuntimePolicy.FailFast));
+            File.WriteAllBytes(path,
+                NativeEmitter.EmitLibrary(program, ["Add", "Multiply", "Divide", "Add64", "Multiply64", "Divide64"],
+                    NativeRuntimePolicy.FailFast));
             library = NativeLibrary.Load(path);
             var add = Export<Float32Binary>(library, "Add");
             var multiply = Export<Float32Binary>(library, "Multiply");
+            var divide = Export<Float32Binary>(library, "Divide");
             var add64 = Export<Float64Binary>(library, "Add64");
             var multiply64 = Export<Float64Binary>(library, "Multiply64");
+            var divide64 = Export<Float64Binary>(library, "Divide64");
             var alteredControl = (originalControl & ~floatingControlMask) | 0x01000200;
             WriteFloatingControl(alteredControl, floatingControlMask);
 
             Assert.Equal(0x3F800000, add(0x3F800000, 0x33800000));
             Assert.Equal(0x00400000, multiply(0x00800000, 0x3F000000));
+            Assert.Equal(0x3EAAAAAB, divide(0x3F800000, 0x40400000));
+            Assert.Equal(0x00000001, divide(0x00000001, 0x3F800000));
             Assert.Equal(0x3FF0000000000000L,
                 add64(0x3FF0000000000000L, 0x3CA0000000000000L));
             Assert.Equal(0x0008000000000000L,
                 multiply64(0x0010000000000000L, 0x3FE0000000000000L));
+            Assert.Equal(0x3FD5555555555555L, divide64(0x3FF0000000000000L, 0x4008000000000000L));
+            Assert.Equal(0x0000000000000001L, divide64(0x0000000000000001L, 0x3FF0000000000000L));
             Assert.Equal(alteredControl & floatingControlMask,
                 ReadFloatingControl() & floatingControlMask);
         }

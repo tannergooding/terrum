@@ -20,7 +20,7 @@ public sealed class FloatingArithmeticModuleTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task FloatingAddSubtractMultiplyMatchesHostedEmitterAsync(BoundRuntimePolicy policy)
+    public async Task FloatingBinaryArithmeticMatchesHostedEmitterAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
         var arithmeticPath = Path.Combine(root, "self-host", "FloatingArithmetic.terrum");
@@ -36,9 +36,11 @@ public sealed class FloatingArithmeticModuleTests
             [NoThrow] public float32 Float32Add(float32 left, float32 right) { return left + right; }
             [NoThrow] public float32 Float32Subtract(float32 left, float32 right) { return left - right; }
             [NoThrow] public float32 Float32Multiply(float32 left, float32 right) { return left * right; }
+            [NoThrow] public float32 Float32Divide(float32 left, float32 right) { return left / right; }
             [NoThrow] public float64 Float64Add(float64 left, float64 right) { return left + right; }
             [NoThrow] public float64 Float64Subtract(float64 left, float64 right) { return left - right; }
             [NoThrow] public float64 Float64Multiply(float64 left, float64 right) { return left * right; }
+            [NoThrow] public float64 Float64Divide(float64 left, float64 right) { return left / right; }
             """, "floating-arithmetic-hosted-oracle.terrum");
         Assert.False(oracleSyntaxTree.HasErrors, string.Join(Environment.NewLine, oracleSyntaxTree.Diagnostics));
         var oracleCompilation = Compilation.CreateLibrary(oracleSyntaxTree);
@@ -50,23 +52,27 @@ public sealed class FloatingArithmeticModuleTests
         {
             File.WriteAllBytes(oraclePath, NativeEmitter.EmitLibrary(oracleProgram, [
                 "Float32Add", "Float32Subtract", "Float32Multiply",
-                "Float64Add", "Float64Subtract", "Float64Multiply",
+                "Float32Divide", "Float64Add", "Float64Subtract", "Float64Multiply", "Float64Divide",
             ], NativeRuntimePolicy.FailFast));
             oracleLibrary = NativeLibrary.Load(oraclePath);
             var float32Add = Export<Float32Binary>(oracleLibrary, "Float32Add");
             var float32Subtract = Export<Float32Binary>(oracleLibrary, "Float32Subtract");
             var float32Multiply = Export<Float32Binary>(oracleLibrary, "Float32Multiply");
+            var float32Divide = Export<Float32Binary>(oracleLibrary, "Float32Divide");
             var float64Add = Export<Float64Binary>(oracleLibrary, "Float64Add");
             var float64Subtract = Export<Float64Binary>(oracleLibrary, "Float64Subtract");
             var float64Multiply = Export<Float64Binary>(oracleLibrary, "Float64Multiply");
+            var float64Divide = Export<Float64Binary>(oracleLibrary, "Float64Divide");
             (string Format, string Operation)[] cases =
             [
                 ("Float32", "Add"),
                 ("Float32", "Subtract"),
                 ("Float32", "Multiply"),
+                ("Float32", "Divide"),
                 ("Float64", "Add"),
                 ("Float64", "Subtract"),
                 ("Float64", "Multiply"),
+                ("Float64", "Divide"),
             ];
             foreach (var (format, operation) in cases)
             {
@@ -78,6 +84,7 @@ public sealed class FloatingArithmeticModuleTests
                         "Add" => float32Add,
                         "Subtract" => float32Subtract,
                         "Multiply" => float32Multiply,
+                        "Divide" => float32Divide,
                         _ => throw new ArgumentOutOfRangeException(nameof(operation)),
                     };
                     verificationSource = CreateFloat32VerificationSource(operation, oracle);
@@ -89,6 +96,7 @@ public sealed class FloatingArithmeticModuleTests
                         "Add" => float64Add,
                         "Subtract" => float64Subtract,
                         "Multiply" => float64Multiply,
+                        "Divide" => float64Divide,
                         _ => throw new ArgumentOutOfRangeException(nameof(operation)),
                     };
                     verificationSource = CreateFloat64VerificationSource(operation, oracle);
@@ -174,6 +182,10 @@ public sealed class FloatingArithmeticModuleTests
             source.Append("if (!").Append(roots[index]).Append("()) { return ")
                 .Append(index + 1).AppendLine("; }");
         }
+        source.AppendLine("if (!CheckFloat32Division()) { return 900; }");
+        source.AppendLine("if (!CheckFloat64DivisionA()) { return 901; }");
+        source.AppendLine("if (!CheckFloat64DivisionA2()) { return 902; }");
+        source.AppendLine("if (!CheckFloat64DivisionB()) { return 903; }");
         source.AppendLine("return 0;");
         source.AppendLine("}");
         source.Append(definitions);
@@ -192,9 +204,10 @@ public sealed class FloatingArithmeticModuleTests
             0x00800000, 0x80800000, 0x3F800000, 0x3F800001, 0xBF800000, 0xBF800001,
             0x3F000000, 0x3F7FFFFE, 0x3F7FFFFF, 0x3FC00000, 0x3FFFFFFE, 0x40000000,
             0x00FFFFFF, 0x7F000000, 0x33800000, 0xB3800000,
+            0x3EAAAAAB, 0x40400000, 0x41200000,
             0x00000002, 0x00000003, 0x00000004, 0x00000005, 0x7F7FFFFF, 0xFF7FFFFF,
             0x34800000,
-            0x7F800001, 0xFF800001, 0x7FC12345, 0xFFCABCDE,
+            0x7F800000, 0xFF800000, 0x7F800001, 0xFF800001, 0x7FC12345, 0xFFCABCDE,
         ];
         var pairs = new List<(uint Left, uint Right)>();
         foreach (var left in boundaries)
@@ -206,6 +219,7 @@ public sealed class FloatingArithmeticModuleTests
         }
 
         AddFloat32PairAndReverse(pairs, 0x00000001, 0x7F000000);
+        AddFloat32PairAndReverse(pairs, 0x3FCDA5E7, 0x3FFA0242);
         AddFloat32PairAndReverse(pairs, 0x7F7FFFFF, 0x72FFFFFF);
         AddFloat32PairAndReverse(pairs, 0x7F7FFFFF, 0x73000000);
         AddFloat32PairAndReverse(pairs, 0x7F7FFFFF, 0x73000001);
@@ -238,6 +252,7 @@ public sealed class FloatingArithmeticModuleTests
             0x3FE0000000000000, 0x3FEFFFFFFFFFFFFE, 0x3FEFFFFFFFFFFFFF, 0x3FF8000000000000,
             0x3FFFFFFFFFFFFFFE, 0x4000000000000000, 0x001FFFFFFFFFFFFF,
             0x7FE0000000000000, 0x3CC0000000000000,
+            0x3FD5555555555555, 0x4008000000000000, 0x4024000000000000,
             0x3CA0000000000000, 0xBCA0000000000000,
             0x0000000000000002, 0x0000000000000003, 0x0000000000000004, 0x0000000000000005,
             0x7FEFFFFFFFFFFFFF, 0xFFEFFFFFFFFFFFFF,
@@ -254,6 +269,7 @@ public sealed class FloatingArithmeticModuleTests
         }
 
         AddFloat64PairAndReverse(pairs, 0x0000000000000001, 0x7FE0000000000000);
+        AddFloat64PairAndReverse(pairs, 0x3FF63A160589F877, 0x3FFF55E11FB797FA);
         AddFloat64PairAndReverse(pairs, 0x7FEFFFFFFFFFFFFF, 0x7C8FFFFFFFFFFFFF);
         AddFloat64PairAndReverse(pairs, 0x7FEFFFFFFFFFFFFF, 0x7C90000000000000);
         AddFloat64PairAndReverse(pairs, 0x7FEFFFFFFFFFFFFF, 0x7C90000000000001);
