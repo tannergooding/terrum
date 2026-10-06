@@ -75,9 +75,11 @@ remains unsupported. None of these floating operations is part of the approved
 Separately, the standalone Terrum-authored `HexFloatLiteral` component now
 converts grammar-shaped, caller-delimited hexadecimal-float slices directly
 to target-format bits and matches hosted binding across rounding boundaries,
-deterministic random valid spellings and 16,000 fractional hex digits. It is not
-wired into the scalar frontend; source token reconstruction, verification and
-emission remain hosted.
+deterministic random valid spellings and 16,000 fractional hex digits. Its
+two raw-bit scalar queries are also provisionally integrated into the
+maintained source-grant companion; the source-free library and classifier are
+unchanged. It is not wired into the scalar frontend; source token
+reconstruction, verification and emission remain hosted.
 
 The bounded Terrum-authored scalar source frontend supports v85 complete
 global-function snapshots and source-order scalar call targets, including
@@ -266,7 +268,8 @@ prerequisite has already been met.
     predicate, packed scalar string- and character-literal queries, a scalar
     character-literal value query, scalar string-literal
     validation/count/indexed-value/encoded-length queries and paired scalar
-    integer-parsing queries, with selected-export
+    integer-parsing queries and target-typed hexadecimal-float raw-bit
+    queries, with selected-export
     descriptors bound to the image hash and end-relative
     reads based on invocation length. The source-free
     compiler-primitives DLL remains unchanged; this does not promote the

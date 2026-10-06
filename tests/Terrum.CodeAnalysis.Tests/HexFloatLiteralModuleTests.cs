@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
@@ -16,20 +17,21 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class HexFloatLiteralModuleTests
 {
+    private const string Float32BitsExport = "Terrum.CodeAnalysis.GetHexFloat32LiteralBitsOrMinusOne";
+    private const string Float64BitsExport = "Terrum.CodeAnalysis.GetHexFloat64LiteralBitsOrMinusOne";
+
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() { return 0; }
 
-        bool TryParseForFormat(int32 format, int32 start, int32 length, init ref<uint64> bits) {
+        int64 ParseForFormatOrMinusOne(int32 format, int32 start, int32 length) {
             if (format == 32) {
-                if (!TryParseHexFloat32Literal(start, length, init var parsed)) { return false; }
-                bits = uint64(parsed);
-                return true;
+                return GetHexFloat32LiteralBitsOrMinusOne(start, length);
             }
             if (format == 64) {
-                return TryParseHexFloat64Literal(start, length, init bits);
+                return GetHexFloat64LiteralBitsOrMinusOne(start, length);
             }
-            return false;
+            return -1;
         }
 
         public int32 VerifyRecords() {
@@ -51,12 +53,12 @@ public sealed class HexFloatLiteralModuleTests
                 if (spellingLength > sourceLength - at) { return -3; }
 
                 if (valid == 0) {
-                    if (TryParseForFormat(format, at, spellingLength, init var unexpectedBits)) {
+                    if (ParseForFormatOrMinusOne(format, at, spellingLength) >= 0) {
                         return item + 1;
                     }
                 } else {
-                    if (!TryParseForFormat(format, at, spellingLength, init var actualBits)
-                        || actualBits != expectedBits) { return item + 1; }
+                    int64 actualBits = ParseForFormatOrMinusOne(format, at, spellingLength);
+                    if (actualBits < 0 || uint64(actualBits) != expectedBits) { return item + 1; }
                 }
 
                 at = at + spellingLength;
@@ -182,6 +184,60 @@ public sealed class HexFloatLiteralModuleTests
         Assert.True(longFraction.Length + 7 <= 16_384);
         Assert.Equal(0, ExecuteRecords(
             consumer, CreateRecords(longFixture, longHostedBits), (NativeRuntimePolicy)policy));
+    }
+
+    [Fact]
+    public void MaintainedSourceGrantCompanionMatchesHostedHexFloatBits()
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name
+            ?? throw new InvalidOperationException("Missing configuration directory.");
+        var imagePath = Path.Combine(RepositoryRoot(), "artifacts", "bin", "self-host", configuration,
+            "terrum-compiler-primitives-source-grant.dll");
+        Assert.True(File.Exists(imagePath), $"Source-grant compiler-primitives companion was not built: {imagePath}");
+
+        var exports = new[]
+        {
+            (Float32BitsExport, true, PrimitiveType.Int64,
+                System.Collections.Immutable.ImmutableArray.Create(PrimitiveType.Int32, PrimitiveType.Int32)),
+            (Float64BitsExport, true, PrimitiveType.Int64,
+                System.Collections.Immutable.ImmutableArray.Create(PrimitiveType.Int32, PrimitiveType.Int32)),
+        };
+        var module = NativeLibrary.Load(imagePath);
+        try
+        {
+            var bindings = new NativeSourceGrantTestBindings(module, [.. exports]);
+            var fixtures = s_fixtures.Concat(CreateRandomFixtures()).ToArray();
+            var hostedBits = ReadHostedBits(fixtures);
+            for (var index = 0; index < fixtures.Length; index++)
+            {
+                var fixture = fixtures[index];
+                var export = fixture.Precision == 32 ? Float32BitsExport : Float64BitsExport;
+                Assert.Equal(unchecked((long)hostedBits[index]),
+                    bindings.Invoke<long>(export, fixture.Spelling.ToCharArray(), 0, fixture.Spelling.Length));
+            }
+
+            foreach (var spelling in s_invalidSpellings)
+            {
+                var source = spelling.ToCharArray();
+                Assert.Equal(-1L, bindings.Invoke<long>(
+                    Float32BitsExport, source, 0, source.Length));
+                Assert.Equal(-1L, bindings.Invoke<long>(
+                    Float64BitsExport, source, 0, source.Length));
+            }
+
+            var longFraction = "0x1." + new string('0', 16_000) + "p0";
+            Assert.Equal(0x3FF0000000000000L,
+                bindings.Invoke<long>(Float64BitsExport, longFraction.ToCharArray(), 0, longFraction.Length));
+            Assert.Equal(-1L, bindings.Invoke<long>(Float64BitsExport, "0x1p0".ToCharArray(), -1, 5));
+            Assert.Equal(-1L, bindings.Invoke<long>(Float64BitsExport, "0x1p0".ToCharArray(), 0, 6));
+            _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                bindings.Invoke<long>(Float64BitsExport, new char[16_385], 0, 5));
+        }
+        finally
+        {
+            NativeLibrary.Free(module);
+        }
     }
 
     private static ulong[] ReadHostedBits(Fixture[] fixtures)

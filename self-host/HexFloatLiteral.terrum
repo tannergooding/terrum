@@ -1,32 +1,25 @@
 namespace Terrum.CodeAnalysis;
 
-public static bool TryParseHexFloat32Literal(int32 start, int32 length, init ref<uint32> bits)
+public static int64 GetHexFloat32LiteralBitsOrMinusOne(int32 start, int32 length)
 {
-    if (!TryParseHexFloatLiteral(start, length, true, init var parsed))
-    {
-        return false;
-    }
-
-    bits = uint32(parsed);
-    return true;
+    return ParseHexFloatLiteralOrMinusOne(start, length, true);
 }
 
-public static bool TryParseHexFloat64Literal(int32 start, int32 length, init ref<uint64> bits)
+public static int64 GetHexFloat64LiteralBitsOrMinusOne(int32 start, int32 length)
 {
-    return TryParseHexFloatLiteral(start, length, false, init bits);
+    return ParseHexFloatLiteralOrMinusOne(start, length, false);
 }
 
-bool TryParseHexFloatLiteral(
+int64 ParseHexFloatLiteralOrMinusOne(
     int32 start,
     int32 length,
-    bool isFloat32,
-    init ref<uint64> bits
+    bool isFloat32
 )
 {
     int32 sourceLength = Host.Source.Length;
     if (start < 0 || length < 5 || start > sourceLength || length > sourceLength - start)
     {
-        return false;
+        return -1;
     }
 
     char16 firstPrefixUnit = Host.Source[start];
@@ -34,7 +27,7 @@ bool TryParseHexFloatLiteral(
     if (firstPrefixUnit != char16(48)
         || (secondPrefixUnit != char16(120) && secondPrefixUnit != char16(88)))
     {
-        return false;
+        return -1;
     }
 
     int32 tokenEnd = start + length;
@@ -47,7 +40,7 @@ bool TryParseHexFloatLiteral(
     }
     if (exponentMarker == tokenEnd)
     {
-        return false;
+        return -1;
     }
 
     mut bool sawPoint = false;
@@ -65,7 +58,7 @@ bool TryParseHexFloatLiteral(
         {
             if (sawPoint || previousSeparator)
             {
-                return false;
+                return -1;
             }
             sawPoint = true;
             previousDigit = false;
@@ -80,12 +73,12 @@ bool TryParseHexFloatLiteral(
             }
             if (next >= exponentMarker || GetHexDigitOrMinusOne(Host.Source[next]) < 0)
             {
-                return false;
+                return -1;
             }
 
             if (!previousDigit && !previousSeparator && (sawDigit || sawPoint))
             {
-                return false;
+                return -1;
             }
             previousDigit = false;
             previousSeparator = true;
@@ -95,7 +88,7 @@ bool TryParseHexFloatLiteral(
             int32 digit = GetHexDigitOrMinusOne(unit);
             if (digit < 0)
             {
-                return false;
+                return -1;
             }
 
             sawDigit = true;
@@ -144,18 +137,19 @@ bool TryParseHexFloatLiteral(
 
     if (!sawDigit || previousSeparator)
     {
-        return false;
+        return -1;
     }
 
-    if (!TryParseHexFloatExponent(exponentMarker + 1, tokenEnd, init var exponent))
+    int64 exponentCode = GetHexFloatExponentCodeOrZero(exponentMarker + 1, tokenEnd);
+    if (exponentCode == 0)
     {
-        return false;
+        return -1;
     }
+    int64 exponent = exponentCode - 1_000_001;
 
     if (significandBitLength == 0)
     {
-        bits = 0;
-        return true;
+        return 0;
     }
 
     mut int32 precision = 53;
@@ -179,20 +173,20 @@ bool TryParseHexFloatLiteral(
     uint64 minimumNormalSignificand = uint64(1) << fractionBits;
     if (unbiasedExponent > int64(maximumExponent))
     {
-        bits = uint64(maximumExponent * 2 + 1) << fractionBits;
-        return true;
+        return int64(uint64(maximumExponent * 2 + 1) << fractionBits);
     }
 
     if (unbiasedExponent >= int64(minimumExponent))
     {
-        if (!TryRoundHexSignificand(
+        int64 initialSignificand = RoundHexSignificandOrMinusOne(
             start + 2, exponentMarker, significandBitLength,
-            int64(significandBitLength) - int64(precision), init var initialSignificand))
+            int64(significandBitLength) - int64(precision));
+        if (initialSignificand < 0)
         {
-            return false;
+            return -1;
         }
 
-        mut uint64 roundedSignificand = initialSignificand;
+        mut uint64 roundedSignificand = uint64(initialSignificand);
         if (roundedSignificand >= minimumNormalSignificand << 1)
         {
             roundedSignificand = roundedSignificand >> 1;
@@ -200,38 +194,36 @@ bool TryParseHexFloatLiteral(
         }
         if (unbiasedExponent > int64(maximumExponent))
         {
-            bits = uint64(maximumExponent * 2 + 1) << fractionBits;
-            return true;
+            return int64(uint64(maximumExponent * 2 + 1) << fractionBits);
         }
 
         uint64 exponentField = uint64(unbiasedExponent + int64(exponentBias));
-        bits = (exponentField << fractionBits) | (roundedSignificand & fractionMask);
-        return true;
+        return int64((exponentField << fractionBits) | (roundedSignificand & fractionMask));
     }
 
     int64 subnormalShift = int64(minimumSubnormalExponent) - binaryShift;
-    if (!TryRoundHexSignificand(
-        start + 2, exponentMarker, significandBitLength, subnormalShift, init var subnormal))
+    int64 subnormalValue = RoundHexSignificandOrMinusOne(
+        start + 2, exponentMarker, significandBitLength, subnormalShift);
+    if (subnormalValue < 0)
     {
-        return false;
+        return -1;
     }
+    uint64 subnormal = uint64(subnormalValue);
 
     if (subnormal >= minimumNormalSignificand)
     {
-        bits = minimumNormalSignificand;
-        return true;
+        return int64(minimumNormalSignificand);
     }
 
-    bits = subnormal;
-    return true;
+    return int64(subnormal);
 }
 
-bool TryParseHexFloatExponent(int32 start, int32 end, init ref<int64> exponent)
+int64 GetHexFloatExponentCodeOrZero(int32 start, int32 end)
 {
     mut int32 at = start;
     if (at >= end)
     {
-        return false;
+        return 0;
     }
 
     mut bool negative = false;
@@ -242,7 +234,7 @@ bool TryParseHexFloatExponent(int32 start, int32 end, init ref<int64> exponent)
     }
     if (at >= end)
     {
-        return false;
+        return 0;
     }
 
     mut bool sawDigit = false;
@@ -263,7 +255,7 @@ bool TryParseHexFloatExponent(int32 start, int32 end, init ref<int64> exponent)
             if ((!previousDigit && !previousSeparator) || next >= end
                 || Host.Source[next] < char16(48) || Host.Source[next] > char16(57))
             {
-                return false;
+                return 0;
             }
             previousDigit = false;
             previousSeparator = true;
@@ -284,7 +276,7 @@ bool TryParseHexFloatExponent(int32 start, int32 end, init ref<int64> exponent)
         }
         else
         {
-            return false;
+            return 0;
         }
 
         at = at + 1;
@@ -292,37 +284,34 @@ bool TryParseHexFloatExponent(int32 start, int32 end, init ref<int64> exponent)
 
     if (!sawDigit || previousSeparator)
     {
-        return false;
+        return 0;
     }
 
-    exponent = negative ? 0 - magnitude : magnitude;
-    return true;
+    return negative ? 1_000_001 - magnitude : 1_000_001 + magnitude;
 }
 
-bool TryRoundHexSignificand(
+int64 RoundHexSignificandOrMinusOne(
     int32 start,
     int32 end,
     int32 bitLength,
-    int64 rightShift,
-    init ref<uint64> rounded
+    int64 rightShift
 )
 {
     if (rightShift <= 0)
     {
-        if (!TryGetHexSignificand(start, end, init var significand))
+        int64 significand = GetHexSignificandOrMinusOne(start, end);
+        if (significand < 0)
         {
-            return false;
+            return -1;
         }
 
         int32 leftShift = int32(0 - rightShift);
-        rounded = significand << leftShift;
-        return true;
+        return int64(uint64(significand) << leftShift);
     }
 
     if (rightShift > int64(bitLength))
     {
-        rounded = 0;
-        return true;
+        return 0;
     }
 
     int32 retainedBits = bitLength - int32(rightShift);
@@ -372,11 +361,10 @@ bool TryRoundHexSignificand(
         quotient = quotient + 1;
     }
 
-    rounded = quotient;
-    return true;
+    return int64(quotient);
 }
 
-bool TryGetHexSignificand(int32 start, int32 end, init ref<uint64> significand)
+int64 GetHexSignificandOrMinusOne(int32 start, int32 end)
 {
     mut uint64 value = 0;
     mut bool sawLeadingBit = false;
@@ -406,9 +394,8 @@ bool TryGetHexSignificand(int32 start, int32 end, init ref<uint64> significand)
 
     if (!sawLeadingBit)
     {
-        return false;
+        return -1;
     }
 
-    significand = value;
-    return true;
+    return int64(value);
 }

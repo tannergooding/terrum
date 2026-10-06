@@ -37,6 +37,8 @@ public sealed class NativeSourceGrantLibraryTests
     private const string StringLiteralScalarCountExport = "Terrum.CodeAnalysis.GetStringLiteralScalarCountOrMinusOne";
     private const string StringLiteralScalarAtExport = "Terrum.CodeAnalysis.GetStringLiteralScalarOrMinusOne";
     private const string StringLiteralEncodedLengthExport = "Terrum.CodeAnalysis.GetStringLiteralEncodedLengthOrMinusOne";
+    private const string HexFloat32BitsExport = "Terrum.CodeAnalysis.GetHexFloat32LiteralBitsOrMinusOne";
+    private const string HexFloat64BitsExport = "Terrum.CodeAnalysis.GetHexFloat64LiteralBitsOrMinusOne";
     private const string LineCountExport = "Terrum.CodeAnalysis.GetSourceLineCount";
     private const string CanParseUInt64Export = "Terrum.CodeAnalysis.Numerics64.CanParseUInt64Base";
     private const string ParseUInt64Export = "Terrum.CodeAnalysis.Numerics64.ParseUInt64Base";
@@ -1329,6 +1331,7 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.Equal([AnalyzeCharacterLiteralPackedExport, AnalyzeStringEscapePackedExport,
             CanGetSourceRangeExport, DecodeScalarExport,
             CharacterLiteralScalarExport,
+            HexFloat32BitsExport, HexFloat64BitsExport,
             SourceCharacterPositionExport,
             SourceCodeUnitExport,
             SourceLineContentEndExport, LineCountExport, SourceLineEndExport, SourceLineNumberExport,
@@ -1372,6 +1375,14 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.Equal(PrimitiveType.Int32, encodedLength.ReturnType);
         Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32],
             encodedLength.ParameterTypes.ToArray());
+        foreach (var exportName in new[] { HexFloat32BitsExport, HexFloat64BitsExport })
+        {
+            var hexFloatBits = Assert.Single(exports, export => export.Name == exportName);
+            Assert.True(hexFloatBits.SourceDependent);
+            Assert.Equal(PrimitiveType.Int64, hexFloatBits.ReturnType);
+            Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32],
+                hexFloatBits.ParameterTypes.ToArray());
+        }
 
         var module = NativeLibrary.Load(imagePath);
         try

@@ -552,6 +552,33 @@ source-grant classifier, change the source-free companion, imply single-pass
 performance or connect these exports to syntax parsing or the scalar
 frontend. This does not approve the ABI.
 
+### Provisional scalar hexadecimal-float bit exports
+
+**Question:** Should the maintained source-grant companion expose target-typed
+hexadecimal-float conversion as two scalar raw-bit queries?
+
+**Summary:** `HexFloatLiteral.terrum` converts a caller-delimited,
+grammar-shaped hexadecimal-float slice directly to `float32` or `float64`
+bits. A source-grant caller can receive those bits through
+`GetHexFloat32LiteralBitsOrMinusOne(start, length) -> int64` and
+`GetHexFloat64LiteralBitsOrMinusOne(start, length) -> int64`, with `-1` for
+invalid slices. The sign remains a separate source operator, so successful
+literal values are positive bit patterns; even positive NaN has a nonnegative
+bit pattern and cannot collide with the sentinel. The functions are isolated
+scalar queries, not lexer-token constructors or frontend integration.
+
+**Recommendation:** Include only these two exports as provisional
+source-dependent evidence. Preserve the hosted target-format rounding
+semantics, including subnormals, ties-to-even and overflow; accept only exact
+grammar-shaped slices, including permitted repeated separators, and reject
+separators adjacent to the point, exponent marker/sign or slice end. Compare
+direct fail-fast companion calls with hosted bound constants, and compare
+persisted semantic-module execution under both runtime policies, including
+invalid bounds/spellings, rounding ties, deterministic valid spellings and
+very long mantissas. Do not widen the classifier, change the source-free DLL,
+or connect the converter to frontend verification or emission. This does not
+approve the ABI.
+
 ## Promotion decisions still required
 
 ### Where source-grant shape is validated

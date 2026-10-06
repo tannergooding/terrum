@@ -2767,6 +2767,18 @@ validity with a single hosted lexer token and lengths with strict host
 encoders; semantic-module tests compare all selector results with aggregate
 `StringLiteral.TryGet*Length` over the existing exhaustive scalar corpus.
 This adds sizing evidence only, not encoding, scanner or frontend support.
+`GetHexFloat32LiteralBitsOrMinusOne(start, length)` and
+`GetHexFloat64LiteralBitsOrMinusOne(start, length)` provisionally convert one
+caller-delimited, grammar-shaped hexadecimal-float slice directly to positive
+IEEE-754 result bits carried in `int64`; `-1` means the slice is invalid. The
+sign is a separate source operator and these literal constructors cannot
+produce a negative or NaN bit pattern, so the sentinel is disjoint from every
+success. Direct calls to the maintained companion and persisted
+semantic-module tests compare with hosted target-typed bound constants across
+rounding boundaries, repeated separators, malformed spellings, deterministic
+random valid spellings and 16,000 fractional hex digits. This does not wire
+the helper into scalar-frontend token reconstruction or move verification and
+emission out of the hosted compiler.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under
