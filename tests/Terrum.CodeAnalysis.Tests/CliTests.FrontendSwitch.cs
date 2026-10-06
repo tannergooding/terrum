@@ -185,12 +185,16 @@ public sealed partial class CliTests
     {
         foreach (var (type, value) in new[]
         {
+            ("int32", "-2147483648"),
             ("int32", "2147483647"),
             ("uint32", "4294967295"),
+            ("int64", "-9223372036854775808"),
             ("int64", "9223372036854775807"),
             ("uint64", "18446744073709551615"),
+            ("bool", "false"),
             ("bool", "true"),
             ("char16", "char16(55296)"),
+            ("char16", "char16(65535)"),
         })
         {
             string source = $$"""

@@ -506,8 +506,9 @@ reinterpret an existing v85 record. Binding, verification, and emission
 remain hosted, and switch support does not extend source-free TRRM or claim
 bootstrap support. CLI integration coverage compares matching and default-arm
 selection with hosted conditional equivalents for each selector type at
-integer-width, Boolean, and surrogate code-unit boundaries under both runtime
-policies; it also checks duplicate constant-label rejection for all six types.
+signed extrema, unsigned maxima, both Boolean values, and surrogate/U+FFFF
+code-unit boundaries under both runtime policies; it also checks duplicate
+constant-label rejection for all six types.
 These syntax and
 scanner contracts do not change semantic-module, ISA, Contract, TRRM or native
 ABI formats.
