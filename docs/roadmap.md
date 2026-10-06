@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `97685f7c` | Compare scalar switch library artifacts with hosted conditional output |
 | `8bafab14` | Verify positional argument evaluation order across linked module artifacts |
 | `6e5c1a4e` | Preserve a caller root across nested imported graph replacement and collection |
 | `3c30d6d1` | Verify source-order evaluation of named output calls across module artifacts |
