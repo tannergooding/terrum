@@ -74,6 +74,26 @@ public sealed partial class JitTests
             : AssertFailFastExecutionAsync(Source, 42);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task FloatingVoidOutPublishesOnReturnAsync(bool checkedFailures)
+    {
+        const string Source = """
+            void Fill64(out float64 value) { value = 7.75; }
+            void Fill32(out float32 value) { value = 3.5; }
+            int32 Main() {
+                mut float64 value64 = 0.0;
+                mut float32 value32 = 0.0;
+                Fill64(out value64);
+                Fill32(out value32);
+                return value64 == 7.75 && value32 == 3.5 ? 42 : 0;
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+
     [Fact]
     public Task CheckedInitReferenceFailurePropagatesWithoutPublicationAsync()
     {
