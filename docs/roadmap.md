@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `fff80843` | Verify every isolated UTF-16 surrogate is rejected by native compiler primitives |
 | `47c35ecd` | Verify every supplementary Unicode escape through character, string-escape and string-literal source-grant JIT |
 | `0fa46337` | Verify every valid Unicode scalar through native UTF-16 compiler primitives |
 | `49a56eb2` | Verify every supplementary scalar spelling through character- and string-literal source-grant JIT |
