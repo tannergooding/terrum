@@ -13,14 +13,20 @@ public bool CheckCopyAlgorithms()
         return false;
     }
 
-    if (TrySelectCopyInit(2, int64(40), int64(42), init var initialized)
-        || TrySelectCopy(-1, int64(40), int64(42), out var absentCopy))
+    if (TrySelectCopyInit(2, int64(40), int64(42), init var initialized))
     {
         return false;
     }
     require TrySelectCopyInit(1, int64(40), int64(42), init initialized);
+    mut int64 outDestination = 40;
+    if (TrySelectCopy(-1, int64(40), int64(42), out outDestination))
+    {
+        return false;
+    }
+    require TrySelectCopy(1, int64(40), int64(42), out outDestination);
     require TrySelectCopy(0, int64(40), int64(42), out var copied);
-    if (initialized != int64(42) || copied != int64(40))
+    if (initialized != int64(42) || outDestination != int64(42)
+        || copied != int64(40))
     {
         return false;
     }
