@@ -275,7 +275,10 @@ match `SourceText.From(text).Lines.Length` across empty/null grants, each
 supported line ending, mixed and trailing endings, malformed UTF-16, NUL,
 excluded VT/FF, and maximum-length inputs. Explicit maximum-bound checks cover
 16,384 plain units, 16,384 LF units, 8,192 CRLF pairs and a final CR; the
-16,385-unit grant remains rejected before dispatch.
+16,385-unit grant remains rejected before dispatch. The line-count export
+also matches hosted `SourceText` for each of the 65,536 possible one-unit
+UTF-16 sources under both runtime policies, including every surrogate and
+control code unit.
 The same test DLL also returns a test-local packed line/character pair and
 matches hosted `SourceText.GetLinePosition` for every offset in the short
 edge-case fixtures and selected boundary offsets in maximum-length inputs.

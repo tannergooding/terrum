@@ -531,6 +531,14 @@ public sealed class NativeSourceGrantExperimentTests
                             bindings.Invoke<int>(LineOffsetExport, source, expected.Line, expected.Character));
                     }
                 }
+                var singleCodeUnitSource = new char[1];
+                for (var codeUnit = 0; codeUnit <= char.MaxValue; codeUnit++)
+                {
+                    singleCodeUnitSource[0] = (char)codeUnit;
+                    var snapshot = SourceText.From(new string(singleCodeUnitSource));
+                    Assert.Equal(snapshot.Lines.Length,
+                        bindings.Invoke<int>(LineCountExport, singleCodeUnitSource));
+                }
                 Assert.Equal(1, bindings.Invoke<int>(LineCountExport, null));
                 Assert.Equal(1, bindings.Invoke<int>(LineCountExport, []));
                 Assert.Equal(1, bindings.Invoke<int>(LineCountExport, new string('x', 16_384).ToCharArray()));
