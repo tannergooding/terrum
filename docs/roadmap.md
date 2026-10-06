@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `fca9fa3b` | Compare every rejected surrogate-valued `\U` escape through scanner-10 against the hosted lexer |
 | `780f072a` | Compare every valid supplementary `\U` scalar and invalid surrogate/out-of-range spellings through scanner-10 against the hosted lexer |
 | `981042fb` | Check maximum-length scanner-profile input with a supplementary scalar at the quoted-source boundary |
 | `6cff8a90` | Compare supplementary Unicode identifier start/continue range endpoints through persisted scanner-10 against the hosted lexer |
