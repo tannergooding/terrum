@@ -532,6 +532,82 @@ public sealed partial class JitTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GenericFixedScalarOutputsPublishAlongsideGenericOutputsAsync(bool checkedFailures)
+    {
+        const string Source = """
+            struct Pair {
+                public int64 First;
+                public int64 Second;
+                public Pair(int64 first, int64 second) { First = first; Second = second; }
+            }
+            int32 Fill<T>(T value, out T result, out int32 count, init ref<float64> score)
+                where T : [Copy] {
+                result = value;
+                count = 2;
+                score = float64(3.5);
+                return 7;
+            }
+            int32 Main() {
+                mut Pair copied = new Pair(0, 0);
+                int32 status = Fill(new Pair(40, 2), out copied, out var count, init var score);
+                if (status != 7 || copied.First != 40 || count != 2 || score != float64(3.5)) {
+                    return 1;
+                }
+                return 42;
+            }
+            """;
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    public Task GenericFixedScalarOutputsDoNotPublishAfterCheckedFailureAsync()
+    {
+        const string Source = """
+            struct Pair {
+                public int64 First;
+                public int64 Second;
+                public Pair(int64 first, int64 second) { First = first; Second = second; }
+            }
+            int32 Fill<T>(T value, bool complete, out T result, out int32 count,
+                init ref<float64> score) where T : [Copy] {
+                result = value;
+                count = 2;
+                score = float64(3.5);
+                require complete;
+                return 7;
+            }
+            int32 Main() {
+                mut Pair copied = new Pair(1, 2);
+                init float64 score;
+                unsafe {
+                    try {
+                        Fill(new Pair(40, 2), false, out copied, out var count, init score);
+                        return 1;
+                    } catch {
+                        if (score is init) { return 2; }
+                        int32 status = Fill(new Pair(42, 2), true, out copied,
+                            out var retriedCount, init score);
+                        if (status != 7 || copied.First != 42 || retriedCount != 2
+                            || score != float64(3.5)) { return 3; }
+                        return 42;
+                    }
+                }
+                return 0;
+            }
+            """;
+        return AssertCheckedExecutionAsync(Source, 42);
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task GenericMixedOutputsRetainManagedInitRootsAsync(NativeRuntimePolicy policy)

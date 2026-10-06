@@ -2205,9 +2205,13 @@ A separate provisional slice allows generic `out T` and `init ref<U>` outputs
 in the same non-Boolean/void template, retaining each mode's type eligibility,
 destination requirements, checked publication and private mode metadata.
 Boolean mixed-mode behavior remains unchanged; fixed-valued output parameters
-and managed-handle ordinary `out` remain excluded. This hosted experiment
-remains under the unapproved
-[mixed generic Copy-output proposal](proposals/generic-mixed-output-publication.md).
+and managed-handle ordinary `out` remain excluded from this slice. A separate
+provisional extension now admits fixed scalar side outputs alongside a generic
+output; fixed outputs remain scalar-only and their target contract is
+unapproved. Managed-handle ordinary `out` remains excluded. These hosted
+experiments remain under the unapproved
+[mixed generic Copy-output proposal](proposals/generic-mixed-output-publication.md)
+and [fixed scalar generic-output proposal](proposals/generic-fixed-output-parameters.md).
 Neither experiment approves a target contract, extends the scalar frontend or
 source-free TRRM, or changes module formats and ABI. Floating specialization
 eligibility remains separately provisional.

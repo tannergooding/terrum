@@ -233,19 +233,8 @@ public sealed class StaticProtocolOutputTests
             }
             int32 Main() { return 0; }
             """));
-        Assert.True(fixedOutput.HasErrors);
-        Assert.Null(fixedOutput.Program);
-
-        var fixedInitOutput = Compilation.Create(SyntaxTree.Parse(Value + """
-            int32 Fill<T>(T value, out T result, init ref<int32> count) where T : [Copy] {
-                result = value;
-                count = 7;
-                return 42;
-            }
-            int32 Main() { return 0; }
-            """));
-        Assert.True(fixedInitOutput.HasErrors);
-        Assert.Null(fixedInitOutput.Program);
+            Assert.True(fixedOutput.HasErrors);
+            Assert.Null(fixedOutput.Program);
     }
 
     [Theory]
@@ -338,6 +327,55 @@ public sealed class StaticProtocolOutputTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GenericFixedScalarOutputsCanAccompanyGenericOutputs(bool explicitType)
+    {
+        var call = explicitType
+            ? "Fill<Value>(new Value(40), out copied, out var count, init var score)"
+            : "Fill(new Value(40), out copied, out var count, init var score)";
+        var source = Value + """
+            int32 Fill<T>(T value, out T result, out int32 count, init ref<float64> score)
+                where T : [Copy] {
+                result = value;
+                count = 2;
+                score = float64(3.5);
+                return 7;
+            }
+            int32 Main() {
+                mut Value copied = new Value(0);
+                int32 status = CALL;
+                require status == 7 && copied.First == 40 && count == 2 && score == float64(3.5);
+                return 42;
+            }
+            """.Replace("CALL", call, StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value>");
+        Assert.True(fill.Variables[1].IsOut);
+        Assert.False(fill.Variables[1].IsInit);
+        Assert.True(fill.Variables[2].IsOut);
+        Assert.False(fill.Variables[2].IsInit);
+        Assert.True(fill.Variables[3].IsOut);
+        Assert.True(fill.Variables[3].IsInit);
+    }
+
+    [Theory]
+    [InlineData("count = 2;")]
+    [InlineData("score = float64(3.5);")]
+    public void GenericFixedOutputsRequirePublicationOnEveryNormalReturn(string body)
+    {
+        var source = Value
+            + "int32 Fill<T>(T value, out T result, out int32 count, init ref<float64> score)"
+            + " where T : [Copy] { result = value; " + body + " return 7; }"
+            + "int32 Main() { return 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
     [InlineData("int32", "result = value; return 7;")]
     [InlineData("int32", "initialized = second; return 7;")]
     [InlineData("void", "result = value;")]
@@ -376,6 +414,8 @@ public sealed class StaticProtocolOutputTests
     [Theory]
     [InlineData("int32(previous.First)")]
     [InlineData("int32(initialized)")]
+    [InlineData("count")]
+    [InlineData("int32(score)")]
     public void GenericMixedOutputIsNotReadableAfterExceptionalDeparture(string catchRead)
     {
         var source = """
@@ -385,18 +425,24 @@ public sealed class StaticProtocolOutputTests
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
             }
             int32 Fill<T, U>(T value, U second, bool complete, out T result,
-                init ref<U> initialized) where T : [Copy] where U : [Copy] {
+                init ref<U> initialized, out int32 count, init ref<float64> score)
+                where T : [Copy] where U : [Copy] {
                 result = value;
                 initialized = second;
+                count = 2;
+                score = float64(3.5);
                 require complete;
                 return 7;
             }
             int32 Main() {
                 mut Pair previous = new Pair(1, 2);
                 init int64 initialized;
+                mut int32 count = 0;
+                init float64 score;
                 unsafe {
                     try {
-                        Fill(new Pair(40, 2), int64(3), false, out previous, init initialized);
+                        Fill(new Pair(40, 2), int64(3), false, out previous, init initialized,
+                            out count, init score);
                     } catch {
                         return CATCH_READ;
                     }

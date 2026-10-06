@@ -58,9 +58,12 @@ public sealed partial class GenericControlFlowModuleTests
             result = value;
         }
         [NoThrow] int32 FillMixed<T, U>(T value, U second, int32 status, out T result,
-            init ref<U> initialized) where T : [Copy] where U : [Copy] {
+            init ref<U> initialized, out int32 count, init ref<float64> score)
+            where T : [Copy] where U : [Copy] {
             result = value;
             initialized = second;
+            count = 2;
+            score = float64(3.5);
             return status;
         }
         [NoThrow] int32 Count<T>(T value, int32 count) where T : [Copy] { return count; }
@@ -72,13 +75,14 @@ public sealed partial class GenericControlFlowModuleTests
             int32 initStatus = FillInit(result, 42, init var initialized);
             FillInitVoid(copied, init var initializedAgain);
             mut Pair mixed = new Pair(0, 0);
-            int32 mixedStatus = FillMixed(result, int64(42), 7, out mixed, init var initializedMixed);
+            int32 mixedStatus = FillMixed(result, int64(42), 7, out mixed,
+                init var initializedMixed, out var mixedCount, init var mixedScore);
             if (status != 7 || duplicate.First != 40 || duplicate.Second != 2
                 || copiedAgain.First != 40 || copiedAgain.Second != 2
                 || initStatus != 7 || initialized.First != 40 || initialized.Second != 2
                 || initializedAgain.First != 40 || initializedAgain.Second != 2
                 || mixedStatus != 7 || mixed.First != 40 || mixed.Second != 2
-                || initializedMixed != 42) { return 2; }
+                || initializedMixed != 42 || mixedCount != 2 || mixedScore != float64(3.5)) { return 2; }
             return int32(result.First + result.Second) + Count(result, 0);
         }
         """;
@@ -141,6 +145,10 @@ public sealed partial class GenericControlFlowModuleTests
         Assert.True(fillMixed.Variables[3].IsOut);
         Assert.False(fillMixed.Variables[3].IsInit);
         Assert.True(fillMixed.Variables[4].IsInit);
+        Assert.True(fillMixed.Variables[5].IsOut);
+        Assert.False(fillMixed.Variables[5].IsInit);
+        Assert.True(fillMixed.Variables[6].IsOut);
+        Assert.True(fillMixed.Variables[6].IsInit);
         var helper = Assert.Single(linked.Functions,
             static function => function.Name == "$producer.TryCopy<Pair>");
         Assert.Equal(PrimitiveType.Bool, helper.ReturnType);

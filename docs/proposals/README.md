@@ -37,7 +37,11 @@ approved.
   compilation-local Copy specializations while preserving Boolean vacancy.
 - [Mixed generic Copy outputs for non-Boolean calls](generic-mixed-output-publication.md)
   recommends combining generic `out` and `init ref` formals while preserving
-  each mode's distinct destination and publication contract.
+  each mode's distinct destination and publication contract; fixed-valued
+  output side parameters remain outside that slice.
+- [Fixed scalar outputs in generic Copy templates](generic-fixed-output-parameters.md)
+  recommends adding scalar fixed-type output side parameters alongside at
+  least one generic output without changing publication rules.
 - [Floating Copy generic specializations](floating-copy-generic-specializations.md)
   recommends admitting floating formats only as concrete arguments to hosted
   Copy-only generic templates; it does not grant symbolic floating operations

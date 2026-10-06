@@ -36,8 +36,10 @@ Apply the non-Boolean eligibility checks independently to each output:
 ordinary `out` retains its scalar/non-unique Copy shape and excludes managed
 handles, while `init ref<T>` retains compilation-private managed-handle
 support. If a formal is used by both modes, its concrete type must satisfy both
-eligibility checks. Exclude fixed-valued output side parameters, unique/owning
-values, public generic declarations or witnesses, ABI/module-format changes,
+eligibility checks. This mixed-mode slice excludes fixed-valued output side
+parameters; a separate unapproved proposal considers scalar fixed outputs
+alongside at least one generic output. Also exclude unique/owning values,
+public generic declarations or witnesses, ABI/module-format changes,
 source-free TRRM and scalar-frontend verification/emission. Do not change the
 existing Boolean-result mixed-mode behavior, including its conditional
 publication and broader managed-`out`/fixed-output eligibility. Floating

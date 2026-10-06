@@ -264,6 +264,12 @@ internal sealed partial class Binder
         _ => null,
     };
 
+    private static PrimitiveType? GenericOutputScalarType(string name) => name switch {
+        "float32" => PrimitiveType.Float32,
+        "float64" => PrimitiveType.Float64,
+        _ => null,
+    };
+
     private bool IsCopyGenericType(PrimitiveType type) => type is PrimitiveType.Bool or PrimitiveType.Char16
         or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
         || IsStruct(type)
@@ -703,7 +709,8 @@ internal sealed partial class Binder
             else
             {
                 var typeName = NameText(argumentType);
-                var scalar = GenericScalarType(typeName);
+                var scalar = GenericScalarType(typeName)
+                    ?? ((isOut || isInit) ? GenericOutputScalarType(typeName) : null);
                 var index = FindTypeParameter(typeName);
                 if (index < 0 && scalar is null)
                 {
@@ -777,7 +784,10 @@ internal sealed partial class Binder
             || (outputParameters.Length != 0
                 && scalarReturn != PrimitiveType.Bool
                 && (scalarReturn is null
-                    || outputParameters.Any(static parameter => parameter.TypeParameterIndex < 0)))
+                    || !outputParameters.Any(static parameter => parameter.TypeParameterIndex >= 0)
+                    || outputParameters.Any(parameter => parameter.TypeParameterIndex < 0
+                        && (parameter.ScalarType is not PrimitiveType scalarType
+                            || !IsSupportedNonBooleanGenericOutputType(scalarType)))))
             || Enumerable.Range(0, typeNames.Length).Any(index => returnIndex != index
                 && !templateParameters.Any(parameter => parameter.TypeParameterIndex == index))
             || (noThrow && operations.Any(operators =>
@@ -987,7 +997,7 @@ internal sealed partial class Binder
         }
         if (template.ReturnType(types) != PrimitiveType.Bool
             && template.Parameters.Any(parameter => parameter.IsOut && !parameter.IsInit
-                && !IsSupportedNonBooleanGenericOutputType(types[parameter.TypeParameterIndex])))
+                && !IsSupportedNonBooleanGenericOutputType(parameter.Resolve(types))))
         {
             Report("TRM3011", "A non-Boolean generic output requires a supported scalar or non-unique Copy type.",
                 callee.Span);
