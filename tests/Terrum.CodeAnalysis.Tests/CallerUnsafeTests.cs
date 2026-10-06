@@ -412,7 +412,7 @@ public sealed class CallerUnsafeTests
             "int32 Main() { unsafe { return Danger(); } }"), reference);
         Assert.False(scopedCall.HasErrors, string.Join(Environment.NewLine, scopedCall.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(scopedCall.Program), producer);
-        foreach (var unsupportedVersion in new[] { 59, 61 })
+        foreach (var unsupportedVersion in new[] { 60, 62 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -497,7 +497,7 @@ public sealed class CallerUnsafeTests
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
             Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
-        foreach (var unsupportedVersion in new[] { 59, 61 })
+        foreach (var unsupportedVersion in new[] { 60, 62 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -562,7 +562,7 @@ public sealed class CallerUnsafeTests
         string[] exports = ["Value.#ctor", "Value.#get:Read", "Value.SafeRead", "Value.get_Read"];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.Equal(60, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
+        Assert.Equal(61, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var getter = Assert.Single(reference.Functions, static function => function.Name == "Value.#get:Read");
@@ -601,6 +601,85 @@ public sealed class CallerUnsafeTests
 
         var safeConsumerCompilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { Value value = new Value(42); return value.Read; }"),
+            ModuleCompiler.CreateReference(safeReplacement), policy);
+        Assert.False(safeConsumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, safeConsumerCompilation.Diagnostics));
+        var safeConsumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(safeConsumerCompilation.Program), safeReplacement);
+        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void SemanticModulesRoundTripCallerUnsafeStaticCopyGetters(BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            public struct Value {
+                public int32 Placeholder;
+                public static int32 Read {
+                    [NoThrow] unsafe get {
+                        int32 local = 42;
+                        return local;
+                    }
+                }
+                public static int32 SafeRead() { unsafe { return Read; } }
+            }
+            """;
+        const string ConsumerSource = """
+            int32 Main() {
+                int32 safeValue = Value.SafeRead();
+                unsafe { return Value.Read + safeValue; }
+            }
+            """;
+        string[] exports = ["Value.#get:Read", "Value.SafeRead"];
+        var providerProgram = CompileLibrary(Source, policy);
+        var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
+        Assert.Equal(61, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
+
+        var reference = ModuleCompiler.CreateReference(producer);
+        var getter = Assert.Single(reference.Functions,
+            static function => function.Name == "Value.#get:Read");
+        Assert.Equal("Read", getter.PropertyName);
+        Assert.True(getter.IsStatic);
+        Assert.Equal(0, getter.ParameterCount);
+        Assert.True(getter.RequiresUnsafeCaller);
+        Assert.True(getter.IsNoThrow);
+
+        var unscoped = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Value.Read; }"),
+            reference, policy);
+        Assert.Null(unscoped.Program);
+        Assert.Contains(unscoped.Diagnostics, static diagnostic => diagnostic.Code == "TRM3028");
+
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), reference, policy);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+        foreach (var unsupportedVersion in new[] { 60, 62 })
+        {
+            var unsupportedConsumer = (byte[])consumer.Clone();
+            BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
+                unsupportedVersion);
+            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
+        }
+
+        var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
+            ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast;
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.Equal(84, NativeJit.Execute(linked, runtimePolicy));
+        Assert.NotEmpty(NativeEmitter.Emit(linked, runtimePolicy));
+
+        var safeReplacementSource = Source
+            .Replace("[NoThrow] unsafe get", "[NoThrow] get", StringComparison.Ordinal)
+            .Replace("local = 42;", "local = 43;", StringComparison.Ordinal)
+            .Replace("unsafe { return Read; }", "return Read;", StringComparison.Ordinal);
+        var safeReplacement = ModuleCompiler.CreateProducer(
+            CompileLibrary(safeReplacementSource, policy), exports);
+        Assert.Equal(86, NativeJit.Execute(ModuleCompiler.Link(consumer, safeReplacement), runtimePolicy));
+
+        var safeConsumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Value.Read; }"),
             ModuleCompiler.CreateReference(safeReplacement), policy);
         Assert.False(safeConsumerCompilation.HasErrors,
             string.Join(Environment.NewLine, safeConsumerCompilation.Diagnostics));
@@ -653,7 +732,7 @@ public sealed class CallerUnsafeTests
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
             Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
-        foreach (var unsupportedVersion in new[] { 59, 61 })
+        foreach (var unsupportedVersion in new[] { 60, 62 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -716,7 +795,7 @@ public sealed class CallerUnsafeTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
             Assert.IsType<BoundProgram>(compilation.Program), producer);
-        foreach (var unsupportedVersion in new[] { 59, 61 })
+        foreach (var unsupportedVersion in new[] { 60, 62 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -874,6 +953,70 @@ public sealed class CallerUnsafeTests
         var replacementProviders = new[] { safeReplacement, helper };
         NativeModuleCompiler.ValidateConsumerSet(consumerSet, replacementProviders);
         Assert.Equal(128, await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, replacementProviders,
+            TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task NativeModuleSetsAndGraphsRoundTripCallerUnsafeStaticCopyGettersAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            public struct Value {
+                public int32 Placeholder;
+                public static int32 Read { [NoThrow] unsafe get { return 42; } }
+                public static int32 SafeRead() { unsafe { return Read; } }
+            }
+            """;
+        const string ConsumerSource = """
+            int32 Main() {
+                int32 safeValue = Value.SafeRead();
+                unsafe { return Value.Read + safeValue; }
+            }
+            """;
+        var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
+            ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast;
+        var exports = new[] { "Value.#get:Read", "Value.SafeRead" };
+        var producer = NativeModuleCompiler.CreateProducer(
+            CompileLibrary(Source, policy), exports, "UnsafeStaticGetterValue", runtimePolicy);
+        var helper = NativeModuleCompiler.CreateProducer(
+            CompileLibrary("public int32 Helper() { return 0; }", policy),
+            ["Helper"], "UnsafeStaticGetterHelper", runtimePolicy);
+        var providers = new[] { producer, helper };
+
+        var graphReference = NativeModuleCompiler.CreateGraphReference([producer]);
+        var graphCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), graphReference, policy);
+        Assert.False(graphCompilation.HasErrors,
+            string.Join(Environment.NewLine, graphCompilation.Diagnostics));
+        var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
+            Assert.IsType<BoundProgram>(graphCompilation.Program), [producer], runtimePolicy);
+        NativeModuleCompiler.ValidateGraph(graphConsumer, [producer]);
+        Assert.Equal(84, await NativeModuleCompiler.RunGraphAsync(graphConsumer, [producer],
+            TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
+
+        var safeReplacementSource = Source.Replace("unsafe get", "get", StringComparison.Ordinal)
+            .Replace("unsafe { return Read; }", "return Read;", StringComparison.Ordinal)
+            .Replace("return 42;", "return 43;", StringComparison.Ordinal);
+        var safeReplacement = NativeModuleCompiler.CreateProducer(
+            CompileLibrary(safeReplacementSource, policy), exports, "UnsafeStaticGetterValue", runtimePolicy);
+        NativeModuleCompiler.ValidateGraph(graphConsumer, [safeReplacement]);
+        Assert.Equal(86, await NativeModuleCompiler.RunGraphAsync(graphConsumer, [safeReplacement],
+            TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
+
+        var setReference = NativeModuleCompiler.CreateReferenceSet(providers);
+        var setCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), setReference, policy);
+        Assert.False(setCompilation.HasErrors,
+            string.Join(Environment.NewLine, setCompilation.Diagnostics));
+        var consumerSet = NativeModuleCompiler.CreateConsumerSet(
+            Assert.IsType<BoundProgram>(setCompilation.Program), providers, runtimePolicy);
+        NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
+        Assert.Equal(84, await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
+            TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
+
+        var replacementProviders = new[] { safeReplacement, helper };
+        NativeModuleCompiler.ValidateConsumerSet(consumerSet, replacementProviders);
+        Assert.Equal(86, await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, replacementProviders,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
     }
 

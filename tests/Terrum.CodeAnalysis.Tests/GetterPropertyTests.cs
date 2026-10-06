@@ -56,6 +56,111 @@ public sealed class GetterPropertyTests
     }
 
     [Fact]
+    public void StaticComputedGetterHasNoReceiverAndUsesTypeQualifiedAndUnqualifiedLookup()
+    {
+        const string source = """
+            public struct Counter {
+                public int32 Placeholder;
+                public static int32 Base { [NoThrow] get { return 40; } }
+                public static int32 LocalValue {
+                    get {
+                        int32 local = 42;
+                        return local;
+                    }
+                }
+                public static int32 Direct => 2;
+                public static int32 Value {
+                    [NoThrow] get { return Base; }
+                }
+                public static int32 UnsafeValue { unsafe get { return 1; } }
+                public static int32 Read() { return Value + Direct; }
+                public int32 ReadStaticValue() { return Counter.Value; }
+            }
+            int32 Main() { return Counter.Read() + unsafe(Counter.UnsafeValue); }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        foreach (var propertyName in new[] { "Base", "Value" })
+        {
+            var getter = Assert.Single(program.Functions,
+                function => function.DeclaringStruct == "Counter" && function.PropertyName == propertyName);
+            Assert.Equal("Counter.#get:" + propertyName, getter.Name);
+            Assert.True(getter.IsStatic);
+            Assert.Equal(0, getter.ParameterCount);
+            Assert.True(getter.IsNoThrow);
+        }
+        var localGetter = Assert.Single(program.Functions,
+            static function => function.DeclaringStruct == "Counter" && function.PropertyName == "LocalValue");
+        Assert.Equal(0, localGetter.ParameterCount);
+        Assert.Equal("local", localGetter.Variables[0].Name);
+        Assert.True(Assert.Single(program.Functions,
+            static function => function.DeclaringStruct == "Counter"
+                && function.PropertyName == "UnsafeValue").RequiresUnsafeCaller);
+        var staticGetterIndex = program.Functions.IndexOf(Assert.Single(program.Functions,
+            static function => function.DeclaringStruct == "Counter" && function.PropertyName == "Value"));
+        var staticGetter = program.Functions[staticGetterIndex];
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(staticGetterIndex, staticGetter with { IsStatic = false }),
+        }));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(staticGetterIndex, staticGetter with {
+                Name = "Counter.#get:Other",
+            }),
+        }));
+        Assert.Equal(43, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData("", "A.Counter.Value")]
+    [InlineData("A.Counter value", "value.InstanceValue")]
+    public void GetterLookupDoesNotFallBackToAnotherOwner(string parameters, string access)
+    {
+        var compilation = Compilation.CreateLibrary([
+            SyntaxTree.Parse("namespace A; public struct Counter { public int32 Placeholder; }"),
+            SyntaxTree.Parse("""
+                namespace N.A;
+                public struct Counter {
+                    public static int32 Value { get { return 42; } }
+                    public int32 InstanceValue { get { return 43; } }
+                }
+                """),
+            SyntaxTree.Parse($"namespace N; int32 Probe({parameters}) {{ return {access}; }}"),
+        ]);
+
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3006");
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData("int32 result = Counter.Value;")]
+    [InlineData("var result = Counter.Value;")]
+    public void StaticGetterDoesNotTreatAnUnresolvedLocalAsAType(string declaration)
+    {
+        var source = "public struct Counter { public static int32 Value { get { return 42; } } } "
+            + "int32 Main() { init var Counter; " + declaration
+            + " Counter = int32(0); return 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3006");
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void StaticComputedGetterDoesNotAddClassPropertySupport()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class Box {
+                public int32 Placeholder;
+                public static int32 Value { get { return 42; } }
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3001");
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
     public void GetterVerifierRejectsFieldNameCollisionsForStructsAndClasses()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ValueSource));
@@ -85,7 +190,7 @@ public sealed class GetterPropertyTests
     [InlineData("public int32 Value { get { return _value; } set { _value = 1; } }", "TRM1002")]
     [InlineData("public int32 Value { [DoesNotReturn] get { return _value; } }", "TRM3001")]
     [InlineData("public mut int32 Value { get { return _value; } }", "TRM3001")]
-    [InlineData("public static int32 Value { get { return _value; } }", "TRM3001")]
+    [InlineData("public static Counter Value { get { return new Counter(1); } }", "TRM3007")]
     [InlineData("public void Value { get { return; } }", "TRM3007")]
     [InlineData("public int32 _value { get { return _value; } }", "TRM3001")]
     [InlineData("[NoThrow] public int32 Value { get { return _value; } }", "TRM3001")]
@@ -161,7 +266,7 @@ public sealed class GetterPropertyTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.Equal(60,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(61,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             ModuleCompiler.CreateReference(producer), boundPolicy);
         Assert.False(consumerCompilation.HasErrors,
@@ -233,7 +338,7 @@ public sealed class GetterPropertyTests
             }
             """, NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.Equal(60,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(61,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             ModuleCompiler.CreateReference(producer));
         Assert.False(consumerCompilation.HasErrors,

@@ -346,8 +346,10 @@ The [module fixture](../docs/modules.md) also compiles the range and character
 definitions into a producer, then binds the tests and a separate entry snapshot
 using only that artifact's declarations. Both AOT and JIT execute the linked
 result; no producer source is rebound while compiling the consumer.
-The cursor and general host-interface sketches still require later language
-slices. Executing these components is not a self-hosted compiler bootstrap.
+The general cursor and host-interface sketches still require later language
+slices. The bounded `TokenCursor` integration does not add general stored views
+or substitute for those host interfaces. Executing these components is not a
+self-hosted compiler bootstrap.
 Compilation-local constrained functions support bounded closed helper composition,
 Copy-only selection and numeric algorithms with scalar control flow, but not the
 generic spans, stored dependencies or host interfaces
@@ -533,6 +535,8 @@ The v1–v84 labels below identify former feature milestones only. Their feature
 selection and servicing statements describe retired implementations: none of
 those tags is produced or accepted now. V85 includes all currently implemented
 source subsets, with the existing layouts, limits and independent source audits.
+Static property syntax and getter bodies remain outside this projection;
+hosted static-getter support does not extend the Terrum-authored frontend.
 
 The scalar frontend now also parses and binds bounded expression trees in
 Terrum, including `=>` scalar functions and nested arithmetic, bitwise,

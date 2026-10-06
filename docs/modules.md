@@ -46,8 +46,8 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 60. Writers use it for every producer,
-consumer and graph library; readers accept only revision 60. Revision 48 adds
+The current semantic-module revision is 61. Writers use it for every producer,
+consumer and graph library; readers accept only revision 61. Revision 48 adds
 the initialization-aware optional-handle pattern expression, recording its
 source expression, capture slot and whether initialized null is accepted.
 Revision 49 adds expression tag 28 for named-storage initialization tests,
@@ -92,8 +92,10 @@ receiver. Readers reconstruct call authorization only from persisted
 `unsafe { }` scopes. An unsafe import remains compatible with a safe
 replacement across semantic links and native graph/module-set links under both
 runtime policies. Revision 60 additionally admits caller-unsafe readonly
-instance getters on those owners when the getter returns a scalar by value;
-property identity remains distinct from an ordinary method name. Mutable
+instance getters on those owners when the getter returns a scalar by value.
+Revision 61 additionally admits storage-free caller-unsafe static getters on
+those owners when the getter returns a scalar by value. Property identity
+remains distinct from an ordinary method name. Mutable
 receivers, constructors, class members, operators, fields, reference/output,
 unique, managed, buffer/view and other non-Copy member contracts remain
 unsupported; getter results must be scalar. Executable TRRM member support is
@@ -602,7 +604,7 @@ unsupported.
 
 The following feature notes document implementation milestones only. They do
 not describe current writer selection or reader compatibility: current
-artifacts always use revision 60, and older semantic-module revisions are
+artifacts always use revision 61, and older semantic-module revisions are
 rejected.
 
 Version 12 stored the unique layout flag, declared cleanup method, cleanup

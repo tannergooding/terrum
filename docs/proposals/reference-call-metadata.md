@@ -57,8 +57,9 @@ section 3. This slice changes the internal semantic-module format and must
 advance its revision. It is an implementation experiment, not approval of
 general reference metadata or the broader proposal.
 
-**Implemented provisionally:** Semantic-module revision 60 persists top-level
-caller obligations and the bounded method and getter contracts described below.
+**Implemented provisionally:** Semantic-module revision 61 persists top-level
+caller obligations and the bounded method, instance-getter and static-getter
+contracts described below.
 Authorization is reconstructed only from explicit `BoundUnsafe` scopes. Safe
 imports reject caller-unsafe replacements; caller-unsafe imports may use a
 safe replacement. Revisions 59 and 61 are rejected rather than upgraded or
@@ -120,6 +121,36 @@ the relevant identity and effect fields, so this adds no new bytes. This
 recommendation and implementation remain provisional and do not approve the
 broader caller-unsafe member contract.
 
+### Provisional extension: storage-free static getters
+
+**Pre-slice boundary:** The accepted grammar permits static named properties
+and accessor-local caller-unsafe obligations, but hosted binding initially
+rejected static properties. Authored getter bodies without backing storage do
+not create static initialization groups; static storage and initialization
+contracts remain separate roadmap work.
+
+**Recommendation:** Implement getter-only static properties with authored
+block or expression bodies, scalar by-value results, on non-unique `Copy`
+structs. Give them zero parameters and retain the distinct
+`Owner.#get:Property` identity, accessor-local `NoThrow`, and caller-unsafe
+obligation. Permit unqualified lookup inside the declaring type and
+type-qualified lookup outside it; do not add a receiver or implicit storage.
+Provisionally persist caller-unsafe static getters only for public,
+non-unique `Copy` owners with exportable layouts, reconstructing authorization
+from an enclosing `BoundUnsafe` scope. Keep auto/backed properties, `field`,
+property initializers, setters, classes, primitives, unique owners, aggregate/reference
+results, executable TRRM members, and scalar-frontend projection outside this
+slice. This implements an accepted source contract and does not approve general
+caller-unsafe member metadata or static initialization semantics.
+
+**Implemented provisionally:** Hosted binding accepts authored block and
+expression-body static getters on non-unique `Copy` structs for scalar
+by-value results, preserving their zero-parameter `Owner.#get:Property`
+identity. Semantic-module revision 61 persists caller-unsafe static getter
+contracts only for public, non-unique owners with exportable layouts;
+authorization is reconstructed from persisted `BoundUnsafe` scopes. This
+remains outside executable TRRM member support and the scalar frontend.
+
 Executable TRRM also provisionally round-trips the assigned caller-unsafe
 Effects bit on top-level function declarations, including when composed with
 `NoThrow` or `DoesNotReturn`, and provisionally admits calls only inside
@@ -178,7 +209,7 @@ individual call was authorized.
 ### 3. How should executable Bodies validate caller-unsafe scope?
 
 **Summary:** The source caller obligation and assigned Effects bit `0x04` are
-settled, and semantic-module revision 60 reconstructs authorization from
+settled, and semantic-module revision 61 reconstructs authorization from
 explicit `BoundUnsafe` scopes. Executable TRRM provisionally round-trips
 caller-unsafe declarations and supports calls only inside validated indexed
 Body unsafe scopes. Compact-linear Bodies still cannot prove explicit

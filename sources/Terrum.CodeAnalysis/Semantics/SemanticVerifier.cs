@@ -480,9 +480,17 @@ public static partial class SemanticVerifier
                 && (string.IsNullOrEmpty(propertyName) || function.DeclaringStruct is not string owner
                     || (function.Name != owner + ".#get:" + propertyName
                         && function.Name != owner + ".$producer.#get:" + propertyName)
-                    || function.IsStatic || function.IsConstructor || function.IsClassConstructor
-                    || function.IsCleanup || function.DoesNotReturn || function.ParameterCount != 1
-                    || function.Variables[0].IsMutable || IsUnique(program, function.Variables[0].Type)
+                    || function.IsConstructor || function.IsClassConstructor
+                    || function.IsCleanup || function.DoesNotReturn
+                    || (function.IsStatic
+                        ? declaringType < 0 || declaringType >= ManagedClassTypes.First
+                            || program.Structures[declaringType].IsUnique
+                            || function.ParameterCount != 0
+                            || function.ReturnType is not (PrimitiveType.Bool or PrimitiveType.Char16
+                                or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+                                or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64)
+                        : function.ParameterCount != 1 || function.Variables[0].IsMutable
+                            || IsUnique(program, function.Variables[0].Type))
                     || !IsClassArgumentType(function.ReturnType, program.Structures)
                     || (declaringType >= 0 && HasFieldName(declaringType, propertyName))))
             {

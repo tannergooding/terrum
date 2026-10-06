@@ -1442,7 +1442,9 @@ internal sealed partial class Binder
                     }
                 }
             }
-            if (containingType is null || isStatic || isMutable || isCleanup || doesNotReturn
+            if (containingType is null || isMutable || isCleanup || doesNotReturn
+                || (isStatic && (!TryResolveStruct(Qualify(containingType), out var staticOwner)
+                    || IsUnique(staticOwner)))
                 || (!TryResolveStruct(Qualify(containingType), out var propertyOwner)
                     && !TryResolveClass(Qualify(containingType), out propertyOwner)
                     && !_primitiveDeclarations.Contains(containingType))
@@ -1464,7 +1466,8 @@ internal sealed partial class Binder
         }
         var classConstructor = constructor && TryResolveClass(Qualify(containingType!), out _);
         var returnType = constructor ? ResolveDeclaredType(containingType!) : BindType(returnNode!, allowVoid: true);
-        if (property && (returnType == PrimitiveType.Void || !IsCopyGenericType(returnType)
+        if (property && (returnType == PrimitiveType.Void
+            || (isStatic ? !IsScalarStaticGetterType(returnType) : !IsCopyGenericType(returnType))
             || IsUnique(returnType)))
         {
             Report("TRM3007", "A getter must return a supported by-value Copy type.", declaration.Span);
@@ -3266,6 +3269,12 @@ internal sealed partial class Binder
                     expression = BindArguments(node, new SyntaxNode(SyntaxKind.ArgumentList, [], node.Span.End),
                         getter, null);
                 }
+                else if (_currentStruct is not null
+                    && TryFindStaticGetter(ResolveDeclaredType(_currentStruct), token.Name, out var staticGetter))
+                {
+                    expression = BindArguments(node, new SyntaxNode(SyntaxKind.ArgumentList, [], node.Span.End),
+                        staticGetter, null);
+                }
                 else
                 {
                     Report("TRM3006", $"Unknown or not-yet-declared variable '{token.Text}'.", token.Span);
@@ -3338,6 +3347,24 @@ internal sealed partial class Binder
                     expression = BindArguments(node, new SyntaxNode(SyntaxKind.ArgumentList, [], node.Span.End),
                         getter, receiverNode);
                     break;
+                }
+                if (receiverType is null && !HasVariableReceiverName(receiverNode))
+                {
+                    var resolution = ResolveStaticMember(receiverNode, member, out var staticMember);
+                    if (resolution == DeclaredTypeResolution.Ambiguous)
+                    {
+                        Report("TRM3011", $"Type '{NameText(receiverNode)}' is ambiguous across declared and imported types.",
+                            receiverNode.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+                    if (resolution == DeclaredTypeResolution.Unique
+                        && TryFindStaticGetter(staticMember, member, out var staticGetter))
+                    {
+                        expression = BindArguments(node, new SyntaxNode(SyntaxKind.ArgumentList, [], node.Span.End),
+                            staticGetter, null);
+                        break;
+                    }
                 }
                 var typeName = NameText(receiverNode);
                 if (member is "MinValue" or "MaxValue" && typeName is "int32" or "uint32" or "int64" or "uint64" or "char16")
@@ -4341,9 +4368,30 @@ internal sealed partial class Binder
             : TryPrimitiveType(TypeName(type), out var primitive) && primitive == type
                 ? TypeName(type) : null;
         getter = -1;
-        return owner is not null && TryFindFunction(owner + ".#get:" + name, out getter)
-            && _signatures[getter].PropertyName == name;
+        return owner is not null && TryFindFunctionExact(owner + ".#get:" + name, out getter)
+            && !_signatures[getter].IsStatic && _signatures[getter].PropertyName == name;
     }
+
+    private bool TryFindStaticGetter(PrimitiveType type, string name, out int getter)
+    {
+        var owner = IsStruct(type) ? _structs[(int)type - 100].Name : null;
+        getter = -1;
+        return owner is not null && TryFindFunctionExact(owner + ".#get:" + name, out getter)
+            && _signatures[getter].IsStatic && _signatures[getter].PropertyName == name;
+    }
+
+    private bool TryFindStaticGetter(string staticMember, string propertyName, out int getter)
+    {
+        var separator = staticMember.LastIndexOf('.');
+        getter = -1;
+        return separator >= 0 && TryFindFunctionExact(
+            staticMember[..(separator + 1)] + "#get:" + propertyName, out getter)
+            && _signatures[getter].IsStatic && _signatures[getter].PropertyName == propertyName;
+    }
+
+    private static bool IsScalarStaticGetterType(PrimitiveType type) =>
+        type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
+            or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
 
     private BoundStructField GetField(PrimitiveType type, int field) => IsClass(type)
         ? _classes[ManagedClassTypes.ClassIndex(type)].Fields[field]
@@ -4536,6 +4584,11 @@ internal sealed partial class Binder
                 {
                     return _signatures[getter].ReturnType;
                 }
+                if (_currentStruct is not null
+                    && TryFindStaticGetter(ResolveDeclaredType(_currentStruct), name, out var staticGetter))
+                {
+                    return _signatures[staticGetter].ReturnType;
+                }
                 return _hasReceiver && _currentStruct is not null
                     && TryFindField(ResolveDeclaredType(_currentStruct), name, out var field)
                     ? GetField(ResolveDeclaredType(_currentStruct), field).Type : null;
@@ -4658,6 +4711,12 @@ internal sealed partial class Binder
                 {
                     return _signatures[getter].ReturnType;
                 }
+                if (receiverType is null && !HasVariableReceiverName(receiver)
+                    && ResolveStaticMember(receiver, member, out var staticMember) == DeclaredTypeResolution.Unique
+                    && TryFindStaticGetter(staticMember, member, out var staticGetter))
+                {
+                    return _signatures[staticGetter].ReturnType;
+                }
                 var text = NameText(node);
                 if (text is "int32.MinValue" or "int32.MaxValue")
                 {
@@ -4778,6 +4837,27 @@ internal sealed partial class Binder
 
         slot = -1;
         return false;
+    }
+
+    private bool HasVariableReceiverName(SyntaxNode receiver)
+    {
+        while (receiver.Kind == SyntaxKind.MemberAccessExpression)
+        {
+            receiver = (SyntaxNode)receiver.Children[0];
+        }
+
+        return receiver.Kind == SyntaxKind.NameExpression
+            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Name, out _);
+    }
+
+    private bool TryFindFunctionExact(string name, out int function)
+    {
+        if (_genericProofSource is Binder source && source._functions.TryGetValue(name, out var sourceIndex)
+            && !_functions.ContainsKey(name))
+        {
+            _ = HydrateProofFunction(sourceIndex);
+        }
+        return _functions.TryGetValue(name, out function);
     }
 
     private bool TryFindFunction(string name, out int function)
