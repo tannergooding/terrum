@@ -30,7 +30,7 @@ bool TryPublishScalarFrontend()
     int32 count = tokens.GetCount();
     var spacing = tokens.GetScalarOperatorSpacingError();
     Span<Token> tokenView = tokens.AsSpan();
-    if (!TryPublishScalarFrontendProgram(tokenView, count, spacing, out var handled)) { return false; }
+    if (!TryPublishScalarFrontendProgram(tokenView, count, spacing, init var handled)) { return false; }
     if (handled) { return true; }
     if (Host.Frontend.Length != 392
         || count < 1

@@ -35,7 +35,7 @@ bool ScalarProgramDefersCompletion()
     return hasNonReturningFunction;
 }
 
-bool ScalarProgramError(int32 code, SourceRange span, out bool handled)
+bool ScalarProgramError(int32 code, SourceRange span, init ref<bool> handled)
 {
     for (mut int32 index = 0; index < Host.FrontendProgram.Length; index = index + 1)
     {
@@ -301,9 +301,8 @@ bool TrySkipScalarAlias(Span<Token> tokenView, int32 count, int32 start, init re
 }
 
 bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
-    SourceRange spacingError, out bool handled)
+    SourceRange spacingError, init ref<bool> handled)
 {
-    handled = false;
     for (mut int32 word = 0; word < Host.FrontendProgram.Length; word = word + 1)
     {
         Host.FrontendProgram[word] = 0;
@@ -311,14 +310,14 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
     if (count > 64)
     {
         require TryGetScalarWindowToken(tokenView, 0, count, false, 64, init var excess);
-        return ScalarProgramError(1, excess.Range, out handled);
+        return ScalarProgramError(1, excess.Range, init handled);
     }
-    if (spacingError.Length != 0) { return ScalarProgramError(1, spacingError, out handled); }
+    if (spacingError.Length != 0) { return ScalarProgramError(1, spacingError, init handled); }
     require SourceRange.TryCreate(0, 0, init var empty);
     var aliasError = BuildScalarAliasTable(tokenView, count, init var aliasCount);
     if (aliasError.Length != 0)
     {
-        return ScalarProgramError(1, aliasError, out handled);
+        return ScalarProgramError(1, aliasError, init handled);
     }
     mut int32 start = 0;
     mut int32 functions = 0;
@@ -340,9 +339,10 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
             if (functions == 0 && aliasCount == 0)
             {
                 for (mut int32 word = 0; word < 392; word = word + 1) { Host.Frontend[word] = 0; }
+                handled = false;
                 return true;
             }
-            return ScalarProgramError(header.ErrorCode, header.ErrorSpan, out handled);
+            return ScalarProgramError(header.ErrorCode, header.ErrorSpan, init handled);
         }
         int32 body = start + headerEnd;
         require TryGetScalarWindowToken(tokenView, 0, count, false, body, init var opening);
@@ -367,13 +367,13 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
                 if (token.Kind == 49) { depth = depth - 1; }
                 end = end + 1;
             }
-            if (depth != 0) { return ScalarProgramError(1, opening.Range, out handled); }
+            if (depth != 0) { return ScalarProgramError(1, opening.Range, init handled); }
         }
         else
         {
-            return ScalarProgramError(1, opening.Range, out handled);
+            return ScalarProgramError(1, opening.Range, init handled);
         }
-        if (functions == 10) { return ScalarProgramError(1, header.Name, out handled); }
+        if (functions == 10) { return ScalarProgramError(1, header.Name, init handled); }
         int32 frame = 4 + functions * 428;
         require TryGetScalarWindowToken(tokenView, 0, count, false, start, init var first);
         require TryGetScalarWindowToken(tokenView, 0, count, false, end - 1, init var last);
@@ -403,6 +403,7 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
         {
             Host.FrontendProgram[word] = 0;
         }
+        handled = false;
         return true;
     }
     Host.FrontendProgram[0] = 85;
@@ -422,11 +423,11 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
         if ((Host.FrontendProgram[header + 2] & 4) != 0
                 && Host.FrontendProgram[header + 5] != 0)
         {
-            return ScalarProgramError(1, name, out handled);
+            return ScalarProgramError(1, name, init handled);
         }
         if (FindScalarProgramFunction(new Token(2, name)) != index)
         {
-            return ScalarProgramError(4, name, out handled);
+            return ScalarProgramError(4, name, init handled);
         }
     }
     if (Host.IntegerValues[0] != 0
@@ -463,7 +464,7 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
         }
         if (!result.IsValid)
         {
-            return ScalarProgramError(result.ErrorCode, result.ErrorSpan, out handled);
+            return ScalarProgramError(result.ErrorCode, result.ErrorSpan, init handled);
         }
         WriteScalarFrontendHeader(result);
         Host.Frontend[0] = 85;
