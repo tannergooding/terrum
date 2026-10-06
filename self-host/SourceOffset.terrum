@@ -1,0 +1,52 @@
+namespace Terrum.CodeAnalysis;
+
+public int32 GetSourceOffsetOrMinusOne(int32 line, int32 character)
+{
+    if (line < 0 || character < 0)
+    {
+        return -1;
+    }
+
+    int32 sourceLength = Host.Source.Length;
+    mut int32 lineStart = 0;
+    mut int32 lineIndex = 0;
+    mut int32 position = 0;
+    while (true)
+    {
+        while (position < sourceLength && !IsLineBreak(Host.Source[position]))
+        {
+            position = position + 1;
+        }
+
+        bool hasLineBreak = position < sourceLength;
+        if (hasLineBreak)
+        {
+            char16 first = Host.Source[position];
+            position = position + 1;
+            if (first == 13 && position < sourceLength && Host.Source[position] == 10)
+            {
+                position = position + 1;
+            }
+        }
+
+        int32 lineLength = position - lineStart;
+        if (lineIndex == line)
+        {
+            if ((hasLineBreak && character >= lineLength)
+                || (!hasLineBreak && character > lineLength))
+            {
+                return -1;
+            }
+
+            return lineStart + character;
+        }
+
+        if (!hasLineBreak)
+        {
+            return -1;
+        }
+
+        lineStart = position;
+        lineIndex = lineIndex + 1;
+    }
+}

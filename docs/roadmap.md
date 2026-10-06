@@ -254,8 +254,8 @@ prerequisite has already been met.
     [invocation-scoped source-grant proposal](proposals/invocation-scoped-source-grant.md);
     the maintained Windows x64 build now also has an explicit opt-in,
     provisional source-grant companion for the checked UTF-16 scalar adapter,
-    scalar source-text-length and source-code-unit queries, and scalar
-    source-line-count query, with selected-export descriptors bound to the
+    scalar source-text-length, source-code-unit and source-offset queries, and
+    scalar source-line-count query, with selected-export descriptors bound to the
     image hash and end-relative reads based on invocation length. The source-free
     compiler-primitives DLL remains unchanged; this does not promote the
     unapproved ABI or establish general source-dependent DLL support. The

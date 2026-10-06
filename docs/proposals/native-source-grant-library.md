@@ -8,7 +8,8 @@ The invocation-scoped source-grant proposal permits bounded source-dependent
 semantic-module JIT execution. Ordinary native-library emission still rejects
 programs that require `Host.Source`; an explicit opt-in CLI path now emits a
 separate provisional Windows x64 companion for a checked scalar adapter and
-a scalar source-length query and source-line count query.
+a scalar source-length, source-code-unit, source-offset and source-line-count
+queries.
 This proposal addresses promotion of that native-library boundary; it does
 not extend the scanner profile or move scalar frontend verification or
 emission out of the hosted compiler.
@@ -196,6 +197,33 @@ before converting to `char16`; it is an ordinary position sentinel, not a
 validation result for invalid pointers, oversized grants or other raw ABI
 preconditions. Keep the source-free DLL and classifier boundary unchanged,
 and do not infer support for the complete source facade or a stable ABI.
+
+### Provisional scalar source-offset export
+
+**Question:** Should the maintained companion expose the hosted line/character
+to source-offset query before supporting the complete `SourceLines` facade?
+
+**Summary:** Hosted `SourceText.TryGetOffset` accepts UTF-16 character
+positions within a line's including-break extent, except that the end of a
+non-final line belongs to the next line; the final line accepts EOF. A scalar
+export can preserve its success/value contract as an offset in
+`0..Host.Source.Length`, or `-1` for invalid pairs. This mapping does not
+preserve the host method's incidental zero-valued `out` storage on failure.
+The source scan must use the existing line-break set, collapse only CRLF,
+retain both CRLF code-unit positions, and include the final empty line after a
+trailing break. The query can be isolated from aggregate `SourceRange` outputs
+without compiling the full `SourceLines` facade.
+
+**Recommendation:** Include only
+`GetSourceOffsetOrMinusOne(int32 line, int32 character) -> int32` as
+provisional evidence, mechanically matching the hosted `TryGetOffset`
+contract. Check both arguments before scanning, compare the bounded character
+position before adding it to the line start, and return `-1` for invalid
+line/character pairs only. Verify every short-fixture line and nearby
+character boundary, recognized and excluded line breaks, empty/trailing-break
+sources, maximum-size grants and extreme `int32` arguments. Keep the
+source-free DLL and classifier boundary unchanged; do not infer general
+`SourceLines` support or a stable ABI.
 
 ## Promotion decisions still required
 

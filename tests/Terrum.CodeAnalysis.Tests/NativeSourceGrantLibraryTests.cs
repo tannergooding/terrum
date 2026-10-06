@@ -22,6 +22,7 @@ public sealed class NativeSourceGrantLibraryTests
     private const string ReadScalarExport = "Terrum.CodeAnalysis.ReadUtf16ScalarChecked";
     private const string DecodeScalarExport = "Terrum.CodeAnalysis.DecodeUtf16Scalar";
     private const string SourceCodeUnitExport = "Terrum.CodeAnalysis.GetSourceCodeUnitOrMinusOne";
+    private const string SourceOffsetExport = "Terrum.CodeAnalysis.GetSourceOffsetOrMinusOne";
     private const string SourceLengthExport = "Terrum.CodeAnalysis.GetSourceTextLength";
     private const string LineCountExport = "Terrum.CodeAnalysis.GetSourceLineCount";
     private static readonly string[] LineCountSamples = [
@@ -389,6 +390,56 @@ public sealed class NativeSourceGrantLibraryTests
         }
     }
 
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void SourceOffsetMatchesHostedTryGetOffset(BoundRuntimePolicy policy)
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var characterFactsPath = Path.Combine(sourceDirectory, "CharacterFacts.terrum");
+        var sourceOffsetPath = Path.Combine(sourceDirectory, "SourceOffset.terrum");
+        var compilation = Compilation.CreateLibrary([
+            SyntaxTree.Parse(File.ReadAllText(characterFactsPath), characterFactsPath),
+            SyntaxTree.Parse(File.ReadAllText(sourceOffsetPath), sourceOffsetPath),
+        ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+            IsInvocationScoped = true,
+        }], (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
+            Assert.IsType<BoundProgram>(compilation.Program), [SourceOffsetExport], (NativeRuntimePolicy)policy);
+        Assert.True(Assert.Single(artifact.Exports).SourceDependent);
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-offset-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(path, artifact.Image);
+        try
+        {
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var binding = new NativeSourceGrantTestBindings(module,
+                    [.. artifact.Exports.Select(static export => (export.Name, export.SourceDependent,
+                        export.ReturnType, export.ParameterTypes))]);
+                foreach (var sample in LineCountSamples)
+                {
+                    AssertSourceOffsetParity(binding, sample);
+                }
+
+                AssertMaximumSourceOffsetCases(binding);
+                _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    binding.Invoke<int>(SourceOffsetExport, new char[16_385], 0, 0));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void MaintainedCompilerPrimitivesCompanionUsesItsGeneratedManifest()
     {
@@ -419,7 +470,8 @@ public sealed class NativeSourceGrantLibraryTests
                         ?? throw new InvalidDataException("Missing parameter type.")))
                     .ToImmutableArray()))
             .ToImmutableArray();
-        Assert.Equal([DecodeScalarExport, SourceCodeUnitExport, LineCountExport, SourceLengthExport, ReadScalarExport],
+        Assert.Equal([DecodeScalarExport, SourceCodeUnitExport, LineCountExport, SourceOffsetExport,
+            SourceLengthExport, ReadScalarExport],
             [.. exports.Select(static export => export.Name).OrderBy(static name => name, StringComparer.Ordinal)]);
 
         var module = NativeLibrary.Load(imagePath);
@@ -444,6 +496,7 @@ public sealed class NativeSourceGrantLibraryTests
             {
                 var source = sample.ToCharArray();
                 var hosted = SourceText.From(sample);
+                AssertSourceOffsetParity(bindings, sample);
                 Assert.Equal(SourceText.From(sample).Length,
                     bindings.Invoke<int>(SourceLengthExport, source));
                 for (var position = 0; position < hosted.Length; position++)
@@ -473,6 +526,7 @@ public sealed class NativeSourceGrantLibraryTests
             Assert.Equal(-1, bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource,
                 maximumCodeUnitSource.Length));
             Assert.Equal(-1, bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource, int.MaxValue));
+            AssertMaximumSourceOffsetCases(bindings);
             _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
                 bindings.Invoke<int>(ReadScalarExport, new char[16_385], 0, 1));
             var singleCodeUnit = new char[1];
@@ -570,6 +624,81 @@ public sealed class NativeSourceGrantLibraryTests
         {
             File.Delete(path);
         }
+    }
+
+    private static void AssertSourceOffsetParity(NativeSourceGrantTestBindings bindings, string text)
+    {
+        var source = text.ToCharArray();
+        var hosted = SourceText.From(text);
+        for (var line = -1; line <= hosted.Lines.Length; line++)
+        {
+            var maximumCharacter = line >= 0 && line < hosted.Lines.Length
+                ? hosted.Lines[line].SpanIncludingLineBreak.Length + 1
+                : 1;
+            for (var character = -1; character <= maximumCharacter; character++)
+            {
+                AssertSourceOffsetMatches(bindings, source, hosted, line, character);
+            }
+        }
+
+        AssertSourceOffsetMatches(bindings, source, hosted, int.MinValue, 0);
+        AssertSourceOffsetMatches(bindings, source, hosted, int.MaxValue, 0);
+        AssertSourceOffsetMatches(bindings, source, hosted, 0, int.MinValue);
+        AssertSourceOffsetMatches(bindings, source, hosted, 0, int.MaxValue);
+    }
+
+    private static void AssertMaximumSourceOffsetCases(NativeSourceGrantTestBindings bindings)
+    {
+        var maximumPlainSource = new string('x', 16_384);
+        var maximumPlain = maximumPlainSource.ToCharArray();
+        var maximumPlainText = SourceText.From(maximumPlainSource);
+        foreach (var character in new[] { 0, 16_383, 16_384, 16_385 })
+        {
+            AssertSourceOffsetMatches(bindings, maximumPlain, maximumPlainText, 0, character);
+        }
+        AssertSourceOffsetMatches(bindings, maximumPlain, maximumPlainText, 1, 0);
+
+        var maximumLineFeedSource = new string('\n', 16_384);
+        var maximumLineFeed = maximumLineFeedSource.ToCharArray();
+        var maximumLineFeedText = SourceText.From(maximumLineFeedSource);
+        for (var line = 0; line < maximumLineFeedText.Lines.Length; line++)
+        {
+            AssertSourceOffsetMatches(bindings, maximumLineFeed, maximumLineFeedText, line, 0);
+            if (line + 1 < maximumLineFeedText.Lines.Length)
+            {
+                AssertSourceOffsetMatches(bindings, maximumLineFeed, maximumLineFeedText, line, 1);
+            }
+        }
+
+        var maximumCrlfSource = string.Concat(Enumerable.Repeat("\r\n", 8_192));
+        var maximumCrlf = maximumCrlfSource.ToCharArray();
+        var maximumCrlfText = SourceText.From(maximumCrlfSource);
+        for (var line = 0; line < maximumCrlfText.Lines.Length; line++)
+        {
+            AssertSourceOffsetMatches(bindings, maximumCrlf, maximumCrlfText, line, 0);
+            if (line + 1 < maximumCrlfText.Lines.Length)
+            {
+                AssertSourceOffsetMatches(bindings, maximumCrlf, maximumCrlfText, line, 1);
+                AssertSourceOffsetMatches(bindings, maximumCrlf, maximumCrlfText, line, 2);
+            }
+        }
+
+        var maximumTrailingCrSource = string.Concat(new string('x', 16_383), '\r');
+        var maximumTrailingCr = maximumTrailingCrSource.ToCharArray();
+        var maximumTrailingCrText = SourceText.From(maximumTrailingCrSource);
+        AssertSourceOffsetMatches(bindings, maximumTrailingCr, maximumTrailingCrText, 0, 16_382);
+        AssertSourceOffsetMatches(bindings, maximumTrailingCr, maximumTrailingCrText, 0, 16_383);
+        AssertSourceOffsetMatches(bindings, maximumTrailingCr, maximumTrailingCrText, 0, 16_384);
+        AssertSourceOffsetMatches(bindings, maximumTrailingCr, maximumTrailingCrText, 1, 0);
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            bindings.Invoke<int>(SourceOffsetExport, new char[16_385], 0, 0));
+    }
+
+    private static void AssertSourceOffsetMatches(NativeSourceGrantTestBindings bindings, char[] source,
+        SourceText hosted, int line, int character)
+    {
+        var expected = hosted.TryGetOffset(line, character, out var offset) ? offset : -1;
+        Assert.Equal(expected, bindings.Invoke<int>(SourceOffsetExport, source, line, character));
     }
 
     private static string RepositoryRoot()
