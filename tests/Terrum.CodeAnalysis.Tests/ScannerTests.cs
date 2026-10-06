@@ -509,6 +509,21 @@ public sealed class ScannerTests
         }
         sources.Add(supplementarySource.ToString());
 
+        const int maximumRawSupplementaryScalarsPerSource = 8_000;
+        for (var scalarStart = 0x10000; scalarStart <= 0x10FFFF;
+            scalarStart += maximumRawSupplementaryScalarsPerSource)
+        {
+            var scalarCount = Math.Min(maximumRawSupplementaryScalarsPerSource, 0x110000 - scalarStart);
+            var text = new StringBuilder(scalarCount * 2 + 2).Append('"');
+            for (var index = 0; index < scalarCount; index++)
+            {
+                text.Append(char.ConvertFromUtf32(scalarStart + index));
+            }
+            text.Append('"');
+            Assert.InRange(text.Length, 1, ScannerHost.MaximumSourceLength);
+            sources.Add(text.ToString());
+        }
+
         var supplementaryStarts = new StringBuilder();
         var startRanges = UnicodeIdentifierProfile.StartRanges;
         for (var index = 0; index < startRanges.Length; index += 2)
