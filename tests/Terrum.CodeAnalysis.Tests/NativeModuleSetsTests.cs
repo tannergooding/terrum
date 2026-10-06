@@ -312,6 +312,49 @@ public sealed class NativeModuleSetsTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ConditionalOutOutputRemainsVacantAcrossNativeConsumerSetsAsync(NativeRuntimePolicy policy)
+    {
+        const string OutputProvider = """
+            public bool TryPublish(bool publish, out int32 result) {
+                result = publish ? 42 : 41;
+                return publish;
+            }
+            public void Complete(init ref<int32> result) { result = 43; }
+            """;
+        var outputProvider = Producer(OutputProvider, ["TryPublish", "Complete"], "First", policy);
+        var second = Producer(Beta, "Beta", "Second", policy);
+        const string ConsumerSource = """
+            int32 Main() {
+                if (TryPublish(false, out var failed)) { return 1; }
+                Complete(init failed);
+                if (failed != 43) { return 2; }
+                if (!TryPublish(true, out var published)) { return 3; }
+                return published + Beta();
+            }
+            """;
+        var references = NativeModuleCompiler.CreateReferenceSet([second, outputProvider]);
+        var compilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), references,
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumerSet(Assert.IsType<BoundProgram>(compilation.Program),
+            [outputProvider, second], policy);
+        var originalConsumer = (byte[])consumer.Clone();
+
+        Assert.Equal(64, await NativeModuleCompiler.RunConsumerSetAsync(consumer, [second, outputProvider],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+
+        var replacementSource = OutputProvider.Replace("publish ? 42 : 41", "publish ? 45 : 0",
+            StringComparison.Ordinal);
+        var replacement = Producer(replacementSource, ["TryPublish", "Complete"], "First", policy);
+        NativeModuleCompiler.ValidateConsumerSet(consumer, [replacement, second]);
+        Assert.Equal(67, await NativeModuleCompiler.RunConsumerSetAsync(consumer, [replacement, second],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(originalConsumer, consumer);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task InitRefOutputBindsAcrossNativeConsumerSetsAsync(NativeRuntimePolicy policy)
     {
         var initializerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""

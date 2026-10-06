@@ -2072,7 +2072,10 @@ consumer and graph replacement checks reject changing a same-typed output
 parameter between `out` and `init ref<T>`; compatibility does not normalize
 their distinct publication contracts. Native consumer sets also bind named
 scalar `init ref<T>` outputs alongside independent providers under both runtime
-policies. Under checked exceptions, a provider write followed by failure leaves
+policies. Conditional Boolean `out` results also leave a consumer's destination
+vacant on false, allowing a later `init ref<T>` provider call to initialize it;
+compatible provider replacement preserves that behavior under both policies.
+Under checked exceptions, a provider write followed by failure leaves
 the destination vacant in a consumer set, permitting a later provider call to
 initialize it. Native graph execution likewise retains vacancy after a checked
 provider failure, allowing a later provider call to initialize the destination
