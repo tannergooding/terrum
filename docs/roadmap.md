@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `dfedc517` | Verify retained `DoesNotReturn` graph replacement compatibility under both runtime policies |
 | `8dc1272c` | Verify native graph replacement rejects weakening a retained `DoesNotReturn` promise |
 | `350e1b2e` | Verify source-dependence fixed-point propagation through terminating mutual recursion under both runtime policies with hosted source-grant JIT parity |
 | `e8263b74` | Verify Boolean scalar and 16-byte Copy-struct `out` vacancy on false and publication on true across native graphs under both runtime policies |
