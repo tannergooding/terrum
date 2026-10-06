@@ -2078,6 +2078,8 @@ removing a declared `[NoThrow]` or `[DoesNotReturn]` promise retained by the
 consumer.
 Native graph replacement coverage also verifies retained `[NoThrow]` and
 `[DoesNotReturn]` promises under both runtime policies.
+Native module-set replacement tests cover both retained effects under both
+runtime policies as well.
 The distinct `out` mode now also accepts ordinary non-unique struct values
 for non-Boolean and void functions, provided the output is initialized on
 every normal return. Public semantic modules, native modules and native
