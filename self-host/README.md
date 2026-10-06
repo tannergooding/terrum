@@ -80,8 +80,8 @@ compiler implementation exports, not a language-level API or stable native
 ABI; the library is not a self-host compiler or an executable scanner/parser.
 The host test runner still orchestrates compilation and assertions in C#.
 `ComponentTestRunner.terrum` is a bounded Terrum entry harness composing the
-`SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`, `Token`, `WideIntegerFacts`,
-`IntegerCheckedArithmetic`, `IntegerMath`, `IntegerSaturation`,
+`SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`, `Token`,
+`WideIntegerFacts`, `IntegerCheckedArithmetic`, `IntegerMath`, `IntegerSaturation`,
 `IntegerWrapping`, `IntegerCheckedConversions`, and `BitOperations` module
 tests; it does not provide general test discovery or
 replace the host runner.
