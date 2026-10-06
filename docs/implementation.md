@@ -573,13 +573,14 @@ buffers. Call children remain in source evaluation order while the packed
 formal-position map is checked against source parameter names. Overload
 selection remains unsupported. Semantic verification and emission remain
 hosted.
-The bounded scalar frontend also projects `<<`, `>>` and `>>>` between named
-scalar parameters when the left operand is `int32`, `uint32`, `int64` or
-`uint64` and the shift count is `int32`. The source-auditing reader checks the
-operator and both parameter types before constructing the existing bound
-operation; checked shift counts and truncation remain hosted semantics. This
-slice does not include literal or local shift operands and does not add a
-projection version, TRRM operation or independent verifier/emitter support.
+The bounded scalar frontend also projects `<<`, `>>` and `>>>` with a named
+scalar parameter on the left when its type is `int32`, `uint32`, `int64` or
+`uint64`. The shift count may be an `int32` parameter or an integer literal
+representable as `int32`. The source-auditing reader checks the operator,
+operand types and literal representation before constructing the existing
+bound operation; checked shift counts and truncation remain hosted semantics.
+Local shift operands remain outside this slice, which does not add a projection
+version, TRRM operation or independent verifier/emitter support.
 Single-function compact expression records and tree/statement records retain
 their existing layouts. Complete-program headers and every function frame
 carry v85, as do single-function diagnostic records. No obsolete tag is accepted

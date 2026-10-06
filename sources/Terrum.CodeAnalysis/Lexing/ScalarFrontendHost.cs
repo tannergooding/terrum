@@ -2160,19 +2160,23 @@ public static partial class ScalarFrontendHost
             var negativeLiteral = !positiveLiteral && operation >= 1200;
             var binaryOperation = operation - (positiveLiteral ? 1600 : negativeLiteral ? 1200 : 0);
             if (binaryOperation / 100 is >= 1 and <= 4
-                && binaryOperation % 100 is >= 57 and <= 61 or >= 65 and <= 70 or 71 or 73 or 75)
+                && binaryOperation % 100 is >= 57 and <= 61 or >= 65 and <= 70
+                    or 71 or 73 or 75 or >= 88 and <= 90)
             {
                 var literalFirst = binaryOperation >= 300;
                 var parameter = encodedOffset != 0 ? 3
                     : binaryOperation / 100 - (literalFirst ? 2 : 0);
                 var parameterType = ParameterType(parameter);
                 var comparison = binaryOperation % 100 is >= 65 and <= 70;
+                var shift = binaryOperation % 100 is >= 88 and <= 90;
                 if ((encodedOffset != 0 && binaryOperation / 100 != (literalFirst ? 3 : 1))
                     || expression.Type != type
-                    || (comparison ? type != 5 || parameterType is not (1 or 2 or 3 or 4 or 6 or 7 or 8)
+                    || (shift ? literalFirst || type != parameterType
+                            || parameterType is not (1 or 2 or 3 or 4)
+                        : comparison ? type != 5 || parameterType is not (1 or 2 or 3 or 4 or 6 or 7 or 8)
                         : type != parameterType || parameterType is not (1 or 2 or 3 or 4 or 7 or 8))
                     || parameter > parameters
-                    || negativeLiteral && parameterType is not (1 or 3 or 7 or 8)
+                    || negativeLiteral && !shift && parameterType is not (1 or 3 or 7 or 8)
                     || !ValidSpan(expression.Span, nonempty: true))
                 {
                     return false;
@@ -2190,7 +2194,10 @@ public static partial class ScalarFrontendHost
                     && tokens[literalFirst ? second : first].Name
                         == SourceName(source, name)
                     && tokens[literalFirst ? first : second].Kind == TokenKind.NumericLiteral
-                    && (parameterType is 7 or 8
+                    && (shift
+                        ? ValidMagnitude(tokens[literalFirst ? first : second].Text.AsSpan(),
+                            1, negativeLiteral, left, right)
+                        : parameterType is 7 or 8
                         ? FloatingProjectionMatches(
                             tokens[literalFirst ? first : second].Text.AsSpan(),
                             parameterType, left, right)
@@ -3578,7 +3585,7 @@ public static partial class ScalarFrontendHost
                 - (positiveLiteral ? 1600 : negativeLiteral ? 1200 : 0);
             if (binaryOperation / 100 is >= 1 and <= 4
                 && binaryOperation % 100 is >= 57 and <= 61 or >= 65 and <= 70
-                    or 71 or 73 or 75)
+                    or 71 or 73 or 75 or >= 88 and <= 90)
             {
                 var literalFirst = binaryOperation >= 300;
                 var parameter = encodedOffset != 0 ? 3
@@ -3596,6 +3603,8 @@ public static partial class ScalarFrontendHost
                 var numberIndex = literalFirst ? first : second;
                 var nameIndex = literalFirst ? second : first;
                 var parameterType = types[parameter - 1].Type;
+                var shift = binaryOperation % 100 is >= 88 and <= 90;
+                var literalType = shift ? PrimitiveType.Int32 : parameterType;
                 var value = parameterType is PrimitiveType.Float32 or PrimitiveType.Float64
                     ? FloatingProjectionValue(parameterType == PrimitiveType.Float32 ? 7 : 8,
                         expression.LeftParameter, expression.RightParameter)
@@ -3607,23 +3616,24 @@ public static partial class ScalarFrontendHost
                     new TextSpan(expression.Span.Start + tokens[nameIndex].Span.Start, tokens[nameIndex].Span.Length));
                 var numberSpan = new TextSpan(expression.Span.Start + tokens[numberIndex].Span.Start,
                     tokens[numberIndex].Span.Length);
-                BoundExpression literal = new BoundConstant(value, parameterType, numberSpan);
+                BoundExpression literal = new BoundConstant(value,
+                    literalType, numberSpan);
                 if (negativeLiteral || positiveLiteral)
                 {
                     var signedSpan = new TextSpan(expression.Span.Start + tokens[numberIndex - 1].Span.Start,
                         tokens[numberIndex].Span.End - tokens[numberIndex - 1].Span.Start);
                     var magnitude = unchecked((ulong)(uint)expression.RightParameter << 32
                         | (uint)expression.LeftParameter);
-                    var minimum = parameterType == PrimitiveType.Int32
+                    var minimum = literalType == PrimitiveType.Int32
                         ? (ulong)int.MaxValue + 1 : (ulong)long.MaxValue + 1;
                     literal = negativeLiteral
                         && ScannerHost.IntegerRadix(tokens[numberIndex].Text.AsSpan()) == 10
                         && magnitude == minimum
-                        ? new BoundConstant(parameterType == PrimitiveType.Int32
-                            ? int.MinValue : long.MinValue, parameterType, signedSpan)
+                        ? new BoundConstant(literalType == PrimitiveType.Int32
+                            ? int.MinValue : long.MinValue, literalType, signedSpan)
                         : Binder.FoldScalarConstant(new BoundUnary(
                             negativeLiteral ? TokenKind.Minus : TokenKind.Plus, literal,
-                            parameterType, signedSpan));
+                            literalType, signedSpan));
                 }
                 return new BoundBinary((TokenKind)(binaryOperation % 100),
                     literalFirst ? literal : leftOperand, literalFirst ? leftOperand : literal,

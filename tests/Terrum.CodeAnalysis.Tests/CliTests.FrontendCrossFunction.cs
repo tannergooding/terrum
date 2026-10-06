@@ -75,6 +75,71 @@ public sealed partial class CliTests
         await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
     }
 
+    [Theory]
+    [InlineData("int32 Main() { return Shift(21) == 42 ? 42 : 0; } int32 Shift(int32 value) { return value << 1; }")]
+    [InlineData("int32 Main() { return Shift(1) == 0x80000000 ? 42 : 0; } uint32 Shift(uint32 value) { return value << 31; }")]
+    [InlineData("int32 Main() { return Shift(-1) == 1 ? 42 : 0; } int64 Shift(int64 value) { return value >>> 63; }")]
+    [InlineData("int32 Main() { return Shift(1) == 0x8000000000000000 ? 42 : 0; } uint64 Shift(uint64 value) { return value << 63; }")]
+    public async Task ScalarFrontendProjectsCheckedIntegerShiftsWithLiteralCountsAsync(string source)
+    {
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Theory]
+    [InlineData("int32 Main() { return 42; } int32 Shift(int32 value) { return value << 32; }")]
+    [InlineData("int32 Main() { return 42; } int64 Shift(int64 value) { return value >> 64; }")]
+    [InlineData("int32 Main() { return 42; } int32 Shift(int32 value) { return value << 2147483647; }")]
+    [InlineData("int32 Main() { return 42; } int32 Shift(int32 value) { return value >>> -1; }")]
+    [InlineData("int32 Main() { return 42; } int64 Shift(int64 value) { return value << -2147483648; }")]
+    public async Task ScalarFrontendPreservesHostedLiteralShiftCountChecksAsync(string source)
+    {
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-literal-shift-{Guid.NewGuid():N}");
+        var nativePath = prefix + ".native.exe";
+        var hostedPath = prefix + ".hosted.exe";
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var input = Encoding.UTF8.GetBytes(source);
+                var (nativeExit, _, nativeError) = await RunAsync(input, "frontend-build",
+                    directory, "-", "-o", nativePath, "--runtime", policy, "--json");
+                var (hostedExit, _, hostedError) = await RunAsync(input, "build",
+                    "-", "-o", hostedPath, "--runtime", policy, "--json");
+                Assert.Equal(0, nativeExit);
+                Assert.Equal(0, hostedExit);
+                Assert.Empty(nativeError);
+                Assert.Empty(hostedError);
+                Assert.Equal(await File.ReadAllBytesAsync(hostedPath),
+                    await File.ReadAllBytesAsync(nativePath));
+            }
+        }
+        finally
+        {
+            File.Delete(nativePath);
+            File.Delete(hostedPath);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 Main() { return 42; } int32 Shift(int32 value) { return value << 2147483648; }")]
+    [InlineData("int32 Main() { return 42; } int32 Shift(int32 value) { return value >> -2147483649; }")]
+    public async Task ScalarFrontendRejectsShiftLiteralCountsOutsideInt32Async(string source)
+    {
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.Equal(1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+            Assert.Equal(2, document.RootElement.GetProperty("result")
+                .GetProperty("errorCode").GetInt32());
+        }
+    }
+
     [Fact]
     public async Task ScalarFrontendRejectsIntegerShiftWithNonInt32CountAsync()
     {

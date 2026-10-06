@@ -1472,12 +1472,20 @@ mut class ScalarFrontendState
             }
             if (((operation >= 57 && operation <= 61)
                 || (operation >= 65 && operation <= 70)
-                || operation == 71 || operation == 73 || operation == 75)
+                || operation == 71 || operation == 73 || operation == 75
+                || (operation >= 88 && operation <= 90))
                 && number.Kind == 3)
             {
+                bool isShift = operation >= 88 && operation <= 90;
                 if (unaryKind != 0 && !rightSignedGrouped)
                 {
                     _at = _at + 1;
+                }
+                if (isShift && (selected < 1 || selected > 4
+                    || unaryKind != 0 || rightSignedGrouped))
+                {
+                    FailAt(2, number.Range);
+                    return false;
                 }
                 if ((operation >= 65 && operation <= 70 && selected == 5)
                     || ((operation < 65 || operation > 70) && (selected == 5 || selected == 6)))
@@ -1486,15 +1494,19 @@ mut class ScalarFrontendState
                     return false;
                 }
                 int32 index = _at;
-                if (unaryKind == 58 && rightSignedGrouped && selected != 1 && selected != 3)
+                if (unaryKind == 58 && rightSignedGrouped && !isShift
+                    && selected != 1 && selected != 3)
                 {
                     FailAt(2, number.Range);
                     return false;
                 }
-                if (!TryReadMagnitude(number, index, selected,
+                if (!TryReadMagnitude(number, index, isShift ? 1 : selected,
                     unaryKind == 58 && !rightSignedGrouped,
-                    number.Range, init var low, init var high)
-                    || !FinishUnaryOperand(number, numericGroups, init var literalEnd, tokenView))
+                    number.Range, init var low, init var high))
+                {
+                    return false;
+                }
+                if (!FinishUnaryOperand(number, numericGroups, init var literalEnd, tokenView))
                 {
                     return false;
                 }
