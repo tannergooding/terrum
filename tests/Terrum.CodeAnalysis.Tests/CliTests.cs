@@ -1935,6 +1935,15 @@ public sealed partial class CliTests
                 }
             }
 
+            utf16[1] = '\0';
+            for (var codeUnit = 0xD800; codeUnit <= 0xDFFF; codeUnit++)
+            {
+                utf16[0] = (char)codeUnit;
+                var status = Rune.DecodeFromUtf16(utf16, out var expected, out _);
+                var expectedScalar = status == OperationStatus.Done ? expected.Value : -1;
+                Assert.Equal(expectedScalar, decode(utf16[0], utf16[1]));
+            }
+
             for (var scalar = 0x10000; scalar < 0x110000; scalar++)
             {
                 var expected = new Rune(scalar);
