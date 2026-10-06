@@ -1,0 +1,46 @@
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckFloatingComparison()
+{
+    if (!Float32EqualBits(0, 0x80000000)
+        || Float32NotEqualBits(0, 0x80000000)
+        || !Float32LessThanBits(0xFF800000, 0x7F800000)
+        || !Float32LessThanOrEqualBits(0x80000000, 0)
+        || !Float32GreaterThanBits(0x7F800000, 0xFF800000)
+        || !Float32GreaterThanOrEqualBits(0, 0x80000000))
+    {
+        return false;
+    }
+
+    if (Float32EqualBits(0x7FC12345, 0x7FC12345)
+        || !Float32NotEqualBits(0x7FC12345, 0x7FC12345)
+        || Float32LessThanBits(0x7FC12345, 0x3F800000)
+        || Float32LessThanOrEqualBits(0x3F800000, 0x7FC12345)
+        || Float32GreaterThanBits(0x3F800000, 0xFFC00001)
+        || Float32GreaterThanOrEqualBits(0xFFC00001, 0x3F800000))
+    {
+        return false;
+    }
+
+    if (!Float64EqualBits(0, 0x8000000000000000)
+        || Float64NotEqualBits(0, 0x8000000000000000)
+        || !Float64LessThanBits(0xFFF0000000000000, 0x7FF0000000000000)
+        || !Float64LessThanOrEqualBits(0x8000000000000000, 0)
+        || !Float64GreaterThanBits(0x7FF0000000000000, 0xFFF0000000000000)
+        || !Float64GreaterThanOrEqualBits(0, 0x8000000000000000))
+    {
+        return false;
+    }
+
+    if (Float64EqualBits(0x7FF8000000001234, 0x7FF8000000001234)
+        || !Float64NotEqualBits(0xFFF0000000000001, 0x3FF0000000000000)
+        || Float64LessThanBits(0xFFF0000000000001, 0x3FF0000000000000)
+        || Float64LessThanOrEqualBits(0x3FF0000000000000, 0x7FF0000000000001)
+        || Float64GreaterThanBits(0x3FF0000000000000, 0x7FF8000000001234)
+        || Float64GreaterThanOrEqualBits(0xFFF8000000001234, 0x3FF0000000000000))
+    {
+        return false;
+    }
+
+    return true;
+}

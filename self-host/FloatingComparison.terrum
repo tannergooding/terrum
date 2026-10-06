@@ -1,0 +1,128 @@
+namespace Terrum.CodeAnalysis;
+
+// Returns -1 for less, 0 for equal, 1 for greater, and 2 for unordered.
+int32 CompareFloat32Bits(uint32 left, uint32 right)
+{
+    uint32 leftMagnitude = left & 0x7FFFFFFF;
+    uint32 rightMagnitude = right & 0x7FFFFFFF;
+    // Every NaN magnitude exceeds the positive-infinity bit pattern.
+    if (leftMagnitude > 0x7F800000 || rightMagnitude > 0x7F800000)
+    {
+        return 2;
+    }
+
+    if ((leftMagnitude == 0 && rightMagnitude == 0) || left == right)
+    {
+        return 0;
+    }
+
+    bool leftNegative = (left & 0x80000000) != 0;
+    bool rightNegative = (right & 0x80000000) != 0;
+    if (leftNegative != rightNegative)
+    {
+        return leftNegative ? -1 : 1;
+    }
+
+    bool magnitudeLess = leftMagnitude < rightMagnitude;
+    if (leftNegative)
+    {
+        return magnitudeLess ? 1 : -1;
+    }
+
+    return magnitudeLess ? -1 : 1;
+}
+
+int32 CompareFloat64Bits(uint64 left, uint64 right)
+{
+    uint64 leftMagnitude = left & 0x7FFFFFFFFFFFFFFF;
+    uint64 rightMagnitude = right & 0x7FFFFFFFFFFFFFFF;
+    // Every NaN magnitude exceeds the positive-infinity bit pattern.
+    if (leftMagnitude > 0x7FF0000000000000 || rightMagnitude > 0x7FF0000000000000)
+    {
+        return 2;
+    }
+
+    if ((leftMagnitude == 0 && rightMagnitude == 0) || left == right)
+    {
+        return 0;
+    }
+
+    bool leftNegative = (left & 0x8000000000000000) != 0;
+    bool rightNegative = (right & 0x8000000000000000) != 0;
+    if (leftNegative != rightNegative)
+    {
+        return leftNegative ? -1 : 1;
+    }
+
+    bool magnitudeLess = leftMagnitude < rightMagnitude;
+    if (leftNegative)
+    {
+        return magnitudeLess ? 1 : -1;
+    }
+
+    return magnitudeLess ? -1 : 1;
+}
+
+public static bool Float32EqualBits(uint32 left, uint32 right)
+{
+    return CompareFloat32Bits(left, right) == 0;
+}
+
+public static bool Float32NotEqualBits(uint32 left, uint32 right)
+{
+    return CompareFloat32Bits(left, right) != 0;
+}
+
+public static bool Float32LessThanBits(uint32 left, uint32 right)
+{
+    return CompareFloat32Bits(left, right) == -1;
+}
+
+public static bool Float32LessThanOrEqualBits(uint32 left, uint32 right)
+{
+    int32 comparison = CompareFloat32Bits(left, right);
+    return comparison == -1 || comparison == 0;
+}
+
+public static bool Float32GreaterThanBits(uint32 left, uint32 right)
+{
+    return CompareFloat32Bits(left, right) == 1;
+}
+
+public static bool Float32GreaterThanOrEqualBits(uint32 left, uint32 right)
+{
+    int32 comparison = CompareFloat32Bits(left, right);
+    return comparison == 0 || comparison == 1;
+}
+
+public static bool Float64EqualBits(uint64 left, uint64 right)
+{
+    return CompareFloat64Bits(left, right) == 0;
+}
+
+public static bool Float64NotEqualBits(uint64 left, uint64 right)
+{
+    return CompareFloat64Bits(left, right) != 0;
+}
+
+public static bool Float64LessThanBits(uint64 left, uint64 right)
+{
+    return CompareFloat64Bits(left, right) == -1;
+}
+
+public static bool Float64LessThanOrEqualBits(uint64 left, uint64 right)
+{
+    int32 comparison = CompareFloat64Bits(left, right);
+    return comparison == -1 || comparison == 0;
+}
+
+public static bool Float64GreaterThanBits(uint64 left, uint64 right)
+{
+    return CompareFloat64Bits(left, right) == 1;
+}
+
+public static bool Float64GreaterThanOrEqualBits(uint64 left, uint64 right)
+{
+    int32 comparison = CompareFloat64Bits(left, right);
+    return comparison == 0 || comparison == 1;
+}

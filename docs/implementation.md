@@ -2830,6 +2830,15 @@ coverage under AOT/JIT and both policies, and hosted native-emitter tests
 exhaust the same input domain. The eligibility and TRRM proposals remain
 unapproved; this internal component does not add scalar-frontend,
 source-free DLL or TRRM support.
+`FloatingComparison` classifies raw `float32` and `float64` pairs as less,
+equal, greater or unordered, and exposes all six IEEE predicates. The
+semantic-module test compares a cross-product of signed zeros, subnormal and
+normal boundaries, finite extrema, infinities, quiet/signaling NaNs and
+deterministic raw-bit pairs against hosted floating operators. The independent
+component runner checks representative ordered, equal and unordered cases
+under AOT/JIT and both policies. This internal helper does not approve the
+TRRM comparison proposal or add scalar-frontend, source-free DLL or TRRM
+support.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under

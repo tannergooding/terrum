@@ -24,6 +24,7 @@ int32 Main()
         require CheckIntegerFormatting();
         require CheckIntegerFloatConversion();
         require CheckChar16FloatConversion();
+        require CheckFloatingComparison();
         require CheckFloatingNegation();
         require CheckFloatingFormatConversion();
         require CheckFloatingIntegerConversion();

@@ -110,6 +110,13 @@ independently constructed exact encodings, and the hosted conversion test
 checks all code units under the native emitter. The eligibility and TRRM
 proposals remain unapproved; this helper does not add scalar-frontend,
 source-free DLL or TRRM support.
+The internal `FloatingComparison` component classifies raw `float32` and
+`float64` pairs and provides all six IEEE comparison predicates. Semantic-module
+tests compare boundary matrices and deterministic raw-bit pairs against hosted
+floating operators; the independent component runner covers signed zero,
+infinities, and NaNs under both runtime policies. The source-free TRRM
+comparison proposal remains unapproved; this helper does not add scalar-
+frontend, DLL or TRRM support.
 Separately, the standalone Terrum-authored `HexFloatLiteral` component now
 converts grammar-shaped, caller-delimited hexadecimal-float slices directly
 to target-format bits and matches hosted binding across rounding boundaries,
