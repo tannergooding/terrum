@@ -255,8 +255,10 @@ prerequisite has already been met.
     the maintained Windows x64 build now also has an explicit opt-in,
     provisional source-grant companion for the checked UTF-16 scalar adapter,
     scalar source-text-length, source-code-unit, source-offset and
-    source-position queries, and scalar source-line-count query, with
-    selected-export descriptors bound to the image hash and end-relative
+    source-position queries, scalar source-line-count and source-line
+    content/including-break end queries, and paired scalar integer-parsing
+    queries, with selected-export descriptors bound to the image hash and
+    end-relative
     reads based on invocation length. The source-free
     compiler-primitives DLL remains unchanged; this does not promote the
     unapproved ABI or establish general source-dependent DLL support. The
@@ -312,6 +314,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `4f550508` | Add provisional scalar source-line content and including-break end queries with same-grant range reconstruction, boundary coverage and maintained manifest binding |
 | `175cbe05` | Add provisional scalar source-grant integer parsing pairs with all-radix oracle coverage and a maintained manifest, without changing the source-free companion or classifier |
 | `121c2e27` | Round-trip provisional scalar source-position coordinates through the source-offset export on the same grant |
 | `b6bf45a9` | Add provisional scalar source-position queries matching hosted UTF-16 line/character coordinates, including CRLF and EOF boundaries |
