@@ -14,6 +14,8 @@ int32 Main()
         require CheckWideAddition();
         require CheckWideSubtraction();
         require CheckWideMultiplication();
+        require CheckWideDivision();
+        require CheckWideRemainder();
         require CheckWideDecimalAccumulation();
         require CheckWideBaseAccumulation();
         require CheckCheckedInt32Arithmetic();

@@ -54,6 +54,50 @@ public static bool CheckWideMultiplication()
         && boundary == int64.MinValue && square == 9223372030926249001;
 }
 
+public static bool CheckWideDivision()
+{
+    if (TryDivideInt64(1, 0, init var divideByZero)
+        || TryDivideInt64(int64.MinValue, -1, init var minimumOverflow)
+        || TryDivideUInt64(1, 0, init var unsignedDivideByZero))
+    {
+        return false;
+    }
+
+    require TryDivideInt64(-7, 3, init var negativeQuotient);
+    require TryDivideInt64(int64.MinValue, 1, init var minimum);
+    require TryDivideInt64(int64.MinValue, int64.MinValue, init var one);
+    require TryDivideUInt64(uint64.MaxValue, 2, init var unsignedQuotient);
+    if (TryDivideInt64(1, 0, init var reused))
+    {
+        return false;
+    }
+    require TryDivideInt64(7, 3, init reused);
+
+    return negativeQuotient == -2 && minimum == int64.MinValue && one == 1
+        && unsignedQuotient == 9223372036854775807 && reused == 2;
+}
+
+public static bool CheckWideRemainder()
+{
+    if (TryRemainderInt64(1, 0, init var remainderByZero)
+        || TryRemainderUInt64(1, 0, init var unsignedRemainderByZero))
+    {
+        return false;
+    }
+
+    require TryRemainderInt64(-7, 3, init var negativeRemainder);
+    require TryRemainderInt64(int64.MinValue, -1, init var minimumRemainder);
+    require TryRemainderUInt64(uint64.MaxValue, 10, init var unsignedRemainder);
+    if (TryRemainderInt64(1, 0, init var reused))
+    {
+        return false;
+    }
+    require TryRemainderInt64(7, 3, init reused);
+
+    return negativeRemainder == -1 && minimumRemainder == 0
+        && unsignedRemainder == 5 && reused == 1;
+}
+
 public static bool CheckWideDecimalAccumulation()
 {
     mut uint64 value = 1844674407370955161;
