@@ -316,6 +316,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7417d62f` | Verify exact-capacity 49,146-byte UTF-8 output for a maximum-length U+0800 literal through persisted semantic-module JIT |
 | `a0738790` | Exercise maximum UTF-8 and Latin-1 encoded lengths through the maintained source-grant DLL under both runtime policies |
 | `c5afd0c8` | Add provisional scalar string-literal encoded-length query for strict single-byte, UTF-8, UTF-16 unit/byte and UTF-32 byte lengths |
 | `1a82dead` | Add indexed scalar lookup for validated string literals to the provisional source-grant companion, preserving malformed-suffix rejection and source-free exports |
