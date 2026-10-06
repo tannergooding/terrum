@@ -65,7 +65,7 @@ void ClearScalarAliasTable(int32 count)
 // The 64-token bound leaves at most nine function frames when aliases are present.
 // An empty returned span means the alias table was built successfully.
 SourceRange BuildScalarAliasTable(Span<Token> tokenView, int32 count,
-    out int32 aliasCount)
+    init ref<int32> aliasCount)
 {
     aliasCount = 0;
     Host.FrontendProgram[Host.FrontendProgram.Length - 1] = 0;
@@ -315,7 +315,7 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
     }
     if (spacingError.Length != 0) { return ScalarProgramError(1, spacingError, out handled); }
     require SourceRange.TryCreate(0, 0, init var empty);
-    var aliasError = BuildScalarAliasTable(tokenView, count, out var aliasCount);
+    var aliasError = BuildScalarAliasTable(tokenView, count, init var aliasCount);
     if (aliasError.Length != 0)
     {
         return ScalarProgramError(1, aliasError, out handled);
