@@ -414,6 +414,40 @@ public sealed class NativeGraphTests
             NativeModuleCompiler.ValidateGraph(root, [replacement]));
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CopyStructOutOutputExecutesAcrossGraphAsync(NativeRuntimePolicy policy)
+    {
+        const string ProviderSource = """
+            public struct Pair {
+                public int64 First;
+                public int64 Second;
+                public Pair(int64 first, int64 second) { First = first; Second = second; }
+            }
+            public void Leaf(out Pair result) { result = new Pair(20, 22); }
+            """;
+        const string ConsumerSource = """
+            int32 Main() {
+                Leaf(out var result);
+                return int32(result.First + result.Second);
+            }
+            """;
+
+        var leaf = Leaf(ProviderSource, policy);
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+            NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
+        Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
+            [leaf], policy);
+
+        NativeModuleCompiler.ValidateGraph(root, [leaf]);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [leaf],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [leaf],
+            CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+    }
+
     [Fact]
     public async Task CheckedGraphFailureLeavesInitRefOutputVacantForRetryAsync()
     {
