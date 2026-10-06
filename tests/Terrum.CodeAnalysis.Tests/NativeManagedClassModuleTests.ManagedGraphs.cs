@@ -148,13 +148,16 @@ public sealed partial class NativeManagedClassModuleTests
         }
         int32 Main() {
             Payload input = Make(39, 2);
+            require Cell.TryCreate(input, out var root);
             require !TryMiddle(false, input, out var absent);
             require TryMiddle(true, input, out var result);
-            require Cell.TryCreate(result, out var root);
+            require ManagedHeap.Collect() == 0;
+            require root.Data.First == input.First && root.Data.Second == input.Second;
             require CollectMiddle() == 1;
             require CollectLeaf() == 0;
             require ManagedHeap.Collect() == 0;
-            return int32(root.Data.First + root.Data.Second) + Bias();
+            require root.Data.First == input.First && root.Data.Second == input.Second;
+            return int32(result.First + result.Second) + Bias();
         }
         """;
 
