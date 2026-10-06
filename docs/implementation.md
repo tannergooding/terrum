@@ -37,6 +37,13 @@ A source-dependent single-producer semantic-module program can be linked and exe
 `NativeJit.ExecuteWithSourceGrant`, which requires one readonly `char16` grant
 of at most 16,384 code units and copies it into fresh invocation storage.
 Neither profile persists source contents, concrete lengths or addresses.
+Separately, the standalone Terrum-authored `HexFloatLiteral` helper converts
+grammar-shaped, caller-delimited hexadecimal-float token slices directly to
+`float32`/`float64` bits. Persisted semantic-module tests compare it with hosted
+bound constants across rounding boundaries, malformed slices, deterministic
+random valid spellings and 16,000 fractional hex digits under both
+runtime policies. It is not wired into scalar-frontend token reconstruction;
+verification and emission remain hosted.
 Graphs, module sets, native DLLs and persisted AOT images remain outside this
 support.
 Revision 57 provisionally added structured semantic-module caller-unsafe

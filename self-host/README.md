@@ -119,6 +119,13 @@ cannot complete a surrogate pair outside the requested extent. These are
 internal compiler implementation exports, not a language-level API or stable
 native ABI; the library is not a self-host compiler or an executable
 scanner/parser.
+Separately, `HexFloatLiteral.terrum` is a standalone conversion helper over a
+caller-delimited token slice in invocation-scoped `Host.Source`. Persisted
+semantic-module tests compare its direct `float32`/`float64` bit results with
+hosted bound constants across IEEE rounding boundaries, malformed spellings,
+deterministic random valid spellings and 16,000 fractional hex digits
+under both runtime policies. It is not connected to scalar-frontend
+reconstruction; verification and emission remain hosted.
 The host test runner still orchestrates compilation and assertions in C#.
 `ComponentTestRunner.terrum` is a bounded Terrum entry harness composing the
 `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`, `Token`,
