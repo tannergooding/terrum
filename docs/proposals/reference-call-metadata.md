@@ -68,10 +68,12 @@ add source-free executable authorization.
 
 Executable TRRM also provisionally round-trips the assigned caller-unsafe
 Effects bit on top-level function declarations, including when composed with
-`NoThrow` or `DoesNotReturn`. It continues to reject calls to caller-unsafe
-functions because executable Bodies do not yet carry a validated unsafe-scope
-region. This narrow declaration round-trip is implemented support, not
-approval of the Body-region recommendation below.
+`NoThrow` or `DoesNotReturn`, and provisionally admits calls only inside
+validated indexed Body unsafe-scope regions as detailed in section 3.
+Compact-linear calls and calls outside validated regions remain rejected.
+Kind `0x06` is still reserved by the accepted instruction-set contract, so
+this bounded Body support remains provisional and does not approve the
+proposed extension.
 
 ### 1. Which dependency relations belong in the first callable profile?
 
@@ -168,6 +170,14 @@ end paths inside a region. Transfers that leave an unsafe region,
 compact-linear unsafe calls, `unsafe(expr)`, unsafe members, cleanup, unwind
 and lifetime authority remain unsupported. This bounded implementation
 remains provisional and does not approve the broader proposal.
+
+**Decision requested:** Approve or reject this bounded indexed-Body
+unsafe-region contract for adoption in the instruction-set, including
+assigning kind `0x06`. This decision is limited to section 3: it does not
+approve the dependency-relation profile in section 1 or general output-call
+migration in section 4. Until the decision and corresponding specification
+change are complete, the existing implementation remains provisional; an
+approval here would not authorize those other migrations.
 
 ### 4. Which source rules and metadata gate general output-call migration?
 
