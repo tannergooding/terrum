@@ -310,6 +310,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `ec530cda` | Lower end-relative source-grant reads from the invocation's captured length, with both-policy boundary coverage |
 | `fce7db24` | Add the opt-in provisional maintained source-grant companion with hash-bound export metadata and preserve image/manifest pairs on publication failures |
 | `89a896d5` | Compare test-only native source content and including-break line extents with hosted `SourceText.Lines` under both runtime policies |
 | `7e71c3dd` | Match generated native source positions and inverse offsets to hosted mappings at every offset of `CR` plus each possible UTF-16 code unit |
