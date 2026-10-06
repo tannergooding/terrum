@@ -1,0 +1,36 @@
+using Terrum.CodeAnalysis.Numerics64;
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckIntegerWrapping()
+{
+    if (WrapInt32ToInt64(int32.MinValue) != int64(int32.MinValue)
+        || WrapInt32ToUInt64(-1) != uint64.MaxValue
+        || WrapUInt32ToInt64(uint32.MaxValue) != int64(uint32.MaxValue)
+        || WrapUInt32ToUInt64(uint32.MaxValue) != uint64(uint32.MaxValue)
+        || WrapInt32ToUInt32(-1) != uint32.MaxValue
+        || WrapUInt32ToInt32(uint32.MaxValue) != -1
+        || WrapInt64ToUInt32(-1) != uint32.MaxValue
+        || WrapInt64ToInt32(int64.MinValue) != 0
+        || WrapUInt64ToUInt32(uint64.MaxValue) != uint32.MaxValue
+        || WrapUInt64ToInt32(uint64.MaxValue) != -1
+        || WrapInt64ToUInt64(int64.MinValue) != 0x8000000000000000
+        || WrapUInt64ToInt64(uint64.MaxValue) != -1)
+    {
+        return false;
+    }
+
+    if (WrapInt32ToChar16(-1) != char16.MaxValue
+        || WrapInt32ToChar16(65536) != char16(0)
+        || WrapUInt32ToChar16(uint32.MaxValue) != char16.MaxValue
+        || WrapInt64ToChar16(-1) != char16.MaxValue
+        || WrapUInt64ToChar16(uint64.MaxValue) != char16.MaxValue)
+    {
+        return false;
+    }
+
+    char16 surrogate = char16(0xD800);
+    return WrapChar16ToInt32(surrogate) == 0xD800
+        && WrapChar16ToUInt32(surrogate) == 0xD800
+        && WrapChar16ToInt64(surrogate) == 0xD800
+        && WrapChar16ToUInt64(surrogate) == 0xD800;
+}

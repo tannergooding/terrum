@@ -21,6 +21,7 @@ int32 Main()
         require CheckIntegerMath();
         require CheckBitOperations();
         require CheckIntegerSaturation();
+        require CheckIntegerWrapping();
         iteration = iteration + 1;
     }
 
