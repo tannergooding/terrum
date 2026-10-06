@@ -379,17 +379,25 @@ public sealed class NativeGraphTests
     }
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task ScalarInitRefOutputExecutesAcrossGraphAndRejectsOutReplacementAsync(
-        NativeRuntimePolicy policy)
+    [InlineData(NativeRuntimePolicy.FailFast, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    public async Task ScalarOutputExecutesAcrossGraphAndRejectsModeReplacementAsync(
+        NativeRuntimePolicy policy, bool initialUsesInit)
     {
-        const string InitialSource = "public void Leaf(init ref<int32> result) { result = 42; }";
-        const string ReplacementSource = "public void Leaf(out int32 result) { result = 43; }";
-        const string ConsumerSource = "int32 Main() { init int32 result; Leaf(init result); return result; }";
+        var initialSource = initialUsesInit
+            ? "public void Leaf(init ref<int32> result) { result = 42; }"
+            : "public void Leaf(out int32 result) { result = 42; }";
+        var replacementSource = initialUsesInit
+            ? "public void Leaf(out int32 result) { result = 43; }"
+            : "public void Leaf(init ref<int32> result) { result = 43; }";
+        var consumerSource = initialUsesInit
+            ? "int32 Main() { init int32 result; Leaf(init result); return result; }"
+            : "int32 Main() { Leaf(out var result); return result; }";
 
-        var leaf = Leaf(InitialSource, policy);
-        var rootCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+        var leaf = Leaf(initialSource, policy);
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
             NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
         Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
         var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
@@ -401,7 +409,7 @@ public sealed class NativeGraphTests
         Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [leaf],
             CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
 
-        var replacement = Leaf(ReplacementSource, policy);
+        var replacement = Leaf(replacementSource, policy);
         _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateGraph(root, [replacement]));
     }
