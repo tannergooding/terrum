@@ -280,8 +280,11 @@ Hosted binding accepts named arguments, including `out` and `init ref<T>`
 destinations, for uniquely resolved non-intrinsic calls. Arguments retain
 source evaluation order while each records its formal parameter position for
 verification and native lowering. Semantic-module revision 56 persists that
-mapping and lexical view endpoints with explicit end-relative modes, allowing
-dynamic absolute and end-relative bounds to be represented without duplicate evaluation.
+mapping; module-artifact tests also verify side-effecting expressions remain
+source ordered when named arguments reorder formal positions around an output.
+Revision 56 also persists lexical view endpoints with explicit end-relative
+modes, allowing dynamic absolute and end-relative bounds to be represented
+without duplicate evaluation.
 Source-free indexed TRRM evaluates mapped arguments in source order
 and materializes supported by-value arguments in formal order before emitting
 its positional call. Overload selection remains outside this support.
