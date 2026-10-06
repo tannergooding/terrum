@@ -20,6 +20,7 @@ int32 Main()
         require CheckCheckedUInt32Arithmetic();
         require CheckIntegerMath();
         require CheckBitOperations();
+        require CheckIntegerSaturation();
         iteration = iteration + 1;
     }
 

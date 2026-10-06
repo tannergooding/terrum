@@ -211,12 +211,14 @@ public sealed class ModuleTests
         var wideFactsPath = Path.Combine(root, "self-host", "WideIntegerFacts.terrum");
         var checkedFactsPath = Path.Combine(root, "self-host", "IntegerCheckedArithmetic.terrum");
         var integerMathPath = Path.Combine(root, "self-host", "IntegerMath.terrum");
+        var integerSaturationPath = Path.Combine(root, "self-host", "IntegerSaturation.terrum");
         var bitOperationsPath = Path.Combine(root, "self-host", "BitOperations.terrum");
         var rangeTestsPath = Path.Combine(root, "self-host", "RangeTests.terrum");
         var tokenTestsPath = Path.Combine(root, "self-host", "TokenTests.terrum");
         var wideTestsPath = Path.Combine(root, "self-host", "WideIntegerTests.terrum");
         var checkedTestsPath = Path.Combine(root, "self-host", "IntegerCheckedArithmeticTests.terrum");
         var integerMathTestsPath = Path.Combine(root, "self-host", "IntegerMathTests.terrum");
+        var integerSaturationTestsPath = Path.Combine(root, "self-host", "IntegerSaturationTests.terrum");
         var bitOperationsTestsPath = Path.Combine(root, "self-host", "BitOperationsTests.terrum");
         var entryPath = Path.Combine(root, "self-host", "ComponentTestRunner.terrum");
         var range = SyntaxTree.Parse(await File.ReadAllTextAsync(rangePath).ConfigureAwait(true), rangePath);
@@ -227,10 +229,12 @@ public sealed class ModuleTests
             checkedFactsPath);
         var integerMath = SyntaxTree.Parse(await File.ReadAllTextAsync(integerMathPath).ConfigureAwait(true),
             integerMathPath);
+        var integerSaturation = SyntaxTree.Parse(await File.ReadAllTextAsync(integerSaturationPath).ConfigureAwait(true),
+            integerSaturationPath);
         var bitOperations = SyntaxTree.Parse(await File.ReadAllTextAsync(bitOperationsPath).ConfigureAwait(true),
             bitOperationsPath);
         var library = Compilation.CreateLibrary([range, facts, token, wideFacts, checkedFacts, integerMath,
-            bitOperations]);
+            integerSaturation, bitOperations]);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
             "Terrum.CodeAnalysis.SourceRange.TryCreate",
@@ -273,6 +277,26 @@ public sealed class ModuleTests
             "Terrum.CodeAnalysis.Numerics64.MaxInt64",
             "Terrum.CodeAnalysis.Numerics64.ClampInt64",
             "Terrum.CodeAnalysis.Numerics64.GreatestCommonDivisorInt64",
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToUInt64",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToUInt64",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToUInt64",
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.SaturateChar16ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateChar16ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateChar16ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.SaturateChar16ToUInt64",
             "Terrum.CodeAnalysis.Numerics64.LeadingZeroCountUInt32",
             "Terrum.CodeAnalysis.Numerics64.TrailingZeroCountUInt32",
             "Terrum.CodeAnalysis.Numerics64.PopCountUInt32",
@@ -299,16 +323,20 @@ public sealed class ModuleTests
             checkedTestsPath);
         var integerMathTests = SyntaxTree.Parse(await File.ReadAllTextAsync(integerMathTestsPath).ConfigureAwait(true),
             integerMathTestsPath);
+        var integerSaturationTests = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(integerSaturationTestsPath).ConfigureAwait(true),
+            integerSaturationTestsPath);
         var bitOperationsTests = SyntaxTree.Parse(await File.ReadAllTextAsync(bitOperationsTestsPath).ConfigureAwait(true),
             bitOperationsTestsPath);
         var entry = SyntaxTree.Parse(await File.ReadAllTextAsync(entryPath).ConfigureAwait(true), entryPath);
         var compilation = Compilation.Create([rangeTests, tokenTests, wideTests, checkedTests, integerMathTests,
-            bitOperationsTests, entry], ModuleCompiler.CreateReference(producer));
+            integerSaturationTests, bitOperationsTests, entry], ModuleCompiler.CreateReference(producer));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.Collection(compilation.SyntaxTrees, tree => Assert.Same(rangeTests, tree),
             tree => Assert.Same(tokenTests, tree), tree => Assert.Same(wideTests, tree),
             tree => Assert.Same(checkedTests, tree), tree => Assert.Same(integerMathTests, tree),
-            tree => Assert.Same(bitOperationsTests, tree), tree => Assert.Same(entry, tree));
+            tree => Assert.Same(integerSaturationTests, tree), tree => Assert.Same(bitOperationsTests, tree),
+            tree => Assert.Same(entry, tree));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
         var consumerPath = Path.Combine(AppContext.BaseDirectory, $"self-host-module-{Guid.NewGuid():N}.trm");
         var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");

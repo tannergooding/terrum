@@ -1,0 +1,40 @@
+using Terrum.CodeAnalysis.Numerics64;
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckIntegerSaturation()
+{
+    if (SaturateInt32ToInt64(int32.MinValue) != int64(int32.MinValue)
+        || SaturateInt32ToUInt64(-1) != 0
+        || SaturateUInt32ToInt64(uint32.MaxValue) != int64(uint32.MaxValue)
+        || SaturateUInt32ToUInt64(uint32.MaxValue) != uint64(uint32.MaxValue)
+        || SaturateUInt32ToInt32(uint32.MaxValue) != int32.MaxValue
+        || SaturateInt32ToUInt32(-1) != 0
+        || SaturateInt64ToInt32(int64.MinValue) != int32.MinValue
+        || SaturateInt64ToInt32(int64.MaxValue) != int32.MaxValue
+        || SaturateInt64ToUInt32(-1) != 0
+        || SaturateInt64ToUInt32(int64.MaxValue) != uint32.MaxValue
+        || SaturateUInt64ToInt32(uint64.MaxValue) != int32.MaxValue
+        || SaturateUInt64ToUInt32(uint64.MaxValue) != uint32.MaxValue
+        || SaturateUInt64ToInt64(uint64.MaxValue) != int64.MaxValue
+        || SaturateInt64ToUInt64(-1) != 0)
+    {
+        return false;
+    }
+
+    if (SaturateInt32ToChar16(-1) != char16(0)
+        || SaturateInt32ToChar16(65536) != char16.MaxValue
+        || SaturateInt32ToChar16(65) != char16(65)
+        || SaturateUInt32ToChar16(uint32.MaxValue) != char16.MaxValue
+        || SaturateInt64ToChar16(int64.MinValue) != char16(0)
+        || SaturateInt64ToChar16(int64.MaxValue) != char16.MaxValue
+        || SaturateUInt64ToChar16(uint64.MaxValue) != char16.MaxValue)
+    {
+        return false;
+    }
+
+    char16 surrogate = char16(0xD800);
+    return SaturateChar16ToInt32(surrogate) == 0xD800
+        && SaturateChar16ToUInt32(surrogate) == 0xD800
+        && SaturateChar16ToInt64(surrogate) == 0xD800
+        && SaturateChar16ToUInt64(surrogate) == 0xD800;
+}
