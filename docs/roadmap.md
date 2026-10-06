@@ -314,6 +314,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `53c79d92` | Record provisional scalar source-range validation with hosted subtext-boundary parity and maintained manifest coverage |
 | `802a69ae` | Add provisional source-dependent `CanGetSourceRange` predicate with hosted subtext-boundary parity, maximum-grant coverage and maintained manifest binding |
 | `4f550508` | Add provisional scalar source-line content and including-break end queries with same-grant range reconstruction, boundary coverage and maintained manifest binding |
 | `175cbe05` | Add provisional scalar source-grant integer parsing pairs with all-radix oracle coverage and a maintained manifest, without changing the source-free companion or classifier |
