@@ -190,6 +190,7 @@ public sealed class TokenCursorTests
         await ExecuteAsync(program, policy).ConfigureAwait(true);
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Main"]));
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, ["Main"], (NativeRuntimePolicy)policy));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "forwarded-span"));
     }
 
     [Theory]
