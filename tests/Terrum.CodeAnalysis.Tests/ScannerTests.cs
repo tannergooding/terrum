@@ -464,6 +464,22 @@ public sealed class ScannerTests
         }
         sources.Add(supplementaryEscapeSource.ToString());
 
+        const int maximumSupplementaryEscapesPerSource = 1_500;
+        for (var scalarStart = 0x10000; scalarStart <= 0x10FFFF;
+            scalarStart += maximumSupplementaryEscapesPerSource)
+        {
+            var scalarCount = Math.Min(maximumSupplementaryEscapesPerSource, 0x110000 - scalarStart);
+            var text = new StringBuilder(scalarCount * 10 + 2).Append('"');
+            for (var index = 0; index < scalarCount; index++)
+            {
+                text.Append("\\U").Append((scalarStart + index).ToString("X8",
+                    CultureInfo.InvariantCulture));
+            }
+            text.Append('"');
+            Assert.InRange(text.Length, 1, ScannerHost.MaximumSourceLength);
+            sources.Add(text.ToString());
+        }
+
         var supplementarySource = new StringBuilder();
         foreach (var scalar in supplementaryEscapes)
         {
