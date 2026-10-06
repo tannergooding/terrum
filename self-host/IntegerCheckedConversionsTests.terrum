@@ -41,12 +41,12 @@ public bool CheckIntegerCheckedConversions()
         return false;
     }
 
-    if (TryConvertInt64ToInt32(int64.MinValue, init var rejectedInt64ToInt32))
+    if (TryConvertInt64ToInt32(int64.MinValue, init var reusableInt64ToInt32))
     {
         return false;
     }
-    require TryConvertInt64ToInt32(int64(int32.MinValue), init var int64ToInt32);
-    if (int64ToInt32 != int32.MinValue
+    require TryConvertInt64ToInt32(int64(int32.MinValue), init reusableInt64ToInt32);
+    if (reusableInt64ToInt32 != int32.MinValue
         || TryConvertInt64ToUInt32(-1, init var rejectedInt64ToUInt32))
     {
         return false;
