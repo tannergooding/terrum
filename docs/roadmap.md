@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `efcc7d2a` | Verify semantic and native module replacements reject `out`/`init ref<T>` mode changes under both runtime policies |
 | `b843eef0` | Verify semantic and native module replacements preserve retained `NoThrow` and `DoesNotReturn` effects under both runtime policies |
 | `fd64de10` | Verify native module-set replacement preserves retained `NoThrow` and `DoesNotReturn` effects under both runtime policies |
 | `04dcbdb1` | Verify Copy-output graph replacements preserve the `out` versus `init ref<T>` contract |
