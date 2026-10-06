@@ -74,7 +74,17 @@ public sealed class SourceLineIndexModuleTests
                 "Terrum.CodeAnalysis.GetIndexedOffset",
             ]);
 
-        var fixtures = new[] { "", "plain", "a\r\nb\rc\nd", "\uD800\r\nx" };
+        var fixtures = new[] {
+            "",
+            "plain",
+            "a\r\nb\rc\nd",
+            "\uD800\r\nx",
+            "a\u0085b\u2028c\u2029d",
+            "x\r\n",
+            "x\u0085",
+            "x\u2028",
+            "x\u2029",
+        };
         var maximumLineCount = fixtures.Max(static text => SourceText.From(text).Lines.Length);
         var maximumSourceLength = fixtures.Max(static text => text.Length);
         var consumers = new BoundProgram[maximumLineCount * 2 + 1];
