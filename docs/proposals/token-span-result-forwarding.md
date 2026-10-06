@@ -49,8 +49,12 @@ semantic/native module persistence, module replacement, executable TRRM,
 the scalar frontend, general `ref<T>` results, receiver dependencies, writable
 views, managed interiors, pins/leases, generic functions, borrowed outputs,
 implicit reference materialization, stored captures and asynchronous retention
-remain outside its scope. The existing checked verifier and native emitter
-remain responsible for execution; this does not add general loan metadata.
+remain outside its scope. A private semantic-module follow-on is separately
+proposed and currently deferred until a concrete provider/consumer corpus and
+supported invocation profile justify the full IR and type-remapping work
+([proposal](token-span-semantic-module.md)). The existing checked verifier and
+native emitter remain responsible for execution; this does not add general
+loan metadata.
 
 ## Required evidence
 

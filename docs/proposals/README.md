@@ -58,6 +58,9 @@ approved.
 - [Forwarded `Span<Token>` results](token-span-result-forwarding.md)
   recommends a same-compilation hosted experiment for forwarding declared
   backing dependencies through bounded top-level functions.
+- [Persisted internal `Span<Token>` forwarding](token-span-semantic-module.md)
+  recommends deferring persistence until a concrete private provider/consumer
+  corpus and supported invocation profile justify its full IR/linking work.
 - [Invocation-scoped source grant](invocation-scoped-source-grant.md)
   recommends a narrow persisted-module dependency for source-aware compiler
   components without enabling arbitrary host-buffer capture.
