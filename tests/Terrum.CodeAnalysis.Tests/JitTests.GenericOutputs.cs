@@ -589,7 +589,10 @@ public sealed partial class JitTests
                 int32 zeroStatus = Fill(float32(1.5), 0, out var first, init var firstCopy);
                 int32 status = Fill<float64>(float64(2.5), 7, out var second, init var secondCopy);
                 FillVoid(float32(3.5), out var voidCopy, init var voidInitialized);
-                if (zeroStatus != 0 || status != 7 || first != float32(1.5)
+                int32 booleanStatus = Fill<bool>(true, 0, out var booleanCopy,
+                    init var booleanInitialized);
+                if (zeroStatus != 0 || status != 7 || booleanStatus != 0
+                    || !booleanCopy || !booleanInitialized || first != float32(1.5)
                     || firstCopy != float32(1.5) || second != float64(2.5)
                     || secondCopy != float64(2.5) || voidCopy != float32(3.5)
                     || voidInitialized != float32(3.5)) {
