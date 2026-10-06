@@ -280,7 +280,10 @@ also matches hosted `SourceText` for each of the 65,536 possible one-unit
 UTF-16 sources under both runtime policies, including every surrogate and
 control code unit. A second exhaustive pass appends each possible UTF-16 unit
 after CR, checking CRLF pairing and adjacent breaks against the hosted line
-count under both policies.
+count under both policies. For every single-unit source, native line/character
+positions at both offsets also match `SourceText.GetLinePosition`, and each
+valid result round-trips through the native inverse query and hosted
+`SourceText.TryGetOffset`.
 The same test DLL also returns a test-local packed line/character pair and
 matches hosted `SourceText.GetLinePosition` for every offset in the short
 edge-case fixtures and selected boundary offsets in maximum-length inputs.
