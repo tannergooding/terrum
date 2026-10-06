@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `fd2cd282` | Verify native source-scalar decoding at one-unit ends for every BMP code unit |
 | `fbbe77dc` | Exhaustively verify signed and unsigned native source reads through the test-only grant ABI |
 | `1f763d43` | Exhaustively verify scanner-delimited BMP string literal scalars through source-grant JIT |
 | `a895ca24` | Exhaustively verify scanner-delimited BMP string escape introducers through source-grant JIT |
