@@ -70,6 +70,14 @@ public sealed class StringLiteralModuleTests
                             || scalar != expectedScalar || next != at + spellingLength - 1) {
                             return item + 1;
                         }
+                        mut StringLiteralCursor cursor = StringLiteralCursor.Create(literal);
+                        if (cursor.Position != at + 1
+                            || !cursor.TryRead(init var cursorScalar, init var following)
+                            || cursorScalar != expectedScalar
+                            || following.Position != at + spellingLength - 1
+                            || following.TryRead(init var extraScalar, init var afterExtra)) {
+                            return item + 1;
+                        }
                     } else if (expectedValid) {
                         return item + 1;
                     }

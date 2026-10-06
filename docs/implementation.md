@@ -36,7 +36,9 @@ surrogate-valued `\U` escapes, including consumed and diagnostic widths.
 `StringLiteral` scalar decoding is checked for every scanner-delimited BMP
 code unit (including surrogate rejection), every valid supplementary scalar
 in both direct and escaped spellings, and the same invalid escaped-surrogate
-set. `StringRow` name/namespace encoders cover ASCII, UTF-8, UTF-16LE and
+set. Its sequential cursor also matches each valid scalar and exact next
+UTF-16 offset across that exhaustive single-scalar corpus. `StringRow`
+name/namespace encoders cover ASCII, UTF-8, UTF-16LE and
 UTF-32LE. Persisted semantic-module JIT tests compare UTF-8, UTF-16LE and
 UTF-32LE name/namespace rows with the hosted string-table writer for every
 nonzero Unicode scalar in bounded batches; the batch boundary exhaustively
