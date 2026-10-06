@@ -35,15 +35,17 @@ public sealed class NativeSourceGrantExperimentTests
         int32 Main() { return 0; }
         public int32 ReadUtf16ScalarForSourceAbiTest(int32 at, int32 end, int32 expectedScalar) {
             if (at < 0 || at >= end || end > Host.Source.Length) { return -2; }
+            int32 cycleValue = SourceCycleFirst(3, at);
             return at == 0
-                ? CheckScalar(expectedScalar: expectedScalar, end: end, at: at)
-                : CheckScalar(at, end, expectedScalar);
+                ? CheckScalar(expectedScalar: expectedScalar, end: end, at: at, cycleValue: cycleValue)
+                : CheckScalar(at, end, expectedScalar, cycleValue);
         }
-        int32 CheckScalar(int32 at, int32 end, int32 expectedScalar) {
+        int32 CheckScalar(int32 at, int32 end, int32 expectedScalar, int32 cycleValue) {
             int32 first = ReadUtf16Scalar(at, end);
             int32 clobber = SourceFreeForSourceAbiTest(1, 2, 3, 4, 5);
             int32 second = ReadUtf16Scalar(at, end);
-            if (first == expectedScalar && second == expectedScalar && clobber == 54321) {
+            if (first == expectedScalar && second == expectedScalar && clobber == 54321
+                && cycleValue == int32(Host.Source[at])) {
                 return second;
             }
             return -3;
@@ -63,6 +65,14 @@ public sealed class NativeSourceGrantExperimentTests
             return -3;
         }
         public uint64 SourceFreeWideForSourceAbiTest(uint64 value) { return value; }
+        int32 SourceCycleFirst(int32 remaining, int32 at) {
+            if (remaining == 0) { return 0; }
+            return SourceCycleSecond(remaining - 1, at);
+        }
+        int32 SourceCycleSecond(int32 remaining, int32 at) {
+            if (remaining == 0) { return int32(Host.Source[at]); }
+            return SourceCycleFirst(remaining - 1, at);
+        }
         """;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -309,19 +319,74 @@ public sealed class NativeSourceGrantExperimentTests
             program with { Functions = program.Functions.SetItem(0, external) }, [ReadExport], NativeRuntimePolicy.FailFast));
     }
 
-    private static BoundProgram Compile(BoundRuntimePolicy policy, ImmutableArray<int> sample, string extra = "")
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void PropagatesSourceDependenceAcrossMutuallyRecursiveCalls(BoundRuntimePolicy policy)
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const int at = 1;
+        var source = new[] { (char)0x1357, (char)0x2468, (char)0xABCD };
+        var program = Compile(policy, [.. source.Select(static value => (int)value)],
+            recursiveEntryPoint: true);
+        var dependencies = Classify(program);
+        Assert.True(dependencies[program.Functions.IndexOf(
+            Assert.Single(program.Functions, function => function.Name == "Terrum.CodeAnalysis.SourceCycleFirst"))]);
+        Assert.True(dependencies[program.Functions.IndexOf(
+            Assert.Single(program.Functions, function => function.Name == "Terrum.CodeAnalysis.SourceCycleSecond"))]);
+
+        var (image, _) = EmitExperiment(program, [ReadExport], (NativeRuntimePolicy)policy);
+        var referenceProgram = program with {
+            EntryPoint = program.Functions.IndexOf(
+                Assert.Single(program.Functions, function => function.Name == "Terrum.CodeAnalysis.Main")),
+        };
+        var grant = new HostBuffer("Source", PrimitiveType.Char16,
+            [.. source.Select(static value => (int)value)], false) { IsInvocationScoped = true };
+        var expected = NativeJit.ExecuteWithSourceGrant(referenceProgram, [grant], (NativeRuntimePolicy)policy);
+        Assert.Equal(source[at], expected);
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-cycle-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(path, image);
+        try
+        {
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var read = Marshal.GetDelegateForFunctionPointer<ReadScalar>(
+                    NativeLibrary.GetExport(module, ReadExport));
+                var actual = WithPinnedSource(source, (uint)source.Length,
+                    (pointer, count) => read(pointer, count, at, at + 1, expected));
+                Assert.Equal(expected, actual);
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private static BoundProgram Compile(BoundRuntimePolicy policy, ImmutableArray<int> sample, string extra = "",
+        bool recursiveEntryPoint = false)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var trees = new[] { "Utf16CodeUnits", "Utf16Scalar" }.Select(name =>
         {
             var path = Path.Combine(root, "self-host", name + ".terrum");
             return SyntaxTree.Parse(File.ReadAllText(path), path);
-        }).Append(SyntaxTree.Parse(Adapter + extra, "source-abi-test.terrum"));
+        }).Append(SyntaxTree.Parse((recursiveEntryPoint
+            ? Adapter.Replace("int32 Main() { return 0; }",
+                "int32 Main() { return ReadUtf16ScalarForSourceAbiTest(1, 2, 9320); }", StringComparison.Ordinal)
+            : Adapter) + extra, "source-abi-test.terrum"));
         var compilation = Compilation.Create(trees,
             [new HostBuffer("Source", PrimitiveType.Char16, sample, false) { IsInvocationScoped = true }], policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        return Assert.IsType<BoundProgram>(compilation.Program) with { EntryPoint = -1 };
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        return program with { EntryPoint = -1 };
     }
 
     private static void InspectArtifact(BoundProgram program, byte[] image, NativeCode code, BoundRuntimePolicy policy)
@@ -342,11 +407,7 @@ public sealed class NativeSourceGrantExperimentTests
         Assert.Equal(0, header.BaseRelocationTableDirectory.Size);
         Assert.DoesNotContain(reader.PEHeaders.SectionHeaders, section => section.Name is ".data" or ".rdata");
 
-        var classifier = Assert.IsType<Type>(typeof(NativeEmitter).Assembly.GetType(
-            "Terrum.CodeAnalysis.Native.NativeSourceGrantExperiment"), exactMatch: false);
-        var classify = Assert.IsType<MethodInfo>(classifier.GetMethod("Classify", BindingFlags.NonPublic | BindingFlags.Static),
-            exactMatch: false);
-        var dependent = Assert.IsType<bool[]>(classify.Invoke(null, [program]));
+        var dependent = Classify(program);
         Span<byte> bounds = stackalloc byte[6];
         Span<byte> load = stackalloc byte[11];
         foreach (var function in program.Functions)
@@ -355,7 +416,8 @@ public sealed class NativeSourceGrantExperimentTests
             Assert.Equal(function.Name is ReadExport or LengthExport
                 or BoundaryExport or SignedExport or UnsignedExport
                 or "Terrum.CodeAnalysis.CheckScalar" or "Terrum.CodeAnalysis.ReadUtf16Scalar"
-                or "Terrum.CodeAnalysis.ReadSignedSourceUnit" or "Terrum.CodeAnalysis.ReadUnsignedSourceUnit",
+                or "Terrum.CodeAnalysis.ReadSignedSourceUnit" or "Terrum.CodeAnalysis.ReadUnsignedSourceUnit"
+                or "Terrum.CodeAnalysis.SourceCycleFirst" or "Terrum.CodeAnalysis.SourceCycleSecond",
                 dependent[index]);
             if (dependent[index])
             {
@@ -420,6 +482,15 @@ public sealed class NativeSourceGrantExperimentTests
             ExceptionDispatchInfo.Capture(inner).Throw();
             throw;
         }
+    }
+
+    private static bool[] Classify(BoundProgram program)
+    {
+        var classifier = Assert.IsType<Type>(typeof(NativeEmitter).Assembly.GetType(
+            "Terrum.CodeAnalysis.Native.NativeSourceGrantExperiment"), exactMatch: false);
+        var classify = Assert.IsType<MethodInfo>(classifier.GetMethod("Classify",
+            BindingFlags.NonPublic | BindingFlags.Static), exactMatch: false);
+        return Assert.IsType<bool[]>(classify.Invoke(null, [program]));
     }
 
     private static int ExpectedScalar(ReadOnlySpan<char> source)
