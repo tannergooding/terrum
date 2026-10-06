@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7bca6ec4` | Reject semantic/native replacement that removes a retained `NoThrow` or `DoesNotReturn` promise |
 | `ac08b34d` | Verify conditional scalar frontend calls to `[DoesNotReturn]` functions |
 | `81f586a8` | Verify scalar frontend `[DoesNotReturn]` library parity under both runtime policies |
 | `9dae43f7` | Check that a staged unique `init ref<T>` remains unpublished on false across module sets |
