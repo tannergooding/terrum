@@ -225,7 +225,9 @@ Both library and reference compilation accept multiple `SyntaxTree` snapshots;
 source diagnostics retain the originating snapshot. The self-host component
 test builds `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`,
 the test-only `IntegerFactsTestExports` bridge, `Token`, `CopyAlgorithms`,
-the producer-local `CopyAlgorithmsTests` wrapper, `WideIntegerFacts`,
+the producer-local `CopyAlgorithmsTests` wrapper, `Float32MathSelection`,
+`Float64MathSelection`, the producer-local `FloatMathSelectionTests` wrapper,
+`WideIntegerFacts`,
 `IntegerFormatting`, the producer-local `IntegerFormattingTests` wrapper,
 `IntegerCheckedArithmetic`, `IntegerMath`, `IntegerSaturation`,
 `IntegerWrapping`, `IntegerCheckedConversions`, and `BitOperations` into one
@@ -240,12 +242,16 @@ is created, reused, and consumed inside the producer, so the candidate owner
 does not become a module export.
 The copy wrapper likewise keeps generic specializations in the producer and
 exports only its test result, not generic candidate functions.
-Those persisted modules execute through AOT and JIT, including range boundaries,
+Those persisted modules execute through AOT and JIT under both runtime
+policies, including range boundaries,
 conditional-output failure, character classification, hexadecimal mapping and
 UTF-16 scalar decoding,
 aggregate token construction, 32-/64-bit checked arithmetic and accumulation,
 integer-math extrema, saturation and wrapping boundaries, checked-conversion
-publication, bit-operation boundaries, and repeated calls. C# still
+publication, bit-operation boundaries, finite `float32`/`float64` math-selection
+cases, and repeated calls. The float checks cover only finite values and do not
+resolve NaN, signed-zero, payload, signaling, or status behavior, or approve the
+candidate APIs. C# still
 orchestrates the test; the entry harness only composes these explicitly
 selected component checks.
 The CLI accepts repeatable `--source <path>` options and, for producers,
@@ -300,6 +306,9 @@ $componentSources = @(
     'self-host\Token.terrum',
     'self-host\CopyAlgorithms.terrum',
     'self-host\CopyAlgorithmsTests.terrum',
+    'self-host\Float32MathSelection.terrum',
+    'self-host\Float64MathSelection.terrum',
+    'self-host\FloatMathSelectionTests.terrum',
     'self-host\WideIntegerFacts.terrum',
     'self-host\IntegerFormatting.terrum',
     'self-host\IntegerFormattingTests.terrum',
@@ -326,6 +335,7 @@ $componentExports = @(
     'IntegerFactsUInt64Mask',
     'Terrum.CodeAnalysis.Tests.CheckIntegerFormatting',
     'Terrum.CodeAnalysis.Tests.CheckCopyAlgorithms',
+    'Terrum.CodeAnalysis.Tests.CheckFiniteFloatMathSelections',
     'Terrum.CodeAnalysis.Token.#ctor',
     'Terrum.CodeAnalysis.Numerics64.TryAddInt64',
     'Terrum.CodeAnalysis.Numerics64.TrySubtractInt64',

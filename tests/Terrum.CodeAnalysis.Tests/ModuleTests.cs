@@ -201,8 +201,11 @@ public sealed class ModuleTests
             ModuleCompiler.Link(consumer, producer), nativePolicy)).ConfigureAwait(true));
     }
 
-    [Fact]
-    public async Task SelfHostComponentTestRunnerExecutesAgainstAnIndependentMultiSourceLibraryAsync()
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task SelfHostComponentTestRunnerExecutesAgainstAnIndependentMultiSourceLibraryAsync(
+        BoundRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var rangePath = Path.Combine(root, "self-host", "SourceRange.terrum");
@@ -214,6 +217,9 @@ public sealed class ModuleTests
         var tokenPath = Path.Combine(root, "self-host", "Token.terrum");
         var copyAlgorithmsPath = Path.Combine(root, "self-host", "CopyAlgorithms.terrum");
         var copyAlgorithmsTestsPath = Path.Combine(root, "self-host", "CopyAlgorithmsTests.terrum");
+        var float32MathSelectionPath = Path.Combine(root, "self-host", "Float32MathSelection.terrum");
+        var float64MathSelectionPath = Path.Combine(root, "self-host", "Float64MathSelection.terrum");
+        var floatMathSelectionTestsPath = Path.Combine(root, "self-host", "FloatMathSelectionTests.terrum");
         var wideFactsPath = Path.Combine(root, "self-host", "WideIntegerFacts.terrum");
         var integerFormattingPath = Path.Combine(root, "self-host", "IntegerFormatting.terrum");
         var integerFormattingTestsPath = Path.Combine(root, "self-host", "IntegerFormattingTests.terrum");
@@ -251,6 +257,15 @@ public sealed class ModuleTests
         var copyAlgorithmsTests = SyntaxTree.Parse(
             await File.ReadAllTextAsync(copyAlgorithmsTestsPath).ConfigureAwait(true),
             copyAlgorithmsTestsPath);
+        var float32MathSelection = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(float32MathSelectionPath).ConfigureAwait(true),
+            float32MathSelectionPath);
+        var float64MathSelection = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(float64MathSelectionPath).ConfigureAwait(true),
+            float64MathSelectionPath);
+        var floatMathSelectionTests = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(floatMathSelectionTestsPath).ConfigureAwait(true),
+            floatMathSelectionTestsPath);
         var wideFacts = SyntaxTree.Parse(await File.ReadAllTextAsync(wideFactsPath).ConfigureAwait(true), wideFactsPath);
         var integerFormatting = SyntaxTree.Parse(
             await File.ReadAllTextAsync(integerFormattingPath).ConfigureAwait(true),
@@ -272,8 +287,9 @@ public sealed class ModuleTests
         var bitOperations = SyntaxTree.Parse(await File.ReadAllTextAsync(bitOperationsPath).ConfigureAwait(true),
             bitOperationsPath);
         var library = Compilation.CreateLibrary([range, facts, utf16CodeUnits, integerFacts, integerFactsExports,
-            token, copyAlgorithms, copyAlgorithmsTests, wideFacts, integerFormatting, integerFormattingTests,
-            checkedFacts, integerMath, integerSaturation, integerWrapping, checkedConversions, bitOperations]);
+            token, copyAlgorithms, copyAlgorithmsTests, float32MathSelection, float64MathSelection,
+            floatMathSelectionTests, wideFacts, integerFormatting, integerFormattingTests, checkedFacts,
+            integerMath, integerSaturation, integerWrapping, checkedConversions, bitOperations], policy);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
             "Terrum.CodeAnalysis.SourceRange.TryCreate",
@@ -291,6 +307,7 @@ public sealed class ModuleTests
             "IntegerFactsUInt64Mask",
             "Terrum.CodeAnalysis.Tests.CheckIntegerFormatting",
             "Terrum.CodeAnalysis.Tests.CheckCopyAlgorithms",
+            "Terrum.CodeAnalysis.Tests.CheckFiniteFloatMathSelections",
             "Terrum.CodeAnalysis.Token.#ctor",
             "Terrum.CodeAnalysis.Numerics64.TryAddInt64",
             "Terrum.CodeAnalysis.Numerics64.TrySubtractInt64",
@@ -437,7 +454,7 @@ public sealed class ModuleTests
         var compilation = Compilation.Create([rangeTests, factsTests, utf16CodeUnitsTests, integerFactsTests,
             tokenTests, wideTests, checkedTests, integerMathTests, integerSaturationTests, integerWrappingTests,
             checkedConversionsTests, bitOperationsTests, entry],
-            ModuleCompiler.CreateReference(producer));
+            ModuleCompiler.CreateReference(producer), policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.Collection(compilation.SyntaxTrees, tree => Assert.Same(rangeTests, tree),
             tree => Assert.Same(factsTests, tree), tree => Assert.Same(utf16CodeUnitsTests, tree),
@@ -454,11 +471,13 @@ public sealed class ModuleTests
         {
             await File.WriteAllBytesAsync(consumerPath, consumer).ConfigureAwait(true);
             await File.WriteAllBytesAsync(producerPath, producer).ConfigureAwait(true);
-            var (exit, error) = await RunJitWorkerAsync(consumerPath, producerPath).ConfigureAwait(true);
+            string runtime = policy == BoundRuntimePolicy.FailFast ? "fail-fast" : "checked-exceptions";
+            var (exit, error) = await RunCliAsync(
+                "run-module", consumerPath, producerPath, "--runtime", runtime).ConfigureAwait(true);
             Assert.Equal(0, exit);
             Assert.Empty(error);
             Assert.Equal(0, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, producer),
-                NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+                (NativeRuntimePolicy)policy)).ConfigureAwait(true));
             Assert.Equal(consumer, await File.ReadAllBytesAsync(consumerPath).ConfigureAwait(true));
         }
         finally

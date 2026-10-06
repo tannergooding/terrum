@@ -1,0 +1,23 @@
+using Terrum.CodeAnalysis.Numerics64;
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckFiniteFloatMathSelections()
+{
+    if (AbsFloat32(-1.5) != 1.5
+        || MinFloat32(-2.0, 1.0) != -2.0
+        || MaxFloat32(-2.0, 1.0) != 1.0
+        || ClampFloat32(-2.0, -1.0, 1.0) != -1.0
+        || ClampFloat32(2.0, -1.0, 1.0) != 1.0
+        || ClampFloat32(0.5, -1.0, 1.0) != 0.5
+        || AbsFloat64(-1.5) != 1.5
+        || MinFloat64(-2.0, 1.0) != -2.0
+        || MaxFloat64(-2.0, 1.0) != 1.0
+        || ClampFloat64(-2.0, -1.0, 1.0) != -1.0
+        || ClampFloat64(2.0, -1.0, 1.0) != 1.0
+        || ClampFloat64(0.5, -1.0, 1.0) != 0.5)
+    {
+        return false;
+    }
+
+    return true;
+}
