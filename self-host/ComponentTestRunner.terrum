@@ -9,6 +9,7 @@ int32 Main()
         require CheckSourceRange();
         require CheckToken();
         require CheckCharacterFacts();
+        require CheckUtf16CodeUnits();
         require CheckWideAddition();
         require CheckWideSubtraction();
         require CheckWideMultiplication();

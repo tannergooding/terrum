@@ -1,0 +1,18 @@
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckUtf16CodeUnits()
+{
+    int32 nullScalar = DecodeUtf16Scalar(char16(0), char16(56320));
+    int32 lowestScalar = DecodeUtf16Scalar(char16(55296), char16(56320));
+    int32 highestScalar = DecodeUtf16Scalar(char16(56319), char16(57343));
+    int32 unpairedHigh = DecodeUtf16Scalar(char16(55296), char16(0));
+    int32 unpairedLow = DecodeUtf16Scalar(char16(56320), char16(65));
+    int32 adjacentHigh = DecodeUtf16Scalar(char16(55296), char16(56319));
+    return nullScalar == 0 && Utf16ScalarWidth(nullScalar) == 1
+        && DecodeUtf16Scalar(char16(64976), char16(0)) == 64976
+        && DecodeUtf16Scalar(char16(65535), char16(0)) == 65535
+        && lowestScalar == 65536 && Utf16ScalarWidth(lowestScalar) == 2
+        && highestScalar == 1114111 && Utf16ScalarWidth(highestScalar) == 2
+        && unpairedHigh == -1 && Utf16ScalarWidth(unpairedHigh) == 1
+        && unpairedLow == -1 && adjacentHigh == -1;
+}

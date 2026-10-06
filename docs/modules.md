@@ -223,16 +223,19 @@ program and extracts selected producer definitions. The CLI uses independent
 consumer source and the validated artifact-reference path.
 Both library and reference compilation accept multiple `SyntaxTree` snapshots;
 source diagnostics retain the originating snapshot. The self-host component
-test builds `SourceRange`, `CharacterFacts`, `Token`, `WideIntegerFacts`,
+test builds `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `Token`,
+`WideIntegerFacts`,
 `IntegerCheckedArithmetic`, `IntegerMath`, `IntegerSaturation`,
 `IntegerWrapping`, `IntegerCheckedConversions`, and `BitOperations` into one
 producer, then independently binds `RangeTests`, `TokenTests`, `WideIntegerTests`,
-`CharacterFactsTests`, `IntegerCheckedArithmeticTests`, `IntegerMathTests`,
+`CharacterFactsTests`, `Utf16CodeUnitsTests`,
+`IntegerCheckedArithmeticTests`, `IntegerMathTests`,
 `IntegerSaturationTests`, `IntegerWrappingTests`,
 `IntegerCheckedConversionsTests`, `BitOperationsTests`, and the Terrum-authored
 `ComponentTestRunner` against its exported declarations.
 Those persisted modules execute through AOT and JIT, including range boundaries,
-conditional-output failure, character classification and hexadecimal mapping,
+conditional-output failure, character classification, hexadecimal mapping and
+UTF-16 scalar decoding,
 aggregate token construction, 32-/64-bit checked arithmetic and accumulation,
 integer-math extrema, saturation and wrapping boundaries, checked-conversion
 publication, bit-operation boundaries, and repeated calls. C# still
@@ -275,15 +278,16 @@ dotnet $cli compile-module consumer self-host\TokenTests.terrum artifacts\token-
 dotnet $cli run-module artifacts\token-tests.trm artifacts\token-values.trm --runtime fail-fast # exits 0
 ```
 
-The bounded `ComponentTestRunner` composes the range, token, checked
-32-/64-bit arithmetic, wide-integer, integer-math, integer-saturation and
-integer-wrapping and checked-conversion checks, plus 32-/64-bit bit-operation
-tests, against one independently compiled producer:
+The bounded `ComponentTestRunner` composes the range, character-fact, UTF-16,
+token, checked 32-/64-bit arithmetic, wide-integer, integer-math,
+integer-saturation, integer-wrapping, checked-conversion and 32-/64-bit
+bit-operation checks against one independently compiled producer:
 
 ```powershell
 $componentSources = @(
     'self-host\SourceRange.terrum',
     'self-host\CharacterFacts.terrum',
+    'self-host\Utf16CodeUnits.terrum',
     'self-host\Token.terrum',
     'self-host\WideIntegerFacts.terrum',
     'self-host\IntegerCheckedArithmetic.terrum',
@@ -301,6 +305,8 @@ $componentExports = @(
     'Terrum.CodeAnalysis.IsLineBreak',
     'Terrum.CodeAnalysis.GetDecimalDigit',
     'Terrum.CodeAnalysis.TryGetHexDigit',
+    'Terrum.CodeAnalysis.DecodeUtf16Scalar',
+    'Terrum.CodeAnalysis.Utf16ScalarWidth',
     'Terrum.CodeAnalysis.Token.#ctor',
     'Terrum.CodeAnalysis.Numerics64.TryAddInt64',
     'Terrum.CodeAnalysis.Numerics64.TrySubtractInt64',
@@ -427,6 +433,7 @@ dotnet $cli @producerArgs
 $componentTests = @(
     'self-host\RangeTests.terrum',
     'self-host\CharacterFactsTests.terrum',
+    'self-host\Utf16CodeUnitsTests.terrum',
     'self-host\TokenTests.terrum',
     'self-host\WideIntegerTests.terrum',
     'self-host\IntegerCheckedArithmeticTests.terrum',

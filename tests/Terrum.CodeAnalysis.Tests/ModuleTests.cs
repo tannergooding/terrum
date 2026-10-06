@@ -208,6 +208,7 @@ public sealed class ModuleTests
         var rangePath = Path.Combine(root, "self-host", "SourceRange.terrum");
         var factsPath = Path.Combine(root, "self-host", "CharacterFacts.terrum");
         var factsTestsPath = Path.Combine(root, "self-host", "CharacterFactsTests.terrum");
+        var utf16CodeUnitsPath = Path.Combine(root, "self-host", "Utf16CodeUnits.terrum");
         var tokenPath = Path.Combine(root, "self-host", "Token.terrum");
         var wideFactsPath = Path.Combine(root, "self-host", "WideIntegerFacts.terrum");
         var checkedFactsPath = Path.Combine(root, "self-host", "IntegerCheckedArithmetic.terrum");
@@ -225,9 +226,12 @@ public sealed class ModuleTests
         var integerWrappingTestsPath = Path.Combine(root, "self-host", "IntegerWrappingTests.terrum");
         var checkedConversionsTestsPath = Path.Combine(root, "self-host", "IntegerCheckedConversionsTests.terrum");
         var bitOperationsTestsPath = Path.Combine(root, "self-host", "BitOperationsTests.terrum");
+        var utf16CodeUnitsTestsPath = Path.Combine(root, "self-host", "Utf16CodeUnitsTests.terrum");
         var entryPath = Path.Combine(root, "self-host", "ComponentTestRunner.terrum");
         var range = SyntaxTree.Parse(await File.ReadAllTextAsync(rangePath).ConfigureAwait(true), rangePath);
         var facts = SyntaxTree.Parse(await File.ReadAllTextAsync(factsPath).ConfigureAwait(true), factsPath);
+        var utf16CodeUnits = SyntaxTree.Parse(await File.ReadAllTextAsync(utf16CodeUnitsPath).ConfigureAwait(true),
+            utf16CodeUnitsPath);
         var token = SyntaxTree.Parse(await File.ReadAllTextAsync(tokenPath).ConfigureAwait(true), tokenPath);
         var wideFacts = SyntaxTree.Parse(await File.ReadAllTextAsync(wideFactsPath).ConfigureAwait(true), wideFactsPath);
         var checkedFacts = SyntaxTree.Parse(await File.ReadAllTextAsync(checkedFactsPath).ConfigureAwait(true),
@@ -243,8 +247,8 @@ public sealed class ModuleTests
             checkedConversionsPath);
         var bitOperations = SyntaxTree.Parse(await File.ReadAllTextAsync(bitOperationsPath).ConfigureAwait(true),
             bitOperationsPath);
-        var library = Compilation.CreateLibrary([range, facts, token, wideFacts, checkedFacts, integerMath,
-            integerSaturation, integerWrapping, checkedConversions, bitOperations]);
+        var library = Compilation.CreateLibrary([range, facts, utf16CodeUnits, token, wideFacts, checkedFacts,
+            integerMath, integerSaturation, integerWrapping, checkedConversions, bitOperations]);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
             "Terrum.CodeAnalysis.SourceRange.TryCreate",
@@ -254,6 +258,8 @@ public sealed class ModuleTests
             "Terrum.CodeAnalysis.IsLineBreak",
             "Terrum.CodeAnalysis.GetDecimalDigit",
             "Terrum.CodeAnalysis.TryGetHexDigit",
+            "Terrum.CodeAnalysis.DecodeUtf16Scalar",
+            "Terrum.CodeAnalysis.Utf16ScalarWidth",
             "Terrum.CodeAnalysis.Token.#ctor",
             "Terrum.CodeAnalysis.Numerics64.TryAddInt64",
             "Terrum.CodeAnalysis.Numerics64.TrySubtractInt64",
@@ -369,6 +375,9 @@ public sealed class ModuleTests
         ]);
         var rangeTests = SyntaxTree.Parse(await File.ReadAllTextAsync(rangeTestsPath).ConfigureAwait(true), rangeTestsPath);
         var factsTests = SyntaxTree.Parse(await File.ReadAllTextAsync(factsTestsPath).ConfigureAwait(true), factsTestsPath);
+        var utf16CodeUnitsTests = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(utf16CodeUnitsTestsPath).ConfigureAwait(true),
+            utf16CodeUnitsTestsPath);
         var tokenTests = SyntaxTree.Parse(await File.ReadAllTextAsync(tokenTestsPath).ConfigureAwait(true), tokenTestsPath);
         var wideTests = SyntaxTree.Parse(await File.ReadAllTextAsync(wideTestsPath).ConfigureAwait(true), wideTestsPath);
         var checkedTests = SyntaxTree.Parse(await File.ReadAllTextAsync(checkedTestsPath).ConfigureAwait(true),
@@ -387,13 +396,14 @@ public sealed class ModuleTests
         var bitOperationsTests = SyntaxTree.Parse(await File.ReadAllTextAsync(bitOperationsTestsPath).ConfigureAwait(true),
             bitOperationsTestsPath);
         var entry = SyntaxTree.Parse(await File.ReadAllTextAsync(entryPath).ConfigureAwait(true), entryPath);
-        var compilation = Compilation.Create([rangeTests, factsTests, tokenTests, wideTests, checkedTests, integerMathTests,
-            integerSaturationTests, integerWrappingTests, checkedConversionsTests, bitOperationsTests, entry],
+        var compilation = Compilation.Create([rangeTests, factsTests, utf16CodeUnitsTests, tokenTests, wideTests,
+            checkedTests, integerMathTests, integerSaturationTests, integerWrappingTests,
+            checkedConversionsTests, bitOperationsTests, entry],
             ModuleCompiler.CreateReference(producer));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.Collection(compilation.SyntaxTrees, tree => Assert.Same(rangeTests, tree),
-            tree => Assert.Same(factsTests, tree), tree => Assert.Same(tokenTests, tree),
-            tree => Assert.Same(wideTests, tree),
+            tree => Assert.Same(factsTests, tree), tree => Assert.Same(utf16CodeUnitsTests, tree),
+            tree => Assert.Same(tokenTests, tree), tree => Assert.Same(wideTests, tree),
             tree => Assert.Same(checkedTests, tree), tree => Assert.Same(integerMathTests, tree),
             tree => Assert.Same(integerSaturationTests, tree), tree => Assert.Same(integerWrappingTests, tree),
             tree => Assert.Same(checkedConversionsTests, tree), tree => Assert.Same(bitOperationsTests, tree),
