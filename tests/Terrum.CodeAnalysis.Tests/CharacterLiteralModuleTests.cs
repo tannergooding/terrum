@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Lexing;
@@ -47,13 +48,14 @@ public sealed class CharacterLiteralModuleTests
                 mut int32 at = 0;
                 mut int32 item = 0;
                 while (at < sourceLength) {
-                    if (sourceLength - at < 5) { return -1; }
+                    if (sourceLength - at < 6) { return -1; }
                     int32 expectedError = int32(Host.Source[at]);
-                    int32 expectedScalar = int32(Host.Source[at + 1]);
-                    int32 expectedErrorStart = int32(Host.Source[at + 2]);
-                    int32 expectedErrorLength = int32(Host.Source[at + 3]);
-                    int32 spellingLength = int32(Host.Source[at + 4]);
-                    at = at + 5;
+                    int32 expectedScalar = int32(Host.Source[at + 1])
+                        | (int32(Host.Source[at + 2]) << 16);
+                    int32 expectedErrorStart = int32(Host.Source[at + 3]);
+                    int32 expectedErrorLength = int32(Host.Source[at + 4]);
+                    int32 spellingLength = int32(Host.Source[at + 5]);
+                    at = at + 6;
                     if (spellingLength < 2 || spellingLength > sourceLength - at) { return -2; }
                     if (!SourceRange.TryCreate(at, spellingLength, init var spelling)
                         || !CharacterLiteralDecodeResult.TryAnalyze(spelling, init var decoded)) {
@@ -178,18 +180,57 @@ public sealed class CharacterLiteralModuleTests
             Assert.Equal(TokenKind.CharacterLiteral, lexed.Tokens[0].Kind);
             Assert.Equal(spelling, lexed.Tokens[0].Text);
             Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[1].Kind);
-            var recordLength = 5 + spelling.Length;
+            var recordLength = 6 + spelling.Length;
             if (records.Count + recordLength > maximumGrantLength)
             {
                 ExecuteRecords();
             }
 
             records.Add(errorCode);
-            records.Add(errorCode == 0 ? value : 0);
+            var expectedScalar = errorCode == 0 ? value : 0;
+            records.Add(expectedScalar & 0xFFFF);
+            records.Add(expectedScalar >> 16);
             records.Add(errorStart);
             records.Add(errorLength);
             records.Add(spelling.Length);
             records.AddRange(spelling.Select(static unit => (int)unit));
+        }
+
+        const int firstSupplementaryScalar = 0x10000;
+        const int supplementaryScalarLimit = 0x110000;
+        const int maximumScalarsPerBatch = 1_600;
+        ExecuteRecords();
+        for (var scalarStart = firstSupplementaryScalar;
+            scalarStart < supplementaryScalarLimit;
+            scalarStart += maximumScalarsPerBatch)
+        {
+            var scalarCount = Math.Min(maximumScalarsPerBatch,
+                supplementaryScalarLimit - scalarStart);
+            var batchText = new StringBuilder(scalarCount * 5);
+            for (var index = 0; index < scalarCount; index++)
+            {
+                var spelling = $"'{char.ConvertFromUtf32(scalarStart + index)}'";
+                batchText.Append(spelling).Append(' ');
+                records.Add(0);
+                records.Add((scalarStart + index) & 0xFFFF);
+                records.Add((scalarStart + index) >> 16);
+                records.Add(0);
+                records.Add(0);
+                records.Add(spelling.Length);
+                records.AddRange(spelling.Select(static unit => (int)unit));
+            }
+
+            var lexed = Lexer.Lex(SourceText.From(batchText.ToString()));
+            Assert.Empty(lexed.Diagnostics);
+            Assert.Equal(scalarCount + 1, lexed.Tokens.Length);
+            for (var index = 0; index < scalarCount; index++)
+            {
+                Assert.Equal(TokenKind.CharacterLiteral, lexed.Tokens[index].Kind);
+                Assert.Equal($"'{char.ConvertFromUtf32(scalarStart + index)}'",
+                    lexed.Tokens[index].Text);
+            }
+            Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[^1].Kind);
+            ExecuteRecords();
         }
         ExecuteRecords();
     }

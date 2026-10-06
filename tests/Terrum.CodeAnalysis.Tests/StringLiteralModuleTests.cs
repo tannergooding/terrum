@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
@@ -55,11 +56,12 @@ public sealed class StringLiteralModuleTests
                 mut int32 at = 0;
                 mut int32 item = 0;
                 while (at < sourceLength) {
-                    if (sourceLength - at < 3) { return -1; }
+                    if (sourceLength - at < 4) { return -1; }
                     bool expectedValid = Host.Source[at] != char16(0);
-                    int32 expectedScalar = int32(Host.Source[at + 1]);
-                    int32 spellingLength = int32(Host.Source[at + 2]);
-                    at = at + 3;
+                    int32 expectedScalar = int32(Host.Source[at + 1])
+                        | (int32(Host.Source[at + 2]) << 16);
+                    int32 spellingLength = int32(Host.Source[at + 3]);
+                    at = at + 4;
                     if (spellingLength < 2 || spellingLength > sourceLength - at) { return -2; }
                     if (!SourceRange.TryCreate(at, spellingLength, init var spelling)) { return -3; }
                     if (StringLiteral.TryCreate(spelling, init var literal)) {
@@ -180,16 +182,53 @@ public sealed class StringLiteralModuleTests
             {
                 Assert.Contains(lexed.Diagnostics, static diagnostic => diagnostic.Code == "TRM0001");
             }
-            var recordLength = 3 + spelling.Length;
+            var recordLength = 4 + spelling.Length;
             if (records.Count + recordLength > maximumGrantLength)
             {
                 ExecuteRecords();
             }
 
             records.Add(valid ? 1 : 0);
-            records.Add(valid ? value : 0);
+            var expectedScalar = valid ? value : 0;
+            records.Add(expectedScalar & 0xFFFF);
+            records.Add(expectedScalar >> 16);
             records.Add(spelling.Length);
             records.AddRange(spelling.Select(static unit => (int)unit));
+        }
+
+        const int firstSupplementaryScalar = 0x10000;
+        const int supplementaryScalarLimit = 0x110000;
+        const int maximumScalarsPerBatch = 2_000;
+        ExecuteRecords();
+        for (var scalarStart = firstSupplementaryScalar;
+            scalarStart < supplementaryScalarLimit;
+            scalarStart += maximumScalarsPerBatch)
+        {
+            var scalarCount = Math.Min(maximumScalarsPerBatch,
+                supplementaryScalarLimit - scalarStart);
+            var batchText = new StringBuilder(scalarCount * 5);
+            for (var index = 0; index < scalarCount; index++)
+            {
+                var spelling = $"\"{char.ConvertFromUtf32(scalarStart + index)}\"";
+                batchText.Append(spelling).Append(' ');
+                records.Add(1);
+                records.Add((scalarStart + index) & 0xFFFF);
+                records.Add((scalarStart + index) >> 16);
+                records.Add(spelling.Length);
+                records.AddRange(spelling.Select(static unit => (int)unit));
+            }
+
+            var lexed = Lexer.Lex(SourceText.From(batchText.ToString()));
+            Assert.Empty(lexed.Diagnostics);
+            Assert.Equal(scalarCount + 1, lexed.Tokens.Length);
+            for (var index = 0; index < scalarCount; index++)
+            {
+                Assert.Equal(TokenKind.StringLiteral, lexed.Tokens[index].Kind);
+                Assert.Equal($"\"{char.ConvertFromUtf32(scalarStart + index)}\"",
+                    lexed.Tokens[index].Text);
+            }
+            Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[^1].Kind);
+            ExecuteRecords();
         }
         ExecuteRecords();
 
