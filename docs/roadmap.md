@@ -393,6 +393,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `fcc586a9` | Provisionally allow compilation-local Copy generic `init ref<T>` publication for fixed non-Boolean/void results with normal-return proof and managed-root cleanup; preserve Boolean vacancy and private module ABI, with target contract unapproved |
 | `e78ccb39` | Provisionally allow compilation-local Copy generic `out T` publication for fixed non-Boolean/void results with normal-return proof and supported output shapes; preserve Boolean/init modes and private module ABI, with target contract unapproved |
 | `fb567a1e` | Provisionally hydrate floating leaves in reached non-unique Copy-struct proof dependencies and non-class concrete signatures, preserving init-mode contracts and excluding managed-class closures |
 | `fcd56190` | Provisionally specialize hosted Copy-only templates for `float32`/`float64`, preserving raw bits, output publication and private semantic/native module boundaries without widening symbolic operations |
