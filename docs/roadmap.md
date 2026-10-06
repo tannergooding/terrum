@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `cb6d3410` | Check duplicate switch constant-label rejection across all supported scalar selector types |
 | `ded27ee2` | Compare switch default-arm selection with hosted conditionals for all supported scalar selector types under both runtime policies |
 | `254bbff9` | Compare scalar frontend switch selectors with hosted conditionals at all supported type boundaries under both runtime policies |
 | `61663624` | Compare the persisted scanner-10 profile with the host lexer for every BMP `\u` escape and surrogate diagnostic |
