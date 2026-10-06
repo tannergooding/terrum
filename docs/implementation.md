@@ -44,6 +44,16 @@ bound constants across rounding boundaries, malformed slices, deterministic
 random valid spellings and 16,000 fractional hex digits under both
 runtime policies. It is not wired into scalar-frontend token reconstruction;
 verification and emission remain hosted.
+The standalone `DecimalFloatLiteral` helper also converts caller-delimited
+decimal numeric slices directly to target-format bits, using exact midpoint
+comparisons rather than an intermediate `float64` for `float32`. Semantic-
+module tests compare both formats with hosted bound constants across ties,
+subnormal and overflow boundaries, malformed slices, deterministic random
+values and long significand/exponent inputs under both runtime policies. Its
+reachable owned-buffer helper signatures are outside the maintained
+source-grant classifier's scalar subset; the helper is not wired into
+scalar-frontend token reconstruction, and verification and emission remain
+hosted.
 Graphs, module sets, native DLLs and persisted AOT images remain outside this
 support.
 Revision 57 provisionally added structured semantic-module caller-unsafe

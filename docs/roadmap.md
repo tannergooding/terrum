@@ -135,6 +135,14 @@ two raw-bit scalar queries are also provisionally integrated into the
 maintained source-grant companion; the source-free library and classifier are
 unchanged. It is not wired into the scalar frontend; source token
 reconstruction, verification and emission remain hosted.
+The standalone `DecimalFloatLiteral` helper also constructs decimal
+`float32`/`float64` bits directly from caller-delimited numeric slices, using
+exact midpoint comparisons and an owned multi-limb workspace.
+Semantic-module parity tests cover ties, subnormal/overflow boundaries,
+malformed slices, deterministic random values and long inputs under both
+runtime policies. The maintained source-grant classifier rejects its
+reachable non-scalar owned-buffer helper signatures; this does not extend
+source-grant DLL, scalar-frontend, or hosted verifier/emitter support.
 
 The bounded Terrum-authored scalar source frontend supports v85 complete
 global-function snapshots and source-order scalar call targets, including

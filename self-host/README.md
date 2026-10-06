@@ -129,6 +129,16 @@ hosted bound constants across IEEE rounding boundaries, malformed spellings,
 deterministic random valid spellings and 16,000 fractional hex digits
 under both runtime policies. It is not connected to scalar-frontend
 reconstruction; verification and emission remain hosted.
+`DecimalFloatLiteral.terrum` similarly converts caller-delimited decimal
+numeric slices directly to `float32` or `float64` bits, without rounding
+`float32` through `float64`. Its exact midpoint comparisons use an owned
+multi-limb workspace and are covered by semantic-module parity tests for ties,
+subnormal and overflow boundaries, malformed spellings, deterministic random
+values and long significand/exponent inputs under both runtime policies. Its
+reachable owned-buffer helper signatures are outside the maintained
+source-grant classifier's scalar subset, so this helper is not a source-grant
+DLL export or scalar-frontend integration; verification and emission remain
+hosted.
 The host test runner still orchestrates compilation and assertions in C#.
 `ComponentTestRunner.terrum` is a bounded Terrum entry harness composing the
 `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`, `Token`,

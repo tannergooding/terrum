@@ -1,0 +1,579 @@
+namespace Terrum.CodeAnalysis;
+
+public static int64 GetDecimalFloat32LiteralBitsOrMinusOne(int32 start, int32 length)
+{
+    return ParseDecimalFloatLiteralOrMinusOne(start, length, true);
+}
+
+public static int64 GetDecimalFloat64LiteralBitsOrMinusOne(int32 start, int32 length)
+{
+    return ParseDecimalFloatLiteralOrMinusOne(start, length, false);
+}
+
+int64 ParseDecimalFloatLiteralOrMinusOne(int32 start, int32 length, bool isFloat32)
+{
+    int32 sourceLength = Host.Source.Length;
+    if (start < 0 || length <= 0 || start > sourceLength || length > sourceLength - start)
+    {
+        return -1;
+    }
+
+    int32 tokenEnd = start + length;
+    mut int32 at = start;
+    mut int32 exponentMarker = tokenEnd;
+    mut int32 significantStart = tokenEnd;
+    mut int32 fractionalDigits = 0;
+    mut int64 significantDigitCount = 0;
+    mut int32 significantPrefixCount = 0;
+    mut bool discardedNonzero = false;
+    mut bool sawPoint = false;
+    mut bool previousDigit = false;
+    mut uint32 firstSignificantDigit = 0;
+    mut int64 exponentMagnitude = 0;
+    mut bool exponentNegative = false;
+    mut bool sawExponent = false;
+    int64 exponentLimit = int64(length) + 4096;
+
+    while (at < tokenEnd)
+    {
+        char16 unit = Host.Source[at];
+        if (unit >= char16(48) && unit <= char16(57))
+        {
+            uint32 digit = uint32(unit) - 48;
+            previousDigit = true;
+            if (sawPoint)
+            {
+                fractionalDigits = fractionalDigits + 1;
+            }
+
+            if (significantStart == tokenEnd && digit != 0)
+            {
+                significantStart = at;
+                firstSignificantDigit = digit;
+            }
+            if (significantStart != tokenEnd)
+            {
+                significantDigitCount = significantDigitCount + 1;
+                if (significantPrefixCount < 768)
+                {
+                    significantPrefixCount = significantPrefixCount + 1;
+                }
+                else if (digit != 0)
+                {
+                    discardedNonzero = true;
+                }
+            }
+
+            at = at + 1;
+        }
+        else if (unit == char16(95))
+        {
+            if (!previousDigit)
+            {
+                return -1;
+            }
+
+            mut int32 next = at + 1;
+            while (next < tokenEnd && Host.Source[next] == char16(95))
+            {
+                next = next + 1;
+            }
+            if (next >= tokenEnd || Host.Source[next] < char16(48) || Host.Source[next] > char16(57))
+            {
+                return -1;
+            }
+
+            previousDigit = false;
+            at = next;
+        }
+        else if (unit == char16(46))
+        {
+            if (sawPoint || !previousDigit || at + 1 >= tokenEnd
+                || Host.Source[at + 1] < char16(48) || Host.Source[at + 1] > char16(57))
+            {
+                return -1;
+            }
+
+            sawPoint = true;
+            previousDigit = false;
+            at = at + 1;
+        }
+        else if (unit == char16(101) || unit == char16(69))
+        {
+            if (!previousDigit)
+            {
+                return -1;
+            }
+
+            exponentMarker = at;
+            sawExponent = true;
+            at = at + 1;
+            break;
+        }
+        else
+        {
+            return -1;
+        }
+    }
+
+    if (!previousDigit)
+    {
+        return -1;
+    }
+
+    if (sawExponent)
+    {
+        if (at < tokenEnd && (Host.Source[at] == char16(43) || Host.Source[at] == char16(45)))
+        {
+            exponentNegative = Host.Source[at] == char16(45);
+            at = at + 1;
+        }
+        if (at >= tokenEnd || Host.Source[at] < char16(48) || Host.Source[at] > char16(57))
+        {
+            return -1;
+        }
+
+        previousDigit = false;
+        while (at < tokenEnd)
+        {
+            char16 unit = Host.Source[at];
+            if (unit >= char16(48) && unit <= char16(57))
+            {
+                previousDigit = true;
+                if (exponentMagnitude < exponentLimit)
+                {
+                    exponentMagnitude = exponentMagnitude * 10 + int64(unit) - 48;
+                    if (exponentMagnitude > exponentLimit)
+                    {
+                        exponentMagnitude = exponentLimit;
+                    }
+                }
+                at = at + 1;
+            }
+            else if (unit == char16(95))
+            {
+                if (!previousDigit)
+                {
+                    return -1;
+                }
+
+                mut int32 next = at + 1;
+                while (next < tokenEnd && Host.Source[next] == char16(95))
+                {
+                    next = next + 1;
+                }
+                if (next >= tokenEnd || Host.Source[next] < char16(48) || Host.Source[next] > char16(57))
+                {
+                    return -1;
+                }
+
+                previousDigit = false;
+                at = next;
+            }
+            else
+            {
+                return -1;
+            }
+        }
+
+        if (!previousDigit)
+        {
+            return -1;
+        }
+    }
+
+    if (at != tokenEnd)
+    {
+        return -1;
+    }
+    if (significantStart == tokenEnd)
+    {
+        return 0;
+    }
+
+    int64 exponent = exponentNegative ? 0 - exponentMagnitude : exponentMagnitude;
+    int64 decimalExponent = significantDigitCount - 1 + exponent - int64(fractionalDigits);
+    mut int32 fractionBits = 52;
+    mut int32 exponentBias = 1023;
+    mut int32 minimumExponent = -1022;
+    mut int32 maximumExponent = 1023;
+    mut int32 minimumSubnormalExponent = -1074;
+    mut int32 minimumDecimalExponent = -324;
+    mut int32 maximumDecimalExponent = 308;
+    mut uint64 infinityBits = 0x7FF0000000000000;
+    if (isFloat32)
+    {
+        fractionBits = 23;
+        exponentBias = 127;
+        minimumExponent = -126;
+        maximumExponent = 127;
+        minimumSubnormalExponent = -149;
+        minimumDecimalExponent = -46;
+        maximumDecimalExponent = 38;
+        infinityBits = 0x7F800000;
+    }
+
+    if (decimalExponent < int64(minimumDecimalExponent))
+    {
+        return 0;
+    }
+    if (decimalExponent > int64(maximumDecimalExponent))
+    {
+        return int64(infinityBits);
+    }
+
+    uint64 hiddenBit = uint64(1) << fractionBits;
+    require OwnedInt32Buffer.TryCreate(183, out var created);
+    mut OwnedInt32Buffer workspace = InitializeDecimalFloatWorkspace(move created);
+
+    mut int64 binaryExponent = FloorDividePositive(
+        decimalExponent * 3_321_928_094_887, 1_000_000_000_000);
+    if (firstSignificantDigit >= 2 && firstSignificantDigit <= 3)
+    {
+        binaryExponent = binaryExponent + 1;
+    }
+    else if (firstSignificantDigit >= 4 && firstSignificantDigit <= 7)
+    {
+        binaryExponent = binaryExponent + 2;
+    }
+    else if (firstSignificantDigit >= 8)
+    {
+        binaryExponent = binaryExponent + 3;
+    }
+
+    workspace = PrepareDecimalFloatPower(move workspace, binaryExponent);
+    workspace = CompareDecimalFloatInputWithDyadic(
+        move workspace, start, exponentMarker, significantStart, significantPrefixCount,
+        discardedNonzero, decimalExponent, 1, binaryExponent);
+    mut int32 comparison = 0;
+    {
+        ReadonlyInt32BufferView values = workspace[..workspace.Count];
+        comparison = values.Read(182);
+    }
+    if (comparison < 0)
+    {
+        binaryExponent = binaryExponent - 1;
+    }
+    else
+    {
+        int64 nextExponent = binaryExponent + 1;
+        workspace = PrepareDecimalFloatPower(move workspace, nextExponent);
+        workspace = CompareDecimalFloatInputWithDyadic(
+            move workspace, start, exponentMarker, significantStart, significantPrefixCount,
+            discardedNonzero, decimalExponent, 1, nextExponent);
+        mut bool reachesNextExponent = false;
+        {
+            ReadonlyInt32BufferView values = workspace[..workspace.Count];
+            reachesNextExponent = values.Read(182) >= 0;
+        }
+        if (reachesNextExponent)
+        {
+            binaryExponent = nextExponent;
+        }
+    }
+
+    if (binaryExponent > int64(maximumExponent))
+    {
+        return int64(infinityBits);
+    }
+
+    mut uint64 low = 0;
+    mut uint64 high = hiddenBit;
+    mut int32 roundingExponent = minimumSubnormalExponent - 1;
+    if (binaryExponent >= int64(minimumExponent))
+    {
+        low = hiddenBit - 1;
+        high = hiddenBit << 1;
+        roundingExponent = int32(binaryExponent) - fractionBits - 1;
+    }
+
+    workspace = PrepareDecimalFloatPower(move workspace, int64(roundingExponent));
+    while (high - low > 1)
+    {
+        uint64 middle = low + (high - low) / 2;
+        uint64 midpointSignificand = middle * 2 + 1;
+        workspace = CompareDecimalFloatInputWithDyadic(
+            move workspace, start, exponentMarker, significantStart, significantPrefixCount,
+            discardedNonzero, decimalExponent, midpointSignificand, int64(roundingExponent));
+        mut bool belowMidpoint = false;
+        {
+            ReadonlyInt32BufferView values = workspace[..workspace.Count];
+            belowMidpoint = values.Read(182) < 0;
+        }
+        if (belowMidpoint)
+        {
+            high = middle;
+        }
+        else
+        {
+            low = middle;
+        }
+    }
+
+    uint64 finalMidpointSignificand = low * 2 + 1;
+    workspace = CompareDecimalFloatInputWithDyadic(
+        move workspace, start, exponentMarker, significantStart, significantPrefixCount,
+        discardedNonzero, decimalExponent, finalMidpointSignificand, int64(roundingExponent));
+    {
+        ReadonlyInt32BufferView values = workspace[..workspace.Count];
+        comparison = values.Read(182);
+    }
+    mut uint64 roundedSignificand = low;
+    if (comparison > 0 || (comparison == 0 && (low & 1) != 0))
+    {
+        roundedSignificand = high;
+    }
+
+    if (binaryExponent < int64(minimumExponent))
+    {
+        return int64(roundedSignificand);
+    }
+    if (roundedSignificand >= hiddenBit << 1)
+    {
+        if (binaryExponent >= int64(maximumExponent))
+        {
+            return int64(infinityBits);
+        }
+        binaryExponent = binaryExponent + 1;
+        roundedSignificand = hiddenBit;
+    }
+
+    uint64 encodedExponent = uint64(binaryExponent + int64(exponentBias));
+    return int64((encodedExponent << fractionBits) | (roundedSignificand - hiddenBit));
+}
+
+OwnedInt32Buffer InitializeDecimalFloatWorkspace(OwnedInt32Buffer workspace)
+{
+    mut OwnedInt32Buffer result = move workspace;
+    mut int32 index = 0;
+    while (index < 183)
+    {
+        require result.TryAppend(0);
+        index = index + 1;
+    }
+
+    result.Set(0, 1);
+    result.Set(1, 1);
+    return move result;
+}
+
+int64 FloorDividePositive(int64 value, int64 divisor)
+{
+    mut int64 quotient = value / divisor;
+    if (value < 0 && value % divisor != 0)
+    {
+        quotient = quotient - 1;
+    }
+    return quotient;
+}
+
+OwnedInt32Buffer PrepareDecimalFloatPower(OwnedInt32Buffer workspace, int64 binaryExponent)
+{
+    mut OwnedInt32Buffer result = move workspace;
+    mut int32 length = 1;
+    mut int32 factor = 2;
+    mut int64 remaining = binaryExponent;
+    if (remaining < 0)
+    {
+        factor = 5;
+        remaining = 0 - remaining;
+    }
+
+    {
+        mut MutableInt32BufferView values = result.SliceMutable(0, result.Count);
+        mut int32 index = 0;
+        while (index < 90)
+        {
+            values.Set(index + 1, 0);
+            index = index + 1;
+        }
+        values.Set(0, 1);
+        values.Set(1, 1);
+
+        index = 0;
+        while (int64(index) < remaining)
+        {
+            mut uint64 carry = 0;
+            mut int32 limb = 0;
+            while (limb < length)
+            {
+                uint64 product = uint64(values.Read(limb + 1)) * uint64(factor) + carry;
+                values.Set(limb + 1, int32(product % 1_000_000_000));
+                carry = product / 1_000_000_000;
+                limb = limb + 1;
+            }
+            if (carry != 0)
+            {
+                require length < 90;
+                length = length + 1;
+                values.Set(length, int32(carry));
+            }
+            index = index + 1;
+        }
+        values.Set(0, length);
+    }
+
+    return move result;
+}
+
+OwnedInt32Buffer CompareDecimalFloatInputWithDyadic(
+    OwnedInt32Buffer workspace,
+    int32 start,
+    int32 exponentMarker,
+    int32 significantStart,
+    int32 significantPrefixCount,
+    bool discardedNonzero,
+    int64 inputDecimalExponent,
+    uint64 significand,
+    int64 binaryExponent
+)
+{
+    mut OwnedInt32Buffer result = move workspace;
+    uint64 factorLow = significand % 1_000_000_000;
+    uint64 factorHigh = significand / 1_000_000_000;
+    mut int32 factorLength = factorHigh == 0 ? 1 : 2;
+    mut int32 comparison = 0;
+    {
+        mut MutableInt32BufferView values = result.SliceMutable(0, result.Count);
+        int32 powerLength = values.Read(0);
+        mut int32 limb = 0;
+        while (limb < 90)
+        {
+            values.Set(92 + limb, 0);
+            limb = limb + 1;
+        }
+
+        mut int32 powerLimb = 0;
+        while (powerLimb < powerLength)
+        {
+            mut uint64 carry = 0;
+            mut int32 factorLimb = 0;
+            while (factorLimb < factorLength)
+            {
+                uint64 factor = factorLimb == 0 ? factorLow : factorHigh;
+                int32 index = 92 + powerLimb + factorLimb;
+                uint64 product = uint64(values.Read(powerLimb + 1)) * factor
+                    + uint64(values.Read(index)) + carry;
+                values.Set(index, int32(product % 1_000_000_000));
+                carry = product / 1_000_000_000;
+                factorLimb = factorLimb + 1;
+            }
+
+            mut int32 carryIndex = 92 + powerLimb + factorLength;
+            while (carry != 0)
+            {
+                uint64 sum = uint64(values.Read(carryIndex)) + carry;
+                values.Set(carryIndex, int32(sum % 1_000_000_000));
+                carry = sum / 1_000_000_000;
+                carryIndex = carryIndex + 1;
+            }
+            powerLimb = powerLimb + 1;
+        }
+
+        mut int32 coefficientLength = powerLength + factorLength;
+        while (coefficientLength > 1 && values.Read(91 + coefficientLength) == 0)
+        {
+            coefficientLength = coefficientLength - 1;
+        }
+        values.Set(91, coefficientLength);
+
+        mut uint32 topLimb = uint32(values.Read(91 + coefficientLength));
+        mut int32 topDigits = 1;
+        while (topLimb >= 10)
+        {
+            topLimb = topLimb / 10;
+            topDigits = topDigits + 1;
+        }
+        int32 coefficientDigits = (coefficientLength - 1) * 9 + topDigits;
+        require coefficientDigits <= 768;
+
+        mut int64 decimalScale = 0;
+        if (binaryExponent < 0)
+        {
+            decimalScale = 0 - binaryExponent;
+        }
+        int64 coefficientDecimalExponent = int64(coefficientDigits) - 1 - decimalScale;
+        if (inputDecimalExponent < coefficientDecimalExponent)
+        {
+            comparison = -1;
+        }
+        else if (inputDecimalExponent > coefficientDecimalExponent)
+        {
+            comparison = 1;
+        }
+        else
+        {
+            mut int32 inputAt = significantStart;
+            mut int32 inputDigitIndex = 0;
+            mut int32 comparedDigits = 0;
+            mut int32 digitsToCompare = significantPrefixCount;
+            if (coefficientDigits > digitsToCompare)
+            {
+                digitsToCompare = coefficientDigits;
+            }
+
+            while (comparedDigits < digitsToCompare && comparison == 0)
+            {
+                mut uint32 inputDigit = 0;
+                if (inputDigitIndex < significantPrefixCount)
+                {
+                    while (inputAt < exponentMarker
+                        && (Host.Source[inputAt] == char16(95) || Host.Source[inputAt] == char16(46)))
+                    {
+                        inputAt = inputAt + 1;
+                    }
+                    inputDigit = uint32(Host.Source[inputAt]) - 48;
+                    inputAt = inputAt + 1;
+                    inputDigitIndex = inputDigitIndex + 1;
+                }
+
+                mut uint32 coefficientDigit = 0;
+                if (comparedDigits < coefficientDigits)
+                {
+                    mut uint32 limbValue = 0;
+                    mut int32 decimalPlace = 0;
+                    if (comparedDigits < topDigits)
+                    {
+                        limbValue = uint32(values.Read(91 + coefficientLength));
+                        decimalPlace = topDigits - comparedDigits - 1;
+                    }
+                    else
+                    {
+                        int32 afterTop = comparedDigits - topDigits;
+                        int32 limbFromTop = afterTop / 9 + 1;
+                        int32 indexFromTop = afterTop % 9;
+                        limbValue = uint32(values.Read(91 + coefficientLength - limbFromTop));
+                        decimalPlace = 8 - indexFromTop;
+                    }
+
+                    mut uint32 divisor = 1;
+                    mut int32 power = 0;
+                    while (power < decimalPlace)
+                    {
+                        divisor = divisor * 10;
+                        power = power + 1;
+                    }
+                    coefficientDigit = (limbValue / divisor) % 10;
+                }
+
+                if (inputDigit < coefficientDigit)
+                {
+                    comparison = -1;
+                }
+                else if (inputDigit > coefficientDigit)
+                {
+                    comparison = 1;
+                }
+                comparedDigits = comparedDigits + 1;
+            }
+
+            if (comparison == 0 && discardedNonzero)
+            {
+                comparison = 1;
+            }
+        }
+        values.Set(182, comparison);
+    }
+
+    return move result;
+}

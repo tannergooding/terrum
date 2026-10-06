@@ -835,3 +835,32 @@ graphs, module sets, AOT, and cross-DLL source propagation remain unchanged
 and unsupported for this experiment. Readable aligned memory, lifetime, and
 immutability remain caller preconditions; there is no general native pointer
 validation or public wrapper. **Status remains unapproved.**
+
+### Decimal floating-literal slice boundary
+
+**Question:** Should the standalone decimal-float converter accept only
+grammar-shaped numeric token slices and remain outside the maintained
+source-grant DLL while its exact-rounding helpers use non-scalar owned-buffer
+signatures?
+
+**Summary:** The hosted decimal path delegates to invariant-culture
+`float.TryParse`/`double.TryParse`, whose accepted spellings are broader than
+the language's numeric tokens. The Terrum helper instead accepts a
+caller-delimited decimal mantissa with optional fractional and exponent
+digits, digit separators only between digits, and no sign because the sign is
+a separate operator. It constructs target-format bits directly and uses an
+owned multi-limb workspace for exact midpoint comparison. The maintained
+source-grant classifier rejects the reachable helper functions because their
+owned-buffer parameters, results and locals are outside its scalar-only
+dependent-function subset. The decimal helper therefore has semantic-module
+coverage only and is not included in the maintained companion.
+
+**Recommendation:** Keep this helper's input contract limited to the decimal
+numeric token shape and preserve the separate unary-sign boundary. Keep its
+implementation and validation within semantic-module execution; do not
+weaken the source-grant classifier or claim maintained-DLL support to
+accommodate its workspace. Reconsider a source-grant export only if an
+exact-rounding storage strategy fits the existing self-contained scalar
+source-dependent contract. This does not change lexer recovery, the hosted
+floating parser, scalar frontend verification/emission, or any accepted
+target contract.
