@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `47c35ecd` | Verify every supplementary Unicode escape through character, string-escape and string-literal source-grant JIT |
 | `0fa46337` | Verify every valid Unicode scalar through native UTF-16 compiler primitives |
 | `49a56eb2` | Verify every supplementary scalar spelling through character- and string-literal source-grant JIT |
 | `24da1f2e` | Exhaustively verify every supplementary scalar and high-surrogate boundary through the test-only native grant ABI |
