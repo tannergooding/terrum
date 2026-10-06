@@ -88,3 +88,31 @@ accepted target contract. Exact export naming, interaction with any future
 cross-DLL source dependency, and whether a higher-level managed invocation
 wrapper is needed remain open. No current source-dependent DLL, compiler
 bootstrap, or public native ABI is supported.
+
+## Provisional test-only experiment
+
+The continuing self-hosting task directs a bounded feasibility experiment;
+this does not approve the proposal or change the implementation boundary
+above. Keep the maintained compiler-primitives DLL and all production
+source-dependent native exports unsupported unless a later decision promotes
+the experiment.
+
+The experiment uses a separate test DLL containing `Utf16CodeUnits`,
+`Utf16Scalar`, and a test-authored export named
+`Terrum.CodeAnalysis.ReadUtf16ScalarForSourceAbiTest`. Its source-dependent
+signature prefixes the source address and `uint32` code-unit count, in that
+order, before the authored scalar parameters. The test adapter takes `at`,
+`end`, and an expected scalar so the ABI exercises a fifth argument on
+Windows x64 while returning the decoder result only when it matches. Internal
+source-dependent calls receive the same hidden source pair; source-independent
+calls and their signatures remain unchanged. No source-dependent imports,
+cross-DLL propagation, aggregate results, or general wrapper are admitted.
+
+A private test helper validates the 16,384-unit limit and null/empty shape,
+pins immutable-for-the-call UTF-16 storage, invokes the export, and unpins
+after synchronous return. The caller remains responsible for readable,
+two-byte-aligned storage and immutability during the call. Tests do not
+dereference invalid pointers. This experiment may establish implementation
+feasibility only; adding source-dependent exports to the maintained library,
+generalizing the ABI, or claiming language/public ABI support requires a
+separate review and decision.
