@@ -2063,6 +2063,8 @@ initialize it. Ownership-set execution also covers conditional unique
 destination vacant, a later true call publishes the owner, and the unchanged
 consumer moves it once across compatible provider replacement under both
 policies.
+Semantic and native provider replacement also reject removing a declared
+`[NoThrow]` or `[DoesNotReturn]` promise retained by the consumer.
 The distinct `out` mode now also accepts ordinary non-unique struct values
 for non-Boolean and void functions, provided the output is initialized on
 every normal return. Public semantic modules, native modules and native
