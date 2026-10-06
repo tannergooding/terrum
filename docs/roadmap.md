@@ -308,6 +308,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7e71c3dd` | Match generated native source positions and inverse offsets to hosted mappings at every offset of `CR` plus each possible UTF-16 code unit |
 | `1d891ea6` | Match native line/character and inverse-offset results to hosted SourceText at both offsets of every UTF-16 code unit |
 | `9c2ab483` | Verify native CRLF pairing and adjacent-line-break counts for every possible UTF-16 code unit following CR under both runtime policies |
 | `2a711178` | Compare generated native line counts with hosted `SourceText` for every single UTF-16 code unit under both runtime policies |
