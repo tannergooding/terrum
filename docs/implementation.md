@@ -2117,7 +2117,9 @@ through both AOT and JIT graph paths. Graph tests also stage scalar and
 unchanged consumer under both policies.
 Both scalar output modes execute through native graphs under each runtime
 policy, and graph replacement rejects switching between `out` and
-`init ref<T>` in either direction.
+`init ref<T>` in either direction. New graph cases cover conditional
+`float32`/`float64` publication in both output modes through AOT and JIT and
+reject replacements that change the floating output format.
 Boolean scalar and 16-byte Copy-struct `out` graph calls also preserve vacancy
 on false: an `init ref<T>` retry succeeds afterward, while a true call publishes
 its output under both runtime policies through AOT and JIT.

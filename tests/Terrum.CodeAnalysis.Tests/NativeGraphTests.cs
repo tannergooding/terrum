@@ -415,6 +415,72 @@ public sealed class NativeGraphTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, "float32", "float64")]
+    [InlineData(NativeRuntimePolicy.FailFast, "float64", "float32")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "float32", "float64")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "float64", "float32")]
+    public async Task FloatingScalarOutputExecutesAcrossGraphAsync(
+        NativeRuntimePolicy policy, string outputType, string replacementType)
+    {
+        var leafSource = $"public bool Leaf(bool publish, out {outputType} result) "
+            + "{ if (!publish) { return false; } result = 7.75; return true; }";
+        var replacementSource = $"public bool Leaf(bool publish, out {replacementType} result) "
+            + "{ if (!publish) { return false; } result = 7.75; return true; }";
+        var consumerSource = $"int32 Main() {{ return Leaf(true, out var result) "
+            + "&& result == 7.75 ? 42 : 0; }";
+
+        var leaf = Leaf(leafSource, policy);
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
+            NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
+        Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
+            [leaf], policy);
+
+        NativeModuleCompiler.ValidateGraph(root, [leaf]);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [leaf],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [leaf],
+            CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+
+        var replacement = Leaf(replacementSource, policy);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(root, [replacement]));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, "float32", "float64")]
+    [InlineData(NativeRuntimePolicy.FailFast, "float64", "float32")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "float32", "float64")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "float64", "float32")]
+    public async Task FloatingInitReferenceExecutesAcrossGraphAsync(
+        NativeRuntimePolicy policy, string outputType, string replacementType)
+    {
+        var leafSource = $"public bool Leaf(bool publish, init ref<{outputType}> result) "
+            + "{ if (!publish) { return false; } result = 7.75; return true; }";
+        var replacementSource = $"public bool Leaf(bool publish, init ref<{replacementType}> result) "
+            + "{ if (!publish) { return false; } result = 7.75; return true; }";
+        var consumerSource = $"int32 Main() {{ return Leaf(true, init var result) "
+            + "&& result == 7.75 ? 42 : 0; }";
+
+        var leaf = Leaf(leafSource, policy);
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
+            NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
+        Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
+            [leaf], policy);
+
+        NativeModuleCompiler.ValidateGraph(root, [leaf]);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [leaf],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [leaf],
+            CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+
+        var replacement = Leaf(replacementSource, policy);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(root, [replacement]));
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast, false)]
     [InlineData(NativeRuntimePolicy.FailFast, true)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
