@@ -2051,18 +2051,20 @@ non-Boolean and void results require complete initialization on every normal
 return. Exceptional paths do not publish. This hosted result contract does not
 make the bounded scalar source projections standalone: single-function v81
 and complete-program v82 now carry this contract for scalar `init ref<T>`
-declarations through the same hosted verifier and emitter. Semantic and native
-semantic/native consumer and graph replacement checks reject changing a
-same-typed output parameter between `out` and `init ref<T>`; compatibility does not normalize their
-distinct publication contracts. Native consumer sets also bind named scalar
-`init ref<T>` outputs alongside independent providers under both runtime
+declarations through the same hosted verifier and emitter. Semantic/native
+consumer and graph replacement checks reject changing a same-typed output
+parameter between `out` and `init ref<T>`; compatibility does not normalize
+their distinct publication contracts. Native consumer sets also bind named
+scalar `init ref<T>` outputs alongside independent providers under both runtime
 policies. Under checked exceptions, a provider write followed by failure leaves
 the destination vacant in a consumer set, permitting a later provider call to
-initialize it. Ownership-set execution also covers conditional unique
-`init ref<T>` publication: false after constructing the value leaves the
-destination vacant, a later true call publishes the owner, and the unchanged
-consumer moves it once across compatible provider replacement under both
-policies.
+initialize it. Native graph execution likewise retains vacancy after a checked
+provider failure, allowing a later provider call to initialize the destination
+through both AOT and JIT graph paths. Ownership-set execution also covers
+conditional unique `init ref<T>` publication: false after constructing the
+value leaves the destination vacant, a later true call publishes the owner,
+and the unchanged consumer moves it once across compatible provider
+replacement under both policies.
 Semantic/native module and native module-set replacement reject removing a
 declared `[NoThrow]` or `[DoesNotReturn]` promise retained by the consumer.
 The distinct `out` mode now also accepts ordinary non-unique struct values

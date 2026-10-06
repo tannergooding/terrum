@@ -403,6 +403,53 @@ public sealed class NativeGraphTests
     }
 
     [Fact]
+    public async Task CheckedGraphFailureLeavesInitRefOutputVacantForRetryAsync()
+    {
+        const NativeRuntimePolicy policy = NativeRuntimePolicy.CheckedExceptions;
+        const string ProviderSource = """
+            public void Fail(init ref<int32> result) { result = 42; require false; }
+            public void Complete(init ref<int32> result) { result = 43; }
+            """;
+        const string ConsumerSource = """
+            int32 Main() {
+                init int32 result;
+                unsafe {
+                    try {
+                        Fail(init result);
+                        return 1;
+                    } catch { }
+                }
+                Complete(init result);
+                return result;
+            }
+            """;
+
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(ProviderSource),
+            (BoundRuntimePolicy)policy);
+        Assert.False(providerCompilation.HasErrors,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = NativeModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(providerCompilation.Program), ["Fail", "Complete"], "NodeB", policy);
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+            NativeModuleCompiler.CreateGraphReference([provider]), (BoundRuntimePolicy)policy);
+        Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
+            [provider], policy);
+
+        NativeModuleCompiler.ValidateGraph(root, [provider]);
+        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(root, [provider],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        var framework = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = framework.Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration directory.");
+        var apphost = Path.Combine(
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..")),
+            "artifacts", "bin", "sources", "terrumc", configuration, framework.Name, "terrumc.exe");
+        Assert.Equal(43, await NativeModuleCompiler.RunGraphJitAsync(root, [provider],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+    }
+
+    [Fact]
     public async Task SharedLeafDiamondIsAcyclicAndBindsEveryImportToItsOwnerAsync()
     {
         var leaf = Leaf("public int32 Leaf() { return 40; }");
