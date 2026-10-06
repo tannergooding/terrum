@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `58efc268` | Verify Boolean `out` vacancy on false and publication on true across native graphs under both runtime policies |
 | `bd345edf` | Verify both scalar `out` and `init ref<T>` execution and replacement directions across native graphs under both runtime policies |
 | `1e7c69a8` | Verify conditional scalar `init ref<T>` publication across native graphs under both runtime policies |
 | `82971fc4` | Keep scalar `init ref<T>` vacant after checked failure across native graph calls |
