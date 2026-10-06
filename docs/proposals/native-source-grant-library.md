@@ -89,6 +89,48 @@ cross-DLL source dependency, and whether a higher-level managed invocation
 wrapper is needed remain open. No current source-dependent DLL, compiler
 bootstrap, or public native ABI is supported.
 
+## Promotion decisions still required
+
+### Where source-grant shape is validated
+
+**Question:** Should each raw native export validate the source pointer/count
+shape and the maximum extent, or should those be mandatory caller
+preconditions?
+
+**Summary:** The feasibility experiment's private managed helper rejects a
+null pointer with a nonzero count and counts above 16,384 before invocation.
+Generated code consumes the supplied count for length and bounds checks, but
+does not validate the raw pointer or enforce the maximum. Native code cannot
+establish that an arbitrary address is readable without dereferencing it.
+
+**Recommendation:** Make `(count == 0 || source != null)` and
+`count <= 16,384` caller preconditions on the raw internal ABI. Require any
+supported managed invocation adapter to validate both before pinning and
+dispatch. Keep readable extent, two-byte alignment, lifetime and immutability
+as caller obligations; do not probe arbitrary pointers. The raw export must
+not acquire a new failure convention solely for invalid external pointers.
+The test helper's validation establishes adapter behavior only, not raw-export
+validation.
+
+### How callers learn the effective export signature
+
+**Question:** How does a caller discover that a source-dependent export has
+the hidden source pair when dependence is inferred from its transitive local
+call graph?
+
+**Summary:** Adding a source read in a private callee can change an export's
+effective native signature without changing its authored parameters or export
+name. The test experiment uses handwritten delegates for known fixtures, so
+it does not establish a production caller-binding mechanism.
+
+**Recommendation:** For any promoted managed path, generate its invocation
+stub from the same verified export set used for DLL emission, including the
+hidden source pair only for source-dependent exports. Do not require callers
+to infer the ABI from source bodies or hand-maintain delegate signatures.
+Direct unmanaged calls remain an internal rebuild-coupled ABI obligation, not
+a stable C ABI; no new semantic-module metadata is needed solely to generate
+the stub.
+
 ## Provisional test-only experiment
 
 The continuing self-hosting task directs a bounded feasibility experiment;
