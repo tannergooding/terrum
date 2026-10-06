@@ -478,6 +478,17 @@ public sealed class CallerUnsafeTests
         Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(graphConsumer, [producer],
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
 
+        var safeReplacementSource = Source
+            .Replace("public unsafe int32 Read(int32 offset)", "public int32 Read(int32 offset)",
+                StringComparison.Ordinal)
+            .Replace("return Number + offset;", "return Number + offset + 1;", StringComparison.Ordinal);
+        var safeReplacement = NativeModuleCompiler.CreateProducer(
+            CompileLibrary(safeReplacementSource, policy), ["Value.#ctor", "Value.Read"],
+            "UnsafeValue", runtimePolicy);
+        NativeModuleCompiler.ValidateGraph(graphConsumer, [safeReplacement]);
+        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(graphConsumer, [safeReplacement],
+            TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
+
         var setReference = NativeModuleCompiler.CreateReferenceSet(providers);
         var setCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), setReference, policy);
         Assert.False(setCompilation.HasErrors,
@@ -486,6 +497,10 @@ public sealed class CallerUnsafeTests
             Assert.IsType<BoundProgram>(setCompilation.Program), providers, runtimePolicy);
         NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
         Assert.Equal(42, await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
+            TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
+        var replacementProviders = new[] { safeReplacement, helper };
+        NativeModuleCompiler.ValidateConsumerSet(consumerSet, replacementProviders);
+        Assert.Equal(43, await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, replacementProviders,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
     }
 

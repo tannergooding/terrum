@@ -86,6 +86,8 @@ support to ordinary instance methods on public, non-unique `Copy` structs
 whose layouts are exportable. The receiver must be readonly, and explicit
 parameters and the result must be scalar, by-value contracts. Readers
 reconstruct call authorization only from persisted `unsafe { }` scopes.
+An unsafe import remains compatible with a safe replacement across semantic
+links and native graph/module-set links under both runtime policies.
 Static, mutable-receiver, constructor, class, accessor, operator, field,
 reference/output and non-scalar member contracts remain unsupported; executable
 TRRM member support is unchanged. This experiment does not approve the broader
