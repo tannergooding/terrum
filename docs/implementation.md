@@ -2612,9 +2612,14 @@ exact selected export descriptors and verifies that changing only a private
 callee changes whether the invocation includes the hidden source pair, while
 the authored export signature stays unchanged. The managed test adapter pins
 the supplied UTF-16 array for each synchronous call, and production
-`EmitLibrary` continues to reject source-dependent programs. This is
-feasibility-test evidence only: production native source-grant DLL support
-remains unapproved and unsupported.
+`EmitLibrary` continues to reject source-dependent programs. The test-only
+classifier also admits pre-tested structured loops with no separate iterator,
+while rejecting post-tested loops, separate iterators and loop transfers. A
+scalar source-line-count export matches hosted `SourceText` for all supported
+line breaks, CRLF pairing, malformed UTF-16, excluded separators, empty input
+and maximum-length grants under both runtime policies. This is feasibility-
+test evidence only: production native source-grant DLL support remains
+unapproved and unsupported.
 The frontend retains its source-grant and hosted verifier/emitter boundaries.
 `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`
 projects typed facts or scanner/shape errors for inspection. Compilation

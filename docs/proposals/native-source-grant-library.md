@@ -176,11 +176,15 @@ continues to reject source grants. Tests compile the two UTF-16 components
 and test adapters through hosted binding, then mark that test IR as a library
 without adding a library-buffer compilation API or changing semantic metadata.
 Admission is deliberately narrower than the candidate contract: only
-self-contained structured `bool`, `char16`, `int32`, `uint32`, and `void`
-functions are accepted. Blocks, initialized locals, assignments, expression
-statements, conditionals, requirements, returns, scalar expressions, and
-local calls are explicitly visited; every other shape is rejected. Loops,
-cleanup regions, indexed graphs, aggregates, output loans, intrinsic
+self-contained structured `bool`, `char16`, `int32`, `uint32`, `int64`,
+`uint64`, and `void` functions are accepted. Blocks, initialized locals,
+assignments, expression statements, conditionals, requirements, returns,
+scalar expressions, and local calls are explicitly visited. It also admits
+pre-tested structured loops whose `BoundWhile` has no separate iterator;
+post-tested loops, loops with a separate iterator, and `break`/`continue`
+remain rejected. Source forms lowered to this same bound shape are
+necessarily admitted as well.
+Cleanup regions, indexed graphs, aggregates, output loans, intrinsic
 functions, and external declarations are not admitted.
 
 Direct source length/read expressions and the transitive local call graph
@@ -251,10 +255,33 @@ The reject-by-default experiment admits only self-contained structured
 These results establish feasibility of the provisional generated ABI only.
 They do not establish native support for the existing four-operation
 `SourceText`/`SourceLines` facade, whose current components require output
-parameters, structures and loops that the experiment rejects. Any promotion
-supported directly by this experiment is limited to its admitted structured
-scalar leaf exports; adopting the source facade would require separate
-implementation and validation evidence.
+parameters and structures outside the experiment. The scalar line-scan
+fixture does not change that boundary; adopting the source facade would
+require separate implementation and validation evidence.
+
+### Test-only increment: structured line scans
+
+**Question:** Should the feasibility classifier admit structured pre-tested
+loops without a separate iterator for scalar-returning source-dependent
+helpers, without admitting the output parameters or aggregate results needed
+by the full source facade?
+
+**Summary:** The test-only classifier now admits `BoundWhile` only when
+`Iterator` is null and `IsPostTested` is false, recursively visiting its
+condition and body for source-dependence. The line-count fixture starts at one
+(including empty input), treats CRLF as one break, and counts CR, LF, NEL, LS
+and PS as line breaks. Under both runtime policies, generated-binding results
+match `SourceText.From(text).Lines.Length` across empty/null grants, each
+supported line ending, mixed and trailing endings, malformed UTF-16, NUL,
+excluded VT/FF, and maximum-length inputs. Explicit maximum-bound checks cover
+16,384 plain units, 16,384 LF units, 8,192 CRLF pairs and a final CR; the
+16,385-unit grant remains rejected before dispatch.
+
+**Recommendation:** Keep this admission confined to the test-only
+feasibility path. Continue rejecting post-tested loops, separate iterators,
+loop transfers, output loans, aggregate types, the four-operation source
+facade, maintained DLL exports and production caller binding. These parity
+tests add implementation evidence only and do not approve the proposal.
 Public library emission, native packages, production CLI paths, maintained
 compiler-primitives exports, JIT execution, scanner profiles, executables,
 graphs, module sets, AOT, and cross-DLL source propagation remain unchanged

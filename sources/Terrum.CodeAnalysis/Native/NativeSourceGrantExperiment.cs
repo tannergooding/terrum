@@ -90,6 +90,10 @@ internal static class NativeSourceGrantExperiment
                         VisitStatement(conditional.Else, function);
                     }
                     break;
+                case BoundWhile loop when loop.Iterator is null && !loop.IsPostTested:
+                    VisitExpression(loop.Condition, function);
+                    VisitStatement(loop.Body, function);
+                    break;
                 case BoundReturn result:
                     if (result.Value is not null)
                     {

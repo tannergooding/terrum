@@ -15,6 +15,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Text;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -23,6 +24,7 @@ public sealed class NativeSourceGrantExperimentTests
 {
     private const string ReadExport = "Terrum.CodeAnalysis.ReadUtf16ScalarForSourceAbiTest";
     private const string FlowExport = "Terrum.CodeAnalysis.SourceFlowForSourceAbiTest";
+    private const string LineCountExport = "Terrum.CodeAnalysis.SourceLineCountForSourceAbiTest";
     private const string LengthExport = "Terrum.CodeAnalysis.SourceLengthForSourceAbiTest";
     private const string BoundaryExport = "Terrum.CodeAnalysis.SourceBoundaryForSourceAbiTest";
     private const string FreeExport = "Terrum.CodeAnalysis.SourceFreeForSourceAbiTest";
@@ -370,6 +372,86 @@ public sealed class NativeSourceGrantExperimentTests
         }
     }
 
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void GeneratedBindingsRunBoundedSourceLineScansAgainstHostedSourceText(BoundRuntimePolicy policy)
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string LineCountFixture = """
+            public int32 SourceLineCountForSourceAbiTest() {
+                mut int32 lineCount = 1;
+                mut int32 at = 0;
+                while (at < Host.Source.Length) {
+                    char16 current = Host.Source[at];
+                    if (current == char16(13) && at + 1 < Host.Source.Length
+                        && Host.Source[at + 1] == char16(10)) {
+                        lineCount = lineCount + 1;
+                        at = at + 1;
+                    }
+                    else if (current == char16(10) || current == char16(13)
+                        || current == char16(133) || current == char16(8232)
+                        || current == char16(8233)) {
+                        lineCount = lineCount + 1;
+                    }
+                    at = at + 1;
+                }
+                return lineCount;
+            }
+            """;
+        var program = Compile(policy, [], LineCountFixture);
+        var function = Assert.Single(program.Functions,
+            static function => function.Name == LineCountExport);
+        var dependencies = Classify(program);
+        Assert.True(dependencies[program.Functions.IndexOf(function)]);
+
+        var emitted = EmitExperiment(program, [LineCountExport], (NativeRuntimePolicy)policy);
+        var export = Assert.Single(emitted.Exports);
+        Assert.True(export.SourceDependent);
+        Assert.Empty(export.ParameterTypes);
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-lines-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(path, emitted.Image);
+        try
+        {
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var bindings = new NativeSourceGrantTestBindings(module, emitted.Exports);
+                string[] fixtures = [
+                    "", "plain", "\r", "\n", "\u0085", "\u2028", "\u2029", "\r\n",
+                    "\r\r\n\n\r", "a\r\nb\rc\nd\u0085e\u2028f\u2029",
+                    "\0\uD800\r\n\uDC00\u000B\u000C", new string('x', 16_384),
+                    new string('\n', 16_384), string.Concat(Enumerable.Repeat("\r\n", 8_192)),
+                    new string('x', 16_383) + "\r",
+                ];
+                foreach (var text in fixtures)
+                {
+                    Assert.Equal(SourceText.From(text).Lines.Length,
+                        bindings.Invoke<int>(LineCountExport, text.ToCharArray()));
+                }
+                Assert.Equal(1, bindings.Invoke<int>(LineCountExport, null));
+                Assert.Equal(1, bindings.Invoke<int>(LineCountExport, []));
+                Assert.Equal(1, bindings.Invoke<int>(LineCountExport, new string('x', 16_384).ToCharArray()));
+                Assert.Equal(16_385,
+                    bindings.Invoke<int>(LineCountExport, new string('\n', 16_384).ToCharArray()));
+                Assert.Equal(8_193, bindings.Invoke<int>(LineCountExport,
+                    string.Concat(Enumerable.Repeat("\r\n", 8_192)).ToCharArray()));
+                Assert.Equal(2, bindings.Invoke<int>(LineCountExport,
+                    (new string('x', 16_383) + "\r").ToCharArray()));
+                Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    bindings.Invoke<int>(LineCountExport, new char[16_385]));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void KeepsProductionEmissionAndUnsupportedExperimentShapesRejected()
     {
@@ -389,14 +471,17 @@ public sealed class NativeSourceGrantExperimentTests
             program with { EntryPoint = 0 }, [ReadExport], NativeRuntimePolicy.FailFast));
 
         foreach (var extra in new[] {
-            "int32 Loop() { mut int32 n = 0; while (n < Host.Source.Length) { n = n + 1; } return n; }",
+            "int32 Loop() { mut int32 n = 0; do { n = n + 1; } while (n < Host.Source.Length); return n; }",
+            "int32 Loop() { mut int32 n = 0; while (n < Host.Source.Length) { n = n + 1; break; } return n; }",
+            "int32 Loop() { mut int32 n = 0; for (mut int32 i = 0; i < Host.Source.Length; i = i + 1) { n = n + 1; continue; } return n; }",
             "int32 Cleanup() { try { return int32(Host.Source[0]); } finally { int32 n = 0; } }",
             "public struct Pair { public int32 A; public int32 B; } public Pair Aggregate(Pair value) { return value; }",
         })
         {
             var unsupported = Compile(BoundRuntimePolicy.FailFast, [], extra);
-            Assert.Throws<NotSupportedException>(() => EmitExperiment(
-                unsupported, [ReadExport], NativeRuntimePolicy.FailFast));
+            var exception = Record.Exception(() =>
+                EmitExperiment(unsupported, [ReadExport], NativeRuntimePolicy.FailFast));
+            Assert.True(exception is NotSupportedException, $"{extra}: {exception}");
         }
         var external = program.Functions[0] with { IsExternal = true, Body = new BoundBlock([], default) };
         Assert.Throws<ArgumentException>(() => EmitExperiment(
