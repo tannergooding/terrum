@@ -28,6 +28,7 @@ public sealed class NativeSourceGrantLibraryTests
     private const string SourceLineEndExport = "Terrum.CodeAnalysis.GetSourceLineEndOrMinusOne";
     private const string SourceOffsetExport = "Terrum.CodeAnalysis.GetSourceOffsetOrMinusOne";
     private const string SourceLengthExport = "Terrum.CodeAnalysis.GetSourceTextLength";
+    private const string CanGetSourceRangeExport = "Terrum.CodeAnalysis.CanGetSourceRange";
     private const string LineCountExport = "Terrum.CodeAnalysis.GetSourceLineCount";
     private const string CanParseUInt64Export = "Terrum.CodeAnalysis.Numerics64.CanParseUInt64Base";
     private const string ParseUInt64Export = "Terrum.CodeAnalysis.Numerics64.ParseUInt64Base";
@@ -407,6 +408,55 @@ public sealed class NativeSourceGrantLibraryTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void SourceRangeValidityMatchesHostedGetSubText(BoundRuntimePolicy policy)
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var sourceRangeValidationPath = Path.Combine(RepositoryRoot(), "self-host", "SourceRangeValidation.terrum");
+        var compilation = Compilation.CreateLibrary([
+            SyntaxTree.Parse(File.ReadAllText(sourceRangeValidationPath), sourceRangeValidationPath),
+        ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+            IsInvocationScoped = true,
+        }], (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
+            Assert.IsType<BoundProgram>(compilation.Program), [CanGetSourceRangeExport],
+            (NativeRuntimePolicy)policy);
+        var export = Assert.Single(artifact.Exports);
+        Assert.True(export.SourceDependent);
+        Assert.Equal(PrimitiveType.Bool, export.ReturnType);
+        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], export.ParameterTypes.ToArray());
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-range-validity-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(path, artifact.Image);
+        try
+        {
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var bindings = new NativeSourceGrantTestBindings(module,
+                    [.. artifact.Exports.Select(static export => (export.Name, export.SourceDependent,
+                        export.ReturnType, export.ParameterTypes))]);
+                foreach (var sample in LineCountSamples.Append(new string('x', 16_384)))
+                {
+                    var source = sample.ToCharArray();
+                    var hosted = SourceText.From(sample);
+                    AssertSourceRangeValidityMatches(bindings, source, hosted);
+                }
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public void SourceOffsetMatchesHostedTryGetOffset(BoundRuntimePolicy policy)
     {
         Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -649,7 +699,8 @@ public sealed class NativeSourceGrantLibraryTests
                         ?? throw new InvalidDataException("Missing parameter type.")))
                     .ToImmutableArray()))
             .ToImmutableArray();
-        Assert.Equal([DecodeScalarExport, SourceCharacterPositionExport, SourceCodeUnitExport,
+        Assert.Equal([CanGetSourceRangeExport, DecodeScalarExport, SourceCharacterPositionExport,
+            SourceCodeUnitExport,
             SourceLineContentEndExport, LineCountExport, SourceLineEndExport, SourceLineNumberExport,
             SourceOffsetExport, SourceLengthExport, CanParseChar16Export,
             CanParseInt32Export, CanParseInt64Export, CanParseUInt32Export, CanParseUInt64Export,
@@ -702,6 +753,7 @@ public sealed class NativeSourceGrantLibraryTests
                 {
                     AssertSourceLineEndMatches(bindings, source, hosted, line, true);
                 }
+                AssertSourceRangeValidityMatches(bindings, source, hosted);
                 Assert.Equal(SourceText.From(sample).Length,
                     bindings.Invoke<int>(SourceLengthExport, source));
                 for (var position = 0; position < hosted.Length; position++)
@@ -735,6 +787,8 @@ public sealed class NativeSourceGrantLibraryTests
             AssertMaximumSourcePositionCases(bindings);
             AssertSourceLineEndCases(bindings, new string('\n', 16_384),
                 0, 8_192, 16_383, 16_384);
+            var maximumSource = new string('x', 16_384);
+            AssertSourceRangeValidityMatches(bindings, maximumSource.ToCharArray(), SourceText.From(maximumSource));
             _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
                 bindings.Invoke<int>(ReadScalarExport, new char[16_385], 0, 1));
             var singleCodeUnit = new char[1];
@@ -981,6 +1035,44 @@ public sealed class NativeSourceGrantLibraryTests
         foreach (var line in lines)
         {
             AssertSourceLineEndMatches(bindings, source, hosted, line, true);
+        }
+    }
+
+    private static void AssertSourceRangeValidityMatches(NativeSourceGrantTestBindings bindings,
+        char[] source, SourceText hosted)
+    {
+        int[] boundaries = [
+            int.MinValue,
+            -1,
+            0,
+            1,
+            hosted.Length / 2,
+            hosted.Length - 1,
+            hosted.Length,
+            hosted.Length + 1,
+            int.MaxValue,
+        ];
+        foreach (var start in boundaries)
+        {
+            foreach (var length in boundaries)
+            {
+                var expected = IsHostedSourceRangeValid(hosted, start, length);
+                var actual = bindings.Invoke<byte>(CanGetSourceRangeExport, source, start, length);
+                Assert.Equal(expected ? (byte)1 : (byte)0, actual);
+            }
+        }
+    }
+
+    private static bool IsHostedSourceRangeValid(SourceText hosted, int start, int length)
+    {
+        try
+        {
+            _ = hosted.GetSubText(new TextSpan(start, length));
+            return true;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return false;
         }
     }
 

@@ -1,0 +1,11 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool CanGetSourceRange(int32 start, int32 length)
+{
+    int32 sourceLength = Host.Source.Length;
+    if (start < 0 || length < 0 || start > sourceLength)
+    {
+        return false;
+    }
+    return length <= sourceLength - start;
+}

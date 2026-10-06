@@ -2685,6 +2685,11 @@ line-break unit and the including-break end is after the complete break, so
 the latter may be the next line's start and is not a valid character position
 on the preceding non-final line. Reconstructing extents for all lines is
 quadratic, not indexed lookup.
+`CanGetSourceRange(start, length)` provisionally returns whether the hosted
+source-slice range can be extracted, including a zero-length range at EOF.
+It rejects negative or out-of-snapshot bounds before subtracting the start
+from source length; the scalar predicate does not export a `SourceRange`
+value or validate raw grant preconditions.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under

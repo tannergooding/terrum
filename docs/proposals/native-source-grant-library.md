@@ -198,6 +198,29 @@ validation result for invalid pointers, oversized grants or other raw ABI
 preconditions. Keep the source-free DLL and classifier boundary unchanged,
 and do not infer support for the complete source facade or a stable ABI.
 
+### Provisional scalar source-range validation export
+
+**Question:** Should the maintained companion expose source-range validity as
+a scalar predicate without returning an aggregate `SourceRange`?
+
+**Summary:** `SourceText.TryGetSourceRange` accepts nonnegative `start` and
+`length` when `start <= Host.Source.Length` and `length <=
+Host.Source.Length - start`, then constructs the range. The subtraction form
+avoids signed overflow, and the accepted source bound makes every resulting
+end representable. A scalar Boolean can preserve that success contract
+without the aggregate output closure that the source-grant classifier
+rejects. Hosted C# `SourceText.GetSubText(TextSpan)` provides an executable
+oracle for the same negative, overflowing and out-of-snapshot boundaries.
+
+**Recommendation:** Include only
+`CanGetSourceRange(int32 start, int32 length) -> bool` as provisional
+evidence. Return true exactly when the hosted `TextSpan` can be extracted
+from the same source snapshot, including a zero-length range at EOF; return
+false for negative, overflowing or out-of-snapshot ranges. Check the start
+before subtracting it from source length. Keep aggregate `SourceRange`
+exports and output closures, the source-free DLL, classifier boundary and ABI
+promotion decision unchanged.
+
 ### Provisional scalar source-offset export
 
 **Question:** Should the maintained companion expose the hosted line/character
