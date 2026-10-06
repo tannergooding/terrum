@@ -258,7 +258,8 @@ public sealed class StringLiteralEncodingModuleTests
             bmpTextBuilder.Append((char)codeUnit);
             bmpSpellingBuilder.Append("\\u").Append(codeUnit.ToString("X4", CultureInfo.InvariantCulture));
             bmpScalarCount++;
-            if (bmpScalarCount == maximumBmpScalarsPerBatch)
+            if (bmpScalarCount == maximumBmpScalarsPerBatch
+                || codeUnit == 0x7F || codeUnit == 0xFF)
             {
                 VerifyBmpBatch(bmpBatchStart);
             }

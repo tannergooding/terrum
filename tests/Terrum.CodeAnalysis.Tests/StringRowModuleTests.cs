@@ -216,7 +216,7 @@ public sealed class StringRowModuleTests
             textBuilder.Append(new Rune(scalar).ToString());
             spellingBuilder.Append($"\\U{scalar:X8}");
             scalarCount++;
-            if (scalarCount == maximumScalarsPerBatch)
+            if (scalarCount == maximumScalarsPerBatch || scalar == 0x7F)
             {
                 VerifyBatch();
             }

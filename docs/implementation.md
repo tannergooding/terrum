@@ -39,8 +39,9 @@ in both direct and escaped spellings, and the same invalid escaped-surrogate
 set. `StringRow` name/namespace encoders cover ASCII, UTF-8, UTF-16LE and
 UTF-32LE. Persisted semantic-module JIT tests compare UTF-8, UTF-16LE and
 UTF-32LE name/namespace rows with the hosted string-table writer for every
-nonzero Unicode scalar in bounded batches; ASCII batches reject non-ASCII
-contents. The fixtures also cover empty names, unrepresentable ASCII and
+nonzero Unicode scalar in bounded batches; the batch boundary exhaustively
+checks successful ASCII rows and rejects non-ASCII contents in ASCII batches.
+The fixtures also cover empty names, unrepresentable ASCII and
 embedded-zero rejection. Ordinal decoded-scalar name and namespace comparison
 APIs match hosted ordinal equality for all nonzero Unicode scalar values in
 bounded batches, using case-varied `\U` spellings, and reject invalid
@@ -79,8 +80,9 @@ Persisted semantic-module JIT tests also compare
 units and LE/BE bytes, strict ASCII and Latin-1, and UTF-32 LE/BE bytes with
 host encoders across fresh grants under both runtime policies. They cover
 every valid Unicode scalar input in bounded batches across all listed
-encodings, including strict ASCII/Latin-1 rejection. The persisted JIT tests
-additionally cover `IntegerParsing` for radices 2–36, `SourceLineIndex`
+encodings, including successful encoding of every ASCII and Latin-1 scalar
+value and strict rejection beyond those single-byte ranges. The persisted JIT
+tests additionally cover `IntegerParsing` for radices 2–36, `SourceLineIndex`
 counts/extents/position mapping/offset lookup, and streaming `SourceLines`
 ranges and coordinates across fresh grants. A test-only formatter wrapper
 also compares `IntegerFormatting` output with expected text from fresh grants;
