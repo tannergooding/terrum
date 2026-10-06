@@ -20,10 +20,10 @@ surrogate diagnostics, every valid supplementary `\U` scalar, and all 2,048
 surrogate-valued `\U` rejections against the hosted lexer; above-maximum
 boundaries are checked as well. Every valid supplementary scalar is also
 checked as raw quoted-string content and in both identifier-start and
-identifier-continue positions. A quoted source at the
-maximum supported length ends with the valid U+10FFFF surrogate pair;
-maximum-length identifier inputs also end with each unpaired surrogate code
-unit.
+identifier-continue positions; every raw surrogate code unit is also checked
+in an isolated quoted token. A quoted source at the maximum supported length
+ends with the valid U+10FFFF surrogate pair; maximum-length identifier inputs
+also end with each unpaired surrogate code unit.
 
 A source-dependent single-producer semantic-module program can be linked and executed by
 `NativeJit.ExecuteWithSourceGrant`, which requires one readonly `char16` grant

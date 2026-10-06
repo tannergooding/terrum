@@ -480,6 +480,14 @@ public sealed class ScannerTests
             sources.Add(text.ToString());
         }
 
+        var rawSurrogateSource = new StringBuilder(0x8000);
+        for (var codeUnit = 0xD800; codeUnit <= 0xDFFF; codeUnit++)
+        {
+            rawSurrogateSource.Append('"').Append((char)codeUnit).Append("\" ");
+        }
+        Assert.InRange(rawSurrogateSource.Length, 1, ScannerHost.MaximumSourceLength);
+        sources.Add(rawSurrogateSource.ToString());
+
         const int maximumSupplementaryEscapesPerSource = 1_500;
         for (var scalarStart = 0x10000; scalarStart <= 0x10FFFF;
             scalarStart += maximumSupplementaryEscapesPerSource)
