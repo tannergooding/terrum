@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `75cacbfc` | Verify all BMP `\u` character literals and surrogate diagnostic spans through source-grant JIT |
 | `b7ffa3a6` | Verify all BMP `\u` escape scalars, consumed widths and surrogate diagnostics through source-grant JIT |
 | `71a6b6d0` | Verify all BMP `\u` scalar escapes, surrogate rejection and literal interior offsets through source-grant JIT |
 | `135963eb` | Verify sequential StringLiteral cursor scalar and next-offset parity across every valid scalar spelling |
