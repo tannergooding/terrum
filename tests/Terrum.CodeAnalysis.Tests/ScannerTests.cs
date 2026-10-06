@@ -550,6 +550,14 @@ public sealed class ScannerTests
         Assert.Equal(ScannerHost.MaximumSourceLength, maximumLengthSupplementarySource.Length);
         sources.Add(maximumLengthSupplementarySource);
 
+        foreach (var trailingSurrogate in new[] { '\uD800', '\uDC00' })
+        {
+            var maximumLengthMalformedSource = new string('x', ScannerHost.MaximumSourceLength - 1)
+                + trailingSurrogate;
+            Assert.Equal(ScannerHost.MaximumSourceLength, maximumLengthMalformedSource.Length);
+            sources.Add(maximumLengthMalformedSource);
+        }
+
         ScannerInvocationResult? retained = null;
         foreach (var text in sources)
         {
