@@ -266,6 +266,40 @@ public sealed partial class ManagedScannerComponentTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task OwnedTokenSnapshotScalesToMaximumScannerSourceAsync(NativeRuntimePolicy policy)
+    {
+        var identifierCount = ScannerHost.MaximumSourceLength / 2;
+        var expectedTokenCount = identifierCount + 1;
+        var input = string.Concat(Enumerable.Repeat("a ", identifierCount));
+        Assert.Equal(ScannerHost.MaximumSourceLength, input.Length);
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                if (tokens.GetCount() != {{expectedTokenCount}}
+                    || tokens.TryGet(-1, init var negative)
+                    || tokens.TryGet({{expectedTokenCount}}, init var beyond)) { return 1; }
+                mut int32 index = 0;
+                while (index < {{identifierCount}}) {
+                    require tokens.TryGet(index, init var token);
+                    if (token.Kind != 2 || token.Range.Start != index * 2
+                        || token.Range.Length != 1) { return 2; }
+                    index = index + 1;
+                }
+                require tokens.TryGet({{identifierCount}}, init var eof);
+                if (eof.Kind != 0 || eof.Range.Start != {{ScannerHost.MaximumSourceLength}}
+                    || eof.Range.Length != 0) { return 3; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync(input, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task TokenSnapshotOwnsValidatedRecordsAndRejectsPartialCopiesAsync(
         NativeRuntimePolicy policy)
     {
