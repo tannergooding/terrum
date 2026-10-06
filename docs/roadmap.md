@@ -72,6 +72,12 @@ Floating-to-integer conversion is also provisionally encoded as a distinct
 fail-fast operation under its unapproved proposal; checked-exception TRRM
 remains unsupported. None of these floating operations is part of the approved
 `(1, 0)` Body profile.
+Separately, the standalone Terrum-authored `HexFloatLiteral` component now
+converts grammar-shaped, caller-delimited hexadecimal-float slices directly
+to target-format bits and matches hosted binding across rounding boundaries,
+deterministic random valid spellings and 16,000 fractional hex digits. It is not
+wired into the scalar frontend; source token reconstruction, verification and
+emission remain hosted.
 
 The bounded Terrum-authored scalar source frontend supports v85 complete
 global-function snapshots and source-order scalar call targets, including
