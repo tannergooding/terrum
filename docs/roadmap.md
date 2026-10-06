@@ -393,6 +393,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `57d41e3f` | Verify non-Boolean/void generic `out` and `init ref<T>` publication with concrete floating specializations through direct execution and private semantic/native replacement under both runtime policies |
 | `2603daf6` | Provisionally allow fixed scalar `out` and `init ref` side outputs alongside generic Copy outputs for fixed non-Boolean/void results; preserve per-mode proof/publication and private module boundaries, with target contract unapproved |
 | `d4864874` | Provisionally combine compilation-local Copy generic `out T` and `init ref<U>` publication for fixed non-Boolean/void results; preserve each mode, managed-init cleanup, Boolean behavior and private module ABI, with target contract unapproved |
 | `fcc586a9` | Provisionally allow compilation-local Copy generic `init ref<T>` publication for fixed non-Boolean/void results with normal-return proof and managed-root cleanup; preserve Boolean vacancy and private module ABI, with target contract unapproved |
