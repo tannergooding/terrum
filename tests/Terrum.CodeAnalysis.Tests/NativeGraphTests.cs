@@ -495,6 +495,49 @@ public sealed class NativeGraphTests
             CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ConditionalOutOutputRemainsVacantOnFalseAcrossGraphAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string ProviderSource = """
+            public bool TryPublish(bool publish, out int32 result) {
+                result = publish ? 42 : 41;
+                return publish;
+            }
+            public void Complete(init ref<int32> result) { result = 43; }
+            """;
+        const string ConsumerSource = """
+            int32 Main() {
+                if (TryPublish(false, out var failed)) { return 1; }
+                Complete(init failed);
+                if (failed != 43) { return 2; }
+                if (!TryPublish(true, out var published)) { return 3; }
+                return published;
+            }
+            """;
+
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(ProviderSource),
+            (BoundRuntimePolicy)policy);
+        Assert.False(providerCompilation.HasErrors,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = NativeModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(providerCompilation.Program), ["TryPublish", "Complete"],
+            "NodeB", policy);
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+            NativeModuleCompiler.CreateGraphReference([provider]), (BoundRuntimePolicy)policy);
+        Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
+            [provider], policy);
+
+        NativeModuleCompiler.ValidateGraph(root, [provider]);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [provider],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [provider],
+            CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+    }
+
     [Fact]
     public async Task SharedLeafDiamondIsAcyclicAndBindsEveryImportToItsOwnerAsync()
     {
