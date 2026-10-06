@@ -110,7 +110,11 @@ public sealed partial class CliTests
             uint.MaxValue, (ulong)uint.MaxValue + 1, long.MaxValue,
             (ulong)long.MaxValue + 1, ulong.MaxValue - 1, ulong.MaxValue,
         ];
-        ushort[] char16Values = [0, 1, 0x7FFF, 0x8000, 0xD800, 0xDC00, ushort.MaxValue];
+        ushort[] char16Values = new ushort[ushort.MaxValue + 1];
+        for (var index = 0; index < char16Values.Length; index++)
+        {
+            char16Values[index] = (ushort)index;
+        }
 
         var int32ToInt64 = GetConversionExport<Int32ToInt64ConversionExport>(
             handle, ExportPrefix, "TryConvertInt32ToInt64");

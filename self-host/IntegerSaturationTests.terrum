@@ -32,9 +32,18 @@ public bool CheckIntegerSaturation()
         return false;
     }
 
-    char16 surrogate = char16(0xD800);
-    return SaturateChar16ToInt32(surrogate) == 0xD800
-        && SaturateChar16ToUInt32(surrogate) == 0xD800
-        && SaturateChar16ToInt64(surrogate) == 0xD800
-        && SaturateChar16ToUInt64(surrogate) == 0xD800;
+    mut int32 codeUnit = 0;
+    while (codeUnit <= 65535)
+    {
+        char16 value = char16(codeUnit);
+        if (SaturateChar16ToInt32(value) != codeUnit
+            || SaturateChar16ToUInt32(value) != uint32(codeUnit)
+            || SaturateChar16ToInt64(value) != int64(codeUnit)
+            || SaturateChar16ToUInt64(value) != uint64(codeUnit))
+        {
+            return false;
+        }
+        codeUnit = codeUnit + 1;
+    }
+    return true;
 }

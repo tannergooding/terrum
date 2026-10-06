@@ -55,6 +55,9 @@ public sealed class IntegerCheckedConversionsModuleTests
                 failureCode++;
             }
         }
+        assertions.Append("if (!CheckAllChar16Widenings()) { return ")
+            .Append(failureCode.ToString(CultureInfo.InvariantCulture)).AppendLine("; }");
+        checks.Add("all 65,536 char16-to-integer widening results");
 
         var consumerSource = new StringBuilder("using Terrum.CodeAnalysis.Numerics64;\nint32 Main() {\n");
         consumerSource.Append(assertions);
@@ -75,6 +78,21 @@ public sealed class IntegerCheckedConversionsModuleTests
                 .AppendLine("(value, init var unpublished);")
                 .AppendLine("}");
         }
+        consumerSource.AppendLine("bool CheckAllChar16Widenings() {")
+            .AppendLine("    mut int32 codeUnit = 0;")
+            .AppendLine("    while (codeUnit <= 65535) {")
+            .AppendLine("        char16 value = char16(codeUnit);")
+            .AppendLine("        if (!TryConvertChar16ToInt32(value, init var actualInt32)) { return false; }")
+            .AppendLine("        if (!TryConvertChar16ToUInt32(value, init var actualUInt32)) { return false; }")
+            .AppendLine("        if (!TryConvertChar16ToInt64(value, init var actualInt64)) { return false; }")
+            .AppendLine("        if (!TryConvertChar16ToUInt64(value, init var actualUInt64)) { return false; }")
+            .AppendLine("        if (actualInt32 != codeUnit || actualUInt32 != uint32(codeUnit)")
+            .AppendLine("            || actualInt64 != int64(codeUnit) || actualUInt64 != uint64(codeUnit))")
+            .AppendLine("        { return false; }")
+            .AppendLine("        codeUnit = codeUnit + 1;")
+            .AppendLine("    }")
+            .AppendLine("    return true;")
+            .AppendLine("}");
 
         var consumerTree = SyntaxTree.Parse(consumerSource.ToString(), "integer-conversion-consumer.terrum");
         Assert.False(consumerTree.HasErrors, string.Join(Environment.NewLine, consumerTree.Diagnostics));

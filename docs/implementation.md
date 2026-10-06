@@ -183,11 +183,12 @@ a stable ABI, or general ownership support. Existing native heap tests
 separately check allocation/release behavior.
 Persisted semantic-module JIT also exercises all 20 existing
 `IntegerCheckedConversions` helpers across source/destination boundaries,
-including signed minima, unsigned maxima, `char16` edges and surrogate code
-units. An independent `BigInteger` oracle checks representability, output
-values and unpublished failures under both runtime policies. This adds
-persistence evidence only; general conversion policy, syntax and witnesses
-remain outside support.
+including signed minima, unsigned maxima and `char16` edges. An independent
+`BigInteger` oracle checks representability, output values and unpublished
+failures under both runtime policies; a separate consumer loop checks all
+65,536 inputs for each of the four `char16`-to-integer widening helpers under
+both policies. This adds persistence evidence only; general conversion
+policy, syntax and witnesses remain outside support.
 Persisted semantic-module JIT also exercises all ten signed and unsigned
 checked 64-bit binary helpers, both signed unary helpers, and total
 `MagnitudeInt64` across 935 boundary cases under both runtime policies. An
@@ -218,14 +219,18 @@ All twenty existing `IntegerCheckedConversions` helpers are also invoked
 directly through that internal DLL. Their signed/unsigned boundaries and
 `char16` code-unit values, including surrogates, are checked against
 `BigInteger`; every call verifies exact success status, preserved failed
-outputs and adjacent canaries. This adds ABI evidence only: it does not approve
-the named conversion APIs, add conversion witnesses, or alter the separate
+outputs and adjacent canaries. All 65,536 inputs are checked against hosted
+C# numeric conversions for each of the four `char16`-to-integer widening
+helpers. This adds ABI evidence only: it does not approve the named
+conversion APIs, add conversion witnesses, or alter the separate
 source-language checked-conversion contract.
 The internal DLL likewise invokes all twenty provisional `IntegerSaturation`
 helpers and checks each scalar return against a separate `BigInteger` clamp
 oracle over signed, unsigned and `char16` boundaries, including surrogate
-code units. This is internal ABI evidence for the provisional named helpers,
-not an adopted saturation API or implicit conversion policy.
+code units. It also checks all 65,536 inputs against hosted C# numeric
+conversions for each of the four `char16`-to-integer widening helpers. This is
+internal ABI evidence for the provisional named helpers, not an adopted
+saturation API or implicit conversion policy.
 The provisional `BitOperations` candidate is also compared with hosted
 `System.Numerics.BitOperations` through persisted semantic-module consumers
 under both runtime policies. Separate width-specific consumers cover every
@@ -243,9 +248,11 @@ remains unapproved.
 A separate revision-56 persisted semantic-module JIT comparison checks all 20
 existing `IntegerSaturation` candidate helpers against a `BigInteger` clamp
 oracle at source/destination boundaries and code-unit edges, including
-surrogate values, under both runtime policies. This remains evidence for that
-provisional candidate API; it does not adopt a general numeric-conversion
-policy.
+surrogate values, under both runtime policies. Its consumer also checks every
+`char16` input for all four widening helpers under both policies; the component
+test runner executes the same full code-unit domain through AOT and JIT. This
+remains evidence for that provisional candidate API; it does not adopt a
+general numeric-conversion policy.
 The internal Windows x64 fail-fast DLL also invokes all twenty existing
 `IntegerWrapping` helpers against a separate `BigInteger` modulo and
 two's-complement oracle, including signed boundaries and surrogate code units.

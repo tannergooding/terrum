@@ -110,11 +110,20 @@ public bool CheckIntegerCheckedConversions()
         return false;
     }
 
-    char16 surrogate = char16(0xD800);
-    require TryConvertChar16ToInt32(surrogate, init var char16ToInt32);
-    require TryConvertChar16ToUInt32(surrogate, init var char16ToUInt32);
-    require TryConvertChar16ToInt64(surrogate, init var char16ToInt64);
-    require TryConvertChar16ToUInt64(surrogate, init var char16ToUInt64);
-    return char16ToInt32 == 0xD800 && char16ToUInt32 == 0xD800
-        && char16ToInt64 == 0xD800 && char16ToUInt64 == 0xD800;
+    mut int32 codeUnit = 0;
+    while (codeUnit <= 65535)
+    {
+        char16 value = char16(codeUnit);
+        require TryConvertChar16ToInt32(value, init var char16ToInt32);
+        require TryConvertChar16ToUInt32(value, init var char16ToUInt32);
+        require TryConvertChar16ToInt64(value, init var char16ToInt64);
+        require TryConvertChar16ToUInt64(value, init var char16ToUInt64);
+        if (char16ToInt32 != codeUnit || char16ToUInt32 != uint32(codeUnit)
+            || char16ToInt64 != int64(codeUnit) || char16ToUInt64 != uint64(codeUnit))
+        {
+            return false;
+        }
+        codeUnit = codeUnit + 1;
+    }
+    return true;
 }

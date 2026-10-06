@@ -63,6 +63,21 @@ public sealed class IntegerSaturationModuleTests
                 failureCode++;
             }
         }
+        assertions.Append("if (!CheckAllChar16Widenings()) { return ")
+            .Append(failureCode.ToString(CultureInfo.InvariantCulture)).AppendLine("; }");
+        checks.Add("all 65,536 char16-to-integer widening results");
+        helpers.AppendLine("bool CheckAllChar16Widenings() {")
+            .AppendLine("    mut int32 codeUnit = 0;")
+            .AppendLine("    while (codeUnit <= 65535) {")
+            .AppendLine("        char16 value = char16(codeUnit);")
+            .AppendLine("        if (SaturateChar16ToInt32(value) != codeUnit")
+            .AppendLine("            || SaturateChar16ToUInt32(value) != uint32(codeUnit)")
+            .AppendLine("            || SaturateChar16ToInt64(value) != int64(codeUnit)")
+            .AppendLine("            || SaturateChar16ToUInt64(value) != uint64(codeUnit)) { return false; }")
+            .AppendLine("        codeUnit = codeUnit + 1;")
+            .AppendLine("    }")
+            .AppendLine("    return true;")
+            .AppendLine("}");
 
         var consumerSource = new StringBuilder("using Terrum.CodeAnalysis.Numerics64;\nint32 Main() {\n");
         consumerSource.Append(assertions);
