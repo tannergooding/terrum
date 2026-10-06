@@ -801,8 +801,9 @@ remains unapproved; this support does not make the scanner or scalar frontend
 independent of hosted verification and emission. Integer-value records are
 also checked against binary, decimal and hexadecimal `uint64` maximum and
 overflow expectations. A maximum-length alternating identifier/whitespace
-source stresses token and trivia record capacities; a maximum-length
-unpaired-surrogate source fills the diagnostic record bound.
+source stresses dense token and trivia publication; a maximum-length newline
+source fills the trivia record bound, while a maximum-length unpaired-surrogate
+source fills the token and diagnostic bounds.
 
 `SourceLineIndex` builds on that streaming reader. It owns a fixed-capacity native
 table of line starts, publishes the completed index through a conditional output,

@@ -436,6 +436,9 @@ public sealed class ScannerTests
         Assert.Equal(ScannerHost.MaximumSourceLength, maximumTokenAndTriviaSource.Length);
         sources.Add(maximumTokenAndTriviaSource.ToString());
 
+        var maximumTriviaSource = new string('\n', ScannerHost.MaximumSourceLength);
+        sources.Add(maximumTriviaSource);
+
         var maximumDiagnosticSource = new string('\uD800', ScannerHost.MaximumSourceLength);
         sources.Add(maximumDiagnosticSource);
 
@@ -642,6 +645,12 @@ public sealed class ScannerTests
             {
                 Assert.Equal(ScannerHost.MaximumSourceLength, actual.LexResult.Diagnostics.Length);
                 Assert.Equal(ScannerHost.MaximumSourceLength + 1, actual.TokenCount);
+            }
+            else if (text == maximumTriviaSource)
+            {
+                Assert.Equal(1, actual.TokenCount);
+                Assert.Equal(ScannerHost.MaximumSourceLength, actual.LexResult.Tokens
+                    .SelectMany(static token => token.LeadingTrivia).Count());
             }
         }
 
