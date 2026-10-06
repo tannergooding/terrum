@@ -202,15 +202,19 @@ public sealed class ModuleTests
     }
 
     [Fact]
-    public async Task SelfHostRangeTestsExecuteAgainstAnIndependentMultiSourceLibraryAsync()
+    public async Task SelfHostComponentTestRunnerExecutesAgainstAnIndependentMultiSourceLibraryAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var rangePath = Path.Combine(root, "self-host", "SourceRange.terrum");
         var factsPath = Path.Combine(root, "self-host", "CharacterFacts.terrum");
-        var testsPath = Path.Combine(root, "self-host", "RangeTests.terrum");
+        var tokenPath = Path.Combine(root, "self-host", "Token.terrum");
+        var rangeTestsPath = Path.Combine(root, "self-host", "RangeTests.terrum");
+        var tokenTestsPath = Path.Combine(root, "self-host", "TokenTests.terrum");
+        var entryPath = Path.Combine(root, "self-host", "ComponentTestRunner.terrum");
         var range = SyntaxTree.Parse(await File.ReadAllTextAsync(rangePath).ConfigureAwait(true), rangePath);
         var facts = SyntaxTree.Parse(await File.ReadAllTextAsync(factsPath).ConfigureAwait(true), factsPath);
-        var library = Compilation.CreateLibrary([range, facts]);
+        var token = SyntaxTree.Parse(await File.ReadAllTextAsync(tokenPath).ConfigureAwait(true), tokenPath);
+        var library = Compilation.CreateLibrary([range, facts, token]);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
             "Terrum.CodeAnalysis.SourceRange.TryCreate",
@@ -219,15 +223,16 @@ public sealed class ModuleTests
             "Terrum.CodeAnalysis.IsAsciiDigit",
             "Terrum.CodeAnalysis.IsLineBreak",
             "Terrum.CodeAnalysis.GetDecimalDigit",
+            "Terrum.CodeAnalysis.Token.#ctor",
         ]);
-        var tests = SyntaxTree.Parse(await File.ReadAllTextAsync(testsPath).ConfigureAwait(true), testsPath);
-        var entryPath = Path.Combine(root, "samples", "native", "modules", "range-entry.terrum");
+        var rangeTests = SyntaxTree.Parse(await File.ReadAllTextAsync(rangeTestsPath).ConfigureAwait(true), rangeTestsPath);
+        var tokenTests = SyntaxTree.Parse(await File.ReadAllTextAsync(tokenTestsPath).ConfigureAwait(true), tokenTestsPath);
         var entry = SyntaxTree.Parse(await File.ReadAllTextAsync(entryPath).ConfigureAwait(true), entryPath);
-        var compilation = Compilation.Create([tests, entry], ModuleCompiler.CreateReference(producer));
+        var compilation = Compilation.Create([rangeTests, tokenTests, entry], ModuleCompiler.CreateReference(producer));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Collection(compilation.SyntaxTrees, tree => Assert.Same(tests, tree), tree => Assert.Same(entry, tree));
+        Assert.Collection(compilation.SyntaxTrees, tree => Assert.Same(rangeTests, tree),
+            tree => Assert.Same(tokenTests, tree), tree => Assert.Same(entry, tree));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.DoesNotContain("#ctor", Encoding.UTF8.GetString(consumer), StringComparison.Ordinal);
         var consumerPath = Path.Combine(AppContext.BaseDirectory, $"self-host-module-{Guid.NewGuid():N}.trm");
         var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");
         try

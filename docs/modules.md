@@ -222,11 +222,14 @@ For existing API callers, `CreateConsumer` also accepts an already bound combine
 program and extracts selected producer definitions. The CLI uses independent
 consumer source and the validated artifact-reference path.
 Both library and reference compilation accept multiple `SyntaxTree` snapshots;
-source diagnostics retain the originating snapshot. The self-host module test
-builds `SourceRange` and `CharacterFacts` into a producer, then independently
-binds `RangeTests` and an entry harness against its exported declarations.
-Those persisted modules execute through AOT and JIT, including range boundaries,
-conditional-output failure, character classification and repeated calls.
+source diagnostics retain the originating snapshot. The self-host component
+test builds `SourceRange`, `CharacterFacts`, and `Token` into one producer,
+then independently binds `RangeTests`, `TokenTests`, and the Terrum-authored
+`ComponentTestRunner` against its exported declarations. Those persisted
+modules execute through AOT and JIT, including range boundaries,
+conditional-output failure, character classification, aggregate token
+construction, and repeated calls. C# still orchestrates the test; the entry
+harness only composes these explicitly selected component checks.
 The CLI accepts repeatable `--source <path>` options and, for producers,
 `--export <qualified-name>` options. It rejects duplicate source paths or exports,
 more than 256 sources or 1,024 exports, and more than 4 MiB of combined UTF-8
@@ -262,6 +265,16 @@ the scalar-register-only profile:
 dotnet $cli compile-module producer self-host\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source self-host\Token.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.Token.#ctor -o artifacts\token-values.trm
 dotnet $cli compile-module consumer self-host\TokenTests.terrum artifacts\token-values.trm --source samples\native\modules\token-entry.terrum -o artifacts\token-tests.trm
 dotnet $cli run-module artifacts\token-tests.trm artifacts\token-values.trm --runtime fail-fast # exits 0
+```
+
+The bounded `ComponentTestRunner` composes both test functions against one
+independently compiled producer:
+
+```powershell
+dotnet $cli compile-module producer self-host\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source self-host\CharacterFacts.terrum --source self-host\Token.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export "Terrum.CodeAnalysis.SourceRange.#get:End" --export Terrum.CodeAnalysis.IsAsciiDigit --export Terrum.CodeAnalysis.IsLineBreak --export Terrum.CodeAnalysis.GetDecimalDigit --export Terrum.CodeAnalysis.Token.#ctor -o artifacts\component-values.trm
+dotnet $cli compile-module consumer self-host\RangeTests.terrum artifacts\component-values.trm --source self-host\TokenTests.terrum --source self-host\ComponentTestRunner.terrum -o artifacts\component-tests.trm
+dotnet $cli run-module artifacts\component-tests.trm artifacts\component-values.trm --runtime fail-fast # exits 0
+dotnet $cli link-module artifacts\component-tests.trm artifacts\component-values.trm -o artifacts\component-tests.exe --runtime fail-fast
 ```
 
 The wide-integer helpers exercise full-range signed and unsigned values across
