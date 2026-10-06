@@ -186,6 +186,40 @@ public sealed class NativeSourceGrantExperimentTests
                     }));
                 }
 
+                const int firstSupplementaryScalar = 0x10000;
+                const int supplementaryScalarLimit = 0x110000;
+                const int maximumPairsPerGrant = 8_191;
+                var pairBuffer = new char[2];
+                for (var scalarStart = firstSupplementaryScalar;
+                    scalarStart < supplementaryScalarLimit;
+                    scalarStart += maximumPairsPerGrant)
+                {
+                    var pairCount = Math.Min(maximumPairsPerGrant,
+                        supplementaryScalarLimit - scalarStart);
+                    var storage = new char[2 + pairCount * 2];
+                    storage[0] = (char)(scalarStart & 0xFFFF);
+                    storage[1] = (char)(scalarStart >> 16);
+                    for (var index = 0; index < pairCount; index++)
+                    {
+                        _ = new Rune(scalarStart + index).EncodeToUtf16(pairBuffer);
+                        storage[2 + index * 2] = pairBuffer[0];
+                        storage[3 + index * 2] = pairBuffer[1];
+                    }
+
+                    Assert.Equal(0, WithPinnedSource(storage, (uint)storage.Length, (pointer, sourceCount) =>
+                    {
+                        Assert.Equal(storage.Length, length(pointer, sourceCount));
+                        for (var index = 0; index < pairCount; index++)
+                        {
+                            var at = 2 + index * 2;
+                            var expected = scalarStart + index;
+                            Assert.Equal(-1, read(pointer, sourceCount, at, at + 1, -1));
+                            Assert.Equal(expected, read(pointer, sourceCount, at, at + 2, expected));
+                        }
+                        return 0;
+                    }));
+                }
+
                 var sameStorage = "\uD83D\uDE00Z".ToCharArray();
                 WithPinnedSource(sameStorage, 3, (pointer, _) =>
                 {

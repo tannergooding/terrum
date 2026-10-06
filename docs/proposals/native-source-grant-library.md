@@ -195,10 +195,13 @@ for maximum-size input, BMP/supplementary scalars, NUL, CR/LF and other line
 breaks, malformed surrogates, final units, and bounded lookahead.
 The signed and unsigned code-unit exports are also compared against every BMP
 code unit across four fresh maximum-size pinned grants under both policies;
-the scalar adapter is checked at the same one-unit ends, so no following code
-unit can complete a surrogate pair outside the requested extent. This is
-direct-read and bounded-decoding evidence only, not support for the
-`SourceText` facade or output loans.
+the scalar adapter is checked at the same one-unit ends and at every
+supplementary high-surrogate boundary, so no following code unit can complete
+a surrogate pair outside the requested extent. The full native scalar adapter
+also decodes all 1,048,576 valid supplementary scalars across fresh
+maximum-size grants under both policies. This is direct-read and
+bounded-decoding evidence only, not support for the `SourceText` facade or
+output loans.
 One pinned allocation is reused with different counts, and two
 simultaneously pinned allocations with equal counts produce distinct results.
 The test adapter returns `-2` for invalid ranges without calling the decoder,
