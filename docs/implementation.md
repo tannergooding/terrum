@@ -349,7 +349,8 @@ v85 also source-audits caller-unsafe top-level declarations and calls enclosed
 by explicit `unsafe { ... }` blocks; it also audits `unsafe(expr)` call-site
 scopes. Both remain backed by the hosted verifier/emitter. Library integration
 tests compare both scope forms byte-for-byte with hosted builds and execute the
-exported safe wrapper under both runtime policies.
+exported safe wrapper under both runtime policies; unscoped unsafe calls reject
+without replacing an existing library artifact.
 
 Target type matching also preserves generic/concrete consistency, including
 reference/pointer forms, without pattern-driven reference formation. Checked

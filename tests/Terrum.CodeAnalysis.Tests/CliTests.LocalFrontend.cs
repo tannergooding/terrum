@@ -164,6 +164,41 @@ public sealed partial class CliTests
     }
 
     [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task LocalFrontendRejectsUnscopedCallerUnsafeCallWithoutReplacingLibraryAsync(string policy)
+    {
+        const string validSource = "public int32 Value() { return 42; }";
+        const string invalidSource = "unsafe int32 Danger() { return 41; } public int32 Value() { return Danger(); }";
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", ".."));
+        var frontend = Path.Combine(root, "self-host");
+        var outputPath = Path.Combine(root, $"local-frontend-{Guid.NewGuid():N}.dll");
+        try
+        {
+            var (success, successOutput, successError) = await RunAsync(
+                Encoding.UTF8.GetBytes(validSource), "frontend-build-library", frontend, "-",
+                "-o", outputPath, "--runtime", policy, "--json");
+            Assert.True(success == 0, $"{success}: {successOutput}{successError}");
+            var previous = await File.ReadAllBytesAsync(outputPath);
+
+            var (failure, failureOutput, failureError) = await RunAsync(
+                Encoding.UTF8.GetBytes(invalidSource), "frontend-build-library", frontend, "-",
+                "-o", outputPath, "--runtime", policy, "--json");
+            Assert.Equal(1, failure);
+            Assert.Empty(failureError);
+            using var document = JsonDocument.Parse(failureOutput);
+            Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+            Assert.NotEmpty(document.RootElement.GetProperty("diagnostics").EnumerateArray());
+            Assert.Equal(previous, await File.ReadAllBytesAsync(outputPath));
+        }
+        finally
+        {
+            File.Delete(outputPath);
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Main() { mut int32 x = 20; x = x + 2; return x; }", 22)]
     [InlineData("int32 Main() { bool skip = false; mut int32 x = 40; if (skip && x / 0 == 1) { return 0; } return x + 2; }", 42)]
     [InlineData("int32 Main() { bool x = true; if (x) { return 42; } else { return 0; } }", 42)]

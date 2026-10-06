@@ -179,7 +179,8 @@ v85 maps named by-value and scalar output call arguments to formal parameters
 without changing source-order evaluation. Their verifier and emitter also
 remain hosted. Library integration tests compare both caller-unsafe scope
 forms byte-for-byte with hosted builds and execute the exported safe wrapper
-under both runtime policies.
+under both runtime policies; unscoped calls reject without replacing an
+existing library artifact.
 The single-function buffer also audits self-call authorization against enclosing
 unsafe scopes. Both current projections
 source-audit `is init` tests for named scalar locals and parameters. Verification
