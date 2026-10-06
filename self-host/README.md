@@ -370,6 +370,12 @@ conditional outputs and rooting still apply. See the detailed
 Scalars support Copy-only helpers, not primitive operator witnesses.
 Compilation-local Copy helpers may publish `bool`/`init ref<T>` outputs after
 definition-site verification, without introducing a public generic ABI.
+The hosted compiler provisionally supports `float32` and `float64` as concrete
+Copy-only generic arguments, including through the maintained selection
+candidate; they do not gain symbolic arithmetic or primitive witnesses. This
+does not add generic support to the source-free scalar frontend or TRRM. See
+the [unapproved proposal](../docs/proposals/floating-copy-generic-specializations.md)
+and the [implementation boundary](../docs/implementation.md#bounded-generic-functions).
 Explicit homogeneous Copy-struct witnesses support `+`, `-`, `*`, `/`, `%`,
 `&`, `|` and `^`; generic code still requires the corresponding declared
 nominal constraints. The hosted compiler supports six separately constrained

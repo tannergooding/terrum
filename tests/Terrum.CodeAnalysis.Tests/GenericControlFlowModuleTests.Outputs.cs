@@ -203,4 +203,66 @@ public sealed partial class GenericControlFlowModuleTests
             Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
         Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
     }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task FloatingCopySpecializationsPersistPrivatelyAcrossSemanticAndNativeModulesAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string FloatingProducer = """
+            [NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }
+            [NoThrow] T Forward<T>(T value) where T : [Copy] { return Identity(value); }
+            [NoThrow] bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
+                result = Forward(value);
+                return publish;
+            }
+            [NoThrow] bool TryCopyInit<T>(T value, bool publish, init ref<T> result) where T : [Copy] {
+                if (!publish) { return false; }
+                result = Forward(value);
+                return true;
+            }
+            public int32 PowerProbe() {
+                float32 single = Identity<float32>(float32(40));
+                float64 wide = Forward(float64(2));
+                if (TryCopy(single, false, out var absent)) { return 1; }
+                require TryCopy<float32>(single, true, out var copied);
+                if (TryCopyInit(wide, false, init var deferred)) { return 2; }
+                require TryCopyInit<float64>(wide, true, init deferred);
+                if (copied != float32(40) || deferred != float64(2)) { return 3; }
+                return 42;
+            }
+            """;
+
+        var original = ModuleCompiler.CreateProducer(Compile(Stub, policy), ["PowerProbe"]);
+        var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return PowerProbe(); }",
+            policy, ModuleCompiler.CreateReference(original), library: false), original);
+        var consumerHash = SHA256.HashData(consumer);
+        var replacement = ModuleCompiler.CreateProducer(Compile(FloatingProducer, policy), ["PowerProbe"]);
+        var linked = ModuleCompiler.Link(consumer, replacement);
+        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Identity<float32>");
+        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Forward<float64>");
+        Assert.Contains(linked.Functions, static function =>
+            function.Name == "$producer.TryCopy<float32>" && function.Variables[2].IsOut);
+        Assert.Contains(linked.Functions, static function =>
+            function.Name == "$producer.TryCopyInit<float64>" && function.Variables[2].IsInit);
+        Assert.Equal(42, NativeJit.Execute(linked, policy));
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.Equal(consumerHash, SHA256.HashData(consumer));
+
+        var nativeOriginal = NativeModuleCompiler.CreateProducer(Compile(Stub, policy),
+            ["PowerProbe"], "NodeB", policy);
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(
+            "int32 Main() { return PowerProbe(); }", policy,
+            NativeModuleCompiler.CreateGraphReference([nativeOriginal]), library: false),
+            [nativeOriginal], policy);
+        var nativeHash = SHA256.HashData(nativeConsumer);
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(Compile(FloatingProducer, policy),
+            ["PowerProbe"], "NodeB", policy);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
+            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
+    }
 }

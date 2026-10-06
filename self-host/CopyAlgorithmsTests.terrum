@@ -7,8 +7,11 @@ public bool CheckCopyAlgorithms()
     int64 selected = SelectCopy(true, int64.MinValue, int64.MaxValue);
     bool selectedBoolean = SelectCopy(false, true, false);
     char16 selectedCodeUnit = SelectCopy(true, char16(55296), char16(65));
+    float32 selectedSingle = SelectCopy(false, float32(1.5), float32(2.5));
+    float64 selectedDouble = SelectCopy(true, float64(40), float64(2));
     if (selected != int64.MinValue || selectedBoolean
-        || selectedCodeUnit != char16(55296))
+        || selectedCodeUnit != char16(55296) || selectedSingle != float32(2.5)
+        || selectedDouble != float64(40))
     {
         return false;
     }

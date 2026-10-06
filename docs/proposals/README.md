@@ -28,6 +28,10 @@ approved.
 - [Copy outputs for non-Boolean calls](non-boolean-copy-out.md) recommends a
   bounded hosted `out` extension using the existing normal-return publication
   contract; it does not add unique or managed outputs.
+- [Floating Copy generic specializations](floating-copy-generic-specializations.md)
+  recommends admitting floating formats only as concrete arguments to hosted
+  Copy-only generic templates; it does not grant symbolic floating operations
+  or source-free generic support.
 - [Span-backed token cursor](span-backed-token-cursor.md) records the open
   backing, capture, indexing and construction contracts needed for the
   existing zero-copy self-host cursor candidate.

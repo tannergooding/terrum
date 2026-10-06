@@ -255,6 +255,9 @@ internal sealed partial class Binder
             && ((int)type < ManagedClassTypes.First
                 || ManagedClassTypes.ClassIndex(type) < _classes.Count));
 
+    private bool IsCopyGenericArgumentType(PrimitiveType type) => type is PrimitiveType.Float32 or PrimitiveType.Float64
+        || IsCopyGenericType(type);
+
     private void DeclareProtocols()
     {
         foreach (var tree in _trees)
@@ -949,7 +952,7 @@ internal sealed partial class Binder
             }
         }
         if (template is null || concrete is not ImmutableArray<PrimitiveType> types
-            || types.Any(type => !IsCopyGenericType(type)))
+            || types.Any(type => !IsCopyGenericArgumentType(type)))
         {
             Report("TRM3011", "A generic call requires each Copy type from a complete explicit list, typed arguments, or its result context.",
                 callee.Span);

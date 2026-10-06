@@ -11,6 +11,44 @@ public sealed partial class JitTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task FloatingCopySpecializationsPreserveConditionalAndVacancyOutputsAsync(bool checkedFailures)
+    {
+        const string Source = """
+            [NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }
+            [NoThrow] T Forward<T>(T value) where T : [Copy] { return Identity(value); }
+            [NoThrow] bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
+                result = Forward(value);
+                return publish;
+            }
+            [NoThrow] bool TryCopyInit<T>(T value, bool publish, init ref<T> result) where T : [Copy] {
+                if (!publish) { return false; }
+                result = Forward(value);
+                return true;
+            }
+            int32 Main() {
+                float32 first = Identity<float32>(float32(40));
+                float64 second = Forward(float64(2));
+                if (TryCopy(first, false, out var absent32)) { return 1; }
+                require TryCopy<float32>(first, true, out var copied32);
+                if (TryCopyInit(second, false, init var absent64)) { return 2; }
+                require TryCopyInit<float64>(second, true, init var copied64);
+                if (copied32 != float32(40) || copied64 != float64(2)) { return 3; }
+                return int32(copied32) + int32(copied64);
+            }
+            """;
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task GenericConditionalSelectionPublishesWholeTokensAndRangesAsync(bool checkedFailures)
     {
         string[] components = [

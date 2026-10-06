@@ -90,6 +90,8 @@ public sealed class StaticProtocolInferenceTests
     [InlineData("uint32", "uint32(42)")]
     [InlineData("int64", "int64(42)")]
     [InlineData("uint64", "uint64(42)")]
+    [InlineData("float32", "float32(42)")]
+    [InlineData("float64", "float64(42)")]
     public void CopyScalarSpecializationAcceptsExplicitAndInferredArguments(string type, string value)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + $$"""
@@ -111,10 +113,33 @@ public sealed class StaticProtocolInferenceTests
             int32 Main() {
                 int64 fromContext = Identity(42);
                 int64 typed = Identity(int64(42));
+                float32 floatFromContext = Identity(42);
+                float64 wideFromContext = Identity(42);
                 return int32(fromContext + typed);
             }
             """));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var functions = Assert.IsType<BoundProgram>(compilation.Program).Functions;
+        Assert.Contains(functions, function => function.Name == "Identity<float32>");
+        Assert.Contains(functions, function => function.Name == "Identity<float64>");
+    }
+
+    [Theory]
+    [InlineData("float32")]
+    [InlineData("float64")]
+    public void ConcreteFloatingGenericArgumentsDoNotWidenGetterResults(string type)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            struct Value {
+                public {{type}} Number { get { return {{type}}(42); } }
+            }
+            int32 Main() {
+                Value value = new Value();
+                return int32(value.Number);
+            }
+            """));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
+        Assert.Null(compilation.Program);
     }
 
     [Theory]
@@ -173,6 +198,8 @@ public sealed class StaticProtocolInferenceTests
     [Theory]
     [InlineData("Add<int32>(int32(1))")]
     [InlineData("Add(int32(1))")]
+    [InlineData("Add<float32>(float32(1))")]
+    [InlineData("Add<float64>(float64(1))")]
     public void PrimitiveDoesNotAcquireOperatorWitnessAfterStructSpecialization(string call)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""

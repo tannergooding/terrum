@@ -80,6 +80,12 @@ public sealed class FloatingLiteralBindingTests
     private delegate long Float64Binary(long left, long right);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Float32Copy(int value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Float64Copy(long value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Float32FourOperands(int a, int b, int c, int d);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -369,6 +375,55 @@ public sealed class FloatingLiteralBindingTests
                 var codeUnit = (ushort)value;
                 Assert.Equal(BitConverter.SingleToInt32Bits((float)value), narrow(codeUnit));
                 Assert.Equal(BitConverter.DoubleToInt64Bits((double)value), widen(codeUnit));
+            }
+        }
+        finally
+        {
+            if (library != IntPtr.Zero)
+            {
+                NativeLibrary.Free(library);
+            }
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void CopyGenericSpecializationsPreserveFloatingPayloadBits()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }
+            [NoThrow] T Forward<T>(T value) where T : [Copy] { return Identity(value); }
+            public float32 CopyFloat32(float32 value) { return Forward(value); }
+            public float64 CopyFloat64(float64 value) { return Forward(value); }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-copy-float-{Guid.NewGuid():N}.dll");
+        var library = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path,
+                NativeEmitter.EmitLibrary(program, ["CopyFloat32", "CopyFloat64"], NativeRuntimePolicy.FailFast));
+            library = NativeLibrary.Load(path);
+            var copyFloat32 = Export<Float32Copy>(library, "CopyFloat32");
+            var copyFloat64 = Export<Float64Copy>(library, "CopyFloat64");
+            uint[] singleBits = [
+                0x00000000, 0x80000000, 0x00000001, 0x007FFFFF, 0x00800000,
+                0x3F800000, 0x7F800000, 0xFF800000, 0x7F800001, 0xFFC12345,
+            ];
+            foreach (var bits in singleBits)
+            {
+                Assert.Equal(unchecked((int)bits), copyFloat32(unchecked((int)bits)));
+            }
+            ulong[] doubleBits = [
+                0x0000000000000000, 0x8000000000000000, 0x0000000000000001,
+                0x000FFFFFFFFFFFFF, 0x0010000000000000, 0x3FF0000000000000,
+                0x7FF0000000000000, 0xFFF0000000000000, 0x7FF0000000000001,
+                0xFFF8123456789ABC,
+            ];
+            foreach (var bits in doubleBits)
+            {
+                Assert.Equal(unchecked((long)bits), copyFloat64(unchecked((long)bits)));
             }
         }
         finally
