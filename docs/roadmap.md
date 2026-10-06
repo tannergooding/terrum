@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `62711bdd` | Compare StringRow names and namespaces for every nonzero Unicode scalar |
 | `0205b2aa` | Verify rejection of every surrogate-valued `\U` escape through source-grant JIT |
 | `dde285a9` | Compare every valid Unicode scalar encoding with host encoders through source-grant JIT |
 | `41f9722e` | Compare every supplementary scalar encoding with host encoders through source-grant JIT |
