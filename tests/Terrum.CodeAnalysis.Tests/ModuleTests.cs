@@ -320,6 +320,8 @@ public sealed class ModuleTests
         var floatingIntegerConversionTestsPath = Path.Combine(root, "self-host", "FloatingIntegerConversionTests.terrum");
         var floatingFormatConversionPath = Path.Combine(root, "self-host", "FloatingFormatConversion.terrum");
         var floatingFormatConversionTestsPath = Path.Combine(root, "self-host", "FloatingFormatConversionTests.terrum");
+        var floatingNegationPath = Path.Combine(root, "self-host", "FloatingNegation.terrum");
+        var floatingNegationTestsPath = Path.Combine(root, "self-host", "FloatingNegationTests.terrum");
         var checkedFactsPath = Path.Combine(root, "self-host", "IntegerCheckedArithmetic.terrum");
         var integerMathPath = Path.Combine(root, "self-host", "IntegerMath.terrum");
         var integerSaturationPath = Path.Combine(root, "self-host", "IntegerSaturation.terrum");
@@ -394,6 +396,12 @@ public sealed class ModuleTests
         var floatingFormatConversionTests = SyntaxTree.Parse(
             await File.ReadAllTextAsync(floatingFormatConversionTestsPath).ConfigureAwait(true),
             floatingFormatConversionTestsPath);
+        var floatingNegation = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(floatingNegationPath).ConfigureAwait(true),
+            floatingNegationPath);
+        var floatingNegationTests = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(floatingNegationTestsPath).ConfigureAwait(true),
+            floatingNegationTestsPath);
         var checkedFacts = SyntaxTree.Parse(await File.ReadAllTextAsync(checkedFactsPath).ConfigureAwait(true),
             checkedFactsPath);
         var integerMath = SyntaxTree.Parse(await File.ReadAllTextAsync(integerMathPath).ConfigureAwait(true),
@@ -412,7 +420,7 @@ public sealed class ModuleTests
             float32MathSelection, float64MathSelection, floatMathSelectionTests, wideFacts,
             integerFormatting, integerFormattingTests, integerFloatConversion, integerFloatConversionTests,
             floatingIntegerConversion, floatingIntegerConversionTests, floatingFormatConversion,
-            floatingFormatConversionTests, checkedFacts,
+            floatingFormatConversionTests, floatingNegation, floatingNegationTests, checkedFacts,
             integerMath, integerSaturation, integerWrapping, checkedConversions, bitOperations], policy);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
@@ -431,6 +439,7 @@ public sealed class ModuleTests
             "IntegerFactsUInt64Mask",
             "Terrum.CodeAnalysis.Tests.CheckIntegerFormatting",
             "Terrum.CodeAnalysis.Tests.CheckIntegerFloatConversion",
+            "Terrum.CodeAnalysis.Tests.CheckFloatingNegation",
             "Terrum.CodeAnalysis.Tests.CheckFloatingFormatConversion",
             "Terrum.CodeAnalysis.Tests.CheckFloatingIntegerConversion",
             "Terrum.CodeAnalysis.Tests.CheckCopyAlgorithms",

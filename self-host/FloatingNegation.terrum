@@ -1,0 +1,11 @@
+namespace Terrum.CodeAnalysis;
+
+public static uint32 NegateFloat32Bits(uint32 bits)
+{
+    return bits ^ uint32(0x80000000);
+}
+
+public static uint64 NegateFloat64Bits(uint64 bits)
+{
+    return bits ^ uint64(0x8000000000000000);
+}
