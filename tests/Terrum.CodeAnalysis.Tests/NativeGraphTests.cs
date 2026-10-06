@@ -729,6 +729,22 @@ public sealed class NativeGraphTests
     }
 
     [Fact]
+    public void GraphReplacementCannotWeakenRequiredNoReturnPromise()
+    {
+        var leaf = Leaf("[DoesNotReturn] public void Leaf() { while (true) { } }");
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { Leaf(); return 42; }"),
+            NativeModuleCompiler.CreateGraphReference([leaf]));
+        Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
+            [leaf], NativeRuntimePolicy.FailFast);
+
+        NativeModuleCompiler.ValidateGraph(root, [leaf]);
+        var replacement = Leaf("public void Leaf() { }");
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [replacement]));
+    }
+
+    [Fact]
     public void LibraryMayExportOrdinaryMainWithoutCreatingAnEntryPoint()
     {
         var leaf = Leaf("public int32 Leaf() { return 40; }");
