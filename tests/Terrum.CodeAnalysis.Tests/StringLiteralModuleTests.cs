@@ -40,6 +40,14 @@ public sealed class StringLiteralModuleTests
                 if (!literal.TryReadScalar(spelling.Start + 1, init var scalar, init var next)) { return -3; }
                 return scalar;
             }
+            public int32 ReadRequestedStringScalar() {
+                if (Host.Source.Length < 2) { return -1; }
+                if (!SourceRange.TryCreate(1, Host.Source.Length - 1, init var spelling)) { return -2; }
+                if (!StringLiteral.TryCreate(spelling, init var literal)) { return -3; }
+                int32 position = spelling.Start + int32(Host.Source[0]);
+                if (!literal.TryReadScalar(position, init var scalar, init var next)) { return -4; }
+                return scalar;
+            }
             """, "string-literal-module.terrum");
         var producerCompilation = Compilation.Create(trees,
         [
@@ -50,7 +58,10 @@ public sealed class StringLiteralModuleTests
         Assert.False(producerCompilation.HasErrors,
             string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
-            ["Terrum.CodeAnalysis.ReadFirstStringScalar"]);
+            [
+                "Terrum.CodeAnalysis.ReadFirstStringScalar",
+                "Terrum.CodeAnalysis.ReadRequestedStringScalar",
+            ]);
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
@@ -83,6 +94,33 @@ public sealed class StringLiteralModuleTests
                 IsInvocationScoped = true,
             };
             Assert.Equal(expected, NativeJit.ExecuteWithSourceGrant(linked, [grant], (NativeRuntimePolicy)policy));
+        }
+
+        var requestedConsumer = Compilation.Create(SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return ReadRequestedStringScalar(); }
+            """, "string-literal-position-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(requestedConsumer.HasErrors,
+            string.Join(Environment.NewLine, requestedConsumer.Diagnostics));
+        var requestedProgram = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(requestedConsumer.Program), producer);
+        var requestedLinked = ModuleCompiler.Link(requestedProgram, producer);
+
+        foreach (var (text, position, expected) in new (string Text, int Position, int Expected)[] {
+            ("\"A\\u00E9B\"", 1, 65), ("\"A\\u00E9B\"", 2, 233),
+            ("\"A\\u00E9B\"", 3, -4), ("\"A\\u00E9B\"", 7, -4),
+            ("\"A\\u00E9B\"", 8, 66), ("\"A\\u00E9B\"", 9, -4),
+            ("\"😀\"", 1, 0x1F600), ("\"😀\"", 2, -4), ("\"😀\"", 3, -4),
+            ("\"\\U0001F600\"", 1, 0x1F600), ("\"\\U0001F600\"", 2, -4),
+            ("\"\\U0001F600\"", 8, -4),
+        })
+        {
+            var grant = new HostBuffer("Source", PrimitiveType.Char16,
+                [position, .. text.Select(static unit => (int)unit)], false) {
+                IsInvocationScoped = true,
+            };
+            Assert.Equal(expected, NativeJit.ExecuteWithSourceGrant(
+                requestedLinked, [grant], (NativeRuntimePolicy)policy));
         }
     }
 
