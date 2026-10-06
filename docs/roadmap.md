@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `cf9a107b` | Verify unchanged consumers execute against compatible 16-byte Copy-output graph replacements in both modes |
 | `4b3e7a9a` | Verify retained `NoThrow` graph replacement compatibility under both runtime policies |
 | `dfedc517` | Verify retained `DoesNotReturn` graph replacement compatibility under both runtime policies |
 | `8dc1272c` | Verify native graph replacement rejects weakening a retained `DoesNotReturn` promise |
