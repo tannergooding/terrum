@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -49,6 +50,32 @@ public sealed class StringLiteralModuleTests
                 if (next != spelling.Start + int32(Host.Source[1])) { return -5; }
                 return scalar;
             }
+            public int32 VerifyBmpLiteralRecords() {
+                int32 sourceLength = Host.Source.Length;
+                mut int32 at = 0;
+                mut int32 item = 0;
+                while (at < sourceLength) {
+                    if (sourceLength - at < 3) { return -1; }
+                    bool expectedValid = Host.Source[at] != char16(0);
+                    int32 expectedScalar = int32(Host.Source[at + 1]);
+                    int32 spellingLength = int32(Host.Source[at + 2]);
+                    at = at + 3;
+                    if (spellingLength < 2 || spellingLength > sourceLength - at) { return -2; }
+                    if (!SourceRange.TryCreate(at, spellingLength, init var spelling)) { return -3; }
+                    if (StringLiteral.TryCreate(spelling, init var literal)) {
+                        if (!expectedValid || literal.ScalarCount != 1
+                            || !literal.TryReadScalar(at + 1, init var scalar, init var next)
+                            || scalar != expectedScalar || next != at + spellingLength - 1) {
+                            return item + 1;
+                        }
+                    } else if (expectedValid) {
+                        return item + 1;
+                    }
+                    at = at + spellingLength;
+                    item = item + 1;
+                }
+                return 0;
+            }
             """, "string-literal-module.terrum");
         var producerCompilation = Compilation.Create(trees,
         [
@@ -62,6 +89,7 @@ public sealed class StringLiteralModuleTests
             [
                 "Terrum.CodeAnalysis.ReadFirstStringScalar",
                 "Terrum.CodeAnalysis.ReadRequestedStringScalar",
+                "Terrum.CodeAnalysis.VerifyBmpLiteralRecords",
             ]);
 
         var consumerTree = SyntaxTree.Parse("""
@@ -73,6 +101,17 @@ public sealed class StringLiteralModuleTests
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
+
+        var recordConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return VerifyBmpLiteralRecords(); }
+            """, "string-literal-record-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(recordConsumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, recordConsumerCompilation.Diagnostics));
+        var recordConsumer = ModuleCompiler.Link(
+            ModuleCompiler.CreateConsumer(
+                Assert.IsType<BoundProgram>(recordConsumerCompilation.Program), producer),
+            producer);
 
         foreach (var (text, scalar) in new (string Text, int? Scalar)[] {
             ("\"\"", 0), ("\"A\"", 65), ("\"é\"", 233), ("\"\\u00E9\"", 233),
@@ -96,6 +135,63 @@ public sealed class StringLiteralModuleTests
             };
             Assert.Equal(expected, NativeJit.ExecuteWithSourceGrant(linked, [grant], (NativeRuntimePolicy)policy));
         }
+
+        const int maximumGrantLength = 16_384;
+        var records = new List<int>(maximumGrantLength);
+        void ExecuteRecords()
+        {
+            if (records.Count == 0)
+            {
+                return;
+            }
+            var grant = new HostBuffer("Source", PrimitiveType.Char16,
+                [.. records], false) { IsInvocationScoped = true };
+            Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(
+                recordConsumer, [grant], (NativeRuntimePolicy)policy));
+            records.Clear();
+        }
+
+        var emptyRecords = new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+            IsInvocationScoped = true,
+        };
+        Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(
+            recordConsumer, [emptyRecords], (NativeRuntimePolicy)policy));
+
+        for (var value = (int)char.MinValue; value <= char.MaxValue; value++)
+        {
+            var codeUnit = (char)value;
+            var spelling = codeUnit switch {
+                '"' => "\"\\\"\"",
+                '\\' => "\"\\\\\"",
+                _ => new string(['"', codeUnit, '"']),
+            };
+            var lexed = Lexer.Lex(SourceText.From(spelling));
+            if (lexed.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM0002"))
+            {
+                continue;
+            }
+
+            var valid = !char.IsSurrogate(codeUnit);
+            if (valid)
+            {
+                Assert.Empty(lexed.Diagnostics);
+            }
+            else
+            {
+                Assert.Contains(lexed.Diagnostics, static diagnostic => diagnostic.Code == "TRM0001");
+            }
+            var recordLength = 3 + spelling.Length;
+            if (records.Count + recordLength > maximumGrantLength)
+            {
+                ExecuteRecords();
+            }
+
+            records.Add(valid ? 1 : 0);
+            records.Add(valid ? value : 0);
+            records.Add(spelling.Length);
+            records.AddRange(spelling.Select(static unit => (int)unit));
+        }
+        ExecuteRecords();
 
         var requestedConsumer = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;

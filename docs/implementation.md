@@ -29,7 +29,8 @@ units) across fresh grants under both runtime policies, plus the `Utf16Scalar`
 adapter, `CharacterLiteral` leaf decoding for every scanner-delimited BMP
 code unit (including surrogate rejection), the provisional `StringEscape`
 decoder for every scanner-delimited BMP escape introducer, and
-`StringLiteral` leaf decoders and `StringRow` name/namespace encoders for
+`StringLiteral` scalar decoding for every scanner-delimited BMP code unit
+(including surrogate rejection), plus `StringRow` name/namespace encoders for
 ASCII, UTF-8, UTF-16LE and UTF-32LE.
 Persisted semantic-module JIT tests compare those rows with the hosted string
 table writer across fresh grants, including the existing empty-name,
