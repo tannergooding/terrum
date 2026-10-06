@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `77230db0` | Preserve hosted unsafe-caller diagnostics across scalar frontend rejection |
 | `c3406537` | Reject unscoped caller-unsafe frontend calls without replacing prior artifacts |
 | `43014ae1` | Compare caller-unsafe frontend library artifacts with hosted builds and execute both scope forms |
 | `dd5eb071` | Compare checked catch/finally library output and cleanup behavior with hosted builds |
