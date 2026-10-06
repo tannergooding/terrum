@@ -128,7 +128,10 @@ existing record meanings do not change. The reader accepts switch records only
 after independently matching them to source and lowers them to ordered hosted
 conditionals that evaluate the selector once. Older readers reject these
 unknown records. Switch remains complete-program-only; verification and
-emission remain hosted, and bootstrap support is not claimed.
+emission remain hosted, and bootstrap support is not claimed. CLI integration
+tests compare all six selector types with hosted conditional equivalents at
+integer-width, Boolean and surrogate code-unit boundaries under both runtime
+policies.
 The bounded Terrum-authored scalar frontend now projects same-format
 `float32`/`float64` unary signs, target-typed decimal and hexadecimal floating
 literals, based integer literals directly targeting either format, `+`, `-`,

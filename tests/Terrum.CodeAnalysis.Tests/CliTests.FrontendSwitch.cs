@@ -179,6 +179,60 @@ public sealed partial class CliTests
     }
 
     [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task ScalarFrontendSwitchMatchesHostedSelectorsAcrossAllScalarWidthsAsync(string policy)
+    {
+        foreach (var (type, value) in new[]
+        {
+            ("int32", "2147483647"),
+            ("uint32", "4294967295"),
+            ("int64", "9223372036854775807"),
+            ("uint64", "18446744073709551615"),
+            ("bool", "true"),
+            ("char16", "char16(55296)"),
+        })
+        {
+            string source = $$"""
+                public int32 Main() {
+                    {{type}} value = {{value}};
+                    switch (value) {
+                        {{value}} => { return 42; },
+                        _ => { return 0; },
+                    }
+                }
+                """;
+            string hostedEquivalent = $$"""
+                public int32 Main() {
+                    {{type}} value = {{value}};
+                    if (value == {{value}}) { return 42; } else { return 0; }
+                }
+                """;
+            var root = RepositoryRoot();
+            var directory = Path.Combine(root, "self-host");
+            var nativePath = Path.Combine(root, $"switch-widths-{Guid.NewGuid():N}.native.exe");
+            var hostedPath = Path.Combine(root, $"switch-widths-{Guid.NewGuid():N}.hosted.exe");
+            try
+            {
+                var (nativeExit, nativeOutput, nativeError) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                    "frontend-build", directory, "-", "-o", nativePath, "--runtime", policy, "--json");
+                var (hostedExit, hostedOutput, hostedError) = await RunAsync(
+                    Encoding.UTF8.GetBytes(hostedEquivalent), "build", "-", "-o", hostedPath,
+                    "--runtime", policy, "--json");
+                Assert.True(nativeExit == 0, $"{type} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
+                Assert.True(hostedExit == 0, $"{type} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
+                Assert.Equal(42, await ExecuteNativeImageAsync(nativePath));
+                Assert.Equal(42, await ExecuteNativeImageAsync(hostedPath));
+            }
+            finally
+            {
+                File.Delete(nativePath);
+                File.Delete(hostedPath);
+            }
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Main() { int32 x = 1; switch (x) { 1 when true => {}, _ => {} } return 0; }")]
     [InlineData("int32 Main() { int32 x = 1; switch (x) { 1 or 2 => {}, _ => {} } return 0; }")]
     [InlineData("int32 Main() { int32 x = 1; switch (x) { x => {}, _ => {} } return 0; }")]
