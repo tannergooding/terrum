@@ -31,7 +31,8 @@ unit (including surrogate rejection) and every valid supplementary scalar in
 both direct and `\U`-escaped spellings, and rejection of all 2,048
 surrogate-valued `\U` escapes with hosted diagnostic parity. The provisional
 `StringEscape` decoder is checked for every scanner-delimited BMP escape
-introducer, every valid supplementary `\U` escape and all 2,048 rejected
+introducer, every BMP `\u` value (including all 2,048 rejected surrogate
+values), every valid supplementary `\U` escape and all 2,048 rejected
 surrogate-valued `\U` escapes, including consumed and diagnostic widths.
 `StringLiteral` scalar decoding is checked for every scanner-delimited BMP
 code unit (including surrogate rejection), every BMP `\u` escape (including
