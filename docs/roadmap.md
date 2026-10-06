@@ -393,6 +393,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f17bcead` | Verify floating scalar `out` and `init ref<T>` modes in both single-function v85 projections under both runtime policies, with hosted library parity |
 | `d65afeb4` | Verify `float32`/`float64` `out` publication for void functions through direct JIT/AOT and bounded v85 frontend parity under both runtime policies |
 | `e8fa5741` | Support `float32`/`float64` `out` outputs on non-Boolean/void hosted declarations and v85 calls; verify non-Boolean publication under both runtime policies |
 | `7c04163d` | Support `float32`/`float64` initialization-loan outputs in hosted binding and bounded v85 projections; verify publication and frontend parity under both runtime policies |
