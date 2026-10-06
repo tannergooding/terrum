@@ -315,6 +315,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `1558b555` | Add isolated packed scalar character-literal analysis to the provisional source-grant companion, preserving relative diagnostic spans and source-free exports |
 | `69f62e8c` | Add isolated packed scalar string-escape analysis to the provisional source-grant companion, with hosted aggregate parity, exhaustive escape coverage and unchanged source-free exports |
 | `802a69ae` | Add provisional source-dependent `CanGetSourceRange` predicate with hosted subtext-boundary parity, maximum-grant coverage and maintained manifest binding |
 | `4f550508` | Add provisional scalar source-line content and including-break end queries with same-grant range reconstruction, boundary coverage and maintained manifest binding |
