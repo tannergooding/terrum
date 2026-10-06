@@ -32,6 +32,9 @@ approved.
   recommends admitting floating formats only as concrete arguments to hosted
   Copy-only generic templates; it does not grant symbolic floating operations
   or source-free generic support.
+- [Concrete floating dependencies in hosted generic proofs](floating-copy-proof-dependencies.md)
+  recommends a bounded floating-leaf descriptor and concrete-signature
+  hydration slice without expanding managed-class closures.
 - [Span-backed token cursor](span-backed-token-cursor.md) records the open
   backing, capture, indexing and construction contracts needed for the
   existing zero-copy self-host cursor candidate.

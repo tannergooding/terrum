@@ -59,7 +59,10 @@ internal sealed partial class Binder
     private ImmutableArray<BoundFunction>.Builder? _genericProofFunctions;
     private Binder? _genericProofSource;
 
-    private PrimitiveType? HydrateProofType(PrimitiveType sourceType)
+    private PrimitiveType? HydrateProofType(
+        PrimitiveType sourceType,
+        bool allowFloatingScalar = false,
+        bool allowFloatingStructFields = false)
     {
         var source = _genericProofSource ?? throw new InvalidOperationException("Missing generic proof source.");
         if (ManagedClassTypes.IsManaged(sourceType))
@@ -95,6 +98,7 @@ internal sealed partial class Binder
         {
             return sourceType is PrimitiveType.Void or PrimitiveType.Bool or PrimitiveType.Char16
                 or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                || (allowFloatingScalar && sourceType is (PrimitiveType.Float32 or PrimitiveType.Float64))
                 ? sourceType : null;
         }
         var structure = source._structs[(int)sourceType - 100];
@@ -109,7 +113,8 @@ internal sealed partial class Binder
         var fields = ImmutableArray.CreateBuilder<BoundStructField>(structure.Fields.Length);
         foreach (var field in structure.Fields)
         {
-            if (HydrateProofType(field.Type) is not PrimitiveType fieldType)
+            if (HydrateProofType(field.Type, allowFloatingScalar: allowFloatingStructFields,
+                allowFloatingStructFields: allowFloatingStructFields) is not PrimitiveType fieldType)
             {
                 return null;
             }
@@ -135,22 +140,27 @@ internal sealed partial class Binder
     {
         var source = _genericProofSource ?? throw new InvalidOperationException("Missing generic proof source.");
         var declaration = source._signatures[sourceIndex];
+        var owner = declaration.StructName is null ? null
+            : declaration.Name[..declaration.Name.LastIndexOf('.', StringComparison.Ordinal)];
+        var allowFloating = owner is null || source._structNames.ContainsKey(owner);
         if (declaration.IsCleanup || declaration.IsClassConstructor
-            || HydrateProofType(declaration.ReturnType) is not PrimitiveType result)
+            || HydrateProofType(declaration.ReturnType,
+                allowFloatingScalar: allowFloating, allowFloatingStructFields: allowFloating)
+                is not PrimitiveType result)
         {
             return false;
         }
         var parameters = ImmutableArray.CreateBuilder<Parameter>(declaration.Parameters.Length);
         foreach (var parameter in declaration.Parameters)
         {
-            if (HydrateProofType(parameter.Type) is not PrimitiveType type)
+            if (HydrateProofType(parameter.Type,
+                allowFloatingScalar: allowFloating, allowFloatingStructFields: allowFloating)
+                is not PrimitiveType type)
             {
                 return false;
             }
             parameters.Add(parameter with { Type = type });
         }
-        var owner = declaration.StructName is null ? null
-            : declaration.Name[..declaration.Name.LastIndexOf('.', StringComparison.Ordinal)];
         PrimitiveType? receiver = null;
         if (owner is not null)
         {
@@ -159,7 +169,9 @@ internal sealed partial class Binder
             {
                 return false;
             }
-            if (HydrateProofType(sourceType) is not PrimitiveType mapped)
+            if (HydrateProofType(sourceType,
+                allowFloatingStructFields: source._structNames.ContainsKey(owner))
+                is not PrimitiveType mapped)
             {
                 return false;
             }
@@ -176,7 +188,10 @@ internal sealed partial class Binder
                 declaration.Tree.Root.Span));
         }
         variables.AddRange(parameters.Select(parameter => new BoundVariable(parameter.Name,
-            parameter.Type, parameter.IsOut, parameter.Span) { IsOut = parameter.IsOut }));
+            parameter.Type, parameter.IsOut, parameter.Span) {
+            IsOut = parameter.IsOut,
+            IsInit = parameter.IsInit,
+        }));
         var external = new BoundFunction(declaration.Name, result, variables.ToImmutable(),
             parameters.Count + (receiver is not null && !declaration.IsStatic && !declaration.IsConstructor ? 1 : 0),
             new BoundBlock([], declaration.Tree.Root.Span), declaration.Tree.Root.Span) {

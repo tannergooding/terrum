@@ -322,6 +322,90 @@ public sealed class StaticProtocolCompositionTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
+    [Fact]
+    public void ConcreteFloatingCopyDependenciesHydrateWithInitMode()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Inner {
+                public float32 Single;
+                public int32 Marker;
+                [NoThrow] public Inner(float32 single, int32 marker) { Single = single; Marker = marker; }
+            }
+            struct Pair {
+                public Inner Nested;
+                public float64 Wide;
+                [NoThrow] public Pair(Inner nested, float64 wide) { Nested = nested; Wide = wide; }
+                [NoThrow] public float32 ReadSingle() { return Nested.Single; }
+            }
+            [NoThrow] bool TryCreatePair(init ref<Pair> result) {
+                result = new Pair(new Inner(float32(1), 42), float64(2));
+                return true;
+            }
+            [NoThrow] float32 CopyFloat(float32 value) { return value; }
+            [NoThrow] T Forward<T>(T value) where T : [Copy] {
+                if (!TryCreatePair(init var pair)) { return value; }
+                if (CopyFloat(pair.ReadSingle()) != float32(1) || pair.Wide != float64(2)) { return value; }
+                return Identity(value);
+            }
+            [NoThrow] U Identity<U>(U value) where U : [Copy] { return value; }
+            int32 Main() { return Forward(int32(42)); }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var functions = Assert.IsType<BoundProgram>(compilation.Program).Functions;
+        Assert.Contains(functions, static function => function.Name == "Forward<int32>");
+        Assert.Contains(functions, static function => function.Name == "Identity<int32>");
+        Assert.DoesNotContain(functions, static function => function.IsExternal
+            || function.Name.Contains('$', StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void FloatingManagedClassFieldsRemainOutsideGenericProofHydration()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class Box {
+                float32 _value;
+                public Box(float32 value) { _value = value; }
+                public static bool TryCreate(out Box result) {
+                    result = new Box(float32(1));
+                    return true;
+                }
+                public float32 Read() { return _value; }
+            }
+            T Forward<T>(T value) where T : [Copy] {
+                require Box.TryCreate(out var box);
+                if (box.Read() != float32(1)) { return value; }
+                return value;
+            }
+            int32 Main() { return Forward(int32(42)); }
+            """));
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3007");
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void FloatingManagedClassSignaturesRemainOutsideGenericProofHydration()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class Box {
+                int32 _value;
+                public Box(int32 value) { _value = value; }
+                public static bool TryCreate(out Box result) {
+                    result = new Box(1);
+                    return true;
+                }
+                public float32 Read() { return float32(_value); }
+            }
+            T Forward<T>(T value) where T : [Copy] {
+                if (!Box.TryCreate(out var box)) { return value; }
+                if (box.Read() != float32(1)) { return value; }
+                return value;
+            }
+            int32 Main() { return Forward(int32(42)); }
+            """));
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3007");
+        Assert.Null(compilation.Program);
+    }
+
     [Theory]
     [InlineData("Value", false)]
     [InlineData("Other", false)]

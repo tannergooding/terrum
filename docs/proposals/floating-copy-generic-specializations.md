@@ -20,11 +20,13 @@ mechanisms. Generic bodies may pass, return, assign, and publish a substituted
 arithmetic, comparison, conversion, or other primitive operator rights.
 
 Keep this eligibility separate from shared Copy predicates used by getters,
-operator results, protocol conformance, and proof hydration. Do not extend
-symbolic generic scalar types, protocol witnesses, ConstEval, or fixed
-floating dependencies in generic proof. User-defined structures containing
-floating fields are outside this slice. Preserve specialization limits and the
-existing output publication and exception behavior.
+operator results, and protocol conformance. This proposal does not itself
+extend symbolic generic scalar types, ConstEval, or concrete floating
+dependencies reached during generic proof; the latter remains a separate
+[unapproved proposal](floating-copy-proof-dependencies.md). User-defined
+structures containing floating fields are outside this slice. Preserve
+specialization limits and the existing output publication and exception
+behavior.
 
 This is a hosted compiler experiment, not an accepted source-contract change.
 It does not make the Terrum-authored scalar frontend independent of hosted

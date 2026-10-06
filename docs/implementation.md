@@ -2364,12 +2364,14 @@ Copy-only templates also specialize for `bool`, `char16`, `int32`, `uint32`,
 This permits scalar selection and conditional output, not new arithmetic
 rights on symbolic `T`. The hosted binder now provisionally admits `float32`
 and `float64` only as concrete Copy-only generic arguments, including nested
-forwarding and existing output modes; this does not admit floating types in
-generic proof hydration, getter/operator-result predicates, protocol witnesses
-or ConstEval. Raw-bit transport and private semantic/native specializations are
-covered. The target-contract proposal remains unapproved; this hosted support
-does not add generic projection to the Terrum-authored scalar frontend or
-generic support to source-free TRRM.
+forwarding and existing output modes. A separate provisional proof-hydration
+slice admits floating leaves in reached non-unique Copy-struct descriptors and
+non-class concrete signatures; it preserves `init ref<T>` mode and keeps
+managed-class closures excluded. Neither change widens getter/operator-result
+predicates, primitive witnesses or ConstEval. Raw-bit transport and private
+semantic/native specializations are covered. Both target-contract proposals
+remain unapproved; this hosted support does not add generic projection to the
+Terrum-authored scalar frontend or generic support to source-free TRRM.
 
 A template can also compose helpers using concrete eligible `Copy` structs
 alongside its symbolic parameters. Normal binding resolves concrete constructors,

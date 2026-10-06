@@ -373,8 +373,11 @@ definition-site verification, without introducing a public generic ABI.
 The hosted compiler provisionally supports `float32` and `float64` as concrete
 Copy-only generic arguments, including through the maintained selection
 candidate; they do not gain symbolic arithmetic or primitive witnesses. This
-does not add generic support to the source-free scalar frontend or TRRM. See
-the [unapproved proposal](../docs/proposals/floating-copy-generic-specializations.md)
+also provisionally hydrates floating leaves in concrete Copy-struct
+dependencies reached by hosted generic proofs, while managed-class closures
+remain excluded. Neither change adds generic support to the source-free scalar
+frontend or TRRM. See the [generic-argument proposal](../docs/proposals/floating-copy-generic-specializations.md),
+the separate [proof-dependency proposal](../docs/proposals/floating-copy-proof-dependencies.md),
 and the [implementation boundary](../docs/implementation.md#bounded-generic-functions).
 Explicit homogeneous Copy-struct witnesses support `+`, `-`, `*`, `/`, `%`,
 `&`, `|` and `^`; generic code still requires the corresponding declared

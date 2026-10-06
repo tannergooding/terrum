@@ -14,8 +14,30 @@ public sealed partial class JitTests
     public async Task FloatingCopySpecializationsPreserveConditionalAndVacancyOutputsAsync(bool checkedFailures)
     {
         const string Source = """
+            struct Inner {
+                public float32 Single;
+                public int32 Marker;
+                [NoThrow] public Inner(float32 single, int32 marker) { Single = single; Marker = marker; }
+            }
+            struct Pair {
+                public Inner Nested;
+                public float64 Wide;
+                [NoThrow] public Pair(Inner nested, float64 wide) { Nested = nested; Wide = wide; }
+                [NoThrow] public float32 ReadSingle() { return Nested.Single; }
+            }
             [NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }
-            [NoThrow] T Forward<T>(T value) where T : [Copy] { return Identity(value); }
+            [NoThrow] bool TryCreatePair(init ref<Pair> result) {
+                result = new Pair(new Inner(float32(1), 42), float64(2));
+                return true;
+            }
+            [NoThrow] float32 CopyFloat(float32 value) { return value; }
+            [NoThrow] T Forward<T>(T value) where T : [Copy] {
+                if (!TryCreatePair(init var pair)) { return Identity(value); }
+                if (CopyFloat(pair.ReadSingle()) != float32(1) || pair.Wide != float64(2)) {
+                    return Identity(value);
+                }
+                return Identity(value);
+            }
             [NoThrow] bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
                 result = Forward(value);
                 return publish;
