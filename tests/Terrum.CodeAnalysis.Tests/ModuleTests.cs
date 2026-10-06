@@ -121,6 +121,42 @@ public sealed class ModuleTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task FloatingOutputsBindAndExecuteAcrossModuleArtifactsAsync(
+        BoundRuntimePolicy policy)
+    {
+        var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public bool TryGet(out float32 value) {
+                value = 3.5;
+                return true;
+            }
+            public bool Initialize(float64 input, init ref<float64> result) {
+                result = input;
+                return true;
+            }
+            """), policy);
+        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program),
+            ["TryGet", "Initialize"]);
+
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                init float64 initialized;
+                if (!Initialize(7.75, init initialized)) { return 1; }
+                if (!TryGet(out var output)) { return 2; }
+                return initialized == 7.75 && output == 3.5 ? 42 : 0;
+            }
+            """), ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        var nativePolicy = policy == BoundRuntimePolicy.FailFast
+            ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, producer), nativePolicy)).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public async Task NamedArgumentExpressionsEvaluateInSourceOrderAcrossModuleArtifactsAsync(
         BoundRuntimePolicy policy)
     {

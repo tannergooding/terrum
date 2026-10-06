@@ -393,6 +393,53 @@ public sealed class NativeModuleSetsTests
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task FloatingOutputsBindAcrossNativeConsumerSetsAsync(NativeRuntimePolicy policy)
+    {
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public bool TryGet(out float32 value) {
+                value = 3.5;
+                return true;
+            }
+            public bool Initialize(float64 value, init ref<float64> result) {
+                result = value;
+                return true;
+            }
+            """), (BoundRuntimePolicy)policy);
+        Assert.False(providerCompilation.HasErrors,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = NativeModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(providerCompilation.Program),
+            ["TryGet", "Initialize"], "Provider", policy);
+        var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Beta() { return 0; }"), (BoundRuntimePolicy)policy);
+        Assert.False(secondCompilation.HasErrors,
+            string.Join(Environment.NewLine, secondCompilation.Diagnostics));
+        var second = NativeModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(secondCompilation.Program), ["Beta"], "Second", policy);
+
+        const string ConsumerSource = """
+            int32 Main() {
+                init float64 initialized;
+                if (!Initialize(7.75, init initialized)) { return 1; }
+                if (!TryGet(out var output)) { return 2; }
+                return initialized == 7.75 && output == 3.5 ? 42 + Beta() : 0;
+            }
+            """;
+        var references = NativeModuleCompiler.CreateReferenceSet([provider, second]);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), references,
+            (BoundRuntimePolicy)policy);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumerSet(
+            Assert.IsType<BoundProgram>(consumerCompilation.Program), [provider, second], policy);
+
+        Assert.Equal(42, await NativeModuleCompiler.RunConsumerSetAsync(consumer, [provider, second],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+    }
+
     [Fact]
     public async Task InitRefOutputRemainsVacantAfterProviderFailureInNativeConsumerSetAsync()
     {

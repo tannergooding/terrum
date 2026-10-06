@@ -2108,6 +2108,8 @@ scalar `init ref<T>` outputs alongside independent providers under both runtime
 policies. Conditional Boolean `out` results also leave a consumer's destination
 vacant on false, allowing a later `init ref<T>` provider call to initialize it;
 compatible provider replacement preserves that behavior under both policies.
+Persisted semantic modules and native consumer sets also cover conditional
+`float32` `out` and `float64` `init ref<T>` publication under both policies.
 Under checked exceptions, a provider write followed by failure leaves
 the destination vacant in a consumer set, permitting a later provider call to
 initialize it. Native graph execution likewise retains vacancy after a checked
