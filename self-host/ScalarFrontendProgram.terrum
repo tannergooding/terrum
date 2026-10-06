@@ -270,9 +270,8 @@ SourceRange ResolveScalarAlias(int32 index, int32 depth, int32 aliasCount)
     return targetSpan;
 }
 
-bool TrySkipScalarAlias(Span<Token> tokenView, int32 count, int32 start, out int32 end)
+bool TrySkipScalarAlias(Span<Token> tokenView, int32 count, int32 start, init ref<int32> end)
 {
-    end = start;
     mut int32 at = start;
     while (at < count - 1
         && TryGetScalarWindowToken(tokenView, 0, count, false, at, init var modifier)
@@ -325,7 +324,7 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
     mut int32 functions = 0;
     while (start < count - 1)
     {
-        if (TrySkipScalarAlias(tokenView, count, start, out var afterAlias))
+        if (TrySkipScalarAlias(tokenView, count, start, init var afterAlias))
         {
             start = afterAlias;
             continue;
