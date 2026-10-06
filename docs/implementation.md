@@ -2089,7 +2089,7 @@ frontend remain outside this extension. This does not migrate `out` to
 Native graph tests execute a 16-byte public Copy-struct output in both
 `out` and `init ref<T>` modes through AOT and JIT under both runtime policies.
 An unchanged graph consumer also executes against compatible replacement
-providers in both modes.
+providers in both modes, and rejects replacements that switch modes.
 Compilation-private `init ref<T>` also supports qualified managed handles.
 The call's checked scratch and exact temporary roots retain the handle until
 successful publication; false and exceptional completion retire the scratch

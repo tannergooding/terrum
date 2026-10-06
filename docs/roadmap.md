@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `04dcbdb1` | Verify Copy-output graph replacements preserve the `out` versus `init ref<T>` contract |
 | `cf9a107b` | Verify unchanged consumers execute against compatible 16-byte Copy-output graph replacements in both modes |
 | `4b3e7a9a` | Verify retained `NoThrow` graph replacement compatibility under both runtime policies |
 | `dfedc517` | Verify retained `DoesNotReturn` graph replacement compatibility under both runtime policies |
