@@ -2717,6 +2717,14 @@ analyzers, and semantic-module coverage includes exhaustive scalar/escape
 inputs. Both use the isolated `HexDigitValue` component, leaving source-free
 `CharacterFacts` unchanged. The tagged layout remains provisional and does
 not broaden scanner or scalar frontend support.
+`GetCharacterLiteralScalarOrMinusOne(start, length)` provisionally returns
+the decoded scalar, including zero for NUL, or `-1` when the packed analyzer
+reports false or an error. It delegates validation to
+`AnalyzeCharacterLiteralPacked`, so callers needing diagnostic codes or spans
+continue to use the packed result. Direct DLL and persisted semantic-module
+tests compare the scalar with the aggregate analyzer under both runtime
+policies; this does not change the classifier or source-free DLL and does not
+move scanner/frontend support out of the hosted verifier/emitter.
 `GetStringLiteralScalarCountOrMinusOne(start, length)` provisionally returns
 `-1` when the existing `StringLiteral.TryCreate` contract rejects an exact
 quoted slice, otherwise the number of decoded scalars; empty literals return

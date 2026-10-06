@@ -1,0 +1,12 @@
+namespace Terrum.CodeAnalysis;
+
+public static int32 GetCharacterLiteralScalarOrMinusOne(int32 start, int32 length)
+{
+    uint32 packed = AnalyzeCharacterLiteralPacked(start, length);
+    if ((packed & uint32(3)) != uint32(1))
+    {
+        return -1;
+    }
+
+    return int32(packed >> 2);
+}

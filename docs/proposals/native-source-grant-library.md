@@ -305,6 +305,32 @@ arguments and maximum grants. Use the isolated scalar hex helper; leave the
 classifier, source-free DLL and hosted scanner/frontend boundaries unchanged.
 The encoding remains provisional and does not establish a stable ABI.
 
+### Provisional scalar character-literal value export
+
+**Question:** Should the maintained companion expose the decoded character
+value without requiring callers to interpret the packed diagnostic layout?
+
+**Summary:** `AnalyzeCharacterLiteralPacked` already validates the exact
+quoted slice and packs either a scalar success or a diagnostic result into
+`uint32`. A separate
+`GetCharacterLiteralScalarOrMinusOne(int32 start, int32 length) -> int32`
+can return the Unicode scalar on success and `-1` for an invalid range,
+malformed spelling or analyzer error. Every valid scalar is in
+`0..0x10FFFF`, so the sentinel is collision-free and successful NUL remains
+zero. The wrapper can reuse the packed analyzer's low two-bit success tag
+instead of duplicating literal parsing.
+
+**Recommendation:** Include only this scalar value query as provisional
+evidence. Return the packed scalar bits only when the tag is `01`; return
+`-1` for false and both error tags. Compare the result with aggregate
+`CharacterLiteralDecodeResult.TryAnalyze` and hosted lexer validity under
+both runtime policies, including NUL, raw and escaped supplementary scalars,
+maximum scalar, malformed/truncated escapes, surrogate cases, multiple
+scalars, invalid bounds and maximum grants. Keep detailed error codes/spans
+on the existing packed query. Do not change the source-grant classifier,
+source-free DLL or hosted scanner/frontend boundary, and do not approve a
+stable ABI.
+
 ### Provisional scalar string-literal validation/count export
 
 **Question:** Should the maintained companion expose the existing

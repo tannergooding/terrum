@@ -25,7 +25,7 @@ public sealed class CharacterLiteralModuleTests
         var root = RepositoryRoot();
         var componentNames = new[] {
             "SourceRange", "CharacterFacts", "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar",
-            "CharacterLiteral", "CharacterLiteralPacked",
+            "CharacterLiteral", "CharacterLiteralPacked", "CharacterLiteralScalar",
         };
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)
@@ -81,7 +81,9 @@ public sealed class CharacterLiteralModuleTests
                     if (decoded.ErrorCode != expectedError || decoded.Scalar != expectedScalar
                         || decoded.ErrorSpan.Start != absoluteErrorStart
                         || decoded.ErrorSpan.Length != expectedErrorLength
-                        || AnalyzeCharacterLiteralPacked(at, spellingLength) != expectedPacked) {
+                        || AnalyzeCharacterLiteralPacked(at, spellingLength) != expectedPacked
+                        || GetCharacterLiteralScalarOrMinusOne(at, spellingLength)
+                            != (decoded.ErrorCode == 0 ? decoded.Scalar : -1)) {
                         return item + 1;
                     }
                     at = at + spellingLength;
