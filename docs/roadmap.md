@@ -85,6 +85,12 @@ constructs exact `float32` and `float64` bits from typed signed and unsigned
 policies; its boundaries also run in the independent AOT/JIT component test
 runner. It does not extend scalar-frontend verification/emission or the
 source-free DLL.
+The standalone `FloatingIntegerConversion` component now also converts raw
+`float32`/`float64` bits to checked fixed-width integer results, matching the
+hosted truncation and range behavior through semantic-module parity and
+independent AOT/JIT component coverage under both runtime policies. This does
+not approve the pair-matrix proposal or add scalar-frontend,
+source-free DLL or TRRM support.
 Separately, the standalone Terrum-authored `HexFloatLiteral` component now
 converts grammar-shaped, caller-delimited hexadecimal-float slices directly
 to target-format bits and matches hosted binding across rounding boundaries,
@@ -339,6 +345,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `2e5a2b67` | Add checked raw float32/float64-to-integer conversion with hosted parity, failure-vacancy checks and independent AOT/JIT component coverage |
 | `16990787` | Add exact typed integer-to-float32/float64 raw-bit conversion with hosted parity, nearest-even boundaries and independent AOT/JIT component coverage |
 | `23eae8e5` | Add provisional target-format float-bit queries for hexadecimal and binary integer slices, including linear repeated-separator validation and maintained-manifest coverage |
 | `f73e0341` | Add provisional hexadecimal-float raw-bit queries to the maintained source-grant companion without widening the classifier or changing source-free exports |

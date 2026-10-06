@@ -2796,6 +2796,15 @@ both tie directions, sticky-bit cases and deterministic values; the independent
 `ComponentTestRunner` also executes the helper under AOT and JIT with both
 runtime policies. This is a Terrum-authored helper, not scalar-frontend
 verification or emission support.
+`FloatingIntegerConversion` separately converts raw `float32`/`float64` bits
+to checked `int32`, `uint32`, `int64` and `uint64` results by truncating toward
+zero before range checking. Semantic-module JIT compares all eight paths
+against hosted conversions under both runtime policies, including signed and
+unsigned boundaries, non-finite inputs, negative fractions and deterministic
+values; the independent `ComponentTestRunner` also exercises representative
+boundaries under AOT/JIT and both policies. This internal helper does not
+approve the floating-to-integer pair matrix or add scalar-frontend,
+source-free DLL or TRRM support.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under
