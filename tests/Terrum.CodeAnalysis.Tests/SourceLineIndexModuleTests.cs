@@ -80,6 +80,7 @@ public sealed class SourceLineIndexModuleTests
             "a\r\nb\rc\nd",
             "\uD800\r\nx",
             "a\u0085b\u2028c\u2029d",
+            "\n\r\u0085\u2028\u2029",
             "x\r\n",
             "x\r",
             "x\n",
