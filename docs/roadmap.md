@@ -258,7 +258,8 @@ prerequisite has already been met.
     source-position queries, scalar source-line-count and source-line
     content/including-break end queries, a scalar source-range validity
     predicate, packed scalar string- and character-literal queries, and
-    paired scalar integer-parsing queries, with selected-export
+    a scalar string-literal validation/count query and paired scalar
+    integer-parsing queries, with selected-export
     descriptors bound to the image hash and end-relative
     reads based on invocation length. The source-free
     compiler-primitives DLL remains unchanged; this does not promote the
@@ -315,6 +316,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `debe8c0b` | Add isolated scalar string-literal validation/count to the provisional source-grant companion with aggregate parity and unchanged source-free exports |
 | `1558b555` | Add isolated packed scalar character-literal analysis to the provisional source-grant companion, preserving relative diagnostic spans and source-free exports |
 | `69f62e8c` | Add isolated packed scalar string-escape analysis to the provisional source-grant companion, with hosted aggregate parity, exhaustive escape coverage and unchanged source-free exports |
 | `802a69ae` | Add provisional source-dependent `CanGetSourceRange` predicate with hosted subtext-boundary parity, maximum-grant coverage and maintained manifest binding |
