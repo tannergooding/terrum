@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `212f2722` | Verify successful StringLiteral encoding across all ASCII and Latin-1 scalar values and exhaustive ASCII StringRow parity |
 | `30d89c48` | Compare StringRow output with the hosted writer for every nonzero Unicode scalar |
 | `62711bdd` | Compare StringRow names and namespaces for every nonzero Unicode scalar |
 | `0205b2aa` | Verify rejection of every surrogate-valued `\U` escape through source-grant JIT |
