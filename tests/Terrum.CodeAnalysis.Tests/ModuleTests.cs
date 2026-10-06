@@ -314,6 +314,8 @@ public sealed class ModuleTests
         var wideFactsPath = Path.Combine(root, "self-host", "WideIntegerFacts.terrum");
         var integerFormattingPath = Path.Combine(root, "self-host", "IntegerFormatting.terrum");
         var integerFormattingTestsPath = Path.Combine(root, "self-host", "IntegerFormattingTests.terrum");
+        var integerFloatConversionPath = Path.Combine(root, "self-host", "IntegerFloatConversion.terrum");
+        var integerFloatConversionTestsPath = Path.Combine(root, "self-host", "IntegerFloatConversionTests.terrum");
         var checkedFactsPath = Path.Combine(root, "self-host", "IntegerCheckedArithmetic.terrum");
         var integerMathPath = Path.Combine(root, "self-host", "IntegerMath.terrum");
         var integerSaturationPath = Path.Combine(root, "self-host", "IntegerSaturation.terrum");
@@ -370,6 +372,12 @@ public sealed class ModuleTests
         var integerFormattingTests = SyntaxTree.Parse(
             await File.ReadAllTextAsync(integerFormattingTestsPath).ConfigureAwait(true),
             integerFormattingTestsPath);
+        var integerFloatConversion = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(integerFloatConversionPath).ConfigureAwait(true),
+            integerFloatConversionPath);
+        var integerFloatConversionTests = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(integerFloatConversionTestsPath).ConfigureAwait(true),
+            integerFloatConversionTestsPath);
         var checkedFacts = SyntaxTree.Parse(await File.ReadAllTextAsync(checkedFactsPath).ConfigureAwait(true),
             checkedFactsPath);
         var integerMath = SyntaxTree.Parse(await File.ReadAllTextAsync(integerMathPath).ConfigureAwait(true),
@@ -386,7 +394,7 @@ public sealed class ModuleTests
         var library = Compilation.CreateLibrary([range, facts, utf16CodeUnits, integerFacts, integerFactsExports,
             token, managedTokenChain, managedTokenChainTests, copyAlgorithms, copyAlgorithmsTests,
             float32MathSelection, float64MathSelection, floatMathSelectionTests, wideFacts,
-            integerFormatting, integerFormattingTests, checkedFacts,
+            integerFormatting, integerFormattingTests, integerFloatConversion, integerFloatConversionTests, checkedFacts,
             integerMath, integerSaturation, integerWrapping, checkedConversions, bitOperations], policy);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
@@ -404,6 +412,7 @@ public sealed class ModuleTests
             "IntegerFactsInt64Mask",
             "IntegerFactsUInt64Mask",
             "Terrum.CodeAnalysis.Tests.CheckIntegerFormatting",
+            "Terrum.CodeAnalysis.Tests.CheckIntegerFloatConversion",
             "Terrum.CodeAnalysis.Tests.CheckCopyAlgorithms",
             "Terrum.CodeAnalysis.Tests.CheckFiniteFloatMathSelections",
             "Terrum.CodeAnalysis.CheckManagedTokenChain",

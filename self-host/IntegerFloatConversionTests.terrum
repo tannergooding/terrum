@@ -1,0 +1,27 @@
+using Terrum.CodeAnalysis.Numerics64;
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckIntegerFloatConversion()
+{
+    if (Int32ToFloat32Bits(int32.MinValue) != uint32(0xCF000000)
+        || Int32ToFloat32Bits(-16_777_219) != uint32(0xCB800002)
+        || Int32ToFloat64Bits(int32.MinValue) != uint64(0xC1E0000000000000)
+        || UInt32ToFloat32Bits(uint32.MaxValue) != uint32(0x4F800000)
+        || UInt32ToFloat64Bits(uint32.MaxValue) != uint64(0x41EFFFFFFFE00000)
+        || Int64ToFloat32Bits(int64.MinValue) != uint32(0xDF000000)
+        || Int64ToFloat64Bits(int64.MinValue) != uint64(0xC3E0000000000000)
+        || Int64ToFloat64Bits(9_007_199_254_740_995) != uint64(0x4340000000000002)
+        || UInt64ToFloat32Bits(uint64.MaxValue) != uint32(0x5F800000)
+        || UInt64ToFloat64Bits(uint64.MaxValue) != uint64(0x43F0000000000000))
+    {
+        return false;
+    }
+
+    uint64 twoTo63 = 0x8000000000000000;
+    uint64 float32HalfUlp = 0x0000008000000000;
+    uint64 float32Ulp = 0x0000010000000000;
+    uint64 float64HalfUlp = 0x0000000000000400;
+    uint64 float64Ulp = 0x0000000000000800;
+    return UInt64ToFloat32Bits(twoTo63 + float32Ulp + float32HalfUlp) == uint32(0x5F000002)
+        && UInt64ToFloat64Bits(twoTo63 + float64Ulp + float64HalfUlp) == uint64(0x43E0000000000002);
+}

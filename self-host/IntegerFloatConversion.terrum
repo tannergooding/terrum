@@ -1,0 +1,112 @@
+namespace Terrum.CodeAnalysis;
+
+public static uint32 Int32ToFloat32Bits(int32 value)
+{
+    return Int64ToFloat32Bits(int64(value));
+}
+
+public static uint64 Int32ToFloat64Bits(int32 value)
+{
+    return Int64ToFloat64Bits(int64(value));
+}
+
+public static uint32 UInt32ToFloat32Bits(uint32 value)
+{
+    return UInt64ToFloat32Bits(uint64(value));
+}
+
+public static uint64 UInt32ToFloat64Bits(uint32 value)
+{
+    return UInt64ToFloat64Bits(uint64(value));
+}
+
+public static uint32 Int64ToFloat32Bits(int64 value)
+{
+    mut uint32 bits = uint32(ConvertUInt64ToFloatBits(Numerics64.MagnitudeInt64(value), true));
+    if (value < 0)
+    {
+        bits = bits | uint32(0x80000000);
+    }
+
+    return bits;
+}
+
+public static uint64 Int64ToFloat64Bits(int64 value)
+{
+    mut uint64 bits = ConvertUInt64ToFloatBits(Numerics64.MagnitudeInt64(value), false);
+    if (value < 0)
+    {
+        bits = bits | uint64(0x8000000000000000);
+    }
+
+    return bits;
+}
+
+public static uint32 UInt64ToFloat32Bits(uint64 value)
+{
+    return uint32(ConvertUInt64ToFloatBits(value, true));
+}
+
+public static uint64 UInt64ToFloat64Bits(uint64 value)
+{
+    return ConvertUInt64ToFloatBits(value, false);
+}
+
+uint64 ConvertUInt64ToFloatBits(uint64 value, bool isFloat32)
+{
+    if (value == 0)
+    {
+        return 0;
+    }
+
+    mut int32 precision = 53;
+    mut int32 fractionBits = 52;
+    mut int32 exponentBias = 1023;
+    if (isFloat32)
+    {
+        precision = 24;
+        fractionBits = 23;
+        exponentBias = 127;
+    }
+
+    mut int32 exponent = -1;
+    mut uint64 remaining = value;
+    while (remaining != 0)
+    {
+        exponent = exponent + 1;
+        remaining = remaining >> 1;
+    }
+
+    mut uint64 roundedSignificand = 0;
+    if (exponent <= fractionBits)
+    {
+        roundedSignificand = value << (fractionBits - exponent);
+    }
+    else
+    {
+        int32 shift = exponent - fractionBits;
+        roundedSignificand = value >> shift;
+        bool guardBit = ((value >> (shift - 1)) & uint64(1)) != 0;
+        mut bool stickyBit = false;
+        if (shift > 1)
+        {
+            uint64 stickyMask = (uint64(1) << (shift - 1)) - 1;
+            stickyBit = (value & stickyMask) != 0;
+        }
+
+        if (guardBit && (stickyBit || (roundedSignificand & uint64(1)) != 0))
+        {
+            roundedSignificand = roundedSignificand + 1;
+        }
+
+        if (roundedSignificand >= (uint64(1) << precision))
+        {
+            roundedSignificand = roundedSignificand >> 1;
+            exponent = exponent + 1;
+        }
+    }
+
+    uint64 fractionMask = (uint64(1) << fractionBits) - 1;
+    uint64 exponentField = uint64(exponent + exponentBias) << fractionBits;
+    return exponentField | (roundedSignificand & fractionMask);
+}
