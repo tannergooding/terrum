@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `58cea52b` | Compare malformed BMP `\u` spellings through scanner-10 with hosted diagnostics |
 | `6e295cb9` | Compare malformed and unterminated Unicode escapes through scanner-10 with hosted diagnostics |
 | `837fd45f` | Check scanner-10 integer snapshots against binary, decimal and hexadecimal uint64 limits |
 | `bc747956` | Compare scalar frontend switches with hosted conditionals at signed minima, both Boolean values and char16 maximum |
