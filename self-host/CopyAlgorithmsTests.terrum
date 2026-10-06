@@ -33,6 +33,12 @@ public bool CheckCopyAlgorithms()
 
     require SourceRange.TryCreate(12, 5, init var firstRange);
     require SourceRange.TryCreate(42, 7, init var secondRange);
+    SourceRange selectedRange = SelectCopy(false, firstRange, secondRange);
+    if (selectedRange.Start != 42 || selectedRange.Length != 7)
+    {
+        return false;
+    }
+
     Token first = new Token(1, firstRange);
     Token second = new Token(2, secondRange);
     Token selectedToken = SelectCopy(false, first, second);
