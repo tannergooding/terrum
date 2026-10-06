@@ -103,14 +103,17 @@ remains a release decision.
 
 **Recommendation, still unapproved:** make the first implementation slice a
 self-contained single-module profile for non-generic, non-partial nominal
-types with ordinary eager static fields. Permit an authored static constructor
-only with one of the two explicit trigger choices above. Exclude lazy fields,
-static-property backing storage, foreign storage, generic substitutions and
-partial type/constructor composition from this slice; the accepted language
-contracts for those forms do not change. A module may contain unrelated
-imports, but an imported or packed definition cannot participate in a static
-initializer, initialization helper, triggerable member or cleanup dependency.
-Reject rather than infer a foreign initialization dependency.
+types with ordinary eager scalar static fields. Permit an authored static
+constructor only with one of the two explicit trigger choices above. Admit
+execution only in a runtime profile that establishes nonconcurrent access and
+uses fail-fast termination; neither condition follows from a source shape or
+from `static`. Exclude lazy fields, static-property backing storage, foreign
+storage, generic substitutions, partial type/constructor composition and
+managed or cleanup-bearing static values from this slice; the accepted
+language contracts for those forms do not change. A module may contain
+unrelated imports, but an imported or packed definition cannot participate in
+a static initializer, initialization helper, triggerable member or cleanup
+dependency. Reject rather than infer a foreign initialization dependency.
 
 Within this profile, use these proposed access obligations:
 
@@ -209,14 +212,17 @@ The state entry is load-scoped and must not itself keep an unloaded image
 alive.
 
 This protocol is an implementation recommendation derived from the accepted
-contract, not a new language rule or assigned runtime ABI. Admission remains
-conditional on explicit, validated sharing and runtime-policy contracts:
-use a checked initialization gate or a proof of nonconcurrency, and reject
-profiles for which neither is available. Do not infer sharing permission or
-failure behavior from `static`, member visibility, or host-runtime defaults.
-The exact state-entry handle, wait/notification mechanism, recursive-owner
-identity, failure transport and cleanup registration still require a typed
-runtime/metadata contract before emission or execution is authorized.
+contract, not a new language rule or assigned runtime ABI. The recommended
+first profile uses an explicitly validated proof of nonconcurrent access and
+fail-fast termination; it does not infer either from `static`, member
+visibility or the absence of an observed race. Later profiles may add a
+checked initialization gate and defined-unwinding failure transport only
+after their sharing and cleanup contracts are assigned and implemented.
+Reject runtime profiles for which neither the required sharing proof nor a
+checked gate is available. The exact state-entry handle, wait/notification
+mechanism, recursive-owner identity, failure transport and cleanup
+registration still require a typed runtime/metadata contract before emission
+or execution is authorized.
 
 ### Decisions still open
 
@@ -226,7 +232,7 @@ runtime/metadata contract before emission or execution is authorized.
 | Which required metadata kinds and executable access forms carry these records? | Current TRRM assigns no static-storage records or access operations; the logical obligation does not select their representation. | Assign closed required records and access forms together, with typed ownership and checked references. Do not emit under the current profile or overload existing flags. |
 | How are semantic clauses validated? | The slice assigns reader validation of clause shape/placement separately from source-body proof, but exact clause identities, payloads and proof obligations remain open. | Define each typed required clause and its compiler proof, reader shape/consistency checks, linker compatibility checks and runtime enforcement. Keep body re-proof governed by the artifact trust policy; reject unknown required or unsupported clauses. |
 | What runtime identity and lifecycle ABI implements the accepted behavior? | The candidate eager-group protocol now names load-scoped identity and required state transitions, but no handle, wait mechanism, recursive-owner identity, failure transport or cleanup ABI exists. | Assign typed runtime inputs and outcomes to the required metadata/access records; preserve the protocol above and reject any runtime profile unable to publish, retain failure, clean up or retire safely. Do not inherit host static-constructor behavior. |
-| Which sharing and runtime-policy combinations are admissible in the first slice? | The accepted contract permits checked sharing or proved nonconcurrency, and distinguishes fail-fast termination from defined unwinding; current compiler profiles do not implement initialization gates or failure transport. | Admit only combinations whose sharing proof/gate and failure/cleanup path are explicit and implemented. Reject every unrepresented combination rather than infer permission or return a success-shaped fallback. |
+| Which sharing and runtime-policy combinations are admissible in the first slice? | The accepted contract permits checked sharing or proved nonconcurrency, and distinguishes fail-fast termination from defined unwinding; current compiler profiles do not implement initialization gates or failure transport. | Start with single-module, non-generic, non-partial eager scalar storage in a runtime profile that establishes nonconcurrent access and uses fail-fast termination. Test both trigger choices, initialization order, one-time completion, cycle failure in a subprocess, load separation and quiescent unload. Keep checked sharing, defined-unwinding failure transport and non-scalar cleanup for later profiles; reject any unsupported combination rather than infer permission. |
 | How do imported field references participate? | The current module schema does not bind `FieldDef` imports; the candidate slice avoids that dependency but not the eventual cross-module contract. | Keep imported/packed initialization edges rejected in the first slice; define validated field identity, trigger effects and dependency edges before a later cross-module slice. |
 | What artifact revision boundary applies? | Terrum remains pre-1.0 and has no external artifact consumers. | Keep one current writer and reader during development; make any shipped-preview boundary an explicit release decision. |
 
