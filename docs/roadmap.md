@@ -371,6 +371,8 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7a034ec4` | Add internal raw-bit IEEE comparisons for `float32` and `float64`, with hosted-operator parity across boundary pairs and deterministic encodings |
+| `41273f1b` | Add internal unsigned `char16`-to-floating raw-bit conversion with exhaustive code-unit parity; eligibility and TRRM proposals remain unapproved |
 | `50dd3bd9` | Add raw-bit floating negation that preserves every non-sign bit, with hosted-oracle and independent AOT/JIT boundary coverage |
 | `c08257d3` | Add raw float32/float64 format conversion with hosted rounding parity, NaN classification and independent AOT/JIT boundary coverage |
 | `2e5a2b67` | Add checked raw float32/float64-to-integer conversion with hosted parity, failure-vacancy checks and independent AOT/JIT component coverage |
