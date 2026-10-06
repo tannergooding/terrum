@@ -138,7 +138,7 @@ public static partial class ModuleCompiler
         RejectCompilationLocalSpans(program);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
         {
-            throw new ModuleContractException("Only top-level caller-unsafe functions are supported in persisted semantic modules.");
+            throw new ModuleContractException("Module contains an unsupported caller-unsafe member contract.");
         }
         SemanticVerifier.VerifyReferences(program);
         if (!allowManagedParticipant)

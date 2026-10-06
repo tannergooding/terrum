@@ -779,7 +779,7 @@ an executed bounded component, not an efficient indexed replacement. Together
 these source-grant helpers still do not implement the hosted `SourceText`
 collection.
 
-Semantic-module revision 56 can persist these four source reads symbolically
+Semantic-module revision 57 can persist these four source reads symbolically
 and propagate the reserved `Host.Source` requirement to an independent
 consumer. `NativeJit.ExecuteWithSourceGrant` links and executes that
 source-dependent program with one readonly `char16` snapshot of at most 16,384
@@ -787,7 +787,7 @@ code units, copied into fresh invocation storage. Source contents, sample
 lengths and addresses are not stored in artifacts. This is provisional support
 under the still-unapproved source-grant proposal; graphs, module sets, native
 DLLs and persisted AOT images remain unsupported. The scanner also has
-provisional persisted semantic-module JIT support under revision 56:
+provisional persisted semantic-module JIT support under revision 57:
 `scanner-10` artifacts retain the fingerprinted profile identity and canonical
 buffer descriptors but no sample contents or capacities. The dedicated
 `NativeJit.ExecuteWithScannerProfile` adapter supplies fresh source, readonly

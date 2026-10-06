@@ -148,7 +148,7 @@ public static partial class ModuleCompiler
         RejectCompilationLocalSpans(program);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
         {
-            throw new ModuleContractException("Only top-level caller-unsafe functions are supported in persisted semantic modules.");
+            throw new ModuleContractException("Module contains an unsupported caller-unsafe member contract.");
         }
         SemanticVerifier.VerifyLibraryReferences(program);
         if (program.EntryPoint != -1 || program.RequiresSourceGrant || !program.Buffers.IsDefaultOrEmpty
@@ -522,7 +522,7 @@ public static partial class ModuleCompiler
             var functions = ReadFunctions(reader, count, expectedConsumer: true, structures, classes);
             foreach (var function in functions)
             {
-                if (HasUnsupportedModuleCallerUnsafeContract(function))
+                if (HasUnsupportedModuleCallerUnsafeContract(function, structures))
                 {
                     throw new ModuleFormatException("Graph library contains an unsupported caller-unsafe contract.");
                 }

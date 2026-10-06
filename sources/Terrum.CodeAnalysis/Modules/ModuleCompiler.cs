@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 56;
+    private const int Version = 57;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -613,7 +613,7 @@ public static partial class ModuleCompiler
         RejectCompilationLocalSpans(program);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
         {
-            throw new ModuleContractException("Only top-level caller-unsafe functions are supported in persisted semantic modules.");
+            throw new ModuleContractException("Module contains an unsupported caller-unsafe member contract.");
         }
         if (program.Functions.Any(static function => function.IndexedBody is not null))
         {
@@ -786,7 +786,7 @@ public static partial class ModuleCompiler
         RejectCompilationLocalSpans(program);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
         {
-            throw new ModuleContractException("Only top-level caller-unsafe functions are supported in persisted semantic modules.");
+            throw new ModuleContractException("Module contains an unsupported caller-unsafe member contract.");
         }
         if (program.Functions.Any(static function => function.IndexedBody is not null))
         {
@@ -1398,21 +1398,127 @@ public static partial class ModuleCompiler
         || ContainsCallerUnsafeCalls(program);
 
     private static bool ContainsUnsupportedModuleCallerUnsafeContracts(BoundProgram program) =>
-        program.Functions.Any(static function => function.RequiresUnsafeCaller && function.DeclaringStruct is not null)
+        program.Functions.Any(function => function.RequiresUnsafeCaller && function.DeclaringStruct is not null
+            && !IsSupportedModuleUnsafeMethod(function, program.Structures))
         || program.Structures.Any(static structure =>
             structure.Fields.Any(static field => field.RequiresUnsafeCaller))
         || program.Classes.Any(static @class => @class.Fields.Any(static field => field.RequiresUnsafeCaller));
 
-    private static bool HasUnsupportedModuleCallerUnsafeContract(ModuleFunction function)
+    private static bool HasUnsupportedModuleCallerUnsafeContract(ModuleFunction function,
+        ImmutableArray<BoundStruct> structures)
     {
         if (function.Function is BoundFunction body)
         {
-            return body.RequiresUnsafeCaller && body.DeclaringStruct is not null;
+            return body.RequiresUnsafeCaller && body.DeclaringStruct is not null
+                && !IsSupportedModuleUnsafeMethod(body, structures);
         }
         var parts = function.Contract.Split('|');
         return parts.Length > 5 && parts[5] != "-"
             && TryContractPromises(function.Contract.AsSpan(), out _, out _, out _, out var unsafeCaller)
-            && unsafeCaller;
+            && unsafeCaller && !IsSupportedModuleUnsafeMethodContract(function.Contract, structures);
+    }
+
+    private static bool IsSupportedModuleUnsafeMethod(BoundFunction function,
+        ImmutableArray<BoundStruct> structures)
+    {
+        if (function.DeclaringStruct is not string ownerName || function.IsStatic || function.IsConstructor
+            || function.IsClassConstructor || function.IsCleanup || function.PropertyName is not null
+            || function.Intrinsic != BoundIntrinsic.None || function.ParameterCount < 1
+            || function.ParameterCount > function.Variables.Length || function.Variables.IsEmpty
+            || function.Variables[0].IsMutable || function.Variables[0].IsOut || function.Variables[0].IsInit
+            || !IsScalarModuleContractType(function.ReturnType))
+        {
+            return false;
+        }
+
+        var ownerIndex = -1;
+        for (var index = 0; index < structures.Length; index++)
+        {
+            if (structures[index].Name == ownerName)
+            {
+                ownerIndex = index;
+                break;
+            }
+        }
+        if (ownerIndex < 0 || structures[ownerIndex].IsUnique || structures[ownerIndex].IsPrivate
+            || structures[ownerIndex].IsInternal
+            || function.Variables[0].Type != (PrimitiveType)(100 + ownerIndex)
+            || !PublicLayout(function.Variables[0].Type, true, structures,
+                new HashSet<(int Index, bool PublicFields)>()))
+        {
+            return false;
+        }
+
+        for (var index = 1; index < function.ParameterCount; index++)
+        {
+            var parameter = function.Variables[index];
+            if (parameter.IsOut || parameter.IsInit || !IsScalarModuleContractType(parameter.Type))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool IsSupportedModuleUnsafeMethodContract(string contract,
+        ImmutableArray<BoundStruct> structures)
+    {
+        if (!TryContractPromises(contract.AsSpan(), out var signature, out _, out _, out var unsafeCaller)
+            || !unsafeCaller)
+        {
+            return false;
+        }
+
+        var parts = signature.ToString().Split('|');
+        if (parts.Length < 9 || parts[2] != "F" || parts[4] != "I" || parts[5] == "-" || parts[6] != "E"
+            || !int.TryParse(parts[7], System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var parameterCount)
+            || parameterCount < 1 || parts.Length != 8 + parameterCount)
+        {
+            return false;
+        }
+
+        var ownerIndex = -1;
+        for (var index = 0; index < structures.Length; index++)
+        {
+            if (structures[index].Name == parts[5])
+            {
+                ownerIndex = index;
+                break;
+            }
+        }
+        if (ownerIndex < 0 || structures[ownerIndex].IsUnique || structures[ownerIndex].IsPrivate
+            || structures[ownerIndex].IsInternal
+            || parts[8] != "in:" + ContractType((PrimitiveType)(100 + ownerIndex), structures)
+            || !IsScalarModuleContractType(parts[1])
+            || !PublicLayout((PrimitiveType)(100 + ownerIndex), true, structures,
+                new HashSet<(int Index, bool PublicFields)>()))
+        {
+            return false;
+        }
+
+        for (var index = 9; index < parts.Length; index++)
+        {
+            if (!parts[index].StartsWith("in:", StringComparison.Ordinal)
+                || !IsScalarModuleContractType(parts[index].AsSpan(3)))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool IsScalarModuleContractType(PrimitiveType type) =>
+        type is PrimitiveType.Bool or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16
+            or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
+
+    private static bool IsScalarModuleContractType(ReadOnlySpan<char> type)
+    {
+        return int.TryParse(type, System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out var value)
+            && value is (int)PrimitiveType.Bool or (int)PrimitiveType.Int32 or (int)PrimitiveType.UInt32
+                or (int)PrimitiveType.Char16 or (int)PrimitiveType.Int64 or (int)PrimitiveType.UInt64
+                or (int)PrimitiveType.Float32 or (int)PrimitiveType.Float64;
     }
 
     private static bool HasLoopTransfer(ImmutableArray<ModuleFunction> functions)
@@ -1686,7 +1792,7 @@ public static partial class ModuleCompiler
                 if (structures[index].Name == declaring)
                 {
                     foundStructure = true;
-                    if (PublicLayout((PrimitiveType)(100 + index), false))
+                    if (PublicLayout((PrimitiveType)(100 + index), false, structures, visited))
                     {
                         foundPublicLayout = true;
                         break;
@@ -1698,40 +1804,42 @@ public static partial class ModuleCompiler
                 return false;
             }
         }
-        bool PublicLayout(PrimitiveType type, bool publicFields)
-        {
-            var index = (int)type - 100;
-            if (index < 0)
-            {
-                return type is not (PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
-                    or PrimitiveType.ManagedNode);
-            }
-            if (index >= structures.Length)
-            {
-                return false;
-            }
-            if (!visited.Add((index, publicFields)))
-            {
-                return true;
-            }
-            var structure = structures[index];
-            return !structure.IsPrivate && !structure.IsInternal
-                && !structure.Fields.IsDefault
-                && structure.Fields.All(field => (!publicFields || (!field.IsPrivate && !field.IsInternal))
-                    && PublicLayout(field.Type, publicFields));
-        }
-        if (!PublicLayout(function.ReturnType, true))
+        if (!PublicLayout(function.ReturnType, true, structures, visited))
         {
             return false;
         }
         for (var index = 0; index < function.ParameterCount; index++)
         {
-            if (!PublicLayout(function.Variables[index + parameterOffset].Type, true))
+            if (!PublicLayout(function.Variables[index + parameterOffset].Type, true, structures, visited))
             {
                 return false;
             }
         }
         return true;
+    }
+
+    private static bool PublicLayout(PrimitiveType type, bool publicFields,
+        ImmutableArray<BoundStruct> structures, HashSet<(int Index, bool PublicFields)> visited)
+    {
+        var index = (int)type - 100;
+        if (index < 0)
+        {
+            return type is not (PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
+                or PrimitiveType.ManagedNode);
+        }
+        if (index >= structures.Length)
+        {
+            return false;
+        }
+        if (!visited.Add((index, publicFields)))
+        {
+            return true;
+        }
+        var structure = structures[index];
+        return !structure.IsPrivate && !structure.IsInternal
+            && !structure.Fields.IsDefault
+            && structure.Fields.All(field => (!publicFields || (!field.IsPrivate && !field.IsInternal))
+                && PublicLayout(field.Type, publicFields, structures, visited));
     }
 
     private static bool SameStructure(BoundStruct a, BoundStruct b,
@@ -2417,9 +2525,14 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Function body contradicts its declaration.");
             }
-            items.Add(new ModuleFunction(name, contract, function, import) {
+            var item = new ModuleFunction(name, contract, function, import) {
                 HasOwnershipTransfer = ownershipTransfer,
-            });
+            };
+            if (HasUnsupportedModuleCallerUnsafeContract(item, structures))
+            {
+                throw new ModuleFormatException("Module contains an unsupported caller-unsafe member contract.");
+            }
+            items.Add(item);
         }
         return items.ToImmutable();
     }

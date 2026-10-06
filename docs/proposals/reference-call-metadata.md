@@ -4,9 +4,10 @@
 for the roadmap's general reference/access/loan call contracts. It does not
 change accepted source semantics or the approved metadata schema, and does not
 approve the broader proposal. Its marked provisional slices now include
-structured semantic-module caller obligations and validated indexed executable
-unsafe scopes; their boundaries are described in [the module
-format](../modules.md) and [implementation notes](../implementation.md).
+structured semantic-module caller obligations, a bounded readonly `Copy`
+instance-method experiment, and validated indexed executable unsafe scopes;
+their boundaries are described in [the module format](../modules.md) and
+[implementation notes](../implementation.md).
 
 ## Current boundary
 
@@ -55,16 +56,25 @@ section 3. This slice changes the internal semantic-module format and must
 advance its revision. It is an implementation experiment, not approval of
 general reference metadata or the broader proposal.
 
-**Implemented provisionally:** Semantic-module revision 56 persists the
-top-level function obligation and reconstructs call authorization only from
-explicit `BoundUnsafe` scopes. Safe imports reject caller-unsafe replacements;
-caller-unsafe imports may use a safe replacement. Revision 54 and future
-revision 57 artifacts are rejected rather than upgraded or normalized. These
-checks are covered by the `CallerUnsafeTests` regressions for round trips,
-replacement compatibility, adjacent-revision rejection, writer refusal of a
-retained authorization outside its unsafe block, and reader rejection after a
-persisted unsafe block is stripped. They do not approve the broader proposal or
-add source-free executable authorization.
+**Implemented provisionally:** Semantic-module revision 57 persists top-level
+caller obligations and the bounded method contracts described below.
+Authorization is reconstructed only from explicit `BoundUnsafe` scopes. Safe
+imports reject caller-unsafe replacements; caller-unsafe imports may use a
+safe replacement. Revisions 56 and 58 are rejected rather than upgraded or
+normalized. `CallerUnsafeTests` cover round trips, replacement compatibility,
+adjacent-revision rejection, writer refusal of a retained authorization
+outside its unsafe block, and reader rejection after a persisted unsafe block
+is stripped. These checks do not approve the broader proposal or add
+source-free executable authorization.
+
+The provisional method experiment admits ordinary readonly instance methods
+on public, non-unique `Copy` structs with exportable public layouts, scalar
+by-value explicit parameters and scalar results. Calls still require an
+explicit persisted unsafe block; the unsafe declaration does not authorize
+operations in its own body. Static and mutable-receiver methods, constructors,
+class methods, accessors, operators, fields, reference/output modes and
+non-scalar signatures remain excluded. This is a narrow persistence
+experiment, not approval of general caller-unsafe member metadata.
 
 Executable TRRM also provisionally round-trips the assigned caller-unsafe
 Effects bit on top-level function declarations, including when composed with
@@ -124,7 +134,7 @@ individual call was authorized.
 ### 3. How should executable Bodies validate caller-unsafe scope?
 
 **Summary:** The source caller obligation and assigned Effects bit `0x04` are
-settled, and semantic-module revision 56 reconstructs authorization from
+settled, and semantic-module revision 57 reconstructs authorization from
 explicit `BoundUnsafe` scopes. Executable TRRM provisionally round-trips
 caller-unsafe declarations and supports calls only inside validated indexed
 Body unsafe scopes. Compact-linear Bodies still cannot prove explicit

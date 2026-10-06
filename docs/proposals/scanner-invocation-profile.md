@@ -1,7 +1,8 @@
 # Persisted scanner invocation profile proposal
 
-**Status: unapproved proposal.** Semantic-module revision 56 now contains a
-provisional implementation of the bounded `scanner-10` invocation profile.
+**Status: unapproved proposal.** Semantic-module revision 57 carries the
+provisional implementation of the bounded `scanner-10` invocation profile,
+introduced in revision 56.
 That implementation does not approve this proposal, expand the target
 contract, or make the scanner/scalar frontend independent of hosted
 verification and emission.

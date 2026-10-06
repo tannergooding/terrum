@@ -17,9 +17,10 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class CallerUnsafeTests
 {
-    private static BoundProgram CompileLibrary(string source)
+    private static BoundProgram CompileLibrary(string source,
+        BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         return Assert.IsType<BoundProgram>(compilation.Program);
     }
@@ -45,6 +46,15 @@ public sealed class CallerUnsafeTests
             "unsafe int32 Danger() { return 42; } unsafe int32 Wrapper() { return Danger(); }"));
         Assert.Null(bodyCall.Program);
         Assert.Contains(bodyCall.Diagnostics, static diagnostic => diagnostic.Code == "TRM3028");
+
+        var memberBodyCall = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            struct Value {
+                public unsafe int32 Danger() { return 42; }
+                public unsafe int32 Wrapper() { return Danger(); }
+            }
+            """));
+        Assert.Null(memberBodyCall.Program);
+        Assert.Contains(memberBodyCall.Diagnostics, static diagnostic => diagnostic.Code == "TRM3028");
 
         var leakedScope = Compilation.CreateLibrary(SyntaxTree.Parse(
             "unsafe int32 Danger() { return 42; } int32 Caller() { unsafe(Danger()); return Danger(); }"));
@@ -310,7 +320,7 @@ public sealed class CallerUnsafeTests
             "int32 Main() { unsafe { return Danger(); } }"), reference);
         Assert.False(scopedCall.HasErrors, string.Join(Environment.NewLine, scopedCall.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(scopedCall.Program), producer);
-        foreach (var unsupportedVersion in new[] { 54, 57 })
+        foreach (var unsupportedVersion in new[] { 56, 58 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -352,6 +362,161 @@ public sealed class CallerUnsafeTests
             CompileLibrary("public unsafe int32 Danger() { return 7; }"), ["Danger"]);
         Assert.Equal(7, NativeJit.Execute(ModuleCompiler.Link(consumer, changedUnsafeProducer),
             NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void SemanticModulesRoundTripCallerUnsafeReadonlyCopyMethods(BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            public struct Value {
+                public int32 Number;
+                public Value(int32 number) { Number = number; }
+                public unsafe int32 Read(int32 offset) { return Number + offset; }
+                public int32 SafeRead() { unsafe { return Read(0); } }
+            }
+            """;
+        const string ConsumerSource = """
+            int32 Main() {
+                Value value = new Value(42);
+                int32 safeValue = value.SafeRead();
+                unsafe { return value.Read(1) + safeValue; }
+            }
+            """;
+        var providerProgram = CompileLibrary(Source, policy);
+        string[] exports = ["Value.#ctor", "Value.Read", "Value.SafeRead"];
+        var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var read = Assert.Single(reference.Functions, static function => function.Name == "Value.Read");
+        Assert.True(read.RequiresUnsafeCaller);
+        Assert.False(read.IsNoThrow);
+        Assert.False(Assert.Single(reference.Functions,
+            static function => function.Name == "Value.SafeRead").RequiresUnsafeCaller);
+
+        var unscoped = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { Value value = new Value(42); return value.Read(); }"),
+            reference, policy);
+        Assert.Null(unscoped.Program);
+        Assert.Contains(unscoped.Diagnostics, static diagnostic => diagnostic.Code == "TRM3028");
+
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), reference, policy);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+        foreach (var unsupportedVersion in new[] { 56, 58 })
+        {
+            var unsupportedConsumer = (byte[])consumer.Clone();
+            BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
+                unsupportedVersion);
+            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
+        }
+
+        var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
+            ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast;
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.Equal(85, NativeJit.Execute(linked, runtimePolicy));
+
+        var safeReplacementSource = Source
+            .Replace("public unsafe int32 Read(int32 offset)", "public int32 Read(int32 offset)",
+                StringComparison.Ordinal)
+            .Replace("return Number + offset;", "return Number + offset + 1;", StringComparison.Ordinal)
+            .Replace("unsafe { return Read(0); }", "return Read(0);", StringComparison.Ordinal);
+        var safeReplacement = ModuleCompiler.CreateProducer(
+            CompileLibrary(safeReplacementSource, policy), exports);
+        var compatible = ModuleCompiler.Link(consumer, safeReplacement);
+        Assert.Equal(87, NativeJit.Execute(compatible, runtimePolicy));
+
+        var safeProvider = ModuleCompiler.CreateProducer(
+            CompileLibrary(safeReplacementSource, policy), exports);
+        var safeConsumerCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { Value value = new Value(42); return value.Read(1); }"),
+            ModuleCompiler.CreateReference(safeProvider), policy);
+        Assert.False(safeConsumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, safeConsumerCompilation.Diagnostics));
+        var safeConsumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(safeConsumerCompilation.Program), safeProvider);
+        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task NativeModuleSetsAndGraphsRoundTripCallerUnsafeReadonlyCopyMethodsAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            public struct Value {
+                public int32 Number;
+                public Value(int32 number) { Number = number; }
+                public unsafe int32 Read(int32 offset) { return Number + offset; }
+            }
+            """;
+        const string ConsumerSource = """
+            int32 Main() {
+                Value value = new Value(42);
+                unsafe { return value.Read(0); }
+            }
+            """;
+        var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
+            ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast;
+        var producer = NativeModuleCompiler.CreateProducer(
+            CompileLibrary(Source, policy), ["Value.#ctor", "Value.Read"], "UnsafeValue", runtimePolicy);
+        var helper = NativeModuleCompiler.CreateProducer(
+            CompileLibrary("public int32 Helper() { return 0; }", policy),
+            ["Helper"], "UnsafeMethodHelper", runtimePolicy);
+        var providers = new[] { producer, helper };
+
+        var graphReference = NativeModuleCompiler.CreateGraphReference([producer]);
+        var graphCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), graphReference, policy);
+        Assert.False(graphCompilation.HasErrors,
+            string.Join(Environment.NewLine, graphCompilation.Diagnostics));
+        var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
+            Assert.IsType<BoundProgram>(graphCompilation.Program), [producer], runtimePolicy);
+        NativeModuleCompiler.ValidateGraph(graphConsumer, [producer]);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(graphConsumer, [producer],
+            TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
+
+        var setReference = NativeModuleCompiler.CreateReferenceSet(providers);
+        var setCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), setReference, policy);
+        Assert.False(setCompilation.HasErrors,
+            string.Join(Environment.NewLine, setCompilation.Diagnostics));
+        var consumerSet = NativeModuleCompiler.CreateConsumerSet(
+            Assert.IsType<BoundProgram>(setCompilation.Program), providers, runtimePolicy);
+        NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
+        Assert.Equal(42, await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
+            TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public void PersistedWritersRejectUnsupportedUnsafeMemberKinds()
+    {
+        var staticMethod = CompileLibrary("""
+            public struct Value {
+                public int32 Number;
+                public static unsafe int32 Read() { return 42; }
+            }
+            """);
+        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(staticMethod, ["Value.Read"]));
+
+        var mutableMethod = CompileLibrary("""
+            public struct Value {
+                public mut int32 Number;
+                public Value(int32 number) { Number = number; }
+                public mut unsafe int32 Read() { return Number; }
+            }
+            """);
+        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(mutableMethod, ["Value.Read"]));
+
+        var classMethod = CompileLibrary("""
+            public class Box {
+                public int32 Number;
+                public Box(int32 number) { Number = number; }
+                public unsafe int32 Read() { return Number; }
+            }
+            """);
+        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(classMethod, ["Box.Read"]));
     }
 
     [Fact]

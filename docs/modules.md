@@ -46,8 +46,8 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 56. Writers use it for every producer,
-consumer and graph library; readers accept only revision 56. Revision 48 adds
+The current semantic-module revision is 57. Writers use it for every producer,
+consumer and graph library; readers accept only revision 57. Revision 48 adds
 the initialization-aware optional-handle pattern expression, recording its
 source expression, capture slot and whether initialized null is accepted.
 Revision 49 adds expression tag 28 for named-storage initialization tests,
@@ -65,7 +65,7 @@ be recreated from source. Revision 54 records top-level caller-unsafe function
 contracts and retains explicit unsafe-block scopes in structured semantic
 modules. Import readers derive call authorization from those scopes; calls
 authorized only by `unsafe(expr)`, unsafe fields, accessors, operators, and
-caller-unsafe TRRM Bodies remain unsupported. Revision 54 and older are retired
+caller-unsafe TRRM Bodies remain unsupported. Revision 56 and older are retired
 by the current reader and must be recreated from source. Revision 55
 introduced a provisional invocation-scoped `Host.Source` requirement and
 symbolic source length/read operations. Revision 56 retains that contract and
@@ -81,6 +81,15 @@ grant and rejects unsupported profile compositions. Graphs, module sets,
 native DLLs and persisted AOT remain unsupported. The source-only boundary is
 covered by the still-unapproved
 [source-grant proposal](proposals/invocation-scoped-source-grant.md).
+Revision 57 provisionally extends structured semantic-module caller-unsafe
+support to ordinary instance methods on public, non-unique `Copy` structs
+whose layouts are exportable. The receiver must be readonly, and explicit
+parameters and the result must be scalar, by-value contracts. Readers
+reconstruct call authorization only from persisted `unsafe { }` scopes.
+Static, mutable-receiver, constructor, class, accessor, operator, field,
+reference/output and non-scalar member contracts remain unsupported; executable
+TRRM member support is unchanged. This experiment does not approve the broader
+reference-call metadata proposal.
 The scanner-specific implementation is provisional and its design remains
 unapproved; see the
 [scanner invocation-profile proposal](proposals/scanner-invocation-profile.md).
@@ -584,7 +593,7 @@ unsupported.
 
 The following feature notes document implementation milestones only. They do
 not describe current writer selection or reader compatibility: current
-artifacts always use revision 56, and older semantic-module revisions are
+artifacts always use revision 57, and older semantic-module revisions are
 rejected.
 
 Version 12 stored the unique layout flag, declared cleanup method, cleanup
