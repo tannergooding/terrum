@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `08300113` | Retain every lexical diagnostic from a maximum-length malformed source in TokenDiagnosticSnapshot |
 | `1bfe03be` | Publish and verify maximum-density token, trivia and integer snapshots from scanner input |
 | `e41ae04e` | Traverse every token in a maximum-length scanner snapshot through TokenCursor under AOT and JIT |
 | `de783076` | Exercise every TokenSnapshot index on a maximum-length scanner source under AOT and JIT |
