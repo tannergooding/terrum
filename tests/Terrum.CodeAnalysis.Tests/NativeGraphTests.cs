@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -365,6 +366,40 @@ public sealed class NativeGraphTests
             CompileLeaf(LeafSource.Replace("public int32 Value;", "public int32 Other;", StringComparison.Ordinal)
                 .Replace("Value = value;", "Other = value;", StringComparison.Ordinal)
                 .Replace("value.Value", "value.Other", StringComparison.Ordinal)), middle]));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ScalarInitRefOutputExecutesAcrossGraphAndRejectsOutReplacementAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string InitialSource = "public void Leaf(init ref<int32> result) { result = 42; }";
+        const string ReplacementSource = "public void Leaf(out int32 result) { result = 43; }";
+        const string ConsumerSource = "int32 Main() { init int32 result; Leaf(init result); return result; }";
+
+        var leaf = Leaf(InitialSource, policy);
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+            NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
+        Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
+            [leaf], policy);
+
+        NativeModuleCompiler.ValidateGraph(root, [leaf]);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [leaf],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        var framework = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = framework.Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration directory.");
+        var apphost = Path.Combine(
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..")),
+            "artifacts", "bin", "sources", "terrumc", configuration, framework.Name, "terrumc.exe");
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [leaf],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+
+        var replacement = Leaf(ReplacementSource, policy);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(root, [replacement]));
     }
 
     [Fact]
