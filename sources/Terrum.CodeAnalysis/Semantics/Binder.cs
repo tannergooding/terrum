@@ -1520,7 +1520,8 @@ internal sealed partial class Binder
                     "A non-boolean output parameter requires a scalar or Copy struct type.", parameter.Span);
             }
             if (isInit && type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
-                or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                or PrimitiveType.Float32 or PrimitiveType.Float64)
                 && !IsStruct(type) && !IsUnique(type) && !ManagedClassTypes.IsManaged(type))
             {
                 Report("TRM3011", "Init ref parameters require supported scalar, Copy-struct, unique, or managed-handle outputs.",

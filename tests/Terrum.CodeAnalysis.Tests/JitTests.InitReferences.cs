@@ -22,6 +22,31 @@ public sealed partial class JitTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task FloatingInitReferencePublishesOnSuccessAsync(bool checkedFailures)
+    {
+        const string Source = """
+            bool Publish64(init ref<float64> value) {
+                value = 0x1.fp+2;
+                return true;
+            }
+            bool Publish32(init ref<float32> value) {
+                value = 3.5;
+                return true;
+            }
+            int32 Main() {
+                init float64 value64;
+                init float32 value32;
+                if (!Publish64(init value64) || !Publish32(init value32)) { return 1; }
+                return value64 == 7.75 && value32 == 3.5 ? 42 : 0;
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+
     [Fact]
     public Task CheckedInitReferenceFailurePropagatesWithoutPublicationAsync()
     {

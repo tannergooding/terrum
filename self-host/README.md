@@ -246,7 +246,8 @@ The bounded scalar frontend candidate also provisionally projects this
 conversion. The hosted binder and emitter treat a code unit as an unsigned
 numeric value; this eligibility remains unapproved.
 Both current v85 projections carry
-scalar non-Boolean/void `init ref<T>` declarations; definite-publication
+scalar non-Boolean/void `init ref<T>` declarations, including `float32` and
+`float64`; definite-publication
 verification and emission remain hosted. V85 includes
 source-audited caller-unsafe callable declarations and explicit unsafe-block
 call authorization and source-audited `unsafe(expr)` call-site scopes;

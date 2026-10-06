@@ -192,7 +192,8 @@ to source-free TRRM or claim bootstrap support.
 V85 complete snapshots carry the existing scalar `out`
 parameter modes, explicit destinations and `out var` call destinations.
 They also carry the existing scalar `init ref<T>` mode and matching
-`init`/`init var` destinations to complete snapshots. Hosted
+`init`/`init var` destinations to complete snapshots, including both floating
+formats. Hosted
 definite-publication verification remains authoritative; general
 `init ref<T>` migration and bootstrap compilation remain pending. Single-
 function v85 carries the existing scalar `init ref<T>` mode and

@@ -2090,7 +2090,8 @@ General borrowed references and stored loans remain unsupported. The accepted
 general `init ref<T>` invocation still requires its representation,
 lifetime, cleanup and ABI implementation; it is scheduled implementation
 work. The current compiler admits the bounded `init ref<T>` parameter and
-`init name` call mode for supported output values, with `init var name`
+`init name` call mode for supported output values, including `float32` and
+`float64`, with `init var name`
 introducing a vacant destination in the call. A named destination must still
 be vacant; an initialized value cannot be overwritten by `init`. A Boolean
 result publishes only on true and leaves the destination vacant on false;
