@@ -391,6 +391,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `5a059bc2` | Verify v85 floating literal payloads assigned to scalar `out` destinations and published through complete-program calls under both runtime policies |
 | `365521fb` | Exercise decimal, hexadecimal-float and based-integer v85 literal payload dispatch in the Terrum frontend under both runtime policies and JIT/AOT |
 | `5e921576` | Verify v85 floating literal payloads in scalar call arguments and local initializers against hosted library output under both runtime policies |
 | `c581bfeb` | Verify uppercase hexadecimal-float/based-integer dispatch and decimal exponents through v85 payloads and hosted-emitter parity under both runtime policies |
