@@ -396,6 +396,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `7862ad88` | Provisionally persist caller-unsafe static and readonly-instance Copy-valued getters in revision 62 using recursive layout eligibility for body-backed and bodyless contracts; keep TRRM and scalar-frontend support excluded |
 | `0c4ecebf` | Provisionally bind authored storage-free static getters on non-unique Copy structs and persist caller-unsafe scalar getters in revision 61; authorize calls only through unsafe blocks, with TRRM and scalar-frontend support excluded |
 | `cf2fdfc5` | Provisionally persist caller-unsafe readonly scalar-result getters for eligible public non-unique Copy structs; reconstruct authorization only from enclosing unsafe blocks |
 | `f86c6fa9` | Provisionally forward declared backing dependencies through internal compilation-local `Span<Token>` result functions; preserve source ownership through named/transitive calls, argument staging and cleanup, with target semantics unapproved |
