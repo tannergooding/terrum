@@ -1467,7 +1467,7 @@ internal sealed partial class Binder
         var classConstructor = constructor && TryResolveClass(Qualify(containingType!), out _);
         var returnType = constructor ? ResolveDeclaredType(containingType!) : BindType(returnNode!, allowVoid: true);
         if (property && (returnType == PrimitiveType.Void
-            || (isStatic ? !IsScalarStaticGetterType(returnType) : !IsCopyGenericType(returnType))
+            || (isStatic ? !IsSupportedStaticGetterType(returnType) : !IsCopyGenericType(returnType))
             || IsUnique(returnType)))
         {
             Report("TRM3007", "A getter must return a supported by-value Copy type.", declaration.Span);
@@ -4392,6 +4392,9 @@ internal sealed partial class Binder
     private static bool IsScalarStaticGetterType(PrimitiveType type) =>
         type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
+
+    private bool IsSupportedStaticGetterType(PrimitiveType type) =>
+        IsScalarStaticGetterType(type) || (IsStruct(type) && !IsUnique(type));
 
     private BoundStructField GetField(PrimitiveType type, int field) => IsClass(type)
         ? _classes[ManagedClassTypes.ClassIndex(type)].Fields[field]

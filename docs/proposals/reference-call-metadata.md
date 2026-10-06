@@ -151,6 +151,36 @@ contracts only for public, non-unique owners with exportable layouts;
 authorization is reconstructed from persisted `BoundUnsafe` scopes. This
 remains outside executable TRRM member support and the scalar frontend.
 
+### Provisional extension: Copy-valued getter results
+
+**Summary:** Readonly instance getters already support non-unique `Copy`
+results in hosted source binding, but caller-unsafe getter persistence is
+scalar-only. Static getters currently accept the existing scalar set, while
+their module persistence is also scalar-only. The revision-59 method slice
+already supports recursively exportable by-value `Copy` results.
+
+**Recommendation:** Extend static and readonly-instance getter results to
+include non-unique `Copy` structs while preserving the current scalar set.
+Static eligibility must add only struct values to its scalar whitelist;
+reusing the broader generic `Copy` predicate would admit managed handles and
+omit floating scalars. For caller-unsafe persistence, reuse the existing
+recursive module Copy-value type cache for both body-backed writers and
+bodyless readers. Keep canonical getter identity, zero static parameters,
+one readonly instance receiver, public non-unique owners, and authorization
+reconstructed only from persisted `BoundUnsafe` scopes. This is an eligibility
+expansion with no new serialized fields; revision 62 remains provisional.
+For persisted caller-unsafe contracts, reject unique, managed/reference,
+cleanup-bearing, empty, cyclic or non-exportable result layouts. These
+persistence limits do not narrow existing readonly-instance source getter
+support. Do not add executable TRRM members or scalar frontend projection.
+
+**Implemented provisionally:** Hosted static getter binding and verification
+retain the existing scalar whitelist and add non-unique struct values.
+Revision 62 uses the recursive module Copy-value cache for both body-backed
+and bodyless caller-unsafe getter contracts. The source and persistence
+boundaries remain provisional; this does not approve the broader metadata
+proposal.
+
 Executable TRRM also provisionally round-trips the assigned caller-unsafe
 Effects bit on top-level function declarations, including when composed with
 `NoThrow` or `DoesNotReturn`, and provisionally admits calls only inside
@@ -209,7 +239,7 @@ individual call was authorized.
 ### 3. How should executable Bodies validate caller-unsafe scope?
 
 **Summary:** The source caller obligation and assigned Effects bit `0x04` are
-settled, and semantic-module revision 61 reconstructs authorization from
+settled, and semantic-module revision 62 reconstructs authorization from
 explicit `BoundUnsafe` scopes. Executable TRRM provisionally round-trips
 caller-unsafe declarations and supports calls only inside validated indexed
 Body unsafe scopes. Compact-linear Bodies still cannot prove explicit

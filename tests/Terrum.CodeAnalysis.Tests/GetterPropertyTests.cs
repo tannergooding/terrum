@@ -2,6 +2,8 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Diagnostics;
+using System.IO;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
@@ -146,6 +148,142 @@ public sealed class GetterPropertyTests
         Assert.Null(compilation.Program);
     }
 
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task StaticAndReadonlyInstanceGettersReturnCopyValuesAsync(BoundRuntimePolicy policy)
+    {
+        const string source = """
+            public struct Pair {
+                public mut int32 First;
+                public mut int32 Second;
+                public Pair(int32 first, int32 second) { First = first; Second = second; }
+            }
+            public struct Odd {
+                public char16 First;
+                public char16 Second;
+                public bool Third;
+                public Odd(char16 first, char16 second, bool third) {
+                    First = first;
+                    Second = second;
+                    Third = third;
+                }
+            }
+            public struct Envelope {
+                public Pair Payload;
+                public Odd Tail;
+                public Envelope(Pair payload, Odd tail) { Payload = payload; Tail = tail; }
+            }
+            public unique struct UniqueValue {
+                public int32 Number;
+                public UniqueValue(int32 number) { Number = number; }
+            }
+            public struct Counter {
+                public mut int32 Number;
+                public Counter(int32 number) { Number = number; }
+                public static Pair StaticPair {
+                    get {
+                        Pair local = new Pair(40, 2);
+                        return local;
+                    }
+                }
+                public static Odd StaticOdd => new Odd(char16(3), char16(4), true);
+                public static Envelope StaticNested {
+                    get { return new Envelope(StaticPair, StaticOdd); }
+                }
+                public static float64 Floating => 1.5;
+                public Pair PairValue { get { return new Pair(Number, Number + 1); } }
+                public Odd OddValue => new Odd(char16(Number), char16(Number + 1), true);
+                public Envelope NestedValue { get { return new Envelope(PairValue, OddValue); } }
+                public mut Counter Next() {
+                    Number = Number + 1;
+                    return new Counter(Number);
+                }
+            }
+            int32 Main() {
+                Pair staticPair = Counter.StaticPair;
+                Odd staticOdd = Counter.StaticOdd;
+                Envelope staticNested = Counter.StaticNested;
+                mut Counter owner = new Counter(10);
+                Pair instancePair = owner.PairValue;
+                Odd instanceOdd = owner.OddValue;
+                Envelope instanceNested = owner.NestedValue;
+                mut Pair changed = owner.PairValue;
+                changed.First = 0;
+                Pair sideEffect = owner.Next().PairValue;
+                require staticOdd.Third && instanceOdd.Third && staticNested.Tail.Third
+                    && instanceNested.Tail.Third && staticPair.First == 40 && staticPair.Second == 2
+                    && instancePair.First == 10 && instancePair.Second == 11;
+                require staticNested.Payload.First == 40 && staticNested.Payload.Second == 2
+                    && staticNested.Tail.First == char16(3) && staticNested.Tail.Second == char16(4);
+                require instanceNested.Payload.First == 10 && instanceNested.Payload.Second == 11
+                    && instanceNested.Tail.First == char16(10) && instanceNested.Tail.Second == char16(11);
+                require changed.First == 0 && owner.PairValue.First == 11;
+                require sideEffect.First == 11 && owner.Number == 11;
+                return 91;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+
+        var staticPairGetter = Assert.Single(program.Functions,
+            static function => function.PropertyName == "StaticPair");
+        Assert.True(staticPairGetter.IsStatic);
+        Assert.Equal(0, staticPairGetter.ParameterCount);
+        Assert.Equal("local", staticPairGetter.Variables[0].Name);
+        var instanceOddGetter = Assert.Single(program.Functions,
+            static function => function.PropertyName == "OddValue");
+        Assert.False(instanceOddGetter.IsStatic);
+        Assert.Equal(1, instanceOddGetter.ParameterCount);
+        Assert.Equal(program.Structures.IndexOf(
+            Assert.Single(program.Structures, static structure => structure.Name == "Counter")) + 100,
+            (int)instanceOddGetter.Variables[0].Type);
+        Assert.Equal(PrimitiveType.Float64, Assert.Single(program.Functions,
+            static function => function.PropertyName == "Floating").ReturnType);
+
+        var uniqueValueIndex = program.Structures.IndexOf(
+            Assert.Single(program.Structures, static structure => structure.Name == "UniqueValue"));
+        var staticPairIndex = program.Functions.IndexOf(staticPairGetter);
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(staticPairIndex,
+                staticPairGetter with { ReturnType = (PrimitiveType)(100 + uniqueValueIndex) }),
+        }));
+
+        var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
+            ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast;
+        await RunNativeImageAsync(NativeEmitter.Emit(program, runtimePolicy), 91).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("""
+        public unique struct UniqueValue {
+            public int32 Number;
+            public UniqueValue(int32 number) { Number = number; }
+        }
+        public struct Counter {
+            public int32 Placeholder;
+            public static UniqueValue Value { get { return new UniqueValue(42); } }
+        }
+        """)]
+    [InlineData("""
+        class Box {
+            public int32 Number;
+            public Box(int32 number) { Number = number; }
+        }
+        public struct Counter {
+            public int32 Placeholder;
+            public static Box Value { get { return new Box(42); } }
+        }
+        """)]
+    public void StaticComputedGettersRejectUniqueAndManagedResults(string source)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
     [Fact]
     public void StaticComputedGetterDoesNotAddClassPropertySupport()
     {
@@ -190,13 +328,15 @@ public sealed class GetterPropertyTests
     [InlineData("public int32 Value { get { return _value; } set { _value = 1; } }", "TRM1002")]
     [InlineData("public int32 Value { [DoesNotReturn] get { return _value; } }", "TRM3001")]
     [InlineData("public mut int32 Value { get { return _value; } }", "TRM3001")]
-    [InlineData("public static Counter Value { get { return new Counter(1); } }", "TRM3007")]
+    [InlineData("public static UniqueCounter Value { get { return new UniqueCounter(1); } }", "TRM3007")]
     [InlineData("public void Value { get { return; } }", "TRM3007")]
     [InlineData("public int32 _value { get { return _value; } }", "TRM3001")]
     [InlineData("[NoThrow] public int32 Value { get { return _value; } }", "TRM3001")]
     public void UnsupportedGetterShapesDiagnose(string declaration, string code)
     {
-        var source = "struct Counter { int32 _value; public Counter(int32 value) { _value = value; } "
+        var source = "unique struct UniqueCounter { public int32 Number; "
+            + "public UniqueCounter(int32 number) { Number = number; } } "
+            + "struct Counter { int32 _value; public Counter(int32 value) { _value = value; } "
             + declaration + " } int32 Main() { return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
@@ -266,7 +406,7 @@ public sealed class GetterPropertyTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.Equal(61,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(62,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             ModuleCompiler.CreateReference(producer), boundPolicy);
         Assert.False(consumerCompilation.HasErrors,
@@ -338,7 +478,7 @@ public sealed class GetterPropertyTests
             }
             """, NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.Equal(61,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(62,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             ModuleCompiler.CreateReference(producer));
         Assert.False(consumerCompilation.HasErrors,
@@ -382,5 +522,42 @@ public sealed class GetterPropertyTests
             : Compilation.CreateLibrary(tree, reference, (BoundRuntimePolicy)policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         return Assert.IsType<BoundProgram>(compilation.Program);
+    }
+
+    private static async Task RunNativeImageAsync(byte[] image, int expected)
+    {
+        var executable = Path.Combine(Path.GetTempPath(),
+            "terrum-getter-" + Guid.NewGuid().ToString("N") + ".exe");
+        try
+        {
+            await File.WriteAllBytesAsync(executable, image).ConfigureAwait(true);
+            var start = new ProcessStartInfo(executable) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardError = true,
+            };
+            using var process = Process.Start(start)
+                ?? throw new InvalidOperationException("Failed to start emitted getter test image.");
+            var error = process.StandardError.ReadToEndAsync();
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(true);
+            }
+            catch (TimeoutException)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync().ConfigureAwait(true);
+                throw;
+            }
+            Assert.Equal(expected, process.ExitCode);
+            Assert.Empty(await error.ConfigureAwait(true));
+        }
+        finally
+        {
+            if (File.Exists(executable))
+            {
+                File.Delete(executable);
+            }
+        }
     }
 }

@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 61;
+    private const int Version = 62;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1434,7 +1434,7 @@ public static partial class ModuleCompiler
             || function.ParameterCount > function.Variables.Length
             || (function.PropertyName is null
                 ? !valueTypes.IsSupported(function.ReturnType)
-                : !IsSupportedModuleUnsafeGetter(function, ownerName)))
+                : !IsSupportedModuleUnsafeGetter(function, ownerName, valueTypes)))
         {
             return false;
         }
@@ -1478,9 +1478,10 @@ public static partial class ModuleCompiler
         return true;
     }
 
-    private static bool IsSupportedModuleUnsafeGetter(BoundFunction function, string ownerName) =>
+    private static bool IsSupportedModuleUnsafeGetter(BoundFunction function, string ownerName,
+        ModuleUnsafeValueTypeCache valueTypes) =>
         function.ParameterCount == (function.IsStatic ? 0 : 1)
-        && IsScalarModuleContractType(function.ReturnType)
+        && valueTypes.IsSupported(function.ReturnType)
         && function.PropertyName is string propertyName && propertyName.Length != 0
         && function.Name == ownerName + ".#get:" + propertyName;
 
@@ -1509,7 +1510,7 @@ public static partial class ModuleCompiler
         var propertyName = hasGetterIdentity ? parts[^1].AsSpan("Property:".Length) : default;
         if (parts.Length != (hasGetterIdentity ? 9 : 8) + parameterCount
             || (hasGetterIdentity && (parameterCount != (isStatic ? 0 : 1)
-                || !IsScalarModuleContractType(parts[1].AsSpan())
+                || !valueTypes.IsSupported(parts[1].AsSpan())
                 || propertyName.IsEmpty
                 || parts[0] != parts[5] + ".#get:" + propertyName.ToString())))
         {
