@@ -2822,6 +2822,14 @@ values; the independent `ComponentTestRunner` also exercises representative
 boundaries under AOT/JIT and both policies. This internal helper does not
 approve the floating-to-integer pair matrix or add scalar-frontend,
 source-free DLL or TRRM support.
+`Char16FloatConversion` composes unsigned code-unit widening with the existing
+integer-to-floating bit helpers. Its semantic-module tests exhaust all 65,536
+code units for both formats and both runtime policies against independently
+constructed exact encodings; the independent component runner repeats the
+coverage under AOT/JIT and both policies, and hosted native-emitter tests
+exhaust the same input domain. The eligibility and TRRM proposals remain
+unapproved; this internal component does not add scalar-frontend,
+source-free DLL or TRRM support.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under

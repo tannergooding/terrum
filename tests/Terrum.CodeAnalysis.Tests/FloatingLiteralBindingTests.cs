@@ -364,10 +364,11 @@ public sealed class FloatingLiteralBindingTests
             library = NativeLibrary.Load(path);
             var narrow = Export<Char16ToFloat32>(library, "Narrow");
             var widen = Export<Char16ToFloat64>(library, "Widen");
-            foreach (var value in new ushort[] { 0, 0x8000, 0xD800, ushort.MaxValue })
+            for (var value = 0; value <= ushort.MaxValue; value++)
             {
-                Assert.Equal(BitConverter.SingleToInt32Bits(value), narrow(value));
-                Assert.Equal(BitConverter.DoubleToInt64Bits(value), widen(value));
+                var codeUnit = (ushort)value;
+                Assert.Equal(BitConverter.SingleToInt32Bits((float)value), narrow(codeUnit));
+                Assert.Equal(BitConverter.DoubleToInt64Bits((double)value), widen(codeUnit));
             }
         }
         finally

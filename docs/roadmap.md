@@ -103,6 +103,13 @@ floating values, preserving all other bits. Semantic-module parity and the
 independent component runner cover both formats under both runtime policies;
 the unapproved TRRM negation proposal remains distinct from this implemented
 helper.
+The internal `Char16FloatConversion` helper composes unsigned `char16`
+zero-extension with the existing integer-to-floating bit conversions.
+Exhaustive semantic-module coverage checks all 65,536 code units against
+independently constructed exact encodings, and the hosted conversion test
+checks all code units under the native emitter. The eligibility and TRRM
+proposals remain unapproved; this helper does not add scalar-frontend,
+source-free DLL or TRRM support.
 Separately, the standalone Terrum-authored `HexFloatLiteral` component now
 converts grammar-shaped, caller-delimited hexadecimal-float slices directly
 to target-format bits and matches hosted binding across rounding boundaries,

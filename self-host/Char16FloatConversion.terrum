@@ -1,0 +1,11 @@
+namespace Terrum.CodeAnalysis;
+
+public static uint32 Char16ToFloat32Bits(char16 value)
+{
+    return UInt32ToFloat32Bits(uint32(value));
+}
+
+public static uint64 Char16ToFloat64Bits(char16 value)
+{
+    return UInt32ToFloat64Bits(uint32(value));
+}
