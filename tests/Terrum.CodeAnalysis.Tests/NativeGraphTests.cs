@@ -728,19 +728,21 @@ public sealed class NativeGraphTests
             [leaf, weakened]));
     }
 
-    [Fact]
-    public void GraphReplacementCannotWeakenRequiredNoReturnPromise()
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void GraphReplacementCannotWeakenRequiredNoReturnPromise(NativeRuntimePolicy policy)
     {
-        var leaf = Leaf("[DoesNotReturn] public void Leaf() { while (true) { } }");
+        var leaf = Leaf("[DoesNotReturn] public void Leaf() { while (true) { } }", policy);
         var rootCompilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { Leaf(); return 42; }"),
-            NativeModuleCompiler.CreateGraphReference([leaf]));
+            NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
         Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
         var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
-            [leaf], NativeRuntimePolicy.FailFast);
+            [leaf], policy);
 
         NativeModuleCompiler.ValidateGraph(root, [leaf]);
-        var replacement = Leaf("public void Leaf() { }");
+        var replacement = Leaf("public void Leaf() { }", policy);
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [replacement]));
     }
 
