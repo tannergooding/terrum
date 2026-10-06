@@ -393,6 +393,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `fb567a1e` | Provisionally hydrate floating leaves in reached non-unique Copy-struct proof dependencies and non-class concrete signatures, preserving init-mode contracts and excluding managed-class closures |
 | `fcd56190` | Provisionally specialize hosted Copy-only templates for `float32`/`float64`, preserving raw bits, output publication and private semantic/native module boundaries without widening symbolic operations |
 | `2c3b7ef6` | Verify floating `out` and `init ref<T>` publication through persisted semantic modules and native consumer sets under both runtime policies |
 | `d2217561` | Verify conditional floating `out` and `init ref<T>` publication across native graphs under both runtime policies and AOT/JIT, rejecting output-format changes |
