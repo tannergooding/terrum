@@ -1202,7 +1202,11 @@ a supported bare catch region. The source-bound reader validates its separate
 extent before setting `BoundTryCatch.Finally`; the hosted verifier retains
 responsibility for failure-edge and cleanup rules. Typed catches and filters
 remain unsupported, and recovery still requires explicit `unsafe` plus the
-checked-exceptions policy.
+checked-exceptions policy. Integration evidence is limited to frontend/hosted
+DLL byte and execution parity for bounded normal cleanup, caught requirement
+failure followed by cleanup, and nested cleanup before an outer bare catch; it
+does not establish independent verification/emission or general catch/filter
+support.
 
 Projection v68 adds kinds 35 and 36 for bounded body `static require` and
 outer-body `static ensure` proofs. The reader validates their source spelling

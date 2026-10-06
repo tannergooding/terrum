@@ -242,6 +242,75 @@ public sealed partial class CliTests
     }
 
     [Theory]
+    [InlineData("public int32 Value() { mut int32 state = 0; unsafe { try { state = 1; } catch { state = 0; } finally { if (state == 1) { state = 42; } else { state = 0; } } } return state; }", 42)]
+    [InlineData("public int32 Value() { mut int32 state = 0; unsafe { try { require false; } catch { state = 1; } finally { if (state == 1) { state = 42; } else { state = 0; } } } return state; }", 42)]
+    [InlineData("public int32 Value() { mut int32 state = 0; unsafe { try { try { require false; } finally { state = 1; } } catch { return state + 41; } } return 0; }", 42)]
+    public async Task CheckedCatchFinallyLibraryMatchesHostedBytesAndExecutionAsync(string source,
+        int expected)
+    {
+        var root = RepositoryRoot();
+        var frontend = Path.Combine(root, "self-host");
+        var prefix = Path.Combine(Path.GetTempPath(), $"checked-catch-library-{Guid.NewGuid():N}");
+        var frontendPath = prefix + ".frontend.dll";
+        var hostedPath = prefix + ".hosted.dll";
+        try
+        {
+            Assert.False(File.Exists(frontendPath));
+            Assert.False(File.Exists(hostedPath));
+
+            var input = Encoding.UTF8.GetBytes(source);
+            var (frontendExit, frontendOutput, frontendError) = await RunAsync(input,
+                "frontend-build-library", frontend, "-", "-o", frontendPath,
+                "--runtime", "checked-exceptions", "--json");
+            var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
+                "build-library", "-", "--export", "Value", "-o", hostedPath,
+                "--runtime", "checked-exceptions", "--json");
+
+            Assert.True(frontendExit == 0, $"frontend-build-library: {frontendOutput}{frontendError}");
+            Assert.True(hostedExit == 0, $"build-library: {hostedOutput}{hostedError}");
+            Assert.Empty(frontendError);
+            Assert.Empty(hostedError);
+            using (var document = JsonDocument.Parse(frontendOutput))
+            {
+                var result = document.RootElement;
+                Assert.True(result.GetProperty("success").GetBoolean());
+                Assert.Equal(frontendPath, result.GetProperty("output").GetString());
+                Assert.Equal(85, result.GetProperty("result").GetProperty("projectionVersion").GetInt32());
+            }
+            using (var document = JsonDocument.Parse(hostedOutput))
+            {
+                var result = document.RootElement;
+                Assert.True(result.GetProperty("success").GetBoolean());
+                var artifact = result.GetProperty("artifact");
+                Assert.Equal(hostedPath, artifact.GetProperty("path").GetString());
+                Assert.Equal("windows-x64", artifact.GetProperty("target").GetString());
+            }
+
+            Assert.Equal(await File.ReadAllBytesAsync(hostedPath),
+                await File.ReadAllBytesAsync(frontendPath));
+            foreach (var libraryPath in new[] { frontendPath, hostedPath })
+            {
+                var handle = NativeLibrary.Load(libraryPath);
+                try
+                {
+                    var export = NativeLibrary.GetExport(handle, "Value");
+                    var value = Marshal.GetDelegateForFunctionPointer<ScopedInt32>(export)();
+                    Assert.Equal(expected, value);
+                }
+                finally
+                {
+                    NativeLibrary.Free(handle);
+                }
+            }
+        }
+        finally
+        {
+            File.Delete(frontendPath);
+            File.Delete(hostedPath);
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Main() { if (true) { int32 x = 1 / 0; return x; } return 42; }", unchecked((int)0xE0540002))]
     [InlineData("int32 Main() { while (true) { mut int32 x = 2147483647; x++; break; } return 42; }", unchecked((int)0xE0540001))]
     public async Task ScopedLocalsPreserveCheckedFailureStatusAsync(string source, int expected)
