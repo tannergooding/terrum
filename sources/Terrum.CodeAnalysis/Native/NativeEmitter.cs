@@ -151,6 +151,19 @@ public static class NativeEmitter
         NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
         EmitLibraryCore(program, exports, null, runtimePolicy, cancellationToken).Image;
 
+    internal static (byte[] Image, NativeCode Code) EmitSourceGrantLibraryForTest(
+        BoundProgram program, IReadOnlyList<string> exports, NativeRuntimePolicy runtimePolicy)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        SemanticVerifier.VerifyLibrary(program);
+        var dependent = NativeSourceGrantExperiment.Classify(program);
+        NativeCode? emitted = null;
+        var result = EmitLibraryCore(program, exports, null, runtimePolicy, default, dependent,
+            code => emitted = code);
+
+        return (result.Image, emitted ?? throw new InvalidOperationException("No experiment code was emitted."));
+    }
+
     /// <summary>Emits a library whose verified external declarations have explicit DLL import bindings.</summary>
     /// <remarks>Bindings specify ABI identities, not provider compatibility; callers must validate dependency contracts.</remarks>
     public static byte[] EmitLibraryWithImports(BoundProgram program, IReadOnlyList<string> exports,
@@ -169,7 +182,8 @@ public static class NativeEmitter
 
     private static (byte[] Image, ImmutableArray<NativeImportBinding> Imports)
         EmitLibraryCore(BoundProgram program, IReadOnlyList<string> exports,
-        IReadOnlyList<NativeImportBinding>? bindings, NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken)
+        IReadOnlyList<NativeImportBinding>? bindings, NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken,
+        bool[]? sourceDependent = null, Action<NativeCode>? captureCode = null)
     {
         if (runtimePolicy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
@@ -177,7 +191,7 @@ public static class NativeEmitter
         }
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(program);
-        if (program.RequiresSourceGrant && !program.IsInvocationSourceBound)
+        if (program.RequiresSourceGrant && !program.IsInvocationSourceBound && sourceDependent is null)
         {
             throw new NotSupportedException("An invocation-scoped Host.Source grant must be bound through NativeJit.");
         }
@@ -194,7 +208,7 @@ public static class NativeEmitter
             throw new ArgumentException("Native and verified checked-failure policies differ.", nameof(program));
         }
         ArgumentNullException.ThrowIfNull(exports);
-        if (!program.Buffers.IsEmpty)
+        if (!program.Buffers.IsEmpty && sourceDependent is null)
         {
             throw new NotSupportedException("Native DLLs do not expose host buffer capabilities.");
         }
@@ -237,8 +251,10 @@ public static class NativeEmitter
         }
         selected.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
         var imports = bindings is null ? null : SelectImports(program, bindings, cancellationToken);
-        var compiler = new PeCompiler(program, cancellationToken, managedExports, library: true, imports: imports);
+        var compiler = new PeCompiler(program, cancellationToken, managedExports, library: true, imports: imports,
+            sourceDependent: sourceDependent);
         var code = compiler.Compile();
+        captureCode?.Invoke(code);
         return (PeImage.BuildLibrary(code, [.. selected]), UsedImports(code, imports));
     }
 
@@ -381,6 +397,8 @@ internal sealed partial class PeCompiler
     private readonly List<NativeImportFixup> _nativeImportFixups = [];
     private readonly List<NativeDataFixup> _dataFixups = [];
     private readonly int[] _bufferOffsets;
+    private readonly bool[]? _sourceDependent;
+    private readonly int[] _sourceSlots;
     private readonly byte[] _data;
     private readonly bool _managedNodes;
     private readonly int _managedRuntimeOffset;
@@ -416,9 +434,11 @@ internal sealed partial class PeCompiler
     }
 
     internal PeCompiler(BoundProgram program, CancellationToken cancellationToken, bool managedNodes, bool library = false,
-        IReadOnlyDictionary<int, NativeImportBinding>? imports = null)
+        IReadOnlyDictionary<int, NativeImportBinding>? imports = null, bool[]? sourceDependent = null)
     {
         _program = program;
+        _sourceDependent = sourceDependent;
+        _sourceSlots = sourceDependent is null ? [] : new int[program.Functions.Length];
         _checkedExceptions = program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions;
         _library = library;
         _nativeImports = imports;
@@ -447,7 +467,14 @@ internal sealed partial class PeCompiler
         _constructedFieldSlots = new int[program.Functions.Length][];
         _replacementSlots = new int[program.Functions.Length];
         _cleanupArgumentSlots = new int[program.Functions.Length];
-        _bufferOffsets = new int[program.Buffers.Length];
+        _bufferOffsets = sourceDependent is null ? new int[program.Buffers.Length] : [];
+        if (sourceDependent is not null)
+        {
+            // Invocation storage has no image data, address fixups, or retained runtime state.
+            _data = [];
+            _managedRuntimeOffset = -1;
+            return;
+        }
         var readOnlyBytes = 0;
         foreach (var buffer in program.Buffers)
         {
@@ -634,6 +661,11 @@ internal sealed partial class PeCompiler
             }
             var outgoingSize = 32 + (8 * Math.Max(0, maximumArguments - 4));
             var at = (outgoingSize + 15) & ~15;
+            if (_sourceDependent?[i] == true)
+            {
+                _sourceSlots[i] = at;
+                at += 16;
+            }
             var slots = new int[function.Variables.Length];
             for (var variable = 0; variable < slots.Length; variable++)
             {
@@ -768,6 +800,13 @@ internal sealed partial class PeCompiler
             Prolog(_frame - 8);
             _code.Bytes(0x48, 0x89, 0xE5); // mov rbp,rsp
             _code.UseFramePointer = true;
+            var sourceHidden = _sourceDependent?[i] == true ? 2 : 0;
+            if (sourceHidden != 0)
+            {
+                // RCX/RDX are volatile; preserve the complete context before emitting any calls.
+                _code.StoreRegister(0, _sourceSlots[i], true);
+                _code.StoreRegister(1, _sourceSlots[i] + 8, false);
+            }
             foreach (var live in _liveSlots[i])
             {
                 if (live >= 0)
@@ -789,8 +828,9 @@ internal sealed partial class PeCompiler
                     _code.Clear(field);
                 }
             }
-            var hidden = IsIndirect(function.ReturnType) ? 1 : 0;
-            if (hidden != 0)
+            var hiddenReturn = IsIndirect(function.ReturnType) ? 1 : 0;
+            var hidden = hiddenReturn + sourceHidden;
+            if (hiddenReturn != 0)
             {
                 _code.StoreRegister(0, _returnSlot, true);
             }
@@ -1214,7 +1254,8 @@ internal sealed partial class PeCompiler
                         ExpressionSpills(conditional.WhenFalse, ref maximumArguments)));
             case BoundCall call:
                 maximumArguments = Math.Max(maximumArguments,
-                    call.Arguments.Length + (IsIndirect(call.Type) ? 1 : 0));
+                    call.Arguments.Length + (IsIndirect(call.Type) ? 1 : 0)
+                        + (_sourceDependent?[call.Function] == true ? 2 : 0));
                 var maximum = 1 + (call.Arguments.Length * 2);
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
@@ -2843,6 +2884,13 @@ internal sealed partial class PeCompiler
 
     private void CheckBufferIndex(int buffer)
     {
+        if (_sourceDependent is not null)
+        {
+            _code.Bytes(0x3B, 0x85); // cmp eax,[rbp+sourceCount]
+            _code.Int32(_sourceSlots[_currentFunction] + 8);
+            RuntimeBranch(0x83, 3);
+            return;
+        }
         _code.Byte(0x3D);
         _code.Int32(_program.Buffers[buffer].Values.Length);
         RuntimeBranch(0x83, 3); // unsigned >= length rejects negative indexes too
@@ -2986,8 +3034,15 @@ internal sealed partial class PeCompiler
                 _code.Load(Slot(length.Variable) + 8);
                 break;
             case BoundBufferLength length:
-                _code.Byte(0xB8);
-                _code.Int32(_program.Buffers[length.Buffer].Values.Length);
+                if (_sourceDependent is not null)
+                {
+                    _code.Load(_sourceSlots[_currentFunction] + 8);
+                }
+                else
+                {
+                    _code.Byte(0xB8);
+                    _code.Int32(_program.Buffers[length.Buffer].Values.Length);
+                }
                 break;
             case BoundSnapshotSpan snapshot:
                 EmitSnapshotSpan(snapshot, spill);
@@ -3108,8 +3163,17 @@ internal sealed partial class PeCompiler
                 break;
             case BoundBufferRead bufferRead:
                 EmitBufferIndex(bufferRead.Buffer, bufferRead.Index, bufferRead.IsEndRelativeOffset, spill);
-                _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _bufferOffsets[bufferRead.Buffer]));
-                _code.Bytes(0x8B, 0x04, 0x82); // mov eax,[rdx+rax*4]
+                if (_sourceDependent is not null)
+                {
+                    _code.Bytes(0x48, 0x8B, 0x95); // mov rdx,[rbp+sourcePointer]
+                    _code.Int32(_sourceSlots[_currentFunction]);
+                    _code.Bytes(0x0F, 0xB7, 0x04, 0x42); // movzx eax,word ptr [rdx+rax*2]
+                }
+                else
+                {
+                    _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _bufferOffsets[bufferRead.Buffer]));
+                    _code.Bytes(0x8B, 0x04, 0x82); // mov eax,[rdx+rax*4]
+                }
                 break;
             case BoundUnary unary:
                 Expression(unary.Operand, spill);
@@ -3492,7 +3556,9 @@ internal sealed partial class PeCompiler
                         SetManagedRoot(OwnerPlace(managedOutput.Variable), active: false);
                     }
                 }
-                var hidden = IsIndirect(call.Type) ? 1 : 0;
+                var hiddenReturn = IsIndirect(call.Type) ? 1 : 0;
+                var sourceHidden = _sourceDependent?[call.Function] == true ? 2 : 0;
+                var hidden = hiddenReturn + sourceHidden;
                 for (var i = Math.Max(0, 4 - hidden); i < call.Arguments.Length; i++)
                 {
                     var argumentIndex = call.ArgumentIndex(i);
@@ -3524,13 +3590,20 @@ internal sealed partial class PeCompiler
                             or BoundFieldLoan or BoundMutableFieldLoan
                             || IsStruct(call.Arguments[argumentIndex].Type) || IsWide(call.Arguments[argumentIndex].Type));
                 }
-                if (hidden != 0)
+                if (sourceHidden != 0)
+                {
+                    _code.Load64(_sourceSlots[_currentFunction]);
+                    _code.MoveArgument(0, true);
+                    _code.Load(_sourceSlots[_currentFunction] + 8);
+                    _code.MoveArgument(1, false);
+                }
+                if (hiddenReturn != 0)
                 {
                     _code.Address(Spill(spill));
                     _code.MoveArgument(0, true);
                 }
                 EmitTargetCall(call.Function);
-                if (hidden != 0)
+                if (hiddenReturn != 0)
                 {
                     _code.Address(Spill(spill));
                 }

@@ -116,3 +116,63 @@ dereference invalid pointers. This experiment may establish implementation
 feasibility only; adding source-dependent exports to the maintained library,
 generalizing the ABI, or claiming language/public ABI support requires a
 separate review and decision.
+
+### Experiment outcome
+
+The test-only path is implemented as internal
+`NativeEmitter.EmitSourceGrantLibraryForTest`; the public `EmitLibrary` path
+continues to reject source grants. Tests compile the two UTF-16 components
+and test adapters through hosted binding, then mark that test IR as a library
+without adding a library-buffer compilation API or changing semantic metadata.
+Admission is deliberately narrower than the candidate contract: only
+self-contained structured `bool`, `char16`, `int32`, `uint32`, and `void`
+functions are accepted. Blocks, initialized locals, assignments, expression
+statements, conditionals, requirements, returns, scalar expressions, and
+local calls are explicitly visited; every other shape is rejected. Loops,
+cleanup regions, indexed graphs, aggregates, output loans, intrinsic
+functions, and external declarations are not admitted.
+
+Direct source length/read expressions and the transitive local call graph
+determine which functions receive the hidden pair. The pair is saved in
+frame-local slots before volatile-register use. Authored argument positions,
+outgoing stack space, and local calls account for those two positions only
+on source-dependent functions. Length reads load the invocation count;
+buffer reads compare their index against that count and use zero-extending
+two-byte loads from the invocation pointer. No source buffer data or address
+fixups are emitted.
+
+Focused Windows x64 tests load one separate temporary DLL per runtime policy
+and reuse it for fresh pinned UTF-16 storage. The scalar adapter and its
+three-argument local callee exercise the fifth argument, including reordered
+named arguments. Empty/null-zero calls use the length export and scalar
+adapter guard. Valid decoder results match hosted C# `Rune.DecodeFromUtf16`
+for maximum-size input, BMP/supplementary scalars, NUL, CR/LF and other line
+breaks, malformed surrogates, final units, and bounded lookahead.
+One pinned allocation is reused with different counts, and two
+simultaneously pinned allocations with equal counts produce distinct results.
+The test adapter returns `-2` for invalid ranges without calling the decoder,
+and `-3` for an expected-value mismatch; neither changes the real decoder's
+precondition or `-1` malformed-surrogate result. Managed test helpers reject
+null/nonzero, oversized, misaligned, and storage/count-inconsistent calls
+before native invocation; tests never dereference invalid pointers. A separate
+boundary export indexes a still-readable one-unit allocation with a zero-unit
+grant, and the checked-exceptions DLL must raise `SEHException` before the
+read. Both runtime-policy images assert the dynamic-count comparison,
+conditional branch, and failure call; the fail-fast failure path is not invoked
+because it terminates the process.
+
+Artifact assertions establish empty host data, buffer offsets, and data
+fixups; absent image data sections, TLS, and base relocations; identical DLL
+bytes after changing the sample source units and length; frame-local context
+stores before body code; and dynamic-count comparisons followed by
+`movzx eax,word ptr [rdx+rax*2]` in the emitted PE text. A five-authored-argument
+source-free export remains callable without the hidden pair and its function
+bytes match ordinary source-free emission exactly.
+
+These results establish feasibility of the provisional generated ABI only.
+Public library emission, native packages, production CLI paths, maintained
+compiler-primitives exports, JIT execution, scanner profiles, executables,
+graphs, module sets, AOT, and cross-DLL source propagation remain unchanged
+and unsupported for this experiment. Readable aligned memory, lifetime, and
+immutability remain caller preconditions; there is no general native pointer
+validation or public wrapper. **Status remains unapproved.**
