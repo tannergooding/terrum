@@ -1,0 +1,109 @@
+namespace Terrum.CodeAnalysis;
+
+public static uint64 Float32BitsToFloat64Bits(uint32 bits)
+{
+    uint64 sign = uint64(bits & uint32(0x80000000)) << 32;
+    uint32 exponentField = (bits >> 23) & uint32(0xFF);
+    uint32 fraction = bits & uint32(0x7FFFFF);
+
+    if (exponentField == uint32(0xFF))
+    {
+        return sign | uint64(0x7FF0000000000000) | (uint64(fraction) << 29);
+    }
+
+    if (exponentField != 0)
+    {
+        uint64 widenedExponent = (uint64(exponentField) + 896) << 52;
+        return sign | widenedExponent | (uint64(fraction) << 29);
+    }
+
+    if (fraction == 0)
+    {
+        return sign;
+    }
+
+    // Normalize each nonzero source subnormal directly into a normal float64 significand.
+    mut uint32 leadingBit = 1;
+    mut int32 highestBit = 0;
+    while (leadingBit <= (fraction >> 1))
+    {
+        leadingBit = leadingBit << 1;
+        highestBit = highestBit + 1;
+    }
+
+    uint64 widenedExponent = uint64(highestBit + 874) << 52;
+    uint64 widenedFraction = uint64(fraction - leadingBit) << (52 - highestBit);
+    return sign | widenedExponent | widenedFraction;
+}
+
+public static uint32 Float64BitsToFloat32Bits(uint64 bits)
+{
+    uint32 sign = uint32((bits >> 32) & uint64(0x80000000));
+    uint64 exponentField = (bits >> 52) & uint64(0x7FF);
+    uint64 fraction = bits & uint64(0x000FFFFFFFFFFFFF);
+
+    if (exponentField == uint64(0x7FF))
+    {
+        if (fraction == 0)
+        {
+            return sign | uint32(0x7F800000);
+        }
+
+        uint32 payload = uint32(fraction >> 29) | uint32(0x00400000);
+        return sign | uint32(0x7F800000) | payload;
+    }
+
+    if (exponentField == 0)
+    {
+        return sign;
+    }
+
+    mut int32 exponent = int32(exponentField) - 1023;
+    if (exponent > 127)
+    {
+        return sign | uint32(0x7F800000);
+    }
+
+    uint64 significand = fraction | uint64(0x0010000000000000);
+    if (exponent >= -126)
+    {
+        mut uint32 rounded = RoundShiftRightUInt64(significand, 29);
+        if (rounded == uint32(0x01000000))
+        {
+            rounded = rounded >> 1;
+            exponent = exponent + 1;
+        }
+
+        if (exponent > 127)
+        {
+            return sign | uint32(0x7F800000);
+        }
+
+        uint32 narrowedExponent = uint32(exponent + 127) << 23;
+        return sign | narrowedExponent | (rounded & uint32(0x7FFFFF));
+    }
+
+    if (exponent < -150)
+    {
+        return sign;
+    }
+
+    // Scale subnormals directly to units of 2^-149 to avoid double rounding.
+    uint32 subnormal = RoundShiftRightUInt64(significand, -exponent - 97);
+    return sign | subnormal;
+}
+
+uint32 RoundShiftRightUInt64(uint64 value, int32 shift)
+{
+    // Callers use shifts 29 or 30..53, keeping guard, sticky and halfway masks within uint64.
+    mut uint64 truncated = value >> shift;
+    uint64 remainderMask = (uint64(1) << shift) - 1;
+    uint64 remainder = value & remainderMask;
+    uint64 halfway = uint64(1) << (shift - 1);
+    if (remainder > halfway || (remainder == halfway && (truncated & 1) != 0))
+    {
+        truncated = truncated + 1;
+    }
+
+    return uint32(truncated);
+}
