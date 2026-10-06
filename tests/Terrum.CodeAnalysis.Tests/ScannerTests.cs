@@ -428,6 +428,16 @@ public sealed class ScannerTests
             new string('x', ScannerHost.MaximumSourceLength),
             "",
         };
+        var binaryMaximum = "0b" + new string('1', 64);
+        var binaryOverflow = "0b1" + new string('0', 64);
+        var integerBoundarySource = string.Join(' ',
+            "0xFFFFFFFFFFFFFFFF",
+            "0x10000000000000000",
+            binaryMaximum,
+            binaryOverflow,
+            "18446744073709551615",
+            "18446744073709551616");
+        sources.Add(integerBoundarySource);
         const int maximumBmpEscapesPerSource = 2_700;
         for (var scalarStart = (int)char.MinValue;
             scalarStart <= char.MaxValue;
@@ -594,6 +604,18 @@ public sealed class ScannerTests
                     [new(1, "i8", false, 12), new(2, "u64", true, null)],
                     actual.IntegerValues);
                 retained = actual;
+            }
+            else if (text == integerBoundarySource)
+            {
+                Assert.Equal<ScannerIntegerValue>(
+                [
+                    new(0, "", false, ulong.MaxValue),
+                    new(1, "", true, null),
+                    new(2, "", false, ulong.MaxValue),
+                    new(3, "", true, null),
+                    new(4, "", false, ulong.MaxValue),
+                    new(5, "", true, null),
+                ], actual.IntegerValues);
             }
             else if (text.Length == 0)
             {

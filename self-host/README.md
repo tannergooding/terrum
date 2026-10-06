@@ -797,7 +797,9 @@ quoted source ends with the valid U+10FFFF surrogate pair, and maximum-length
 identifier inputs end with each unpaired surrogate code unit. The
 [scanner-profile proposal](../docs/proposals/scanner-invocation-profile.md)
 remains unapproved; this support does not make the scanner or scalar frontend
-independent of hosted verification and emission.
+independent of hosted verification and emission. Integer-value records are
+also checked against binary, decimal and hexadecimal `uint64` maximum and
+overflow expectations.
 
 `SourceLineIndex` builds on that streaming reader. It owns a fixed-capacity native
 table of line starts, publishes the completed index through a conditional output,

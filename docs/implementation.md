@@ -23,7 +23,9 @@ checked as raw quoted-string content and in both identifier-start and
 identifier-continue positions; every raw surrogate code unit is also checked
 in an isolated quoted token. A quoted source at the maximum supported length
 ends with the valid U+10FFFF surrogate pair; maximum-length identifier inputs
-also end with each unpaired surrogate code unit.
+also end with each unpaired surrogate code unit. The profile's integer-value
+records are checked against expected binary, decimal and hexadecimal
+`uint64`-maximum and overflow cases.
 
 A source-dependent single-producer semantic-module program can be linked and executed by
 `NativeJit.ExecuteWithSourceGrant`, which requires one readonly `char16` grant
