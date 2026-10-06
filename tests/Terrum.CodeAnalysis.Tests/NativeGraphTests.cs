@@ -503,18 +503,41 @@ public sealed class NativeGraphTests
     }
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [InlineData(NativeRuntimePolicy.FailFast, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
     public async Task ConditionalInitRefOutputPublishesAcrossGraphOnlyOnTrueAsync(
-        NativeRuntimePolicy policy)
+        NativeRuntimePolicy policy, bool usesCopyStruct)
     {
-        const string ProviderSource = """
+        var providerSource = usesCopyStruct
+            ? """
+                public struct Pair {
+                    public int64 First;
+                    public int64 Second;
+                    public Pair(int64 first, int64 second) { First = first; Second = second; }
+                }
+                public bool TryPublish(bool publish, init ref<Pair> result) {
+                    result = publish ? new Pair(20, 22) : new Pair(20, 21);
+                    return publish;
+                }
+                """
+            : """
             public bool TryPublish(bool publish, init ref<int32> result) {
                 result = publish ? 42 : 41;
                 return publish;
             }
             """;
-        const string ConsumerSource = """
+        var consumerSource = usesCopyStruct
+            ? """
+                int32 Main() {
+                    init Pair result;
+                    if (TryPublish(false, init result)) { return 1; }
+                    if (!TryPublish(true, init result)) { return 2; }
+                    return int32(result.First + result.Second);
+                }
+                """
+            : """
             int32 Main() {
                 init int32 result;
                 if (TryPublish(false, init result)) { return 1; }
@@ -523,13 +546,13 @@ public sealed class NativeGraphTests
             }
             """;
 
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(ProviderSource),
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(providerSource),
             (BoundRuntimePolicy)policy);
         Assert.False(providerCompilation.HasErrors,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateProducer(
             Assert.IsType<BoundProgram>(providerCompilation.Program), ["TryPublish"], "NodeB", policy);
-        var rootCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
             NativeModuleCompiler.CreateGraphReference([provider]), (BoundRuntimePolicy)policy);
         Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
         var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
