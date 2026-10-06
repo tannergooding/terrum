@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `65fb3bbe` | Verify conditional unique `init ref<T>` transfer through native module-set replacement |
 | `def3cb33` | Preserve vacant `init ref<T>` state after checked failure across native consumer sets |
 | `8c287c19` | Verify named `init ref<T>` output in native consumer sets under both policies |
 | `43620eb9` | Reject semantic/native replacement that changes `out` versus `init ref<T>` |
