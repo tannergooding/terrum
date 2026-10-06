@@ -42,6 +42,9 @@ approved.
 - [Fixed scalar outputs in generic Copy templates](generic-fixed-output-parameters.md)
   recommends adding scalar fixed-type output side parameters alongside at
   least one generic output without changing publication rules.
+- [Floating results from generic Copy output templates](generic-floating-output-results.md)
+  recommends allowing fixed floating result types without adding symbolic
+  floating generic operations or conditional output semantics.
 - [Floating Copy generic specializations](floating-copy-generic-specializations.md)
   recommends admitting floating formats only as concrete arguments to hosted
   Copy-only generic templates; it does not grant symbolic floating operations

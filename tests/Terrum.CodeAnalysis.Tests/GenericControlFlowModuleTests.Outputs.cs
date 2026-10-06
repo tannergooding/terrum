@@ -60,6 +60,18 @@ public sealed partial class GenericControlFlowModuleTests
             initialized = value;
             return status;
         }
+        [NoThrow] float32 FillFloating32<T>(T value, out T result, init ref<T> initialized)
+            where T : [Copy] {
+            result = value;
+            initialized = value;
+            return float32(-0.0);
+        }
+        [NoThrow] float64 FillFloating64<T>(T value, out T result, init ref<T> initialized)
+            where T : [Copy] {
+            result = value;
+            initialized = value;
+            return float64(-0.0);
+        }
         [NoThrow] void FillInitVoid<T>(T value, init ref<T> result) where T : [Copy] {
             result = value;
         }
@@ -82,6 +94,10 @@ public sealed partial class GenericControlFlowModuleTests
             FillInitVoid(copied, init var initializedAgain);
             int32 floatingStatus = FillFloating(float32(40.5), 0,
                 out var floatingCopy, init var floatingInitialized);
+            float32 floatingResult32 = FillFloating32(int32(42), out var floatingCopy32,
+                init var floatingInitialized32);
+            float64 floatingResult64 = FillFloating64<int32>(int32(43), out var floatingCopy64,
+                init var floatingInitialized64);
             mut Pair mixed = new Pair(0, 0);
             int32 mixedStatus = FillMixed(result, int64(42), 7, out mixed,
                 init var initializedMixed, out var mixedCount, init var mixedScore);
@@ -91,6 +107,12 @@ public sealed partial class GenericControlFlowModuleTests
                 || initializedAgain.First != 40 || initializedAgain.Second != 2
                 || floatingStatus != 0 || floatingCopy != float32(40.5)
                 || floatingInitialized != float32(40.5)
+                || floatingResult32 != float32(0.0)
+                || float32(1.0) / floatingResult32 >= float32(0.0)
+                || floatingCopy32 != 42 || floatingInitialized32 != 42
+                || floatingResult64 != float64(0.0)
+                || float64(1.0) / floatingResult64 >= float64(0.0)
+                || floatingCopy64 != 43 || floatingInitialized64 != 43
                 || mixedStatus != 7 || mixed.First != 40 || mixed.Second != 2
                 || initializedMixed != 42 || mixedCount != 2 || mixedScore != float64(3.5)) { return 2; }
             return int32(result.First + result.Second) + Count(result, 0);
@@ -111,6 +133,8 @@ public sealed partial class GenericControlFlowModuleTests
             .Replace("FillVoid(", "FillVoid<Pair>(", StringComparison.Ordinal)
             .Replace("FillInit(", "FillInit<Pair>(", StringComparison.Ordinal)
             .Replace("FillFloating(", "FillFloating<float32>(", StringComparison.Ordinal)
+            .Replace("FillFloating32(", "FillFloating32<int32>(", StringComparison.Ordinal)
+            .Replace("FillFloating64(", "FillFloating64<int32>(", StringComparison.Ordinal)
             .Replace("FillInitVoid(", "FillInitVoid<Pair>(", StringComparison.Ordinal)
             .Replace("FillMixed(", "FillMixed<Pair, int64>(", StringComparison.Ordinal)
             .Replace("Count(", "Count<Pair>(", StringComparison.Ordinal);
@@ -152,6 +176,16 @@ public sealed partial class GenericControlFlowModuleTests
         Assert.True(fillFloating.Variables[2].IsOut);
         Assert.False(fillFloating.Variables[2].IsInit);
         Assert.True(fillFloating.Variables[3].IsInit);
+        var fillFloating32 = Assert.Single(linked.Functions,
+            static function => function.Name == "$producer.FillFloating32<int32>");
+        Assert.Equal(PrimitiveType.Float32, fillFloating32.ReturnType);
+        Assert.True(fillFloating32.Variables[1].IsOut);
+        Assert.True(fillFloating32.Variables[2].IsInit);
+        var fillFloating64 = Assert.Single(linked.Functions,
+            static function => function.Name == "$producer.FillFloating64<int32>");
+        Assert.Equal(PrimitiveType.Float64, fillFloating64.ReturnType);
+        Assert.True(fillFloating64.Variables[1].IsOut);
+        Assert.True(fillFloating64.Variables[2].IsInit);
         var fillInitVoid = Assert.Single(linked.Functions,
             static function => function.Name == "$producer.FillInitVoid<Pair>");
         Assert.Equal(PrimitiveType.Void, fillInitVoid.ReturnType);

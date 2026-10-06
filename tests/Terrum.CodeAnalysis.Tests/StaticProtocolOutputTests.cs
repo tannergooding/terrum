@@ -376,6 +376,127 @@ public sealed class StaticProtocolOutputTests
     }
 
     [Theory]
+    [InlineData("float32", "float32(-0.0)")]
+    [InlineData("float64", "float64(-0.0)")]
+    public void GenericFloatingResultsPreserveOutputModes(string resultType, string resultValue)
+    {
+        var source = Value + resultType
+            + " Fill<T>(T value, out T copied, init ref<T> initialized) where T : [Copy] {"
+            + " copied = value; initialized = value; return " + resultValue + "; }"
+            + "int32 Main() { mut Value copied = new Value(0);"
+            + resultType + " status1 = Fill(new Value(40), out copied, init var initialized1);"
+            + resultType + " status2 = Fill<Value>(new Value(42), out copied, init var initialized2);"
+            + "return 42; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value>");
+        Assert.Equal(resultType == "float32" ? PrimitiveType.Float32 : PrimitiveType.Float64, fill.ReturnType);
+        Assert.True(fill.Variables[1].IsOut);
+        Assert.False(fill.Variables[1].IsInit);
+        Assert.True(fill.Variables[2].IsInit);
+    }
+
+    [Theory]
+    [InlineData("float32", "result = value; initialized = value; count = 2; return float32(1.5);")]
+    [InlineData("float64", "result = value; initialized = value; score = float64(3.5); return float64(1.5);")]
+    [InlineData("float32", "initialized = value; count = 2; score = float64(3.5); return float32(1.5);")]
+    [InlineData("float64", "result = value; count = 2; score = float64(3.5); return float64(1.5);")]
+    public void GenericFloatingResultRequiresEveryOutputOnNormalReturn(string resultType, string body)
+    {
+        var source = Value
+            + resultType + " Fill<T>(T value, out T result, init ref<T> initialized,"
+            + " out int32 count, init ref<float64> score)"
+            + " where T : [Copy] { " + body + " } int32 Main() { return 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData("float32 Create<T>(T value) where T : [Copy] { return float32(1.5); }")]
+    [InlineData("float32 Fill<T>(float32 value, out T result) where T : [Copy] { result = value; return float32(1.5); }")]
+    public void GenericFloatingResultDoesNotWidenTemplateTypes(string declaration)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            declaration + " int32 Main() { return 0; }"));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void GenericFloatingResultAndFixedOutputsDoNotInferOutputTypes()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [NoThrow] float64 None<T>(int32 marker, init ref<T> result, out int32 count,
+                init ref<float64> score) where T : [Copy] {
+                for (;;) { }
+            }
+            int32 Main() {
+                None(1, init var result, out var count, init var score);
+                return 42;
+            }
+            """));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void GenericFloatingResultDoesNotRelaxFinallyNoThrow()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            float64 Fill<T>(T value, out T copied) where T : [Copy] {
+                copied = value;
+                try {
+                    return float64(0.0);
+                } finally {
+                    require false;
+                }
+            }
+            int32 Main() { return 0; }
+            """), BoundRuntimePolicy.CheckedExceptions);
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3017");
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData("copied")]
+    [InlineData("initialized")]
+    [InlineData("count")]
+    [InlineData("int32(score)")]
+    public void GenericFloatingResultOutputsAreUnreadableAfterExceptionalDeparture(string catchRead)
+    {
+        var source = """
+            float64 Fill<T>(T value, bool complete, out T copied, init ref<T> initialized,
+                out int32 count, init ref<float64> score) where T : [Copy] {
+                copied = value;
+                initialized = value;
+                count = 2;
+                score = float64(3.5);
+                require complete;
+                return float64(1.5);
+            }
+            int32 Main() {
+                mut int32 copied = 0;
+                init int32 initialized;
+                mut int32 count = 0;
+                init float64 score;
+                unsafe {
+                    try {
+                        Fill(1, false, out copied, init initialized, out count, init score);
+                    } catch {
+                        return int32(CATCH_READ);
+                    }
+                }
+                return 0;
+            }
+            """.Replace("CATCH_READ", catchRead, StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
     [InlineData("int32", "result = value; return 7;")]
     [InlineData("int32", "initialized = second; return 7;")]
     [InlineData("void", "result = value;")]

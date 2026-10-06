@@ -647,7 +647,8 @@ internal sealed partial class Binder
             }
         }
         var returnName = returnType is null ? "" : NameText(returnType);
-        var scalarReturn = returnName == "void" ? PrimitiveType.Void : GenericScalarType(returnName);
+        var scalarReturn = returnName == "void" ? PrimitiveType.Void
+            : GenericScalarType(returnName) ?? GenericOutputScalarType(returnName);
         SyntaxToken? nameToken = null;
         var noThrow = noThrowCount != 0;
         var unsafeModifierCount = 0;
@@ -781,6 +782,8 @@ internal sealed partial class Binder
         if (body is null || copies.Any(static copy => !copy)
             || (scalarReturn == PrimitiveType.Void
                 && !outputParameters.Any(static parameter => parameter.TypeParameterIndex >= 0))
+            || (scalarReturn is PrimitiveType.Float32 or PrimitiveType.Float64
+                && outputParameters.Length == 0)
             || (outputParameters.Length != 0
                 && scalarReturn != PrimitiveType.Bool
                 && (scalarReturn is null

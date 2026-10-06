@@ -2183,6 +2183,17 @@ exported declarations distinguish `init:` from `out:` while historical
 private declarations retain their earlier contract spelling. Both modes
 share checked output scratch, cleanup and native ABI without matching each
 other's public contracts.
+Compilation-local generic `Copy` output templates also provisionally accept
+fixed `float32` and `float64` results when at least one generic-typed output is
+present. Every normal return must initialize all outputs, and checked
+exceptional departure leaves `init` destinations vacant; fixed scalar side
+outputs may accompany generic outputs but do not infer their types. Focused
+direct-execution and private semantic/native replacement tests cover both
+floating formats, output modes, signed zero, subnormals and checked retry.
+This hosted experiment remains unapproved, does not add floating protocol
+results or symbolic floating operations, and does not make the Terrum-authored
+scalar frontend independent of hosted verification/emission; see the
+[proposal](proposals/generic-floating-output-results.md).
 Separately, compilation-local `Copy` generic templates provisionally allow
 ordinary `out T` with a fixed supported non-Boolean scalar result or `void`.
 Definition-site proof requires publication on every normal return, including

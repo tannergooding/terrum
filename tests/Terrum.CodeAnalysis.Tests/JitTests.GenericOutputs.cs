@@ -611,6 +611,106 @@ public sealed partial class JitTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GenericFloatingResultsPreserveZeroAndSubnormalOutputsAsync(bool checkedFailures)
+    {
+        const string Source = """
+            [NoThrow] float32 Fill32<T>(T value, out T copied, init ref<T> initialized,
+                out int32 count, init ref<float64> score)
+                where T : [Copy] {
+                copied = value;
+                initialized = value;
+                count = 2;
+                score = float64(3.5);
+                return float32(-0.0);
+            }
+            [NoThrow] float64 Fill64<T>(T value, out T copied, init ref<T> initialized,
+                out int32 count, init ref<float64> score)
+                where T : [Copy] {
+                copied = value;
+                initialized = value;
+                count = 3;
+                score = float64(4.5);
+                return float64(-0.0);
+            }
+            [NoThrow] float32 Tiny32<T>(T value, out T copied) where T : [Copy] {
+                copied = value;
+                return float32(1.401298464324817e-45);
+            }
+            [NoThrow] float64 Tiny64<T>(T value, init ref<T> initialized) where T : [Copy] {
+                initialized = value;
+                return float64(4.9406564584124654e-324);
+            }
+            int32 Main() {
+                float32 negative32 = Fill32(int32(42), out var copied32, init var initialized32,
+                    out var count32, init var score32);
+                float64 negative64 = Fill64<int32>(int32(43), out var copied64, init var initialized64,
+                    out var count64, init var score64);
+                float32 tiny32 = Tiny32(int32(44), out var copiedTiny32);
+                float64 tiny64 = Tiny64<int32>(int32(45), init var initializedTiny64);
+                if (negative32 != float32(0.0) || float32(1.0) / negative32 >= float32(0.0)
+                    || negative64 != float64(0.0) || float64(1.0) / negative64 >= float64(0.0)
+                    || copied32 != 42 || initialized32 != 42 || copied64 != 43 || initialized64 != 43
+                    || count32 != 2 || score32 != float64(3.5)
+                    || count64 != 3 || score64 != float64(4.5)
+                    || tiny32 != float32(1.401298464324817e-45)
+                    || copiedTiny32 != 44 || tiny64 != float64(4.9406564584124654e-324)
+                    || initializedTiny64 != 45) {
+                    return 1;
+                }
+                return 42;
+            }
+            """;
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    public Task GenericFloatingResultDoesNotPublishAfterCheckedFailureAsync()
+    {
+        const string Source = """
+            float64 Fill<T>(T value, bool complete, out T copied, init ref<T> initialized,
+                out int32 count, init ref<float64> score) where T : [Copy] {
+                copied = value;
+                initialized = value;
+                count = 2;
+                score = float64(3.5);
+                require complete;
+                return float64(-0.0);
+            }
+            int32 Main() {
+                mut int32 copied = 40;
+                init int32 initialized;
+                mut int32 count = 0;
+                init float64 score;
+                unsafe {
+                    try {
+                        Fill(int32(41), false, out copied, init initialized, out count, init score);
+                        return 1;
+                    } catch {
+                        if (initialized is init || score is init) { return 2; }
+                        float64 result = Fill<int32>(42, true, out copied, init initialized,
+                            out count, init score);
+                        if (result != float64(0.0) || float64(1.0) / result >= float64(0.0)
+                            || copied != 42 || initialized != 42 || count != 2
+                            || score != float64(3.5)) { return 3; }
+                        return 42;
+                    }
+                }
+                return 0;
+            }
+            """;
+        return AssertCheckedExecutionAsync(Source, 42);
+    }
+
     [Fact]
     public Task GenericFixedScalarOutputsDoNotPublishAfterCheckedFailureAsync()
     {
