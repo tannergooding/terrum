@@ -450,9 +450,11 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
         var characterFactsPath = Path.Combine(sourceDirectory, "CharacterFacts.terrum");
+        var sourceOffsetPath = Path.Combine(sourceDirectory, "SourceOffset.terrum");
         var sourcePositionPath = Path.Combine(sourceDirectory, "SourcePosition.terrum");
         var compilation = Compilation.CreateLibrary([
             SyntaxTree.Parse(File.ReadAllText(characterFactsPath), characterFactsPath),
+            SyntaxTree.Parse(File.ReadAllText(sourceOffsetPath), sourceOffsetPath),
             SyntaxTree.Parse(File.ReadAllText(sourcePositionPath), sourcePositionPath),
         ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
@@ -460,14 +462,20 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
             Assert.IsType<BoundProgram>(compilation.Program),
-            [SourceLineNumberExport, SourceCharacterPositionExport], (NativeRuntimePolicy)policy);
-        Assert.Equal(2, artifact.Exports.Length);
-        foreach (var export in artifact.Exports)
+            [SourceLineNumberExport, SourceCharacterPositionExport, SourceOffsetExport],
+            (NativeRuntimePolicy)policy);
+        Assert.Equal(3, artifact.Exports.Length);
+        Assert.All(artifact.Exports, static export =>
         {
             Assert.True(export.SourceDependent);
             Assert.Equal(PrimitiveType.Int32, export.ReturnType);
-            Assert.Equal([PrimitiveType.Int32], export.ParameterTypes.ToArray());
-        }
+        });
+        Assert.Equal([PrimitiveType.Int32], Assert.Single(artifact.Exports,
+            static export => export.Name == SourceLineNumberExport).ParameterTypes.ToArray());
+        Assert.Equal([PrimitiveType.Int32], Assert.Single(artifact.Exports,
+            static export => export.Name == SourceCharacterPositionExport).ParameterTypes.ToArray());
+        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], Assert.Single(artifact.Exports,
+            static export => export.Name == SourceOffsetExport).ParameterTypes.ToArray());
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-position-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -817,8 +825,15 @@ public sealed class NativeSourceGrantLibraryTests
             expectedCharacter = linePosition.Character;
         }
 
-        Assert.Equal(expectedLine, bindings.Invoke<int>(SourceLineNumberExport, source, position));
-        Assert.Equal(expectedCharacter, bindings.Invoke<int>(SourceCharacterPositionExport, source, position));
+        var actualLine = bindings.Invoke<int>(SourceLineNumberExport, source, position);
+        var actualCharacter = bindings.Invoke<int>(SourceCharacterPositionExport, source, position);
+        Assert.Equal(expectedLine, actualLine);
+        Assert.Equal(expectedCharacter, actualCharacter);
+        if (expectedLine >= 0 && expectedCharacter >= 0)
+        {
+            Assert.Equal(position,
+                bindings.Invoke<int>(SourceOffsetExport, source, actualLine, actualCharacter));
+        }
     }
 
     private static void AssertSourceOffsetMatches(NativeSourceGrantTestBindings bindings, char[] source,

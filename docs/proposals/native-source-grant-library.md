@@ -246,8 +246,9 @@ units of CRLF on the preceding line.
 `GetSourceCharacterPositionOrMinusOne(int32 position)` scalar exports as
 provisional evidence. Preserve hosted `GetLinePosition` behavior for every
 valid offset, including EOF, an empty source, trailing empty lines and
-positions inside each recognized break. Return `-1` only for offsets outside
-the source extent. Reuse shared line-break classification, keep the
+positions inside each recognized break; round-trip those coordinates through
+the scalar source-offset query on the same grant. Return `-1` only for offsets
+outside the source extent. Reuse shared line-break classification, keep the
 source-free DLL and classifier boundary unchanged, and do not infer aggregate
 `LinePosition`, complete `SourceLines` or stable ABI support.
 

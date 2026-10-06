@@ -2668,7 +2668,9 @@ source-dependent calls use aggregate outputs. The two source-position exports
 independently scan to return the hosted line number or UTF-16 character
 position for offsets in `[0, Host.Source.Length]`; invalid offsets return
 `-1`. Callers combining them must use the same unchanged snapshot. This
-bounded scan does not claim hosted indexed-lookup performance. Hosted
+bounded scan does not claim hosted indexed-lookup performance. Direct and
+manifest-bound tests also round-trip coordinates through the scalar
+source-offset query using the same grant. Hosted
 `SourceText` parity covers length, line count, code-unit
 reads, line/character offsets and both position components for empty and
 maximum-length grants, line-break variants, malformed UTF-16, NUL and every
