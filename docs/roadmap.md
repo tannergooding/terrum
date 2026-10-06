@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `dd4cde86` | Compare raw supplementary string scalars at every Unicode-plane boundary through the persisted scanner-10 profile |
 | `c2dd22d4` | Compare persisted scanner-10 `\U` escapes at every Unicode-plane boundary and reject surrogate/out-of-range values against the host lexer |
 | `cb6d3410` | Check duplicate switch constant-label rejection across all supported scalar selector types |
 | `ded27ee2` | Compare switch default-arm selection with hosted conditionals for all supported scalar selector types under both runtime policies |
