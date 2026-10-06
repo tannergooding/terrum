@@ -2066,9 +2066,9 @@ unchanged consumer under both policies.
 Both scalar output modes execute through native graphs under each runtime
 policy, and graph replacement rejects switching between `out` and
 `init ref<T>` in either direction.
-Boolean `out` graph calls also preserve vacancy on false: an `init ref<T>`
-retry succeeds afterward, while a true call publishes its output under both
-runtime policies through AOT and JIT.
+Boolean scalar and 16-byte Copy-struct `out` graph calls also preserve vacancy
+on false: an `init ref<T>` retry succeeds afterward, while a true call publishes
+its output under both runtime policies through AOT and JIT.
 Ownership-set execution also covers conditional unique `init ref<T>` publication:
 false after constructing the value leaves the destination vacant, a later true
 call publishes the owner, and the unchanged consumer moves it once across
