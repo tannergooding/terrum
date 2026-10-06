@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `82971fc4` | Keep scalar `init ref<T>` vacant after checked failure across native graph calls |
 | `ec61562b` | Verify scalar `init ref<T>` output and replacement compatibility across native graphs |
 | `d9990d0e` | Preserve `DoesNotReturn` promises when replacing native module-set providers |
 | `7bca6ec4` | Reject semantic/native replacement that removes a retained `NoThrow` or `DoesNotReturn` promise |
