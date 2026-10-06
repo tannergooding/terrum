@@ -43,6 +43,21 @@ public sealed class Utf16ScalarModuleTests
             }
             return 0;
         }
+
+        public int32 VerifySupplementaryPairs() {
+            if (Host.Source.Length < 2 || (Host.Source.Length - 2) % 2 != 0) { return -1; }
+            mut int32 expected = int32(Host.Source[0]) | (int32(Host.Source[1]) << 16);
+            mut int32 position = 2;
+            mut int32 index = 0;
+            while (position < Host.Source.Length) {
+                int32 scalar = ReadUtf16Scalar(position, position + 2);
+                if (scalar != expected || Utf16ScalarWidth(scalar) != 2) { return index + 1; }
+                position = position + 2;
+                expected = expected + 1;
+                index = index + 1;
+            }
+            return 0;
+        }
         """;
 
     [Theory]
@@ -73,6 +88,7 @@ public sealed class Utf16ScalarModuleTests
             [
                 "Terrum.CodeAnalysis.DecodeRequestedScalar",
                 "Terrum.CodeAnalysis.VerifyBoundedBmpCodeUnits",
+                "Terrum.CodeAnalysis.VerifySupplementaryPairs",
             ]);
 
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
@@ -143,6 +159,44 @@ public sealed class Utf16ScalarModuleTests
             };
             Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(
                 bmpLinked, [grant], (NativeRuntimePolicy)policy));
+        }
+
+        var supplementaryConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return VerifySupplementaryPairs(); }
+            """, "utf16-scalar-supplementary-consumer.terrum"),
+            ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(supplementaryConsumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, supplementaryConsumerCompilation.Diagnostics));
+        var supplementaryConsumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(supplementaryConsumerCompilation.Program), producer);
+        var supplementaryLinked = ModuleCompiler.Link(supplementaryConsumer, producer);
+
+        const int firstSupplementaryScalar = 0x10000;
+        const int supplementaryScalarLimit = 0x110000;
+        const int maximumPairsPerGrant = 8_191;
+        var pairBuffer = new char[2];
+        for (var scalarStart = firstSupplementaryScalar;
+            scalarStart < supplementaryScalarLimit;
+            scalarStart += maximumPairsPerGrant)
+        {
+            var count = Math.Min(maximumPairsPerGrant, supplementaryScalarLimit - scalarStart);
+            var source = ImmutableArray.CreateBuilder<int>(2 + count * 2);
+            source.Add(scalarStart & 0xFFFF);
+            source.Add(scalarStart >> 16);
+            for (var index = 0; index < count; index++)
+            {
+                var rune = new Rune(scalarStart + index);
+                _ = rune.EncodeToUtf16(pairBuffer);
+                source.Add(pairBuffer[0]);
+                source.Add(pairBuffer[1]);
+            }
+
+            var grant = new HostBuffer("Source", PrimitiveType.Char16, source.ToImmutable(), false) {
+                IsInvocationScoped = true,
+            };
+            Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(
+                supplementaryLinked, [grant], (NativeRuntimePolicy)policy));
         }
     }
 
