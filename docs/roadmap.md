@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `49a56eb2` | Verify every supplementary scalar spelling through character- and string-literal source-grant JIT |
 | `24da1f2e` | Exhaustively verify every supplementary scalar and high-surrogate boundary through the test-only native grant ABI |
 | `fd2cd282` | Verify native source-scalar decoding at one-unit ends for every BMP code unit |
 | `fbbe77dc` | Exhaustively verify signed and unsigned native source reads through the test-only grant ABI |
