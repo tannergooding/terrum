@@ -15,8 +15,9 @@ buffers per call, captures native data only after normal completion, and
 validates copied token, diagnostic, trivia and integer records through
 `ScannerHost`. Identical producer/consumer artifacts are exercised across
 empty, varied, malformed-UTF-16 and maximum-length sources under both runtime
-policies. A source-dependent single-producer semantic-module program can be
-linked and executed by
+policies, plus bounded batches covering every BMP `\u` escape and its
+surrogate diagnostics against the hosted lexer. A source-dependent
+single-producer semantic-module program can be linked and executed by
 `NativeJit.ExecuteWithSourceGrant`, which requires one readonly `char16` grant
 of at most 16,384 code units and copies it into fresh invocation storage.
 Neither profile persists source contents, concrete lengths or addresses.

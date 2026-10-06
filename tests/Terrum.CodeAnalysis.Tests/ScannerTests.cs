@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
@@ -421,12 +422,29 @@ public sealed class ScannerTests
             Assert.IsType<BoundProgram>(consumerCompilation.Program), provider);
         var linked = ModuleCompiler.Link(consumer, provider);
 
-        var sources = new[] {
+        var sources = new List<string> {
             "if 12i8 18446744073709551616u64 // trailing trivia\r\n\"\\q\"",
             "\uD800 0x_ \uDC00",
             new string('x', ScannerHost.MaximumSourceLength),
             "",
         };
+        const int maximumBmpEscapesPerSource = 2_700;
+        for (var scalarStart = (int)char.MinValue;
+            scalarStart <= char.MaxValue;
+            scalarStart += maximumBmpEscapesPerSource)
+        {
+            var scalarCount = Math.Min(maximumBmpEscapesPerSource,
+                char.MaxValue + 1 - scalarStart);
+            var text = new StringBuilder(scalarCount * 6 + 2).Append('"');
+            for (var index = 0; index < scalarCount; index++)
+            {
+                text.Append("\\u").Append((scalarStart + index).ToString("X4",
+                    CultureInfo.InvariantCulture));
+            }
+            text.Append('"');
+            sources.Add(text.ToString());
+        }
+
         ScannerInvocationResult? retained = null;
         foreach (var text in sources)
         {
