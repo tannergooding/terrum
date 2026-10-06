@@ -198,8 +198,11 @@ The same Windows x64 DLL exports the eight existing `IntegerFloatConversion`
 helpers as integer-carried `float32`/`float64` bit results. Direct calls are
 checked against hosted integer-to-floating conversions at signed and unsigned
 width boundaries, precision transitions, exact half-ULP ties and deterministic
-random values. This is internal fail-fast ABI evidence for the candidate
-helpers; it does not approve a conversion API or general compiler support.
+random values. It also exports the two existing `Char16FloatConversion`
+helpers and checks every `char16` code unit against hosted conversion. This is
+internal fail-fast ABI evidence for the candidate helpers; it does not approve
+a conversion API, the separate char16-to-floating eligibility proposal or
+general compiler support.
 The same DLL directly invokes both existing `SourceRange` end-query forms,
 `GetEnd` and the `End` property getter, with every successful boundary produced
 by `TryCreate` and compares them with hosted `TextSpan.End`. These calls exercise

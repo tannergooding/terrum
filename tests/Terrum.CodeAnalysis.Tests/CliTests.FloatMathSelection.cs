@@ -50,6 +50,12 @@ public sealed partial class CliTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate ulong UInt64ToFloat64BitsExport(ulong value);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint Char16ToFloat32BitsExport(ushort value);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong Char16ToFloat64BitsExport(ushort value);
+
     private static void AssertFloatingMathSelectionExports(IntPtr handle)
     {
         var absFloat32 = Marshal.GetDelegateForFunctionPointer<Float32UnarySelectionExport>(
@@ -91,6 +97,10 @@ public sealed partial class CliTests
             NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.UInt64ToFloat32Bits"));
         var uint64ToFloat64 = Marshal.GetDelegateForFunctionPointer<UInt64ToFloat64BitsExport>(
             NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.UInt64ToFloat64Bits"));
+        var char16ToFloat32 = Marshal.GetDelegateForFunctionPointer<Char16ToFloat32BitsExport>(
+            NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.Char16ToFloat32Bits"));
+        var char16ToFloat64 = Marshal.GetDelegateForFunctionPointer<Char16ToFloat64BitsExport>(
+            NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.Char16ToFloat64Bits"));
 
         foreach (var value in new[] {
             int.MinValue, int.MinValue + 1, -16_777_219, -16_777_217, -1, 0, 1,
@@ -137,6 +147,13 @@ public sealed partial class CliTests
         {
             Assert.Equal(BitConverter.SingleToUInt32Bits((float)value), uint64ToFloat32(value));
             Assert.Equal(BitConverter.DoubleToUInt64Bits((double)value), uint64ToFloat64(value));
+        }
+        for (var codeUnit = 0; codeUnit <= char.MaxValue; codeUnit++)
+        {
+            var value = (char)codeUnit;
+            var carrier = (ushort)codeUnit;
+            Assert.Equal(BitConverter.SingleToUInt32Bits((float)value), char16ToFloat32(carrier));
+            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)value), char16ToFloat64(carrier));
         }
 
         var random = new Random(0xF10A7);

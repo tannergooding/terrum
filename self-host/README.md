@@ -13,8 +13,8 @@ The full-solution build also produces
 `artifacts\bin\self-host\<configuration>\terrum-compiler-primitives.dll`
 from `BitOperations`, `CharacterFacts`, `Float32MathSelection`,
 `Float64MathSelection`, `IntegerCheckedArithmetic`, `IntegerFormatting`,
-`IntegerCheckedConversions`, `IntegerFloatConversion`, `IntegerMath`,
-`SourceRange`, `Token`, `IntegerSaturation`, `IntegerWrapping`,
+`IntegerCheckedConversions`, `IntegerFloatConversion`, `Char16FloatConversion`,
+`IntegerMath`, `SourceRange`, `Token`, `IntegerSaturation`, `IntegerWrapping`,
 `Utf16CodeUnits`, `WideIntegerFacts`, `IntegerFacts` and `CopyAlgorithms`.
 The test build also includes
 `tests\native\integer-formatting-abi.terrum` for workspace setup and
