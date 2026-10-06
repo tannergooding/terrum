@@ -1315,8 +1315,9 @@ V74–v76 use by-value parameters; v77 adds the existing `bool`-returning scalar
 `out` parameter modes and destinations. V80 additionally supports scalar
 `out` parameters on non-Boolean/void-returning functions, with existing
 destinations only; the hosted verifier requires those outputs initialized on
-every normal return. Non-scalar outputs on non-Boolean/void functions remain
-unsupported. Forward, self and mutual calls are permitted; visible
+every normal return. This includes `float32` and `float64` outputs.
+Non-scalar outputs on non-Boolean/void functions remain unsupported.
+Forward, self and mutual calls are permitted; visible
 locals/parameters shadow function names. Void callers are supported, but
 v74 callees must return a scalar. Single-function projections, including
 v72/v73 output and void self-call statements, retain their existing shapes
@@ -1459,9 +1460,9 @@ non-Boolean/void-returning declarations and admits matching explicit or
 `out var` destinations in direct calls. Its host reader rejects the same
 records under v74–v78, and the hosted verifier/emitter require normal-return
 initialization and publish outputs after a successful call regardless of its
-result value. Non-scalar non-Boolean outputs and standalone compilation remain
-outside its support. Managed-module output exports retain their separate
-existing shape restriction.
+result value. Floating scalar outputs are included; non-scalar non-Boolean
+outputs and standalone compilation remain outside its support. Managed-module
+output exports retain their separate existing shape restriction.
 
 Single-function v79 uses the same non-Boolean/void scalar `out` contract as
 complete-program v80 for bounded recursive self-calls, with explicit and

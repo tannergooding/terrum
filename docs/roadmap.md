@@ -201,8 +201,9 @@ non-Boolean scalar `out` mode to the bounded self-call frontend, including
 matching `out var` destinations in recursive self-calls.
 Complete-program v85 supports existing-destination calls to scalar `out` parameters on
 non-Boolean/void-returning functions; the hosted verifier requires publication
-on every normal return, and the hosted emitter publishes them without using
-the result as a success flag. It also supports matching `out var` destinations
+on every normal return, including `float32` and `float64`, and the hosted
+emitter publishes them without using the result as a success flag. It also
+supports matching `out var` destinations
 for these calls, with the destination available after normal return. This
 remains a hosted-verifier/emitter-backed projection; it does not broaden
 non-scalar non-Boolean outputs. Projection tags are alpha implementation/validation
