@@ -311,6 +311,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `c7063261` | Add the provisional scalar source-length query through an isolated component, preserving whole-program classifier and source-free DLL boundaries |
 | `7d0f7b38` | Exhaust all 65,536 `char16` inputs for all four saturation and checked-conversion widening helpers across source-free DLLs, persisted consumers and Terrum component tests |
 | `b5dee01b` | Add provisional scalar source-line-count export to the maintained companion with hosted line-count parity under both policies |
 | `7d2a7938` | Exhaust all 65,536 `char16` inputs for the four integer-wrapping widening candidates through Terrum, persisted consumers and the source-free DLL |
