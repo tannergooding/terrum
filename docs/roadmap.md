@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e5e5ff82` | Compare maximum-length zero and overflow inputs for `uint64` parsing in every radix |
 | `23be9989` | Compare all five integer parsers on maximum-length successful zero and overflowing digit slices |
 | `36e567af` | Check maximum-length ASCII literal output against exact-capacity buffers for all eight encodings |
 | `9e17bd0a` | Encode a maximum-length ASCII StringLiteral into exact-capacity output under both runtime policies |
