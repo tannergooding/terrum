@@ -281,7 +281,9 @@ destinations, for uniquely resolved non-intrinsic calls. Arguments retain
 source evaluation order while each records its formal parameter position for
 verification and native lowering. Semantic-module revision 56 persists that
 mapping; module-artifact tests also verify side-effecting expressions remain
-source ordered when named arguments reorder formal positions around an output.
+source ordered for both named arguments that reorder formal positions around an
+output and positional arguments. Both hosted JIT execution and linked semantic
+module execution are checked under both runtime policies.
 Revision 56 also persists lexical view endpoints with explicit end-relative
 modes, allowing dynamic absolute and end-relative bounds to be represented
 without duplicate evaluation.

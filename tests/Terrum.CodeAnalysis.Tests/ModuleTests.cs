@@ -166,6 +166,48 @@ public sealed class ModuleTests
     }
 
     [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task PositionalArgumentExpressionsEvaluateInSourceOrderAcrossModuleArtifactsAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string functionSource = """
+            public int32 Combine(int32 first, int32 second) {
+                return first * 10 + second;
+            }
+            """;
+        const string mainSource = """
+            int32 Main() {
+                mut int32 trace = 0;
+                int32 result = Combine(trace++ + 1, trace++ + 1);
+                return result * 10 + trace;
+            }
+            """;
+        const int expected = 122;
+
+        var hosted = Compilation.Create(SyntaxTree.Parse(functionSource + mainSource), policy);
+        Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+        Assert.Equal(expected, NativeJit.Execute(
+            Assert.IsType<BoundProgram>(hosted.Program),
+            policy == BoundRuntimePolicy.FailFast
+                ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions));
+
+        var library = Compilation.CreateLibrary(SyntaxTree.Parse(functionSource), policy);
+        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(library.Program), ["Combine"]);
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(mainSource),
+            ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        var nativePolicy = policy == BoundRuntimePolicy.FailFast
+            ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+        Assert.Equal(expected, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, producer), nativePolicy)).ConfigureAwait(true));
+    }
+
+    [Theory]
     [InlineData(BoundRuntimePolicy.FailFast, @"samples\native\graph\managed-class-leaf.terrum", "Leaf")]
     [InlineData(BoundRuntimePolicy.CheckedExceptions, @"samples\native\graph\managed-class-leaf.terrum", "Leaf")]
     [InlineData(BoundRuntimePolicy.FailFast, @"samples\native\graph\managed-copy-class-leaf.terrum", "Leaf")]
