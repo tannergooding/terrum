@@ -119,7 +119,10 @@ every valid Unicode scalar input in bounded batches across all listed
 encodings, including successful encoding of every ASCII and Latin-1 scalar
 value and strict rejection beyond those single-byte ranges. A maximum-length
 quoted ASCII source also checks exact-capacity output for all eight encodings,
-including the four-byte UTF-32 output boundary. The persisted JIT
+including the four-byte UTF-32 output boundary. Direct source-grant DLL tests
+also check maximum-length U+0800 and U+00FF grants against strict host
+encoders under both runtime policies, including the 49,146-byte UTF-8 bound.
+The persisted JIT
 tests additionally cover `IntegerParsing` for radices 2–36 and maximum-length
 all-zero/overflow digit slices across all five APIs, with the `uint64` parser
 checked at the same input bound for every radix; `SourceLineIndex`

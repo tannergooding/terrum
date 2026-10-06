@@ -1010,6 +1010,42 @@ public sealed class NativeSourceGrantLibraryTests
                             maximumAsciiSource.ToCharArray(), 0, maximumAsciiSource.Length, encoding));
                 }
 
+                var maximumUtf8Text = new string('\u0800', 16_382);
+                var maximumUtf8Source = "\"" + maximumUtf8Text + "\"";
+                int?[] maximumUtf8Lengths = [
+                    TryGetByteCount(strictAscii, maximumUtf8Text),
+                    TryGetByteCount(strictLatin1, maximumUtf8Text),
+                    TryGetByteCount(strictUtf8, maximumUtf8Text),
+                    maximumUtf8Text.Length,
+                    TryGetByteCount(strictUtf16, maximumUtf8Text),
+                    TryGetByteCount(strictUtf32, maximumUtf8Text),
+                ];
+                Assert.Equal<int?>([null, null, 49_146, 16_382, 32_764, 65_528], maximumUtf8Lengths);
+                for (var encoding = 0; encoding < maximumUtf8Lengths.Length; encoding++)
+                {
+                    Assert.Equal(maximumUtf8Lengths[encoding] ?? -1,
+                        bindings.Invoke<int>(StringLiteralEncodedLengthExport,
+                            maximumUtf8Source.ToCharArray(), 0, maximumUtf8Source.Length, encoding));
+                }
+
+                var maximumLatin1Text = new string('\u00FF', 16_382);
+                var maximumLatin1Source = "\"" + maximumLatin1Text + "\"";
+                int?[] maximumLatin1Lengths = [
+                    TryGetByteCount(strictAscii, maximumLatin1Text),
+                    TryGetByteCount(strictLatin1, maximumLatin1Text),
+                    TryGetByteCount(strictUtf8, maximumLatin1Text),
+                    maximumLatin1Text.Length,
+                    TryGetByteCount(strictUtf16, maximumLatin1Text),
+                    TryGetByteCount(strictUtf32, maximumLatin1Text),
+                ];
+                Assert.Equal<int?>([null, 16_382, 32_764, 16_382, 32_764, 65_528], maximumLatin1Lengths);
+                for (var encoding = 0; encoding < maximumLatin1Lengths.Length; encoding++)
+                {
+                    Assert.Equal(maximumLatin1Lengths[encoding] ?? -1,
+                        bindings.Invoke<int>(StringLiteralEncodedLengthExport,
+                            maximumLatin1Source.ToCharArray(), 0, maximumLatin1Source.Length, encoding));
+                }
+
                 _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
                     bindings.Invoke<int>(StringLiteralEncodedLengthExport, new char[16_385], 0, 2, 2));
             }
