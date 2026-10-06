@@ -40,10 +40,23 @@ public sealed partial class GenericControlFlowModuleTests
             result = value;
             return publish;
         }
+        [NoThrow] int32 Fill<T>(T value, int32 marker, out T result, out T duplicate) where T : [Copy] {
+            result = value;
+            duplicate = value;
+            if (marker != 42) { return 0; }
+            return 7;
+        }
+        [NoThrow] void FillVoid<T>(T value, out T result) where T : [Copy] {
+            result = value;
+        }
         [NoThrow] int32 Count<T>(T value, int32 count) where T : [Copy] { return count; }
         public int32 PowerProbe() {
             if (TryCopy(new Pair(1, 2), false, out var missing)) { return 1; }
             require TryCopy(new Pair(40, 2), true, out var result);
+            int32 status = Fill(result, 42, out var copied, out var duplicate);
+            FillVoid(copied, out var copiedAgain);
+            if (status != 7 || duplicate.First != 40 || duplicate.Second != 2
+                || copiedAgain.First != 40 || copiedAgain.Second != 2) { return 2; }
             return int32(result.First + result.Second) + Count(result, 0);
         }
         """;
@@ -58,6 +71,8 @@ public sealed partial class GenericControlFlowModuleTests
     {
         var source = infer ? OutputProducer : OutputProducer
             .Replace("TryCopy(", "TryCopy<Pair>(", StringComparison.Ordinal)
+            .Replace("status = Fill(", "status = Fill<Pair>(", StringComparison.Ordinal)
+            .Replace("FillVoid(", "FillVoid<Pair>(", StringComparison.Ordinal)
             .Replace("Count(", "Count<Pair>(", StringComparison.Ordinal);
         var original = ModuleCompiler.CreateProducer(Compile(Stub, policy), ["PowerProbe"]);
         var consumer = ModuleCompiler.CreateConsumer(Compile("""
@@ -78,6 +93,15 @@ public sealed partial class GenericControlFlowModuleTests
         Assert.Equal("PowerProbe", Assert.Single(reference.Functions).Name);
         var linked = ModuleCompiler.Link(consumer, replacement);
         Assert.Equal(["Pair", "$producer.Pair"], linked.Structures.Select(static structure => structure.Name));
+        var fill = Assert.Single(linked.Functions,
+            static function => function.Name == "$producer.Fill<Pair>");
+        Assert.Equal(PrimitiveType.Int32, fill.ReturnType);
+        Assert.True(fill.Variables[2].IsOut);
+        Assert.True(fill.Variables[3].IsOut);
+        var fillVoid = Assert.Single(linked.Functions,
+            static function => function.Name == "$producer.FillVoid<Pair>");
+        Assert.Equal(PrimitiveType.Void, fillVoid.ReturnType);
+        Assert.True(fillVoid.Variables[1].IsOut);
         var helper = Assert.Single(linked.Functions,
             static function => function.Name == "$producer.TryCopy<Pair>");
         Assert.Equal(PrimitiveType.Bool, helper.ReturnType);

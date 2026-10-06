@@ -91,16 +91,119 @@ public sealed class StaticProtocolOutputTests
         Assert.Null(compilation.Program);
     }
 
+    [Fact]
+    public void GenericOutputCannotDependOnAFormalReturnType()
+    {
+        var source = Value
+            + "T Pick<T>(T value, out T result) where T : [Copy] { result = value; return value; }"
+            + "int32 Main() { return 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
     [Theory]
-    [InlineData("T")]
-    [InlineData("int32")]
-    [InlineData("uint64")]
-    public void OutputsDoNotInventSuccessRulesForNonBooleanGenericResults(string resultType)
+    [InlineData("int32", false)]
+    [InlineData("uint64", true)]
+    [InlineData("void", false)]
+    [InlineData("void", true)]
+    public void GenericNonBooleanOutputsUseNormalReturnPublication(string resultType, bool explicitType)
+    {
+        var call = explicitType
+            ? "Fill<Value>(new Value(40), out var result)"
+            : "Fill(new Value(40), out var result)";
+        var completion = resultType == "void"
+            ? call + "; require result.First == 40; return 42;"
+            : resultType + " status = " + call + "; require status == 7;"
+                + " require result.First == 40; return 42;";
+        var body = resultType == "void"
+            ? explicitType ? "result = value; return;" : "result = value;"
+            : "result = value; return 7;";
+        var source = Value + "[NoThrow] " + resultType
+            + " Fill<T>(T value, out T result) where T : [Copy] { "
+            + body + "} int32 Main() { " + completion + " }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value>");
+        Assert.Equal(resultType == "void" ? PrimitiveType.Void
+            : resultType == "uint64" ? PrimitiveType.UInt64 : PrimitiveType.Int32, fill.ReturnType);
+        Assert.True(fill.Variables[1].IsOut);
+    }
+
+    [Theory]
+    [InlineData("int32", "if (publish) { result = value; } return 7;")]
+    [InlineData("void", "if (publish) { result = value; }")]
+    public void GenericNonBooleanOutputsRequirePublicationOnEveryNormalReturn(string resultType, string body)
     {
         var source = Value + resultType
-            + " Pick<T>(T value, out T result) where T : [Copy] { result = value; "
-            + (resultType == "T" ? "return value;" : "return 0;") + "} int32 Main() { return 0; }";
+            + " Fill<T>(T value, bool publish, out T result) where T : [Copy] { "
+            + body + "} int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void GenericNonBooleanOutputsKeepInitRefAndManagedHandlesOutsideTheExtension()
+    {
+        var voidWithoutOutput = Compilation.Create(SyntaxTree.Parse("""
+            void Ignore<T>(T value) where T : [Copy] { }
+            int32 Main() { return 0; }
+            """));
+        Assert.True(voidWithoutOutput.HasErrors);
+        Assert.Null(voidWithoutOutput.Program);
+
+        var initReference = Compilation.Create(SyntaxTree.Parse(Value + """
+            int32 Fill<T>(T value, init ref<T> result) where T : [Copy] {
+                result = value;
+                return 7;
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.True(initReference.HasErrors);
+        Assert.Null(initReference.Program);
+
+        var managedHandle = Compilation.Create(SyntaxTree.Parse("""
+            int32 Fill<T>(T value, out T result) where T : [Copy] {
+                result = value;
+                return 7;
+            }
+            int32 Main() {
+                require ManagedNode.TryCreate(42, out var node);
+                int32 status = Fill(node, out var copy);
+                return status + copy.Value;
+            }
+            """));
+        Assert.True(managedHandle.HasErrors);
+        Assert.Null(managedHandle.Program);
+    }
+
+    [Fact]
+    public void GenericNonBooleanOutputIsNotReadableAfterExceptionalDeparture()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Value {
+                public int64 Number;
+                public Value(int64 number) { Number = number; }
+            }
+            int32 Fill<T>(T value, bool complete, out T result) where T : [Copy] {
+                result = value;
+                require complete;
+                return 7;
+            }
+            int32 Main() {
+                mut Value result = new Value(1);
+                unsafe {
+                    try {
+                        Fill(new Value(40), false, out result);
+                    } catch {
+                        return int32(result.Number);
+                    }
+                }
+                return 0;
+            }
+            """), BoundRuntimePolicy.CheckedExceptions);
         Assert.True(compilation.HasErrors);
         Assert.Null(compilation.Program);
     }

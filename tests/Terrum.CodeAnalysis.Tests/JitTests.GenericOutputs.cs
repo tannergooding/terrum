@@ -11,6 +11,44 @@ public sealed partial class JitTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task GenericNonBooleanAndVoidOutputsPublishCopyValuesAsync(bool checkedFailures)
+    {
+        const string Source = """
+            struct Counter {
+                public int64 Number;
+                public Counter(int64 number) { Number = number; }
+            }
+            [NoThrow] int32 Copy<T>(T value, T duplicate, out T result,
+                out T secondResult) where T : [Copy] {
+                result = value;
+                secondResult = duplicate;
+                return 7;
+            }
+            [NoThrow] void CopyVoid<T>(T value, out T result) where T : [Copy] {
+                result = value;
+            }
+            int32 Main() {
+                Counter counter = new Counter(40);
+                int32 status = Copy(counter, new Counter(41), out var first, out var second);
+                CopyVoid<Counter>(new Counter(2), out var voidOutput);
+                if (status != 7 || first.Number != 40 || second.Number != 41
+                    || voidOutput.Number != 2) { return 1; }
+                return 42;
+            }
+            """;
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task FloatingCopySpecializationsPreserveConditionalAndVacancyOutputsAsync(bool checkedFailures)
     {
         const string Source = """
@@ -300,6 +338,36 @@ public sealed partial class JitTests
                     } catch {
                         require Try<Pair>(new Pair(40, 2), true, out result);
                         return int32(result.First + result.Second);
+                    }
+                }
+            }
+            """;
+        return AssertCheckedExecutionAsync(Source, 42);
+    }
+
+    [Fact]
+    public Task GenericNonBooleanOutputFailureDoesNotPublishAsync()
+    {
+        const string Source = """
+            struct Value {
+                public int64 Number;
+                public Value(int64 number) { Number = number; }
+            }
+            int32 Fill<T>(T value, bool complete, out T result) where T : [Copy] {
+                result = value;
+                require complete;
+                return 7;
+            }
+            int32 Main() {
+                mut Value result = new Value(1);
+                unsafe {
+                    try {
+                        Fill(new Value(40), false, out result);
+                        return 1;
+                    } catch {
+                        int32 status = Fill<Value>(new Value(42), true, out result);
+                        if (status != 7) { return 3; }
+                        return int32(result.Number);
                     }
                 }
             }

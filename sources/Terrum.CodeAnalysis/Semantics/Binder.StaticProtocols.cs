@@ -7,6 +7,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
@@ -269,6 +270,11 @@ internal sealed partial class Binder
         || (ManagedClassTypes.IsManaged(type)
             && ((int)type < ManagedClassTypes.First
                 || ManagedClassTypes.ClassIndex(type) < _classes.Count));
+
+    private bool IsSupportedNonBooleanGenericOutputType(PrimitiveType type) =>
+        type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
+            or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
+        || (IsStruct(type) && !_structs[(int)type - 100].IsUnique);
 
     private bool IsCopyGenericArgumentType(PrimitiveType type) => type is PrimitiveType.Float32 or PrimitiveType.Float64
         || IsCopyGenericType(type);
@@ -635,7 +641,7 @@ internal sealed partial class Binder
             }
         }
         var returnName = returnType is null ? "" : NameText(returnType);
-        var scalarReturn = GenericScalarType(returnName);
+        var scalarReturn = returnName == "void" ? PrimitiveType.Void : GenericScalarType(returnName);
         SyntaxToken? nameToken = null;
         var noThrow = noThrowCount != 0;
         var unsafeModifierCount = 0;
@@ -765,7 +771,14 @@ internal sealed partial class Binder
             }
         }
         if (body is null || copies.Any(static copy => !copy)
-            || (templateParameters.Any(static parameter => parameter.IsOut) && scalarReturn != PrimitiveType.Bool)
+            || (scalarReturn == PrimitiveType.Void
+                && !templateParameters.Any(static parameter =>
+                    parameter.IsOut && !parameter.IsInit && parameter.TypeParameterIndex >= 0))
+            || (templateParameters.Any(static parameter => parameter.IsOut)
+                && scalarReturn != PrimitiveType.Bool
+                && (scalarReturn is null
+                    || templateParameters.Any(static parameter => parameter.IsOut
+                        && (parameter.IsInit || parameter.TypeParameterIndex < 0))))
             || Enumerable.Range(0, typeNames.Length).Any(index => returnIndex != index
                 && !templateParameters.Any(parameter => parameter.TypeParameterIndex == index))
             || (noThrow && operations.Any(operators =>
@@ -775,7 +788,7 @@ internal sealed partial class Binder
         }
         if (!valid || _templates.Count >= MaximumStaticSpecializations)
         {
-            Report("TRM3007", "Generic function requires distinct local Copy type parameters, supported value or bool/output parameters, and explicit constraints for any operators.", declaration.Span);
+            Report("TRM3007", "Generic function requires distinct local Copy type parameters, supported value and output modes, and explicit constraints for any operators.", declaration.Span);
             return;
         }
         if (!_templates.TryAdd(qualified, new GenericTemplate(qualified,
@@ -970,6 +983,14 @@ internal sealed partial class Binder
             || types.Any(type => !IsCopyGenericArgumentType(type)))
         {
             Report("TRM3011", "A generic call requires each Copy type from a complete explicit list, typed arguments, or its result context.",
+                callee.Span);
+            return -1;
+        }
+        if (template.ReturnType(types) != PrimitiveType.Bool
+            && template.Parameters.Any(parameter => parameter.IsOut
+                && !IsSupportedNonBooleanGenericOutputType(types[parameter.TypeParameterIndex])))
+        {
+            Report("TRM3011", "A non-Boolean generic output requires a supported scalar or non-unique Copy type.",
                 callee.Span);
             return -1;
         }
@@ -1187,6 +1208,11 @@ internal sealed partial class Binder
             }
             proofBinder._localStart = proofBinder._variables.Count;
             var body = proofBinder.BindGenericBody(new GenericInstantiation(template, symbolicTypes));
+            if (symbolicReturn == PrimitiveType.Void)
+            {
+                var end = new TextSpan(template.Body.Span.End, 0);
+                body = body with { Statements = body.Statements.Add(new BoundReturn(null, end)) };
+            }
             if (proofBinder.DiagnosticCount != 0)
             {
                 foreach (var diagnostic in proofBinder.Diagnostics)

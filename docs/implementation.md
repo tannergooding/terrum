@@ -2183,6 +2183,18 @@ exported declarations distinguish `init:` from `out:` while historical
 private declarations retain their earlier contract spelling. Both modes
 share checked output scratch, cleanup and native ABI without matching each
 other's public contracts.
+Separately, compilation-local `Copy` generic templates provisionally allow
+ordinary `out T` with a fixed supported non-Boolean scalar result or `void`.
+Definition-site proof requires publication on every normal return, including
+the implicit void fallthrough; concrete substitutions must satisfy the
+existing non-Boolean output shape. Exceptional departure still leaves the
+destination unavailable, and catch-path reads reject. Private semantic/native
+specializations execute through unchanged exports and formats. This hosted
+experiment remains under the unapproved
+[generic Copy-output proposal](proposals/generic-copy-out-publication.md);
+Boolean conditional outputs, generic `init ref<T>`, public generic contracts
+and ABI are unchanged. Floating specialization eligibility remains separately
+provisional, and this does not extend the scalar frontend or source-free TRRM.
 For-loop initialization runs once, followed by condition, body and iterator;
 the iterator does not run after a returning or breaking body. `continue` runs
 the iterator before testing the next condition. An omitted condition is true.

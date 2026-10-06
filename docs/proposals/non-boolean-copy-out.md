@@ -31,8 +31,11 @@ reuses the existing Copy layout and output ABI without changing `out` into
 Keep unique, managed-handle, buffer-view and cursor outputs outside this
 non-Boolean slice. Preserve Boolean conditional publication, existing scalar
 support, generic static-protocol restrictions and the scalar frontend's
-hosted-verifier/emitter boundary. This experiment does not approve broader
-output metadata or resolve general `out`/`init ref<T>` migration.
+hosted-verifier/emitter boundary. Compilation-local generic outputs are a
+separate question in the
+[generic Copy-output proposal](generic-copy-out-publication.md). This
+experiment does not approve broader output metadata or resolve general
+`out`/`init ref<T>` migration.
 
 ## Implemented hosted support
 
