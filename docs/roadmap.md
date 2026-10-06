@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `81f586a8` | Verify scalar frontend `[DoesNotReturn]` library parity under both runtime policies |
 | `9dae43f7` | Check that a staged unique `init ref<T>` remains unpublished on false across module sets |
 | `65fb3bbe` | Verify conditional unique `init ref<T>` transfer through native module-set replacement |
 | `def3cb33` | Preserve vacant `init ref<T>` state after checked failure across native consumer sets |
