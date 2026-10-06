@@ -300,6 +300,51 @@ public sealed partial class ManagedScannerComponentTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CompilerInputSnapshotsPublishMaximumDensityRecordsAsync(NativeRuntimePolicy policy)
+    {
+        var integerCount = ScannerHost.MaximumSourceLength / 2;
+        var tokenCount = integerCount + 1;
+        var input = string.Concat(Enumerable.Repeat("1 ", integerCount));
+        Assert.Equal(ScannerHost.MaximumSourceLength, input.Length);
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (!TryScanCompilerInput(init var tokens, init var trivia, init var integers)) {
+                    return 1;
+                }
+                if (tokens.GetCount() != {{tokenCount}}
+                    || trivia.GetCount() != {{integerCount}}
+                    || integers.GetCount() != {{integerCount}}) { return 2; }
+                mut int32 index = 0;
+                while (index < {{integerCount}}) {
+                    if (!tokens.TryGet(index, init var token)
+                        || token.Kind != 3 || token.Range.Start != index * 2
+                        || token.Range.Length != 1) { return 3; }
+                    if (!trivia.TryGet(index, init var whitespace, init var owner)
+                        || whitespace.Kind != 0 || whitespace.Range.Start != index * 2 + 1
+                        || whitespace.Range.Length != 1 || owner != index + 1) { return 4; }
+                    if (!integers.TryGet(index, init var tokenIndex, init var overflow,
+                        init var low, init var high)
+                        || tokenIndex != index || overflow || low != 1 || high != 0) { return 5; }
+                    if (!integers.TryFind(index, init var foundOverflow,
+                        init var foundLow, init var foundHigh)
+                        || foundOverflow || foundLow != 1 || foundHigh != 0) { return 6; }
+                    index = index + 1;
+                }
+                if (!tokens.TryGet({{integerCount}}, init var eof)
+                    || eof.Kind != 0 || eof.Range.Start != {{ScannerHost.MaximumSourceLength}}
+                    || eof.Range.Length != 0) { return 7; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync(input, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task TokenSnapshotOwnsValidatedRecordsAndRejectsPartialCopiesAsync(
         NativeRuntimePolicy policy)
     {
