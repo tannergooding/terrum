@@ -38,6 +38,17 @@ public bool CheckCopyAlgorithms()
     {
         return false;
     }
+    if (TrySelectCopyInit(2, firstRange, secondRange, init var initializedRange))
+    {
+        return false;
+    }
+    require TrySelectCopyInit(1, firstRange, secondRange, init initializedRange);
+    require TrySelectCopy(0, firstRange, secondRange, out var copiedRange);
+    if (initializedRange.Start != 42 || initializedRange.Length != 7
+        || copiedRange.Start != 12 || copiedRange.Length != 5)
+    {
+        return false;
+    }
 
     Token first = new Token(1, firstRange);
     Token second = new Token(2, secondRange);
