@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
@@ -125,7 +126,19 @@ internal static partial class Program
                 ScalarFrontendHost.WordCount * sizeof(int));
             var programBytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
                 ScalarFrontendHost.ProgramWordCount * sizeof(int));
-            var read = ScalarFrontendHost.ReadProgram(source, bytes, programBytes, (BoundRuntimePolicy)policy);
+            ScalarFrontendReadResult read;
+            try
+            {
+                read = ScalarFrontendHost.ReadProgram(source, bytes, programBytes, (BoundRuntimePolicy)policy);
+            }
+            catch (ArgumentException exception)
+            {
+                if (TryWriteUnsafeCallerDiagnostic(args[0], source, policy, json, exception))
+                {
+                    return 1;
+                }
+                throw;
+            }
             var result = read.Projection;
             if ((build || runExecutable) && result.IsValid)
             {
@@ -153,8 +166,20 @@ internal static partial class Program
                     WriteInputError(json, "TRM4002", "A native frontend entry requires int32 or void Main() without parameters.");
                     return 1;
                 }
-                var library = read.Program ?? ScalarFrontendHost.BindLibrary(source, bytes, programBytes,
-                    (BoundRuntimePolicy)policy);
+                BoundProgram library;
+                try
+                {
+                    library = read.Program ?? ScalarFrontendHost.BindLibrary(source, bytes, programBytes,
+                        (BoundRuntimePolicy)policy);
+                }
+                catch (ArgumentException exception)
+                {
+                    if (TryWriteUnsafeCallerDiagnostic(args[0], source, policy, json, exception))
+                    {
+                        return 1;
+                    }
+                    throw;
+                }
                 if (runExecutable)
                 {
                     try
@@ -205,6 +230,38 @@ internal static partial class Program
             WriteInputError(json, "TRM5001", exception.Message);
             return 1;
         }
+    }
+
+    private static bool TryWriteUnsafeCallerDiagnostic(string command, SourceText source,
+        NativeRuntimePolicy policy, bool json, ArgumentException exception)
+    {
+        if (exception.Data["Terrum.InvalidEffect"] is not "UnsafeCaller"
+            || exception.Data["Terrum.SourceSpan"] is not TextSpan verifierSpan
+            || verifierSpan.Start < 0 || verifierSpan.End > source.Length)
+        {
+            return false;
+        }
+
+        var syntaxTree = SyntaxTree.Parse(source);
+        if (syntaxTree.HasErrors)
+        {
+            return false;
+        }
+
+        var compilation = Compilation.CreateLibrary(syntaxTree, (BoundRuntimePolicy)policy);
+        var hasMatchingDiagnostic = compilation.SourceDiagnostics.Any(diagnostic =>
+            diagnostic.SyntaxTree.Source.Path == source.Path
+            && diagnostic.Diagnostic.Code == "TRM3028"
+            && diagnostic.Diagnostic.Severity == DiagnosticSeverity.Error
+            && diagnostic.Diagnostic.Span == verifierSpan);
+        if (!hasMatchingDiagnostic)
+        {
+            return false;
+        }
+
+        WriteCompilationResult(command, compilation, compilation.SourceDiagnostics,
+            false, null, null, json, policy);
+        return true;
     }
 
     private static void WriteFrontendOutput(string command, bool json, bool success,

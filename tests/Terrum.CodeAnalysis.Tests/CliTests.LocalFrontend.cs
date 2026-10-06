@@ -174,6 +174,7 @@ public sealed partial class CliTests
             "..", "..", "..", "..", "..", ".."));
         var frontend = Path.Combine(root, "self-host");
         var outputPath = Path.Combine(root, $"local-frontend-{Guid.NewGuid():N}.dll");
+        var missingPath = Path.Combine(root, $"local-frontend-{Guid.NewGuid():N}.dll");
         try
         {
             var (success, successOutput, successError) = await RunAsync(
@@ -188,13 +189,55 @@ public sealed partial class CliTests
             Assert.Equal(1, failure);
             Assert.Empty(failureError);
             using var document = JsonDocument.Parse(failureOutput);
-            Assert.False(document.RootElement.GetProperty("success").GetBoolean());
-            Assert.NotEmpty(document.RootElement.GetProperty("diagnostics").EnumerateArray());
+            var result = document.RootElement;
+            Assert.Equal(1, result.GetProperty("schemaVersion").GetInt32());
+            Assert.Equal("frontend-build-library", result.GetProperty("command").GetString());
+            Assert.Equal("<stdin>", result.GetProperty("path").GetString());
+            Assert.Equal(invalidSource.Length, result.GetProperty("sourceLength").GetInt32());
+            Assert.Equal(policy, result.GetProperty("runtimePolicy").GetString());
+            Assert.False(result.GetProperty("success").GetBoolean());
+            Assert.False(result.TryGetProperty("artifact", out _));
+            var diagnostic = Assert.Single(result.GetProperty("diagnostics").EnumerateArray());
+            Assert.Equal("TRM3028", diagnostic.GetProperty("code").GetString());
+            Assert.Equal("error", diagnostic.GetProperty("severity").GetString());
+            Assert.Equal("Calling 'Danger' requires an explicit unsafe context.",
+                diagnostic.GetProperty("message").GetString());
+            Assert.Equal(invalidSource.LastIndexOf("Danger()", StringComparison.Ordinal),
+                diagnostic.GetProperty("span").GetProperty("start").GetInt32());
+            Assert.Equal("Danger()".Length, diagnostic.GetProperty("span").GetProperty("length").GetInt32());
             Assert.Equal(previous, await File.ReadAllBytesAsync(outputPath));
+
+            var (missingFailure, missingOutput, missingError) = await RunAsync(
+                Encoding.UTF8.GetBytes(invalidSource), "frontend-build-library", frontend, "-",
+                "-o", missingPath, "--runtime", policy, "--json");
+            Assert.Equal(1, missingFailure);
+            Assert.Empty(missingError);
+            using (var missingDocument = JsonDocument.Parse(missingOutput))
+            {
+                Assert.False(missingDocument.RootElement.GetProperty("success").GetBoolean());
+                Assert.Equal("TRM3028", missingDocument.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString());
+            }
+            Assert.False(File.Exists(missingPath));
+
+            if (policy == "checked-exceptions")
+            {
+                var (textFailure, textOutput, textError) = await RunAsync(
+                    Encoding.UTF8.GetBytes(invalidSource), "frontend-build-library", frontend, "-",
+                    "-o", missingPath, "--runtime", policy);
+                Assert.Equal(1, textFailure);
+                Assert.Empty(textOutput);
+                Assert.Contains("<stdin>(1,", textError, StringComparison.Ordinal);
+                Assert.Contains("TRM3028", textError, StringComparison.Ordinal);
+                Assert.Contains("Calling 'Danger' requires an explicit unsafe context.",
+                    textError, StringComparison.Ordinal);
+                Assert.False(File.Exists(missingPath));
+            }
         }
         finally
         {
             File.Delete(outputPath);
+            File.Delete(missingPath);
         }
     }
 
