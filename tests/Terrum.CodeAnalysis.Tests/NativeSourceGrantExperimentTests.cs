@@ -178,6 +178,9 @@ public sealed class NativeSourceGrantExperimentTests
                         {
                             Assert.Equal((long)storage[at], signed(pointer, sourceCount, at));
                             Assert.Equal((ulong)storage[at], unsigned(pointer, sourceCount, at));
+                            var expectedScalar = char.IsSurrogate(storage[at]) ? -1 : storage[at];
+                            Assert.Equal(expectedScalar,
+                                read(pointer, sourceCount, at, at + 1, expectedScalar));
                         }
                         return 0;
                     }));
