@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `6e295cb9` | Compare malformed and unterminated Unicode escapes through scanner-10 with hosted diagnostics |
 | `837fd45f` | Check scanner-10 integer snapshots against binary, decimal and hexadecimal uint64 limits |
 | `bc747956` | Compare scalar frontend switches with hosted conditionals at signed minima, both Boolean values and char16 maximum |
 | `83838e0e` | Compare every isolated raw surrogate code unit in scanner-10 with hosted lexer diagnostics |
