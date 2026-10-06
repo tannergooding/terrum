@@ -2076,8 +2076,8 @@ compatible provider replacement under both policies.
 Semantic/native module, native module-set and graph replacement reject
 removing a declared `[NoThrow]` or `[DoesNotReturn]` promise retained by the
 consumer.
-Native graph replacement coverage also verifies the retained
-`DoesNotReturn` promise under both runtime policies.
+Native graph replacement coverage also verifies retained `[NoThrow]` and
+`[DoesNotReturn]` promises under both runtime policies.
 The distinct `out` mode now also accepts ordinary non-unique struct values
 for non-Boolean and void functions, provided the output is initialized on
 every normal return. Public semantic modules, native modules and native
