@@ -1,0 +1,11 @@
+namespace Terrum.CodeAnalysis;
+
+public int32 GetSourceCodeUnitOrMinusOne(int32 position)
+{
+    if (position < 0 || position >= Host.Source.Length)
+    {
+        return -1;
+    }
+
+    return int32(Host.Source[position]);
+}

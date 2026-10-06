@@ -2642,23 +2642,29 @@ one-code-unit input also match hosted `SourceText.GetLinePosition` and
 against `SourceText.Lines` for short fixtures and sampled maximum-bound lines.
 The maintained Windows x64 build now also emits a separate, provisional
 source-grant companion DLL for the checked UTF-16 scalar adapter, scalar
-source-text length and allocation-free source-line-count exports. The compiler
-derives hidden source parameters through local calls and emits a hash-bound
-manifest for the selected scalar value exports; output/loan or aggregate
-export signatures and managed-runtime use reject. `GetSourceTextLength`
-returns the invocation's `Host.Source.Length` through an isolated scalar
-component; compiling the complete `SourceText` module would also classify its
-unselected source-dependent output/aggregate functions and remains
-unsupported. `GetSourceLineCount` scans the invocation source using shared
-line-break classification, treats CRLF as one break and includes the final
-empty line after a trailing break. The general `SourceLines.TryReadSourceLine`
-helper remains unsupported because its source-dependent calls use aggregate
-outputs. Hosted `SourceText.Length` and `SourceText.Lines.Length` parity covers
-empty and maximum-length grants, line-break variants, malformed UTF-16 and
-NUL. End-relative source reads use the invocation's captured code-unit count
-rather than the empty build-time buffer length. Generated test bindings use
-the manifest to call source-dependent and unchanged source-free signatures
-under both runtime policies. The companion is bounded to self-contained local
+source-text length, allocation-free source-line-count and isolated
+source-code-unit exports. The compiler derives hidden source parameters
+through local calls and emits a hash-bound manifest for the selected scalar
+value exports; output/loan or aggregate export signatures and managed-runtime
+use reject. `GetSourceTextLength` returns the invocation's
+`Host.Source.Length` through an isolated scalar component; compiling the
+complete `SourceText` module would also classify its unselected
+source-dependent output/aggregate functions and remains unsupported.
+`GetSourceCodeUnitOrMinusOne` returns the raw UTF-16 value for positions in
+`[0, Host.Source.Length)` and `-1` otherwise, checking bounds before
+indexing. NUL, surrogate units and `0xFFFF` are preserved; callers must check
+the sentinel before conversion to `char16`. This does not validate raw
+pointer/grant preconditions. `GetSourceLineCount` scans the invocation source
+using shared line-break classification, treats CRLF as one break and includes
+the final empty line after a trailing break. The general
+`SourceLines.TryReadSourceLine` helper remains unsupported because its
+source-dependent calls use aggregate outputs. Hosted `SourceText` parity
+covers length, line count and code-unit reads for empty and maximum-length
+grants, line-break variants, malformed UTF-16, NUL and every code-unit value.
+End-relative source reads use the invocation's captured code-unit count rather
+than the empty build-time buffer length. Generated test bindings use the
+manifest to call source-dependent and unchanged source-free signatures under
+both runtime policies. The companion is bounded to self-contained local
 dependencies and does not change the source-free compiler-primitives DLL;
 ordinary `EmitLibrary` still rejects source grants. The CLI stages the
 companion and manifest together, preserving the previous artifact pair when

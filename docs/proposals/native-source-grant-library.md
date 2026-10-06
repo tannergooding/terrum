@@ -174,6 +174,29 @@ for empty, edge and maximum-size grants; do not infer code-unit reads, ranges,
 line operations, the complete source facade, classifier support for
 unselected aggregate functions, or a stable ABI.
 
+### Provisional scalar source-code-unit export
+
+**Question:** Should the maintained companion expose one isolated raw
+source-code-unit query before supporting the complete `SourceText` facade?
+
+**Summary:** `SourceText.TryReadSourceCodeUnit` distinguishes a valid code unit
+from an out-of-range position with a Boolean and output value. For an isolated
+scalar export, returning `0..65535` for every UTF-16 code unit and `-1` only
+for positions outside `[0, Host.Source.Length)` preserves that information
+without output/aggregate ABI. Bounds must be checked before indexing; NUL,
+surrogates and `0xFFFF` remain unchanged. The source-grant classifier still
+requires an isolated component rather than the complete `SourceText` module.
+
+**Recommendation:** Include only
+`GetSourceCodeUnitOrMinusOne(int32 position) -> int32` as provisional
+implementation evidence. Compare every code-unit value and hosted
+`SourceText` indexing under both runtime policies, including empty and
+maximum grants and the full `int32` boundary cases. Callers must check `-1`
+before converting to `char16`; it is an ordinary position sentinel, not a
+validation result for invalid pointers, oversized grants or other raw ABI
+preconditions. Keep the source-free DLL and classifier boundary unchanged,
+and do not infer support for the complete source facade or a stable ABI.
+
 ## Promotion decisions still required
 
 ### Where source-grant shape is validated
