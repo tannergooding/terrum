@@ -5,7 +5,12 @@ public bool CheckIntegerFormatting()
 {
     require TryGetInt64BaseLength(int64.MinValue, 16, init var minimumLength);
     if (minimumLength != 17
-        || TryGetChar16BaseLength(char16(65), 1, init var invalidLength))
+        || TryGetChar16BaseLength(char16(65), 1, init var reusableLength))
+    {
+        return false;
+    }
+    require TryGetChar16BaseLength(char16(65), 16, init reusableLength);
+    if (reusableLength != 2)
     {
         return false;
     }
