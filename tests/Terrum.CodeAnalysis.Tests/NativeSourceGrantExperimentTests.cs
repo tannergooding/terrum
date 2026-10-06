@@ -27,6 +27,8 @@ public sealed class NativeSourceGrantExperimentTests
     private const string LineCountExport = "Terrum.CodeAnalysis.SourceLineCountForSourceAbiTest";
     private const string LinePositionExport = "Terrum.CodeAnalysis.SourceLinePositionForSourceAbiTest";
     private const string LineOffsetExport = "Terrum.CodeAnalysis.SourceLineOffsetForSourceAbiTest";
+    private const string LineContentExtentExport = "Terrum.CodeAnalysis.SourceLineContentExtentForSourceAbiTest";
+    private const string LineExtentExport = "Terrum.CodeAnalysis.SourceLineExtentForSourceAbiTest";
     private const string LengthExport = "Terrum.CodeAnalysis.SourceLengthForSourceAbiTest";
     private const string BoundaryExport = "Terrum.CodeAnalysis.SourceBoundaryForSourceAbiTest";
     private const string FreeExport = "Terrum.CodeAnalysis.SourceFreeForSourceAbiTest";
@@ -468,6 +470,48 @@ public sealed class NativeSourceGrantExperimentTests
                     currentLine = currentLine + 1;
                 }
             }
+            int32 PackSourceLineExtent(int32 line, bool includeBreak) {
+                mut int32 currentLine = 0;
+                mut int32 start = 0;
+                mut int32 at = 0;
+                while (at < Host.Source.Length) {
+                    char16 current = Host.Source[at];
+                    mut int32 breakLength = 0;
+                    if (current == char16(13)) {
+                        breakLength = 1;
+                        if (at + 1 < Host.Source.Length && Host.Source[at + 1] == char16(10)) {
+                            breakLength = 2;
+                        }
+                    }
+                    else if (current == char16(10) || current == char16(133)
+                        || current == char16(8232) || current == char16(8233)) {
+                        breakLength = 1;
+                    }
+                    if (breakLength != 0) {
+                        if (currentLine == line) {
+                            mut int32 length = at - start;
+                            if (includeBreak) { length = length + breakLength; }
+                            return start * 32768 + length;
+                        }
+                        at = at + breakLength;
+                        start = at;
+                        currentLine = currentLine + 1;
+                    }
+                    else {
+                        at = at + 1;
+                    }
+                }
+                if (currentLine == line) {
+                    return start * 32768 + (Host.Source.Length - start);
+                }
+                return -1;
+            }
+            public int32 SourceLineContentExtentForSourceAbiTest(int32 line) {
+                return PackSourceLineExtent(line, false);
+            }
+            public int32 SourceLineExtentForSourceAbiTest(int32 line) {
+                return PackSourceLineExtent(line, true);
+            }
             """;
         var program = Compile(policy, [], LineQueryFixture);
         var function = Assert.Single(program.Functions,
@@ -476,12 +520,19 @@ public sealed class NativeSourceGrantExperimentTests
             static function => function.Name == LinePositionExport);
         var offsetFunction = Assert.Single(program.Functions,
             static function => function.Name == LineOffsetExport);
+        var lineContentExtentFunction = Assert.Single(program.Functions,
+            static function => function.Name == LineContentExtentExport);
+        var lineExtentFunction = Assert.Single(program.Functions,
+            static function => function.Name == LineExtentExport);
         var dependencies = Classify(program);
         Assert.True(dependencies[program.Functions.IndexOf(function)]);
         Assert.True(dependencies[program.Functions.IndexOf(positionFunction)]);
         Assert.True(dependencies[program.Functions.IndexOf(offsetFunction)]);
+        Assert.True(dependencies[program.Functions.IndexOf(lineContentExtentFunction)]);
+        Assert.True(dependencies[program.Functions.IndexOf(lineExtentFunction)]);
 
-        var emitted = EmitExperiment(program, [LineCountExport, LinePositionExport, LineOffsetExport],
+        var emitted = EmitExperiment(program,
+            [LineCountExport, LinePositionExport, LineOffsetExport, LineContentExtentExport, LineExtentExport],
             (NativeRuntimePolicy)policy);
         var lineCountExport = Assert.Single(emitted.Exports,
             static export => export.Name == LineCountExport);
@@ -496,6 +547,14 @@ public sealed class NativeSourceGrantExperimentTests
         Assert.True(lineOffsetExport.SourceDependent);
         Assert.Equal(2, lineOffsetExport.ParameterTypes.Length);
         Assert.All(lineOffsetExport.ParameterTypes, static type => Assert.Equal(PrimitiveType.Int32, type));
+        var lineContentExtentExport = Assert.Single(emitted.Exports,
+            static export => export.Name == LineContentExtentExport);
+        Assert.True(lineContentExtentExport.SourceDependent);
+        Assert.Equal(PrimitiveType.Int32, Assert.Single(lineContentExtentExport.ParameterTypes));
+        var lineExtentExport = Assert.Single(emitted.Exports,
+            static export => export.Name == LineExtentExport);
+        Assert.True(lineExtentExport.SourceDependent);
+        Assert.Equal(PrimitiveType.Int32, Assert.Single(lineExtentExport.ParameterTypes));
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-lines-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, emitted.Image);
         try
@@ -510,6 +569,7 @@ public sealed class NativeSourceGrantExperimentTests
                     "\0\uD800\r\n\uDC00\u000B\u000C", new string('x', 16_384),
                     new string('\n', 16_384), string.Concat(Enumerable.Repeat("\r\n", 8_192)),
                     new string('x', 16_383) + "\r",
+                    new string('a', 8_191) + "\r\n" + new string('b', 8_191),
                 ];
                 foreach (var text in fixtures)
                 {
@@ -529,6 +589,19 @@ public sealed class NativeSourceGrantExperimentTests
                         Assert.Equal(position, expectedOffset);
                         Assert.Equal(expectedOffset,
                             bindings.Invoke<int>(LineOffsetExport, source, expected.Line, expected.Character));
+                    }
+                    int[] lineIndices = snapshot.Lines.Length <= 256
+                        ? Enumerable.Range(0, snapshot.Lines.Length).ToArray()
+                        : [0, snapshot.Lines.Length / 2, snapshot.Lines.Length - 1];
+                    foreach (var lineIndex in lineIndices)
+                    {
+                        var expected = snapshot.Lines[lineIndex];
+                        var content = bindings.Invoke<int>(LineContentExtentExport, source, lineIndex);
+                        Assert.Equal(expected.Span.Start, content >> 15);
+                        Assert.Equal(expected.Span.Length, content & 0x7FFF);
+                        var includingBreak = bindings.Invoke<int>(LineExtentExport, source, lineIndex);
+                        Assert.Equal(expected.SpanIncludingLineBreak.Start, includingBreak >> 15);
+                        Assert.Equal(expected.SpanIncludingLineBreak.Length, includingBreak & 0x7FFF);
                     }
                 }
                 var singleCodeUnitSource = new char[1];

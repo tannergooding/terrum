@@ -2624,7 +2624,9 @@ mapping and round-trip through the inverse offset query. The test-only packed
 scalar also matches hosted positions at every offset in short edge cases and
 selected maximum-length boundaries. All three offsets of every `CR` plus
 one-code-unit input also match hosted `SourceText.GetLinePosition` and
-`SourceText.TryGetOffset` results. These are feasibility-test results only:
+`SourceText.TryGetOffset` results. Test-only packed scalars also match content
+and including-break line extents against `SourceText.Lines` for short fixtures
+and sampled maximum-bound lines. These are feasibility-test results only:
 production native source-grant DLL support remains unapproved and unsupported.
 The frontend retains its source-grant and hosted verifier/emitter boundaries.
 `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`

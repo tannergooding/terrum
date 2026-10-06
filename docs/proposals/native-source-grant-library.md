@@ -294,7 +294,12 @@ production return ABI or remove the full facade's output-parameter and
 aggregate requirements. For those same valid positions, a scalar inverse
 query maps line/character back to the original offset and agrees with hosted
 `SourceText.TryGetOffset`. Invalid line/character pairs and any production
-failure representation remain outside the experiment.
+failure representation remain outside the experiment. Two further test-only
+scalar carriers pack each line's content extent and including-break extent,
+matching `SourceText.Lines` for every line in short fixtures and selected
+lines in maximum-length sources. Start and length each fit within 15 bits
+under the source bound; the packed coordinates remain private to the fixture
+and do not add aggregate returns or output loans.
 
 **Recommendation:** Keep this admission confined to the test-only
 feasibility path. Continue rejecting post-tested loops, separate iterators,
