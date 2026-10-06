@@ -151,6 +151,46 @@ public static class NativeEmitter
         NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
         EmitLibraryCore(program, exports, null, runtimePolicy, cancellationToken).Image;
 
+    /// <summary>Provisionally emits a library with local invocation-scoped source context and exact export descriptors.</summary>
+    /// <remarks>The source-grant ABI remains experimental and is not a stable or accepted target contract.</remarks>
+    public static NativeSourceGrantLibrary EmitLibraryWithSourceGrant(BoundProgram program,
+        IReadOnlyList<string> exports, NativeRuntimePolicy runtimePolicy,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        var dependent = NativeSourceGrantClassifier.Classify(program);
+        var descriptors = ImmutableArray.CreateBuilder<NativeLibraryExportDescriptor>();
+        var (image, _) = EmitLibraryCore(program, exports, null, runtimePolicy, cancellationToken, dependent,
+            captureSelectedExports: selectedExports =>
+            {
+                foreach (var (name, index) in selectedExports)
+                {
+                    var function = program.Functions[index];
+                    if (function.IsExternal || function.IsConstructor || function.DeclaringStruct is not null
+                        || function.ReturnType == PrimitiveType.Void
+                        || !NativeSourceGrantClassifier.IsScalar(function.ReturnType))
+                    {
+                        throw new NotSupportedException("Source-grant export descriptors support only scalar value functions.");
+                    }
+                    var parameterTypes = ImmutableArray.CreateBuilder<PrimitiveType>(function.ParameterCount);
+                    for (var parameter = 0; parameter < function.ParameterCount; parameter++)
+                    {
+                        var variable = function.Variables[parameter];
+                        if (variable.IsOut || variable.IsInit || !NativeSourceGrantClassifier.IsScalar(variable.Type))
+                        {
+                            throw new NotSupportedException(
+                                "Source-grant export descriptors do not support output, loan, or aggregate parameters.");
+                        }
+                        parameterTypes.Add(variable.Type);
+                    }
+                    descriptors.Add(new NativeLibraryExportDescriptor(name, dependent[index],
+                        function.ReturnType, parameterTypes.MoveToImmutable()));
+                }
+            });
+
+        return new NativeSourceGrantLibrary(image, descriptors.ToImmutable());
+    }
+
     internal static (byte[] Image, NativeCode Code,
         ImmutableArray<(string Name, bool SourceDependent, PrimitiveType ReturnType,
             ImmutableArray<PrimitiveType> ParameterTypes)> Exports) EmitSourceGrantLibraryForTest(

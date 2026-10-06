@@ -249,17 +249,18 @@ prerequisite has already been met.
 12. **Rich libraries/self-hosting — bootstrap components.** Grow the current
     bounded components toward a compiler bootstrap only as their language and
     library prerequisites are met and through the shared
-    [self-host gate](#compiler-and-self-hosting-gate). Persisting source-aware
-    helpers in the maintained compiler-primitives library remains pending. A
-    bounded semantic-module JIT path is provisionally implemented under the
-    still-unapproved
+    [self-host gate](#compiler-and-self-hosting-gate). A bounded semantic-module
+    JIT path is provisionally implemented under the still-unapproved
     [invocation-scoped source-grant proposal](proposals/invocation-scoped-source-grant.md);
-    source-dependent components remain outside the compiler-primitives DLL, and
-    the scanner and scalar frontend still rely on hosted verification/emission.
-    A separate
+    the maintained Windows x64 build now also has an explicit opt-in,
+    provisional source-grant companion for the checked UTF-16 scalar adapter,
+    with selected-export descriptors bound to the image hash. The source-free
+    compiler-primitives DLL remains unchanged; this does not promote the
+    unapproved ABI or establish general source-dependent DLL support. The
+    scanner and scalar frontend still rely on hosted verification/emission. A separate
     [native source-grant library proposal](proposals/native-source-grant-library.md)
-    records a candidate per-call ABI for those helpers; it remains unapproved
-    and does not authorize DLL emission.
+    records the candidate per-call ABI and remaining promotion decisions; it
+    remains unapproved.
     A scanner-specific `scanner-10` persisted semantic-module JIT profile is
     implemented provisionally under the still-unapproved
     [scanner invocation-profile proposal](proposals/scanner-invocation-profile.md).

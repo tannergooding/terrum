@@ -597,6 +597,11 @@ public sealed class Compilation
         CancellationToken cancellationToken = default) =>
         CreateCore(trees, [], isLibrary: true, cancellationToken, runtimePolicy: runtimePolicy);
 
+    /// <summary>Binds library definitions against explicit host buffer capabilities under the selected runtime policy.</summary>
+    public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers,
+        BoundRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
+        CreateCore(trees, buffers, isLibrary: true, cancellationToken, runtimePolicy: runtimePolicy);
+
     /// <summary>Binds the compiler-owned primitive declarations and APIs of a Core library without a standard-library reference.</summary>
     public static Compilation CreateCoreLibrary(IEnumerable<SyntaxTree> trees,
         CancellationToken cancellationToken = default) =>

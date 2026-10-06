@@ -2601,9 +2601,10 @@ source-range export with hosted `TextSpan` boundaries, verifies two-word
 publication and false-path preservation with canaries, invokes every
 `CharacterFacts` export, checks the UTF-16 decoder for every BMP code unit and
 all 1,048,576 valid supplementary pairs, checks every isolated surrogate as
-malformed, and checks scalar width for every valid Unicode scalar. The DLL
-still excludes the `Host.Source`-dependent `Utf16Scalar` adapter and scalar
-frontend. These remain internal compiler exports, not a stable native ABI.
+malformed, and checks scalar width for every valid Unicode scalar. The
+source-free compiler-primitives DLL still excludes the `Host.Source`-dependent
+`Utf16Scalar` adapter and scalar frontend. These remain internal compiler
+exports, not a stable native ABI.
 Separately, the test-only native source-grant experiment verifies source-
 dependence fixed-point propagation through a terminating two-function mutual-
 recursion cycle under both runtime policies; its result matches the hosted
@@ -2624,10 +2625,21 @@ mapping and round-trip through the inverse offset query. The test-only packed
 scalar also matches hosted positions at every offset in short edge cases and
 selected maximum-length boundaries. All three offsets of every `CR` plus
 one-code-unit input also match hosted `SourceText.GetLinePosition` and
-`SourceText.TryGetOffset` results. Test-only packed scalars also match content
-and including-break line extents against `SourceText.Lines` for short fixtures
-and sampled maximum-bound lines. These are feasibility-test results only:
-production native source-grant DLL support remains unapproved and unsupported.
+`SourceText.TryGetOffset` results. Test-only packed scalars also match content and including-break line extents
+against `SourceText.Lines` for short fixtures and sampled maximum-bound lines.
+The maintained Windows x64 build now also emits a separate, provisional
+source-grant companion DLL for the checked scalar adapter. The compiler
+derives hidden source parameters through local calls and emits a hash-bound
+manifest for the selected scalar value exports; output/loan or aggregate
+export signatures, managed-runtime use and end-relative source reads reject.
+Generated test bindings use the manifest to call source-dependent and
+unchanged source-free signatures under both runtime policies. The companion
+is bounded to self-contained local dependencies and does not change the
+source-free compiler-primitives DLL; ordinary `EmitLibrary` still rejects
+source grants. The CLI stages the companion and manifest together, preserving
+the previous artifact pair when either destination cannot be replaced. This
+is provisional implemented support, not approval of the proposed ABI or
+general source-grant DLL support.
 The frontend retains its source-grant and hosted verifier/emitter boundaries.
 `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`
 projects typed facts or scanner/shape errors for inspection. Compilation

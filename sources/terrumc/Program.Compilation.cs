@@ -23,12 +23,14 @@ internal static partial class Program
         ImmutableArray<SyntaxTree> snapshots;
         List<string> exports;
         string? outputPath;
+        string? abiOutputPath;
         NativeRuntimePolicy runtimePolicy;
         bool coreLibrary;
+        bool sourceGrant;
         try
         {
             if (!TryReadCompilationOptions(args, out var paths, out exports, out outputPath,
-                out runtimePolicy, out coreLibrary))
+                out runtimePolicy, out coreLibrary, out sourceGrant, out abiOutputPath))
             {
                 WriteInputError(json, "TRM2000", Usage);
 
@@ -41,6 +43,16 @@ internal static partial class Program
                     || paths.Any(path => path != "-" && string.Equals(outputPath, Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))))
             {
                 WriteInputError(json, "TRM2002", $"Output must be a distinct {extension} path, not any input source.");
+
+                return 2;
+            }
+            if (abiOutputPath is not null
+                && (string.Equals(abiOutputPath, outputPath, StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(Path.GetExtension(abiOutputPath), ".json", StringComparison.OrdinalIgnoreCase)
+                    || paths.Any(path => path != "-"
+                        && string.Equals(abiOutputPath, Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))))
+            {
+                WriteInputError(json, "TRM2002", "The ABI manifest must be a distinct JSON path, not an input source or the library output.");
 
                 return 2;
             }
@@ -61,17 +73,20 @@ internal static partial class Program
         }
 
         return CompileTrees(args[0], snapshots, outputPath, json, [.. exports],
-            runtimePolicy, coreLibrary);
+            runtimePolicy, coreLibrary, sourceGrant, abiOutputPath);
     }
 
     private static bool TryReadCompilationOptions(string[] args, out List<string> paths, out List<string> exports,
-        out string? outputPath, out NativeRuntimePolicy runtimePolicy, out bool coreLibrary)
+        out string? outputPath, out NativeRuntimePolicy runtimePolicy, out bool coreLibrary,
+        out bool sourceGrant, out string? abiOutputPath)
     {
         paths = [];
         exports = [];
         outputPath = null;
+        abiOutputPath = null;
         runtimePolicy = NativeRuntimePolicy.FailFast;
         coreLibrary = false;
+        sourceGrant = false;
         var count = args.Length - (args.Length != 0 && args[^1] == "--json" ? 1 : 0);
         if (count < 2 || args[1] == "--json")
         {
@@ -98,6 +113,12 @@ internal static partial class Program
                 index++;
                 continue;
             }
+            if (args[index] == "--source-grant" && args[0] == "build-library" && !sourceGrant)
+            {
+                sourceGrant = true;
+                index++;
+                continue;
+            }
             if (index + 1 >= count)
             {
                 return false;
@@ -110,6 +131,9 @@ internal static partial class Program
                     break;
                 case "--export" when args[0] == "build-library" && exports.Count < 1024 && exportNames.Add(value):
                     exports.Add(value);
+                    break;
+                case "--abi-output" when args[0] == "build-library" && abiOutputPath is null:
+                    abiOutputPath = Path.GetFullPath(value);
                     break;
                 case "-o" when args[0] is "build" or "build-library" && outputPath is null:
                     outputPath = Path.GetFullPath(value);
@@ -126,26 +150,35 @@ internal static partial class Program
             index += 2;
         }
 
-        return args[0] == "analyze"
+        return (sourceGrant == (abiOutputPath is not null))
+            && (!sourceGrant || args[0] == "build-library" && !coreLibrary)
+            && (args[0] == "analyze"
             || (hasRuntime && (args[0] == "jit" || outputPath is not null)
-                && (args[0] != "build-library" || exports.Count != 0));
+                && (args[0] != "build-library" || exports.Count != 0)));
     }
 
     private static int CompileTrees(string command, ImmutableArray<SyntaxTree> trees, string? outputPath, bool json,
         ImmutableArray<string> exports = default, NativeRuntimePolicy runtimePolicy = NativeRuntimePolicy.FailFast,
-        bool coreLibrary = false)
+        bool coreLibrary = false, bool sourceGrant = false, string? abiOutputPath = null)
     {
         var build = outputPath is not null;
         var library = command == "build-library" || coreLibrary;
+        var buffers = sourceGrant
+            ? ImmutableArray.Create(new HostBuffer("Source", PrimitiveType.Char16, [], false)
+                { IsInvocationScoped = true })
+            : ImmutableArray<HostBuffer>.Empty;
         var compilation = coreLibrary
             ? Compilation.CreateCoreLibrary(trees, (BoundRuntimePolicy)runtimePolicy)
             : library
-            ? trees.Length == 1 ? Compilation.CreateLibrary(trees[0], (BoundRuntimePolicy)runtimePolicy)
-                : Compilation.CreateLibrary(trees, (BoundRuntimePolicy)runtimePolicy)
+            ? sourceGrant
+                ? Compilation.CreateLibrary(trees, buffers, (BoundRuntimePolicy)runtimePolicy)
+                : trees.Length == 1 ? Compilation.CreateLibrary(trees[0], (BoundRuntimePolicy)runtimePolicy)
+                    : Compilation.CreateLibrary(trees, (BoundRuntimePolicy)runtimePolicy)
             : trees.Length == 1 ? Compilation.Create(trees[0], (BoundRuntimePolicy)runtimePolicy)
                 : Compilation.Create(trees, (BoundRuntimePolicy)runtimePolicy);
         var diagnostics = compilation.SourceDiagnostics;
         byte[]? image = null;
+        byte[]? abiManifest = null;
 
         if (!compilation.HasErrors && (build || command == "jit"))
         {
@@ -163,8 +196,17 @@ internal static partial class Program
                     return NativeJit.Execute(program, runtimePolicy, GraphJitRegistrarAssemblyPath());
                 }
 
-                image = library ? NativeEmitter.EmitLibrary(program, exports, runtimePolicy)
-                    : NativeEmitter.Emit(program, runtimePolicy);
+                if (library && sourceGrant)
+                {
+                    var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program, exports, runtimePolicy);
+                    image = artifact.Image;
+                    abiManifest = CreateSourceGrantManifest(artifact, runtimePolicy);
+                }
+                else
+                {
+                    image = library ? NativeEmitter.EmitLibrary(program, exports, runtimePolicy)
+                        : NativeEmitter.Emit(program, runtimePolicy);
+                }
             }
             catch (NotSupportedException exception)
             {
@@ -190,7 +232,16 @@ internal static partial class Program
         {
             try
             {
-                WriteArtifact(outputPath, image);
+                if (abiManifest is not null)
+                {
+                    WriteArtifactPair(outputPath, image,
+                        abiOutputPath ?? throw new InvalidOperationException("A source-grant manifest path is required."),
+                        abiManifest);
+                }
+                else
+                {
+                    WriteArtifact(outputPath, image);
+                }
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
             {
@@ -203,6 +254,39 @@ internal static partial class Program
         WriteCompilationResult(command, compilation, diagnostics, success, outputPath, image, json, runtimePolicy);
 
         return success ? 0 : 1;
+    }
+
+    private static byte[] CreateSourceGrantManifest(NativeSourceGrantLibrary artifact,
+        NativeRuntimePolicy runtimePolicy)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("schemaVersion", 1);
+            writer.WriteNumber("sourceGrantAbiVersion", 1);
+            writer.WriteNumber("maximumSourceCodeUnits", 16_384);
+            writer.WriteString("runtimePolicy", PolicyName(runtimePolicy));
+            writer.WriteString("imageSha256", Convert.ToHexString(SHA256.HashData(artifact.Image)));
+            writer.WriteStartArray("exports");
+            foreach (var export in artifact.Exports)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("name", export.Name);
+                writer.WriteBoolean("sourceDependent", export.SourceDependent);
+                writer.WriteString("returnType", export.ReturnType.ToString());
+                writer.WriteStartArray("parameterTypes");
+                foreach (var parameterType in export.ParameterTypes)
+                {
+                    writer.WriteStringValue(parameterType.ToString());
+                }
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+        return stream.ToArray();
     }
 
     private static void WriteCompilationResult(string command, Compilation compilation,
@@ -268,6 +352,117 @@ internal static partial class Program
             {
                 File.Delete(temporaryPath);
             }
+        }
+    }
+
+    private static void WriteArtifactPair(string imagePath, byte[] image, string manifestPath, byte[] manifest)
+    {
+        string? imageTemporary = null;
+        string? manifestTemporary = null;
+        var imageBackup = SiblingPath(imagePath, ".bak");
+        var manifestBackup = SiblingPath(manifestPath, ".bak");
+        var preserveManifestBackup = false;
+
+        try
+        {
+            imageTemporary = StageArtifact(imagePath, image);
+            manifestTemporary = StageArtifact(manifestPath, manifest);
+            var imageExisted = File.Exists(imagePath);
+            var manifestExisted = File.Exists(manifestPath);
+
+            // Publish the manifest first so a blocked manifest destination cannot replace the image alone.
+            PublishStagedArtifact(manifestTemporary, manifestPath, manifestBackup, manifestExisted);
+            try
+            {
+                PublishStagedArtifact(imageTemporary, imagePath, imageBackup, imageExisted);
+            }
+            catch (Exception publishException)
+            {
+                try
+                {
+                    if (manifestExisted)
+                    {
+                        File.Replace(manifestBackup, manifestPath, null);
+                    }
+                    else
+                    {
+                        File.Delete(manifestPath);
+                    }
+                }
+                catch (Exception rollbackException)
+                {
+                    preserveManifestBackup = true;
+                    throw new IOException(
+                        $"Failed to publish the artifact pair and restore the manifest backup at '{manifestBackup}'.",
+                        new AggregateException(publishException, rollbackException));
+                }
+
+                throw;
+            }
+        }
+        finally
+        {
+            DeleteIfPresent(imageTemporary);
+            DeleteIfPresent(manifestTemporary);
+            if (!preserveManifestBackup)
+            {
+                DeleteIfPresent(imageBackup);
+                DeleteIfPresent(manifestBackup);
+            }
+        }
+    }
+
+    private static string StageArtifact(string outputPath, byte[] image)
+    {
+        var directory = Path.GetDirectoryName(outputPath)
+            ?? throw new ArgumentException("Output requires a parent directory.", nameof(outputPath));
+        var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(outputPath)}.{Guid.NewGuid():N}.tmp");
+        var completed = false;
+
+        try
+        {
+            using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(image);
+                stream.Flush(flushToDisk: true);
+            }
+            completed = true;
+            return temporaryPath;
+        }
+        finally
+        {
+            if (!completed)
+            {
+                DeleteIfPresent(temporaryPath);
+            }
+        }
+    }
+
+    private static void PublishStagedArtifact(string temporaryPath, string outputPath, string backupPath,
+        bool outputExisted)
+    {
+        if (outputExisted)
+        {
+            File.Replace(temporaryPath, outputPath, backupPath);
+        }
+        else
+        {
+            File.Move(temporaryPath, outputPath);
+        }
+    }
+
+    private static string SiblingPath(string path, string extension)
+    {
+        var directory = Path.GetDirectoryName(path)
+            ?? throw new ArgumentException("Output requires a parent directory.", nameof(path));
+        return Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}{extension}");
+    }
+
+    private static void DeleteIfPresent(string? path)
+    {
+        if (path is not null && File.Exists(path))
+        {
+            File.Delete(path);
         }
     }
 

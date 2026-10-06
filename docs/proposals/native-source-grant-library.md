@@ -5,12 +5,12 @@
 ## Summary
 
 The invocation-scoped source-grant proposal permits bounded source-dependent
-semantic-module JIT execution, but native DLL emission still rejects programs
-that require `Host.Source`. The self-hosting roadmap leaves persistence of
-source-aware helpers in the maintained compiler-primitives library pending.
-This proposal addresses only that native-library boundary; it does not extend
-the scanner profile or move scalar frontend verification or emission out of
-the hosted compiler.
+semantic-module JIT execution. Ordinary native-library emission still rejects
+programs that require `Host.Source`; an explicit opt-in CLI path now emits a
+separate provisional Windows x64 companion for one checked scalar adapter.
+This proposal addresses promotion of that native-library boundary; it does
+not extend the scanner profile or move scalar frontend verification or
+emission out of the hosted compiler.
 
 ## Decision question
 
@@ -77,17 +77,55 @@ the caller precondition instead.
 ## Alternative
 
 Keep source-dependent native exports unsupported and continue using the
-semantic-module JIT adapter. This avoids adding a native call ABI and is the
-current implementation boundary. The roadmap's native source-aware-helper
-work remains blocked under this alternative.
+semantic-module JIT adapter. This avoids adding a native call ABI; the
+provisional companion remains explicitly opt-in and separate from the
+source-free artifact unless the proposal is promoted.
 
 ## Implementation boundary
 
-This proposal does not authorize implementation or make the candidate ABI an
-accepted target contract. Exact export naming, interaction with any future
-cross-DLL source dependency, and whether a higher-level managed invocation
-wrapper is needed remain open. No current source-dependent DLL, compiler
-bootstrap, or public native ABI is supported.
+This proposal remains unapproved and does not make the candidate ABI an
+accepted target contract. The bounded maintained-library companion described
+below is provisional implementation evidence, not promotion. Exact export
+naming, interaction with any future cross-DLL source dependency, and whether
+a general managed invocation API is needed remain open. No compiler bootstrap
+or public native ABI is supported.
+
+### Provisional maintained-library slice
+
+**Question:** Should the proposed source-context ABI be wired into the
+maintained Windows x64 compiler-primitives DLL for one checked scalar
+`Utf16Scalar` export, with its managed caller generated from the exact export
+selection?
+
+**Summary:** The separate test-only DLL has exercised hidden source context,
+generated bindings, transitive dependency changes, loop-based `SourceText`
+line count/position/offset/extent queries and exhaustive UTF-16 line-break
+parity under both runtime policies. The maintained build now emits a separate
+companion from `Utf16CodeUnits` and `Utf16Scalar`, exporting the source-free
+decoder and checked source-dependent adapter with a hash-bound export
+manifest. CLI and generated-caller tests exercise this path under both
+runtime policies, while the maintained companion itself uses the fail-fast
+policy. Export descriptors admit only scalar value signatures; unsupported
+output/loan and aggregate signatures, managed-runtime use and end-relative
+source reads reject. This establishes a narrow provisional implementation
+path, not a promoted ABI.
+
+**Recommendation:** Add only an explicit opt-in source-grant build path in
+the maintained compiler-primitives build, initially producing a separate
+experimental companion DLL so the existing source-free artifact remains
+unchanged. It must accept the existing readonly `Host.Source` grant, derive
+hidden parameters from transitive local dependencies, and emit a descriptor
+manifest from the same selected export set for the generated synchronous
+managed caller. Bound this provisional slice to self-contained local
+dependencies and scalar source-dependent exports; range-check the scalar
+adapter with the existing `require` failure policy. Raw native pointer/count
+shape, 16,384-unit maximum, readable aligned storage, lifetime and
+immutability remain caller preconditions. The managed caller must validate
+the bound and pin UTF-16 storage only for the call. Keep source-dependent
+imports, cross-DLL propagation, aggregates, output loans, the complete source
+facade, scanner profiles, executables, packages, graphs, module sets and AOT
+unsupported. This implementation remains experimental evidence only and
+does not approve the proposal or promise ABI stability.
 
 ## Promotion decisions still required
 
@@ -137,11 +175,13 @@ the stub.
 
 ## Provisional test-only experiment
 
-The continuing self-hosting task directs a bounded feasibility experiment;
-this does not approve the proposal or change the implementation boundary
-above. Keep the maintained compiler-primitives DLL and all production
-source-dependent native exports unsupported unless a later decision promotes
-the experiment.
+The test-only feasibility experiment below remains distinct from the bounded
+maintained source-grant companion described above. That companion is available
+only through an explicit opt-in path and leaves the source-free
+compiler-primitives DLL unchanged. Neither implementation approves the
+proposal; general source-dependent native-library support and a production
+managed invocation stub remain unsupported unless a later decision promotes
+them.
 
 The experiment uses a separate test DLL containing `Utf16CodeUnits`,
 `Utf16Scalar`, and a test-authored export named
@@ -163,10 +203,10 @@ the selected export descriptor requires it, and unpins after return. The
 caller remains responsible for readable storage and immutability during the
 call; pinned arrays provide the required two-byte alignment. Lower-level
 adapter tests still check null/count and alignment rejection before dispatch.
-Tests do not dereference invalid pointers. This experiment may establish
-implementation feasibility only; adding source-dependent exports to the
-maintained library, generalizing the ABI, or claiming language/public ABI
-support requires a separate review and decision.
+Tests do not dereference invalid pointers. This experiment establishes implementation feasibility only; extending the
+maintained companion beyond its documented scalar slice, generalizing the
+ABI, or claiming language/public ABI support requires a separate review and
+decision.
 
 ### Experiment outcome
 
@@ -240,15 +280,17 @@ unchanged while switching only its private callee from source-free to a
 to the hidden source pair plus that argument, and execution matches the
 expected source unit under both runtime policies. Oversized managed grants are
 rejected before invocation, source-free calls retain their authored signature,
-and production `EmitLibrary` continues to reject both fixtures. This does not
-generate production stubs or change the maintained compiler-primitives DLL
-boundary.
+and ordinary `EmitLibrary` continues to reject both fixtures. The separate
+opt-in maintained companion path now emits its own hash-bound manifest; it
+does not change the source-free compiler-primitives DLL boundary or provide a
+general production invocation stub.
 
 The test-only fixture also verifies source-dependence fixed-point propagation
 through a terminating two-function mutual-recursion cycle under both runtime
 policies, with the native result matching the hosted source-grant JIT result.
-This adds feasibility evidence only; native source-grant DLL support remains
-unapproved and unsupported.
+This adds feasibility evidence only; the general source-grant DLL proposal
+remains unapproved. Only the separately bounded maintained companion is
+provisionally implemented.
 
 The reject-by-default experiment admits only self-contained structured
 `bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`, and `void` functions.

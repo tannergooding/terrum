@@ -815,6 +815,7 @@ public sealed class NativeSourceGrantExperimentTests
             Assert.Equal(function.Name is ReadExport or LengthExport
                 or BoundaryExport or SignedExport or UnsignedExport
                 or "Terrum.CodeAnalysis.CheckScalar" or "Terrum.CodeAnalysis.ReadUtf16Scalar"
+                or "Terrum.CodeAnalysis.ReadUtf16ScalarChecked"
                 or "Terrum.CodeAnalysis.ReadSignedSourceUnit" or "Terrum.CodeAnalysis.ReadUnsignedSourceUnit"
                 or "Terrum.CodeAnalysis.SourceCycleFirst" or "Terrum.CodeAnalysis.SourceCycleSecond",
                 dependent[index]);

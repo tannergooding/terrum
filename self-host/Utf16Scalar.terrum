@@ -13,3 +13,9 @@ int32 ReadUtf16Scalar(int32 at, int32 end)
 
     return DecodeUtf16Scalar(first, second);
 }
+
+public int32 ReadUtf16ScalarChecked(int32 at, int32 end)
+{
+    require at >= 0 && at < end && end <= Host.Source.Length;
+    return ReadUtf16Scalar(at, end);
+}
