@@ -321,6 +321,50 @@ public sealed partial class CliTests
         }
     }
 
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task ScalarFrontendProjectsFloatingPayloadsInCallsAndLocalsAsync(string policy)
+    {
+        const string Source = """
+            float64 Echo(float64 value) { return value; }
+            public float64 Call64() { return Echo(0.1); }
+            public float32 Local32() { float32 value = 0.1; return value; }
+            """;
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-float-contexts-{Guid.NewGuid():N}.dll");
+        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-float-contexts-{Guid.NewGuid():N}.dll");
+        try
+        {
+            var input = Encoding.UTF8.GetBytes(Source);
+            var (componentExit, componentJson, componentError) = await RunAsync(input,
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            using (var document = JsonDocument.Parse(componentJson))
+            {
+                var functions = document.RootElement.GetProperty("result").GetProperty("functions");
+                Assert.Equal(3, functions.GetArrayLength());
+                Assert.Equal(0x3FB999999999999AUL, ProjectedFloatLiteralBits(functions[1], 8));
+                Assert.Equal(0x3DCCCCCDUL, ProjectedFloatLiteralBits(functions[2], 7));
+            }
+
+            var (exit, json, error) = await RunAsync(input,
+                "frontend-build-library", directory, "-", "-o", output,
+                "--runtime", policy, "--json");
+            Assert.True(exit == 0, $"{policy}: {json}{error}");
+            var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
+                "build-library", "-", "--export", "Call64", "--export", "Local32",
+                "-o", hosted, "--runtime", policy, "--json");
+            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
+            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+        }
+        finally
+        {
+            File.Delete(output);
+            File.Delete(hosted);
+        }
+    }
+
     private static ulong ProjectedFloatLiteralBits(JsonElement function, int type)
     {
         JsonElement literal = default;
