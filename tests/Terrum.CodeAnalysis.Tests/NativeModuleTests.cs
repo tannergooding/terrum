@@ -69,9 +69,11 @@ public sealed class NativeModuleTests
         """;
     private static readonly string[] s_exports = ["Evaluate", "MakeTwelve", "MakeWide", "TryWide"];
 
-    private static BoundProgram CompileLibrary(string source)
+    private static BoundProgram CompileLibrary(
+        string source,
+        BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
     {
-        var result = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var result = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
         Assert.False(result.HasErrors, string.Join(Environment.NewLine, result.Diagnostics));
         return Assert.IsType<BoundProgram>(result.Program);
     }
@@ -231,8 +233,10 @@ public sealed class NativeModuleTests
             TimeSpan.FromSeconds(10)).ConfigureAwait(true));
     }
 
-    [Fact]
-    public async Task PersistedConsumerExecutesReplacementCleanupFuncletsAsync()
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task PersistedConsumerExecutesReplacementCleanupFuncletsAsync(NativeRuntimePolicy policy)
     {
         const string Source = """
             [NoThrow] int32 Value() { return 42; }
@@ -241,10 +245,20 @@ public sealed class NativeModuleTests
                 finally { result = Value(); }
             }
             """;
-        var original = Producer(Source, exports: ["Take"]);
-        var replacement = Producer(Source.Replace("return 42;", "return 43;", StringComparison.Ordinal),
-            exports: ["Take"]);
-        var consumer = ConsumerPackage(original, "int32 Main() { require Take(out var value); return value; }");
+        var boundPolicy = policy == NativeRuntimePolicy.CheckedExceptions
+            ? BoundRuntimePolicy.CheckedExceptions : BoundRuntimePolicy.FailFast;
+        var original = NativeModuleCompiler.CreateProducer(
+            CompileLibrary(Source, boundPolicy), ["Take"], "Example", policy);
+        var replacement = NativeModuleCompiler.CreateProducer(
+            CompileLibrary(Source.Replace("return 42;", "return 43;", StringComparison.Ordinal), boundPolicy),
+            ["Take"], "Example", policy);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { require Take(out var value); return value; }"),
+            NativeModuleCompiler.CreateReference(original), boundPolicy);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(consumerCompilation.Program), original, policy);
         NativeModuleCompiler.Validate(consumer, original);
         NativeModuleCompiler.Validate(consumer, replacement);
         Assert.Equal(42, await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10)));
