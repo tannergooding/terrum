@@ -566,19 +566,44 @@ public sealed class NativeGraphTests
     }
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [InlineData(NativeRuntimePolicy.FailFast, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
     public async Task ConditionalOutOutputRemainsVacantOnFalseAcrossGraphAsync(
-        NativeRuntimePolicy policy)
+        NativeRuntimePolicy policy, bool usesCopyStruct)
     {
-        const string ProviderSource = """
+        var providerSource = usesCopyStruct
+            ? """
+                public struct Pair {
+                    public int64 First;
+                    public int64 Second;
+                    public Pair(int64 first, int64 second) { First = first; Second = second; }
+                }
+                public bool TryPublish(bool publish, out Pair result) {
+                    result = publish ? new Pair(20, 22) : new Pair(20, 21);
+                    return publish;
+                }
+                public void Complete(init ref<Pair> result) { result = new Pair(30, 13); }
+                """
+            : """
             public bool TryPublish(bool publish, out int32 result) {
                 result = publish ? 42 : 41;
                 return publish;
             }
             public void Complete(init ref<int32> result) { result = 43; }
             """;
-        const string ConsumerSource = """
+        var consumerSource = usesCopyStruct
+            ? """
+                int32 Main() {
+                    if (TryPublish(false, out var failed)) { return 1; }
+                    Complete(init failed);
+                    if (failed.First != 30 || failed.Second != 13) { return 2; }
+                    if (!TryPublish(true, out var published)) { return 3; }
+                    return int32(published.First + published.Second);
+                }
+                """
+            : """
             int32 Main() {
                 if (TryPublish(false, out var failed)) { return 1; }
                 Complete(init failed);
@@ -588,14 +613,14 @@ public sealed class NativeGraphTests
             }
             """;
 
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(ProviderSource),
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(providerSource),
             (BoundRuntimePolicy)policy);
         Assert.False(providerCompilation.HasErrors,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateProducer(
             Assert.IsType<BoundProgram>(providerCompilation.Program), ["TryPublish", "Complete"],
             "NodeB", policy);
-        var rootCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
             NativeModuleCompiler.CreateGraphReference([provider]), (BoundRuntimePolicy)policy);
         Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
         var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
