@@ -141,6 +141,17 @@ public sealed class IntegerParsingRadixModuleTests
             from api in Enum.GetValues<ParserApi>()
             select new ParseFixture(api, radix, "1")).ToArray();
         ExecuteBatch(invalidRadixFixtures, linked, policy, "invalid radices");
+
+        var maximumLengthZeros = new string('0', MaximumSourceCodeUnits - 8);
+        var maximumLengthNines = new string('9', MaximumSourceCodeUnits - 8);
+        Assert.Equal(MaximumSourceCodeUnits, 8 + maximumLengthZeros.Length);
+        foreach (var api in Enum.GetValues<ParserApi>())
+        {
+            ExecuteBatch([new ParseFixture(api, 10, maximumLengthZeros)],
+                linked, policy, $"maximum-length zero digits for {api}");
+            ExecuteBatch([new ParseFixture(api, 10, maximumLengthNines)],
+                linked, policy, $"maximum-length overflowing digits for {api}");
+        }
     }
 
     private static void ExecuteBatch(ParseFixture[] fixtures, BoundProgram linked,

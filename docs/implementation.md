@@ -107,7 +107,8 @@ encodings, including successful encoding of every ASCII and Latin-1 scalar
 value and strict rejection beyond those single-byte ranges. A maximum-length
 quoted ASCII source also checks exact-capacity output for all eight encodings,
 including the four-byte UTF-32 output boundary. The persisted JIT
-tests additionally cover `IntegerParsing` for radices 2–36, `SourceLineIndex`
+tests additionally cover `IntegerParsing` for radices 2–36 and maximum-length
+all-zero/overflow digit slices across all five APIs, `SourceLineIndex`
 counts/extents/position mapping/offset lookup, and streaming `SourceLines`
 ranges and coordinates across fresh grants. A test-only formatter wrapper
 also compares `IntegerFormatting` output with expected text from fresh grants;
