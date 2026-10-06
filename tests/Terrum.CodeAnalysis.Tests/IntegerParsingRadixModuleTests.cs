@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
@@ -15,6 +18,7 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class IntegerParsingRadixModuleTests
 {
     private const int MaximumSourceCodeUnits = 16_384;
+    private const string SourceIntegerParsingNamespace = "Terrum.CodeAnalysis.Numerics64.";
 
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
@@ -162,6 +166,241 @@ public sealed class IntegerParsingRadixModuleTests
                 linked, policy, $"maximum-length overflow digits in radix {radix}");
         }
     }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task SourceGrantIntegerParsingScalarExportsMatchHostOracleAsync(
+        BoundRuntimePolicy policy)
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var root = RepositoryRoot();
+        var componentNames = new[] { "WideIntegerFacts", "SourceIntegerParsing" };
+        var trees = new SyntaxTree[componentNames.Length];
+        for (var index = 0; index < componentNames.Length; index++)
+        {
+            var componentPath = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
+            var text = await File.ReadAllTextAsync(componentPath).ConfigureAwait(true);
+            trees[index] = SyntaxTree.Parse(text, componentPath);
+            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+        }
+
+        var compilation = Compilation.CreateLibrary(trees,
+        [
+            new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+                IsInvocationScoped = true,
+            },
+        ], policy);
+        Assert.False(compilation.HasErrors,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
+            Assert.IsType<BoundProgram>(compilation.Program),
+            Enum.GetValues<ParserApi>().SelectMany(static api => new[] {
+                SourceIntegerParsingNamespace + "CanParse" + api + "Base",
+                SourceIntegerParsingNamespace + "Parse" + api + "Base",
+            }).ToArray(), (NativeRuntimePolicy)policy);
+        Assert.Equal(Enum.GetValues<ParserApi>().Length * 2, artifact.Exports.Length);
+        Assert.All(artifact.Exports, static export => {
+            Assert.True(export.SourceDependent);
+            Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.UInt32],
+                export.ParameterTypes.ToArray());
+            var isStatus = export.Name.StartsWith(
+                SourceIntegerParsingNamespace + "CanParse", StringComparison.Ordinal);
+            var parserName = export.Name[(SourceIntegerParsingNamespace.Length
+                + (isStatus ? "CanParse" : "Parse").Length)..];
+            var api = Enum.GetValues<ParserApi>().Single(value => parserName == value + "Base");
+            Assert.Equal(isStatus ? PrimitiveType.Bool : ResultType(api),
+                export.ReturnType);
+        });
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-integer-parsing-{Guid.NewGuid():N}.dll");
+        try
+        {
+            await File.WriteAllBytesAsync(path, artifact.Image).ConfigureAwait(true);
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var bindings = new NativeSourceGrantTestBindings(module,
+                    [.. artifact.Exports.Select(static export => (export.Name, export.SourceDependent,
+                        export.ReturnType, export.ParameterTypes))]);
+                foreach (var radix in Enumerable.Range(2, 35))
+                {
+                    foreach (var fixture in FixturesForRadix(radix))
+                    {
+                        AssertSourceGrantFixture(bindings, fixture);
+                    }
+                }
+
+                foreach (var api in Enum.GetValues<ParserApi>())
+                {
+                    foreach (var text in new[] { "?", "+1", " 1", "0x1", "\0", "\u0661", "\uD800", "-" })
+                    {
+                        AssertSourceGrantFixture(bindings, new ParseFixture(api, 10, text));
+                    }
+
+                    var source = "1".ToCharArray();
+                    Assert.False(InvokeCanParse(bindings, api, source, -1, 1, 10));
+                    Assert.False(InvokeCanParse(bindings, api, source, 0, 0, 10));
+                    Assert.False(InvokeCanParse(bindings, api, source, 0, -1, 10));
+                    Assert.False(InvokeCanParse(bindings, api, source, 1, 1, 10));
+                    Assert.False(InvokeCanParse(bindings, api, source, int.MaxValue, 1, 10));
+                    Assert.False(InvokeCanParse(bindings, api, source, 0, int.MaxValue, 10));
+                    Assert.False(InvokeCanParse(bindings, api, source, 0, 1, 0));
+                    Assert.False(InvokeCanParse(bindings, api, source, 0, 1, 1));
+                    Assert.False(InvokeCanParse(bindings, api, source, 0, 1, 37));
+                    Assert.False(InvokeCanParse(bindings, api, source, 0, 1, uint.MaxValue));
+                    Assert.False(InvokeCanParse(bindings, api, [], 0, 1, 10));
+
+                    if (policy == BoundRuntimePolicy.CheckedExceptions)
+                    {
+                        Assert.Throws<TargetInvocationException>(() =>
+                            InvokeParsedValue(bindings, api, ['?'], 0, 1, 10));
+                        Assert.Throws<TargetInvocationException>(() =>
+                            InvokeParsedValue(bindings, api, source, -1, 1, 10));
+                        Assert.Throws<TargetInvocationException>(() =>
+                            InvokeParsedValue(bindings, api, source, 0, 1, 1));
+                    }
+                }
+
+                var maximumZeros = new string('0', MaximumSourceCodeUnits).ToCharArray();
+                var maximumNines = new string('9', MaximumSourceCodeUnits).ToCharArray();
+                foreach (var api in Enum.GetValues<ParserApi>())
+                {
+                    Assert.True(InvokeCanParse(bindings, api, maximumZeros, 0,
+                        MaximumSourceCodeUnits, 10));
+                    Assert.Equal(BigInteger.Zero, InvokeParsedValue(bindings, api, maximumZeros, 0,
+                        MaximumSourceCodeUnits, 10));
+                    Assert.False(InvokeCanParse(bindings, api, maximumNines, 0,
+                        MaximumSourceCodeUnits, 10));
+                }
+
+                var maximumZerosForRadix = new string('0', MaximumSourceCodeUnits).ToCharArray();
+                foreach (var radix in Enumerable.Range(2, 35))
+                {
+                    var maximumDigitsForRadix = new string(Digit(radix - 1), MaximumSourceCodeUnits).ToCharArray();
+                    Assert.True(InvokeCanParse(bindings, ParserApi.UInt64, maximumZerosForRadix, 0,
+                        MaximumSourceCodeUnits, (uint)radix));
+                    Assert.Equal(BigInteger.Zero, InvokeParsedValue(bindings, ParserApi.UInt64,
+                        maximumZerosForRadix, 0, MaximumSourceCodeUnits, (uint)radix));
+                    Assert.False(InvokeCanParse(bindings, ParserApi.UInt64, maximumDigitsForRadix, 0,
+                        MaximumSourceCodeUnits, (uint)radix));
+                }
+
+                Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    InvokeCanParse(bindings, ParserApi.UInt64, new char[MaximumSourceCodeUnits + 1],
+                        0, 1, 10));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("ParseUInt64Base(0, 1, 10)")]
+    [InlineData("ParseInt32Base(0, 1, 10)")]
+    public async Task InvalidSourceGrantValueQueryFailsFastInSubprocessAsync(string expression)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        var root = RepositoryRoot();
+        var componentNames = new[] { "WideIntegerFacts", "SourceIntegerParsing" };
+        var trees = new SyntaxTree[componentNames.Length + 1];
+        for (var index = 0; index < componentNames.Length; index++)
+        {
+            var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
+            trees[index] = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
+        }
+        trees[^1] = SyntaxTree.Parse(
+            $"namespace Terrum.CodeAnalysis.Numerics64; int32 Main() {{ return int32({expression}); }}",
+            "source-integer-parsing-fail-fast.terrum");
+
+        var compilation = Compilation.Create(trees,
+            [new HostBuffer("Source", PrimitiveType.Char16, [(int)'?'], false)],
+            BoundRuntimePolicy.FailFast);
+        Assert.False(compilation.HasErrors,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+
+        var pathToExecutable = Path.Combine(Path.GetTempPath(),
+            $"terrum-source-integer-parsing-fail-fast-{Guid.NewGuid():N}.exe");
+        try
+        {
+            await File.WriteAllBytesAsync(pathToExecutable,
+                NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true);
+            using var process = Process.Start(new ProcessStartInfo(pathToExecutable) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            }) ?? throw new InvalidOperationException("Could not start the compiled source parser.");
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(true);
+            }
+            catch (TimeoutException)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+                throw;
+            }
+            Assert.NotEqual(0, process.ExitCode);
+        }
+        finally
+        {
+            File.Delete(pathToExecutable);
+        }
+    }
+
+    private static void AssertSourceGrantFixture(NativeSourceGrantTestBindings bindings, ParseFixture fixture)
+    {
+        var source = ("!" + fixture.Text + "!").ToCharArray();
+        var expected = ParseOracle(fixture);
+        var actualIsValid = InvokeCanParse(bindings, fixture.Api, source, 1, fixture.Text.Length,
+            (uint)fixture.Radix);
+        Assert.Equal(expected.HasValue, actualIsValid);
+        if (expected.HasValue)
+        {
+            Assert.Equal(expected.Value, InvokeParsedValue(bindings, fixture.Api, source, 1,
+                fixture.Text.Length, (uint)fixture.Radix));
+        }
+    }
+
+    private static bool InvokeCanParse(NativeSourceGrantTestBindings bindings, ParserApi api,
+        char[] source, int start, int length, uint radix)
+    {
+        return bindings.Invoke<byte>(SourceIntegerParsingNamespace + "CanParse" + api + "Base",
+            source, start, length, radix) != 0;
+    }
+
+    private static BigInteger InvokeParsedValue(NativeSourceGrantTestBindings bindings, ParserApi api,
+        char[] source, int start, int length, uint radix) => api switch {
+        ParserApi.UInt64 => new BigInteger(bindings.Invoke<ulong>(
+            SourceIntegerParsingNamespace + "ParseUInt64Base", source, start, length, radix)),
+        ParserApi.Int64 => new BigInteger(bindings.Invoke<long>(
+            SourceIntegerParsingNamespace + "ParseInt64Base", source, start, length, radix)),
+        ParserApi.UInt32 => new BigInteger(bindings.Invoke<uint>(
+            SourceIntegerParsingNamespace + "ParseUInt32Base", source, start, length, radix)),
+        ParserApi.Int32 => new BigInteger(bindings.Invoke<int>(
+            SourceIntegerParsingNamespace + "ParseInt32Base", source, start, length, radix)),
+        ParserApi.Char16 => new BigInteger(bindings.Invoke<ushort>(
+            SourceIntegerParsingNamespace + "ParseChar16Base", source, start, length, radix)),
+        _ => throw new ArgumentOutOfRangeException(nameof(api)),
+    };
+
+    private static PrimitiveType ResultType(ParserApi api) => api switch {
+        ParserApi.UInt64 => PrimitiveType.UInt64,
+        ParserApi.Int64 => PrimitiveType.Int64,
+        ParserApi.UInt32 => PrimitiveType.UInt32,
+        ParserApi.Int32 => PrimitiveType.Int32,
+        ParserApi.Char16 => PrimitiveType.Char16,
+        _ => throw new ArgumentOutOfRangeException(nameof(api)),
+    };
 
     private static void ExecuteBatch(ParseFixture[] fixtures, BoundProgram linked,
         BoundRuntimePolicy policy, string description)

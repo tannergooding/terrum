@@ -1,0 +1,218 @@
+namespace Terrum.CodeAnalysis.Numerics64;
+
+int32 GetSourceIntegerDigit(int32 codeUnit)
+{
+    if (codeUnit >= 48 && codeUnit <= 57)
+    {
+        return codeUnit - 48;
+    }
+    if (codeUnit >= 65 && codeUnit <= 90)
+    {
+        return codeUnit - 65 + 10;
+    }
+    if (codeUnit >= 97 && codeUnit <= 122)
+    {
+        return codeUnit - 97 + 10;
+    }
+    return -1;
+}
+
+bool CanParseSourceMagnitude(int32 start, int32 length, uint32 radix, uint64 maximum)
+{
+    if (start < 0 || length <= 0 || start > Host.Source.Length
+        || length > Host.Source.Length - start || radix < 2 || radix > 36)
+    {
+        return false;
+    }
+
+    mut uint64 value = 0;
+    uint64 divisor = uint64(radix);
+    // Bound each prefix before multiplication, without dividing per digit.
+    uint64 cutoff = maximum / divisor;
+    uint64 finalDigit = maximum - cutoff * divisor;
+    int32 end = start + length;
+    mut int32 index = start;
+    while (index < end)
+    {
+        int32 codeUnit = int32(Host.Source[index]);
+        if (codeUnit == 95)
+        {
+            if ((radix != 2 && radix != 10 && radix != 16)
+                || (radix == 10 && index == start))
+            {
+                return false;
+            }
+
+            mut int32 next = index + 1;
+            while (next < end && Host.Source[next] == char16(95))
+            {
+                next = next + 1;
+            }
+            if (next == end)
+            {
+                return false;
+            }
+            index = next;
+            continue;
+        }
+
+        int32 digit = GetSourceIntegerDigit(codeUnit);
+        if (digit < 0 || uint32(digit) >= radix
+            || value > cutoff || (value == cutoff && uint64(digit) > finalDigit))
+        {
+            return false;
+        }
+        value = value * divisor + uint64(digit);
+        index = index + 1;
+    }
+    return true;
+}
+
+uint64 ParseSourceMagnitudeOrRequire(int32 start, int32 length, uint32 radix, uint64 maximum)
+{
+    require start >= 0 && length > 0 && start <= Host.Source.Length;
+    require length <= Host.Source.Length - start && radix >= 2 && radix <= 36;
+
+    mut uint64 value = 0;
+    uint64 divisor = uint64(radix);
+    // Bound each prefix before multiplication, without dividing per digit.
+    uint64 cutoff = maximum / divisor;
+    uint64 finalDigit = maximum - cutoff * divisor;
+    int32 end = start + length;
+    mut int32 index = start;
+    while (index < end)
+    {
+        int32 codeUnit = int32(Host.Source[index]);
+        if (codeUnit == 95)
+        {
+            require (radix == 2 || radix == 10 || radix == 16)
+                && (radix != 10 || index != start);
+
+            mut int32 next = index + 1;
+            while (next < end && Host.Source[next] == char16(95))
+            {
+                next = next + 1;
+            }
+            require next < end;
+            index = next;
+            continue;
+        }
+
+        int32 digit = GetSourceIntegerDigit(codeUnit);
+        require digit >= 0 && uint32(digit) < radix;
+        require value <= cutoff && (value != cutoff || uint64(digit) <= finalDigit);
+        value = value * divisor + uint64(digit);
+        index = index + 1;
+    }
+    return value;
+}
+
+bool CanParseSourceSigned(int32 start, int32 length, uint32 radix,
+    int64 minimum, int64 maximum)
+{
+    if (start < 0 || length <= 0 || start >= Host.Source.Length)
+    {
+        return false;
+    }
+
+    bool negative = Host.Source[start] == char16(45);
+    mut int32 digitStart = start;
+    mut int32 digitLength = length;
+    if (negative)
+    {
+        digitStart = digitStart + 1;
+        digitLength = digitLength - 1;
+    }
+
+    mut uint64 magnitudeLimit = uint64(maximum);
+    if (negative)
+    {
+        magnitudeLimit = MagnitudeInt64(minimum);
+    }
+    return CanParseSourceMagnitude(digitStart, digitLength, radix, magnitudeLimit);
+}
+
+int64 ParseSourceSignedOrRequire(int32 start, int32 length, uint32 radix,
+    int64 minimum, int64 maximum)
+{
+    require start >= 0 && length > 0 && start < Host.Source.Length;
+
+    bool negative = Host.Source[start] == char16(45);
+    mut int32 digitStart = start;
+    mut int32 digitLength = length;
+    if (negative)
+    {
+        digitStart = digitStart + 1;
+        digitLength = digitLength - 1;
+    }
+
+    mut uint64 magnitudeLimit = uint64(maximum);
+    if (negative)
+    {
+        magnitudeLimit = MagnitudeInt64(minimum);
+    }
+    uint64 magnitude = ParseSourceMagnitudeOrRequire(
+        digitStart, digitLength, radix, magnitudeLimit);
+    if (negative && magnitude == magnitudeLimit)
+    {
+        return minimum;
+    }
+    if (negative)
+    {
+        return -int64(magnitude);
+    }
+    return int64(magnitude);
+}
+
+public static bool CanParseUInt64Base(int32 start, int32 length, uint32 radix)
+{
+    return CanParseSourceMagnitude(start, length, radix, uint64.MaxValue);
+}
+
+public static uint64 ParseUInt64Base(int32 start, int32 length, uint32 radix)
+{
+    return ParseSourceMagnitudeOrRequire(start, length, radix, uint64.MaxValue);
+}
+
+public static bool CanParseUInt32Base(int32 start, int32 length, uint32 radix)
+{
+    return CanParseSourceMagnitude(start, length, radix, uint64(uint32.MaxValue));
+}
+
+public static uint32 ParseUInt32Base(int32 start, int32 length, uint32 radix)
+{
+    return uint32(ParseSourceMagnitudeOrRequire(
+        start, length, radix, uint64(uint32.MaxValue)));
+}
+
+public static bool CanParseChar16Base(int32 start, int32 length, uint32 radix)
+{
+    return CanParseSourceMagnitude(start, length, radix, 65535);
+}
+
+public static char16 ParseChar16Base(int32 start, int32 length, uint32 radix)
+{
+    return char16(ParseSourceMagnitudeOrRequire(start, length, radix, 65535));
+}
+
+public static bool CanParseInt64Base(int32 start, int32 length, uint32 radix)
+{
+    return CanParseSourceSigned(start, length, radix, int64.MinValue, int64.MaxValue);
+}
+
+public static int64 ParseInt64Base(int32 start, int32 length, uint32 radix)
+{
+    return ParseSourceSignedOrRequire(start, length, radix, int64.MinValue, int64.MaxValue);
+}
+
+public static bool CanParseInt32Base(int32 start, int32 length, uint32 radix)
+{
+    return CanParseSourceSigned(start, length, radix,
+        int64(int32.MinValue), int64(int32.MaxValue));
+}
+
+public static int32 ParseInt32Base(int32 start, int32 length, uint32 radix)
+{
+    return int32(ParseSourceSignedOrRequire(start, length, radix,
+        int64(int32.MinValue), int64(int32.MaxValue)));
+}

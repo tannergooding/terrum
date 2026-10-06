@@ -2679,8 +2679,15 @@ End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under
 both runtime policies. The companion is bounded to self-contained local
-dependencies and does not change the source-free compiler-primitives DLL;
-ordinary `EmitLibrary` still rejects source grants. The CLI stages the
+dependencies and also includes an isolated `SourceIntegerParsing` component
+and `WideIntegerFacts` for paired scalar parser exports. For each integer
+type, `CanParse...Base(start, length, radix)` reports validity and
+`Parse...Base(start, length, radix)` returns the typed value or fails through
+`require`; callers must supply identical arguments and the same immutable
+source grant. Successful paired calls scan twice, so they are not an atomic
+try-style operation or a single-pass performance claim. The companion does
+not change the source-free compiler-primitives DLL; ordinary `EmitLibrary`
+still rejects source grants. The CLI stages the
 companion and manifest together, preserving the previous artifact pair when
 either destination cannot be replaced. This is provisional implemented
 support, not approval of the proposed ABI or general source-grant DLL support.
@@ -2720,6 +2727,15 @@ negating the signed minimum.
 It is not wired into `SyntaxTree.Parse(LexResult)` or the scanner-backed
 integer record: that record still supplies the binder's contextual literal
 magnitude.
+The maintained source-grant companion uses a separate scalar-only
+`SourceIntegerParsing` component rather than exporting these `bool`/`init ref`
+functions or widening the classifier. Its five `CanParse...Base` and
+`Parse...Base` pairs preserve the same parse rules; invalid value queries fail
+through `require`. Both calls must use identical arguments and one unchanged
+source snapshot, and a successful pair parses twice. This provisional
+source-dependent library surface is not wired into `SyntaxTree.Parse` or the
+scanner-backed integer record and does not move the scalar frontend beyond
+hosted verification/emission.
 
 The [checked integer-conversion candidate](../self-host/IntegerCheckedConversions.terrum)
 provides all twelve cross-type signed/unsigned 32-/64-bit pairs as named

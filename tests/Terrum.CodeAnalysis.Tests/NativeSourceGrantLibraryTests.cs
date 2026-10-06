@@ -27,6 +27,16 @@ public sealed class NativeSourceGrantLibraryTests
     private const string SourceOffsetExport = "Terrum.CodeAnalysis.GetSourceOffsetOrMinusOne";
     private const string SourceLengthExport = "Terrum.CodeAnalysis.GetSourceTextLength";
     private const string LineCountExport = "Terrum.CodeAnalysis.GetSourceLineCount";
+    private const string CanParseUInt64Export = "Terrum.CodeAnalysis.Numerics64.CanParseUInt64Base";
+    private const string ParseUInt64Export = "Terrum.CodeAnalysis.Numerics64.ParseUInt64Base";
+    private const string CanParseInt64Export = "Terrum.CodeAnalysis.Numerics64.CanParseInt64Base";
+    private const string ParseInt64Export = "Terrum.CodeAnalysis.Numerics64.ParseInt64Base";
+    private const string CanParseUInt32Export = "Terrum.CodeAnalysis.Numerics64.CanParseUInt32Base";
+    private const string ParseUInt32Export = "Terrum.CodeAnalysis.Numerics64.ParseUInt32Base";
+    private const string CanParseInt32Export = "Terrum.CodeAnalysis.Numerics64.CanParseInt32Base";
+    private const string ParseInt32Export = "Terrum.CodeAnalysis.Numerics64.ParseInt32Base";
+    private const string CanParseChar16Export = "Terrum.CodeAnalysis.Numerics64.CanParseChar16Base";
+    private const string ParseChar16Export = "Terrum.CodeAnalysis.Numerics64.ParseChar16Base";
     private static readonly string[] LineCountSamples = [
         "",
         "plain",
@@ -540,13 +550,33 @@ public sealed class NativeSourceGrantLibraryTests
                     .ToImmutableArray()))
             .ToImmutableArray();
         Assert.Equal([DecodeScalarExport, SourceCharacterPositionExport, SourceCodeUnitExport, LineCountExport,
-            SourceLineNumberExport, SourceOffsetExport, SourceLengthExport, ReadScalarExport],
+            SourceLineNumberExport, SourceOffsetExport, SourceLengthExport, CanParseChar16Export,
+            CanParseInt32Export, CanParseInt64Export, CanParseUInt32Export, CanParseUInt64Export,
+            ParseChar16Export, ParseInt32Export, ParseInt64Export, ParseUInt32Export, ParseUInt64Export,
+            ReadScalarExport],
             [.. exports.Select(static export => export.Name).OrderBy(static name => name, StringComparer.Ordinal)]);
 
         var module = NativeLibrary.Load(imagePath);
         try
         {
             var bindings = new NativeSourceGrantTestBindings(module, exports);
+            var parserSource = "!1__2?".ToCharArray();
+            Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseUInt64Export, parserSource, 1, 4, (uint)10));
+            Assert.Equal(12UL, bindings.Invoke<ulong>(ParseUInt64Export, parserSource, 1, 4, (uint)10));
+            Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseInt64Export, parserSource, 1, 4, (uint)10));
+            Assert.Equal(12L, bindings.Invoke<long>(ParseInt64Export, parserSource, 1, 4, (uint)10));
+            Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseUInt32Export, parserSource, 1, 4, (uint)10));
+            Assert.Equal(12U, bindings.Invoke<uint>(ParseUInt32Export, parserSource, 1, 4, (uint)10));
+            Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseInt32Export, parserSource, 1, 4, (uint)10));
+            Assert.Equal(12, bindings.Invoke<int>(ParseInt32Export, parserSource, 1, 4, (uint)10));
+            Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseChar16Export, parserSource, 1, 4, (uint)10));
+            Assert.Equal((ushort)12, bindings.Invoke<ushort>(ParseChar16Export, parserSource, 1, 4, (uint)10));
+            var negativeParserSource = "!-12?".ToCharArray();
+            Assert.Equal(-12L, bindings.Invoke<long>(ParseInt64Export,
+                negativeParserSource, 1, 3, (uint)10));
+            Assert.Equal(-12, bindings.Invoke<int>(ParseInt32Export,
+                negativeParserSource, 1, 3, (uint)10));
+            Assert.Equal((byte)0, bindings.Invoke<byte>(CanParseUInt64Export, ['?'], 0, 1, (uint)10));
             Assert.Equal((int)'A', bindings.Invoke<int>(ReadScalarExport, ['A'], 0, 1));
             Assert.Equal(0x1F600, bindings.Invoke<int>(ReadScalarExport, ['\uD83D', '\uDE00'], 0, 2));
             Assert.Equal(-1, bindings.Invoke<int>(ReadScalarExport, ['\uD800', 'A'], 0, 1));

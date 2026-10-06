@@ -252,6 +252,34 @@ outside the source extent. Reuse shared line-break classification, keep the
 source-free DLL and classifier boundary unchanged, and do not infer aggregate
 `LinePosition`, complete `SourceLines` or stable ABI support.
 
+### Provisional scalar integer-parsing exports
+
+**Question:** Should the maintained source-grant companion expose the
+source-dependent integer parsers as paired scalar validity and value queries?
+
+**Summary:** The existing `IntegerParsing` APIs use `bool` plus
+`init ref<T>` output, which the source-grant ABI does not admit. No sentinel
+value can represent failure for the full `int64` or `uint64` domains. An
+isolated scalar-only component can instead expose `CanParseTBase(start,
+length, radix) -> bool` and `ParseTBase(start, length, radix) -> T` for each
+existing parser type. The value query repeats validation and fails through
+`require` when input is invalid; it does not fabricate a zero or sentinel.
+Callers must use identical arguments and the same immutable source snapshot
+for both calls. A successful pair scans twice, and is not an atomic try-style
+operation.
+
+**Recommendation:** Keep the pair provisional and isolated from
+`IntegerParsing.terrum`, preserving its hosted semantics for exact UTF-16
+slices, radices 2–36, ASCII digits, signed leading minus, radix-specific
+separators and destination-specific overflow. Compare all five types against
+the existing independent `BigInteger` oracle under both runtime policies,
+including invalid values, extreme slice/radix arguments and maximum grants;
+verify checked failure directly and fail-fast failure in a subprocess.
+Include only the scalar pairs in the maintained manifest. Do not widen the
+source-grant classifier, change the source-free companion, imply single-pass
+performance or connect these exports to syntax parsing or the scalar
+frontend. This does not approve the ABI.
+
 ## Promotion decisions still required
 
 ### Where source-grant shape is validated
