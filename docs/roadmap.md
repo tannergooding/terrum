@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `667fbe28` | Verify frontend source-limit rejection before artifact publication |
 | `e282c0de` | Compare maximum-length scalar frontend builds with hosted output under both runtime policies |
 | `e5e5ff82` | Compare maximum-length zero and overflow inputs for `uint64` parsing in every radix |
 | `23be9989` | Compare all five integer parsers on maximum-length successful zero and overflowing digit slices |
