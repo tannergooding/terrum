@@ -130,14 +130,42 @@ weaken waiting, cycle-detection, memory-publication, ownership, cleanup or
 load-scoped unload requirements. These are required runtime obligations, not
 facts that the proposed metadata can prove.
 
+### Candidate access-obligation artifact contract
+
+**Recommendation, still unapproved:** define access obligations logically
+before assigning table kinds, clause IDs, operation forms or runtime handles.
+Each obligation identifies the selected local member, its owning group recipe,
+the access kind and one of two authorities:
+
+| Authority | Required meaning |
+|---|---|
+| Ordinary demand | A runtime operation selected by the trigger policy requires its owning group to complete before the operation proceeds. The operation's published contract exposes this initialization effect; ordinary method effects cannot hide it. |
+| Initialization-phase authority | A source-compiler-validated initializer, static constructor or checked helper participates in its owning group's unpublished initialization flow. The authority is scoped to that group and flow, is not an ordinary reentrant demand, and permits reads only after the particular field has been initialized. |
+
+For an ordinary demand, the referenced group and access kind must agree with
+the normalized constructor trigger, or with the synthesized grouped-field
+trigger when no constructor is authored. Normal completion guarantees the
+required group completion before the operation continues. An unfinished group
+is never exposed to ordinary callers; failure, cleanup and retained outcomes
+follow the accepted runtime policy rather than an access-specific fallback.
+Compile-time binding and inspection carry no demand.
+
+Initialization dependencies in this slice resolve only to definitions in the
+same module. The selected operation, member and group recipe use typed
+definition references and must agree on their owning type; names, row order
+and linker remapping do not establish identity. Imported or packed
+initialization dependencies reject. This logical contract is not an encoding
+or runtime protocol, does not choose sharing or failure-policy admission, and
+does not authorize implementation.
+
 Proposed validation ownership for this slice:
 
-| Layer | Required responsibility |
-|---|---|
-| Source compiler | Resolve registered attribute identities and closed schemas; assign each field to one group; preserve initializer source order; prove authored bodies satisfy initialization-phase authority, definite-initialization, effect and constructor-policy clauses. |
-| Metadata reader | Require the profile and every required record; validate row extents, typed owner references, unique field/group assignments, signatures, policy cardinality, initializer ordering, and the identity, payload shape, placement and consistency of every recognized clause; reject unknown required forms. Under the selected artifact trust policy, this structural contract validation does not re-prove accepted producer body facts. |
-| Linker or consumer | Accept only self-contained initialization dependencies for this slice; reject imported/packed initialization edges and incompatible trigger contracts before lowering. |
-| Runtime | Key state by loaded type identity within its load instance; implement the accepted waiting, cycle, completion publication, retained failure, cleanup and unload behavior. Metadata is not a substitute for these state transitions. |
+| Layer | Required validation | Required rejection |
+|---|---|---|
+| Source compiler | Resolve registered attribute identities and closed schemas; assign each field to one group; preserve initializer source order; attach the selected local member/group obligation to each triggering operation; prove authored bodies satisfy initialization-phase authority, definite-initialization, effect and constructor-policy clauses. | Reject same-named unregistered attributes, ambiguous or mismatched group ownership, reads before field initialization, unvalidated helper access and trigger effects omitted from the published contract. |
+| Metadata reader | Require the profile and every required record; validate row extents, typed owner references, selected-member/group agreement, access kind, unique field/group assignments, signatures, policy cardinality, initializer ordering, and the identity, payload shape, placement and consistency of every recognized clause. Under the selected artifact trust policy, structural validation does not re-prove accepted producer body facts. | Reject absent or unknown required schema, dangling or wrong-kind references, missing/conflicting obligations, unknown semantic clauses and unsupported trigger or authority forms. |
+| Linker or consumer | Preserve the selected definitions, obligations and trigger effects without deriving them from names or remapped row order. | Reject imported/packed initialization dependencies and incompatible group or trigger contracts before lowering. |
+| Runtime | Key state by loaded type identity within its load instance; implement the accepted waiting, cycle, completion publication, retained failure, cleanup and unload behavior. Keep initialization synchronization separate from permission to share later accesses. | Reject admission of a runtime-policy combination whose sharing, failure, publication or lifecycle obligations are not explicitly implemented; never expose unfinished state or retry a retained failure implicitly. |
 
 This proposed slice is a scope boundary for staged implementation, not a new
 language restriction. Later slices must add generic closed-type identity,
@@ -194,7 +222,8 @@ runtime/metadata contract before emission or execution is authorized.
 
 | Question | Summary | Recommendation |
 |---|---|---|
-| Which required metadata kinds and executable access forms carry these records? | The slice now names the logical cases, but current TRRM assigns no static-storage records or access operations. | Assign closed required records and access forms together, with typed ownership and checked references. Do not emit under the current profile or overload existing flags. |
+| What is the logical access obligation before assigning its encoding? | The first slice distinguishes ordinary demand from initialization authority, but no typed selected-member/group link or cross-layer rejection matrix is assigned. | Use the candidate contract above: bind each runtime access to its selected local member and owning group, distinguish ordinary demand from validated group-scoped authority, publish the trigger effect, and reject missing or mismatched obligations. |
+| Which required metadata kinds and executable access forms carry these records? | Current TRRM assigns no static-storage records or access operations; the logical obligation does not select their representation. | Assign closed required records and access forms together, with typed ownership and checked references. Do not emit under the current profile or overload existing flags. |
 | How are semantic clauses validated? | The slice assigns reader validation of clause shape/placement separately from source-body proof, but exact clause identities, payloads and proof obligations remain open. | Define each typed required clause and its compiler proof, reader shape/consistency checks, linker compatibility checks and runtime enforcement. Keep body re-proof governed by the artifact trust policy; reject unknown required or unsupported clauses. |
 | What runtime identity and lifecycle ABI implements the accepted behavior? | The candidate eager-group protocol now names load-scoped identity and required state transitions, but no handle, wait mechanism, recursive-owner identity, failure transport or cleanup ABI exists. | Assign typed runtime inputs and outcomes to the required metadata/access records; preserve the protocol above and reject any runtime profile unable to publish, retain failure, clean up or retire safely. Do not inherit host static-constructor behavior. |
 | Which sharing and runtime-policy combinations are admissible in the first slice? | The accepted contract permits checked sharing or proved nonconcurrency, and distinguishes fail-fast termination from defined unwinding; current compiler profiles do not implement initialization gates or failure transport. | Admit only combinations whose sharing proof/gate and failure/cleanup path are explicit and implemented. Reject every unrepresented combination rather than infer permission or return a success-shaped fallback. |
