@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Lexing;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -164,6 +165,20 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return ~(~(40 + 2)); }")]
     [InlineData("int32 Main() => 6 * (3 + 4);")]
     public async Task FrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
+    {
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Fact]
+    public async Task FrontendBuildMatchesHostedAtMaximumSourceLengthAsync()
+    {
+        const string program = "int32 Main() { return 42; }";
+        var source = program + new string(' ', ScannerHost.MaximumSourceLength - program.Length);
+        Assert.Equal(ScannerHost.MaximumSourceLength, source.Length);
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    private static async Task AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", "..")), "self-host");

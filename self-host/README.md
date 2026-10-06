@@ -236,6 +236,9 @@ The native scalar frontend remains a bounded projection, not a standalone
 compiler: it shares the hosted verifier/emitter and is limited to 16K source
 units and 64 tokens per snapshot, with 8 total named/hidden local identities,
 12 statement records, 32 expression nodes and 3 parameters per function.
+A maximum-length program with trailing trivia is compared byte-for-byte with
+the hosted build under both runtime policies; this remains projection parity,
+not an independent-verification or bootstrap claim.
 V85 inventories top-level global declarations before parsing bodies, resolves
 direct scalar-returning calls in declaration order regardless of source order,
 and rejects duplicate normalized names, local/parameter shadowing at call sites,
