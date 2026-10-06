@@ -743,6 +743,9 @@ selection.
 checked code-unit reads, validation of half-open ranges, and streaming line
 reads against the current immutable `Host.Source`. It retains no pointer or
 source text, creates no runtime string, and does not carry a diagnostic path.
+Persisted semantic-module JIT coverage checks exact reads of all 65,536 UTF-16
+code units, including surrogate units, across fresh grants under both runtime
+policies.
 Its ranges remain offsets for the current invocation's source grant; this
 facade is not the hosted, owning `SourceText` collection.
 

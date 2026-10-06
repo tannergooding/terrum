@@ -1,8 +1,10 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -13,6 +15,71 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class SourceLineComponentTests
 {
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task SourceTextReadsEveryUtf16CodeUnitFromFreshGrantsAsync(BoundRuntimePolicy policy)
+    {
+        var trees = await ReadComponentsAsync(includeTests: false, includeLines: false).ConfigureAwait(true);
+        var entry = SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return 0; }
+            public int32 VerifySourceCodeUnits(int32 expectedFirst) {
+                int32 length = GetSourceTextLength();
+                mut int32 position = 0;
+                while (position < length) {
+                    if (!TryReadSourceCodeUnit(position, init var codeUnit)
+                        || int32(codeUnit) != expectedFirst + position) {
+                        return position + 1;
+                    }
+                    position = position + 1;
+                }
+                if (TryReadSourceCodeUnit(length, init var outOfRange)) {
+                    return -1;
+                }
+                return 0;
+            }
+            """, "source-text-exhaustive-entry.terrum");
+        var producerCompilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [65], false) { IsInvocationScoped = true }],
+            policy);
+        Assert.False(producerCompilation.HasErrors,
+            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(producerCompilation.Program),
+            ["Terrum.CodeAnalysis.VerifySourceCodeUnits"]);
+
+        BoundProgram CreateConsumer(int expectedFirst)
+        {
+            var consumerTree = SyntaxTree.Parse($$"""
+                namespace Terrum.CodeAnalysis;
+                int32 Main() { return VerifySourceCodeUnits({{expectedFirst}}); }
+                """, "source-text-exhaustive-consumer.terrum");
+            var consumerCompilation = Compilation.Create(
+                consumerTree, ModuleCompiler.CreateReference(producer), policy);
+            Assert.False(consumerCompilation.HasErrors,
+                string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+            var consumer = ModuleCompiler.CreateConsumer(
+                Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+            return ModuleCompiler.Link(consumer, producer);
+        }
+
+        var emptyConsumer = CreateConsumer(0);
+        Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(emptyConsumer,
+            [new HostBuffer("Source", PrimitiveType.Char16, [], false) { IsInvocationScoped = true }],
+            (NativeRuntimePolicy)policy));
+
+        const int batchSize = 16_384;
+        for (var start = 0; start <= char.MaxValue; start += batchSize)
+        {
+            var count = Math.Min(batchSize, char.MaxValue + 1 - start);
+            var grant = new HostBuffer("Source", PrimitiveType.Char16,
+                [.. Enumerable.Range(start, count)], false) { IsInvocationScoped = true };
+            Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(
+                CreateConsumer(start), [grant], (NativeRuntimePolicy)policy));
+        }
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("plain")]
