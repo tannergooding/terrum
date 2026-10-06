@@ -104,6 +104,7 @@ public bool CheckManagedTokenChain()
         }
     }
 
+    ManagedHeap.Collect();
     for (mut int32 index = 0; index < 64; index = index + 1)
     {
         require cursorChain.TryAppend(index, index, 1);
@@ -115,6 +116,12 @@ public bool CheckManagedTokenChain()
     }
     require cursorChain.TryGet(63, init var last);
     if (last.Kind != 63 || last.Range.Start != 63 || last.Range.Length != 1)
+    {
+        return false;
+    }
+    require cursorChain.TryClear();
+    if (cursorChain.Count != 0 || cursorChain.Version != 70
+        || ManagedHeap.Collect() != 64)
     {
         return false;
     }
