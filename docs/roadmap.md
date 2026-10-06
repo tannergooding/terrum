@@ -311,6 +311,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `b5dee01b` | Add provisional scalar source-line-count export to the maintained companion with hosted line-count parity under both policies |
 | `7d2a7938` | Exhaust all 65,536 `char16` inputs for the four integer-wrapping widening candidates through Terrum, persisted consumers and the source-free DLL |
 | `1ea672d0` | Verify conditional Boolean `out` vacancy, later initialization and compatible provider replacement across native consumer sets under both runtime policies |
 | `ec530cda` | Lower end-relative source-grant reads from the invocation's captured length, with both-policy boundary coverage |
