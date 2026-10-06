@@ -27,8 +27,9 @@ code-unit decoder and the source-grant-dependent `SourceText` facade,
 including exact reads of all 65,536 UTF-16 code units (including surrogate
 units) across fresh grants under both runtime policies, plus the `Utf16Scalar`
 adapter, `CharacterLiteral` leaf decoding for every scanner-delimited BMP code
-unit (including surrogate rejection) and every valid supplementary scalar in
-both direct and `\U`-escaped spellings, and rejection of all 2,048
+unit (including surrogate rejection), every BMP `\u` escape (including all
+2,048 surrogate-valued rejections), and every valid supplementary scalar in
+both direct and `\U`-escaped spellings, plus rejection of all 2,048
 surrogate-valued `\U` escapes with hosted diagnostic parity. The provisional
 `StringEscape` decoder is checked for every scanner-delimited BMP escape
 introducer, every BMP `\u` value (including all 2,048 rejected surrogate

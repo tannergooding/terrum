@@ -196,6 +196,56 @@ public sealed class CharacterLiteralModuleTests
             records.AddRange(spelling.Select(static unit => (int)unit));
         }
 
+        const int maximumEscapedBmpScalarsPerBatch = 1_000;
+        for (var scalarStart = (int)char.MinValue;
+            scalarStart <= char.MaxValue;
+            scalarStart += maximumEscapedBmpScalarsPerBatch)
+        {
+            var scalarCount = Math.Min(maximumEscapedBmpScalarsPerBatch,
+                char.MaxValue + 1 - scalarStart);
+            var batchText = new StringBuilder(scalarCount * 9);
+            var invalidScalarCount = 0;
+            for (var index = 0; index < scalarCount; index++)
+            {
+                var scalar = scalarStart + index;
+                var spelling = $"'\\u{scalar:X4}'";
+                batchText.Append(spelling).Append(' ');
+                var valid = !char.IsSurrogate((char)scalar);
+                if (!valid)
+                {
+                    invalidScalarCount++;
+                }
+                records.Add(valid ? 0 : 5);
+                records.Add(valid ? scalar & 0xFFFF : 0);
+                records.Add(valid ? scalar >> 16 : 0);
+                records.Add(valid ? 0 : 1);
+                records.Add(valid ? 0 : 6);
+                records.Add(spelling.Length);
+                records.AddRange(spelling.Select(static unit => (int)unit));
+            }
+
+            var lexed = Lexer.Lex(SourceText.From(batchText.ToString()));
+            Assert.Equal(invalidScalarCount, lexed.Diagnostics.Length);
+            Assert.Equal(scalarCount + 1, lexed.Tokens.Length);
+            var diagnosticIndex = 0;
+            for (var index = 0; index < scalarCount; index++)
+            {
+                var scalar = scalarStart + index;
+                var spelling = $"'\\u{scalar:X4}'";
+                Assert.Equal(TokenKind.CharacterLiteral, lexed.Tokens[index].Kind);
+                Assert.Equal(spelling, lexed.Tokens[index].Text);
+                if (char.IsSurrogate((char)scalar))
+                {
+                    Assert.Equal("TRM0005", lexed.Diagnostics[diagnosticIndex].Code);
+                    Assert.Equal(index * 9 + 1, lexed.Diagnostics[diagnosticIndex].Span.Start);
+                    Assert.Equal(6, lexed.Diagnostics[diagnosticIndex].Span.Length);
+                    diagnosticIndex++;
+                }
+            }
+            Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[^1].Kind);
+            ExecuteRecords();
+        }
+
         const int firstSupplementaryScalar = 0x10000;
         const int supplementaryScalarLimit = 0x110000;
         const int maximumScalarsPerBatch = 1_600;
