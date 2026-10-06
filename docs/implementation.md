@@ -2622,10 +2622,10 @@ one-unit UTF-16 value and every possible second code unit after CR under both
 policies. Both offsets of every one-unit input match hosted line/character
 mapping and round-trip through the inverse offset query. The test-only packed
 scalar also matches hosted positions at every offset in short edge cases and
-selected maximum-length boundaries, then maps those valid positions back to
-the original offsets with hosted `SourceText.TryGetOffset` parity. These are
-feasibility-test results only: production native source-grant DLL support
-remains unapproved and unsupported.
+selected maximum-length boundaries. All three offsets of every `CR` plus
+one-code-unit input also match hosted `SourceText.GetLinePosition` and
+`SourceText.TryGetOffset` results. These are feasibility-test results only:
+production native source-grant DLL support remains unapproved and unsupported.
 The frontend retains its source-grant and hosted verifier/emitter boundaries.
 `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`
 projects typed facts or scanner/shape errors for inspection. Compilation

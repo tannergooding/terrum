@@ -556,6 +556,17 @@ public sealed class NativeSourceGrantExperimentTests
                     crPrefixSource[1] = (char)codeUnit;
                     var snapshot = SourceText.From(new string(crPrefixSource));
                     Assert.Equal(snapshot.Lines.Length, bindings.Invoke<int>(LineCountExport, crPrefixSource));
+                    for (var position = 0; position <= 2; position++)
+                    {
+                        var expected = snapshot.GetLinePosition(position);
+                        var packed = bindings.Invoke<int>(LinePositionExport, crPrefixSource, position);
+                        Assert.Equal(expected.Line, packed >> 16);
+                        Assert.Equal(expected.Character, packed & 0xFFFF);
+                        Assert.True(snapshot.TryGetOffset(expected.Line, expected.Character, out var expectedOffset));
+                        Assert.Equal(position, expectedOffset);
+                        Assert.Equal(expectedOffset, bindings.Invoke<int>(LineOffsetExport, crPrefixSource,
+                            expected.Line, expected.Character));
+                    }
                 }
                 Assert.Equal(1, bindings.Invoke<int>(LineCountExport, null));
                 Assert.Equal(1, bindings.Invoke<int>(LineCountExport, []));
