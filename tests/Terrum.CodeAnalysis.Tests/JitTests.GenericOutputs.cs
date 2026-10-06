@@ -496,6 +496,12 @@ public sealed partial class JitTests
                 result = value;
                 initialized = second;
             }
+            [NoThrow] int32 FillSame<T>(T value, out T result, init ref<T> initialized)
+                where T : [Copy] {
+                result = value;
+                initialized = value;
+                return 7;
+            }
             int32 Main() {
                 mut Pair previous = new Pair(1, 2);
                 int32 zeroStatus = Fill(new Pair(40, 2), int64(3), 0, out previous, init var first);
@@ -504,8 +510,12 @@ public sealed partial class JitTests
                 mut Pair voidResult = new Pair(0, 0);
                 init int64 voidInitialized;
                 FillVoid(new Pair(40, 2), int64(6), out voidResult, init voidInitialized);
+                mut Pair sameTypeResult = new Pair(0, 0);
+                int32 sameTypeStatus = FillSame(new Pair(44, 2), out sameTypeResult,
+                    init var sameTypeInitialized);
                 if (zeroStatus != 0 || status != 7 || previous.First != 42 || first != 3 || second != 5
-                    || voidResult.First != 40 || voidInitialized != 6) {
+                    || voidResult.First != 40 || voidInitialized != 6 || sameTypeStatus != 7
+                    || sameTypeResult.First != 44 || sameTypeInitialized.First != 44) {
                     return 1;
                 }
                 return 42;

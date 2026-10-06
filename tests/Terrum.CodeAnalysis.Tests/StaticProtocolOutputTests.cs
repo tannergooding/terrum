@@ -307,6 +307,37 @@ public sealed class StaticProtocolOutputTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GenericMixedOutputsCanShareOneTypeParameter(bool explicitType)
+    {
+        var call = explicitType
+            ? "Fill<Value>(new Value(40), out copied, init var initialized)"
+            : "Fill(new Value(40), out copied, init var initialized)";
+        var source = Value + """
+            int32 Fill<T>(T value, out T result, init ref<T> initialized) where T : [Copy] {
+                result = value;
+                initialized = value;
+                return 7;
+            }
+            int32 Main() {
+                mut Value copied = new Value(0);
+                int32 status = CALL;
+                require status == 7 && copied.First == 40 && initialized.First == 40;
+                return 42;
+            }
+            """.Replace("CALL", call, StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value>");
+        Assert.True(fill.Variables[1].IsOut);
+        Assert.False(fill.Variables[1].IsInit);
+        Assert.True(fill.Variables[2].IsOut);
+        Assert.True(fill.Variables[2].IsInit);
+    }
+
+    [Theory]
     [InlineData("int32", "result = value; return 7;")]
     [InlineData("int32", "initialized = second; return 7;")]
     [InlineData("void", "result = value;")]
