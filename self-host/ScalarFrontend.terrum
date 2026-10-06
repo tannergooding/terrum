@@ -654,7 +654,8 @@ mut class ScalarFrontendState
             return false;
         }
         return (operation.Kind >= 57 && operation.Kind <= 61)
-            || (operation.Kind >= 65 && operation.Kind <= 75);
+            || (operation.Kind >= 65 && operation.Kind <= 75)
+            || (operation.Kind >= 88 && operation.Kind <= 90);
     }
 
     private bool HasOperandKind(int32 index, int32 kind, Span<Token> tokenView)
@@ -671,7 +672,8 @@ mut class ScalarFrontendState
     {
         return (kind >= 57 && kind <= 61)
             || (kind >= 65 && kind <= 70)
-            || kind == 71 || kind == 73 || kind == 75;
+            || kind == 71 || kind == 73 || kind == 75
+            || (kind >= 88 && kind <= 90);
     }
 
     private bool HasBinaryAfterOperand(int32 cursor, int32 groups, Span<Token> tokenView)
@@ -1415,7 +1417,8 @@ mut class ScalarFrontendState
         require TryGetToken(tokenView, _at, init var next);
         if ((next.Kind >= 57 && next.Kind <= 61)
             || (next.Kind >= 65 && next.Kind <= 70)
-            || (next.Kind >= 71 && next.Kind <= 75))
+            || (next.Kind >= 71 && next.Kind <= 75)
+            || (next.Kind >= 88 && next.Kind <= 90))
         {
             operation = next.Kind;
             _at = _at + 1;
@@ -1530,7 +1533,10 @@ mut class ScalarFrontendState
                 return false;
             }
             rightIndex = resolvedRightIndex;
-            if (selected != rightType || ((operation >= 57 && operation <= 61)
+            bool isShift = operation >= 88 && operation <= 90;
+            if ((isShift && (selected < 1 || selected > 4 || rightType != 1))
+                || (!isShift && selected != rightType)
+                || ((operation >= 57 && operation <= 61)
                 && (selected == 5 || selected == 6))
                 || (operation >= 67 && operation <= 70 && selected == 5)
                 || (operation >= 71 && operation <= 75 && selected == 6)

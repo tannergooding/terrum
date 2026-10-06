@@ -64,6 +64,33 @@ public sealed partial class CliTests
     }
 
     [Theory]
+    [InlineData("int32 Main() { return Shift(21, 1); } int32 Shift(int32 value, int32 count) { return value << count; }")]
+    [InlineData("int32 Main() { return Shift(-84, 1) == -42 ? 42 : 0; } int32 Shift(int32 value, int32 count) { return value >> count; }")]
+    [InlineData("int32 Main() { return Shift(-1, 1) == 2147483647 ? 42 : 0; } int32 Shift(int32 value, int32 count) { return value >>> count; }")]
+    [InlineData("int32 Main() { return Shift(1, 31) == 0x80000000 ? 42 : 0; } uint32 Shift(uint32 value, int32 count) { return value << count; }")]
+    [InlineData("int32 Main() { return Shift(-84, 2) == -21 ? 42 : 0; } int64 Shift(int64 value, int32 count) { return value >> count; }")]
+    [InlineData("int32 Main() { return Shift(0x8000000000000000, 63) == 1 ? 42 : 0; } uint64 Shift(uint64 value, int32 count) { return value >>> count; }")]
+    public async Task ScalarFrontendProjectsCheckedIntegerShiftsAsync(string source)
+    {
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Fact]
+    public async Task ScalarFrontendRejectsIntegerShiftWithNonInt32CountAsync()
+    {
+        const string source = "int32 Main() { return Shift(1, 1); } int32 Shift(int32 value, uint32 count) { return value << count; }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+            "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(2, document.RootElement.GetProperty("result")
+            .GetProperty("errorCode").GetInt32());
+    }
+
+    [Theory]
     [InlineData(64, true)]
     [InlineData(65, false)]
     public async Task ScalarFrontendEnforcesGlobalScannerTokenLimitAndPreservesLaterFrameIndexesAsync(

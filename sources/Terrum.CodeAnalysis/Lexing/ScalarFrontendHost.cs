@@ -2218,6 +2218,17 @@ public static partial class ScalarFrontendHost
                     && source.Text.AsSpan(expression.Span.Start, expression.Span.Length)
                         .SequenceEqual((operation == 20 ? "true" : "false").AsSpan());
             }
+            if (operation is >= 88 and <= 90)
+            {
+                return encodedOffset == 0
+                    && expression.Type == type
+                    && type == leftType && leftType is >= 1 and <= 4
+                    && rightType == 1
+                    && ValidSpan(expression.Span, nonempty: true)
+                    && left >= 1 && left <= parameters
+                    && right >= 1 && right <= parameters
+                    && MatchesSource(expression, left, right);
+            }
             return encodedOffset == 0 && expression.Type == type
                 && ValidSpan(expression.Span, nonempty: true)
                 && left >= 1 && left <= parameters
@@ -2276,7 +2287,8 @@ public static partial class ScalarFrontendHost
                 57 => "+", 58 => "-", 59 => "*", 60 => "/", 61 => "%",
                 65 => "==", 66 => "!=", 67 => "<",
                 68 => "<=", 69 => ">", 70 => ">=", 71 => "&", 73 => "|",
-                72 => "&&", 74 => "||", 75 => "^", _ => throw InvalidResult(),
+                72 => "&&", 74 => "||", 75 => "^",
+                88 => "<<", 89 => ">>", 90 => ">>>", _ => throw InvalidResult(),
             };
             if (!groupedLeft && middleLength >= 1
                 && source.Text.AsSpan(span.Start, leftName.Length)
