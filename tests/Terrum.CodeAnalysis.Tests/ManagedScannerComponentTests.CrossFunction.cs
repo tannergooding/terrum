@@ -104,6 +104,38 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("float64 Value() { return 0.1; }", 8, -1717986918, 1069128089)]
+    [InlineData("float32 Value() { return 0X1.8P+1; }", 7, 0x40400000, 0)]
+    [InlineData("float32 Value() { return 0B101; }", 7, 0x40A00000, 0)]
+    [InlineData("float64 Value() { return 0X123; }", 8, 0, 0x40723000)]
+    [InlineData("float32 Value() { return 1.25E-2; }", 7, 0x3C4CCCCD, 0)]
+    public async Task ScalarFrontendDispatchesFloatLiteralBitsInTerrumAsync(
+        string source, int type, int low, int high)
+    {
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                require TryParseScalarFrontend(move tokens, init var result);
+                if (!result.IsValid || result.WhenTrue.Operation != 3
+                    || result.WhenTrue.Type != {{type}}
+                    || result.WhenTrue.LeftParameter != {{low}}
+                    || result.WhenTrue.RightParameter != {{high}}) {
+                    return 1;
+                }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(source, entry, policy, "ScalarFrontend");
+            var nativePolicy = (NativeRuntimePolicy)policy;
+            Assert.Equal(42, NativeJit.Execute(program, nativePolicy));
+            await ExecuteAotAsync(program, nativePolicy);
+        }
+    }
+
+    [Theory]
     [InlineData("alias Scalar = Wide; alias Wide = int32; public Scalar Main() { const Wide value = 40; return Bump(int32(value)); } Scalar Bump(Scalar value) => value + 2;", 2, 42)]
     [InlineData("public Number Main() { init Number value; Set(init value); return int32(value) + 2; } void Set(init ref<Scalar> value) { value = 40; } alias Number = Scalar; alias Scalar = int32;", 2, 42)]
     [InlineData("alias Number = int32; public Number Main() => 42;", 1, 42)]
