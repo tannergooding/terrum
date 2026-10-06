@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Lexing;
@@ -46,14 +47,15 @@ public sealed class StringEscapeModuleTests
                 mut int32 at = 0;
                 mut int32 item = 0;
                 while (at < sourceLength) {
-                    if (sourceLength - at < 6) { return -1; }
+                    if (sourceLength - at < 7) { return -1; }
                     int32 expectedError = int32(Host.Source[at]);
-                    int32 expectedScalar = int32(Host.Source[at + 1]);
-                    bool expectedUnpaired = Host.Source[at + 2] != char16(0);
-                    int32 expectedConsumedLength = int32(Host.Source[at + 3]);
-                    int32 expectedErrorLength = int32(Host.Source[at + 4]);
-                    int32 spellingLength = int32(Host.Source[at + 5]);
-                    at = at + 6;
+                    int32 expectedScalar = int32(Host.Source[at + 1])
+                        | (int32(Host.Source[at + 2]) << 16);
+                    bool expectedUnpaired = Host.Source[at + 3] != char16(0);
+                    int32 expectedConsumedLength = int32(Host.Source[at + 4]);
+                    int32 expectedErrorLength = int32(Host.Source[at + 5]);
+                    int32 spellingLength = int32(Host.Source[at + 6]);
+                    at = at + 7;
                     if (spellingLength < 1 || spellingLength > sourceLength - at) { return -2; }
                     if (!SourceRange.TryCreate(at, spellingLength, init var spelling)
                         || !StringEscapeDecodeResult.TryAnalyze(spelling, init var decoded)) {
@@ -190,14 +192,15 @@ public sealed class StringEscapeModuleTests
                 errorLength = diagnostic.Span.Length;
             }
 
-            var recordLength = 6 + escape.Length;
+            var recordLength = 7 + escape.Length;
             if (records.Count + recordLength > maximumGrantLength)
             {
                 ExecuteRecords();
             }
 
             records.Add(errorCode);
-            records.Add(scalar < 0 ? 0 : scalar);
+            records.Add(scalar < 0 ? 0 : scalar & 0xFFFF);
+            records.Add(scalar < 0 ? 0 : scalar >> 16);
             records.Add(scalar < 0 ? 1 : 0);
             records.Add(consumedLength);
             records.Add(errorLength);
@@ -205,6 +208,44 @@ public sealed class StringEscapeModuleTests
             records.AddRange(escape.Select(static unit => (int)unit));
         }
         ExecuteRecords();
+
+        const int firstSupplementaryScalar = 0x10000;
+        const int supplementaryScalarLimit = 0x110000;
+        const int maximumScalarsPerBatch = 960;
+        for (var scalarStart = firstSupplementaryScalar;
+            scalarStart < supplementaryScalarLimit;
+            scalarStart += maximumScalarsPerBatch)
+        {
+            var scalarCount = Math.Min(maximumScalarsPerBatch,
+                supplementaryScalarLimit - scalarStart);
+            var batchText = new StringBuilder(scalarCount * 14);
+            for (var index = 0; index < scalarCount; index++)
+            {
+                var scalar = scalarStart + index;
+                var escape = $"\\U{scalar:X8}";
+                batchText.Append('"').Append(escape).Append("\" ");
+                records.Add(0);
+                records.Add(scalar & 0xFFFF);
+                records.Add(scalar >> 16);
+                records.Add(0);
+                records.Add(escape.Length);
+                records.Add(0);
+                records.Add(escape.Length);
+                records.AddRange(escape.Select(static unit => (int)unit));
+            }
+
+            var lexed = Lexer.Lex(SourceText.From(batchText.ToString()));
+            Assert.Empty(lexed.Diagnostics);
+            Assert.Equal(scalarCount + 1, lexed.Tokens.Length);
+            for (var index = 0; index < scalarCount; index++)
+            {
+                Assert.Equal(TokenKind.StringLiteral, lexed.Tokens[index].Kind);
+                Assert.Equal($"\"\\U{scalarStart + index:X8}\"",
+                    lexed.Tokens[index].Text);
+            }
+            Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[^1].Kind);
+            ExecuteRecords();
+        }
     }
 
     private static int ExpectedResult(string escape, int errorCode, int scalar,

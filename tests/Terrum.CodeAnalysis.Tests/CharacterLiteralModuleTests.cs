@@ -233,6 +233,42 @@ public sealed class CharacterLiteralModuleTests
             ExecuteRecords();
         }
         ExecuteRecords();
+
+        const int maximumEscapedScalarsPerBatch = 900;
+        for (var scalarStart = firstSupplementaryScalar;
+            scalarStart < supplementaryScalarLimit;
+            scalarStart += maximumEscapedScalarsPerBatch)
+        {
+            var scalarCount = Math.Min(maximumEscapedScalarsPerBatch,
+                supplementaryScalarLimit - scalarStart);
+            var batchText = new StringBuilder(scalarCount * 13);
+            for (var index = 0; index < scalarCount; index++)
+            {
+                var scalar = scalarStart + index;
+                var spelling = $"'\\U{scalar:X8}'";
+                batchText.Append(spelling).Append(' ');
+                records.Add(0);
+                records.Add(scalar & 0xFFFF);
+                records.Add(scalar >> 16);
+                records.Add(0);
+                records.Add(0);
+                records.Add(spelling.Length);
+                records.AddRange(spelling.Select(static unit => (int)unit));
+            }
+
+            var lexed = Lexer.Lex(SourceText.From(batchText.ToString()));
+            Assert.Empty(lexed.Diagnostics);
+            Assert.Equal(scalarCount + 1, lexed.Tokens.Length);
+            for (var index = 0; index < scalarCount; index++)
+            {
+                Assert.Equal(TokenKind.CharacterLiteral, lexed.Tokens[index].Kind);
+                Assert.Equal($"'\\U{scalarStart + index:X8}'",
+                    lexed.Tokens[index].Text);
+            }
+            Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[^1].Kind);
+            ExecuteRecords();
+        }
+        ExecuteRecords();
     }
 
     private static int ExpectedInvalidResult(Diagnostic diagnostic)

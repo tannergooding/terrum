@@ -232,6 +232,39 @@ public sealed class StringLiteralModuleTests
         }
         ExecuteRecords();
 
+        const int maximumEscapedScalarsPerBatch = 1_000;
+        for (var scalarStart = firstSupplementaryScalar;
+            scalarStart < supplementaryScalarLimit;
+            scalarStart += maximumEscapedScalarsPerBatch)
+        {
+            var scalarCount = Math.Min(maximumEscapedScalarsPerBatch,
+                supplementaryScalarLimit - scalarStart);
+            var batchText = new StringBuilder(scalarCount * 13);
+            for (var index = 0; index < scalarCount; index++)
+            {
+                var scalar = scalarStart + index;
+                var spelling = $"\"\\U{scalar:X8}\"";
+                batchText.Append(spelling).Append(' ');
+                records.Add(1);
+                records.Add(scalar & 0xFFFF);
+                records.Add(scalar >> 16);
+                records.Add(spelling.Length);
+                records.AddRange(spelling.Select(static unit => (int)unit));
+            }
+
+            var lexed = Lexer.Lex(SourceText.From(batchText.ToString()));
+            Assert.Empty(lexed.Diagnostics);
+            Assert.Equal(scalarCount + 1, lexed.Tokens.Length);
+            for (var index = 0; index < scalarCount; index++)
+            {
+                Assert.Equal(TokenKind.StringLiteral, lexed.Tokens[index].Kind);
+                Assert.Equal($"\"\\U{scalarStart + index:X8}\"",
+                    lexed.Tokens[index].Text);
+            }
+            Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[^1].Kind);
+            ExecuteRecords();
+        }
+
         var requestedConsumer = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() { return ReadRequestedStringScalar(); }
