@@ -80,6 +80,10 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
+            if (function.IsOperator)
+            {
+                VerifyOperatorFunction(function, program);
+            }
             if (function.Variables.Length > MaximumVariables)
             {
                 throw Limit();
@@ -3308,6 +3312,14 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(update.Span, "UnsafeCaller");
                 }
+                var updateOperator = update.Operator == TokenKind.PlusPlus
+                    ? TokenKind.PlusPlus : TokenKind.MinusMinus;
+                if (!updateTarget.IsOperator
+                    || !Binder.TryGetStaticOperatorKey(updateTarget.Name, updateOwner, out var operatorKey)
+                    || operatorKey.Arity != 1 || operatorKey.Operator != updateOperator)
+                {
+                    throw Invalid();
+                }
                 if (function.IsNoThrow && !updateTarget.IsNoThrow)
                 {
                     throw InvalidEffect(update.Span);
@@ -3783,6 +3795,54 @@ public static partial class SemanticVerifier
                 break;
             default:
                 throw Invalid();
+        }
+    }
+
+    private static void VerifyOperatorFunction(BoundFunction function, BoundProgram program)
+    {
+        if (!function.IsStatic || function.IsConstructor || function.IsClassConstructor
+            || function.IsCleanup || function.PropertyName is not null || function.Intrinsic != BoundIntrinsic.None
+            || function.DeclaringStruct is not string owner
+            || !Binder.TryGetStaticOperatorKey(function.Name, owner, out var key)
+            || function.ParameterCount != key.Arity || function.Variables.Length < key.Arity
+            || !ValidType(function.ReturnType, allowVoid: false, program))
+        {
+            throw Invalid();
+        }
+        var ownerIndex = -1;
+        for (var index = 0; index < program.Structures.Length; index++)
+        {
+            if (program.Structures[index].Name == owner)
+            {
+                ownerIndex = index;
+                break;
+            }
+        }
+        if (ownerIndex < 0)
+        {
+            throw Invalid();
+        }
+        var ownerType = (PrimitiveType)(100 + ownerIndex);
+        for (var index = 0; index < key.Arity; index++)
+        {
+            var parameter = function.Variables[index];
+            if (parameter.Type != ownerType || parameter.IsMutable || parameter.IsOut || parameter.IsInit)
+            {
+                throw Invalid();
+            }
+        }
+        if (key.Operator is TokenKind.PlusPlus or TokenKind.MinusMinus
+            && function.ReturnType != ownerType)
+        {
+            throw Invalid();
+        }
+        if (key.Arity == 2)
+        {
+            var expectedResult = Binder.IsComparisonOperator(key.Operator) ? PrimitiveType.Bool : ownerType;
+            if (function.ReturnType != expectedResult)
+            {
+                throw Invalid();
+            }
         }
     }
 

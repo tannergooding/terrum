@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 63;
+    private const int Version = 64;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1475,7 +1475,7 @@ public static partial class ModuleCompiler
         if (function.Function is BoundFunction body)
         {
             return (body.RequiresUnsafeCaller && body.DeclaringStruct is not null
-                    && !IsSupportedModuleUnsafeMethod(body, structures, valueTypes))
+                    && !body.IsOperator && !IsSupportedModuleUnsafeMethod(body, structures, valueTypes))
                 || ContainsUnsupportedModuleCallerUnsafeFieldLoan(
                     body.Body, structures, valueTypes);
         }
@@ -1546,6 +1546,76 @@ public static partial class ModuleCompiler
         && function.PropertyName is string propertyName && propertyName.Length != 0
         && function.Name == ownerName + ".#get:" + propertyName;
 
+    private static bool HasOperatorContractMarker(string contract) =>
+        contract.Contains("|Operator|", StringComparison.Ordinal)
+        || contract.EndsWith("|Operator", StringComparison.Ordinal);
+
+    private static bool IsSupportedModuleOperatorContract(string contract,
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes, bool requirePublic)
+    {
+        if (!TryContractPromises(contract.AsSpan(), out var signature, out _, out _, out _)
+            || !signature.EndsWith("|Operator".AsSpan(), StringComparison.Ordinal))
+        {
+            return false;
+        }
+        var parts = signature.ToString().Split('|');
+        if (parts.Length < 9 || parts[^1] != "Operator" || parts[2] != "F" || parts[4] != "S"
+            || !Binder.TryGetStaticOperatorKey(parts[0], parts[5], out var key)
+            || !int.TryParse(parts[7], System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var parameterCount)
+            || parameterCount != key.Arity || parts.Length != 9 + parameterCount)
+        {
+            return false;
+        }
+        var ownerIndex = -1;
+        for (var index = 0; index < structures.Length; index++)
+        {
+            if (structures[index].Name == parts[5])
+            {
+                ownerIndex = index;
+                break;
+            }
+        }
+        if (ownerIndex < 0 || parts[6] != Visibility(structures[ownerIndex]).ToString()
+            || parts[3] is not ("E" or "N" or "P")
+            || parts[1].Length == 0 || parts[1] == "void")
+        {
+            return false;
+        }
+        var ownerType = (PrimitiveType)(100 + ownerIndex);
+        var ownerContractType = ContractType(ownerType, structures);
+        for (var index = 0; index < parameterCount; index++)
+        {
+            if (parts[8 + index] != "in:" + ownerContractType)
+            {
+                return false;
+            }
+        }
+        if (key.Operator is TokenKind.PlusPlus or TokenKind.MinusMinus
+            && parts[1] != ownerContractType)
+        {
+            return false;
+        }
+        if (key.Arity == 2)
+        {
+            var resultType = Binder.IsComparisonOperator(key.Operator)
+                ? ContractType(PrimitiveType.Bool, structures) : ownerContractType;
+            if (parts[1] != resultType)
+            {
+                return false;
+            }
+        }
+        if (!requirePublic)
+        {
+            return true;
+        }
+        return parts[3] == "E" && parts[6] == "E" && !structures[ownerIndex].IsUnique
+            && PublicLayout(ownerType, true, structures, new HashSet<(int Index, bool PublicFields)>())
+            && valueTypes.IsSupported(parts[1])
+            && parts.Skip(8).Take(parameterCount)
+                .All(parameter => valueTypes.IsSupported(parameter.AsSpan("in:".Length)));
+    }
+
     private static bool IsSupportedModuleUnsafeMethodContract(string contract,
         ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
     {
@@ -1553,6 +1623,10 @@ public static partial class ModuleCompiler
             || !unsafeCaller)
         {
             return false;
+        }
+        if (signature.EndsWith("|Operator".AsSpan(), StringComparison.Ordinal))
+        {
+            return IsSupportedModuleOperatorContract(contract, structures, valueTypes, requirePublic: true);
         }
 
         var parts = signature.ToString().Split('|');
@@ -1920,6 +1994,10 @@ public static partial class ModuleCompiler
         if (function.IsCleanup)
         {
             _ = result.Append("|Cleanup");
+        }
+        if (function.IsOperator)
+        {
+            _ = result.Append("|Operator");
         }
         _ = result.Append(function.IsNoThrow ? "|NoThrow" : "|MayThrow")
             .Append(function.DoesNotReturn ? "|DoesNotReturn" : "|MayReturn");
@@ -2387,6 +2465,17 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("Indexed executable Bodies cannot be serialized as structured module IR.");
         }
+        ModuleUnsafeValueTypeCache? valueTypes = null;
+        foreach (var function in module.Functions)
+        {
+            if ((function.Function?.IsOperator == true || HasOperatorContractMarker(function.Contract))
+                && !IsSupportedModuleOperatorContract(function.Contract, module.Structures,
+                    valueTypes ??= new ModuleUnsafeValueTypeCache(module.Structures),
+                    function.Import))
+            {
+                throw new ModuleContractException("Module contains an unsupported operator contract.");
+            }
+        }
         if (module.Consumer && !HasPrivateManagedState(module))
         {
             RejectManagedNodes(program);
@@ -2757,6 +2846,11 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Function body contradicts its declaration.");
             }
+            if ((function?.IsOperator == true || HasOperatorContractMarker(contract))
+                && !IsSupportedModuleOperatorContract(contract, structures, valueTypes, import))
+            {
+                throw new ModuleFormatException("Module contains an unsupported operator contract.");
+            }
             var item = new ModuleFunction(name, contract, function, import) {
                 HasOwnershipTransfer = ownershipTransfer,
             };
@@ -2777,6 +2871,7 @@ public static partial class ModuleCompiler
         writer.Write(function.IsPrivate);
         writer.Write(function.IsInternal);
         writer.Write(function.IsStatic);
+        writer.Write(function.IsOperator);
         writer.Write(function.IsNoThrow);
         writer.Write(function.DoesNotReturn);
         writer.Write(function.RequiresUnsafeCaller);
@@ -2817,6 +2912,7 @@ public static partial class ModuleCompiler
         var isPrivate = GetBool(reader);
         var isInternal = GetBool(reader);
         var isStatic = GetBool(reader);
+        var isOperator = GetBool(reader);
         var isNoThrow = GetBool(reader);
         var doesNotReturn = GetBool(reader);
         var requiresUnsafeCaller = GetBool(reader);
@@ -2863,6 +2959,7 @@ public static partial class ModuleCompiler
             IsPrivate = isPrivate,
             IsInternal = isInternal,
             IsStatic = isStatic,
+            IsOperator = isOperator,
             IsNoThrow = isNoThrow,
             DoesNotReturn = doesNotReturn,
             RequiresUnsafeCaller = requiresUnsafeCaller,

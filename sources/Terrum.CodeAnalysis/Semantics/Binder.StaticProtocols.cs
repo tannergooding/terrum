@@ -199,6 +199,7 @@ internal sealed partial class Binder
             IsExternal = true,
             IsConstructor = declaration.IsConstructor,
             IsStatic = declaration.IsStatic,
+            IsOperator = declaration.IsOperator,
             IsNoThrow = declaration.IsNoThrow,
             DoesNotReturn = declaration.DoesNotReturn,
             RequiresUnsafeCaller = declaration.RequiresUnsafeCaller,
@@ -223,7 +224,7 @@ internal sealed partial class Binder
         kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde
             or TokenKind.PlusPlus or TokenKind.MinusMinus;
 
-    private static bool IsComparisonOperator(TokenKind kind) => kind is TokenKind.EqualsEquals or TokenKind.BangEquals
+    internal static bool IsComparisonOperator(TokenKind kind) => kind is TokenKind.EqualsEquals or TokenKind.BangEquals
         or TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals;
 
     private static PrimitiveType StaticOperatorResult(TokenKind kind, PrimitiveType operand) =>
@@ -253,6 +254,48 @@ internal sealed partial class Binder
         { Operator: TokenKind.GreaterEquals, Arity: 2 } => "op_GreaterThanOrEqual",
         _ => throw new ArgumentOutOfRangeException(nameof(key)),
     };
+
+    internal static bool TryGetStaticOperatorKey(string name, string owner, out StaticOperatorKey key)
+    {
+        key = default;
+        var nameSpan = name.AsSpan();
+        var ownerSpan = owner.AsSpan();
+        if (nameSpan.Length <= ownerSpan.Length + 1
+            || !nameSpan.StartsWith(ownerSpan, StringComparison.Ordinal)
+            || nameSpan[ownerSpan.Length] != '.')
+        {
+            return false;
+        }
+        var operatorName = nameSpan[(ownerSpan.Length + 1)..];
+        if (operatorName.StartsWith("$producer.", StringComparison.Ordinal))
+        {
+            operatorName = operatorName["$producer.".Length..];
+        }
+        key = operatorName.ToString() switch {
+            "op_UnaryPlus" => new StaticOperatorKey(TokenKind.Plus, 1),
+            "op_UnaryNegation" => new StaticOperatorKey(TokenKind.Minus, 1),
+            "op_LogicalNot" => new StaticOperatorKey(TokenKind.Bang, 1),
+            "op_OnesComplement" => new StaticOperatorKey(TokenKind.Tilde, 1),
+            "op_Increment" => new StaticOperatorKey(TokenKind.PlusPlus, 1),
+            "op_Decrement" => new StaticOperatorKey(TokenKind.MinusMinus, 1),
+            "op_Addition" => new StaticOperatorKey(TokenKind.Plus, 2),
+            "op_Subtraction" => new StaticOperatorKey(TokenKind.Minus, 2),
+            "op_Multiply" => new StaticOperatorKey(TokenKind.Star, 2),
+            "op_Division" => new StaticOperatorKey(TokenKind.Slash, 2),
+            "op_Modulus" => new StaticOperatorKey(TokenKind.Percent, 2),
+            "op_BitwiseAnd" => new StaticOperatorKey(TokenKind.Ampersand, 2),
+            "op_BitwiseOr" => new StaticOperatorKey(TokenKind.Pipe, 2),
+            "op_ExclusiveOr" => new StaticOperatorKey(TokenKind.Caret, 2),
+            "op_Equality" => new StaticOperatorKey(TokenKind.EqualsEquals, 2),
+            "op_Inequality" => new StaticOperatorKey(TokenKind.BangEquals, 2),
+            "op_LessThan" => new StaticOperatorKey(TokenKind.Less, 2),
+            "op_LessThanOrEqual" => new StaticOperatorKey(TokenKind.LessEquals, 2),
+            "op_GreaterThan" => new StaticOperatorKey(TokenKind.Greater, 2),
+            "op_GreaterThanOrEqual" => new StaticOperatorKey(TokenKind.GreaterEquals, 2),
+            _ => default,
+        };
+        return key.Arity != 0;
+    }
 
     private static PrimitiveType? GenericScalarType(string name) => name switch {
         "int32" => PrimitiveType.Int32,
@@ -1157,6 +1200,7 @@ internal sealed partial class Binder
                         new BoundBlock([], operatorSpan), operatorSpan) {
                         IsExternal = true,
                         IsStatic = true,
+                        IsOperator = true,
                         IsNoThrow = _protocols[constraint.Protocol].IsNoThrow,
                         RequiresUnsafeCaller = _protocols[constraint.Protocol].RequiresUnsafeCaller,
                         DeclaringStruct = probeName,

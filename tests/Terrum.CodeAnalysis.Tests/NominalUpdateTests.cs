@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
@@ -425,6 +426,87 @@ public sealed class NominalUpdateTests
         Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(index, function with { IsNoThrow = true }),
         }));
+        var operatorIndex = Enumerable.Range(0, program.Functions.Length)
+            .Single(i => program.Functions[i].Name == "Value.op_Increment");
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(operatorIndex,
+                program.Functions[operatorIndex] with { IsOperator = false }),
+        }));
+
+        var ordinary = Compile("""
+            struct Value {
+                public int32 Number;
+                public static int32 op_Increment(Value value) { return 1; }
+            }
+            int32 Main() { return 1; }
+            """, NativeRuntimePolicy.FailFast);
+        var ordinaryOperatorIndex = Enumerable.Range(0, ordinary.Functions.Length)
+            .Single(i => ordinary.Functions[i].Name == "Value.op_Increment");
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(ordinary with {
+            Functions = ordinary.Functions.SetItem(ordinaryOperatorIndex,
+                ordinary.Functions[ordinaryOperatorIndex] with { IsOperator = true }),
+        }));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void ConcreteNominalUpdatesInGenericDefinitionsRetainOperatorIdentity(NativeRuntimePolicy policy)
+    {
+        var source = Operators + """
+            T Forward<T>(T value) where T : [Copy] {
+                mut Value fixedValue = new Value(1);
+                fixedValue++;
+                return value;
+            }
+            int32 Main() { return Forward(new Value(42)).Number; }
+            """;
+        Assert.Equal(42, NativeJit.Execute(Compile(source, policy), policy));
+    }
+
+    [Fact]
+    public void BodylessIncrementImportContractRequiresOwnerResult()
+    {
+        const string source = """
+            public struct Value {
+                public int32 Number;
+                public Value(int32 number) { Number = number; }
+                public static Value operator ++(Value value) {
+                    return new Value(value.Number + 1);
+                }
+            }
+            """;
+        var producer = ModuleCompiler.CreateProducer(CompileLibrary(source, NativeRuntimePolicy.FailFast),
+            ["Value.#ctor", "Value.op_Increment"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var client = CompileClient("""
+            int32 Main() {
+                mut Value value = new Value(40);
+                return (++value).Number;
+            }
+            """, reference, NativeRuntimePolicy.FailFast);
+        var consumer = ModuleCompiler.CreateConsumer(client, producer);
+        var contractPrefix = Encoding.UTF8.GetBytes("Value.op_Increment|Value:E|");
+        var contractOffset = consumer.AsSpan().IndexOf(contractPrefix);
+        Assert.True(contractOffset >= 0);
+        var lengthOffset = contractOffset - sizeof(int);
+        var originalLength = BinaryPrimitives.ReadInt32LittleEndian(
+            consumer.AsSpan(lengthOffset, sizeof(int)));
+        var originalContract = Encoding.UTF8.GetString(consumer, contractOffset, originalLength);
+        var scalarReturnType = ((int)PrimitiveType.Int32)
+            .ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var malformedContract = originalContract.Replace("Value.op_Increment|Value:E|",
+            "Value.op_Increment|" + scalarReturnType + "|", StringComparison.Ordinal);
+        Assert.NotEqual(originalContract, malformedContract);
+        var malformedContractBytes = Encoding.UTF8.GetBytes(malformedContract);
+        var malformed = new byte[consumer.Length + malformedContractBytes.Length - originalLength];
+        consumer.AsSpan(0, lengthOffset).CopyTo(malformed);
+        BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(lengthOffset, sizeof(int)),
+            malformedContractBytes.Length);
+        malformedContractBytes.CopyTo(malformed.AsSpan(lengthOffset + sizeof(int)));
+        consumer.AsSpan(contractOffset + originalLength).CopyTo(
+            malformed.AsSpan(lengthOffset + sizeof(int) + malformedContractBytes.Length));
+        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(malformed, producer));
     }
 
     [Theory]
@@ -459,9 +541,9 @@ public sealed class NominalUpdateTests
         }
         string[] exports = exportOperator ? ["Next", "Value.op_Increment"] : ["Next"];
         var original = ModuleCompiler.CreateProducer(CompileLibrary(library, policy), exports);
-        Assert.Equal(63,BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)));
+        Assert.Equal(64, BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)));
         var stale = (byte[])original.Clone();
-        BinaryPrimitives.WriteInt32LittleEndian(stale.AsSpan(4, 4), 43);
+        BinaryPrimitives.WriteInt32LittleEndian(stale.AsSpan(4, 4), 63);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(stale));
         var client = CompileClient("int32 Main() { return Next(); }",
             ModuleCompiler.CreateReference(original), policy);

@@ -46,8 +46,8 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 63. Writers use it for every producer,
-consumer and graph library; readers accept only revision 63. Revision 48 adds
+The current semantic-module revision is 64. Writers use it for every producer,
+consumer and graph library; readers accept only revision 64. Revision 48 adds
 the initialization-aware optional-handle pattern expression, recording its
 source expression, capture slot and whether initialized null is accepted.
 Revision 49 adds expression tag 28 for named-storage initialization tests,
@@ -107,7 +107,14 @@ through eligible field paths are supported with authorization checked at each
 field edge. Readonly field loans and `unsafe(expr)`-only persistence remain
 unsupported. Class/static/foreign fields, reference/output, unique, managed,
 buffer/view and other non-Copy member contracts remain unsupported.
-Executable TRRM member support is unchanged. Revision 62 and older artifacts
+Revision 64 provisionally persists explicit identity for existing safe and
+caller-unsafe static operators on eligible public, non-unique `Copy` structs.
+The marker is checked for canonical owner/name/signature shape in body-backed
+and bodyless declarations, is structural across links, graphs and module sets,
+and is required by nominal update verification. Caller-unsafe operations still
+require persisted `BoundUnsafe` scopes. This does not add operator lowering,
+native ABI, or executable TRRM support.
+Executable TRRM member support is unchanged. Revision 63 and older artifacts
 are retired and must be recreated from source.
 These experiments do not approve the broader reference-call metadata proposal.
 The scanner-specific implementation is provisional and its design remains
@@ -613,7 +620,7 @@ unsupported.
 
 The following feature notes document implementation milestones only. They do
 not describe current writer selection or reader compatibility: current
-artifacts always use revision 63, and older semantic-module revisions are
+artifacts always use revision 64, and older semantic-module revisions are
 rejected.
 
 Version 12 stored the unique layout flag, declared cleanup method, cleanup

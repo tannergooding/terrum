@@ -332,6 +332,9 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     /// <summary>Whether a member has no receiver.</summary>
     public bool IsStatic { get; init; }
 
+    /// <summary>Whether this function was declared with static operator syntax.</summary>
+    public bool IsOperator { get; init; }
+
     /// <summary>A fixed compiler-defined operation, or None for an ordinary function.</summary>
     public BoundIntrinsic Intrinsic { get; init; }
 

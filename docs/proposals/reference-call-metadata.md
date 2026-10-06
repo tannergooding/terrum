@@ -238,6 +238,38 @@ metadata proposal.
 bounded implementation and regression coverage do not approve the broader
 reference-call metadata proposal or establish a general stored-loan contract.
 
+### Implemented follow-up: caller-unsafe static operators
+
+**Implemented provisionally in semantic-module revision 64:** `BoundFunction`
+and callable contracts now retain an explicit operator marker. Writers and
+readers validate the marker against the declaring owner, static status,
+recognized canonical `op_*` name, arity and signature for body-backed and
+bodyless declarations. The persisted slice covers existing safe and
+caller-unsafe operators on eligible public, non-unique `Copy` structs with
+scalar or recursively exportable `Copy` by-value parameters and results;
+caller-unsafe operators still require an enclosing persisted `BoundUnsafe`
+scope.
+
+Operator identity is structural across semantic links, native graphs and
+module sets, while `NoThrow`, `DoesNotReturn` and caller-unsafe promises retain
+their directional compatibility. Imported-signature reconstruction and
+function remapping preserve the marker, including `Owner.$producer.op_*`
+names. Nominal update verification requires the target marker in addition to
+its existing name and signature checks, rejecting forged updates to ordinary
+`op_Increment`/`op_Decrement` methods. Existing unary, binary, comparison and
+nominal-update binding/lowering rules are unchanged. Revision-63 artifacts are
+rejected rather than inferred or migrated; no native ABI or operator lowering
+was added.
+
+Regression coverage includes mixed safe/unsafe operators under both runtime
+policies, unary results distinct from the owner, Boolean comparisons,
+bodyless malformed contracts, identity-mismatched replacements, nominal
+updates, and semantic/native links, graphs and module sets. The bounded
+implementation does not approve the proposed general reference-call target
+contract; mutable receivers, constructors, accessors, classes, generic
+witnesses, reference/output parameters and unsupported layouts remain outside
+this slice.
+
 Executable TRRM also provisionally round-trips the assigned caller-unsafe
 Effects bit on top-level function declarations, including when composed with
 `NoThrow` or `DoesNotReturn`, and provisionally admits calls only inside
@@ -296,7 +328,7 @@ individual call was authorized.
 ### 3. How should executable Bodies validate caller-unsafe scope?
 
 **Summary:** The source caller obligation and assigned Effects bit `0x04` are
-settled, and semantic-module revision 63 reconstructs authorization from
+settled, and semantic-module revision 64 reconstructs authorization from
 explicit `BoundUnsafe` scopes. Executable TRRM provisionally round-trips
 caller-unsafe declarations and supports calls only inside validated indexed
 Body unsafe scopes. Compact-linear Bodies still cannot prove explicit

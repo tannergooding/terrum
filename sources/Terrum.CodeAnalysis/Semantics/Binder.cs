@@ -171,6 +171,7 @@ internal sealed partial class Binder
                     null, null, _trees[0], function.DeclaringStruct, function.IsConstructor,
                     false, false, false, function.IsStatic, function.IsNoThrow, function.DoesNotReturn, function) {
                     IsCleanup = function.IsCleanup,
+                    IsOperator = function.IsOperator,
                     PropertyName = function.PropertyName,
                     RequiresUnsafeCaller = function.RequiresUnsafeCaller,
                 });
@@ -566,6 +567,7 @@ internal sealed partial class Binder
                 IsPrivate = signature.IsPrivate,
                 IsInternal = signature.IsInternal,
                 IsStatic = signature.IsStatic,
+                IsOperator = signature.IsOperator,
                 IsNoThrow = signature.IsNoThrow,
                 RequiresUnsafeCaller = signature.RequiresUnsafeCaller,
                 IsClassConstructor = signature.IsClassConstructor,
