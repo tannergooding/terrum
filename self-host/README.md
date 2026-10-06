@@ -20,9 +20,9 @@ consumption, `tests\native\token-abi.terrum` for aggregate ABI selection,
 these helper exports are test-only. The build also emits a separate
 provisional `terrum-compiler-primitives-source-grant.dll` from
 `CharacterFacts`, `SourceCodeUnit`, `SourceLineCount`, `SourceTextLength`,
-`SourceOffset`, `Utf16CodeUnits` and `Utf16Scalar`, with a hash-bound export
-manifest; it does not change the source-free compiler-primitives DLL or
-establish a stable ABI.
+`SourceOffset`, `SourcePosition`, `Utf16CodeUnits` and `Utf16Scalar`, with a
+hash-bound export manifest; it does not change the source-free
+compiler-primitives DLL or establish a stable ABI.
 This maintained native
 compiler-primitives library exports `Terrum.CodeAnalysis.SourceRange.TryCreate`,
 `Terrum.CodeAnalysis.IsAsciiDigit`,
@@ -82,13 +82,17 @@ it does not approve a public layout, stable C ABI, or exact hidden-result write
 extent.
 The source-grant-dependent `Utf16Scalar.ReadUtf16Scalar` adapter remains
 outside the source-free DLL. The separate companion exports its checked
-`ReadUtf16ScalarChecked` adapter and the scalar-only `GetSourceLineCount`,
-`GetSourceTextLength`, `GetSourceCodeUnitOrMinusOne` and
-`GetSourceOffsetOrMinusOne` queries alongside the unchanged source-free
-decoder. The length, code-unit and offset components isolate scalar
-`SourceText` contracts; the code-unit query preserves every UTF-16 value, and
-the offset query returns `-1` for invalid line/character pairs. None of these
-queries is the complete `SourceText` or `SourceLines` facade.
+`ReadUtf16ScalarChecked` adapter and scalar-only queries for
+`GetSourceLineCount`, `GetSourceTextLength`,
+`GetSourceCodeUnitOrMinusOne`, `GetSourceOffsetOrMinusOne`,
+`GetSourceLineNumberOrMinusOne` and `GetSourceCharacterPositionOrMinusOne`,
+alongside the unchanged source-free decoder. The length, code-unit, offset
+and position components isolate scalar `SourceText` contracts; the code-unit
+query preserves every UTF-16 value, the offset query returns `-1` for invalid
+line/character pairs, and the position queries return `-1` for invalid source
+offsets. Position queries scan independently and must use the same unchanged
+snapshot when combined. None of these queries is the complete `SourceText`
+or `SourceLines` facade.
 The persisted
 semantic-module JIT test also checks every BMP code unit at a one-unit source
 boundary under both runtime policies, ensuring that a following code unit
@@ -389,7 +393,8 @@ native emitter or compiler self-build.
 | [SourceLineCount](SourceLineCount.terrum) | Scalar-only count of physical lines in the current immutable UTF-16 source grant, reusing shared line-break classification | Direct source-grant DLL tests compare with hosted `SourceText.Lines.Length` for empty, trailing-break, CRLF, Unicode line-break, NUL, malformed-surrogate and maximum-length inputs under both policies; the maintained fail-fast companion also binds the export and checks its edge and maximum-length behavior; this does not enable aggregate-output call closures or the complete `SourceLines` facade |
 | [SourceTextLength](SourceTextLength.terrum) | Scalar source-grant adapter for the existing `SourceText.GetSourceTextLength` contract | Direct source-grant DLL tests compare with hosted `SourceText.Length` for empty, edge and maximum-length grants under both policies; the maintained fail-fast companion binds the export through its image-hash manifest; isolated from the complete `SourceText` module because classifier checks include unselected source-dependent functions |
 | [SourceCodeUnit](SourceCodeUnit.terrum) | Isolated scalar query for one raw UTF-16 source code unit, returning `-1` for an out-of-range position | Direct tests exhaust all 65,536 code-unit values under both policies and compare edge/maximum grants with hosted `SourceText`; the maintained fail-fast companion binds the export through its image-hash manifest; callers check the sentinel before conversion, and this does not support the complete `SourceText` facade |
-| [SourceOffset](SourceOffset.terrum) | Isolated scalar line/character-to-source-offset query, returning `-1` for invalid pairs | Direct and manifest-bound tests compare every short-fixture line/character boundary with hosted `SourceText.TryGetOffset`, and exercise maximum plain, LF, CRLF and trailing-CR grants under both policies; aggregate `SourceRange` outputs and the complete `SourceLines` facade remain unsupported |
+| [SourceOffset](SourceOffset.terrum) | Isolated scalar line/character-to-source-offset query, returning `-1` for invalid pairs | Direct tests compare every short-fixture line/character boundary with hosted `SourceText.TryGetOffset` under both policies and exercise maximum plain, LF, CRLF and trailing-CR grants; the maintained fail-fast companion binds the export through its manifest; aggregate `SourceRange` outputs and the complete `SourceLines` facade remain unsupported |
+| [SourcePosition](SourcePosition.terrum) | Two isolated scalar queries for the hosted line number and UTF-16 character position of a source offset, returning `-1` for invalid offsets | Direct tests compare every short-fixture offset and maximum-grant boundaries with hosted `SourceText.GetLinePosition` under both policies; the maintained fail-fast companion binds the exports through its manifest; both CRLF code units stay on the preceding line; each query scans independently and must use the same snapshot when combined; aggregate `LinePosition` and the complete `SourceLines` facade remain unsupported |
 | [SourceLineIndex](SourceLineIndex.terrum) | Owned one-word-per-line table; the sign bit of a next-line offset records a preceding CRLF, alongside random-access extents and bidirectional UTF-16 offset/line-position lookup | Executed as AOT/JIT under both failure policies; vacancy-only `init ref` construction and lookups, exact offset round-trips, every hosted line-break form including trailing-break empty lines and the all-break source fast path, CRLF marker boundaries, source-mutation-stable extents, unpublished invalid outputs and owner-copy rejection; revision-56 semantic-module JIT compares line counts, content/full-break extents, position mappings and offset lookups with the hosted snapshot across fresh grants under both policies, including every line and code-unit position of a maximum-length all-CRLF source |
 | [SourceLineTests](SourceLineTests.terrum) | Shared line-range/position fixtures, invalid offsets and repeated queries | Executed natively with host-supplied expected records; no source normalization or default output values |
 | [StringLiteral](StringLiteral.terrum) | Validated quoted spelling and scalar decoding from the immutable UTF-16 source grant, with explicit ASCII, ISO-8859-1 (Latin-1), UTF-8, UTF-16 unit/UTF-16LE and BE byte, and UTF-32LE and BE byte length measurement and encoding into owned storage | Executed with vacancy-only `init ref` construction and scalar/cursor reads, all supported escapes and exact source boundaries; cursor queries reject positions inside escape spellings and surrogate pairs and report the exact next scalar boundary; revision-56 semantic-module JIT reuses the leaf decoder across fresh grants and checks every scanner-delimited BMP code unit, every BMP `\u` escape including all 2,048 rejected surrogate-valued escapes, every valid supplementary scalar in both direct and `\U`-escaped spellings, scalar-read rejection at every interior offset in valid spellings, sequential cursor scalar/next-offset parity for every valid scalar spelling, and all 2,048 invalid surrogate-valued `\U` escapes; encoding lengths and output match host encoders for all supported formats under both runtime policies for every valid Unicode scalar, including strict ASCII/Latin-1 rejection and successful encoding across all ASCII and Latin-1 scalar values; a maximum-length quoted ASCII source checks exact-capacity output for all eight encodings, including UTF-32 byte output; ordinary non-surrogate source units decode directly while surrogate pairs use the shared UTF-16 decoder; single-byte encoders reject unrepresentable scalars rather than substitute, while UTF bytes/units agree with host encoders without a byte-order mark; Latin-1 is not a StringRow selector or default runtime representation |

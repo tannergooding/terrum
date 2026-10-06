@@ -1,0 +1,60 @@
+namespace Terrum.CodeAnalysis;
+
+internal int32 GetSourcePositionComponent(int32 position, bool getLine)
+{
+    int32 sourceLength = Host.Source.Length;
+    if (position < 0 || position > sourceLength)
+    {
+        return -1;
+    }
+
+    mut int32 lineStart = 0;
+    mut int32 lineNumber = 0;
+    mut int32 scan = 0;
+    while (scan < position)
+    {
+        while (scan < position && !IsLineBreak(Host.Source[scan]))
+        {
+            scan = scan + 1;
+        }
+
+        if (scan < position)
+        {
+            char16 first = Host.Source[scan];
+            mut int32 breakLength = 1;
+            if (first == 13 && scan + 1 < sourceLength && Host.Source[scan + 1] == 10)
+            {
+                breakLength = 2;
+            }
+
+            // A position inside CRLF still belongs to the preceding line.
+            if (breakLength > position - scan)
+            {
+                scan = position;
+            }
+            else
+            {
+                scan = scan + breakLength;
+                lineStart = scan;
+                lineNumber = lineNumber + 1;
+            }
+        }
+    }
+
+    if (getLine)
+    {
+        return lineNumber;
+    }
+
+    return position - lineStart;
+}
+
+public int32 GetSourceLineNumberOrMinusOne(int32 position)
+{
+    return GetSourcePositionComponent(position, true);
+}
+
+public int32 GetSourceCharacterPositionOrMinusOne(int32 position)
+{
+    return GetSourcePositionComponent(position, false);
+}

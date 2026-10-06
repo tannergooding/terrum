@@ -2643,10 +2643,11 @@ against `SourceText.Lines` for short fixtures and sampled maximum-bound lines.
 The maintained Windows x64 build now also emits a separate, provisional
 source-grant companion DLL for the checked UTF-16 scalar adapter, scalar
 source-text length, allocation-free source-line-count, and isolated
-source-code-unit and source-offset exports. The compiler derives hidden source
-parameters through local calls and emits a hash-bound manifest for the
-selected scalar value exports; output/loan or aggregate export signatures and
-managed-runtime use reject. `GetSourceTextLength` returns the invocation's
+source-code-unit, source-offset and source-position exports. The compiler
+derives hidden source parameters through local calls and emits a hash-bound
+manifest for the selected scalar value exports; output/loan or aggregate
+export signatures and managed-runtime use reject. `GetSourceTextLength`
+returns the invocation's
 `Host.Source.Length` through an isolated scalar component; compiling the
 complete `SourceText` module would also classify its unselected
 source-dependent output/aggregate functions and remains unsupported.
@@ -2658,15 +2659,20 @@ returns the hosted line/character mapping as a nonnegative offset, or `-1`
 for an invalid pair. It treats CRLF as one break while retaining both
 code-unit positions, excludes the including-break end of non-final lines,
 and accepts EOF on the final line, including the final empty line after a
-trailing break. Both sentinels represent ordinary query results only; neither
+trailing break. These sentinels represent ordinary query results only; none
 validates raw pointer/grant preconditions. `GetSourceLineCount` scans the
 invocation source using shared line-break classification, treats CRLF as one
 break and includes the final empty line after a trailing break. The general
 `SourceLines.TryReadSourceLine` helper remains unsupported because its
-source-dependent calls use aggregate outputs. Hosted `SourceText` parity
-covers length, line count, code-unit reads and line/character offsets for
-empty and maximum-length grants, line-break variants, malformed UTF-16, NUL
-and every code-unit value.
+source-dependent calls use aggregate outputs. The two source-position exports
+independently scan to return the hosted line number or UTF-16 character
+position for offsets in `[0, Host.Source.Length]`; invalid offsets return
+`-1`. Callers combining them must use the same unchanged snapshot. This
+bounded scan does not claim hosted indexed-lookup performance. Hosted
+`SourceText` parity covers length, line count, code-unit
+reads, line/character offsets and both position components for empty and
+maximum-length grants, line-break variants, malformed UTF-16, NUL and every
+code-unit value.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under

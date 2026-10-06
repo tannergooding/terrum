@@ -8,8 +8,8 @@ The invocation-scoped source-grant proposal permits bounded source-dependent
 semantic-module JIT execution. Ordinary native-library emission still rejects
 programs that require `Host.Source`; an explicit opt-in CLI path now emits a
 separate provisional Windows x64 companion for a checked scalar adapter and
-a scalar source-length, source-code-unit, source-offset and source-line-count
-queries.
+a scalar source-length, source-code-unit, source-offset, source-line-count
+and source-position queries.
 This proposal addresses promotion of that native-library boundary; it does
 not extend the scanner profile or move scalar frontend verification or
 emission out of the hosted compiler.
@@ -224,6 +224,32 @@ character boundary, recognized and excluded line breaks, empty/trailing-break
 sources, maximum-size grants and extreme `int32` arguments. Keep the
 source-free DLL and classifier boundary unchanged; do not infer general
 `SourceLines` support or a stable ABI.
+
+### Provisional scalar source-position exports
+
+**Question:** Should the maintained companion expose the hosted
+line/character result as two scalar source-position exports rather than a
+packed pair?
+
+**Summary:** `SourceText.GetLinePosition` returns two coordinates for offsets
+in `[0, SourceText.Length]`; both fit in `0..16,384` under the current grant
+bound. Two scalar exports can return the exact line number and UTF-16
+character position, or `-1` for invalid offsets, without defining a packed
+representation or output/aggregate ABI. Each export scans independently, so
+callers combining the values must use the same unchanged source snapshot; the
+bounded scan is not a performance-parity claim with the hosted line index.
+Line advancement must wait for the complete line break, keeping both code
+units of CRLF on the preceding line.
+
+**Recommendation:** Include only the isolated
+`GetSourceLineNumberOrMinusOne(int32 position)` and
+`GetSourceCharacterPositionOrMinusOne(int32 position)` scalar exports as
+provisional evidence. Preserve hosted `GetLinePosition` behavior for every
+valid offset, including EOF, an empty source, trailing empty lines and
+positions inside each recognized break. Return `-1` only for offsets outside
+the source extent. Reuse shared line-break classification, keep the
+source-free DLL and classifier boundary unchanged, and do not infer aggregate
+`LinePosition`, complete `SourceLines` or stable ABI support.
 
 ## Promotion decisions still required
 

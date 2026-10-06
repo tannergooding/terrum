@@ -21,7 +21,9 @@ public sealed class NativeSourceGrantLibraryTests
 {
     private const string ReadScalarExport = "Terrum.CodeAnalysis.ReadUtf16ScalarChecked";
     private const string DecodeScalarExport = "Terrum.CodeAnalysis.DecodeUtf16Scalar";
+    private const string SourceCharacterPositionExport = "Terrum.CodeAnalysis.GetSourceCharacterPositionOrMinusOne";
     private const string SourceCodeUnitExport = "Terrum.CodeAnalysis.GetSourceCodeUnitOrMinusOne";
+    private const string SourceLineNumberExport = "Terrum.CodeAnalysis.GetSourceLineNumberOrMinusOne";
     private const string SourceOffsetExport = "Terrum.CodeAnalysis.GetSourceOffsetOrMinusOne";
     private const string SourceLengthExport = "Terrum.CodeAnalysis.GetSourceTextLength";
     private const string LineCountExport = "Terrum.CodeAnalysis.GetSourceLineCount";
@@ -440,6 +442,65 @@ public sealed class NativeSourceGrantLibraryTests
         }
     }
 
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void SourcePositionComponentsMatchHostedGetLinePosition(BoundRuntimePolicy policy)
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var characterFactsPath = Path.Combine(sourceDirectory, "CharacterFacts.terrum");
+        var sourcePositionPath = Path.Combine(sourceDirectory, "SourcePosition.terrum");
+        var compilation = Compilation.CreateLibrary([
+            SyntaxTree.Parse(File.ReadAllText(characterFactsPath), characterFactsPath),
+            SyntaxTree.Parse(File.ReadAllText(sourcePositionPath), sourcePositionPath),
+        ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+            IsInvocationScoped = true,
+        }], (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
+            Assert.IsType<BoundProgram>(compilation.Program),
+            [SourceLineNumberExport, SourceCharacterPositionExport], (NativeRuntimePolicy)policy);
+        Assert.Equal(2, artifact.Exports.Length);
+        foreach (var export in artifact.Exports)
+        {
+            Assert.True(export.SourceDependent);
+            Assert.Equal(PrimitiveType.Int32, export.ReturnType);
+            Assert.Equal([PrimitiveType.Int32], export.ParameterTypes.ToArray());
+        }
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-position-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(path, artifact.Image);
+        try
+        {
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var binding = new NativeSourceGrantTestBindings(module,
+                    [.. artifact.Exports.Select(static export => (export.Name, export.SourceDependent,
+                        export.ReturnType, export.ParameterTypes))]);
+                foreach (var sample in LineCountSamples)
+                {
+                    AssertSourcePositionParity(binding, sample);
+                }
+
+                AssertMaximumSourcePositionCases(binding);
+                _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    binding.Invoke<int>(SourceLineNumberExport, new char[16_385], 0));
+                _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    binding.Invoke<int>(SourceCharacterPositionExport, new char[16_385], 0));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void MaintainedCompilerPrimitivesCompanionUsesItsGeneratedManifest()
     {
@@ -470,8 +531,8 @@ public sealed class NativeSourceGrantLibraryTests
                         ?? throw new InvalidDataException("Missing parameter type.")))
                     .ToImmutableArray()))
             .ToImmutableArray();
-        Assert.Equal([DecodeScalarExport, SourceCodeUnitExport, LineCountExport, SourceOffsetExport,
-            SourceLengthExport, ReadScalarExport],
+        Assert.Equal([DecodeScalarExport, SourceCharacterPositionExport, SourceCodeUnitExport, LineCountExport,
+            SourceLineNumberExport, SourceOffsetExport, SourceLengthExport, ReadScalarExport],
             [.. exports.Select(static export => export.Name).OrderBy(static name => name, StringComparer.Ordinal)]);
 
         var module = NativeLibrary.Load(imagePath);
@@ -497,6 +558,7 @@ public sealed class NativeSourceGrantLibraryTests
                 var source = sample.ToCharArray();
                 var hosted = SourceText.From(sample);
                 AssertSourceOffsetParity(bindings, sample);
+                AssertSourcePositionParity(bindings, sample);
                 Assert.Equal(SourceText.From(sample).Length,
                     bindings.Invoke<int>(SourceLengthExport, source));
                 for (var position = 0; position < hosted.Length; position++)
@@ -527,6 +589,7 @@ public sealed class NativeSourceGrantLibraryTests
                 maximumCodeUnitSource.Length));
             Assert.Equal(-1, bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource, int.MaxValue));
             AssertMaximumSourceOffsetCases(bindings);
+            AssertMaximumSourcePositionCases(bindings);
             _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
                 bindings.Invoke<int>(ReadScalarExport, new char[16_385], 0, 1));
             var singleCodeUnit = new char[1];
@@ -692,6 +755,70 @@ public sealed class NativeSourceGrantLibraryTests
         AssertSourceOffsetMatches(bindings, maximumTrailingCr, maximumTrailingCrText, 1, 0);
         _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
             bindings.Invoke<int>(SourceOffsetExport, new char[16_385], 0, 0));
+    }
+
+    private static void AssertSourcePositionParity(NativeSourceGrantTestBindings bindings, string text)
+    {
+        var source = text.ToCharArray();
+        var hosted = SourceText.From(text);
+        for (var position = -1; position <= hosted.Length + 1; position++)
+        {
+            AssertSourcePositionMatches(bindings, source, hosted, position);
+        }
+
+        AssertSourcePositionMatches(bindings, source, hosted, int.MinValue);
+        AssertSourcePositionMatches(bindings, source, hosted, int.MaxValue);
+    }
+
+    private static void AssertMaximumSourcePositionCases(NativeSourceGrantTestBindings bindings)
+    {
+        var maximumPlainSource = new string('x', 16_384);
+        var maximumPlain = maximumPlainSource.ToCharArray();
+        var maximumPlainText = SourceText.From(maximumPlainSource);
+        foreach (var position in new[] { 0, 16_383, 16_384, 16_385 })
+        {
+            AssertSourcePositionMatches(bindings, maximumPlain, maximumPlainText, position);
+        }
+
+        var maximumLineFeedSource = new string('\n', 16_384);
+        var maximumLineFeed = maximumLineFeedSource.ToCharArray();
+        var maximumLineFeedText = SourceText.From(maximumLineFeedSource);
+        foreach (var position in new[] { 0, 1, 8_192, 16_383, 16_384 })
+        {
+            AssertSourcePositionMatches(bindings, maximumLineFeed, maximumLineFeedText, position);
+        }
+
+        var maximumCrlfSource = string.Concat(Enumerable.Repeat("\r\n", 8_192));
+        var maximumCrlf = maximumCrlfSource.ToCharArray();
+        var maximumCrlfText = SourceText.From(maximumCrlfSource);
+        foreach (var position in new[] { 0, 1, 2, 8_192, 16_382, 16_383, 16_384 })
+        {
+            AssertSourcePositionMatches(bindings, maximumCrlf, maximumCrlfText, position);
+        }
+
+        var maximumTrailingCrSource = string.Concat(new string('x', 16_383), '\r');
+        var maximumTrailingCr = maximumTrailingCrSource.ToCharArray();
+        var maximumTrailingCrText = SourceText.From(maximumTrailingCrSource);
+        foreach (var position in new[] { 16_382, 16_383, 16_384 })
+        {
+            AssertSourcePositionMatches(bindings, maximumTrailingCr, maximumTrailingCrText, position);
+        }
+    }
+
+    private static void AssertSourcePositionMatches(NativeSourceGrantTestBindings bindings, char[] source,
+        SourceText hosted, int position)
+    {
+        var expectedLine = -1;
+        var expectedCharacter = -1;
+        if (position >= 0 && position <= hosted.Length)
+        {
+            var linePosition = hosted.GetLinePosition(position);
+            expectedLine = linePosition.Line;
+            expectedCharacter = linePosition.Character;
+        }
+
+        Assert.Equal(expectedLine, bindings.Invoke<int>(SourceLineNumberExport, source, position));
+        Assert.Equal(expectedCharacter, bindings.Invoke<int>(SourceCharacterPositionExport, source, position));
     }
 
     private static void AssertSourceOffsetMatches(NativeSourceGrantTestBindings bindings, char[] source,
