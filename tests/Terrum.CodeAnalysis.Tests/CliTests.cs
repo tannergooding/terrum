@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -1918,6 +1919,28 @@ public sealed partial class CliTests
             })
             {
                 Assert.Equal(expected, scalarWidth(scalar));
+            }
+
+            Span<char> utf16 = stackalloc char[2];
+            utf16[1] = '\uDC00';
+            for (var codeUnit = (int)char.MinValue; codeUnit <= char.MaxValue; codeUnit++)
+            {
+                utf16[0] = (char)codeUnit;
+                var status = Rune.DecodeFromUtf16(utf16, out var expected, out _);
+                var expectedScalar = status == OperationStatus.Done ? expected.Value : -1;
+                Assert.Equal(expectedScalar, decode(utf16[0], utf16[1]));
+                if (!char.IsSurrogate((char)codeUnit))
+                {
+                    Assert.Equal(1, scalarWidth(codeUnit));
+                }
+            }
+
+            for (var scalar = 0x10000; scalar < 0x110000; scalar++)
+            {
+                var expected = new Rune(scalar);
+                Assert.Equal(2, expected.EncodeToUtf16(utf16));
+                Assert.Equal(scalar, decode(utf16[0], utf16[1]));
+                Assert.Equal(2, scalarWidth(scalar));
             }
 
             var magnitudeInt64 = Marshal.GetDelegateForFunctionPointer<MagnitudeInt64Export>(

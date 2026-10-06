@@ -2482,8 +2482,9 @@ source-independent `CharacterFacts` helpers and the pure `Utf16CodeUnits`
 decoder and width helper. The Windows x64 integration test compares the
 source-range export with hosted `TextSpan` boundaries, verifies two-word
 publication and false-path preservation with canaries, invokes every
-`CharacterFacts` export and calls both UTF-16 exports over representative
-scalar and width boundaries. The DLL
+`CharacterFacts` export, checks the UTF-16 decoder for every BMP code unit and
+all 1,048,576 valid supplementary pairs, and checks scalar width for every
+valid Unicode scalar. The DLL
 still excludes the `Host.Source`-dependent `Utf16Scalar` adapter and scalar
 frontend. These remain internal compiler exports, not a stable native ABI.
 The frontend retains its source-grant and hosted verifier/emitter boundaries.
