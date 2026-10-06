@@ -75,9 +75,13 @@ including the stack-passed argument. This is rebuild-coupled ABI evidence only;
 it does not approve a public layout, stable C ABI, or exact hidden-result write
 extent.
 The source-grant-dependent
-`Utf16Scalar.ReadUtf16Scalar` adapter remains outside it. These are internal
-compiler implementation exports, not a language-level API or stable native
-ABI; the library is not a self-host compiler or an executable scanner/parser.
+`Utf16Scalar.ReadUtf16Scalar` adapter remains outside it. Its persisted
+semantic-module JIT test also checks every BMP code unit at a one-unit source
+boundary under both runtime policies, ensuring that a following code unit
+cannot complete a surrogate pair outside the requested extent. These are
+internal compiler implementation exports, not a language-level API or stable
+native ABI; the library is not a self-host compiler or an executable
+scanner/parser.
 The host test runner still orchestrates compilation and assertions in C#.
 `ComponentTestRunner.terrum` is a bounded Terrum entry harness composing the
 `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`, `Token`,

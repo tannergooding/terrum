@@ -28,6 +28,21 @@ public sealed class Utf16ScalarModuleTests
             if (scalar < 0) { return -1; }
             return scalar * 2 + Utf16ScalarWidth(scalar);
         }
+
+        public int32 VerifyBoundedBmpCodeUnits() {
+            mut int32 position = 0;
+            while (position < Host.Source.Length) {
+                int32 codeUnit = int32(Host.Source[position]);
+                int32 scalar = ReadUtf16Scalar(position, position + 1);
+                if (codeUnit >= 55296 && codeUnit <= 57343) {
+                    if (scalar != -1) { return position + 1; }
+                } else if (scalar != codeUnit) {
+                    return position + 1;
+                }
+                position = position + 1;
+            }
+            return 0;
+        }
         """;
 
     [Theory]
@@ -55,7 +70,10 @@ public sealed class Utf16ScalarModuleTests
             string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
             Assert.IsType<BoundProgram>(producerCompilation.Program),
-            ["Terrum.CodeAnalysis.DecodeRequestedScalar"]);
+            [
+                "Terrum.CodeAnalysis.DecodeRequestedScalar",
+                "Terrum.CodeAnalysis.VerifyBoundedBmpCodeUnits",
+            ]);
 
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
@@ -100,6 +118,32 @@ public sealed class Utf16ScalarModuleTests
         var boundedGrant = CreateSourceGrant(boundedText, 1);
         Assert.Equal(ExpectedResult(boundedText, 1, endOffset: 1),
             NativeJit.ExecuteWithSourceGrant(boundedLinked, [boundedGrant], (NativeRuntimePolicy)policy));
+
+        var bmpConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return VerifyBoundedBmpCodeUnits(); }
+            """, "utf16-scalar-bmp-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(bmpConsumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, bmpConsumerCompilation.Diagnostics));
+        var bmpConsumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(bmpConsumerCompilation.Program), producer);
+        var bmpLinked = ModuleCompiler.Link(bmpConsumer, producer);
+
+        for (var start = 0; start <= char.MaxValue; start += 16_384)
+        {
+            var count = Math.Min(16_384, char.MaxValue + 1 - start);
+            var source = ImmutableArray.CreateBuilder<int>(count);
+            for (var offset = 0; offset < count; offset++)
+            {
+                source.Add(start + offset);
+            }
+
+            var grant = new HostBuffer("Source", PrimitiveType.Char16, source.ToImmutable(), false) {
+                IsInvocationScoped = true,
+            };
+            Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(
+                bmpLinked, [grant], (NativeRuntimePolicy)policy));
+        }
     }
 
     [Theory]
