@@ -2806,6 +2806,13 @@ classification. Its independent `ComponentTestRunner` exercises representative
 boundaries under AOT/JIT and both policies. This does not add
 scalar-frontend, source-free DLL or TRRM support; the TRRM proposal remains
 unapproved.
+`FloatingNegation` separately toggles only the sign bit of raw `float32` and
+`float64` values, preserving every other bit including NaN payloads. Its
+semantic-module tests compare raw results with the sign-bit oracle under both
+runtime policies, and the independent `ComponentTestRunner` checks signed
+zeros, infinities and noncanonical NaNs under AOT/JIT and both policies. This
+does not approve the TRRM negation proposal or add scalar-frontend,
+source-free DLL or TRRM support.
 `FloatingIntegerConversion` separately converts raw `float32`/`float64` bits
 to checked `int32`, `uint32`, `int64` and `uint64` results by truncating toward
 zero before range checking. Semantic-module JIT compares all eight paths

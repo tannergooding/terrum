@@ -98,6 +98,11 @@ Its semantic-module and independent AOT/JIT component tests cover midpoint,
 subnormal and overflow boundaries under both runtime policies. It does not
 approve the unapproved TRRM proposal or add scalar-frontend, DLL or TRRM
 support.
+The standalone `FloatingNegation` component toggles only the sign bit of raw
+floating values, preserving all other bits. Semantic-module parity and the
+independent component runner cover both formats under both runtime policies;
+the unapproved TRRM negation proposal remains distinct from this implemented
+helper.
 Separately, the standalone Terrum-authored `HexFloatLiteral` component now
 converts grammar-shaped, caller-delimited hexadecimal-float slices directly
 to target-format bits and matches hosted binding across rounding boundaries,
@@ -352,6 +357,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `50dd3bd9` | Add raw-bit floating negation that preserves every non-sign bit, with hosted-oracle and independent AOT/JIT boundary coverage |
 | `c08257d3` | Add raw float32/float64 format conversion with hosted rounding parity, NaN classification and independent AOT/JIT boundary coverage |
 | `2e5a2b67` | Add checked raw float32/float64-to-integer conversion with hosted parity, failure-vacancy checks and independent AOT/JIT component coverage |
 | `16990787` | Add exact typed integer-to-float32/float64 raw-bit conversion with hosted parity, nearest-even boundaries and independent AOT/JIT component coverage |
