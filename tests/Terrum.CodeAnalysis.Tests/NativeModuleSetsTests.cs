@@ -31,6 +31,17 @@ public sealed class NativeModuleSetsTests
             exports, identity, NativeRuntimePolicy.FailFast);
     }
 
+    private static byte[] Producer(string source, string export, string identity, NativeRuntimePolicy policy)
+        => Producer(source, [export], identity, policy);
+
+    private static byte[] Producer(string source, string[] exports, string identity, NativeRuntimePolicy policy)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program),
+            exports, identity, policy);
+    }
+
     private static byte[] MakeConsumer(params byte[][] producers) => MakeConsumerSource(Consumer, producers);
 
     private static byte[] MakeConsumerSource(string source, params byte[][] producers)
@@ -40,6 +51,15 @@ public sealed class NativeModuleSetsTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         return NativeModuleCompiler.CreateConsumerSet(Assert.IsType<BoundProgram>(compilation.Program),
             producers, NativeRuntimePolicy.FailFast);
+    }
+
+    private static byte[] MakeConsumerSource(string source, NativeRuntimePolicy policy, params byte[][] producers)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            NativeModuleCompiler.CreateReferenceSet(producers), (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return NativeModuleCompiler.CreateConsumerSet(Assert.IsType<BoundProgram>(compilation.Program),
+            producers, policy);
     }
 
     private static byte[] WithUpdatedSetChecksum(byte[] artifact, Action<byte[]> mutate)
@@ -187,19 +207,27 @@ public sealed class NativeModuleSetsTests
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectConsumerSet(bounds));
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void ReplacementChecksRetainedEffectsUnderBothPolicies(NativeRuntimePolicy policy)
+    {
+        var beta = Producer(Beta, "Beta", "Second", policy);
+        var noThrow = Producer("[NoThrow] public int32 Alpha() { return 20; }", "Alpha", "First", policy);
+        var effectConsumer = MakeConsumerSource(Consumer, policy, noThrow, beta);
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(effectConsumer,
+            [Producer(Alpha, "Alpha", "First", policy), beta]));
+
+        var noReturn = Producer("[DoesNotReturn] public void Stop() { require false; }", "Stop", "First", policy);
+        var noReturnConsumer = MakeConsumerSource("void Main() { Stop(); }", policy, noReturn, beta);
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(noReturnConsumer,
+            [Producer("public void Stop() { }", "Stop", "First", policy), beta]));
+    }
+
     [Fact]
-    public void ReplacementChecksRetainedEffectsAndValueLayouts()
+    public void ReplacementChecksRetainedValueLayoutsAndOutputModes()
     {
         var beta = Producer(Beta, "Beta", "Second");
-        var noThrow = Producer("[NoThrow] public int32 Alpha() { return 20; }", "Alpha", "First");
-        var effectConsumer = MakeConsumer(noThrow, beta);
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(effectConsumer,
-            [Producer(Alpha, "Alpha", "First"), beta]));
-
-        var noReturn = Producer("[DoesNotReturn] public void Stop() { require false; }", "Stop", "First");
-        var noReturnConsumer = MakeConsumerSource("void Main() { Stop(); }", noReturn, beta);
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(noReturnConsumer,
-            [Producer("public void Stop() { }", "Stop", "First"), beta]));
 
         const string Value = """
             public struct Box {
