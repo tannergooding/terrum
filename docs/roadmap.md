@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `3c30d6d1` | Verify source-order evaluation of named output calls across module artifacts |
 | `0232c341` | Share the scanner source bound across scalar projection readers |
 | `667fbe28` | Verify frontend source-limit rejection before artifact publication |
 | `e282c0de` | Compare maximum-length scalar frontend builds with hosted output under both runtime policies |
