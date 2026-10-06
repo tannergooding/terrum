@@ -60,6 +60,59 @@ public sealed partial class CliTests
         }
     }
 
+    [Fact]
+    public async Task LocalFrontendSwitchLibraryMatchesHostedIfChainAsync()
+    {
+        const string source = """
+            public int32 Value(int32 x) {
+                switch (x) {
+                    1 => { return 42; },
+                    _ => { return 0; },
+                }
+            }
+            """;
+        const string hostedEquivalent = """
+            public int32 Value(int32 x) {
+                int32 choice = x;
+                if (choice == 1) {
+                    return 42;
+                } else {
+                    return 0;
+                }
+            }
+            """;
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", ".."));
+        var frontend = Path.Combine(root, "self-host");
+        var nativePath = Path.Combine(root, $"local-frontend-{Guid.NewGuid():N}.native.dll");
+        var hostedPath = Path.Combine(root, $"local-frontend-{Guid.NewGuid():N}.hosted.dll");
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var input = Encoding.UTF8.GetBytes(source);
+                var hostedInput = Encoding.UTF8.GetBytes(hostedEquivalent);
+                var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
+                    "frontend-build-library", frontend, "-", "-o", nativePath,
+                    "--runtime", policy, "--json");
+                var (hostedExit, hostedOutput, hostedError) = await RunAsync(hostedInput,
+                    "build-library", "-", "--export", "Value", "-o", hostedPath,
+                    "--runtime", policy, "--json");
+                Assert.True(nativeExit == 0, $"{nativeExit}: {nativeOutput}{nativeError}");
+                Assert.True(hostedExit == 0, $"{hostedExit}: {hostedOutput}{hostedError}");
+                Assert.Empty(nativeError);
+                Assert.Empty(hostedError);
+                Assert.Equal(await File.ReadAllBytesAsync(hostedPath),
+                    await File.ReadAllBytesAsync(nativePath));
+            }
+        }
+        finally
+        {
+            File.Delete(nativePath);
+            File.Delete(hostedPath);
+        }
+    }
+
     [Theory]
     [InlineData("int32 Main() { mut int32 x = 20; x = x + 2; return x; }", 22)]
     [InlineData("int32 Main() { bool skip = false; mut int32 x = 40; if (skip && x / 0 == 1) { return 0; } return x + 2; }", 42)]

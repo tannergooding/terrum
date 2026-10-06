@@ -525,7 +525,9 @@ bootstrap support. CLI integration coverage compares matching and default-arm
 selection with hosted conditional equivalents for each selector type at
 signed extrema, unsigned maxima, both Boolean values, and surrogate/U+FFFF
 code-unit boundaries under both runtime policies; it also checks duplicate
-constant-label rejection for all six types.
+constant-label rejection for all six types. A separate regression compares
+library bytes for one public scalar switch function with an equivalent hosted
+`if` chain under both runtime policies; this is library-artifact parity only.
 These syntax and
 scanner contracts do not change semantic-module, ISA, Contract, TRRM or native
 ABI formats.
