@@ -400,6 +400,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `2e63135c` | Provisionally persist caller-unsafe public instance fields on eligible public, non-unique `Copy` structs in semantic-module revision 63; reconstruct `BoundUnsafe`-only access, enforce exact link compatibility, and reject unsupported graph layouts and field-reference loans |
 | `7862ad88` | Provisionally persist caller-unsafe static and readonly-instance Copy-valued getters in revision 62 using recursive layout eligibility for body-backed and bodyless contracts; keep TRRM and scalar-frontend support excluded |
 | `0c4ecebf` | Provisionally bind authored storage-free static getters on non-unique Copy structs and persist caller-unsafe scalar getters in revision 61; authorize calls only through unsafe blocks, with TRRM and scalar-frontend support excluded |
 | `cf2fdfc5` | Provisionally persist caller-unsafe readonly scalar-result getters for eligible public non-unique Copy structs; reconstruct authorization only from enclosing unsafe blocks |
