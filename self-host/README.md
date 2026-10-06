@@ -79,9 +79,9 @@ The source-grant-dependent
 compiler implementation exports, not a language-level API or stable native
 ABI; the library is not a self-host compiler or an executable scanner/parser.
 The host test runner still orchestrates compilation and assertions in C#.
-`ComponentTestRunner.terrum` is a bounded Terrum entry harness for the
-`SourceRange`, `CharacterFacts`, and `Token` module tests; it does not provide
-general test discovery or replace the host runner.
+`ComponentTestRunner.terrum` is a bounded Terrum entry harness composing the
+`SourceRange`, `CharacterFacts`, `Token`, and `WideIntegerFacts` module tests;
+it does not provide general test discovery or replace the host runner.
 The hosted [TRRM scalar pipeline](../docs/implementation.md#executable-trrm-scalar-interchange)
 emits approved metadata and compact-linear/indexed Bodies and loads them for
 shared native execution without producer source. It supports bounded branches,
@@ -358,7 +358,7 @@ native emitter or compiler self-build.
 | [StringLiteralTests](StringLiteralTests.terrum) | Quoted-form validation, scalar values and rejection of offsets inside escapes or surrogate pairs | Shared host-lexer/compiled fixtures under both native runtime policies; failed calls publish no output |
 | [CharacterFacts](CharacterFacts.terrum) | Shared ASCII digit, hex-digit and newline decisions | Executed with `char16` comparisons, checked numeric type-call conversions and verified NoThrow classification contracts; revision-56 semantic-module JIT checks ASCII-digit, hex-digit and line-break behavior across every UTF-16 code unit, including successful digit publication and failed-output vacancy/reuse, and verifies `GetDecimalDigit` for all ten digits under both policies; Windows x64 compiler-primitives DLL integration invokes every export, exhaustively checks digit/newline classification, and checks decimal/hexadecimal mapping, rejection, output preservation and canaries |
 | [Token](Token.terrum) | Token category and nested source range | Executed as a 12-byte aggregate with independent producer/consumer artifacts |
-| [ComponentTestRunner](ComponentTestRunner.terrum) | Explicit entry harness composing the bounded range, character-fact, and token test functions | Persisted consumer executes the independently compiled range/character/token producer through both JIT and AOT; test selection remains explicit and host-orchestrated |
+| [ComponentTestRunner](ComponentTestRunner.terrum) | Explicit entry harness composing bounded range, character-fact, token, and wide-integer tests | Persisted consumer executes the independently compiled producer through both JIT and AOT; test selection remains explicit and host-orchestrated |
 | [TokenCursor](TokenCursor.terrum) | Read-only traversal and repeatable indexed reads of a validated `TokenSnapshot` without copying or owning its backing; indexed reads do not advance the remaining view | Hosted binding, mandatory verification and Windows x64 emission support only `Span<Token>`; `uint64` is the internal unsigned native-width index carrier, with full-width bounds checks before address calculation. `[Captures(nameof(tokens))]` preserves the owner dependency through copies, moves, joins and unwind. The scalar frontend passes the unadvanced snapshot view through parser methods and reads bounded indexed windows without storing the view. No source-level `nuint`, mutable/writable spans, general slicing, arbitrary stored views, exports or persistence; see [the bounded cursor proposal](../docs/proposals/span-backed-token-cursor.md#implemented-bounded-indexed-parser-integration). |
 | [RangeTests](RangeTests.terrum) | Small success/failure and overflow boundary cases | Executed by `ComponentTestRunner` alongside `TokenTests` against an independent multi-source producer; C# still owns test discovery and execution orchestration |
 | [TokenTests](TokenTests.terrum) | Nested value copies and reconstruction with a vacancy-only initialized replacement range | Executed through the Windows indirect aggregate ABI; token and range fields stay read-only; no retained backing views |

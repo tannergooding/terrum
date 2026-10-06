@@ -11,6 +11,11 @@ int32 Main()
         require IsAsciiDigit(char16(48)) && !IsAsciiDigit(char16(47));
         require IsLineBreak(char16(8232)) && !IsLineBreak(char16(32));
         require GetDecimalDigit(char16(57)) == 9;
+        require CheckWideAddition();
+        require CheckWideSubtraction();
+        require CheckWideMultiplication();
+        require CheckWideDecimalAccumulation();
+        require CheckWideBaseAccumulation();
         iteration = iteration + 1;
     }
 
