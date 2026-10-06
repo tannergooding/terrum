@@ -23,7 +23,10 @@ public sealed class CharacterLiteralModuleTests
     public async Task CharacterLiteralModuleUsesFreshSourceGrantsAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
-        var componentNames = new[] { "SourceRange", "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "CharacterLiteral" };
+        var componentNames = new[] {
+            "SourceRange", "CharacterFacts", "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar",
+            "CharacterLiteral", "CharacterLiteralPacked",
+        };
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)
         {
@@ -62,9 +65,23 @@ public sealed class CharacterLiteralModuleTests
                         return -3;
                     }
                     int32 absoluteErrorStart = expectedError == 0 ? 0 : at + expectedErrorStart;
+                    mut uint32 expectedPacked = 0;
+                    if (expectedError == 0)
+                    {
+                        expectedPacked = (uint32(decoded.Scalar) << 2) | 1;
+                    }
+                    else
+                    {
+                        mut uint32 tag = 2;
+                        if (decoded.ErrorCode == 5) { tag = 3; }
+                        expectedPacked = tag
+                            | (uint32(decoded.ErrorSpan.Start - at) << 2)
+                            | (uint32(decoded.ErrorSpan.Length) << 17);
+                    }
                     if (decoded.ErrorCode != expectedError || decoded.Scalar != expectedScalar
                         || decoded.ErrorSpan.Start != absoluteErrorStart
-                        || decoded.ErrorSpan.Length != expectedErrorLength) {
+                        || decoded.ErrorSpan.Length != expectedErrorLength
+                        || AnalyzeCharacterLiteralPacked(at, spellingLength) != expectedPacked) {
                         return item + 1;
                     }
                     at = at + spellingLength;

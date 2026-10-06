@@ -25,7 +25,7 @@ public sealed class StringEscapeModuleTests
         var root = RepositoryRoot();
         var componentNames = new[] {
             "SourceRange", "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "StringEscape",
-            "StringEscapePacked",
+            "HexDigitValue", "StringEscapePacked",
         };
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)

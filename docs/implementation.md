@@ -2703,6 +2703,17 @@ analyzer is not whole-string validation: direct calls on backslash-before-
 line-break spellings retain its analyzer result rather than applying the
 hosted lexer's preceding special case. This does not move scanner or scalar
 frontend support out of the hosted verifier/emitter.
+`AnalyzeCharacterLiteralPacked(start, length)` uses a separate provisional
+tagged `uint32`: tag `00` is false, `01` is success with the scalar shifted by
+two, and tags `10`/`11` encode error codes 1/5 with a 15-bit
+spelling-relative UTF-16 error start and 15-bit error length. This preserves
+false versus successful NUL and zero-length error results; the full-length
+error encoding uses unsigned bit 31. The fields fit the current 16,384-unit
+source bound. Direct tests compare both packed decoders with their aggregate
+analyzers, and semantic-module coverage includes exhaustive scalar/escape
+inputs. Both use the isolated `HexDigitValue` component, leaving source-free
+`CharacterFacts` unchanged. The tagged layout remains provisional and does
+not broaden scanner or scalar frontend support.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under

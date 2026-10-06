@@ -1,0 +1,128 @@
+namespace Terrum.CodeAnalysis;
+
+public static uint32 AnalyzeCharacterLiteralPacked(int32 start, int32 length)
+{
+    int32 sourceLength = Host.Source.Length;
+    if (start < 0 || length < 0 || start > sourceLength
+        || length > sourceLength - start)
+    {
+        return 0;
+    }
+
+    if (length < 2)
+    {
+        return PackCharacterLiteralError(1, 0, length);
+    }
+
+    int32 end = start + length - 1;
+    if (Host.Source[start] != char16(39) || Host.Source[end] != char16(39))
+    {
+        return PackCharacterLiteralError(1, 0, length);
+    }
+
+    mut int32 at = start + 1;
+    mut int32 scalarCount = 0;
+    mut int32 scalar = 0;
+    while (at < end)
+    {
+        int32 scalarStart = at;
+        mut int32 decoded = 0;
+        if (Host.Source[at] == char16(92))
+        {
+            at = at + 1;
+            if (at >= end)
+            {
+                return PackCharacterLiteralError(5, scalarStart - start, at - scalarStart);
+            }
+
+            int32 escape = int32(Host.Source[at]);
+            at = at + 1;
+            if (escape == 110) { decoded = 10; }
+            else if (escape == 114) { decoded = 13; }
+            else if (escape == 116) { decoded = 9; }
+            else if (escape == 92) { decoded = 92; }
+            else if (escape == 34) { decoded = 34; }
+            else if (escape == 39) { decoded = 39; }
+            else if (escape == 48) { decoded = 0; }
+            else if (escape == 117 || escape == 85)
+            {
+                mut int32 required = 4;
+                if (escape == 85)
+                {
+                    required = 8;
+                }
+                mut int32 digits = 0;
+                mut uint32 value = 0;
+                while (digits < required && at < end)
+                {
+                    int32 digit = GetHexDigitOrMinusOne(Host.Source[at]);
+                    if (digit < 0)
+                    {
+                        break;
+                    }
+                    value = (value << 4) | uint32(digit);
+                    at = at + 1;
+                    digits = digits + 1;
+                }
+
+                if (digits != required || value > uint32(0x10FFFF)
+                    || (value >= uint32(0xD800) && value <= uint32(0xDFFF)))
+                {
+                    return PackCharacterLiteralError(5, scalarStart - start, at - scalarStart);
+                }
+                decoded = int32(value);
+            }
+            else
+            {
+                return PackCharacterLiteralError(5, scalarStart - start, at - scalarStart);
+            }
+        }
+        else
+        {
+            int32 unit = int32(Host.Source[at]);
+            if (unit < 55296 || unit > 57343)
+            {
+                decoded = unit;
+                at = at + 1;
+            }
+            else
+            {
+                decoded = ReadUtf16Scalar(at, end);
+                if (decoded < 0)
+                {
+                    return PackCharacterLiteralError(1, scalarStart - start, 1);
+                }
+                at = at + Utf16ScalarWidth(decoded);
+            }
+        }
+
+        if (scalarCount != 0)
+        {
+            return PackCharacterLiteralError(1, scalarStart - start, at - scalarStart);
+        }
+        scalar = decoded;
+        scalarCount = scalarCount + 1;
+    }
+
+    if (scalarCount == 0)
+    {
+        return PackCharacterLiteralError(1, 0, length);
+    }
+    return PackCharacterLiteralSuccess(scalar);
+}
+
+public static uint32 PackCharacterLiteralSuccess(int32 scalar)
+{
+    return (uint32(scalar) << 2) | 1;
+}
+
+public static uint32 PackCharacterLiteralError(int32 errorCode, int32 relativeStart, int32 length)
+{
+    // Two tag bits distinguish false, success and errors; each diagnostic coordinate uses 15 bits.
+    mut uint32 tag = 2;
+    if (errorCode == 5)
+    {
+        tag = 3;
+    }
+    return tag | (uint32(relativeStart) << 2) | (uint32(length) << 17);
+}

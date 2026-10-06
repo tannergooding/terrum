@@ -242,8 +242,8 @@ values from -1 through U+10FFFF and positive consumed widths no greater than
 10. Future changes to those values require revisiting the encoding. Separate
 field exports would repeatedly scan and require identical arguments and the
 same unchanged source snapshot across calls. The isolated implementation uses
-its own scalar `GetHexDigitOrMinusOne` helper so neither the aggregate decoder
-nor the source-free `CharacterFacts` component changes.
+the shared source-free `HexDigitValue` helper, leaving the aggregate decoder
+and source-free `CharacterFacts` component unchanged.
 
 **Recommendation:** Include only the isolated
 `AnalyzeStringEscapePacked(int32 start, int32 length) -> uint32` query as
@@ -265,6 +265,45 @@ invalid arguments and maximum grants. Semantic-module regressions compare the
 packed fields with the aggregate analyzer across the hosted diagnostic corpus
 and exhaustive BMP/supplementary escape cases; the maintained manifest binds
 the selected export without changing the source-free export set.
+
+### Provisional packed character-literal analysis export
+
+**Question:** Should the maintained companion expose one scalar result for
+`CharacterLiteralDecodeResult.TryAnalyze` without returning its aggregate
+diagnostic span?
+
+**Summary:** The existing analyzer returns false only for an invalid source
+range; valid ranges may instead publish either one scalar or an error code and
+an absolute UTF-16 error span. Its aggregate span prevents direct selection by
+the current source-grant ABI. A tagged `uint32` preserves the result without
+sentinels or collisions: low two bits `00` mean false and the canonical
+result is zero; `01` means success and stores the scalar in bits 2..22;
+`10` and `11` mean error codes 1 and 5, respectively, with the spelling-
+relative error start in bits 2..16 and error length in bits 17..31. Both
+diagnostic coordinates fit 15 bits under the current 16,384-unit maximum.
+Errors use unsigned packing because a full-spelling error may set bit 31.
+Successful NUL (`1`), false (`0`) and zero-length diagnostics (`2` or `3`)
+remain distinct. The encoding must be revisited if the source maximum or
+diagnostic/result domain changes. The component scans the quoted spelling
+directly rather than calling the aggregate analyzer or changing the
+source-grant classifier.
+
+**Recommendation:** Include only
+`AnalyzeCharacterLiteralPacked(int32 start, int32 length) -> uint32` as
+provisional evidence. Preserve the analyzer's exact quote-boundary and
+UTF-16 behavior: valid empty/short ranges publish error 1, invalid ranges
+return zero, raw unpaired surrogates publish error 1, malformed escapes and
+surrogate-valued Unicode escapes publish error 5, and a backslash before a
+surrogate consumes only one code unit. Error coordinates remain relative to
+the complete quoted spelling, including the opening quote; closing quotes
+are excluded from escape spans, and invalid second escapes take precedence
+over the multiple-scalar error. Verify both policies against aggregate
+`CharacterLiteralDecodeResult.TryAnalyze` and hosted lexer diagnostics across
+nonzero source offsets, NUL, quote/newline, escaped apostrophe, truncated and
+non-hex escapes, surrogate cases, second-scalar precedence, extreme
+arguments and maximum grants. Use the isolated scalar hex helper; leave the
+classifier, source-free DLL and hosted scanner/frontend boundaries unchanged.
+The encoding remains provisional and does not establish a stable ABI.
 
 ### Provisional scalar source-offset export
 

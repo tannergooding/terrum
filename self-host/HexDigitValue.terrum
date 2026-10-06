@@ -1,0 +1,18 @@
+namespace Terrum.CodeAnalysis;
+
+public static int32 GetHexDigitOrMinusOne(char16 character)
+{
+    if (character >= char16(48) && character <= char16(57))
+    {
+        return int32(character) - 48;
+    }
+    if (character >= char16(65) && character <= char16(70))
+    {
+        return int32(character) - 55;
+    }
+    if (character >= char16(97) && character <= char16(102))
+    {
+        return int32(character) - 87;
+    }
+    return -1;
+}
