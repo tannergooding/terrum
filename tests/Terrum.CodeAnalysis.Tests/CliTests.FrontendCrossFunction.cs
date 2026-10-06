@@ -95,6 +95,10 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { int32 count = 5; init int32 value; value = 1 << count; return value == 32 ? 42 : 0; }")]
     [InlineData("int32 Main() { int32 count = 2; var value = +(1 << count); return value == 4 ? 42 : 0; }")]
     [InlineData("int32 Main() { int32 count = 2; var value = (1 << count) << count; return value == 16 ? 42 : 0; }")]
+    [InlineData("int32 Main() { int32 count = 2; var value = true ? 1 << count : 16; return value == 4 ? 42 : 0; }")]
+    [InlineData("int32 Main() { int32 count = 2; var value = true ? 1 << count : count; return value == 4 ? 42 : 0; }")]
+    [InlineData("int32 Main() { int32 count = 2; var value = (1 << count) + 1; return value == 5 ? 42 : 0; }")]
+    [InlineData("int32 Main() { int32 count = 2; var value = true ? 1 << count : 2 << count; return value == 4 ? 42 : 0; }")]
     public async Task ScalarFrontendProjectsCheckedIntegerShiftsWithLocalOperandsAsync(string source)
     {
         await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
