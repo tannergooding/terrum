@@ -111,7 +111,7 @@ void Report(int32 code, int32 start, int32 length)
     Host.Diagnostics[0] = count + 1;
 }
 
-int32 ReadCommentScalar(int32 at, out int32 width)
+int32 ReadCommentScalar(int32 at, init ref<int32> width)
 {
     int32 unit = PeekUnit(at);
     width = 1;
@@ -144,8 +144,7 @@ int32 SkipBlockComment(int32 start, int32 slashes)
     {
         if (PeekUnit(at) != 42)
         {
-            mut int32 width = 0;
-            int32 scalar = ReadCommentScalar(at, out width);
+            int32 scalar = ReadCommentScalar(at, init var width);
             at = at + width;
             continue;
         }
@@ -230,10 +229,9 @@ int32 SkipTrivia(int32 initial, int32 owner)
         {
             bool documentation = PeekUnit(at + 2) == 47;
             at = at + 2;
-            mut int32 width = 0;
             while (at < Host.Source.Length)
             {
-                int32 scalar = ReadCommentScalar(at, out width);
+                int32 scalar = ReadCommentScalar(at, init var width);
                 if (IsNewline(scalar))
                 {
                     break;
