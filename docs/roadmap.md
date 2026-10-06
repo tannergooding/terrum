@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e41ae04e` | Traverse every token in a maximum-length scanner snapshot through TokenCursor under AOT and JIT |
 | `de783076` | Exercise every TokenSnapshot index on a maximum-length scanner source under AOT and JIT |
 | `d41e924a` | Exercise every line and code-unit position in a maximum-length all-CRLF indexed source |
 | `9de43928` | Validate the densest scanner-10 integer record sequence under the maximum source bound |
