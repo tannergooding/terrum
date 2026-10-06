@@ -509,6 +509,15 @@ public sealed class ScannerTests
         Assert.InRange(supplementaryContinues.Length, 1, ScannerHost.MaximumSourceLength);
         sources.Add(supplementaryContinues.ToString());
 
+        var maximumLengthSupplementarySource = new StringBuilder(ScannerHost.MaximumSourceLength)
+            .Append('"')
+            .Append('a', ScannerHost.MaximumSourceLength - 4)
+            .Append(char.ConvertFromUtf32(0x10FFFF))
+            .Append('"')
+            .ToString();
+        Assert.Equal(ScannerHost.MaximumSourceLength, maximumLengthSupplementarySource.Length);
+        sources.Add(maximumLengthSupplementarySource);
+
         ScannerInvocationResult? retained = null;
         foreach (var text in sources)
         {

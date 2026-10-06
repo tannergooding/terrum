@@ -19,7 +19,9 @@ policies, plus bounded batches covering every BMP `\u` escape and its
 surrogate diagnostics against the hosted lexer, and `\U` values at every
 Unicode-plane boundary, including surrogate and above-maximum rejections, plus
 raw supplementary scalars in quoted tokens at each plane boundary and
-supplementary Unicode identifier start/continue range endpoints.
+supplementary Unicode identifier start/continue range endpoints. A quoted
+source at the maximum supported length also ends with the valid U+10FFFF
+surrogate pair.
 A source-dependent
 single-producer semantic-module program can be linked and executed by
 `NativeJit.ExecuteWithSourceGrant`, which requires one readonly `char16` grant
