@@ -304,6 +304,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f19b42ca` | Fill the scanner-10 diagnostic record bound with maximum-length malformed UTF-16 input |
 | `8c7e000b` | Stress maximum-length scanner-10 token and trivia record publication |
 | `58cea52b` | Compare malformed BMP `\u` spellings through scanner-10 with hosted diagnostics |
 | `6e295cb9` | Compare malformed and unterminated Unicode escapes through scanner-10 with hosted diagnostics |
