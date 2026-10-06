@@ -88,10 +88,10 @@ public sealed partial class JitTests
                     if (graph.Impostor != uint64.MaxValue
                         || ManagedHeap.Collect() != 0) { return 1; }
                     {
-                        require graph.Second is some alias;
+                        require graph.Second is some secondLeaf;
                         require graph.Third is some tail;
                         require graph.Native is some node;
-                        if (alias.Value + tail.Value != 42 || node.Value != 7) { return 2; }
+                        if (secondLeaf.Value + tail.Value != 42 || node.Value != 7) { return 2; }
                     }
                     graph.First = null;
                     if (ManagedHeap.Collect() != 0) { return 3; }

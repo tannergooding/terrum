@@ -37,9 +37,9 @@ bool Build(out write Pair result) {
 
 int32 Main() {
     require Build(out var pair);
-    write Leaf alias = pair.Left;
+    write Leaf leftAlias = pair.Left;
     Pair same = pair;
-    alias.Value = 38;
+    leftAlias.Value = 38;
     if (ManagedHeap.Collect() != 0) { return 1; }
     if (pair.Serial != 3) { return 2; }
     return same.Total();
