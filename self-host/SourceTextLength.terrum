@@ -1,0 +1,6 @@
+namespace Terrum.CodeAnalysis;
+
+public int32 GetSourceTextLength()
+{
+    return Host.Source.Length;
+}

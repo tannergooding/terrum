@@ -253,10 +253,10 @@ prerequisite has already been met.
     JIT path is provisionally implemented under the still-unapproved
     [invocation-scoped source-grant proposal](proposals/invocation-scoped-source-grant.md);
     the maintained Windows x64 build now also has an explicit opt-in,
-    provisional source-grant companion for the checked UTF-16 scalar adapter
-    and a scalar-only source-line-count query, with selected-export
-    descriptors bound to the image hash and end-relative reads based on
-    invocation length. The source-free
+    provisional source-grant companion for the checked UTF-16 scalar adapter,
+    scalar source-text-length query and scalar source-line-count query, with
+    selected-export descriptors bound to the image hash and end-relative
+    reads based on invocation length. The source-free
     compiler-primitives DLL remains unchanged; this does not promote the
     unapproved ABI or establish general source-dependent DLL support. The
     scanner and scalar frontend still rely on hosted verification/emission. A separate

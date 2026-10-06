@@ -8,7 +8,7 @@ The invocation-scoped source-grant proposal permits bounded source-dependent
 semantic-module JIT execution. Ordinary native-library emission still rejects
 programs that require `Host.Source`; an explicit opt-in CLI path now emits a
 separate provisional Windows x64 companion for a checked scalar adapter and
-a scalar source-line count query.
+a scalar source-length query and source-line count query.
 This proposal addresses promotion of that native-library boundary; it does
 not extend the scanner profile or move scalar frontend verification or
 emission out of the hosted compiler.
@@ -95,39 +95,46 @@ or public native ABI is supported.
 
 **Question:** Should the proposed source-context ABI be wired into the
 maintained Windows x64 compiler-primitives DLL for one checked scalar
-`Utf16Scalar` export and a scalar source-line-count export, with its managed
-caller generated from the exact export selection?
+`Utf16Scalar` export, the existing scalar source-length query and a scalar
+source-line-count export, with its managed caller generated from the exact
+export selection?
 
 **Summary:** The separate test-only DLL has exercised hidden source context,
 generated bindings, transitive dependency changes, loop-based `SourceText`
 line count/position/offset/extent queries and exhaustive UTF-16 line-break
 parity under both runtime policies. The maintained build now emits a separate
-companion from `CharacterFacts`, `Utf16CodeUnits`, `Utf16Scalar` and the
-scalar-only `SourceLineCount` component. It exports the source-free decoder,
-checked source-dependent adapter and allocation-free source-line count with a
-hash-bound manifest. The line-count loop uses shared line-break
-classification, collapses CRLF to one break and counts the final empty line
-after a trailing break; it avoids `SourceLines.TryReadSourceLine` because
-source-dependent aggregate/output call closures remain unsupported. Hosted
-`SourceText.Lines.Length` comparisons cover line-break forms, malformed
-UTF-16, NUL and the maximum 16,384-unit grant. The maintained companion itself
-uses the fail-fast policy. Export descriptors admit only scalar value
-signatures; unsupported output/loan and aggregate signatures and
-managed-runtime use reject. End-relative source reads derive their base from
-the captured invocation count, not the empty build-time buffer length. This
-establishes a narrow provisional implementation path, not a promoted ABI.
+companion from `CharacterFacts`, `Utf16CodeUnits`, `Utf16Scalar`,
+`SourceLineCount` and the isolated scalar `SourceTextLength` component. It
+exports the source-free decoder, checked source-dependent adapter, existing
+source-length query and allocation-free source-line count with a hash-bound
+manifest. `GetSourceTextLength` returns `Host.Source.Length`; including the
+complete `SourceText` module is rejected because whole-program source-grant
+classification also sees its unselected source-dependent output/aggregate
+functions. The isolated component retains the existing scalar contract
+without widening classifier support. The line-count loop uses shared
+line-break classification, collapses CRLF to one break and counts the final
+empty line after a trailing break; it avoids `SourceLines.TryReadSourceLine`
+because source-dependent aggregate/output call closures remain unsupported.
+Hosted `SourceText.Length` and `SourceText.Lines.Length` comparisons cover
+empty and maximum-size grants, line-break forms, malformed UTF-16 and NUL.
+The maintained companion itself uses the fail-fast policy. Export descriptors
+admit only scalar value signatures; unsupported output/loan and aggregate
+signatures and managed-runtime use reject. End-relative source reads derive
+their base from the captured invocation count, not the empty build-time buffer
+length. This establishes a narrow provisional implementation path, not a
+promoted ABI.
 
 **Recommendation:** Keep the opt-in companion separate from the source-free
 artifact and the ABI unapproved. Accept only self-contained local dependency
 closures and scalar source-dependent exports; generate the descriptor
 manifest from the exact selected export set for synchronous callers. The
-checked scalar adapter and allocation-free scalar line-count query remain
-provisional implementation evidence. Raw pointer/count shape, 16,384-unit
-maximum, readable aligned storage, lifetime and immutability remain caller
-preconditions. The managed caller validates the bound and pins UTF-16 storage
-only for the call. Keep source-dependent imports, cross-DLL propagation,
-aggregate/output export and call closures, the complete source facade,
-scanner profiles, executables, packages, graphs, module sets and AOT
+checked scalar adapter, source-length query and allocation-free line-count
+query remain provisional implementation evidence. Raw pointer/count shape,
+16,384-unit maximum, readable aligned storage, lifetime and immutability
+remain caller preconditions. The managed caller validates the bound and pins
+UTF-16 storage only for the call. Keep source-dependent imports, cross-DLL
+propagation, aggregate/output export and call closures, the complete source
+facade, scanner profiles, executables, packages, graphs, module sets and AOT
 unsupported. This implementation does not approve the proposal or promise
 ABI stability.
 
@@ -148,6 +155,24 @@ as provisional coverage of the existing per-call source ABI. Verify it
 against hosted `SourceText.Lines.Length`, including maximum-size grants, but
 do not infer support for line positions/extents, general `SourceText` APIs,
 internal aggregate/output source-dependent call closures, or a stable ABI.
+
+### Provisional scalar source-text-length export
+
+**Question:** Should the maintained companion expose the existing source
+length query before supporting the complete `SourceText` facade?
+
+**Summary:** `SourceText.GetSourceTextLength` directly returns
+`Host.Source.Length` as a scalar. The source-grant classifier validates all
+source-dependent functions in the supplied program before export selection, so
+including the full `SourceText` component also reaches unrelated
+output/aggregate functions. A separate scalar-only component isolates the
+existing length behavior without widening that boundary.
+
+**Recommendation:** Include only the isolated `GetSourceTextLength` scalar
+export as provisional evidence. Compare it with hosted `SourceText.Length`
+for empty, edge and maximum-size grants; do not infer code-unit reads, ranges,
+line operations, the complete source facade, classifier support for
+unselected aggregate functions, or a stable ABI.
 
 ## Promotion decisions still required
 

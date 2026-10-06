@@ -21,6 +21,7 @@ public sealed class NativeSourceGrantLibraryTests
 {
     private const string ReadScalarExport = "Terrum.CodeAnalysis.ReadUtf16ScalarChecked";
     private const string DecodeScalarExport = "Terrum.CodeAnalysis.DecodeUtf16Scalar";
+    private const string SourceLengthExport = "Terrum.CodeAnalysis.GetSourceTextLength";
     private const string LineCountExport = "Terrum.CodeAnalysis.GetSourceLineCount";
     private static readonly string[] LineCountSamples = [
         "",
@@ -262,6 +263,55 @@ public sealed class NativeSourceGrantLibraryTests
         }
     }
 
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void SourceTextLengthMatchesHostedTextLength(BoundRuntimePolicy policy)
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var characterFactsPath = Path.Combine(RepositoryRoot(), "self-host", "CharacterFacts.terrum");
+        var sourceLengthPath = Path.Combine(RepositoryRoot(), "self-host", "SourceTextLength.terrum");
+        var compilation = Compilation.CreateLibrary([
+            SyntaxTree.Parse(File.ReadAllText(sourceLengthPath), sourceLengthPath),
+        ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+            IsInvocationScoped = true,
+        }], (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
+            Assert.IsType<BoundProgram>(compilation.Program), [SourceLengthExport], (NativeRuntimePolicy)policy);
+        Assert.True(Assert.Single(artifact.Exports).SourceDependent);
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-length-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(path, artifact.Image);
+        try
+        {
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var binding = new NativeSourceGrantTestBindings(module,
+                    [.. artifact.Exports.Select(static export => (export.Name, export.SourceDependent,
+                        export.ReturnType, export.ParameterTypes))]);
+                foreach (var sample in LineCountSamples)
+                {
+                    Assert.Equal(SourceText.From(sample).Length,
+                        binding.Invoke<int>(SourceLengthExport, sample.ToCharArray()));
+                }
+
+                var maximumSource = new string('\0', 16_384);
+                Assert.Equal(SourceText.From(maximumSource).Length,
+                    binding.Invoke<int>(SourceLengthExport, maximumSource.ToCharArray()));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void MaintainedCompilerPrimitivesCompanionUsesItsGeneratedManifest()
     {
@@ -292,7 +342,7 @@ public sealed class NativeSourceGrantLibraryTests
                         ?? throw new InvalidDataException("Missing parameter type.")))
                     .ToImmutableArray()))
             .ToImmutableArray();
-        Assert.Equal([DecodeScalarExport, LineCountExport, ReadScalarExport],
+        Assert.Equal([DecodeScalarExport, LineCountExport, SourceLengthExport, ReadScalarExport],
             [.. exports.Select(static export => export.Name).OrderBy(static name => name, StringComparer.Ordinal)]);
 
         var module = NativeLibrary.Load(imagePath);
@@ -313,6 +363,14 @@ public sealed class NativeSourceGrantLibraryTests
             var maximumLineCountSource = new string('\n', 16_384);
             Assert.Equal(SourceText.From(maximumLineCountSource).Lines.Length,
                 bindings.Invoke<int>(LineCountExport, maximumLineCountSource.ToCharArray()));
+            foreach (var sample in LineCountSamples)
+            {
+                Assert.Equal(SourceText.From(sample).Length,
+                    bindings.Invoke<int>(SourceLengthExport, sample.ToCharArray()));
+            }
+            var maximumSourceLength = new string('\0', 16_384);
+            Assert.Equal(SourceText.From(maximumSourceLength).Length,
+                bindings.Invoke<int>(SourceLengthExport, maximumSourceLength.ToCharArray()));
             _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
                 bindings.Invoke<int>(ReadScalarExport, new char[16_385], 0, 1));
             var singleCodeUnit = new char[1];
