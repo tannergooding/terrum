@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -41,6 +42,34 @@ public sealed class CharacterLiteralModuleTests
                 return 0 - decoded.ErrorCode * 1_000_000
                     + decoded.ErrorSpan.Start * 128 + decoded.ErrorSpan.Length;
             }
+            public int32 VerifyCharacterLiteralRecords() {
+                int32 sourceLength = Host.Source.Length;
+                mut int32 at = 0;
+                mut int32 item = 0;
+                while (at < sourceLength) {
+                    if (sourceLength - at < 5) { return -1; }
+                    int32 expectedError = int32(Host.Source[at]);
+                    int32 expectedScalar = int32(Host.Source[at + 1]);
+                    int32 expectedErrorStart = int32(Host.Source[at + 2]);
+                    int32 expectedErrorLength = int32(Host.Source[at + 3]);
+                    int32 spellingLength = int32(Host.Source[at + 4]);
+                    at = at + 5;
+                    if (spellingLength < 2 || spellingLength > sourceLength - at) { return -2; }
+                    if (!SourceRange.TryCreate(at, spellingLength, init var spelling)
+                        || !CharacterLiteralDecodeResult.TryAnalyze(spelling, init var decoded)) {
+                        return -3;
+                    }
+                    int32 absoluteErrorStart = expectedError == 0 ? 0 : at + expectedErrorStart;
+                    if (decoded.ErrorCode != expectedError || decoded.Scalar != expectedScalar
+                        || decoded.ErrorSpan.Start != absoluteErrorStart
+                        || decoded.ErrorSpan.Length != expectedErrorLength) {
+                        return item + 1;
+                    }
+                    at = at + spellingLength;
+                    item = item + 1;
+                }
+                return 0;
+            }
             """, "character-literal-module.terrum");
         var producerCompilation = Compilation.Create(trees,
         [
@@ -51,7 +80,7 @@ public sealed class CharacterLiteralModuleTests
         Assert.False(producerCompilation.HasErrors,
             string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
-            ["Terrum.CodeAnalysis.DecodeWholeSource"]);
+            ["Terrum.CodeAnalysis.DecodeWholeSource", "Terrum.CodeAnalysis.VerifyCharacterLiteralRecords"]);
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
@@ -62,6 +91,18 @@ public sealed class CharacterLiteralModuleTests
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
+
+        var recordConsumerTree = SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return VerifyCharacterLiteralRecords(); }
+            """, "character-literal-record-consumer.terrum");
+        var recordConsumerCompilation = Compilation.Create(
+            recordConsumerTree, ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(recordConsumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, recordConsumerCompilation.Diagnostics));
+        var recordConsumer = ModuleCompiler.Link(
+            ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(recordConsumerCompilation.Program), producer),
+            producer);
 
         foreach (var (text, scalar) in new (string Text, int? Scalar)[] {
             ("'A'", 65), ("'é'", 233), ("'\\u00E9'", 233), ("'\\U0010FFFF'", 0x10FFFF),
@@ -88,6 +129,69 @@ public sealed class CharacterLiteralModuleTests
             };
             Assert.Equal(expected, NativeJit.ExecuteWithSourceGrant(linked, [grant], (NativeRuntimePolicy)policy));
         }
+
+        const int maximumGrantLength = 16_384;
+        var records = new List<int>(maximumGrantLength);
+        void ExecuteRecords()
+        {
+            if (records.Count == 0)
+            {
+                return;
+            }
+            var grant = new HostBuffer("Source", PrimitiveType.Char16,
+                [.. records], false) { IsInvocationScoped = true };
+            Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(
+                recordConsumer, [grant], (NativeRuntimePolicy)policy));
+            records.Clear();
+        }
+
+        var emptyRecords = new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+            IsInvocationScoped = true,
+        };
+        Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(
+            recordConsumer, [emptyRecords], (NativeRuntimePolicy)policy));
+
+        for (var value = (int)char.MinValue; value <= char.MaxValue; value++)
+        {
+            var codeUnit = (char)value;
+            var spelling = codeUnit switch {
+                '\'' => "'\\''",
+                '\\' => "'\\\\'",
+                _ => new string(['\'', codeUnit, '\'']),
+            };
+            var lexed = Lexer.Lex(SourceText.From(spelling));
+            var errorCode = 0;
+            var errorStart = 0;
+            var errorLength = 0;
+            if (!lexed.Diagnostics.IsEmpty)
+            {
+                if (lexed.Diagnostics.All(static diagnostic => diagnostic.Code == "TRM0002"))
+                {
+                    continue;
+                }
+                var diagnostic = Assert.Single(lexed.Diagnostics);
+                Assert.Equal("TRM0001", diagnostic.Code);
+                errorCode = 1;
+                errorStart = diagnostic.Span.Start;
+                errorLength = diagnostic.Span.Length;
+            }
+            Assert.Equal(TokenKind.CharacterLiteral, lexed.Tokens[0].Kind);
+            Assert.Equal(spelling, lexed.Tokens[0].Text);
+            Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[1].Kind);
+            var recordLength = 5 + spelling.Length;
+            if (records.Count + recordLength > maximumGrantLength)
+            {
+                ExecuteRecords();
+            }
+
+            records.Add(errorCode);
+            records.Add(errorCode == 0 ? value : 0);
+            records.Add(errorStart);
+            records.Add(errorLength);
+            records.Add(spelling.Length);
+            records.AddRange(spelling.Select(static unit => (int)unit));
+        }
+        ExecuteRecords();
     }
 
     private static int ExpectedInvalidResult(Diagnostic diagnostic)

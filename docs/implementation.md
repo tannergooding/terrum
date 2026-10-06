@@ -26,9 +26,10 @@ The bounded adapter has executed the Terrum-authored `Utf16CodeUnits` pure
 code-unit decoder and the source-grant-dependent `SourceText` facade,
 including exact reads of all 65,536 UTF-16 code units (including surrogate
 units) across fresh grants under both runtime policies, plus the `Utf16Scalar`
-adapter, `CharacterLiteral` and `StringLiteral` leaf decoders, the provisional
-`StringEscape` decoder and `StringRow` name/namespace encoders for ASCII,
-UTF-8, UTF-16LE and UTF-32LE.
+adapter, `CharacterLiteral` leaf decoding for every scanner-delimited BMP
+code unit (including surrogate rejection) and `StringLiteral` leaf decoders,
+the provisional `StringEscape` decoder and `StringRow` name/namespace encoders
+for ASCII, UTF-8, UTF-16LE and UTF-32LE.
 Persisted semantic-module JIT tests compare those rows with the hosted string
 table writer across fresh grants, including the existing empty-name,
 unrepresentable-ASCII and embedded-zero rejection behavior. They also compare
