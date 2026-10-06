@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Immutable;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -175,30 +176,35 @@ public sealed class StringLiteralEncodingModuleTests
                 "\"\\u007F\\u0080\\u07FF\\u0800\\uFFFF\""),
         };
 
-        foreach (var fixture in fixtures)
+        void VerifyFixture(string text, string spelling, string context)
         {
-            Assert.True(fixture.Spelling.Length + 2 <= 16_384);
-            Assert.Empty(Lexer.Lex(SourceText.From(fixture.Spelling)).Diagnostics);
+            Assert.True(spelling.Length + 2 <= 16_384);
+            Assert.Empty(Lexer.Lex(SourceText.From(spelling)).Diagnostics);
 
             var expected = new int[]?[] {
-                strictUtf8.GetBytes(fixture.Text).Select(static value => (int)value).ToArray(),
-                fixture.Text.Select(static unit => (int)unit).ToArray(),
-                strictUtf16Le.GetBytes(fixture.Text).Select(static value => (int)value).ToArray(),
-                strictUtf16Be.GetBytes(fixture.Text).Select(static value => (int)value).ToArray(),
-                TryEncode(strictAscii, fixture.Text),
-                TryEncode(strictLatin1, fixture.Text),
-                strictUtf32Le.GetBytes(fixture.Text).Select(static value => (int)value).ToArray(),
-                strictUtf32Be.GetBytes(fixture.Text).Select(static value => (int)value).ToArray(),
+                strictUtf8.GetBytes(text).Select(static value => (int)value).ToArray(),
+                text.Select(static unit => (int)unit).ToArray(),
+                strictUtf16Le.GetBytes(text).Select(static value => (int)value).ToArray(),
+                strictUtf16Be.GetBytes(text).Select(static value => (int)value).ToArray(),
+                TryEncode(strictAscii, text),
+                TryEncode(strictLatin1, text),
+                strictUtf32Le.GetBytes(text).Select(static value => (int)value).ToArray(),
+                strictUtf32Be.GetBytes(text).Select(static value => (int)value).ToArray(),
             };
 
             for (var encoding = 0; encoding < expected.Length; encoding++)
             {
-                var grant = CreateSourceGrant(encoding, expected[encoding], fixture.Spelling);
+                var grant = CreateSourceGrant(encoding, expected[encoding], spelling);
                 var actual = NativeJit.ExecuteWithSourceGrant(consumers[encoding], [grant],
                     (NativeRuntimePolicy)policy);
                 Assert.True(actual == 0,
-                    $"{exports[encoding]} failed for {fixture.Spelling}: verification returned {actual}.");
+                    $"{exports[encoding]} failed for {context}: verification returned {actual}.");
             }
+        }
+
+        foreach (var fixture in fixtures)
+        {
+            VerifyFixture(fixture.Text, fixture.Spelling, fixture.Spelling);
         }
 
         const int firstSupplementaryScalar = 0x10000;
@@ -219,26 +225,47 @@ public sealed class StringLiteralEncodingModuleTests
             var text = textBuilder.ToString();
             var spelling = $"\"{text}\"";
             Assert.True(scalarCount * 6 + 4 <= 16_384);
-            Assert.Empty(Lexer.Lex(SourceText.From(spelling)).Diagnostics);
-            var expected = new int[]?[] {
-                strictUtf8.GetBytes(text).Select(static value => (int)value).ToArray(),
-                text.Select(static unit => (int)unit).ToArray(),
-                strictUtf16Le.GetBytes(text).Select(static value => (int)value).ToArray(),
-                strictUtf16Be.GetBytes(text).Select(static value => (int)value).ToArray(),
-                TryEncode(strictAscii, text),
-                TryEncode(strictLatin1, text),
-                strictUtf32Le.GetBytes(text).Select(static value => (int)value).ToArray(),
-                strictUtf32Be.GetBytes(text).Select(static value => (int)value).ToArray(),
-            };
+            VerifyFixture(text, spelling, $"supplementary scalar batch starting at U+{scalarStart:X}");
+        }
 
-            for (var encoding = 0; encoding < expected.Length; encoding++)
+        const int maximumBmpScalarsPerBatch = 1_600;
+        var bmpTextBuilder = new StringBuilder(maximumBmpScalarsPerBatch);
+        var bmpSpellingBuilder = new StringBuilder(maximumBmpScalarsPerBatch * 6);
+        var bmpScalarCount = 0;
+        var bmpBatchStart = 0;
+        void VerifyBmpBatch(int scalarStart)
+        {
+            var text = bmpTextBuilder.ToString();
+            var spelling = $"\"{bmpSpellingBuilder}\"";
+            Assert.True(bmpScalarCount * 10 + 4 <= 16_384);
+            VerifyFixture(text, spelling, $"BMP scalar batch starting at U+{scalarStart:X4}");
+            bmpTextBuilder.Clear();
+            bmpSpellingBuilder.Clear();
+            bmpScalarCount = 0;
+        }
+
+        for (var codeUnit = (int)char.MinValue; codeUnit <= char.MaxValue; codeUnit++)
+        {
+            if (char.IsSurrogate((char)codeUnit))
             {
-                var grant = CreateSourceGrant(encoding, expected[encoding], spelling);
-                var actual = NativeJit.ExecuteWithSourceGrant(consumers[encoding], [grant],
-                    (NativeRuntimePolicy)policy);
-                Assert.True(actual == 0,
-                    $"{exports[encoding]} failed for supplementary scalar batch starting at U+{scalarStart:X}: verification returned {actual}.");
+                continue;
             }
+
+            if (bmpScalarCount == 0)
+            {
+                bmpBatchStart = codeUnit;
+            }
+            bmpTextBuilder.Append((char)codeUnit);
+            bmpSpellingBuilder.Append("\\u").Append(codeUnit.ToString("X4", CultureInfo.InvariantCulture));
+            bmpScalarCount++;
+            if (bmpScalarCount == maximumBmpScalarsPerBatch)
+            {
+                VerifyBmpBatch(bmpBatchStart);
+            }
+        }
+        if (bmpScalarCount != 0)
+        {
+            VerifyBmpBatch(bmpBatchStart);
         }
     }
 
