@@ -10,8 +10,14 @@ public bool CheckManagedTokenChain()
     {
         return false;
     }
+    require chain.TryCreateCursor(out var emptyCursor);
+    if (!emptyCursor.IsCurrent || emptyCursor.TryPeek(init var absentOnEmpty))
+    {
+        return false;
+    }
     if (!chain.TryAppend(7, 10, 2) || !chain.TryAppend(8, 12, 1)
-        || chain.Count != 2 || chain.Version != 2)
+        || chain.Count != 2 || chain.Version != 2 || emptyCursor.IsCurrent
+        || emptyCursor.TryPeek(init var invalidatedEmpty))
     {
         return false;
     }
