@@ -326,6 +326,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `f73e0341` | Add provisional hexadecimal-float raw-bit queries to the maintained source-grant companion without widening the classifier or changing source-free exports |
 | `a15b9174` | Add a provisional scalar character-literal value export over the packed analyzer, with aggregate parity and maintained-manifest coverage |
 | `7417d62f` | Verify exact-capacity 49,146-byte UTF-8 output for a maximum-length U+0800 literal through persisted semantic-module JIT |
 | `a0738790` | Exercise maximum UTF-8 and Latin-1 encoded lengths through the maintained source-grant DLL under both runtime policies |
