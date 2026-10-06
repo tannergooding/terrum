@@ -468,6 +468,11 @@ public sealed class NativeGraphTests
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
         Assert.Equal(43, await NativeModuleCompiler.RunGraphJitAsync(root, [replacement],
             CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+
+        var incompatibleMode = usesInit ? "out Pair" : "init ref<Pair>";
+        var incompatible = Leaf($"{ProviderTemplate}public void Leaf({incompatibleMode} result) "
+            + "{ result = new Pair(21, 22); }", policy);
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [incompatible]));
     }
 
     [Fact]
