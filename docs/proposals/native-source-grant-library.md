@@ -223,6 +223,12 @@ stores before body code; and dynamic-count comparisons followed by
 source-free export remains callable without the hidden pair and its function
 bytes match ordinary source-free emission exactly.
 
+The test-only fixture also verifies source-dependence fixed-point propagation
+through a terminating two-function mutual-recursion cycle under both runtime
+policies, with the native result matching the hosted source-grant JIT result.
+This adds feasibility evidence only; native source-grant DLL support remains
+unapproved and unsupported.
+
 The reject-by-default experiment admits only self-contained structured
 `bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`, and `void` functions.
 These results establish feasibility of the provisional generated ABI only.

@@ -2576,6 +2576,11 @@ all 1,048,576 valid supplementary pairs, checks every isolated surrogate as
 malformed, and checks scalar width for every valid Unicode scalar. The DLL
 still excludes the `Host.Source`-dependent `Utf16Scalar` adapter and scalar
 frontend. These remain internal compiler exports, not a stable native ABI.
+Separately, the test-only native source-grant experiment verifies source-
+dependence fixed-point propagation through a terminating two-function mutual-
+recursion cycle under both runtime policies; its result matches the hosted
+source-grant JIT result. This is feasibility-test evidence only: production
+native source-grant DLL support remains unapproved and unsupported.
 The frontend retains its source-grant and hosted verifier/emitter boundaries.
 `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`
 projects typed facts or scanner/shape errors for inspection. Compilation
