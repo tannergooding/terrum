@@ -326,6 +326,8 @@ public sealed class ModuleTests
         var char16FloatConversionTestsPath = Path.Combine(root, "self-host", "Char16FloatConversionTests.terrum");
         var floatingComparisonPath = Path.Combine(root, "self-host", "FloatingComparison.terrum");
         var floatingComparisonTestsPath = Path.Combine(root, "self-host", "FloatingComparisonTests.terrum");
+        var floatingArithmeticPath = Path.Combine(root, "self-host", "FloatingArithmetic.terrum");
+        var floatingArithmeticTestsPath = Path.Combine(root, "self-host", "FloatingArithmeticTests.terrum");
         var checkedFactsPath = Path.Combine(root, "self-host", "IntegerCheckedArithmetic.terrum");
         var integerMathPath = Path.Combine(root, "self-host", "IntegerMath.terrum");
         var integerSaturationPath = Path.Combine(root, "self-host", "IntegerSaturation.terrum");
@@ -418,6 +420,12 @@ public sealed class ModuleTests
         var floatingComparisonTests = SyntaxTree.Parse(
             await File.ReadAllTextAsync(floatingComparisonTestsPath).ConfigureAwait(true),
             floatingComparisonTestsPath);
+        var floatingArithmetic = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(floatingArithmeticPath).ConfigureAwait(true),
+            floatingArithmeticPath);
+        var floatingArithmeticTests = SyntaxTree.Parse(
+            await File.ReadAllTextAsync(floatingArithmeticTestsPath).ConfigureAwait(true),
+            floatingArithmeticTestsPath);
         var checkedFacts = SyntaxTree.Parse(await File.ReadAllTextAsync(checkedFactsPath).ConfigureAwait(true),
             checkedFactsPath);
         var integerMath = SyntaxTree.Parse(await File.ReadAllTextAsync(integerMathPath).ConfigureAwait(true),
@@ -438,6 +446,7 @@ public sealed class ModuleTests
             floatingIntegerConversion, floatingIntegerConversionTests, floatingFormatConversion,
             floatingFormatConversionTests, floatingNegation, floatingNegationTests, checkedFacts,
             char16FloatConversion, char16FloatConversionTests, floatingComparison, floatingComparisonTests,
+            floatingArithmetic, floatingArithmeticTests,
             integerMath, integerSaturation, integerWrapping, checkedConversions, bitOperations], policy);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
@@ -458,6 +467,7 @@ public sealed class ModuleTests
             "Terrum.CodeAnalysis.Tests.CheckIntegerFloatConversion",
             "Terrum.CodeAnalysis.Tests.CheckChar16FloatConversion",
             "Terrum.CodeAnalysis.Tests.CheckFloatingComparison",
+            "Terrum.CodeAnalysis.Tests.CheckFloatingArithmetic",
             "Terrum.CodeAnalysis.Tests.CheckFloatingNegation",
             "Terrum.CodeAnalysis.Tests.CheckFloatingFormatConversion",
             "Terrum.CodeAnalysis.Tests.CheckFloatingIntegerConversion",

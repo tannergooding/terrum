@@ -1,0 +1,200 @@
+namespace Terrum.CodeAnalysis;
+
+public static uint32 Float32AddBits(uint32 left, uint32 right)
+{
+    return uint32(AddFloatingBits(uint64(left), uint64(right), true, false));
+}
+
+public static uint32 Float32SubtractBits(uint32 left, uint32 right)
+{
+    return uint32(AddFloatingBits(uint64(left), uint64(right), true, true));
+}
+
+public static uint64 Float64AddBits(uint64 left, uint64 right)
+{
+    return AddFloatingBits(left, right, false, false);
+}
+
+public static uint64 Float64SubtractBits(uint64 left, uint64 right)
+{
+    return AddFloatingBits(left, right, false, true);
+}
+
+uint64 AddFloatingBits(uint64 left, uint64 right, bool isFloat32, bool subtract)
+{
+    mut int32 fractionBits = 52;
+    mut int32 maximumExponent = 2047;
+    mut uint64 signMask = 0x8000000000000000;
+    mut uint64 exponentMask = 0x7FF0000000000000;
+    mut uint64 fractionMask = 0x000FFFFFFFFFFFFF;
+    mut uint64 canonicalNaN = 0x7FF8000000000000;
+    if (isFloat32)
+    {
+        fractionBits = 23;
+        maximumExponent = 255;
+        signMask = 0x80000000;
+        exponentMask = 0x7F800000;
+        fractionMask = 0x007FFFFF;
+        canonicalNaN = 0x7FC00000;
+    }
+
+    uint64 positiveMask = signMask - 1;
+    mut uint64 leftMagnitude = left & positiveMask;
+    mut uint64 rightMagnitude = right & positiveMask;
+    mut int32 leftEncodedExponent = int32((leftMagnitude & exponentMask) >> fractionBits);
+    mut int32 rightEncodedExponent = int32((rightMagnitude & exponentMask) >> fractionBits);
+    uint64 leftFraction = leftMagnitude & fractionMask;
+    uint64 rightFraction = rightMagnitude & fractionMask;
+    if ((leftEncodedExponent == maximumExponent && leftFraction != 0)
+        || (rightEncodedExponent == maximumExponent && rightFraction != 0))
+    {
+        return canonicalNaN;
+    }
+
+    mut bool leftNegative = (left & signMask) != 0;
+    mut bool rightNegative = (right & signMask) != 0;
+    if (subtract)
+    {
+        rightNegative = !rightNegative;
+    }
+
+    bool leftInfinity = leftEncodedExponent == maximumExponent;
+    bool rightInfinity = rightEncodedExponent == maximumExponent;
+    if (leftInfinity && rightInfinity)
+    {
+        if (leftNegative != rightNegative)
+        {
+            return canonicalNaN;
+        }
+
+        return leftNegative ? signMask | exponentMask : exponentMask;
+    }
+    if (leftInfinity)
+    {
+        return leftNegative ? signMask | exponentMask : exponentMask;
+    }
+    if (rightInfinity)
+    {
+        return rightNegative ? signMask | exponentMask : exponentMask;
+    }
+
+    bool leftZero = leftMagnitude == 0;
+    bool rightZero = rightMagnitude == 0;
+    if (leftZero && rightZero)
+    {
+        return leftNegative && rightNegative ? signMask : 0;
+    }
+    if (leftZero)
+    {
+        return rightMagnitude | (rightNegative ? signMask : 0);
+    }
+    if (rightZero)
+    {
+        return leftMagnitude | (leftNegative ? signMask : 0);
+    }
+
+    // Exponent field 1 gives subnormals the same scale as minimum normals.
+    mut int32 leftExponent = leftEncodedExponent == 0 ? 1 : leftEncodedExponent;
+    mut int32 rightExponent = rightEncodedExponent == 0 ? 1 : rightEncodedExponent;
+    mut uint64 hiddenBit = uint64(1) << fractionBits;
+    mut uint64 leftSignificand = leftFraction;
+    mut uint64 rightSignificand = rightFraction;
+    if (leftEncodedExponent != 0)
+    {
+        leftSignificand = leftSignificand | hiddenBit;
+    }
+    if (rightEncodedExponent != 0)
+    {
+        rightSignificand = rightSignificand | hiddenBit;
+    }
+
+    if (leftMagnitude == rightMagnitude && leftNegative != rightNegative)
+    {
+        return 0;
+    }
+
+    if (leftMagnitude < rightMagnitude)
+    {
+        uint64 magnitude = leftMagnitude;
+        leftMagnitude = rightMagnitude;
+        rightMagnitude = magnitude;
+
+        int32 exponent = leftExponent;
+        leftExponent = rightExponent;
+        rightExponent = exponent;
+
+        uint64 significand = leftSignificand;
+        leftSignificand = rightSignificand;
+        rightSignificand = significand;
+
+        bool negative = leftNegative;
+        leftNegative = rightNegative;
+        rightNegative = negative;
+    }
+
+    uint64 leftExtended = leftSignificand << 3;
+    uint64 rightExtended = ShiftRightJam(rightSignificand << 3, leftExponent - rightExponent);
+    mut uint64 resultSignificand = 0;
+    mut int32 resultExponent = leftExponent;
+    if (leftNegative == rightNegative)
+    {
+        resultSignificand = leftExtended + rightExtended;
+        if (resultSignificand >= (hiddenBit << 4))
+        {
+            resultSignificand = ShiftRightJam(resultSignificand, 1);
+            resultExponent = resultExponent + 1;
+        }
+    }
+    else
+    {
+        resultSignificand = leftExtended - rightExtended;
+        while (resultSignificand < (hiddenBit << 3) && resultExponent > 1)
+        {
+            resultSignificand = resultSignificand << 1;
+            resultExponent = resultExponent - 1;
+        }
+    }
+
+    mut uint64 retainedSignificand = resultSignificand >> 3;
+    uint64 roundBits = resultSignificand & 7;
+    if (roundBits > 4 || (roundBits == 4 && (retainedSignificand & 1) != 0))
+    {
+        retainedSignificand = retainedSignificand + 1;
+    }
+
+    if (retainedSignificand >= (hiddenBit << 1))
+    {
+        retainedSignificand = retainedSignificand >> 1;
+        resultExponent = resultExponent + 1;
+    }
+
+    if (resultExponent >= maximumExponent)
+    {
+        return leftNegative ? signMask | exponentMask : exponentMask;
+    }
+
+    mut uint64 encodedExponent = 0;
+    if (resultExponent > 1 || retainedSignificand >= hiddenBit)
+    {
+        encodedExponent = uint64(resultExponent);
+    }
+    uint64 encodedFraction = retainedSignificand & fractionMask;
+    return (leftNegative ? signMask : 0) | (encodedExponent << fractionBits) | encodedFraction;
+}
+
+uint64 ShiftRightJam(uint64 value, int32 shift)
+{
+    // Preserve discarded low bits in the sticky bit used by final rounding.
+    if (shift == 0)
+    {
+        return value;
+    }
+    if (shift >= 64)
+    {
+        return value == 0 ? 0 : 1;
+    }
+
+    uint64 shifted = value >> shift;
+    uint64 discardedMask = (uint64(1) << shift) - 1;
+    return (value & discardedMask) != 0 ? shifted | 1 : shifted;
+}

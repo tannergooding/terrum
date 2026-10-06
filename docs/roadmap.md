@@ -117,6 +117,15 @@ floating operators; the independent component runner covers signed zero,
 infinities, and NaNs under both runtime policies. The source-free TRRM
 comparison proposal remains unapproved; this helper does not add scalar-
 frontend, DLL or TRRM support.
+The internal `FloatingArithmetic` component adds raw-bit `float32`/`float64`
+addition and subtraction with nearest/ties-to-even rounding, gradual
+underflow, and the hosted emitter's provisional canonical arithmetic NaNs.
+Semantic-module tests compare boundary pairs and deterministic raw-bit inputs
+against hosted results, and the independent runner covers precision ties,
+subnormal transitions, infinities, NaNs and signed zeros under AOT/JIT and both
+policies. The arithmetic and NaN-encoding proposals remain unapproved; this
+helper does not add multiplication, division, scalar-frontend, DLL or TRRM
+support.
 Separately, the standalone Terrum-authored `HexFloatLiteral` component now
 converts grammar-shaped, caller-delimited hexadecimal-float slices directly
 to target-format bits and matches hosted binding across rounding boundaries,
