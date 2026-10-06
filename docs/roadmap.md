@@ -391,6 +391,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `c581bfeb` | Verify uppercase hexadecimal-float/based-integer dispatch and decimal exponents through v85 payloads and hosted-emitter parity under both runtime policies |
 | `169b8fcc` | Populate Terrum-authored decimal, hexadecimal-float and based-integer floating literal payloads in v85; host independently audits and consumes raw bits, while verification and emission remain hosted |
 | `60e16165` | Add standalone decimal `float32`/`float64` raw-bit conversion with exact-midpoint and discarded-tail parity; source-grant DLL and scalar frontend remain unsupported, and the token-slice boundary remains proposed |
 | `455d43c3` | Add internal raw-bit `float32`/`float64` division with hosted-emitter parity across rounding, subnormal and special-value boundaries; arithmetic proposals remain unapproved |
