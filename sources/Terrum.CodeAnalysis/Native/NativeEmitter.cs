@@ -151,17 +151,36 @@ public static class NativeEmitter
         NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
         EmitLibraryCore(program, exports, null, runtimePolicy, cancellationToken).Image;
 
-    internal static (byte[] Image, NativeCode Code) EmitSourceGrantLibraryForTest(
+    internal static (byte[] Image, NativeCode Code,
+        ImmutableArray<(string Name, bool SourceDependent, PrimitiveType ReturnType,
+            ImmutableArray<PrimitiveType> ParameterTypes)> Exports) EmitSourceGrantLibraryForTest(
         BoundProgram program, IReadOnlyList<string> exports, NativeRuntimePolicy runtimePolicy)
     {
         ArgumentNullException.ThrowIfNull(program);
         SemanticVerifier.VerifyLibrary(program);
         var dependent = NativeSourceGrantExperiment.Classify(program);
         NativeCode? emitted = null;
+        var exportBindings = ImmutableArray.CreateBuilder<(string Name, bool SourceDependent,
+            PrimitiveType ReturnType, ImmutableArray<PrimitiveType> ParameterTypes)>();
         var result = EmitLibraryCore(program, exports, null, runtimePolicy, default, dependent,
-            code => emitted = code);
+            code => emitted = code, selectedExports =>
+            {
+                foreach (var (name, index) in selectedExports)
+                {
+                    var function = program.Functions[index];
+                    var parameterOffset = function.IsConstructor ? 1 : 0;
+                    var parameterTypes = ImmutableArray.CreateBuilder<PrimitiveType>(function.ParameterCount);
+                    for (var parameter = 0; parameter < function.ParameterCount; parameter++)
+                    {
+                        parameterTypes.Add(function.Variables[parameter + parameterOffset].Type);
+                    }
+                    exportBindings.Add((name, dependent[index], function.ReturnType,
+                        parameterTypes.MoveToImmutable()));
+                }
+            });
 
-        return (result.Image, emitted ?? throw new InvalidOperationException("No experiment code was emitted."));
+        return (result.Image, emitted ?? throw new InvalidOperationException("No experiment code was emitted."),
+            exportBindings.ToImmutable());
     }
 
     /// <summary>Emits a library whose verified external declarations have explicit DLL import bindings.</summary>
@@ -183,7 +202,8 @@ public static class NativeEmitter
     private static (byte[] Image, ImmutableArray<NativeImportBinding> Imports)
         EmitLibraryCore(BoundProgram program, IReadOnlyList<string> exports,
         IReadOnlyList<NativeImportBinding>? bindings, NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken,
-        bool[]? sourceDependent = null, Action<NativeCode>? captureCode = null)
+        bool[]? sourceDependent = null, Action<NativeCode>? captureCode = null,
+        Action<ImmutableArray<(string Name, int Index)>>? captureSelectedExports = null)
     {
         if (runtimePolicy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
@@ -250,6 +270,7 @@ public static class NativeEmitter
             selected.Add((name, index));
         }
         selected.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
+        captureSelectedExports?.Invoke([.. selected]);
         var imports = bindings is null ? null : SelectImports(program, bindings, cancellationToken);
         var compiler = new PeCompiler(program, cancellationToken, managedExports, library: true, imports: imports,
             sourceDependent: sourceDependent);

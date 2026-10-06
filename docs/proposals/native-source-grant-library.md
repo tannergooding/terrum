@@ -120,8 +120,12 @@ call graph?
 
 **Summary:** Adding a source read in a private callee can change an export's
 effective native signature without changing its authored parameters or export
-name. The test experiment uses handwritten delegates for known fixtures, so
-it does not establish a production caller-binding mechanism.
+name. A test-only follow-up now derives selected-export descriptors from the
+same emission selection and generates matching cdecl delegate types, including
+the hidden pair only for source-dependent exports. Recompiling an unchanged
+export after changing only its private callee verifies both signature shapes.
+This is feasibility evidence, not a production managed caller-binding
+mechanism.
 
 **Recommendation:** For any promoted managed path, generate its invocation
 stub from the same verified export set used for DLL emission, including the
@@ -153,14 +157,16 @@ calls and their signatures remain unchanged. Separate signed and unsigned
 No source-dependent imports, cross-DLL propagation, aggregate results, or
 general wrapper are admitted.
 
-A private test helper validates the 16,384-unit limit and null/empty shape,
-pins immutable-for-the-call UTF-16 storage, invokes the export, and unpins
-after synchronous return. The caller remains responsible for readable,
-two-byte-aligned storage and immutability during the call. Tests do not
-dereference invalid pointers. This experiment may establish implementation
-feasibility only; adding source-dependent exports to the maintained library,
-generalizing the ABI, or claiming language/public ABI support requires a
-separate review and decision.
+The test-only generated binding validates the 16,384-unit limit, pins the
+provided UTF-16 array for the synchronous call, adds the hidden pair only when
+the selected export descriptor requires it, and unpins after return. The
+caller remains responsible for readable storage and immutability during the
+call; pinned arrays provide the required two-byte alignment. Lower-level
+adapter tests still check null/count and alignment rejection before dispatch.
+Tests do not dereference invalid pointers. This experiment may establish
+implementation feasibility only; adding source-dependent exports to the
+maintained library, generalizing the ABI, or claiming language/public ABI
+support requires a separate review and decision.
 
 ### Experiment outcome
 
@@ -222,6 +228,17 @@ stores before body code; and dynamic-count comparisons followed by
 `movzx eax,word ptr [rdx+rax*2]` in the emitted PE text. A five-authored-argument
 source-free export remains callable without the hidden pair and its function
 bytes match ordinary source-free emission exactly.
+
+The test-only managed binder consumes the selected-export descriptors emitted
+alongside the image. A fixture keeps the public `int32(int32)` export
+unchanged while switching only its private callee from source-free to a
+`Host.Source` read; the generated delegate changes from one authored argument
+to the hidden source pair plus that argument, and execution matches the
+expected source unit under both runtime policies. Oversized managed grants are
+rejected before invocation, source-free calls retain their authored signature,
+and production `EmitLibrary` continues to reject both fixtures. This does not
+generate production stubs or change the maintained compiler-primitives DLL
+boundary.
 
 The test-only fixture also verifies source-dependence fixed-point propagation
 through a terminating two-function mutual-recursion cycle under both runtime

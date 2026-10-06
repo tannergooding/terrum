@@ -22,6 +22,7 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class NativeSourceGrantExperimentTests
 {
     private const string ReadExport = "Terrum.CodeAnalysis.ReadUtf16ScalarForSourceAbiTest";
+    private const string FlowExport = "Terrum.CodeAnalysis.SourceFlowForSourceAbiTest";
     private const string LengthExport = "Terrum.CodeAnalysis.SourceLengthForSourceAbiTest";
     private const string BoundaryExport = "Terrum.CodeAnalysis.SourceBoundaryForSourceAbiTest";
     private const string FreeExport = "Terrum.CodeAnalysis.SourceFreeForSourceAbiTest";
@@ -103,9 +104,11 @@ public sealed class NativeSourceGrantExperimentTests
     {
         Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var program = Compile(policy, [0x1357, 0x2468, 0xABCD]);
-        var (image, code) = EmitExperiment(program,
+        var emitted = EmitExperiment(program,
             [ReadExport, LengthExport, BoundaryExport, FreeExport, SignedExport, UnsignedExport, FreeWideExport],
             (NativeRuntimePolicy)policy);
+        var image = emitted.Image;
+        var code = emitted.Code;
         InspectArtifact(program, image, code, policy);
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-experiment-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, image);
@@ -114,6 +117,7 @@ public sealed class NativeSourceGrantExperimentTests
             var module = NativeLibrary.Load(path);
             try
             {
+                var generated = new NativeSourceGrantTestBindings(module, emitted.Exports);
                 var read = Marshal.GetDelegateForFunctionPointer<ReadScalar>(NativeLibrary.GetExport(module, ReadExport));
                 var length = Marshal.GetDelegateForFunctionPointer<ReadLength>(NativeLibrary.GetExport(module, LengthExport));
                 var boundary = Marshal.GetDelegateForFunctionPointer<ReadBoundary>(NativeLibrary.GetExport(module, BoundaryExport));
@@ -124,6 +128,17 @@ public sealed class NativeSourceGrantExperimentTests
                     NativeLibrary.GetExport(module, UnsignedExport));
                 var freeWide = Marshal.GetDelegateForFunctionPointer<SourceFreeWide>(
                     NativeLibrary.GetExport(module, FreeWideExport));
+                Assert.Equal((int)'A', generated.Invoke<int>(ReadExport, ['A'], 0, 1, (int)'A'));
+                Assert.Equal(0, generated.Invoke<int>(LengthExport, null));
+                Assert.Equal(0, generated.Invoke<int>(LengthExport, []));
+                Assert.Equal(54321, generated.Invoke<int>(FreeExport, null, 1, 2, 3, 4, 5));
+                Assert.Equal(0xFEDCBA9876543210UL,
+                    generated.Invoke<ulong>(FreeWideExport, null, 0xFEDCBA9876543210UL));
+                Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    generated.Invoke<int>(LengthExport, new char[16_385]));
+                Assert.Equal(new[] { ReadExport, LengthExport, BoundaryExport, FreeExport, SignedExport,
+                    UnsignedExport, FreeWideExport }.OrderBy(static name => name, StringComparer.Ordinal),
+                    emitted.Exports.Select(static export => export.Name).ToArray());
                 Assert.Equal(54321, free(1, 2, 3, 4, 5));
                 Assert.Equal(12345, free(5, 4, 3, 2, 1));
                 Assert.Equal(0xFEDCBA9876543210UL, freeWide(0xFEDCBA9876543210UL));
@@ -286,6 +301,75 @@ public sealed class NativeSourceGrantExperimentTests
         Assert.Equal(0, calls);
     }
 
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void GeneratedBindingsFollowPrivateCalleeSourceDependence(BoundRuntimePolicy policy)
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var sourceFreeProgram = CompileBindingFixture(policy, privateCalleeReadsSource: false);
+        var sourceFree = EmitExperiment(sourceFreeProgram, [FlowExport], (NativeRuntimePolicy)policy);
+        var sourceFreeExport = Assert.Single(sourceFree.Exports);
+        Assert.False(sourceFreeExport.SourceDependent);
+        Assert.Equal(PrimitiveType.Int32, Assert.Single(sourceFreeExport.ParameterTypes));
+        Assert.Throws<NotSupportedException>(() =>
+            NativeEmitter.EmitLibrary(sourceFreeProgram, [FlowExport], (NativeRuntimePolicy)policy));
+
+        var sourceFreePath = Path.Combine(Path.GetTempPath(),
+            $"terrum-source-grant-binding-free-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(sourceFreePath, sourceFree.Image);
+        try
+        {
+            var module = NativeLibrary.Load(sourceFreePath);
+            try
+            {
+                var bindings = new NativeSourceGrantTestBindings(module, sourceFree.Exports);
+                Assert.Equal(42, bindings.Invoke<int>(FlowExport, null, 42));
+                Assert.Throws<ArgumentException>(() => bindings.Invoke<int>(FlowExport, ['A'], 42));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(sourceFreePath);
+        }
+
+        var sourceDependentProgram = CompileBindingFixture(policy, privateCalleeReadsSource: true);
+        var sourceDependent = EmitExperiment(sourceDependentProgram, [FlowExport], (NativeRuntimePolicy)policy);
+        var sourceDependentExport = Assert.Single(sourceDependent.Exports);
+        Assert.True(sourceDependentExport.SourceDependent);
+        Assert.Equal(PrimitiveType.Int32, Assert.Single(sourceDependentExport.ParameterTypes));
+        Assert.Throws<NotSupportedException>(() =>
+            NativeEmitter.EmitLibrary(sourceDependentProgram, [FlowExport], (NativeRuntimePolicy)policy));
+
+        var sourceDependentPath = Path.Combine(Path.GetTempPath(),
+            $"terrum-source-grant-binding-dependent-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(sourceDependentPath, sourceDependent.Image);
+        try
+        {
+            var module = NativeLibrary.Load(sourceDependentPath);
+            try
+            {
+                var bindings = new NativeSourceGrantTestBindings(module, sourceDependent.Exports);
+                var source = new[] { 'A' };
+                Assert.Equal((int)source[0], bindings.Invoke<int>(FlowExport, source, 0));
+                Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    bindings.Invoke<int>(FlowExport, new char[16_385], 0));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(sourceDependentPath);
+        }
+    }
+
     [Fact]
     public void KeepsProductionEmissionAndUnsupportedExperimentShapesRejected()
     {
@@ -335,7 +419,7 @@ public sealed class NativeSourceGrantExperimentTests
         Assert.True(dependencies[program.Functions.IndexOf(
             Assert.Single(program.Functions, function => function.Name == "Terrum.CodeAnalysis.SourceCycleSecond"))]);
 
-        var (image, _) = EmitExperiment(program, [ReadExport], (NativeRuntimePolicy)policy);
+        var image = EmitExperiment(program, [ReadExport], (NativeRuntimePolicy)policy).Image;
         var referenceProgram = program with {
             EntryPoint = program.Functions.IndexOf(
                 Assert.Single(program.Functions, function => function.Name == "Terrum.CodeAnalysis.Main")),
@@ -387,6 +471,24 @@ public sealed class NativeSourceGrantExperimentTests
 
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         return program with { EntryPoint = -1 };
+    }
+
+    private static BoundProgram CompileBindingFixture(BoundRuntimePolicy policy, bool privateCalleeReadsSource)
+    {
+        var privateCallee = privateCalleeReadsSource
+            ? "return int32(Host.Source[at]);"
+            : "return at;";
+        var source = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return 0; }
+            public int32 SourceFlowForSourceAbiTest(int32 at) { return SourceFlowLeaf(at); }
+            int32 SourceFlowLeaf(int32 at) { BODY }
+            int32 KeepSourceGrant() { return Host.Source.Length; }
+            """.Replace("BODY", privateCallee, StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source, "source-flow-test.terrum"),
+            [new HostBuffer("Source", PrimitiveType.Char16, [], false) { IsInvocationScoped = true }], policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return Assert.IsType<BoundProgram>(compilation.Program) with { EntryPoint = -1 };
     }
 
     private static void InspectArtifact(BoundProgram program, byte[] image, NativeCode code, BoundRuntimePolicy policy)
@@ -468,14 +570,18 @@ public sealed class NativeSourceGrantExperimentTests
         }
     }
 
-    private static (byte[] Image, NativeCode Code) EmitExperiment(
+    private static (byte[] Image, NativeCode Code,
+        ImmutableArray<(string Name, bool SourceDependent, PrimitiveType ReturnType,
+            ImmutableArray<PrimitiveType> ParameterTypes)> Exports) EmitExperiment(
         BoundProgram program, string[] exports, NativeRuntimePolicy policy)
     {
         var method = Assert.IsType<MethodInfo>(typeof(NativeEmitter).GetMethod("EmitSourceGrantLibraryForTest",
             BindingFlags.NonPublic | BindingFlags.Static), exactMatch: false);
         try
         {
-            return Assert.IsType<(byte[], NativeCode)>(method.Invoke(null, [program, exports, policy]));
+            return Assert.IsType<(byte[], NativeCode,
+                ImmutableArray<(string, bool, PrimitiveType, ImmutableArray<PrimitiveType>)>)>(
+                method.Invoke(null, [program, exports, policy]));
         }
         catch (TargetInvocationException exception) when (exception.InnerException is Exception inner)
         {

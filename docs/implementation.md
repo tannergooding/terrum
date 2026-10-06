@@ -2607,8 +2607,14 @@ frontend. These remain internal compiler exports, not a stable native ABI.
 Separately, the test-only native source-grant experiment verifies source-
 dependence fixed-point propagation through a terminating two-function mutual-
 recursion cycle under both runtime policies; its result matches the hosted
-source-grant JIT result. This is feasibility-test evidence only: production
-native source-grant DLL support remains unapproved and unsupported.
+source-grant JIT result. It also generates test-only cdecl bindings from the
+exact selected export descriptors and verifies that changing only a private
+callee changes whether the invocation includes the hidden source pair, while
+the authored export signature stays unchanged. The managed test adapter pins
+the supplied UTF-16 array for each synchronous call, and production
+`EmitLibrary` continues to reject source-dependent programs. This is
+feasibility-test evidence only: production native source-grant DLL support
+remains unapproved and unsupported.
 The frontend retains its source-grant and hosted verifier/emitter boundaries.
 `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`
 projects typed facts or scanner/shape errors for inspection. Compilation
