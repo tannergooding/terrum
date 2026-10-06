@@ -97,6 +97,22 @@ public sealed class StringLiteralEncodingModuleTests
         public int32 VerifyLatin1() { return VerifyEncoding(5); }
         public int32 VerifyUtf32LeBytes() { return VerifyEncoding(6); }
         public int32 VerifyUtf32BeBytes() { return VerifyEncoding(7); }
+
+        public int32 VerifyMaximumAsciiLiteral() {
+            if (!SourceRange.TryCreate(0, Host.Source.Length, init var spelling)
+                || !StringLiteral.TryCreate(spelling, init var literal)) { return -1; }
+            int32 expectedLength = Host.Source.Length - 2;
+            if (literal.ScalarCount != expectedLength
+                || !literal.TryGetAsciiLength(init var measured)
+                || measured != expectedLength
+                || !OwnedInt32Buffer.TryCreate(expectedLength, out var workspace)) { return -2; }
+            mut OwnedInt32Buffer encoded = literal.EncodeAscii(move workspace);
+            if (encoded.Count != expectedLength || encoded.Capacity != expectedLength) { return -3; }
+            for (mut int32 index = 0; index < expectedLength; index = index + 1) {
+                if (encoded.Read(index) != int32(Host.Source[index + 1])) { return -4; }
+            }
+            return expectedLength;
+        }
         """;
 
     [Theory]
@@ -135,6 +151,7 @@ public sealed class StringLiteralEncodingModuleTests
             "VerifyLatin1",
             "VerifyUtf32LeBytes",
             "VerifyUtf32BeBytes",
+            "VerifyMaximumAsciiLiteral",
         };
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
             [.. exports.Select(static name => "Terrum.CodeAnalysis." + name)]);
@@ -268,6 +285,15 @@ public sealed class StringLiteralEncodingModuleTests
         {
             VerifyBmpBatch(bmpBatchStart);
         }
+
+        var maximumAsciiSpelling = "\"" + new string('a', ScannerHost.MaximumSourceLength - 2) + "\"";
+        Assert.Equal(ScannerHost.MaximumSourceLength, maximumAsciiSpelling.Length);
+        var maximumAsciiGrant = new HostBuffer("Source", PrimitiveType.Char16,
+            [.. maximumAsciiSpelling.Select(static unit => (int)unit)], false) {
+            IsInvocationScoped = true,
+        };
+        Assert.Equal(ScannerHost.MaximumSourceLength - 2,
+            NativeJit.ExecuteWithSourceGrant(consumers[^1], [maximumAsciiGrant], (NativeRuntimePolicy)policy));
     }
 
     private static int[]? TryEncode(Encoding encoding, string value)
