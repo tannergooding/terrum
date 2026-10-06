@@ -79,6 +79,12 @@ Floating-to-integer conversion is also provisionally encoded as a distinct
 fail-fast operation under its unapproved proposal; checked-exception TRRM
 remains unsupported. None of these floating operations is part of the approved
 `(1, 0)` Body profile.
+The standalone Terrum-authored `IntegerFloatConversion` component now also
+constructs exact `float32` and `float64` bits from typed signed and unsigned
+32-/64-bit integers, matching hosted target-format results under both runtime
+policies; its boundaries also run in the independent AOT/JIT component test
+runner. It does not extend scalar-frontend verification/emission or the
+source-free DLL.
 Separately, the standalone Terrum-authored `HexFloatLiteral` component now
 converts grammar-shaped, caller-delimited hexadecimal-float slices directly
 to target-format bits and matches hosted binding across rounding boundaries,
@@ -333,6 +339,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `16990787` | Add exact typed integer-to-float32/float64 raw-bit conversion with hosted parity, nearest-even boundaries and independent AOT/JIT component coverage |
 | `23eae8e5` | Add provisional target-format float-bit queries for hexadecimal and binary integer slices, including linear repeated-separator validation and maintained-manifest coverage |
 | `f73e0341` | Add provisional hexadecimal-float raw-bit queries to the maintained source-grant companion without widening the classifier or changing source-free exports |
 | `a15b9174` | Add a provisional scalar character-literal value export over the packed analyzer, with aggregate parity and maintained-manifest coverage |

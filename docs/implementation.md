@@ -2788,6 +2788,14 @@ only for invalid slices. Persisted semantic-module and maintained companion
 tests compare them with hosted contextual binding at ties, precision limits,
 overflow, malformed spellings, deterministic generated inputs and a
 16,000-digit source. They do not add literal typing or frontend support.
+`IntegerFloatConversion` separately constructs exact `float32` and `float64`
+result bits from typed signed and unsigned 32-/64-bit integers. Its semantic-
+module tests compare all eight conversion paths with hosted target-format
+results under both runtime policies, including signed minima, precision ties,
+both tie directions, sticky-bit cases and deterministic values; the independent
+`ComponentTestRunner` also executes the helper under AOT and JIT with both
+runtime policies. This is a Terrum-authored helper, not scalar-frontend
+verification or emission support.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under
