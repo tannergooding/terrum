@@ -226,17 +226,6 @@ public sealed class StaticProtocolOutputTests
         Assert.True(managedHandle.HasErrors);
         Assert.Null(managedHandle.Program);
 
-        var mixedModes = Compilation.Create(SyntaxTree.Parse(Value + """
-            int32 Fill<T>(T value, out T result, init ref<T> initialized) where T : [Copy] {
-                result = value;
-                initialized = value;
-                return 7;
-            }
-            int32 Main() { return 0; }
-            """));
-        Assert.True(mixedModes.HasErrors);
-        Assert.Null(mixedModes.Program);
-
         var fixedOutput = Compilation.Create(SyntaxTree.Parse(Value + """
             int32 Fill<T>(T value, out int32 result) where T : [Copy] {
                 result = 7;
@@ -246,6 +235,147 @@ public sealed class StaticProtocolOutputTests
             """));
         Assert.True(fixedOutput.HasErrors);
         Assert.Null(fixedOutput.Program);
+
+        var fixedInitOutput = Compilation.Create(SyntaxTree.Parse(Value + """
+            int32 Fill<T>(T value, out T result, init ref<int32> count) where T : [Copy] {
+                result = value;
+                count = 7;
+                return 42;
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.True(fixedInitOutput.HasErrors);
+        Assert.Null(fixedInitOutput.Program);
+    }
+
+    [Theory]
+    [InlineData("int32", false)]
+    [InlineData("int32", true)]
+    [InlineData("uint32", false)]
+    [InlineData("uint32", true)]
+    [InlineData("int64", false)]
+    [InlineData("int64", true)]
+    [InlineData("uint64", false)]
+    [InlineData("uint64", true)]
+    [InlineData("char16", false)]
+    [InlineData("char16", true)]
+    [InlineData("void", false)]
+    [InlineData("void", true)]
+    public void GenericNonBooleanMixedOutputsPreserveEachMode(string resultType, bool explicitType)
+    {
+        var call = explicitType
+            ? "Fill<Value, int32>(new Value(40), int32(2), out copied, init var initialized)"
+            : "Fill(new Value(40), int32(2), out copied, init var initialized)";
+        var returnValue = resultType == "char16" ? "char16(7)" : "7";
+        var body = resultType == "void"
+            ? "result = value; initialized = second;" + (explicitType ? " return;" : "")
+            : "result = value; initialized = second; return " + returnValue + ";";
+        var completion = resultType == "void"
+            ? "CALL; require copied.First == 40 && initialized == 2; return 42;"
+            : "var status = CALL; require status == " + returnValue
+                + " && copied.First == 40 && initialized == 2; return 42;";
+        var source = Value + """
+            RESULT Fill<T, U>(T value, U second, out T result, init ref<U> initialized)
+                where T : [Copy] where U : [Copy] {
+                BODY
+            }
+            int32 Main() {
+                mut Value copied = new Value(0);
+                COMPLETION
+            }
+            """.Replace("RESULT", resultType, StringComparison.Ordinal)
+            .Replace("BODY", body, StringComparison.Ordinal)
+            .Replace("COMPLETION", completion, StringComparison.Ordinal)
+            .Replace("CALL", call, StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value, int32>");
+        var expectedReturn = resultType switch {
+            "int32" => PrimitiveType.Int32,
+            "uint32" => PrimitiveType.UInt32,
+            "int64" => PrimitiveType.Int64,
+            "uint64" => PrimitiveType.UInt64,
+            "char16" => PrimitiveType.Char16,
+            _ => PrimitiveType.Void,
+        };
+        Assert.Equal(expectedReturn, fill.ReturnType);
+        Assert.True(fill.Variables[2].IsOut);
+        Assert.False(fill.Variables[2].IsInit);
+        Assert.True(fill.Variables[3].IsOut);
+        Assert.True(fill.Variables[3].IsInit);
+    }
+
+    [Theory]
+    [InlineData("int32", "result = value; return 7;")]
+    [InlineData("int32", "initialized = second; return 7;")]
+    [InlineData("void", "result = value;")]
+    [InlineData("void", "initialized = second;")]
+    public void GenericNonBooleanMixedOutputsRequirePublicationOnEveryNormalReturn(
+        string resultType, string body)
+    {
+        var source = Value + resultType
+            + " Fill<T, U>(T value, U second, bool publish, out T result, init ref<U> initialized)"
+            + " where T : [Copy] where U : [Copy] { " + body + "} int32 Main() { return 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void GenericMixedOutputDoesNotAdmitManagedOrdinaryOut()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Fill<T, U>(T value, U second, out T result, init ref<U> initialized)
+                where T : [Copy] where U : [Copy] {
+                result = value;
+                initialized = second;
+                return 7;
+            }
+            int32 Main() {
+                require ManagedNode.TryCreate(42, out var node);
+                int32 status = Fill(node, int32(3), out var copy, init var count);
+                return status + copy.Value + count;
+            }
+            """));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData("int32(previous.First)")]
+    [InlineData("int32(initialized)")]
+    public void GenericMixedOutputIsNotReadableAfterExceptionalDeparture(string catchRead)
+    {
+        var source = """
+            struct Pair {
+                public int64 First;
+                public int64 Second;
+                public Pair(int64 first, int64 second) { First = first; Second = second; }
+            }
+            int32 Fill<T, U>(T value, U second, bool complete, out T result,
+                init ref<U> initialized) where T : [Copy] where U : [Copy] {
+                result = value;
+                initialized = second;
+                require complete;
+                return 7;
+            }
+            int32 Main() {
+                mut Pair previous = new Pair(1, 2);
+                init int64 initialized;
+                unsafe {
+                    try {
+                        Fill(new Pair(40, 2), int64(3), false, out previous, init initialized);
+                    } catch {
+                        return CATCH_READ;
+                    }
+                }
+                return 0;
+            }
+            """.Replace("CATCH_READ", catchRead, StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
     }
 
     [Fact]

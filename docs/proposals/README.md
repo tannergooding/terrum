@@ -35,6 +35,9 @@ approved.
 - [Generic Copy initialization outputs for non-Boolean calls](generic-init-output-publication.md)
   recommends carrying ordinary `init ref<T>` normal-return publication through
   compilation-local Copy specializations while preserving Boolean vacancy.
+- [Mixed generic Copy outputs for non-Boolean calls](generic-mixed-output-publication.md)
+  recommends combining generic `out` and `init ref` formals while preserving
+  each mode's distinct destination and publication contract.
 - [Floating Copy generic specializations](floating-copy-generic-specializations.md)
   recommends admitting floating formats only as concrete arguments to hosted
   Copy-only generic templates; it does not grant symbolic floating operations

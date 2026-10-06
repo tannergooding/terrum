@@ -771,16 +771,13 @@ internal sealed partial class Binder
             }
         }
         var outputParameters = templateParameters.Where(static parameter => parameter.IsOut).ToArray();
-        var hasMixedOutputModes = outputParameters.Any(static parameter => parameter.IsInit)
-            && outputParameters.Any(static parameter => !parameter.IsInit);
         if (body is null || copies.Any(static copy => !copy)
             || (scalarReturn == PrimitiveType.Void
                 && !outputParameters.Any(static parameter => parameter.TypeParameterIndex >= 0))
             || (outputParameters.Length != 0
                 && scalarReturn != PrimitiveType.Bool
                 && (scalarReturn is null
-                    || outputParameters.Any(static parameter => parameter.TypeParameterIndex < 0)
-                    || hasMixedOutputModes))
+                    || outputParameters.Any(static parameter => parameter.TypeParameterIndex < 0)))
             || Enumerable.Range(0, typeNames.Length).Any(index => returnIndex != index
                 && !templateParameters.Any(parameter => parameter.TypeParameterIndex == index))
             || (noThrow && operations.Any(operators =>

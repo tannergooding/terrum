@@ -57,6 +57,12 @@ public sealed partial class GenericControlFlowModuleTests
         [NoThrow] void FillInitVoid<T>(T value, init ref<T> result) where T : [Copy] {
             result = value;
         }
+        [NoThrow] int32 FillMixed<T, U>(T value, U second, int32 status, out T result,
+            init ref<U> initialized) where T : [Copy] where U : [Copy] {
+            result = value;
+            initialized = second;
+            return status;
+        }
         [NoThrow] int32 Count<T>(T value, int32 count) where T : [Copy] { return count; }
         public int32 PowerProbe() {
             if (TryCopy(new Pair(1, 2), false, out var missing)) { return 1; }
@@ -65,10 +71,14 @@ public sealed partial class GenericControlFlowModuleTests
             FillVoid(copied, out var copiedAgain);
             int32 initStatus = FillInit(result, 42, init var initialized);
             FillInitVoid(copied, init var initializedAgain);
+            mut Pair mixed = new Pair(0, 0);
+            int32 mixedStatus = FillMixed(result, int64(42), 7, out mixed, init var initializedMixed);
             if (status != 7 || duplicate.First != 40 || duplicate.Second != 2
                 || copiedAgain.First != 40 || copiedAgain.Second != 2
                 || initStatus != 7 || initialized.First != 40 || initialized.Second != 2
-                || initializedAgain.First != 40 || initializedAgain.Second != 2) { return 2; }
+                || initializedAgain.First != 40 || initializedAgain.Second != 2
+                || mixedStatus != 7 || mixed.First != 40 || mixed.Second != 2
+                || initializedMixed != 42) { return 2; }
             return int32(result.First + result.Second) + Count(result, 0);
         }
         """;
@@ -87,6 +97,7 @@ public sealed partial class GenericControlFlowModuleTests
             .Replace("FillVoid(", "FillVoid<Pair>(", StringComparison.Ordinal)
             .Replace("FillInit(", "FillInit<Pair>(", StringComparison.Ordinal)
             .Replace("FillInitVoid(", "FillInitVoid<Pair>(", StringComparison.Ordinal)
+            .Replace("FillMixed(", "FillMixed<Pair, int64>(", StringComparison.Ordinal)
             .Replace("Count(", "Count<Pair>(", StringComparison.Ordinal);
         var original = ModuleCompiler.CreateProducer(Compile(Stub, policy), ["PowerProbe"]);
         var consumer = ModuleCompiler.CreateConsumer(Compile("""
@@ -124,6 +135,12 @@ public sealed partial class GenericControlFlowModuleTests
             static function => function.Name == "$producer.FillInitVoid<Pair>");
         Assert.Equal(PrimitiveType.Void, fillInitVoid.ReturnType);
         Assert.True(fillInitVoid.Variables[1].IsInit);
+        var fillMixed = Assert.Single(linked.Functions,
+            static function => function.Name == "$producer.FillMixed<Pair, int64>");
+        Assert.Equal(PrimitiveType.Int32, fillMixed.ReturnType);
+        Assert.True(fillMixed.Variables[3].IsOut);
+        Assert.False(fillMixed.Variables[3].IsInit);
+        Assert.True(fillMixed.Variables[4].IsInit);
         var helper = Assert.Single(linked.Functions,
             static function => function.Name == "$producer.TryCopy<Pair>");
         Assert.Equal(PrimitiveType.Bool, helper.ReturnType);

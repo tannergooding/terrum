@@ -474,6 +474,201 @@ public sealed partial class JitTests
         return AssertCheckedExecutionAsync(Source, 42);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GenericMixedOutputsPublishUnderTheirDistinctModesAsync(bool checkedFailures)
+    {
+        const string Source = """
+            struct Pair {
+                public int64 First;
+                public int64 Second;
+                public Pair(int64 first, int64 second) { First = first; Second = second; }
+            }
+            [NoThrow] int32 Fill<T, U>(T value, U second, int32 status, out T result,
+                init ref<U> initialized) where T : [Copy] where U : [Copy] {
+                result = value;
+                initialized = second;
+                return status;
+            }
+            [NoThrow] void FillVoid<T, U>(T value, U second, out T result,
+                init ref<U> initialized) where T : [Copy] where U : [Copy] {
+                result = value;
+                initialized = second;
+            }
+            int32 Main() {
+                mut Pair previous = new Pair(1, 2);
+                int32 zeroStatus = Fill(new Pair(40, 2), int64(3), 0, out previous, init var first);
+                int32 status = Fill<Pair, int64>(new Pair(42, 2), int64(5), 7,
+                    out previous, init var second);
+                mut Pair voidResult = new Pair(0, 0);
+                init int64 voidInitialized;
+                FillVoid(new Pair(40, 2), int64(6), out voidResult, init voidInitialized);
+                if (zeroStatus != 0 || status != 7 || previous.First != 42 || first != 3 || second != 5
+                    || voidResult.First != 40 || voidInitialized != 6) {
+                    return 1;
+                }
+                return 42;
+            }
+            """;
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task GenericMixedOutputsRetainManagedInitRootsAsync(NativeRuntimePolicy policy)
+    {
+        const string Source = """
+            struct Pair {
+                public int64 First;
+                public int64 Second;
+                public Pair(int64 first, int64 second) { First = first; Second = second; }
+            }
+            [NoThrow] int32 Copy<T, U>(T value, U second, int32 status, out T result,
+                init ref<U> initialized) where T : [Copy] where U : [Copy] {
+                result = value;
+                initialized = second;
+                return status;
+            }
+            int32 Fill(out Pair result, init ref<write ManagedNode> initialized) {
+                require ManagedNode.TryCreate(42, out var created);
+                return Copy(new Pair(40, 2), created, 7, out result, init initialized);
+            }
+            int32 Main() {
+                if (ManagedHeap.Collect() != 0) { return 1; }
+                mut Pair pair = new Pair(0, 0);
+                int32 status = Fill(out pair, init var node);
+                if (ManagedHeap.Collect() != 0) { return 2; }
+                if (pair.First != 40 || pair.Second != 2) { return 3; }
+                return status + node.Value;
+            }
+            """;
+        if (policy == NativeRuntimePolicy.CheckedExceptions)
+        {
+            await AssertCheckedExecutionAsync(Source, 49).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 49).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    public Task GenericMixedManagedOutputsRetireRootsAfterCheckedFailureAsync()
+    {
+        const string Source = """
+            struct Pair {
+                public int64 First;
+                public int64 Second;
+                public Pair(int64 first, int64 second) { First = first; Second = second; }
+            }
+            int32 Copy<T, U>(T value, U second, bool complete, out T result,
+                init ref<U> initialized) where T : [Copy] where U : [Copy] {
+                result = value;
+                initialized = second;
+                require complete;
+                return 7;
+            }
+            int32 Fill(bool complete, out Pair result, init ref<write ManagedNode> initialized) {
+                require ManagedNode.TryCreate(42, out var created);
+                return Copy(new Pair(42, 2), created, complete, out result, init initialized);
+            }
+            int32 Main() {
+                mut Pair previous = new Pair(40, 2);
+                init write ManagedNode node;
+                unsafe {
+                    try {
+                        Fill(false, out previous, init node);
+                        return 1;
+                    } catch {
+                        if (node is init) { return 2; }
+                        if (ManagedHeap.Collect() != 1) { return 3; }
+                        int32 status = Fill(true, out previous, init node);
+                        if (ManagedHeap.Collect() != 0 || previous.First != 42) { return 4; }
+                        return status + node.Value;
+                    }
+                }
+                return 0;
+            }
+            """;
+        return AssertCheckedExecutionAsync(Source, 49);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GenericBooleanMixedOutputPublicationRemainsConditionalAsync(bool checkedFailures)
+    {
+        const string Source = """
+            [NoThrow] bool Fill<T>(T value, int32 number, bool publish, out T result,
+                init ref<int32> initialized) where T : [Copy] {
+                result = value;
+                initialized = number;
+                return publish;
+            }
+            int32 Main() {
+                require ManagedNode.TryCreate(40, out var value);
+                require ManagedNode.TryCreate(42, out var replacement);
+                if (Fill(value, 3, false, out var absent, init var number)) { return 1; }
+                require Fill(replacement, 5, true, out var result, init number);
+                return result.Value + number - 5;
+            }
+            """;
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    public Task GenericMixedOutputsDoNotPublishAfterCheckedFailureAsync()
+    {
+        const string Source = """
+            struct Pair {
+                public int64 First;
+                public int64 Second;
+                public Pair(int64 first, int64 second) { First = first; Second = second; }
+            }
+            int32 Fill<T, U>(T value, U second, bool complete, out T result,
+                init ref<U> initialized) where T : [Copy] where U : [Copy] {
+                result = value;
+                initialized = second;
+                require complete;
+                return 7;
+            }
+            int32 Main() {
+                mut Pair previous = new Pair(40, 2);
+                init int64 initialized;
+                unsafe {
+                    try {
+                        Fill(new Pair(42, 3), int64(4), false, out previous, init initialized);
+                        return 1;
+                    } catch {
+                        if (initialized is init) { return 2; }
+                        int32 status = Fill<Pair, int64>(new Pair(42, 2), int64(5), true,
+                            out previous, init initialized);
+                        if (status != 7 || initialized != 5) { return 3; }
+                        return int32(previous.First);
+                    }
+                }
+                return 0;
+            }
+            """;
+        return AssertCheckedExecutionAsync(Source, 42);
+    }
+
     [Fact]
     public Task GenericInitManagedOutputFailureRetiresTemporaryRootAsync()
     {

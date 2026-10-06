@@ -2197,12 +2197,20 @@ Separately, generic `init ref<T>` provisionally accepts fixed `int32`, `uint32`,
 `int64`, `uint64` or `char16` results and `void`, requiring publication on
 every normal return and preserving vacancy on checked exceptional departure.
 The extension retains private managed-handle specializations and existing
-rooting/cleanup, but excludes mixed output modes and fixed-valued output
-parameters. This hosted experiment remains under the unapproved
-[generic Copy-init-output proposal](proposals/generic-init-output-publication.md);
-it does not approve a target contract, extend the scalar frontend or source-free
-TRRM, or change module formats and ABI. Floating specialization eligibility
-remains separately provisional.
+rooting/cleanup. The init-only extension excludes mixed output modes and
+fixed-valued output parameters; this hosted experiment remains under the
+unapproved
+[generic Copy-init-output proposal](proposals/generic-init-output-publication.md).
+A separate provisional slice allows generic `out T` and `init ref<U>` outputs
+in the same non-Boolean/void template, retaining each mode's type eligibility,
+destination requirements, checked publication and private mode metadata.
+Boolean mixed-mode behavior remains unchanged; fixed-valued output parameters
+and managed-handle ordinary `out` remain excluded. This hosted experiment
+remains under the unapproved
+[mixed generic Copy-output proposal](proposals/generic-mixed-output-publication.md).
+Neither experiment approves a target contract, extends the scalar frontend or
+source-free TRRM, or changes module formats and ABI. Floating specialization
+eligibility remains separately provisional.
 For-loop initialization runs once, followed by condition, body and iterator;
 the iterator does not run after a returning or breaking body. `continue` runs
 the iterator before testing the next condition. An omitted condition is true.
