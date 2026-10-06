@@ -1132,9 +1132,13 @@ public sealed class ModuleTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void RejectsOutAndInitModeChangesAcrossSemanticAndNativeModules(bool initialUsesInit)
+    [InlineData(BoundRuntimePolicy.FailFast, false)]
+    [InlineData(BoundRuntimePolicy.FailFast, true)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions, false)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions, true)]
+    public void RejectsOutAndInitModeChangesAcrossSemanticAndNativeModules(
+        BoundRuntimePolicy policy,
+        bool initialUsesInit)
     {
         var initialDeclaration = initialUsesInit
             ? "public void Set(init ref<int32> result) { result = 42; }"
@@ -1146,20 +1150,18 @@ public sealed class ModuleTests
             ? "int32 Main() { init int32 result; Set(init result); return result; }"
             : "int32 Main() { Set(out var result); return result; }";
 
-        var initialCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(initialDeclaration),
-            BoundRuntimePolicy.FailFast);
+        var initialCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(initialDeclaration), policy);
         Assert.False(initialCompilation.HasErrors,
             string.Join(Environment.NewLine, initialCompilation.Diagnostics));
         var initialProgram = Assert.IsType<BoundProgram>(initialCompilation.Program);
         var semanticProvider = ModuleCompiler.CreateProducer(initialProgram, ["Set"]);
         var semanticCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
-            ModuleCompiler.CreateReference(semanticProvider), BoundRuntimePolicy.FailFast);
+            ModuleCompiler.CreateReference(semanticProvider), policy);
         Assert.False(semanticCompilation.HasErrors,
             string.Join(Environment.NewLine, semanticCompilation.Diagnostics));
         var semanticConsumer = ModuleCompiler.CreateConsumer(
             Assert.IsType<BoundProgram>(semanticCompilation.Program), semanticProvider);
-        var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(replacementDeclaration),
-            BoundRuntimePolicy.FailFast);
+        var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(replacementDeclaration), policy);
         Assert.False(replacementCompilation.HasErrors,
             string.Join(Environment.NewLine, replacementCompilation.Diagnostics));
         var replacementProgram = Assert.IsType<BoundProgram>(replacementCompilation.Program);
@@ -1167,15 +1169,18 @@ public sealed class ModuleTests
         _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.Link(semanticConsumer, semanticReplacement));
 
-        const NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast;
-        var nativeProvider = NativeModuleCompiler.CreateProducer(initialProgram, ["Set"], "OutputProvider", policy);
+        var nativePolicy = policy == BoundRuntimePolicy.FailFast
+            ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+        var nativeProvider = NativeModuleCompiler.CreateProducer(
+            initialProgram, ["Set"], "OutputProvider", nativePolicy);
         var nativeCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
-            NativeModuleCompiler.CreateReference(nativeProvider), BoundRuntimePolicy.FailFast);
+            NativeModuleCompiler.CreateReference(nativeProvider), policy);
         Assert.False(nativeCompilation.HasErrors,
             string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(
-            Assert.IsType<BoundProgram>(nativeCompilation.Program), nativeProvider, policy);
-        var nativeReplacement = NativeModuleCompiler.CreateProducer(replacementProgram, ["Set"], "OutputProvider", policy);
+            Assert.IsType<BoundProgram>(nativeCompilation.Program), nativeProvider, nativePolicy);
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(
+            replacementProgram, ["Set"], "OutputProvider", nativePolicy);
         _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.Validate(nativeConsumer, nativeReplacement));
     }
