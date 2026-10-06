@@ -60,6 +60,25 @@ public sealed class IntegerWrappingModuleTests
                 failureCode++;
             }
         }
+        checks.Add("all char16-to-integer widening inputs");
+        assertions.Append("if (!CheckAllChar16Widenings()) { return ")
+            .Append(failureCode.ToString(CultureInfo.InvariantCulture)).AppendLine("; }");
+        helpers.AppendLine("""
+            bool CheckAllChar16Widenings() {
+                mut int32 codeUnit = 0;
+                while (codeUnit <= 65535) {
+                    char16 value = char16(codeUnit);
+                    if (WrapChar16ToInt32(value) != codeUnit
+                        || WrapChar16ToUInt32(value) != uint32(codeUnit)
+                        || WrapChar16ToInt64(value) != int64(codeUnit)
+                        || WrapChar16ToUInt64(value) != uint64(codeUnit)) {
+                        return false;
+                    }
+                    codeUnit = codeUnit + 1;
+                }
+                return true;
+            }
+            """);
 
         var consumerSource = new StringBuilder("using Terrum.CodeAnalysis.Numerics64;\nint32 Main() {\n");
         consumerSource.Append(assertions);

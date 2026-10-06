@@ -249,14 +249,17 @@ policy.
 The internal Windows x64 fail-fast DLL also invokes all twenty existing
 `IntegerWrapping` helpers against a separate `BigInteger` modulo and
 two's-complement oracle, including signed boundaries and surrogate code units.
-This remains candidate ABI evidence only; it does not adopt `unchecked`
-conversion syntax or a general conversion policy.
+It also checks all 65,536 `char16` inputs for each widening helper against
+hosted C# numeric conversions. This remains candidate ABI evidence only; it
+does not adopt `unchecked` conversion syntax or a general conversion policy.
 Revision-56 persisted semantic-module JIT also compares all 20 existing
 `IntegerWrapping` candidate helpers with a `BigInteger` modulo and
 two's-complement oracle across source/destination boundaries and code-unit
-edges, including surrogates, under both runtime policies. This remains
-provisional candidate evidence, not unchecked conversion syntax or a general
-conversion policy.
+edges, including surrogates, under both runtime policies. Its independent
+consumer also checks every `char16` input for all four widening helpers under
+both policies; the component test runner executes the same full code-unit
+domain through AOT and JIT. This remains provisional candidate evidence, not
+unchecked conversion syntax or a general conversion policy.
 A second persisted semantic-module consumer executes private generic
 `CopyAlgorithms` specializations over scalar values, code units and nested
 `Token`/`SourceRange` aggregates. It checks conditional `init ref` publication
@@ -2707,8 +2710,10 @@ provides all twelve cross-type 32-/64-bit signedness and width conversions that
 retain destination-width low bits, rather than applying checked range
 semantics. Four additional `char16`-to-integer widenings preserve every
 code unit, including surrogate values. AOT/JIT compare against host bit-pattern
-results under both policies, including an independent compiled-module consumer. This does not
-introduce `unchecked` source syntax or change existing type-call conversion.
+results under both policies, including an independent compiled-module
+consumer; all 65,536 `char16` values are checked for each widening. This does
+not introduce `unchecked` source syntax or change existing type-call
+conversion.
 
 The [integer-math candidate](../self-host/IntegerMath.terrum) provides
 checked `Abs` alternatives, sign/min/max/clamp, exact widened `int32`

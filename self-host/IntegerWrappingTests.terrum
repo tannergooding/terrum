@@ -28,9 +28,18 @@ public bool CheckIntegerWrapping()
         return false;
     }
 
-    char16 surrogate = char16(0xD800);
-    return WrapChar16ToInt32(surrogate) == 0xD800
-        && WrapChar16ToUInt32(surrogate) == 0xD800
-        && WrapChar16ToInt64(surrogate) == 0xD800
-        && WrapChar16ToUInt64(surrogate) == 0xD800;
+    mut int32 codeUnit = 0;
+    while (codeUnit <= 65535)
+    {
+        char16 value = char16(codeUnit);
+        if (WrapChar16ToInt32(value) != codeUnit
+            || WrapChar16ToUInt32(value) != uint32(codeUnit)
+            || WrapChar16ToInt64(value) != int64(codeUnit)
+            || WrapChar16ToUInt64(value) != uint64(codeUnit))
+        {
+            return false;
+        }
+        codeUnit = codeUnit + 1;
+    }
+    return true;
 }

@@ -175,6 +175,15 @@ public sealed partial class CliTests
             static value => new BigInteger(value), static value => new BigInteger(value), value => char16ToInt64(value));
         AssertWrapping<ushort, ulong>("WrapChar16ToUInt64", char16Values, 64, false,
             static value => new BigInteger(value), static value => new BigInteger(value), value => char16ToUInt64(value));
+
+        for (var value = 0; value <= ushort.MaxValue; value++)
+        {
+            var codeUnit = (ushort)value;
+            Assert.Equal(value, char16ToInt32(codeUnit));
+            Assert.Equal((uint)value, char16ToUInt32(codeUnit));
+            Assert.Equal((long)value, char16ToInt64(codeUnit));
+            Assert.Equal((ulong)value, char16ToUInt64(codeUnit));
+        }
     }
 
     private static void AssertWrapping<TSource, TResult>(
