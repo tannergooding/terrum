@@ -496,9 +496,10 @@ rejects malformed or unsupported records. Older v85 readers that do not know
 these reserved values reject switch projections; no reader is asked to
 reinterpret an existing v85 record. Binding, verification, and emission
 remain hosted, and switch support does not extend source-free TRRM or claim
-bootstrap support. CLI integration coverage compares each selector type with
-the hosted conditional equivalent at integer-width, Boolean, and surrogate
-code-unit boundaries under both runtime policies.
+bootstrap support. CLI integration coverage compares matching and default-arm
+selection with hosted conditional equivalents for each selector type at
+integer-width, Boolean, and surrogate code-unit boundaries under both runtime
+policies.
 These syntax and
 scanner contracts do not change semantic-module, ISA, Contract, TRRM or native
 ABI formats.
