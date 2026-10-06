@@ -86,6 +86,17 @@ public sealed partial class CliTests
     }
 
     [Theory]
+    [InlineData("int32 Main() { int32 value = 21; int32 count = 1; return value << count; }")]
+    [InlineData("int32 Main() { return Shift(84, 1); } int32 Shift(int32 value, int32 count) { int32 shifted = value; return shifted >> count; }")]
+    [InlineData("int32 Main() { return Shift(21); } int32 Shift(int32 value) { int32 count = 1; return value << count; }")]
+    [InlineData("int32 Main() { uint32 value = 0x80000000; int32 count = 31; return value >>> count == 1 ? 42 : 0; }")]
+    [InlineData("int32 Main() { uint32 value = 1; return value << 31 == 0x80000000 ? 42 : 0; }")]
+    public async Task ScalarFrontendProjectsCheckedIntegerShiftsWithLocalOperandsAsync(string source)
+    {
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Theory]
     [InlineData("int32 Main() { return 42; } int32 Shift(int32 value) { return value << 32; }")]
     [InlineData("int32 Main() { return 42; } int64 Shift(int64 value) { return value >> 64; }")]
     [InlineData("int32 Main() { return 42; } int32 Shift(int32 value) { return value << 2147483647; }")]
