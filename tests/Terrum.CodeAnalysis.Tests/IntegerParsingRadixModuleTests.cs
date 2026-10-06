@@ -152,6 +152,15 @@ public sealed class IntegerParsingRadixModuleTests
             ExecuteBatch([new ParseFixture(api, 10, maximumLengthNines)],
                 linked, policy, $"maximum-length overflowing digits for {api}");
         }
+        foreach (var radix in Enumerable.Range(2, 35))
+        {
+            var maximumDigit = Digit(radix - 1);
+            ExecuteBatch([new ParseFixture(ParserApi.UInt64, radix, maximumLengthZeros)],
+                linked, policy, $"maximum-length zero digits in radix {radix}");
+            ExecuteBatch([new ParseFixture(ParserApi.UInt64, radix,
+                    new string(maximumDigit, MaximumSourceCodeUnits - 8))],
+                linked, policy, $"maximum-length overflow digits in radix {radix}");
+        }
     }
 
     private static void ExecuteBatch(ParseFixture[] fixtures, BoundProgram linked,
