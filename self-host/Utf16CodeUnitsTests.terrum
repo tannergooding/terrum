@@ -8,11 +8,27 @@ public bool CheckUtf16CodeUnits()
     int32 unpairedHigh = DecodeUtf16Scalar(char16(55296), char16(0));
     int32 unpairedLow = DecodeUtf16Scalar(char16(56320), char16(65));
     int32 adjacentHigh = DecodeUtf16Scalar(char16(55296), char16(56319));
-    return nullScalar == 0 && Utf16ScalarWidth(nullScalar) == 1
-        && DecodeUtf16Scalar(char16(64976), char16(0)) == 64976
-        && DecodeUtf16Scalar(char16(65535), char16(0)) == 65535
-        && lowestScalar == 65536 && Utf16ScalarWidth(lowestScalar) == 2
-        && highestScalar == 1114111 && Utf16ScalarWidth(highestScalar) == 2
-        && unpairedHigh == -1 && Utf16ScalarWidth(unpairedHigh) == 1
-        && unpairedLow == -1 && adjacentHigh == -1;
+    if (nullScalar != 0 || Utf16ScalarWidth(nullScalar) != 1
+        || DecodeUtf16Scalar(char16(64976), char16(0)) != 64976
+        || DecodeUtf16Scalar(char16(65535), char16(0)) != 65535
+        || lowestScalar != 65536 || Utf16ScalarWidth(lowestScalar) != 2
+        || highestScalar != 1114111 || Utf16ScalarWidth(highestScalar) != 2
+        || unpairedHigh != -1 || Utf16ScalarWidth(unpairedHigh) != 1
+        || unpairedLow != -1 || adjacentHigh != -1)
+    {
+        return false;
+    }
+
+    for (mut int32 value = 0; value <= 65535; value = value + 1)
+    {
+        bool surrogate = value >= 55296 && value <= 57343;
+        int32 expectedScalar = surrogate ? -1 : value;
+        int32 scalar = DecodeUtf16Scalar(char16(value), char16(0));
+        if (scalar != expectedScalar || Utf16ScalarWidth(scalar) != 1)
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
