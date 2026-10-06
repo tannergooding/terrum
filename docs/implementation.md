@@ -26,7 +26,8 @@ in an isolated quoted token. A quoted source at the maximum supported length
 ends with the valid U+10FFFF surrogate pair; maximum-length identifier inputs
 also end with each unpaired surrogate code unit. The profile's integer-value
 records are checked against expected binary, decimal and hexadecimal
-`uint64`-maximum and overflow cases.
+`uint64`-maximum and overflow cases. A maximum-length source alternating
+identifiers and whitespace checks dense token and trivia record publication.
 
 A source-dependent single-producer semantic-module program can be linked and executed by
 `NativeJit.ExecuteWithSourceGrant`, which requires one readonly `char16` grant

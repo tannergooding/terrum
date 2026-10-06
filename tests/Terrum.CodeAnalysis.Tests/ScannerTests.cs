@@ -428,6 +428,14 @@ public sealed class ScannerTests
             new string('x', ScannerHost.MaximumSourceLength),
             "",
         };
+        var maximumTokenAndTriviaSource = new StringBuilder(ScannerHost.MaximumSourceLength);
+        for (var index = 0; index < ScannerHost.MaximumSourceLength / 2; index++)
+        {
+            maximumTokenAndTriviaSource.Append("a ");
+        }
+        Assert.Equal(ScannerHost.MaximumSourceLength, maximumTokenAndTriviaSource.Length);
+        sources.Add(maximumTokenAndTriviaSource.ToString());
+
         var binaryMaximum = "0b" + new string('1', 64);
         var binaryOverflow = "0b1" + new string('0', 64);
         var integerBoundarySource = string.Join(' ',
