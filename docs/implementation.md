@@ -229,6 +229,14 @@ retained without binding. AOT/JIT fixtures compare with the hosted reader under
 both runtime policies, including local matches/mismatches, external producers,
 invalid names, counts and byte words. This remains structural validation, not
 producer binding or import execution support.
+The `SourceFileTableValidation` candidate composes Module validation and checks
+the nonempty fixed-row table extent, required nonempty decoded path references,
+and the currently assigned zero `digestBlob` value against
+`TrRmSourceFileTableReader`. Its AOT/JIT fixtures cover both runtime policies,
+including encoded paths, empty/malformed text, reference and digest failures,
+row counts and section extents. Paths remain identifiers rather than file
+access, and the candidate validates rows without exposing the hosted reader's
+owner lookup API.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.

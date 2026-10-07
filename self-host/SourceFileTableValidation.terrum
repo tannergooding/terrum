@@ -1,0 +1,90 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateSourceFileTable(int32 recordCount, int32 moduleCount,
+    int32 stringCount, int32 moduleRefCount, int32 typeDefCount, int32 methodDefCount,
+    int32 sourceFileCount, int32 featureCount)
+{
+    if (recordCount <= 0 || recordCount > 0xFF_FFFF
+        || recordCount != sourceFileCount
+        || recordCount * 8 != Host.SourceFiles.Length)
+    {
+        return false;
+    }
+
+    if (!TryValidateModuleTable(moduleCount, stringCount, moduleRefCount,
+        typeDefCount, methodDefCount, sourceFileCount, featureCount))
+    {
+        return false;
+    }
+
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        if (!TryValidateSourceFileRow(row, stringCount, (stringCount + 1) * 4))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryValidateSourceFileRow(int32 row, int32 stringCount, int32 stringIndexByteLength)
+{
+    if (!TryReadSourceFileTableWord(row, 0, init var path)
+        || !TryReadSourceFileTableWord(row, 4, init var digestBlob)
+        || path == 0 || path > 0xFF_FFFF || path > uint32(stringCount)
+        || digestBlob != 0)
+    {
+        return false;
+    }
+
+    if (!TryGetValidatedModuleIdentityExtent(stringCount, stringIndexByteLength,
+            int32(path), init var pathStart, init var pathLength,
+            init var pathEncoding, init var pathContentLength)
+        || !TryValidateModuleIdentityText(pathStart, pathContentLength, pathEncoding))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool TryReadSourceFileTableWord(int32 row, int32 offset, init ref<uint32> value)
+{
+    if (row <= 0)
+    {
+        return false;
+    }
+
+    int32 rowStart = (row - 1) * 8;
+    if (rowStart < 0 || rowStart > Host.SourceFiles.Length - 8
+        || offset < 0 || offset > 4
+        || !TryReadSourceFileTableByte(rowStart + offset, init var first)
+        || !TryReadSourceFileTableByte(rowStart + offset + 1, init var second)
+        || !TryReadSourceFileTableByte(rowStart + offset + 2, init var third)
+        || !TryReadSourceFileTableByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadSourceFileTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.SourceFiles.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.SourceFiles[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
