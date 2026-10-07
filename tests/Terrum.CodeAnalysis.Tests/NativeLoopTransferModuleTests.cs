@@ -39,7 +39,7 @@ public sealed class NativeLoopTransferModuleTests
             ["Leaf"], "NodeB", policy);
         var replacementProgram = Compile(StructuredLeaf, policy);
         var semantic = ModuleCompiler.CreateProducer(replacementProgram, ["Leaf"]);
-        Assert.Equal(68,VersionOf(semantic));
+        Assert.Equal(69,VersionOf(semantic));
         var reference = ModuleCompiler.CreateReference(semantic);
         var consumer = ModuleCompiler.CreateConsumer(Compile("""
             int32 Main() {
@@ -48,7 +48,7 @@ public sealed class NativeLoopTransferModuleTests
                 return answer;
             }
             """, policy, reference, library: false), semantic);
-        Assert.Equal(68,VersionOf(consumer));
+        Assert.Equal(69,VersionOf(consumer));
         SemanticVerifier.Verify(ModuleCompiler.Link(consumer, semantic));
         var downgraded = (byte[])semantic.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 50);
@@ -107,7 +107,7 @@ public sealed class NativeLoopTransferModuleTests
     public void CurrentSemanticFormatRoundTripsNearestLoopAndForIterator(NativeRuntimePolicy policy)
     {
         var producer = ModuleCompiler.CreateProducer(Compile(Leaf, policy), ["Leaf"]);
-        Assert.Equal(68,VersionOf(producer));
+        Assert.Equal(69,VersionOf(producer));
         Assert.Equal(policy == NativeRuntimePolicy.FailFast ? "native-10" : "native-11",
             ModuleCompiler.GetNativeProfileVersion(producer, false));
         _ = Assert.Single(ModuleCompiler.CreateReference(producer).Functions);
@@ -118,7 +118,7 @@ public sealed class NativeLoopTransferModuleTests
                 return result;
             }
             """, policy, ModuleCompiler.CreateReference(producer), library: false), producer);
-        Assert.Equal(68,VersionOf(consumer));
+        Assert.Equal(69,VersionOf(consumer));
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.Contains(linked.Functions, static function => function.Name == "Leaf" && !function.IsExternal);
         Assert.Contains(linked.Functions, static function => function.Name == "$producer.Advance");
@@ -129,7 +129,7 @@ public sealed class NativeLoopTransferModuleTests
                 return sum;
             }
             """, policy), ["Leaf"]);
-        Assert.Equal(68,VersionOf(old));
+        Assert.Equal(69,VersionOf(old));
         _ = ModuleCompiler.CreateReference(old);
     }
 
@@ -229,7 +229,7 @@ public sealed class NativeLoopTransferModuleTests
         var policy = NativeRuntimePolicy.FailFast;
         var oldProgram = Compile("public int32 Leaf() { return 42; }", policy);
         var old = ModuleCompiler.CreateProducer(oldProgram, ["Leaf"]);
-        Assert.Equal(68,VersionOf(old));
+        Assert.Equal(69,VersionOf(old));
         var classProgram = Compile("""
             class Box {
                 public int32 Value;
@@ -238,12 +238,12 @@ public sealed class NativeLoopTransferModuleTests
             public int32 Leaf() { require Box.TryCreate(out var box); return box.Value; }
             """, policy);
         var classOnly = ModuleCompiler.CreateProducer(classProgram, ["Leaf"]);
-        Assert.Equal(68,VersionOf(classOnly));
+        Assert.Equal(69,VersionOf(classOnly));
         _ = ModuleCompiler.CreateReference(classOnly);
         var copyProgram = Compile(File.ReadAllText(Path.Combine(RepositoryRoot(),
             "samples", "native", "graph", "managed-copy-class-leaf.terrum")), policy);
         var copy = ModuleCompiler.CreateProducer(copyProgram, ["Leaf"]);
-        Assert.Equal(68,VersionOf(copy));
+        Assert.Equal(69,VersionOf(copy));
         _ = ModuleCompiler.CreateReference(copy);
         foreach (var (legacy, program) in new[] {
             (old, oldProgram), (classOnly, classProgram), (copy, copyProgram),
@@ -255,7 +255,7 @@ public sealed class NativeLoopTransferModuleTests
             _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(invalid));
         }
         var transferred = ModuleCompiler.CreateProducer(Compile(ClassLeaf, policy), ["Leaf"]);
-        Assert.Equal(68,VersionOf(transferred));
+        Assert.Equal(69,VersionOf(transferred));
         var downgraded = (byte[])transferred.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 19);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));

@@ -3133,6 +3133,9 @@ internal sealed partial class Binder
             && (_signatures[call.Function].StructName is null
                 || _signatures[call.Function] is {
                     IsStatic: true, IsOperator: false, PropertyName: null,
+                }
+                || _signatures[call.Function] is {
+                    IsOperator: false, PropertyName: not null,
                 }))
             || call.Arguments.Any(ContainsAuthorizedExpressionScopeCall),
         BoundUnary unary => ContainsAuthorizedExpressionScopeCall(unary.Operand),

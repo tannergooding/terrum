@@ -46,7 +46,7 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 68. Writers emit only revision 68 and
+The current semantic-module revision is 69. Writers emit only revision 69 and
 readers reject every other revision; older artifacts must be recreated from
 source. The current format preserves verified, typed, source-mapped structured
 IR and the supported declaration, layout, initialization, cleanup, and runtime
@@ -56,7 +56,13 @@ Revision 68 provisionally persists caller-unsafe field-value reads inside
 `unsafe(expr)` for eligible public `Copy` paths, alongside the existing
 expression-scoped call slice. Unsafe-block field mutation and supported
 mutable-field loans remain separate; expression scopes do not add mutation,
-loan, TRRM, or scalar-frontend verification/emission support. The broader
+loan, TRRM, or scalar-frontend verification/emission support. Revision 69
+additionally persists getter-only and mixed caller-unsafe getter calls inside
+`unsafe(expr)` for eligible public `Copy` owners, including recursively
+exportable `Copy` results. Getter identity remains canonical in serialized
+modules; linking permits only its established producer qualification. These
+expression scopes do not add getter mutation, loans, TRRM, or scalar-frontend
+verification/emission support. The broader
 [reference-call metadata proposal](proposals/reference-call-metadata.md)
 remains unapproved.
 

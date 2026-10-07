@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 68;
+    private const int Version = 69;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1500,7 +1500,8 @@ public static partial class ModuleCompiler
     }
 
     private static bool IsSupportedModuleUnsafeExpressionCall(BoundFunction function,
-        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes,
+        bool allowProducerQualifiedGetterName = false)
     {
         if (!function.RequiresUnsafeCaller)
         {
@@ -1510,7 +1511,12 @@ public static partial class ModuleCompiler
         {
             return IsSupportedModuleUnsafeTopLevelCall(function, valueTypes);
         }
-        if (!function.IsStatic || function.IsOperator || function.PropertyName is not null
+        if (function.PropertyName is not null)
+        {
+            return !function.IsOperator && IsSupportedModuleUnsafeMethod(
+                function, structures, valueTypes, allowProducerQualifiedGetterName);
+        }
+        if (!function.IsStatic || function.IsOperator
             || !IsSupportedModuleUnsafeMethod(function, structures, valueTypes))
         {
             return false;
@@ -1692,7 +1698,8 @@ public static partial class ModuleCompiler
     }
 
     private static bool IsSupportedModuleUnsafeMethod(BoundFunction function,
-        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes,
+        bool allowProducerQualifiedGetterName = false)
     {
         if (function.DeclaringStruct is not string ownerName || function.IsConstructor
             || function.IsClassConstructor || function.IsCleanup
@@ -1700,7 +1707,8 @@ public static partial class ModuleCompiler
             || function.ParameterCount > function.Variables.Length
             || (function.PropertyName is null
                 ? !valueTypes.IsSupported(function.ReturnType)
-                : !IsSupportedModuleUnsafeGetter(function, ownerName, valueTypes)))
+                : !IsSupportedModuleUnsafeGetter(
+                    function, ownerName, valueTypes, allowProducerQualifiedGetterName)))
         {
             return false;
         }
@@ -1745,11 +1753,18 @@ public static partial class ModuleCompiler
     }
 
     private static bool IsSupportedModuleUnsafeGetter(BoundFunction function, string ownerName,
-        ModuleUnsafeValueTypeCache valueTypes) =>
-        function.ParameterCount == (function.IsStatic ? 0 : 1)
-        && valueTypes.IsSupported(function.ReturnType)
-        && function.PropertyName is string propertyName && propertyName.Length != 0
-        && function.Name == ownerName + ".#get:" + propertyName;
+        ModuleUnsafeValueTypeCache valueTypes, bool allowProducerQualifiedName = false)
+    {
+        if (function.ParameterCount != (function.IsStatic ? 0 : 1)
+            || !valueTypes.IsSupported(function.ReturnType)
+            || function.PropertyName is not string propertyName || propertyName.Length == 0)
+        {
+            return false;
+        }
+        return function.Name == ownerName + ".#get:" + propertyName
+            || (allowProducerQualifiedName
+                && function.Name == ownerName + ".$producer.#get:" + propertyName);
+    }
 
     private static bool HasOperatorContractMarker(string contract) =>
         contract.Contains("|Operator|", StringComparison.Ordinal)
@@ -3961,7 +3976,8 @@ public static partial class ModuleCompiler
         ModuleUnsafeValueTypeCache valueTypes, bool inUnsafe, bool inUnsafeExpression = false) => expression switch {
             SymbolicCall call when names.TryGetValue(call.Name, out var index)
                 && (!inUnsafeExpression || !functions[index].RequiresUnsafeCaller
-                    || IsSupportedModuleUnsafeExpressionCall(functions[index], structures, valueTypes)) =>
+                    || IsSupportedModuleUnsafeExpressionCall(
+                        functions[index], structures, valueTypes, allowProducerQualifiedGetterName: true)) =>
                 new BoundCall(index, [.. call.Arguments.Select(argument =>
                 ResolveExpression(argument, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression))],
                     call.Type, call.Span) {

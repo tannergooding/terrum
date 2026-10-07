@@ -218,6 +218,63 @@ stripping and scope boundaries, evaluation-once and selected-branch behavior,
 `NoThrow`, value-versus-place and loan exclusions, safe replacement, and
 semantic links plus native graphs/module sets under both runtime policies.
 
+**Implemented provisionally:** Semantic-module revision 69 retains getter-only
+and mixed `unsafe(expr)` scopes for the recommended readonly instance and
+storage-free static getter slice, including recursively exportable `Copy`
+results. Serialized getter identity remains canonical; linking admits only
+the exact producer-qualified identity. Regression coverage exercises scalar
+and aggregate results, forwarding through a producer that does not export the
+getter directly, wrapper stripping at writer and reader boundaries, safe
+replacement, semantic links, and native graphs/module sets under both runtime
+policies. This remains an unapproved persistence experiment; it does not add
+TRRM or scalar-frontend verifier/emitter support.
+
+### Provisional follow-up: caller-unsafe instance methods in `unsafe(expr)`
+
+**Status: unapproved recommendation.** Revision 69 retains eligible getter
+calls in expression-scoped unsafe wrappers, while the existing unsafe-block
+method slice already persists readonly instance methods on eligible public
+`Copy` owners. Extending the expression wrapper to those methods is an
+eligibility change, not a new call representation or receiver loan.
+
+**Recommendation:** Provisionally admit ordinary caller-unsafe readonly
+instance methods on public, non-unique `Copy` owners when the existing
+recursive value whitelist accepts the result and every explicit by-value
+parameter. Reuse the existing `BoundCall` representation: exactly one
+readonly by-value receiver at parameter zero, then explicit arguments with
+their existing source evaluation order and parameter mapping. Reconstruct
+authorization only from retained unsafe-scope structure; add no authorization
+bit or wrapper payload. Require an exact owner-relative name with one ordinary
+member identifier and preserve the full name, declaring owner and signature in
+import-contract comparisons; do not normalize or suffix-match identities.
+Validate the stored identifier using the existing Unicode XID rules, retaining
+ordinal spelling, excluding malformed scalar sequences and the `_` discard,
+and neither requiring nor preserving the source `@` keyword escape. During
+linking only, also admit the exact shared-owner transformation
+`Owner.$producer.Method`. For a non-shared owner, the existing
+`$producer.Owner.Method` qualification remains owner-relative to its remapped
+declaring type. The current bound/import shape has no separate
+method-provenance field, so this recommendation promises canonical name shape
+and recorded-identity consistency, not detection of a consistently rewritten,
+otherwise-valid member name as a different historical alias. Preserve caller
+effects, `NoThrow`, `DoesNotReturn`, replacement compatibility and the
+existing call verifier.
+
+Keep mutable or loan receivers, constructors, operators, accessors, reference
+or output modes, ownership transfer, unsupported layouts, TRRM, and
+scalar-frontend verification/emission outside this extension. A readonly
+receiver does not imply method purity. This is a provisional persistence
+recommendation and does not approve the broader metadata proposal.
+
+Acceptance evidence should cover receiver-first and exactly-once evaluation,
+source-ordered explicit arguments with named-argument mappings, nested and
+mixed expression scopes, safe forwarding bodies, scalar and recursively
+exportable results, exact owner-relative name shape and linker-only
+qualification (including rejection of malformed/repeated qualification),
+stripped wrappers, replacement directionality, type remapping, excluded
+receiver and parameter modes, and semantic links plus native graphs/module
+sets under both runtime policies.
+
 ### Provisional extension: caller-unsafe readonly getters
 
 **Summary:** The accepted source contract supports caller-unsafe getter
