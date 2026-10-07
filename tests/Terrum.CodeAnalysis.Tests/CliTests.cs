@@ -1980,6 +1980,7 @@ public sealed partial class CliTests
             AssertFloatingFormatConversionExports(handle);
             AssertFloatingNegationExports(handle);
             AssertFloatingComparisonExports(handle);
+            AssertFloatingArithmeticExports(handle);
             AssertTokenAggregateExports(handle);
 
             var isAsciiDigit = Marshal.GetDelegateForFunctionPointer<Char16PredicateExport>(

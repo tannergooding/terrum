@@ -2927,8 +2927,9 @@ module tests compare all eight conversion paths with hosted target-format
 results under both runtime policies, including signed minima, precision ties,
 both tie directions, sticky-bit cases and deterministic values; the independent
 `ComponentTestRunner` also executes the helper under AOT and JIT with both
-runtime policies. This is a Terrum-authored helper, not scalar-frontend
-verification or emission support.
+runtime policies. The Windows x64 internal DLL directly invokes all eight
+helpers against hosted conversions with integer carriers. This remains
+candidate evidence, not scalar-frontend verification or emission support.
 `FloatingFormatConversion` separately converts between raw `float32` and
 `float64` bits. It performs widening exactly and narrows with one
 nearest/ties-to-even rounding step, including gradual underflow and overflow
@@ -2936,16 +2937,18 @@ to infinity; NaN payload bits are not an exact contract. Semantic-module JIT
 compares finite results with hosted conversions under both runtime policies,
 including subnormal normalization, rounding midpoints and special-value
 classification. Its independent `ComponentTestRunner` exercises representative
-boundaries under AOT/JIT and both policies. This does not add
-scalar-frontend, source-free DLL or TRRM support; the TRRM proposal remains
+boundaries under AOT/JIT and both policies. The Windows x64 internal DLL
+directly checks finite conversions exactly and NaNs by classification only.
+This does not add scalar-frontend or TRRM support; the TRRM proposal remains
 unapproved.
 `FloatingNegation` separately toggles only the sign bit of raw `float32` and
 `float64` values, preserving every other bit including NaN payloads. Its
 semantic-module tests compare raw results with the sign-bit oracle under both
 runtime policies, and the independent `ComponentTestRunner` checks signed
 zeros, infinities and noncanonical NaNs under AOT/JIT and both policies. This
-does not approve the TRRM negation proposal or add scalar-frontend,
-source-free DLL or TRRM support.
+does not approve the TRRM negation proposal or add scalar-frontend or TRRM
+support. The Windows x64 internal DLL also checks exact sign-bit toggling and
+involution through integer carriers.
 `FloatingIntegerConversion` separately converts raw `float32`/`float64` bits
 to checked `int32`, `uint32`, `int64` and `uint64` results by truncating toward
 zero before range checking. Semantic-module JIT compares all eight paths
@@ -2960,18 +2963,20 @@ integer-to-floating bit helpers. Its semantic-module tests exhaust all 65,536
 code units for both formats and both runtime policies against independently
 constructed exact encodings; the independent component runner repeats the
 coverage under AOT/JIT and both policies, and hosted native-emitter tests
-exhaust the same input domain. The eligibility and TRRM proposals remain
-unapproved; this internal component does not add scalar-frontend,
-source-free DLL or TRRM support.
+exhaust the same input domain. The Windows x64 internal DLL checks both raw-bit
+conversions for every code unit. The eligibility and TRRM proposals remain
+unapproved; this internal component does not add scalar-frontend or TRRM
+support.
 `FloatingComparison` classifies raw `float32` and `float64` pairs as less,
 equal, greater or unordered, and exposes all six IEEE predicates. The
 semantic-module test compares a cross-product of signed zeros, subnormal and
 normal boundaries, finite extrema, infinities, quiet/signaling NaNs and
 deterministic raw-bit pairs against hosted floating operators. The independent
 component runner checks representative ordered, equal and unordered cases
-under AOT/JIT and both policies. This internal helper does not approve the
-TRRM comparison proposal or add scalar-frontend, source-free DLL or TRRM
-support.
+under AOT/JIT and both policies. The Windows x64 internal DLL also exercises
+all twelve predicates with integer carriers against hosted operators across
+the boundary cross-product and deterministic pairs. This evidence does not
+approve the TRRM comparison proposal or add scalar-frontend or TRRM support.
 `FloatingArithmetic` implements raw-bit addition and subtraction for both
 formats with integer significands, guard/round/sticky alignment and
 nearest/ties-to-even rounding, plus multiplication with an exact two-word
@@ -2982,8 +2987,11 @@ Semantic-module tests compare boundary matrices, underflow/sticky-rounding
 cases and 1,024 deterministic raw-bit pairs per format and operation with the
 controlled hosted emitter under both policies; the
 independent component runner covers ties, subnormal transitions, infinities,
-NaNs and zeros under AOT/JIT. The arithmetic and NaN-encoding proposals remain
-unapproved; scalar-frontend, source-free DLL and TRRM support are unchanged.
+NaNs and zeros under AOT/JIT. The Windows x64 internal DLL directly invokes
+all eight raw-bit operations with integer carriers and compares results to a
+controlled hosted-emitter oracle, checking exact non-NaN bits and NaN
+classification only. The arithmetic and NaN-encoding proposals remain
+unapproved; this evidence adds no scalar-frontend or TRRM support.
 End-relative source reads use the invocation's captured code-unit count rather
 than the empty build-time buffer length. Generated test bindings use the
 manifest to call source-dependent and unchanged source-free signatures under
