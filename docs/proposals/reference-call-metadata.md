@@ -1,15 +1,11 @@
 # Reference-call metadata proposal
 
-**Status: unapproved.** This records a recommended first implementation slice
-for the roadmap's general reference/access/loan call contracts. It does not
-change accepted source semantics or the approved metadata schema, and does not
-approve the broader proposal. Its marked provisional slices now include
-structured semantic-module caller obligations, bounded readonly-instance and
-static-method experiments and getter support on `Copy` structs,
-caller-unsafe public `Copy`-struct fields and mutable receiver loans through
-eligible fields, and validated indexed executable unsafe scopes; their
-boundaries are described in
-[the module format](../specs/modules.md) and [implementation notes](../implementation.md).
+**Status: partially accepted.** Section 3's bounded indexed-Body unsafe-region
+contract is accepted and specified in the
+[instruction set](../specs/il-instruction-set.md). The dependency-relation
+profile, general output-call migration, and all other extensions in this
+proposal remain unapproved. Provisional implementation notes are evidence of
+support only and do not settle those decisions.
 
 ## Current boundary
 
@@ -686,14 +682,12 @@ contract; mutable receivers, constructors, accessors, classes, generic
 witnesses, reference/output parameters and unsupported layouts remain outside
 this slice.
 
-Executable TRRM also provisionally round-trips the assigned caller-unsafe
-Effects bit on top-level function declarations, including when composed with
-`NoThrow` or `DoesNotReturn`, and provisionally admits calls only inside
-validated indexed Body unsafe-scope regions as detailed in section 3.
-Compact-linear calls and calls outside validated regions remain rejected.
-Kind `0x06` is still reserved by the accepted instruction-set contract, so
-this bounded Body support remains provisional and does not approve the
-proposed extension.
+Executable TRRM round-trips the assigned caller-unsafe Effects bit on
+top-level function declarations, including when composed with `NoThrow` or
+`DoesNotReturn`. The accepted indexed-Body contract admits calls only inside
+validated unsafe-scope regions as detailed in section 3. Compact-linear calls
+and calls outside validated regions remain rejected. This bounded contract
+does not approve the proposal's other extensions.
 
 ### 1. Which dependency relations belong in the first callable profile?
 
@@ -806,15 +800,13 @@ individual call was authorized.
 **Summary:** The source caller obligation and assigned Effects bit `0x04` are
 settled, and semantic-module revisions 64–65 reconstruct authorization from
 explicit `BoundUnsafe` and bounded `BoundUnsafeExpression` scopes.
-Executable TRRM provisionally round-trips
-caller-unsafe declarations and supports calls only inside validated indexed
-Body unsafe scopes. Compact-linear Bodies still cannot prove explicit
-unsafe-block enclosure.
+Executable TRRM round-trips caller-unsafe declarations and supports calls only
+inside validated indexed Body unsafe scopes. Compact-linear Bodies still
+cannot prove explicit unsafe-block enclosure.
 
-**Recommendation:** Define a first executable slice for indexed, fail-fast
-Bodies with root-free Copy-scalar shapes only, using proposed region kind
-`0x06` as a structurally validated lexical unsafe region and its feature
-discriminator.
+**Accepted contract:** Define the bounded executable slice for indexed,
+fail-fast Bodies with root-free Copy-scalar shapes only, using assigned region
+kind `0x06` as a structurally validated lexical unsafe region.
 Do not change `bodyLayout`: bits 2–3 select the existing Body form, `0x0C` is
 the invalid fourth form, and bits 4–7 remain reserved. Compact-linear Bodies
 stay scope-free. Split blocks at unsafe-scope boundaries and derive
@@ -832,16 +824,13 @@ reject Bodies that require those behaviors. Limit the slice to top-level
 caller-unsafe declarations and local calls; keep `unsafe(expr)`, imports,
 unsafe fields, accessors and operators rejected.
 
-Writers and readers must audit every call and every Body, including uncalled
+Writers and readers audit every call and every Body, including uncalled
 functions, and reject malformed, stripped, bypassed or leaking scope
 structures. This validates Body structure under the existing producer-trust
-model; it does not authenticate original source authorship. The proposed
-region kind itself gates this provisional support; no `bodyLayout` feature
-bit is added.
-The accepted instruction-set contract still reserves kind `0x06`, so this
-recommendation and its implementation remain provisional until approved.
+model; it does not authenticate original source authorship. Region kind
+`0x06` itself gates this support; no `bodyLayout` feature bit is added.
 
-**Implemented provisionally:** Indexed fail-fast Bodies use kind-`0x06`
+**Implemented:** Indexed fail-fast Bodies use kind-`0x06`
 regions to represent explicit `BoundUnsafe` scopes without changing
 `bodyLayout`. The writer lowers scopes into nested lexical regions and rejects
 unsafe calls without one; the reader validates region ancestry, entry/exit
@@ -849,16 +838,12 @@ edges, loop backedges and the zero cleanup field before reconstructing call
 authorization from region membership. Returns and fail-fast terminators may
 end paths inside a region. Transfers that leave an unsafe region,
 compact-linear unsafe calls, `unsafe(expr)`, unsafe members, cleanup, unwind
-and lifetime authority remain unsupported. This bounded implementation
-remains provisional and does not approve the broader proposal.
+and lifetime authority remain unsupported.
 
-**Decision requested:** Approve or reject this bounded indexed-Body
-unsafe-region contract for adoption in the instruction-set, including
-assigning kind `0x06`. This decision is limited to section 3: it does not
-approve the dependency-relation profile in section 1 or general output-call
-migration in section 4. Until the decision and corresponding specification
-change are complete, the existing implementation remains provisional; an
-approval here would not authorize those other migrations.
+**Decision:** Accepted for adoption in the instruction set. This decision is
+limited to section 3: it does not approve the dependency-relation profile in
+section 1, general output-call migration in section 4, or any other proposal
+extension.
 
 ### 4. Which source rules and metadata gate general output-call migration?
 

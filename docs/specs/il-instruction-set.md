@@ -1322,9 +1322,27 @@ with a nonzero entry header, one designated exit outside its subtree and
 zero cleanupBlock. Kind `0x02`
 lexical scope is reserved until lifetime and exit rules are assigned.
 Kinds `0x03` handler, `0x04` finally, `0x05` loan,
-`0x06` unsafe and `0x07` root reserve their identities but are **not
-executable** until exit/cleanup/exception rules and feature requirements are
-assigned. No region kind by itself proves borrow safety or releases an owner.
+and `0x07` root reserve their identities but are **not executable** until
+exit/cleanup/exception rules and feature requirements are assigned.
+
+Kind `0x06` is an indexed-Body lexical unsafe region in the bounded fail-fast
+profile. Its Body uses root-free Copy-scalar shapes. Caller-unsafe
+declarations are limited to top-level functions, and calls are limited to
+local definitions. The region requires a preceding parent region ID, an entry
+block within its subtree, a designated exit outside its subtree but within its
+parent, and a zero cleanup block.
+Every incoming control-flow edge from outside the region targets its entry;
+every normal edge leaving the region targets its designated exit. Nested
+regions are permitted, and loop backedges remain within their loop region.
+Returns and fail-fast terminators may end a path inside the region; other
+transfers leaving it use the designated exit. A call's caller-unsafe
+authorization is reconstructed only from validated enclosing-region
+membership. Writers and readers audit every Body, including uncalled
+definitions, and reject malformed, bypassed or leaking scope structures.
+Compact-linear Bodies, imported calls, `unsafe(expr)`, unsafe members, cleanup,
+exception unwind and lifetime authority are not supported by this region.
+Kind `0x06` does not change `bodyLayout` or prove borrow safety or release an
+owner.
 
 A block extent contains these fields in order:
 
@@ -2136,8 +2154,8 @@ non-value-mode and owning calls remain outside this executable subset.
 decode shapes, not executable forms**; `19` is reserved and rejects.
 The assigned shapes require place authority,
 ownership, cleanup, richer call failure, backing or region rules that this revision
-does not encode completely. The `02` lexical and `03..07` region kinds are
-likewise reserved for execution. A structural inspector can identify each
+does not encode completely. The `02` lexical and `03..05`, `07` region kinds
+are likewise reserved for execution. A structural inspector can identify each
 known opcode's operands and report unsupported semantics; a semantic editor
 cannot safely relocate or rewrite it without those rules. An executable
 reader rejects such forms rather than treating them as pure scalar

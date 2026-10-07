@@ -22,9 +22,9 @@ approved.
 - [Self-host frontend verification budget](self-host-frontend-verification-budget.md)
   records a deferred, unapproved architecture option if memoization no longer
   suffices to grow the authored scalar frontend within its shared limit.
-- [Reference-call metadata](reference-call-metadata.md) records the proposed
-  first dependency and caller-safety metadata slice for general cross-call
-  references; it does not change the accepted source contracts.
+- [Reference-call metadata](reference-call-metadata.md) has an accepted,
+  bounded indexed-Body unsafe-region contract; its dependency-relation profile,
+  general output-call migration and other extensions remain unapproved.
 - [Copy outputs for non-Boolean calls](non-boolean-copy-out.md) recommends a
   bounded hosted `out` extension using the existing normal-return publication
   contract; it does not add unique or managed outputs.
