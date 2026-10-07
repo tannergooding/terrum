@@ -168,12 +168,17 @@ public sealed class TrRmExecutableCompilerTests
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
-    [Fact]
-    public void IdentityFloatConvertIsRejectedFromArtifacts()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(7)]
+    public void FloatConvertRejectsInvalidDestinationTypeSpecs(byte destinationTypeId)
     {
         const string source = "public float64 Widen(float32 value) { return float64(value); }";
         var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-float-convert");
-        var malformed = ReplaceBodyOperationByte(artifact, 1, 0x1A, 2, 7);
+        var malformed = ReplaceBodyOperationByte(artifact, 1, 0x1A, 2, destinationTypeId);
 
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
@@ -219,29 +224,36 @@ public sealed class TrRmExecutableCompilerTests
             public float64 Widen(float32 value) { return float64(value); }
             public float32 Narrow(float64 value) { return float32(value); }
             public float64 WidenIf(float32 value) {
-                float64 widened = float64(value);
-                if (widened == 1.0) { return widened; }
-                return 0.0;
+                if (value < 0.0) { return float64(value); }
+                return float64(value);
             }
             public float32 NarrowIf(float64 value) {
-                float32 narrowed = float32(value);
-                if (narrowed == 1.0) { return narrowed; }
-                return 0.0;
+                if (value < 0.0) { return float32(value); }
+                return float32(value);
             }
             """;
         var original = Compile(source, true);
         var artifact = TrRmExecutableCompiler.Emit(original, "float-conversions");
         var loaded = TrRmExecutableCompiler.Load(artifact);
         string[] names = ["Widen", "Narrow", "WidenIf", "NarrowIf"];
-        var actual = NativeEmitter.EmitLibrary(loaded, names, NativeRuntimePolicy.FailFast);
-
-        var path = Path.Combine(Directory.GetCurrentDirectory(),
-            $"trrm-float-conversion-{Guid.NewGuid():N}.dll");
+        var images = new[]
+        {
+            NativeEmitter.EmitLibrary(original, names, NativeRuntimePolicy.FailFast),
+            NativeEmitter.EmitLibrary(loaded, names, NativeRuntimePolicy.FailFast),
+        };
+        var paths = new string[images.Length];
+        var handles = new IntPtr[images.Length];
         try
         {
-            File.WriteAllBytes(path, actual);
-            var handle = NativeLibrary.Load(path);
-            try
+            for (var index = 0; index < images.Length; index++)
+            {
+                paths[index] = Path.Combine(Directory.GetCurrentDirectory(),
+                    $"trrm-float-conversion-{Guid.NewGuid():N}-{index}.dll");
+                File.WriteAllBytes(paths[index], images[index]);
+                handles[index] = NativeLibrary.Load(paths[index]);
+            }
+
+            foreach (var handle in handles)
             {
                 var widen = Marshal.GetDelegateForFunctionPointer<Float32ToFloat64>(
                     NativeLibrary.GetExport(handle, "Widen"));
@@ -254,6 +266,11 @@ public sealed class TrRmExecutableCompilerTests
 
                 Assert.Equal(0x3FB99999A0000000L, widen(0x3DCCCCCD));
                 Assert.Equal(long.MinValue, widen(int.MinValue));
+                Assert.Equal(long.MinValue, widenIf(int.MinValue));
+                Assert.True(double.IsPositiveInfinity(BitConverter.Int64BitsToDouble(widenIf(0x7F800000))));
+                Assert.True(double.IsNegativeInfinity(BitConverter.Int64BitsToDouble(
+                    widenIf(unchecked((int)0xFF800000)))));
+                Assert.True(double.IsNaN(BitConverter.Int64BitsToDouble(widenIf(0x7FC00001))));
                 Assert.Equal(0x3F800000, narrow(0x3FF0000010000000L));
                 Assert.Equal(0x7F800000, narrow(BitConverter.DoubleToInt64Bits(double.MaxValue)));
                 Assert.Equal(0, narrow(BitConverter.DoubleToInt64Bits(double.Epsilon)));
@@ -262,19 +279,37 @@ public sealed class TrRmExecutableCompilerTests
                     BitConverter.DoubleToInt64Bits(double.NaN)))));
                 Assert.Equal(0x7F800000,
                     narrow(BitConverter.DoubleToInt64Bits(double.PositiveInfinity)));
-                Assert.Equal(0x3FF0000000000000L, widenIf(0x3F800000));
-                Assert.Equal(0L, widenIf(0x40000000));
-                Assert.Equal(0x3F800000, narrowIf(0x3FF0000000000000L));
-                Assert.Equal(0, narrowIf(0x4000000000000000L));
-            }
-            finally
-            {
-                NativeLibrary.Free(handle);
+                Assert.Equal(0x3FB99999A0000000L, widenIf(0x3DCCCCCD));
+                Assert.Equal(unchecked((int)0xFF800000),
+                    narrowIf(BitConverter.DoubleToInt64Bits(double.NegativeInfinity)));
+                Assert.Equal(0x7F800000,
+                    narrowIf(BitConverter.DoubleToInt64Bits(double.PositiveInfinity)));
+                Assert.Equal(unchecked((int)0x7F800000),
+                    narrowIf(BitConverter.DoubleToInt64Bits(double.MaxValue)));
+                Assert.Equal(0, narrowIf(BitConverter.DoubleToInt64Bits(double.Epsilon)));
+                Assert.Equal(int.MinValue, narrowIf(long.MinValue | 1));
+                Assert.True(float.IsNaN(BitConverter.Int32BitsToSingle(
+                    narrowIf(BitConverter.DoubleToInt64Bits(double.NaN)))));
+                Assert.Equal(0x3F800000, narrowIf(0x3FF0000010000000L));
+                Assert.Equal(0x40000000, narrowIf(0x4000000000000000L));
             }
         }
         finally
         {
-            File.Delete(path);
+            foreach (var handle in handles)
+            {
+                if (handle != IntPtr.Zero)
+                {
+                    NativeLibrary.Free(handle);
+                }
+            }
+            foreach (var path in paths)
+            {
+                if (path is not null)
+                {
+                    File.Delete(path);
+                }
+            }
         }
     }
 
