@@ -1,0 +1,184 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateGenericParamTable(int32 recordCount,
+    int32 moduleCount, int32 stringCount, int32 moduleRefCount,
+    int32 typeDefCount, int32 methodDefCount, int32 sourceFileCount,
+    int32 featureCount, int32 fieldCount, int32 genericParamCount,
+    int32 layoutCount, int32 contractCount, int32 methodSigCount,
+    int32 constraintCount, int32 bodyCount)
+{
+    if (recordCount < 0 || recordCount > 0xFF_FFFF
+        || recordCount != genericParamCount
+        || constraintCount < 0 || constraintCount > 0xFF_FFFF
+        || recordCount * 20 != Host.GenericParams.Length
+        || Host.ConstraintOwners.Length != constraintCount + 1
+        || !TryValidateMethodDefTable(methodDefCount, moduleCount, stringCount,
+            moduleRefCount, typeDefCount, methodDefCount, sourceFileCount,
+            featureCount, fieldCount, genericParamCount, layoutCount,
+            contractCount, methodSigCount, bodyCount))
+    {
+        return false;
+    }
+
+    int32 stringIndexByteLength = (stringCount + 1) * 4;
+    mut int32 declaredFormalCount = 0;
+    for (mut int32 type = 1; type <= typeDefCount; type = type + 1)
+    {
+        if (!TryReadTypeDefTableWord((type - 1) * 40, 24, init var formalCount)
+            || formalCount > uint32(recordCount - declaredFormalCount))
+        {
+            return false;
+        }
+        declaredFormalCount = declaredFormalCount + int32(formalCount);
+    }
+
+    for (mut int32 method = 1; method <= methodDefCount; method = method + 1)
+    {
+        if (!TryReadMethodDefTableWord((method - 1) * 28, 8, init var signature)
+            || signature == 0 || signature > uint32(methodSigCount)
+            || !TryReadMethodSignatureWord((int32(signature) - 1) * 24, 16,
+                init var firstFormal)
+            || !TryReadMethodSignatureWord((int32(signature) - 1) * 24, 20,
+                init var formalCount)
+            || !IsValidGenericParamRange(firstFormal, formalCount, genericParamCount)
+            || formalCount > uint32(recordCount - declaredFormalCount))
+        {
+            return false;
+        }
+        declaredFormalCount = declaredFormalCount + int32(formalCount);
+    }
+
+    if (declaredFormalCount != recordCount)
+    {
+        return false;
+    }
+
+    for (mut int32 constraint = 0; constraint <= constraintCount; constraint = constraint + 1)
+    {
+        Host.ConstraintOwners[constraint] = 0;
+    }
+
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        int32 rowStart = (row - 1) * 20;
+        if (!TryReadGenericParamTableWord(rowStart, 0, init var owner)
+            || !TryReadGenericParamTableWord(rowStart, 4, init var ordinal)
+            || !TryReadGenericParamTableWord(rowStart, 8, init var name)
+            || !TryReadGenericParamTableWord(rowStart, 12, init var firstConstraint)
+            || !TryReadGenericParamTableWord(rowStart, 16, init var constraintRangeCount)
+            || name == 0 || name > 0xFF_FFFF || name > uint32(stringCount)
+            || !IsValidGenericParamRange(firstConstraint, constraintRangeCount, constraintCount))
+        {
+            return false;
+        }
+
+        uint32 ownerKind = owner >> 24;
+        int32 ownerRow = int32(owner & 0x00FF_FFFF);
+        init uint32 firstFormal;
+        init uint32 formalCount;
+        if (ownerKind == 0x13 && ownerRow > 0 && ownerRow <= typeDefCount)
+        {
+            int32 ownerOffset = (ownerRow - 1) * 40;
+            if (!TryReadTypeDefTableWord(ownerOffset, 20, init firstFormal)
+                || !TryReadTypeDefTableWord(ownerOffset, 24, init formalCount))
+            {
+                return false;
+            }
+        }
+        else if (ownerKind == 0x16 && ownerRow > 0 && ownerRow <= methodDefCount)
+        {
+            int32 ownerOffset = (ownerRow - 1) * 28;
+            if (!TryReadMethodDefTableWord(ownerOffset, 8, init var signature)
+                || signature == 0 || signature > uint32(methodSigCount)
+                || !TryReadMethodSignatureWord((int32(signature) - 1) * 24, 16,
+                    init firstFormal)
+                || !TryReadMethodSignatureWord((int32(signature) - 1) * 24, 20,
+                    init formalCount))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
+
+        if (formalCount == 0 || uint32(row) < firstFormal
+            || uint32(row) >= firstFormal + formalCount
+            || ordinal != uint32(row) - firstFormal
+            || !TryGetVariableTableRowExtent(stringCount, 8, 4, int32(name),
+                init var nameOffset, init var nameLength)
+            || !TryGetStringNameScalarCount(stringIndexByteLength + int32(nameOffset),
+                nameLength, init var nameScalarCount))
+        {
+            return false;
+        }
+
+        for (mut uint32 constraint = firstConstraint;
+            constraint < firstConstraint + constraintRangeCount;
+            constraint = constraint + 1)
+        {
+            int32 constraintRow = int32(constraint);
+            if (Host.ConstraintOwners[constraintRow] != 0)
+            {
+                return false;
+            }
+            Host.ConstraintOwners[constraintRow] = row;
+        }
+    }
+
+    for (mut int32 constraint = 1; constraint <= constraintCount; constraint = constraint + 1)
+    {
+        if (Host.ConstraintOwners[constraint] == 0)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool IsValidGenericParamRange(uint32 first, uint32 count, int32 total)
+{
+    if (count == 0)
+    {
+        return first == 0;
+    }
+
+    return first != 0 && first <= uint32(total)
+        && count <= uint32(total) - first + 1;
+}
+
+bool TryReadGenericParamTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.GenericParams.Length - 20
+        || offset < 0 || offset > 16
+        || !TryReadGenericParamTableByte(rowStart + offset, init var first)
+        || !TryReadGenericParamTableByte(rowStart + offset + 1, init var second)
+        || !TryReadGenericParamTableByte(rowStart + offset + 2, init var third)
+        || !TryReadGenericParamTableByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadGenericParamTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.GenericParams.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.GenericParams[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}

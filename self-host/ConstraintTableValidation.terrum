@@ -1,0 +1,86 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateConstraintTable(int32 recordCount,
+    int32 moduleCount, int32 stringCount, int32 moduleRefCount,
+    int32 typeDefCount, int32 methodDefCount, int32 sourceFileCount,
+    int32 featureCount, int32 fieldCount, int32 genericParamCount,
+    int32 layoutCount, int32 contractCount, int32 methodSigCount,
+    int32 typeSpecCount, int32 constraintCount, int32 bodyCount)
+{
+    if (recordCount < 0 || recordCount > 0xFF_FFFF
+        || recordCount != constraintCount
+        || typeSpecCount < 0 || typeSpecCount > 0xFF_FFFF
+        || recordCount * 16 != Host.Constraints.Length
+        || !TryValidateGenericParamTable(genericParamCount, moduleCount, stringCount,
+            moduleRefCount, typeDefCount, methodDefCount, sourceFileCount,
+            featureCount, fieldCount, genericParamCount, layoutCount, contractCount,
+            methodSigCount, constraintCount, bodyCount))
+    {
+        return false;
+    }
+
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        int32 rowStart = (row - 1) * 16;
+        if (!TryReadConstraintTableWord(rowStart, 0, init var owner)
+            || !TryReadConstraintTableHalfWord(rowStart + 4, init var kind)
+            || !TryReadConstraintTableHalfWord(rowStart + 6, init var flags)
+            || !TryReadConstraintTableWord(rowStart, 8, init var target)
+            || !TryReadConstraintTableWord(rowStart, 12, init var witness)
+            || owner != uint32(Host.ConstraintOwners[row])
+            || flags != 0
+            || target == 0 || target > uint32(typeSpecCount))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryReadConstraintTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Constraints.Length - 16
+        || offset < 0 || offset > 12
+        || !TryReadConstraintTableByte(rowStart + offset, init var first)
+        || !TryReadConstraintTableByte(rowStart + offset + 1, init var second)
+        || !TryReadConstraintTableByte(rowStart + offset + 2, init var third)
+        || !TryReadConstraintTableByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadConstraintTableHalfWord(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset > Host.Constraints.Length - 2
+        || !TryReadConstraintTableByte(offset, init var first)
+        || !TryReadConstraintTableByte(offset + 1, init var second))
+    {
+        return false;
+    }
+
+    value = first | (second << 8);
+    return true;
+}
+
+bool TryReadConstraintTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Constraints.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Constraints[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
