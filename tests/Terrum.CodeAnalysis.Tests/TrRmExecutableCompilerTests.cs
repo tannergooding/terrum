@@ -184,6 +184,76 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Fact]
+    public void FloatConvertRejectsConstructedDestinationTypeSpecs()
+    {
+        const string source = "public float64 Widen(float32 value) { return float64(value); }";
+        var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "constructed-float-convert");
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x11, out var typeBytes, out var typeCount));
+        var originalTypes = new TrRmTypeSpecTableReader(typeBytes, typeCount, 0, 0, 0, 0);
+        var typeRows = new List<ReadOnlyMemory<byte>>(typeCount + 1);
+        var int32Row = 0;
+        var float64Row = 0;
+        var int32Type = TrRmTypeSpecTableWriter.Builtin(0x08);
+        var float64Type = TrRmTypeSpecTableWriter.Builtin(0x15);
+        for (var row = 1; row <= typeCount; row++)
+        {
+            var type = originalTypes.GetRow(row);
+            typeRows.Add(type.ToArray());
+            if (type.SequenceEqual(int32Type))
+            {
+                int32Row = row;
+            }
+            if (type.SequenceEqual(float64Type))
+            {
+                float64Row = row;
+            }
+        }
+        Assert.NotEqual(0, int32Row);
+        Assert.NotEqual(0, float64Row);
+        typeRows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, (uint)int32Row));
+        var constructedTypeRow = typeRows.Count;
+        var rewrittenTypes = TrRmTypeSpecTableWriter.Encode(typeRows, 0, 0, 0, 0);
+
+        Assert.True(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount));
+        var originalBodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
+        var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
+        for (var row = 1; row <= bodyCount; row++)
+        {
+            bodyRows[row - 1] = originalBodies.GetRow(row).ToArray();
+        }
+        var body = bodyRows[0].ToArray();
+        var localWidth = 1 << (body[0] & 3);
+        Assert.Equal(1, localWidth);
+        var typeMapCount = body[1];
+        var conversionOffset = body.AsSpan().IndexOf((byte)0x1A);
+        Assert.True(conversionOffset >= 0);
+        var destinationTypeId = body[conversionOffset + 2];
+        Assert.InRange(destinationTypeId, 1, typeMapCount);
+        var typeMapOffset = 1 + localWidth + (destinationTypeId - 1) * sizeof(int);
+        Assert.Equal(float64Row, BinaryPrimitives.ReadInt32LittleEndian(body.AsSpan(typeMapOffset)));
+        BinaryPrimitives.WriteInt32LittleEndian(body.AsSpan(typeMapOffset), constructedTypeRow);
+        bodyRows[0] = body;
+        var rewrittenBodies = TrRmVariableTableWriter.EncodeBodies(bodyRows);
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags, out var bytes, out var count);
+            sections.Add(new TrRmSection(kind, flags, (uint)(kind == 0x11 ? typeRows.Count : count),
+                kind switch
+                {
+                    0x11 => rewrittenTypes,
+                    0x20 => rewrittenBodies,
+                    _ => bytes.ToArray(),
+                }));
+        }
+        var malformed = TrRmArtifactWriter.Encode(sections);
+
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
+    [Fact]
     public void OptionalFloatingTypesRemainOutsideExecutableTrRm()
     {
         var artifact = OptionalScalarArtifact(
