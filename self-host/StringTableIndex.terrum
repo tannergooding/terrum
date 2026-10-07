@@ -1,0 +1,89 @@
+namespace Terrum.CodeAnalysis;
+
+bool TryReadStringTableOffset(int32 offsetIndex, init ref<uint32> offset)
+{
+    if (offsetIndex < 0 || offsetIndex >= Host.Rows.Length / 4)
+    {
+        return false;
+    }
+
+    int32 at = offsetIndex * 4;
+    mut uint32 value = 0;
+    for (mut int32 byteIndex = 0; byteIndex < 4; byteIndex = byteIndex + 1)
+    {
+        int32 part = Host.Rows[at + byteIndex];
+        if (part < 0 || part > 255)
+        {
+            return false;
+        }
+        value = value | (uint32(part) << (byteIndex * 8));
+    }
+
+    offset = value;
+    return true;
+}
+
+public static bool TryGetStringTableRowLayout(int32 recordCount, int32 row,
+    init ref<int32> rowStart, init ref<int32> rowLength,
+    init ref<int32> encoding, init ref<int32> contentByteLength)
+{
+    if (recordCount <= 0 || recordCount > 16777215
+        || row <= 0 || row > recordCount
+        || recordCount > Host.Rows.Length / 4 - 1)
+    {
+        return false;
+    }
+
+    int32 indexByteLength = (recordCount + 1) * 4;
+    int32 dataByteLength = Host.Rows.Length - indexByteLength;
+    if (dataByteLength < 8
+        || !TryReadStringTableOffset(0, init var firstOffset) || firstOffset != 0)
+    {
+        return false;
+    }
+
+    mut uint32 previous = firstOffset;
+    mut int32 selectedStart = 0;
+    mut int32 selectedLength = 0;
+    mut int32 selectedEncoding = 0;
+    mut int32 selectedContentLength = 0;
+    for (mut int32 currentRow = 1; currentRow <= recordCount; currentRow = currentRow + 1)
+    {
+        if (!TryReadStringTableOffset(currentRow, init var next)
+            || next > uint32(dataByteLength)
+            || previous > uint32(dataByteLength - 8)
+            || next < previous + 8
+            || (next & 3) != 0)
+        {
+            return false;
+        }
+
+        int32 start = int32(previous);
+        int32 length = int32(next - previous);
+        if (!TryGetStringRowLayout(indexByteLength + start, length,
+            init var rowEncoding, init var rowContentLength))
+        {
+            return false;
+        }
+
+        if (currentRow == row)
+        {
+            selectedStart = start;
+            selectedLength = length;
+            selectedEncoding = rowEncoding;
+            selectedContentLength = rowContentLength;
+        }
+        previous = next;
+    }
+
+    if (previous != uint32(dataByteLength))
+    {
+        return false;
+    }
+
+    rowStart = selectedStart;
+    rowLength = selectedLength;
+    encoding = selectedEncoding;
+    contentByteLength = selectedContentLength;
+    return true;
+}
