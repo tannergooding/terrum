@@ -720,6 +720,11 @@ public sealed class TrRmCompactLinearBodyReaderTests
             typeCodes, optional);
     }
 
+    internal static int GetOperationCount(byte[] row, int parameterCount, byte typeCode = 8,
+        byte? secondTypeCode = null, bool resultUsesSecondType = false)
+        => Inspect(row, parameterCount, typeCode: typeCode, secondTypeCode: secondTypeCode,
+            resultUsesSecondType: resultUsesSecondType).Operations;
+
     private static void Write(byte[] bytes, int offset, uint value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
 

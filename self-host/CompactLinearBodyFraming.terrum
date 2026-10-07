@@ -1,0 +1,294 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryGetCompactLinearBodyFrame(int32 recordCount, int32 row,
+    int32 typeSpecCount, init ref<int32> blockCount, init ref<int32> operationCount)
+{
+    if (recordCount <= 0 || recordCount > 16777215
+        || recordCount > Host.Rows.Length / 4 - 1
+        || typeSpecCount < 0 || typeSpecCount > 16777215)
+    {
+        return false;
+    }
+
+    if (!TryGetBodyTableRowExtent(recordCount, row,
+        init var bodyDataStart, init var bodyLength))
+    {
+        return false;
+    }
+
+    int32 indexLength = (recordCount + 1) * 4;
+    int32 dataLength = Host.Rows.Length - indexLength;
+    if (bodyDataStart < 0 || bodyLength < 1
+        || bodyDataStart > dataLength - bodyLength)
+    {
+        return false;
+    }
+
+    mut int32 position = indexLength + bodyDataStart;
+    int32 end = position + bodyLength;
+    if (!TryReadCompactLinearByte(position, end, init var bodyLayout)
+        || (bodyLayout & 0xFC) != 0x04 || (bodyLayout & 3) == 3)
+    {
+        return false;
+    }
+
+    position = position + 1;
+    int32 bodyWidth = (bodyLayout & 3) == 0 ? 1
+        : (bodyLayout & 3) == 1 ? 2 : 4;
+    if (!TryReadCompactLinearWord(position, end, bodyWidth,
+            init var afterTypeCount, init var typeCount)
+        || typeCount > uint32((end - afterTypeCount) / 4))
+    {
+        return false;
+    }
+
+    position = afterTypeCount;
+    for (mut int32 typeIndex = 0; typeIndex < int32(typeCount); typeIndex = typeIndex + 1)
+    {
+        if (!TryReadCompactLinearWord(position, end, 4,
+                init var afterType, init var typeReference)
+            || typeReference == 0 || typeReference > uint32(typeSpecCount))
+        {
+            return false;
+        }
+
+        position = afterType;
+    }
+
+    if (!TryReadCompactLinearWord(position, end, bodyWidth,
+            init var afterOperationCount, init var encodedOperationCount)
+        || encodedOperationCount > uint32((end - afterOperationCount) / 3))
+    {
+        return false;
+    }
+
+    position = afterOperationCount;
+    int32 operationCountValue = int32(encodedOperationCount);
+    for (mut int32 ordinal = 0; ordinal < operationCountValue; ordinal = ordinal + 1)
+    {
+        if (!TryReadCompactLinearInstruction(position, end,
+                init var afterInstruction, init var opcode,
+                init var referenceWidth, init var dataWidth)
+            || !TrySkipCompactLinearOperation(afterInstruction, end, opcode,
+                referenceWidth, dataWidth, init var afterOperation))
+        {
+            return false;
+        }
+
+        position = afterOperation;
+    }
+
+    if (!TryReadCompactLinearInstruction(position, end,
+            init var afterTerminator, init var terminator,
+            init var terminatorReferenceWidth, init var terminatorDataWidth)
+        || terminatorDataWidth != 0)
+    {
+        return false;
+    }
+
+    if (terminator == 0x83)
+    {
+        if (!TrySkipCompactLinearBytes(afterTerminator, end,
+                terminatorReferenceWidth, init var afterReturn))
+        {
+            return false;
+        }
+
+        position = afterReturn;
+    }
+    else if (terminator == 0x87)
+    {
+        if (terminatorReferenceWidth != 1
+            || !TryReadCompactLinearByte(afterTerminator, end, init var failureReason)
+            || failureReason < 1 || failureReason > 4)
+        {
+            return false;
+        }
+
+        position = afterTerminator + 1;
+    }
+    else
+    {
+        return false;
+    }
+
+    if (position != end)
+    {
+        return false;
+    }
+
+    blockCount = 1;
+    operationCount = operationCountValue;
+    return true;
+}
+
+bool TryReadCompactLinearInstruction(int32 start, int32 end,
+    init ref<int32> nextPosition, init ref<uint32> opcode,
+    init ref<int32> referenceWidth, init ref<int32> dataWidth)
+{
+    if (!TryReadCompactLinearByte(start, end, init var firstByte))
+    {
+        return false;
+    }
+
+    if (firstByte != 0xF0)
+    {
+        nextPosition = start + 1;
+        opcode = firstByte;
+        referenceWidth = 1;
+        dataWidth = firstByte == 1 || firstByte == 2 ? 1 : 0;
+        return true;
+    }
+
+    if (start > end - 3
+        || !TryReadCompactLinearByte(start + 1, end, init var layout)
+        || !TryReadCompactLinearByte(start + 2, end, init var wideOpcode)
+        || layout == 0 || (layout & 0xC0) != 0
+        || (layout & 3) == 3 || (layout & 0x0C) != 0)
+    {
+        return false;
+    }
+
+    mut int32 dataWidthValue = 0;
+    if (wideOpcode == 1 || wideOpcode == 2)
+    {
+        dataWidthValue = 1 << int32((layout >> 4) & 3);
+    }
+    else if ((layout & 0x30) != 0)
+    {
+        return false;
+    }
+
+    int32 referenceCode = int32(layout & 3);
+    nextPosition = start + 3;
+    opcode = wideOpcode;
+    referenceWidth = referenceCode == 0 ? 1 : referenceCode == 1 ? 2 : 4;
+    dataWidth = dataWidthValue;
+    return true;
+}
+
+bool TrySkipCompactLinearOperation(int32 start, int32 end, uint32 opcode,
+    int32 referenceWidth, int32 dataWidth, init ref<int32> nextPosition)
+{
+    mut int32 byteCount = 0;
+    if (opcode == 1 || opcode == 2)
+    {
+        if (dataWidth == 0)
+        {
+            return false;
+        }
+
+        byteCount = referenceWidth * 2 + dataWidth;
+    }
+    else if (opcode == 3 || opcode == 9 || opcode == 0x0A || opcode == 0x17)
+    {
+        byteCount = referenceWidth * 2;
+    }
+    else if (opcode == 4 || opcode == 0x15)
+    {
+        byteCount = referenceWidth * 2 + 1;
+        if (opcode == 0x15)
+        {
+            byteCount = referenceWidth * 3 + 1;
+        }
+    }
+    else if (opcode == 5)
+    {
+        byteCount = referenceWidth * 2 + 1;
+    }
+    else if (opcode == 6)
+    {
+        byteCount = referenceWidth * 3 + 1;
+    }
+    else if (opcode == 0x16)
+    {
+        byteCount = referenceWidth * 3;
+    }
+    else if (opcode == 7)
+    {
+        byteCount = referenceWidth * 4;
+    }
+    else if (opcode == 8)
+    {
+        byteCount = referenceWidth * 3;
+    }
+    else if (opcode == 0x18)
+    {
+        byteCount = referenceWidth * 4;
+    }
+    else
+    {
+        return false;
+    }
+
+    if (!TrySkipCompactLinearBytes(start, end, byteCount, init var afterOperation))
+    {
+        return false;
+    }
+
+    nextPosition = afterOperation;
+    return true;
+}
+
+bool TrySkipCompactLinearBytes(int32 start, int32 end, int32 byteCount,
+    init ref<int32> nextPosition)
+{
+    if (byteCount < 0 || start < 0 || end > Host.Rows.Length
+        || start > end - byteCount)
+    {
+        return false;
+    }
+
+    for (mut int32 index = 0; index < byteCount; index = index + 1)
+    {
+        if (!TryReadCompactLinearByte(start + index, end, init var ignored))
+        {
+            return false;
+        }
+    }
+
+    nextPosition = start + byteCount;
+    return true;
+}
+
+bool TryReadCompactLinearWord(int32 start, int32 end, int32 width,
+    init ref<int32> nextPosition, init ref<uint32> value)
+{
+    if ((width != 1 && width != 2 && width != 4)
+        || start < 0 || end > Host.Rows.Length || start > end - width)
+    {
+        return false;
+    }
+
+    mut uint32 result = 0;
+    for (mut int32 index = 0; index < width; index = index + 1)
+    {
+        if (!TryReadCompactLinearByte(start + index, end, init var part))
+        {
+            return false;
+        }
+
+        result = result | (part << (index * 8));
+    }
+
+    nextPosition = start + width;
+    value = result;
+    return true;
+}
+
+bool TryReadCompactLinearByte(int32 index, int32 end, init ref<uint32> value)
+{
+    if (index < 0 || index >= end || end > Host.Rows.Length)
+    {
+        return false;
+    }
+
+    int32 byteValue = Host.Rows[index];
+    if (byteValue < 0 || byteValue > 255)
+    {
+        return false;
+    }
+
+    value = uint32(byteValue);
+    return true;
+}
