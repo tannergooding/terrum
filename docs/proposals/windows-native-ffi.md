@@ -89,6 +89,25 @@ authorize a proven lifetime escape.
    `MessageBoxW` program as an observable pointer-call gate before callbacks.
    Keep Terrum `bool`, Win32 `BOOL`, HRESULTs, handles and managed references
    distinct.
+
+### DX11 SDK layout reference (provisional)
+
+**Summary:** The sample's native descriptor and message structures now have
+an x64 C layout probe compiled against the Windows SDK selected by the test
+machine's `vcvars64.bat`. It asserts size, alignment and accessed field
+offsets for `DXGI_MODE_DESC` (28/4), `DXGI_SAMPLE_DESC` (8/4),
+`DXGI_SWAP_CHAIN_DESC` (72/8), `D3D11_BUFFER_DESC` (24/4),
+`D3D11_SUBRESOURCE_DATA` (16/8), `D3D11_INPUT_ELEMENT_DESC` (32/8),
+`D3D11_VIEWPORT` (24/4), `RECT` (16/4), `WNDCLASSEXW` (80/8) and `MSG`
+(48/8). The probe passed against Windows SDK 10.0.28000.0 on the current
+host.
+
+**Recommendation:** Retain this probe as the sample-specific ABI oracle when
+implementing descriptor storage. Matching SDK layout is necessary but does
+not define Terrum initialization, zero-initialization eligibility, pointer
+loans, ownership or general `Blittable` support; those remain separate
+contracts under this unapproved proposal.
+
 3. **One static window callback.** Support the sample's exact noncapturing
    `WNDPROC` signature, calling convention and native-entry address formation,
    not general delegates or closures. Retain code and data lifetime through

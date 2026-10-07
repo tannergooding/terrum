@@ -425,7 +425,7 @@ public sealed class NativeSourceImportTests
     }
 
     [Fact]
-    public async Task SourceImportsMatchIndependentCScalarAndUtf16PointerAbiAsync()
+    public async Task SourceImportsMatchIndependentCAbiAndDx11SdkLayoutsAsync()
     {
         Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var vswhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
@@ -450,6 +450,9 @@ public sealed class NativeSourceImportTests
         var objectPath = Path.Combine(directory, "native-import-abi-probe.obj");
         var executablePath = Path.Combine(directory, "native-import-abi-probe.exe");
         var sourcePath = Path.Combine(repositoryRoot, "tests", "native", "native-import-abi-probe.c");
+        var layoutProbeObjectPath = Path.Combine(directory, "dx11-sdk-layout-probe.obj");
+        var layoutProbeSourcePath = Path.Combine(repositoryRoot, "tests", "native",
+            "dx11-sdk-layout-probe.c");
         try
         {
             var build = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
@@ -458,6 +461,13 @@ public sealed class NativeSourceImportTests
                 WorkingDirectory = repositoryRoot,
             };
             _ = await RunAsync(build, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+
+            var layoutProbeBuild = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
+                ?? throw new InvalidOperationException("ComSpec is unset.")) {
+                Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /nologo /W4 /WX /wd4201 /TC /c /Fo\"{layoutProbeObjectPath}\" \"{layoutProbeSourcePath}\"\"",
+                WorkingDirectory = repositoryRoot,
+            };
+            _ = await RunAsync(layoutProbeBuild, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
 
             var catalog = NativeImportCatalog.CreateForTesting("test-native-import-abi-v1", [
                 new NativeImportDefinition(SignedFixtureKey, "native-import-abi-probe.dll", "NativeFfiSigned",
