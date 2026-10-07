@@ -3145,7 +3145,11 @@ internal sealed partial class Binder
             || call.Arguments.Any(ContainsAuthorizedExpressionScopeCall),
         BoundUnary unary => ContainsAuthorizedExpressionScopeCall(unary.Operand),
         BoundUpdate update => ContainsAuthorizedExpressionScopeCall(update.Place),
-        BoundNominalUpdate update => ContainsAuthorizedExpressionScopeCall(update.Place),
+        BoundNominalUpdate update => (update.IsUnsafeAuthorized
+            && update.Function >= 0
+            && update.Function < _signatures.Count
+            && IsSupportedExpressionStaticUpdateOperator(_signatures[update.Function], update.Operator))
+            || ContainsAuthorizedExpressionScopeCall(update.Place),
         BoundCompoundAssignment compound => ContainsAuthorizedExpressionScopeCall(compound.Place)
             || ContainsAuthorizedExpressionScopeCall(compound.Right),
         BoundBinary binary => ContainsAuthorizedExpressionScopeCall(binary.Left)
@@ -3179,6 +3183,12 @@ internal sealed partial class Binder
         && TryGetStaticOperatorKey(signature.Name, owner, out var key)
         && key.Arity is 1 or 2
         && key.Operator is not (TokenKind.PlusPlus or TokenKind.MinusMinus);
+
+    private static bool IsSupportedExpressionStaticUpdateOperator(Signature signature, TokenKind updateOperator) =>
+        signature.IsStatic && signature.IsOperator && signature.StructName is string owner
+        && TryGetStaticOperatorKey(signature.Name, owner, out var key)
+        && key.Arity == 1 && key.Operator == updateOperator
+        && updateOperator is TokenKind.PlusPlus or TokenKind.MinusMinus;
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unsupported syntax kinds are rejected by the default branch.")]
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Runtime struct IDs are represented by enum values outside the declared primitive range.")]

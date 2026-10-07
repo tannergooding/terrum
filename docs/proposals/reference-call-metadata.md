@@ -467,6 +467,34 @@ stripped wrappers, operand-only scopes, nominal-update exclusion, semantic
 linking, and native graphs/module sets under both runtime policies. This
 bounded persistence slice does not approve the broader proposal.
 
+### Provisional extension: caller-unsafe nominal updates in expression scopes
+
+**Summary:** The accepted update contract already binds nominal `++`/`--` as
+`BoundNominalUpdate`, checks the exact owner-typed by-value operator and
+result, saves the place value, and commits only after the operator succeeds.
+Unlike unary non-update calls, the node is not a `BoundCall`; before revision
+75 the binder could discard its `unsafe(expr)` wrapper and the module reader
+rejected caller-unsafe updates inside a retained wrapper.
+
+**Recommendation:** Persist only caller-unsafe nominal prefix/postfix updates
+whose complete `BoundNominalUpdate` is enclosed in `BoundUnsafeExpression`.
+Reuse the established public, non-unique `Copy` owner/layout gate and exact
+static update-operator contract. Preserve ordinary writable-place,
+initialization, effects, evaluation-once, commit-on-success and prefix/postfix
+result rules. Continue rejecting caller-unsafe field paths as expression
+mutation places, and reconstruct authorization from the enclosing unsafe
+block or expression rather than a serialized flag. Do not widen update
+semantics, ABI, TRRM, scalar-frontend verification/emission, or approve the
+broader reference-call metadata proposal.
+
+**Implemented provisionally in semantic-module revision 75:** The binder now
+retains the complete expression scope around an authorized nominal update.
+Writers and readers validate the exact matching `++`/`--` operator and the
+eligible owner contract; the reader derives authorization from the retained
+scope and rejects a stripped wrapper. Existing unsafe-block update behavior
+and expression-place field-path rejection remain unchanged. This bounded
+persistence extension does not settle or approve the broader proposal.
+
 ### Provisional extension: caller-unsafe readonly getters
 
 **Summary:** The accepted source contract supports caller-unsafe getter

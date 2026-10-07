@@ -46,7 +46,7 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 74. Writers emit only revision 74 and
+The current semantic-module revision is 75. Writers emit only revision 75 and
 readers reject every other revision; older artifacts must be recreated from
 source. The current format preserves verified, typed, source-mapped structured
 IR and the supported declaration, layout, initialization, cleanup, and runtime
@@ -114,8 +114,17 @@ exact owner type passed by value; the result follows the existing unary
 declaration contract and may be a distinct recursively exportable scalar or
 `Copy` type. The complete call and canonical default argument mapping are
 validated by both writer and reader. Caller-unsafe `++`/`--` nominal updates
-remain outside expression-scope support; existing unsafe-block behavior is
-unchanged. This adds no ABI, TRRM or scalar-frontend
+were outside this revision's expression-scope slice; existing unsafe-block
+behavior was unchanged.
+
+Revision 75 provisionally persists caller-unsafe nominal prefix and postfix
+`++`/`--` updates when the complete update is enclosed by `unsafe(expr)`.
+Writers and readers validate the matching static operator, exact owner
+operand/result, public recursively exportable non-unique `Copy` owner and
+ordinary writable place. Unsafe field paths remain excluded from expression
+update places. Reader authorization is reconstructed from the unsafe block
+or expression scope, not persisted as a separate capability; stripping the
+only scope fails closed. This adds no ABI, TRRM or scalar-frontend
 verification/emission support and does not approve the broader
 reference-call metadata proposal.
 

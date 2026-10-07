@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 74;
+    private const int Version = 75;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1482,9 +1482,18 @@ public static partial class ModuleCompiler
                                 break;
                             case BoundCall { IsUnsafeAuthorized: true }:
                                 throw new ModuleFormatException("Invalid expression-scoped unsafe call target.");
+                            case BoundNominalUpdate { IsUnsafeAuthorized: true } update
+                                when (uint)update.Function < (uint)program.Functions.Length:
+                                if (!IsSupportedModuleUnsafeExpressionUpdate(update.Operator, update.Type,
+                                    update.Place.Type, program.Functions[update.Function],
+                                    program.Structures, callValueTypes))
+                                {
+                                    throw new ModuleContractException(
+                                        "Expression-scoped nominal updates require a supported public Copy operator.");
+                                }
+                                break;
                             case BoundNominalUpdate { IsUnsafeAuthorized: true }:
-                                throw new ModuleContractException(
-                                    "Expression-scoped unsafe operators are unsupported.");
+                                throw new ModuleFormatException("Invalid expression-scoped update operator target.");
                             case BoundFieldRead field when ContainsCallerUnsafeField(field, module.Structures):
                                 if (!IsSupportedModuleUnsafeExpressionFieldRead(
                                     field, module.Structures, fieldValueTypes))
@@ -1570,6 +1579,23 @@ public static partial class ModuleCompiler
             return IsSupportedModuleUnsafeTopLevelCall(function, valueTypes);
         }
         return !function.IsOperator && IsSupportedModuleUnsafeMethod(function, structures, valueTypes);
+    }
+
+    private static bool IsSupportedModuleUnsafeExpressionUpdate(TokenKind updateOperator,
+        PrimitiveType type, PrimitiveType placeType, BoundFunction function,
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
+    {
+        if (!function.RequiresUnsafeCaller || !function.IsStatic || !function.IsOperator
+            || function.DeclaringStruct is not string owner
+            || !Binder.TryGetStaticOperatorKey(function.Name, owner, out var key)
+            || key.Arity != 1 || key.Operator != updateOperator
+            || updateOperator is not (TokenKind.PlusPlus or TokenKind.MinusMinus)
+            || type != placeType || type != function.ReturnType || !valueTypes.IsSupported(type))
+        {
+            return false;
+        }
+        return IsSupportedModuleOperatorContract(
+            Contract(function, structures), structures, valueTypes, requirePublic: true);
     }
 
     private static bool IsSupportedModuleUnsafeExpressionMutableFieldLoanCall(BoundFunction function,
@@ -3848,6 +3874,11 @@ public static partial class ModuleCompiler
                 PutExpression(writer, compound.Right, names, ref remaining, depth + 1, inUnsafe);
                 break;
             case BoundNominalUpdate update:
+                if (update.IsUnsafeAuthorized && !inUnsafe)
+                {
+                    throw new ModuleContractException(
+                        "Caller-unsafe nominal update authorization requires an unsafe scope.");
+                }
                 writer.Write((int)update.Operator);
                 writer.Write(update.IsPrefix);
                 if (update.Function < 0 || update.Function >= names.Length)
@@ -4218,13 +4249,25 @@ public static partial class ModuleCompiler
                     "Expression-scoped unsafe field paths cannot be used as mutation places."),
             SymbolicNominalUpdate update when inUnsafeExpression
                 && names.TryGetValue(update.Name, out var unsafeMethod)
-                && functions[unsafeMethod].RequiresUnsafeCaller =>
-                throw new ModuleContractException("Expression-scoped unsafe operators are unsupported."),
+                && functions[unsafeMethod].RequiresUnsafeCaller
+                && IsSupportedModuleUnsafeExpressionUpdate(update.Operator, update.Type,
+                    update.Place.Type, functions[unsafeMethod], structures, valueTypes) =>
+                new BoundNominalUpdate(update.Operator,
+                    ResolveExpression(update.Place, names, functions, structures, valueTypes, inUnsafe,
+                        inUnsafeExpression),
+                    update.IsPrefix, unsafeMethod, update.Type, update.Span) {
+                    IsUnsafeAuthorized = true,
+                },
+            SymbolicNominalUpdate update when inUnsafeExpression
+                && names.TryGetValue(update.Name, out var unsupportedUnsafeMethod)
+                && functions[unsupportedUnsafeMethod].RequiresUnsafeCaller =>
+                throw new ModuleContractException(
+                    "Expression-scoped nominal updates require a supported public Copy operator."),
             SymbolicNominalUpdate update => names.TryGetValue(update.Name, out var method)
                 ? new BoundNominalUpdate(update.Operator,
                     ResolveExpression(update.Place, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
                     update.IsPrefix, method, update.Type, update.Span) {
-                    IsUnsafeAuthorized = inUnsafe && functions[method].RequiresUnsafeCaller,
+                    IsUnsafeAuthorized = (inUnsafe || inUnsafeExpression) && functions[method].RequiresUnsafeCaller,
                 }
                 : throw new ModuleContractException($"Unresolved update operator '{update.Name}'."),
             BoundBinary binary => binary with {

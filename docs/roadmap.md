@@ -76,8 +76,10 @@ prerequisite has already been met.
    existing owner-result or comparison-`bool` signature contract. Revision 74
    provisionally adds recognized unary plus, negation, logical-not and
    ones-complement calls with an exact by-value owner operand and an existing
-   unary-contract result; caller-unsafe nominal updates remain outside
-   expression-scope support. Existing unsafe-block behavior is unchanged.
+   unary-contract result. Revision 75 provisionally adds caller-unsafe
+   nominal prefix/postfix `++`/`--` updates through the same complete
+   expression-scope boundary; unsafe field mutation places remain excluded.
+   Existing unsafe-block behavior is unchanged.
    These slices add no ABI, TRRM or scalar-frontend support and do not approve
    the broader proposal.
    Revision 64 also provisionally
