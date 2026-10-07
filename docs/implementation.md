@@ -570,10 +570,10 @@ calls. Output Bodies preserve by-value `bool`, `char16`, `int32`, `uint32`,
 by local scalar-returning calls; output places and initialized value locals
 remain `int32`, and output-bearing functions return only `void` or `int32`.
 They also provisionally encode and reconstruct scalar comparisons: equality
-and inequality for `bool`, `char16`, `int32` and `int64`; ordering for integer
-types; and all six comparisons for `float32` and `float64`. Comparison results
-are `bool`. Unsigned equality, other value operations, and non-`int32` local
-constants remain outside this slice.
+and inequality for `bool`, `char16` and integer types; integer ordering; and
+all six comparisons for `float32` and `float64`. Comparison results are
+`bool`. Other value operations and non-`int32` local constants remain outside
+this slice.
 It uses required Feature section kind `0x0004` and a separately audited
 one-block general Body path, reconstructs bound nodes, and still runs the
 mandatory semantic verifier. Only the profile's bounded output shapes are

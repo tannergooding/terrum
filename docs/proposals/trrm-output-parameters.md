@@ -88,12 +88,11 @@ scalar-returning calls into a local call; this does not widen output places,
 which remain `int32`, output-bearing function results, which remain `void` or
 `int32`, or the int32-only constants, initialized locals, assignment and
 arithmetic operations. The writer and loader also provisionally support
-Boolean and `char16` equality/inequality, signed integer equality/inequality,
-integer ordering, and all six floating comparisons, with `bool` results.
-Unsigned equality and non-`int32` local constants remain excluded. The
-one-block control-flow boundary is unchanged. These value and comparison paths
-are implemented support only, not approval of the proposed executable
-contract.
+Boolean, `char16` and integer equality/inequality, integer ordering, and all
+six floating comparisons, with `bool` results. Non-`int32` local constants
+remain excluded. The one-block control-flow boundary is unchanged. These
+value and comparison paths are implemented support only, not approval of the
+proposed executable contract.
 
 The broader proposal remains unresolved. In particular, Boolean status facts
 are call-specific and require correlation with their particular destinations;

@@ -312,7 +312,8 @@ public static partial class TrRmExecutableCompiler
                         1 or 2 when isFloat => IsFloat(left.Type),
                         3 or 4 or 5 or 6 when isFloat => IsFloat(left.Type),
                         4 or 5 => left.Type is PrimitiveType.Bool or PrimitiveType.Char16
-                            or PrimitiveType.Int32 or PrimitiveType.Int64,
+                            or PrimitiveType.Int32 or PrimitiveType.UInt32
+                            or PrimitiveType.Int64 or PrimitiveType.UInt64,
                         6 or 7 or 8 or 9 => IsInteger(left.Type),
                         _ => false,
                     });
@@ -694,7 +695,8 @@ public static partial class TrRmExecutableCompiler
                     if (!IsOutputScalarType(binary.Left.Type)
                         || !isFloat && (isEquality
                             ? binary.Left.Type is not (PrimitiveType.Bool or PrimitiveType.Char16
-                                or PrimitiveType.Int32 or PrimitiveType.Int64)
+                                or PrimitiveType.Int32 or PrimitiveType.UInt32
+                                or PrimitiveType.Int64 or PrimitiveType.UInt64)
                             : !IsInteger(binary.Left.Type)))
                     {
                         throw Unsupported("Comparison operands are outside the output Body profile.");
