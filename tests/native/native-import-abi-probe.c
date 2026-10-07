@@ -89,7 +89,7 @@ __declspec(dllexport) int32_t __cdecl NativeFfiMessageBox(
     };
     if (owner != NULL)
     {
-        return 1;
+        return -1;
     }
     if (text == NULL || caption == NULL || ((uintptr_t)text & 1) != 0
         || ((uintptr_t)caption & 1) != 0)

@@ -222,6 +222,8 @@ public sealed class NativeSourceImportTests
         var program = Assert.IsType<BoundProgram>(validCompilation.Program);
         var mainIndex = Array.FindIndex(program.Functions.ToArray(), static function => function.Name == "Main");
         var main = program.Functions[mainIndex];
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitWithNativeImports(
+            program, NativeRuntimePolicy.FailFast));
         var boundReturn = Assert.IsType<BoundReturn>(main.Body.Statements[0]);
         var call = Assert.IsType<BoundCall>(boundReturn.Value);
         var ownerArgumentIndex = Enumerable.Range(0, call.Arguments.Length)

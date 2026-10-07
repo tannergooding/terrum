@@ -20,6 +20,7 @@ internal static partial class Program
     private const string Usage = "Usage: terrumc <check|tokens|tree> <path|-> [--json]\n"
         + "       terrumc analyze <path|-> [--source <path>] [--runtime <fail-fast|checked-exceptions>] [--corelib] [--json]\n"
         + "       terrumc build <path|-> [--source <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
+        + "       terrumc build-native-import <path|-> [--source <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc build-library <path|-> [--source <path>] --export <name> [--export <name>] -o <output.dll> --runtime <fail-fast|checked-exceptions> [--corelib | --source-grant --abi-output <output.json>] [--json]\n"
         + "       terrumc jit <path|-> [--source <path>] --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc scan-component <scanner.terrum|self-host-directory> <input|-> --runtime <fail-fast|checked-exceptions> [--json]\n"
@@ -54,6 +55,7 @@ internal static partial class Program
         + "       terrumc run-native-graph <consumer.trng> --provider <selected.trmn|selected.trng> [--provider <selected>] --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc run-native-graph-jit <consumer.trng> --provider <selected.trmn|selected.trng> [--provider <selected>] --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "check/tokens/tree inspect syntax; analyze binds the native profile; build emits Windows x64 PE.\n"
+        + "build-native-import opts into the immutable Windows x64 source-import catalog; ordinary build does not enable imports.\n"
         + "fail-fast explicitly selects process termination for runtime failures, not catchable exceptions.\n"
         + "checked-exceptions enables recovery and unwinding for four compiler-generated failure reasons.\n"
         + "jit/run-module/run-trrm execute in this process and return the program's status; supervise them with a deadline.\n"
@@ -136,7 +138,8 @@ internal static partial class Program
             return NativeJitContinuationRegistrar.Serve();
         }
 
-        if (args.Length != 0 && args[0] is "analyze" or "build" or "build-library" or "jit")
+        if (args.Length != 0 && args[0] is "analyze" or "build" or "build-native-import"
+            or "build-library" or "jit")
         {
             return RunCompilation(args, json);
         }

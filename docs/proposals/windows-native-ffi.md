@@ -62,7 +62,7 @@ authorize a proven lifetime escape.
    Reject unknown keys and any signature/effect mismatch. A DLL
    basename alone does not establish trusted loading or prove that a foreign
    provider implements the declared signature. Keep the initial catalog
-   compiler-supplied and immutable, with only the reviewed system import and a
+   compiler-supplied and    immutable, with only reviewed system imports and a
    test-only fixture entry; do not add plugin discovery, arbitrary caller
    catalogs or source-selected DLLs. Carry the catalog identity from binding
    through IR and target lowering to PE emission, and enforce
@@ -149,10 +149,10 @@ application-directory or other loader redirection.
 **Progress:** A test-only native ABI fixture now exercises the static-literal
 pointer path with an independently compiled C reader, including UTF-16 code
 units, terminators, alignment, register and stack argument positions, and
-scalar arguments. This implements test coverage for the proposed subgate; it
-does not promote the proposal or add a pointer import to the production
-catalog. `MessageBoxW` and its sample-specific handle representation remain
-the next observable gate.
+scalar arguments. This establishes fixture coverage for the literal contract,
+not general pointer support. Production `MessageBoxW` progress and its
+sample-specific handle representation are tracked in the following subgate;
+the overall proposal remains unapproved.
 
 ### Proposed `MessageBoxW` owner-handle subgate (unapproved)
 
@@ -190,29 +190,31 @@ KnownDLL registry key; that is host evidence only. The set is OS-dependent,
 and DLL redirection, SxS redirection and loaded-module reuse precede the
 KnownDLL check. The catalog's `System32` policy does not enforce a path.
 
-**Trusted-loader acceptance condition:** Limit a production `MessageBoxW`
-entry to explicitly validated Windows x64 desktop release/configuration
-families where `user32.dll` is a KnownDLL. Assume a trusted OS installation and
-normal process startup; application-controlled DLL/SxS redirection and
-substituted providers are outside the gate. The compiler-host registry is not
-evidence about another execution target, and ordinary DLL-search fallback is
-not an accepted basis. Before adding the production entry, record supported
-target coverage and verify a nonmodal static-import probe resolves the system
-image despite application-directory, current-directory and `PATH` shadow
-files. This does not authorize other DLLs merely because they share the
-`System32` policy.
+**Trusted-loader acceptance condition:** The directed target scope is all
+Windows x64 desktop-class NT releases supported by the project, relying on
+`user32.dll` being a KnownDLL throughout that target family. This is the
+product's target premise, not a compiler-host registry matrix. Assume a
+trusted OS installation and normal process startup; application-controlled
+DLL/SxS redirection and substituted providers are outside the gate. The
+development host's nonmodal static-import probe must resolve the system image
+despite application-directory, current-directory and `PATH` shadow files.
+The PE's `System32` policy remains a reviewed deployment assertion, not an
+enforced search path, and does not authorize other DLLs.
 
-**Progress:** A test-only `HWND.NoOwner` source marker now binds only as the
-direct owner argument of a catalogued call and lowers to native zero; an
-independent C fixture verifies the named-argument mapping and ABI without
-displaying a dialog. A separate nonmodal static-import probe passed on the
-Windows 11 x64 development host (build 26300), confirming that the loaded
-`user32.dll` image matches the system-directory path despite application,
-current-directory and `PATH` shadow DLLs. This is evidence for that host only:
-the production catalog still has no `MessageBoxW` entry, supported target
-coverage beyond this host is unvalidated, and there is no runnable sample or
-interactive smoke test. The representation and import remain provisional under
-this unapproved proposal.
+**Progress:** The test-only `HWND.NoOwner` source marker binds only as the
+direct owner argument and lowers to native zero. Its independent C fixture
+now returns a distinct failure value for nonzero owners, so the ABI check
+cannot mistake an invalid owner for the expected `IDOK` result. A separate
+nonmodal static-import probe passed on the Windows 11 x64 development host
+(build 26300), despite application-directory, current-directory and `PATH`
+shadow DLLs. The production catalog now includes the exact `MessageBoxW`
+signature under the directed desktop target scope, and
+`terrumc build-native-import` emits a runnable sample while ordinary `build`
+remains unchanged. The opt-in smoke image was launched and returned success,
+which the sample does only after `MessageBoxW` returns `IDOK`; the displayed
+text and caption were not confirmed, so visual acceptance remains pending.
+The representation and import remain provisional under this unapproved
+proposal.
 
 See Microsoft's [`MessageBoxW` contract](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-messageboxw)
 and [DLL search order](https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order)

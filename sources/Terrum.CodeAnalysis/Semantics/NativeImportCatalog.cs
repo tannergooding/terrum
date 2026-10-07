@@ -13,7 +13,7 @@ public sealed class NativeImportCatalog
         new("Terrum.Interop.NativeImport", ArgumentCount: 1, RequiresStringLiteral: true, IsRepeatable: false);
 
     private static readonly NativeImportCatalog s_windowsX64 = new(
-        "windows-x64-native-imports-v1",
+        "windows-x64-native-imports-v2",
         [
             new NativeImportDefinition(
                 "windows-x64.system32.kernel32.GetCurrentThreadId",
@@ -25,6 +25,24 @@ public sealed class NativeImportCatalog
                 RequiresUnsafeCaller: false,
                 DoesNotReturn: false,
                 DeploymentPolicy: NativeImportDeploymentPolicy.System32),
+            new NativeImportDefinition(
+                "windows-x64.system32.user32.MessageBoxW",
+                "user32.dll",
+                "MessageBoxW",
+                [PrimitiveType.NativeWindowHandle, PrimitiveType.NativeUtf16ZPointer,
+                    PrimitiveType.NativeUtf16ZPointer, PrimitiveType.UInt32],
+                PrimitiveType.Int32,
+                IsNoThrow: true,
+                RequiresUnsafeCaller: false,
+                DoesNotReturn: false,
+                DeploymentPolicy: NativeImportDeploymentPolicy.System32) {
+                ParameterContracts = [
+                    NativeImportParameterContract.NoOwnerWindowHandle,
+                    NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
+                    NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
+                    NativeImportParameterContract.Value,
+                ],
+            },
         ]);
 
     private readonly ImmutableDictionary<string, NativeImportDefinition> _imports;

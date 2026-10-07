@@ -1,7 +1,10 @@
 # CLI machine protocol
 
 The CLI distinguishes inspection/build diagnostics from execution results.
-`check`, `tokens`, `tree`, `analyze`, and `build` do not execute source.
+`check`, `tokens`, `tree`, `analyze`, `build`, and `build-native-import` do not
+execute source. `build-native-import` explicitly compiles against the immutable
+Windows x64 source-import catalog; ordinary `build` does not enable native
+imports.
 Inspection/build commands return 0 on success, 1 for source or compilation
 diagnostics, and 2 for usage or input/output failures. Execution workers
 return the program's raw status. `run-native` supervises its native child with

@@ -40,6 +40,15 @@ reading it in a loop; the owner remains live until the view's scope ends.
 The [writable buffer-view sample](../samples/native/mutable-buffer-view.terrum)
 returns 42 after an exclusive scoped update and a NoThrow in-place `Clear`
 followed by reuse of the same fixed-capacity owner.
+The [Windows `MessageBoxW` sample](../samples/native/message-box.terrum) uses
+the provisional compiler-owned native-import catalog, a no-owner `HWND`, and
+static UTF-16-NUL literals. Build it with the explicit `build-native-import`
+command; it returns success only when the user dismisses the dialog with OK.
+
+```powershell
+terrumc build-native-import samples\native\message-box.terrum -o artifacts\message-box.exe --runtime fail-fast
+```
+
 The [nested struct-receiver sample](../samples/native/nested-struct-receiver.terrum)
 returns 42 under either runtime policy. It mutates nested counters in both
 a Copy local and a unique owner through field paths and forwarded `this`

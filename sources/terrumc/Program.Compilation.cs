@@ -135,10 +135,12 @@ internal static partial class Program
                 case "--abi-output" when args[0] == "build-library" && abiOutputPath is null:
                     abiOutputPath = Path.GetFullPath(value);
                     break;
-                case "-o" when args[0] is "build" or "build-library" && outputPath is null:
+                case "-o" when args[0] is "build" or "build-native-import" or "build-library"
+                    && outputPath is null:
                     outputPath = Path.GetFullPath(value);
                     break;
-                case "--runtime" when args[0] is "analyze" or "build" or "build-library" or "jit"
+                case "--runtime" when args[0] is "analyze" or "build" or "build-native-import"
+                    or "build-library" or "jit"
                     && !hasRuntime && value is "fail-fast" or "checked-exceptions":
                     hasRuntime = true;
                     runtimePolicy = value == "fail-fast"
@@ -167,7 +169,10 @@ internal static partial class Program
             ? ImmutableArray.Create(new HostBuffer("Source", PrimitiveType.Char16, [], false)
                 { IsInvocationScoped = true })
             : ImmutableArray<HostBuffer>.Empty;
-        var compilation = coreLibrary
+        var nativeImports = command == "build-native-import";
+        var compilation = nativeImports
+            ? Compilation.CreateWithNativeImports(trees, (BoundRuntimePolicy)runtimePolicy)
+            : coreLibrary
             ? Compilation.CreateCoreLibrary(trees, (BoundRuntimePolicy)runtimePolicy)
             : library
             ? sourceGrant
@@ -201,6 +206,10 @@ internal static partial class Program
                     var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program, exports, runtimePolicy);
                     image = artifact.Image;
                     abiManifest = CreateSourceGrantManifest(artifact, runtimePolicy);
+                }
+                else if (nativeImports)
+                {
+                    image = NativeEmitter.EmitWithNativeImports(program, runtimePolicy);
                 }
                 else
                 {

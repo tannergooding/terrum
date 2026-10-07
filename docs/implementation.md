@@ -56,11 +56,19 @@ emission into Terrum. Test-only fixtures exercise the proposed static
 UTF-16-NUL literal pointer subgate using read-only image storage and catalogued
 readonly/no-escape parameters against an independent C reader, and the
 sample-specific `HWND.NoOwner` marker against a nonmodal ABI-equivalent C
-function. A separate static `user32.dll` import probe checks the loaded image
-while application-directory, current-directory and `PATH` shadow DLLs are
-present. These tests do not add pointer or HWND imports to the production
-catalog or establish general pointer or handle support; `MessageBoxW` remains
-unimplemented.
+function. The production catalog also includes the exact `user32.dll!MessageBoxW`
+signature, callable only with `HWND.NoOwner` and static readonly UTF-16-NUL
+literals. The provisional target scope is supported Windows x64 desktop-class
+NT releases where `user32.dll` is a KnownDLL; the separate static-import probe
+checks the current host with application-directory, current-directory and
+`PATH` shadow DLLs present, not a cross-version matrix. The opt-in
+`terrumc build-native-import` command explicitly selects this immutable
+catalog; ordinary `build` remains unchanged. Its runnable sample returns
+success only for `MessageBoxW`'s `IDOK` result. Unattended tests build and
+inspect the import without calling the modal API. The opt-in smoke process
+returned success, but the displayed text and caption were not confirmed;
+visual acceptance remains pending. This is a narrow provisional slice, not
+general pointer, handle or foreign-function support.
 
 ## Syntax and CLI
 
