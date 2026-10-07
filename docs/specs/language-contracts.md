@@ -285,6 +285,23 @@ exports or witnesses, source-free TRRM, and custom conditional
 postcondition-driven generic `Copy` outputs remain outside it; Boolean
 publication rules are unchanged.
 
+Compilation-local `[Copy]` templates also admit `init ref<T>` outputs with a
+fixed `int32`, `uint32`, `int64`, `uint64`, `char16`, or `void` result. Every
+normal return, including implicit `void` fallthrough, must fully initialize
+the destination; exceptional departure publishes none, leaving it vacant and
+unreadable. Boolean results keep their conditional rule: `true` publishes and
+`false` leaves the destination vacant. Calls must use `init` with vacant
+storage, and type inference remains unchanged: explicit type arguments, typed
+inputs, or an already typed vacant destination may establish `T`; `init var`
+alone cannot. The existing `[Copy]` eligibility includes
+compilation-private managed-handle specializations and their rooting and
+cleanup. Closed private specializations survive compatible semantic-module and
+native-graph producer replacements without changing output-mode metadata or
+wire formats. Floating concrete argument eligibility remains separate. Unique
+or owning values, fixed-valued output side parameters, mixed `out`/`init`
+modes, public generic exports or witnesses, source-free TRRM, and
+scalar-frontend verification or emission remain outside this profile.
+
 ### 2.3 Checking and consuming the contract
 
 The body must prove that every promised output is completely initialized on

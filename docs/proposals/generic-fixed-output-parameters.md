@@ -4,11 +4,12 @@
 
 ## Summary
 
-Compilation-local `[Copy]` generic templates provisionally allow fixed scalar
-`out` and `init ref<T>` side outputs alongside at least one generic-typed
-output. This remains an unapproved hosted experiment. The existing broad module
-fixture couples fixed side outputs with mixed generic outputs and floating
-results; separate evidence is tracked below without changing those boundaries.
+Compilation-local `[Copy]` templates have accepted bounded contracts for
+generic-typed `out` and `init ref<T>` outputs separately. Fixed scalar `out`
+and `init ref<T>` side outputs alongside a generic-typed output remain an
+unapproved hosted experiment. The existing broad module fixture couples fixed
+side outputs with mixed generic outputs and floating results; separate evidence
+is tracked below without changing those boundaries.
 
 ## Recommendation
 

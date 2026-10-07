@@ -283,6 +283,76 @@ public sealed class ModuleTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task GenericCopyInitSpecializationsRemainPrivateAcrossModuleReplacementAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string LibrarySource = """
+            public struct Pair {
+                public int32 First;
+                public int32 Second;
+                public Pair(int32 first, int32 second) {
+                    First = first;
+                    Second = second;
+                }
+            }
+            int32 Fill<T>(T value, init ref<T> result) where T : [Copy] {
+                result = value;
+                return 7;
+            }
+            void FillVoid<T>(T value, init ref<T> result) where T : [Copy] {
+                result = value;
+            }
+            public int32 Read() {
+                int32 status = Fill(new Pair(20, 22), init var result);
+                FillVoid(new Pair(5, 2), init var voidResult);
+                return status + result.First + result.Second + voidResult.First + voidResult.Second;
+            }
+            """;
+        const string ConsumerSource = "int32 Main() { return Read(); }";
+        var library = Compilation.CreateLibrary(SyntaxTree.Parse(LibrarySource), policy);
+        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(library.Program);
+        var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
+        var compilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+            ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(compilation.Program), producer);
+        var nativePolicy = policy == BoundRuntimePolicy.FailFast
+            ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+        Assert.Equal(56, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, producer), nativePolicy)).ConfigureAwait(true));
+
+        var replacementLibrary = Compilation.CreateLibrary(SyntaxTree.Parse(
+            LibrarySource.Replace("return 7;", "return 8;", StringComparison.Ordinal)), policy);
+        Assert.False(replacementLibrary.HasErrors,
+            string.Join(Environment.NewLine, replacementLibrary.Diagnostics));
+        var replacementProgram = Assert.IsType<BoundProgram>(replacementLibrary.Program);
+        var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["Read"]);
+        Assert.Equal(57, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, replacement), nativePolicy)).ConfigureAwait(true));
+
+        var nativeProducer = NativeModuleCompiler.CreateProducer(
+            program, ["Read"], "GenericCopyInitProvider", nativePolicy);
+        var nativeCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+            NativeModuleCompiler.CreateGraphReference([nativeProducer]), runtimePolicy: policy);
+        Assert.False(nativeCompilation.HasErrors,
+            string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
+            Assert.IsType<BoundProgram>(nativeCompilation.Program), [nativeProducer], nativePolicy);
+        Assert.Equal(56, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true));
+
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(
+            replacementProgram, ["Read"], "GenericCopyInitProvider", nativePolicy);
+        NativeModuleCompiler.ValidateGraph(nativeConsumer, [nativeReplacement]);
+        Assert.Equal(57, await NativeModuleCompiler.RunGraphAsync(nativeConsumer,
+            [nativeReplacement], TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CopyOutputsRetainConditionalPublicationAcrossModuleArtifactsAsync(
         BoundRuntimePolicy policy)
     {

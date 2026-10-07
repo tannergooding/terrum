@@ -5,12 +5,13 @@
 ## Summary
 
 Compilation-local `[Copy]` templates have accepted bounded support for
-ordinary `out T` with fixed non-Boolean or `void` results. The corresponding
-`init ref<T>` extension remains unapproved. Mixed-mode support is implemented
-provisionally, but its current integration fixture also exercises fixed-valued
-output side parameters; this proposal tracks the narrower all-output-formal
-contract and its independent replacement evidence. This does not promote the
-behavior or its broader extensions.
+ordinary `out T` and, separately, generic `init ref<T>` outputs with fixed
+non-Boolean or `void` results. Combining the modes in one template remains
+unapproved. Mixed-mode support is implemented provisionally, but its current
+integration fixture also exercises fixed-valued output side parameters; this
+proposal tracks the narrower all-output-formal contract and its independent
+replacement evidence. This does not promote the behavior or its broader
+extensions.
 
 ## Question
 

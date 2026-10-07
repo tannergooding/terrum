@@ -25,9 +25,6 @@ approved.
 - [Reference-call metadata](reference-call-metadata.md) has an accepted,
   bounded indexed-Body unsafe-region contract; its dependency-relation profile,
   general output-call migration and other extensions remain unapproved.
-- [Generic Copy initialization outputs for non-Boolean calls](generic-init-output-publication.md)
-  recommends carrying ordinary `init ref<T>` normal-return publication through
-  compilation-local Copy specializations while preserving Boolean vacancy.
 - [Mixed generic Copy outputs for non-Boolean calls](generic-mixed-output-publication.md)
   recommends combining generic `out` and `init ref` formals while preserving
   each mode's distinct destination and publication contract; fixed-valued
