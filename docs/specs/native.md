@@ -261,6 +261,13 @@ is total; NaNs and infinities remain floating values, but fixed NaN payload
 preservation is not promised. Identity conversions remain ordinary `Copy`
 values.
 
+The draft also accepts opcode `0x1B`,
+`IntToFloat rNew, tDest, rSource`, for exactly `int32`, `uint32`, `int64` or
+`uint64` sources and `float32` or `float64` destinations. Conversion is total
+and follows nearest, ties-to-even target-format semantics. It does not extend
+integer `Convert` or `CheckedConvert`; `char16`, floating sources and identity
+conversions are outside this operation.
+
 The draft also accepts opcode `0x1E`, `Char16ToFloat rNew, tDest, rSource`,
 for exactly `char16` to `float32` or `float64`. It interprets the source as an
 unsigned UTF-16 code unit, without decoding or validating surrogate pairs;
