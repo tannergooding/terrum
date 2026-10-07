@@ -36,12 +36,30 @@ Any future profile should specify and validate:
   matching, storage vacancy or initialization requirements, and any producer
   qualification or compatibility obligations.
 - Which stores publish output, when publication becomes observable, and how
-  control-flow joins correlate Boolean results with each output's state.
+  control-flow joins correlate each call's saved status with its particular
+  destinations. Define how those facts flow through values and control flow,
+  and invalidate them after relevant mutation, alias or lifetime changes; an
+  undiscriminated maybe-live owner cannot be transferred.
 - The required state on every normal return and the state on exceptional
-  departure, including cleanup and whether a prior write may be observed after
-  failure.
+  departure at each failure edge, including the effects of writes completed
+  before that edge and the ordering of body `finally`, cleanup and
+  postconditions. Preserve the accepted no-rollback contract: failure does not
+  transactionally undo body effects or replay completed cleanup. Define
+  exceptional publication only for an admitted exception model; fail-fast
+  execution promises neither recovery nor cleanup and must not be mistaken for
+  checked-exception support.
 - How the writer, loader, verifier and native executor prove these rules
-  together, and how malformed or contradictory metadata is rejected.
+  together, and how malformed or contradictory metadata is rejected. Assign
+  the required semantic feature and schema/revision compatibility rules before
+  emission; unsupported consumers must reject before binding or lowering.
+  Existing structural rows or skippable optional extensions cannot enable
+  output execution.
+
+Boolean status facts are call-specific, not reusable merely because a Boolean
+has the same value. Their checked correlation must remain attached to the
+designated destinations until a relevant mutation, alias or lifetime change
+invalidates it. This profile must not transfer or clean up an owner whose
+output state is still ambiguous.
 
 This proposal does not assign opcodes, body forms, parameter metadata changes,
 or native ABI rules. It does not approve broader reference-call metadata,
