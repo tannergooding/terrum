@@ -246,6 +246,15 @@ fixtures cover both runtime policies, including multi-module partitions,
 empty namespaces, flags, malformed names, range failures and field overlap or
 omission. Generic/contract ownership and Layout row ownership remain with
 their respective readers; this component is not a full type-system validator.
+The `LayoutTableValidation` candidate composes TypeDef validation, requires a
+nonempty fixed-row table and uses exact-size writable `LayoutOwners` scratch
+to prove that each declared Layout belongs to exactly one TypeDef and every
+Layout row names that owner. It checks only the assigned target and zero
+reserved flags, matching `TrRmLayoutTableReader`; size, alignment and pack
+remain uninterpreted here and this is not target ABI validation. AOT/JIT
+fixtures compare both runtime policies with the hosted reader, including
+multi-module ownership, duplicate/orphan rows, target/flag failures and
+scratch publication.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.

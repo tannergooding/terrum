@@ -1,0 +1,91 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateLayoutTable(int32 recordCount, int32 moduleCount,
+    int32 stringCount, int32 moduleRefCount, int32 typeDefCount, int32 methodDefCount,
+    int32 sourceFileCount, int32 featureCount, int32 fieldCount, int32 genericParamCount,
+    int32 layoutCount, int32 contractCount)
+{
+    if (recordCount <= 0 || recordCount > 0xFF_FFFF
+        || recordCount != layoutCount
+        || recordCount * 24 != Host.Layouts.Length
+        || Host.LayoutOwners.Length != recordCount + 1
+        || !TryValidateTypeDefTable(typeDefCount, moduleCount, stringCount,
+            moduleRefCount, typeDefCount, methodDefCount, sourceFileCount, featureCount,
+            fieldCount, genericParamCount, layoutCount, contractCount))
+    {
+        return false;
+    }
+
+    for (mut int32 row = 0; row <= recordCount; row = row + 1)
+    {
+        Host.LayoutOwners[row] = 0;
+    }
+
+    for (mut int32 type = 1; type <= typeDefCount; type = type + 1)
+    {
+        if (!TryReadTypeDefTableWord((type - 1) * 40, 28, init var layoutRow)
+            || layoutRow > uint32(recordCount))
+        {
+            return false;
+        }
+
+        if (layoutRow != 0)
+        {
+            if (Host.LayoutOwners[int32(layoutRow)] != 0)
+            {
+                return false;
+            }
+
+            Host.LayoutOwners[int32(layoutRow)] = type;
+        }
+    }
+
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        int32 rowStart = (row - 1) * 24;
+        if (!TryReadLayoutTableWord(rowStart, 0, init var owner)
+            || !TryReadLayoutTableWord(rowStart, 4, init var targetRequirement)
+            || !TryReadLayoutTableWord(rowStart, 20, init var flags)
+            || owner == 0 || owner != uint32(Host.LayoutOwners[row])
+            || targetRequirement > 1 || flags != 0)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryReadLayoutTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Layouts.Length - 24
+        || offset < 0 || offset > 20
+        || !TryReadLayoutTableByte(rowStart + offset, init var first)
+        || !TryReadLayoutTableByte(rowStart + offset + 1, init var second)
+        || !TryReadLayoutTableByte(rowStart + offset + 2, init var third)
+        || !TryReadLayoutTableByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadLayoutTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Layouts.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Layouts[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
