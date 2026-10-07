@@ -123,6 +123,8 @@ public static partial class TrRmExecutableCompiler
         var valueVariables = new int[body.Values.Length];
         Array.Fill(valueVariables, -1);
         var valueExpressions = new BoundExpression?[body.Values.Length];
+        var conditionalResult = body.Terminator.Opcode == 0x81
+            ? body.Terminator.Operands[0] : 0;
         for (var index = 0; index < body.Values.Length; index++)
         {
             var value = body.Values[index];
@@ -150,9 +152,19 @@ public static partial class TrRmExecutableCompiler
             }
             else
             {
+                if (index + 1 == conditionalResult)
+                {
+                    continue;
+                }
                 valueVariables[index] = variables.Count;
                 variables.Add(new BoundVariable($"value{index + 1}", type, false, default));
             }
+        }
+
+        var bodyTypes = new PrimitiveType[body.Types.Length];
+        for (var index = 0; index < bodyTypes.Length; index++)
+        {
+            bodyTypes[index] = OutputType(body, types, index + 1);
         }
 
         BoundExpression ReadValue(int valueId)
@@ -202,149 +214,157 @@ public static partial class TrRmExecutableCompiler
             statements.Add(new BoundLocal(variable, expression, default));
         }
 
-        foreach (var operation in body.Operations)
+        BoundCall? conditionalCall = null;
+        void DecodeOperations(ImmutableArray<TrRmScalarInitOutputBodyReader.Instruction> operations)
         {
-            switch (operation.Opcode)
+            foreach (var operation in operations)
             {
-                case 0x0B:
-                    if (operation.Result <= 0 || operation.Result > body.Values.Length
-                        || body.Values[operation.Result - 1].Kind != 1)
-                    {
-                        throw Invalid("PlaceLocal must define a place handle.");
-                    }
-                    break;
-                case 1:
-                case 2:
+                switch (operation.Opcode)
                 {
-                    var type = OutputType(body, types, operation.TypeId);
-                    if (!IsOutputScalarType(type) || operation.Opcode == 2 && !IsInteger(type))
-                    {
-                        throw Invalid("Constant type is outside the executable place profile.");
-                    }
-
-                    var constantValue = type switch
-                    {
-                        PrimitiveType.Int32 or PrimitiveType.UInt32
-                            => unchecked((int)operation.Data),
-                        PrimitiveType.Float32 => unchecked((uint)operation.Data),
-                        PrimitiveType.Bool or PrimitiveType.Char16 => (long)operation.Data,
-                        _ => unchecked((long)operation.Data),
-                    };
-                    DefineValue(operation.Result,
-                        new BoundConstant(constantValue, type, default));
-                    break;
-                }
-                case 0x0D:
-                {
-                    if (operation.Operands.Length != 1)
-                    {
-                        throw Invalid("Load requires one place handle.");
-                    }
-                    var place = PlaceVariable(PlaceForHandle(operation.Operands[0]));
-                    DefineValue(operation.Result,
-                        new BoundRead(place, variables[place].Type, default));
-                    break;
-                }
-                case 0x0E:
-                {
-                    if (operation.Operands.Length != 2)
-                    {
-                        throw Invalid("Initialize requires a place handle and a value.");
-                    }
-                    var place = PlaceVariable(PlaceForHandle(operation.Operands[0]));
-                    statements.Add(new BoundAssignment(place, ReadValue(operation.Operands[1]), default));
-                    break;
-                }
-                case 0x16:
-                case 0x1A:
-                case 0x1B:
-                case 0x1E:
-                case 0x1F:
-                {
-                    if (operation.Operands.Length != 1)
-                    {
-                        throw Invalid("Convert requires one value.");
-                    }
-
-                    var operand = ReadValue(operation.Operands[0]);
-                    var destination = OutputType(body, types, operation.TypeId);
-                    var valid = operation.Opcode switch
-                    {
-                        0x16 => IsOutputIntegerConversionType(operand.Type)
-                            && IsOutputIntegerConversionType(destination),
-                        0x1A => IsFloat(operand.Type) && IsFloat(destination)
-                            && operand.Type != destination,
-                        0x1B => IsInteger(operand.Type) && IsFloat(destination),
-                        0x1E => operand.Type == PrimitiveType.Char16 && IsFloat(destination),
-                        0x1F => IsFloat(operand.Type) && IsInteger(destination),
-                        _ => false,
-                    };
-                    if (!valid)
-                    {
-                        throw Invalid("Convert is outside the executable scalar profile.");
-                    }
-
-                    DefineValue(operation.Result, new BoundCast(operand, destination, default));
-                    break;
-                }
-                case 0x12:
-                {
-                    if (operation.MethodRow <= 0 || operation.MethodRow > functions.Count)
-                    {
-                        throw Invalid("Call target is outside the module.");
-                    }
-                    var target = functions[operation.MethodRow - 1];
-                    if (!IsOutputCallResultType(target.ReturnType)
-                        || operation.Operands.Length != target.ParameterCount)
-                    {
-                        throw Invalid("Call target is outside the executable place profile.");
-                    }
-                    var arguments = ImmutableArray.CreateBuilder<BoundExpression>(target.ParameterCount);
-                    for (var parameter = 0; parameter < target.ParameterCount; parameter++)
-                    {
-                        var formal = target.Variables[parameter];
-                        var argument = operation.Operands[parameter];
-                        if (formal.IsOut || formal.IsInit)
+                    case 0x0B:
+                        if (operation.Result <= 0 || operation.Result > body.Values.Length
+                            || body.Values[operation.Result - 1].Kind != 1)
                         {
-                            if (!formal.IsOut || !formal.IsInit
-                                || !IsOutputScalarType(formal.Type))
-                            {
-                                throw Invalid("The output formal type is outside the executable profile.");
-                            }
+                            throw Invalid("PlaceLocal must define a place handle.");
+                        }
+                        break;
+                    case 1:
+                    case 2:
+                    {
+                        var type = bodyTypes[operation.TypeId - 1];
+                        if (!IsOutputScalarType(type) || operation.Opcode == 2 && !IsInteger(type))
+                        {
+                            throw Invalid("Constant type is outside the executable place profile.");
+                        }
 
-                            var place = PlaceVariable(PlaceForHandle(argument));
-                            if (variables[place].Type != formal.Type)
+                        var constantValue = type switch
+                        {
+                            PrimitiveType.Int32 or PrimitiveType.UInt32
+                                => unchecked((int)operation.Data),
+                            PrimitiveType.Float32 => unchecked((uint)operation.Data),
+                            PrimitiveType.Bool or PrimitiveType.Char16 => (long)operation.Data,
+                            _ => unchecked((long)operation.Data),
+                        };
+                        DefineValue(operation.Result,
+                            new BoundConstant(constantValue, type, default));
+                        break;
+                    }
+                    case 0x0D:
+                    {
+                        if (operation.Operands.Length != 1)
+                        {
+                            throw Invalid("Load requires one place handle.");
+                        }
+                        var place = PlaceVariable(PlaceForHandle(operation.Operands[0]));
+                        DefineValue(operation.Result,
+                            new BoundRead(place, variables[place].Type, default));
+                        break;
+                    }
+                    case 0x0E:
+                    {
+                        if (operation.Operands.Length != 2)
+                        {
+                            throw Invalid("Initialize requires a place handle and a value.");
+                        }
+                        var place = PlaceVariable(PlaceForHandle(operation.Operands[0]));
+                        statements.Add(new BoundAssignment(place, ReadValue(operation.Operands[1]), default));
+                        break;
+                    }
+                    case 0x16:
+                    case 0x1A:
+                    case 0x1B:
+                    case 0x1E:
+                    case 0x1F:
+                    {
+                        if (operation.Operands.Length != 1)
+                        {
+                            throw Invalid("Convert requires one value.");
+                        }
+
+                        var operand = ReadValue(operation.Operands[0]);
+                        var destination = bodyTypes[operation.TypeId - 1];
+                        var valid = operation.Opcode switch
+                        {
+                            0x16 => IsOutputIntegerConversionType(operand.Type)
+                                && IsOutputIntegerConversionType(destination),
+                            0x1A => IsFloat(operand.Type) && IsFloat(destination)
+                                && operand.Type != destination,
+                            0x1B => IsInteger(operand.Type) && IsFloat(destination),
+                            0x1E => operand.Type == PrimitiveType.Char16 && IsFloat(destination),
+                            0x1F => IsFloat(operand.Type) && IsInteger(destination),
+                            _ => false,
+                        };
+                        if (!valid)
+                        {
+                            throw Invalid("Convert is outside the executable scalar profile.");
+                        }
+
+                        DefineValue(operation.Result, new BoundCast(operand, destination, default));
+                        break;
+                    }
+                    case 0x12:
+                    {
+                        if (operation.MethodRow <= 0 || operation.MethodRow > functions.Count)
+                        {
+                            throw Invalid("Call target is outside the module.");
+                        }
+                        var target = functions[operation.MethodRow - 1];
+                        if (!IsOutputCallResultType(target.ReturnType)
+                            || operation.Operands.Length != target.ParameterCount)
+                        {
+                            throw Invalid("Call target is outside the executable place profile.");
+                        }
+                        var arguments = ImmutableArray.CreateBuilder<BoundExpression>(target.ParameterCount);
+                        for (var parameter = 0; parameter < target.ParameterCount; parameter++)
+                        {
+                            var formal = target.Variables[parameter];
+                            var argument = operation.Operands[parameter];
+                            if (formal.IsOut || formal.IsInit)
                             {
-                                throw Invalid("Output argument type does not match its formal.");
+                                if (!formal.IsOut || !formal.IsInit
+                                    || !IsOutputScalarType(formal.Type))
+                                {
+                                    throw Invalid("The output formal type is outside the executable profile.");
+                                }
+
+                                var place = PlaceVariable(PlaceForHandle(argument));
+                                if (variables[place].Type != formal.Type)
+                                {
+                                    throw Invalid("Output argument type does not match its formal.");
+                                }
+                                arguments.Add(new BoundOutArgument(place, false, formal.Type, default)
+                                {
+                                    IsInit = true,
+                                });
                             }
-                            arguments.Add(new BoundOutArgument(place, false, formal.Type, default)
+                            else
                             {
-                                IsInit = true,
-                            });
+                                var value = ReadValue(argument);
+                                if (formal.Type != value.Type)
+                                {
+                                    throw Invalid("Call argument type does not match its formal.");
+                                }
+                                arguments.Add(value);
+                            }
+                        }
+
+                        var call = new BoundCall(operation.MethodRow - 1,
+                            arguments.MoveToImmutable(), target.ReturnType, default);
+                        if (conditionalResult != 0 && operation.Result == conditionalResult)
+                        {
+                            conditionalCall = call;
+                            valueExpressions[operation.Result - 1] = call;
+                        }
+                        else if (operation.Result == 0)
+                        {
+                            statements.Add(new BoundExpressionStatement(call, default));
                         }
                         else
                         {
-                            var value = ReadValue(argument);
-                            if (formal.Type != value.Type)
-                            {
-                                throw Invalid("Call argument type does not match its formal.");
-                            }
-                            arguments.Add(value);
+                            DefineValue(operation.Result, call);
                         }
+                        break;
                     }
-
-                    var call = new BoundCall(operation.MethodRow - 1,
-                        arguments.MoveToImmutable(), target.ReturnType, default);
-                    if (operation.Result == 0)
-                    {
-                        statements.Add(new BoundExpressionStatement(call, default));
-                    }
-                    else
-                    {
-                        DefineValue(operation.Result, call);
-                    }
-                    break;
-                }
                 case 4:
                 case 0x17:
                 case 0x1C:
@@ -496,26 +516,60 @@ public static partial class TrRmExecutableCompiler
                 }
                 default:
                     throw Invalid($"Operation 0x{operation.Opcode:X2} is outside the executable place profile.");
+                }
             }
         }
 
-        if (body.Terminator.Opcode == 0x83)
+        void DecodeTerminator(TrRmScalarInitOutputBodyReader.Instruction terminator)
         {
-            if (body.Terminator.Operands.Length != 1)
+            if (terminator.Opcode == 0x83)
             {
-                throw Invalid("Return requires one result slot.");
-            }
+                if (terminator.Operands.Length != 1)
+                {
+                    throw Invalid("Return requires one result slot.");
+                }
 
-            var result = body.Terminator.Operands[0];
-            statements.Add(new BoundReturn(result == 0 ? null : ReadValue(result), default));
+                var result = terminator.Operands[0];
+                statements.Add(new BoundReturn(result == 0 ? null : ReadValue(result), default));
+            }
+            else if (terminator.Opcode == 0x87)
+            {
+                statements.Add(new BoundRequire(new BoundConstant(0, PrimitiveType.Bool, default), default));
+            }
+            else
+            {
+                throw Invalid("Unsupported executable place terminator.");
+            }
         }
-        else if (body.Terminator.Opcode == 0x87)
+
+        if (body.Blocks.Length == 1)
         {
-            statements.Add(new BoundRequire(new BoundConstant(0, PrimitiveType.Bool, default), default));
+            DecodeOperations(body.Operations);
+            DecodeTerminator(body.Terminator);
         }
         else
         {
-            throw Invalid("Unsupported executable place terminator.");
+            if (body.Blocks.Length != 3 || body.Terminator.Opcode != 0x81)
+            {
+                throw Invalid("Conditional output Body is outside the executable profile.");
+            }
+
+            DecodeOperations(body.Blocks[0].Operations);
+            if (conditionalCall is null)
+            {
+                throw Invalid("Conditional output Body has no direct Boolean call condition.");
+            }
+            var rootStatements = statements;
+            statements = ImmutableArray.CreateBuilder<BoundStatement>();
+            DecodeOperations(body.Blocks[1].Operations);
+            DecodeTerminator(body.Blocks[1].Terminator);
+            var whenTrue = new BoundBlock(statements.ToImmutable(), default);
+            statements = ImmutableArray.CreateBuilder<BoundStatement>();
+            DecodeOperations(body.Blocks[2].Operations);
+            DecodeTerminator(body.Blocks[2].Terminator);
+            var whenFalse = new BoundBlock(statements.ToImmutable(), default);
+            statements = rootStatements;
+            statements.Add(new BoundIf(conditionalCall, whenTrue, whenFalse, default));
         }
 
         return statements.ToImmutable();
@@ -576,15 +630,18 @@ public static partial class TrRmExecutableCompiler
         private readonly List<int> _placeHandles = [0];
         private readonly List<int> _bodyTypeRows = [];
         private readonly Dictionary<int, int> _bodyTypeIds = [];
+        private readonly List<OutputBlock> _blocks = [];
         private readonly List<int> _valueTypes = [];
         private readonly List<byte> _valueKinds = [];
         private readonly List<uint> _definitionOffsets = [];
+        private readonly List<int> _definitionBlocks = [];
         private readonly List<int> _parameterValues = [];
         private readonly List<byte> _operations = [];
         private readonly Dictionary<int, int> _valueLastUses = [];
         private readonly Dictionary<int, int> _placeLastUses = [];
         private int _operationCount;
         private int _returnValue;
+        private int _currentBlock;
         private bool _ended;
 
         public OutputBodyWriter(BoundFunction function, BoundProgram program)
@@ -669,6 +726,11 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported("The output Body profile requires one terminal Return.");
             }
 
+            if (_blocks.Count == 0)
+            {
+                CaptureBlock();
+                _ended = true;
+            }
             return BuildBody();
         }
 
@@ -695,6 +757,7 @@ public static partial class TrRmExecutableCompiler
             _valueTypes.Add(typeRow);
             _valueKinds.Add(kind);
             _definitionOffsets.Add(definitionOffset);
+            _definitionBlocks.Add(_currentBlock);
             return _valueTypes.Count;
         }
 
@@ -757,9 +820,109 @@ public static partial class TrRmExecutableCompiler
                 case BoundReturn result:
                     EmitReturn(result);
                     break;
+                case BoundIf conditional:
+                    EmitConditional(conditional);
+                    break;
                 default:
                     throw Unsupported($"Statement {statement.GetType().Name} is outside the output Body profile.");
             }
+        }
+
+        private void EmitConditional(BoundIf conditional)
+        {
+            if (conditional.Condition is not BoundCall { Type: PrimitiveType.Bool } call)
+            {
+                throw Unsupported("Output Body conditionals require a direct Boolean output call.");
+            }
+
+            var condition = EmitCall(call);
+            if (condition == 0)
+            {
+                throw Unsupported("Output Body conditionals require a Boolean call result.");
+            }
+            UseValue(condition, _operationCount);
+
+            var outputPlaces = new List<int>();
+            foreach (var argument in call.Arguments)
+            {
+                if (argument is BoundOutArgument { IsInit: true } output)
+                {
+                    if ((uint)output.Variable >= (uint)_placeByVariable.Length
+                        || _placeByVariable[output.Variable] == 0)
+                    {
+                        throw Unsupported("Conditional output destinations must be scalar local places.");
+                    }
+                    outputPlaces.Add(_placeByVariable[output.Variable]);
+                }
+            }
+            if (outputPlaces.Count == 0)
+            {
+                throw Unsupported("Output Body conditionals require at least one output destination.");
+            }
+
+            var falseState = _placeInitialized.ToArray();
+            var trueState = (bool[])falseState.Clone();
+            foreach (var place in outputPlaces)
+            {
+                trueState[place] = true;
+            }
+
+            CaptureBlock(condition);
+            _currentBlock = 1;
+            RestorePlaceState(trueState);
+            var trueEntryState = _placeInitialized.ToArray();
+            EmitBranchReturn(conditional.Then);
+            CaptureBlock(inheritedPlaces: trueEntryState);
+
+            _currentBlock = 2;
+            RestorePlaceState(falseState);
+            if (conditional.Else is null)
+            {
+                throw Unsupported("Output Body conditionals require two terminal arms.");
+            }
+            var falseEntryState = _placeInitialized.ToArray();
+            EmitBranchReturn(conditional.Else);
+            CaptureBlock(inheritedPlaces: falseEntryState);
+            _ended = true;
+        }
+
+        private void EmitBranchReturn(BoundStatement statement)
+        {
+            var result = statement switch
+            {
+                BoundReturn returned => returned,
+                BoundBlock { RetiredManagedLocals.IsEmpty: true, Statements.Length: 1 } block
+                    when block.Statements[0] is BoundReturn returned => returned,
+                _ => throw Unsupported("Conditional output arms require one terminal Return."),
+            };
+            EmitReturn(result);
+        }
+
+        private void RestorePlaceState(bool[] initialized)
+        {
+            if (initialized.Length != _placeInitialized.Count)
+            {
+                throw Unsupported("Conditional output place inventory changed between arms.");
+            }
+
+            for (var place = 0; place < initialized.Length; place++)
+            {
+                _placeInitialized[place] = initialized[place];
+            }
+        }
+
+        private void CaptureBlock(int condition = 0, bool[]? inheritedPlaces = null)
+        {
+            _blocks.Add(new OutputBlock(_operations.ToArray(), _operationCount, _returnValue,
+                condition, new Dictionary<int, int>(_valueLastUses),
+                new Dictionary<int, int>(_placeLastUses),
+                _currentBlock == 0 ? null : inheritedPlaces ?? _placeInitialized.ToArray()));
+            _operations.Clear();
+            _valueLastUses.Clear();
+            _placeLastUses.Clear();
+            _operationCount = 0;
+            _returnValue = 0;
+            _ended = false;
         }
 
         private void EmitAssignment(BoundAssignment assignment)
@@ -1240,62 +1403,132 @@ public static partial class TrRmExecutableCompiler
 
         private byte[] BuildBody()
         {
-            var localWidth = Width((ulong)Math.Max(
-                Math.Max(_valueTypes.Count, _places.Count - 1),
-                Math.Max(_operationCount, _parameterValues.Count)));
-            if (localWidth > 4 || _operations.Count > int.MaxValue)
+            if (_blocks.Count is not (1 or 3))
+            {
+                throw Unsupported("Output Bodies support one block or one terminal conditional split.");
+            }
+
+            var blockCount = _blocks.Count;
+            var liveIns = new int[blockCount][];
+            var liveOuts = new int[blockCount][];
+            for (var blockIndex = 0; blockIndex < blockCount; blockIndex++)
+            {
+                liveIns[blockIndex] = blockIndex == 0 ? []
+                    : _definitionBlocks
+                        .Select((definitionBlock, index) => (definitionBlock, index))
+                        .Where(pair => pair.definitionBlock < blockIndex
+                            && _blocks[blockIndex].ValueLastUses.ContainsKey(pair.index + 1))
+                        .Select(static pair => pair.index + 1)
+                        .ToArray();
+                liveOuts[blockIndex] = [];
+            }
+            if (blockCount == 3)
+            {
+                liveOuts[0] = liveIns[1].Concat(liveIns[2]).Distinct().Order().ToArray();
+            }
+
+            var maximumStructural = Math.Max(blockCount,
+                Math.Max(_valueTypes.Count, Math.Max(_places.Count - 1, _parameterValues.Count)));
+            foreach (var block in _blocks)
+            {
+                maximumStructural = Math.Max(maximumStructural,
+                    Math.Max(block.OperationCount, Math.Max(block.ValueLastUses.Count,
+                        Math.Max(block.PlaceLastUses.Count,
+                            block.InheritedPlaces?.Length - 1 ?? 0))));
+            }
+            var localWidth = Width((ulong)maximumStructural);
+            if (localWidth > 4)
             {
                 throw Unsupported("Output Body exceeds its bounded local representation.");
             }
 
-            var valueUseCount = _valueLastUses.Count;
-            var placeUseCount = _placeLastUses.Count;
-            var startPlaces = Enumerable.Range(1, _places.Count - 1).ToArray();
-            var block = new List<byte>();
-            Write(block, 0, localWidth); // function-root region
-            Write(block, (ulong)_parameterValues.Count, localWidth);
-            foreach (var value in _parameterValues)
+            var blocks = new List<byte>[blockCount];
+            var operationsStarts = new int[blockCount];
+            var terminatorOffsets = new int[blockCount];
+            var blockOffsets = new int[blockCount + 1];
+            for (var blockIndex = 0; blockIndex < blockCount; blockIndex++)
             {
-                Write(block, (ulong)value, localWidth);
+                var current = _blocks[blockIndex];
+                var block = new List<byte>();
+                Write(block, 0, localWidth);
+                var parameters = blockIndex == 0 ? _parameterValues : [];
+                Write(block, (ulong)parameters.Count, localWidth);
+                foreach (var value in parameters)
+                {
+                    Write(block, (ulong)value, localWidth);
+                }
+                Write(block, (ulong)liveIns[blockIndex].Length, localWidth);
+                foreach (var value in liveIns[blockIndex])
+                {
+                    Write(block, (ulong)value, localWidth);
+                }
+                Write(block, (ulong)liveOuts[blockIndex].Length, localWidth);
+                foreach (var value in liveOuts[blockIndex])
+                {
+                    Write(block, (ulong)value, localWidth);
+                }
+
+                var inheritedPlaces = current.InheritedPlaces;
+                Write(block, (ulong)(inheritedPlaces is null ? 0 : inheritedPlaces.Length - 1),
+                    localWidth);
+                if (inheritedPlaces is not null)
+                {
+                    for (var place = 1; place < inheritedPlaces.Length; place++)
+                    {
+                        Write(block, (ulong)place, localWidth);
+                        block.Add(inheritedPlaces[place] ? (byte)1 : (byte)0);
+                    }
+                }
+
+                var startingPlaces = blockIndex == 0
+                    ? Enumerable.Range(1, _places.Count - 1).ToArray() : [];
+                Write(block, (ulong)startingPlaces.Length, localWidth);
+                foreach (var place in startingPlaces)
+                {
+                    Write(block, (ulong)place, localWidth);
+                }
+                var endingPlaces = blockCount == 1 || blockIndex != 0
+                    ? startingPlacesForEnd() : [];
+                Write(block, (ulong)endingPlaces.Length, localWidth);
+                foreach (var place in endingPlaces)
+                {
+                    Write(block, (ulong)place, localWidth);
+                }
+                Write(block, (ulong)current.ValueLastUses.Count, localWidth);
+                foreach (var (value, ordinal) in current.ValueLastUses.OrderBy(static pair => pair.Key))
+                {
+                    Write(block, (ulong)value, localWidth);
+                    Write(block, (ulong)ordinal, localWidth);
+                }
+                Write(block, (ulong)current.PlaceLastUses.Count, localWidth);
+                foreach (var (place, ordinal) in current.PlaceLastUses.OrderBy(static pair => pair.Key))
+                {
+                    Write(block, (ulong)place, localWidth);
+                    Write(block, (ulong)ordinal, localWidth);
+                }
+                Write(block, (ulong)current.OperationCount, localWidth);
+                operationsStarts[blockIndex] = block.Count;
+                block.AddRange(current.Operations);
+                terminatorOffsets[blockIndex] = block.Count;
+                if (current.Condition == 0)
+                {
+                    WriteInstruction(block, 0x83, Width((ulong)current.ReturnValue), 0);
+                    Write(block, (ulong)current.ReturnValue, Width((ulong)current.ReturnValue));
+                }
+                else
+                {
+                    WriteConditionalTerminator(block, current.Condition,
+                        trueTarget: 2, falseTarget: 3);
+                }
+                blocks[blockIndex] = block;
+                blockOffsets[blockIndex + 1] = checked(blockOffsets[blockIndex] + block.Count);
             }
-            Write(block, 0, localWidth); // live-ins
-            Write(block, 0, localWidth); // live-outs
-            Write(block, 0, localWidth); // inherited places
-            Write(block, (ulong)startPlaces.Length, localWidth);
-            foreach (var place in startPlaces)
-            {
-                Write(block, (ulong)place, localWidth);
-            }
-            Write(block, (ulong)(_places.Count - 1), localWidth);
-            for (var place = 1; place < _places.Count; place++)
-            {
-                Write(block, (ulong)place, localWidth);
-            }
-            Write(block, (ulong)valueUseCount, localWidth);
-            foreach (var (value, ordinal) in _valueLastUses.OrderBy(static pair => pair.Key))
-            {
-                Write(block, (ulong)value, localWidth);
-                Write(block, (ulong)ordinal, localWidth);
-            }
-            Write(block, (ulong)placeUseCount, localWidth);
-            foreach (var (place, ordinal) in _placeLastUses.OrderBy(static pair => pair.Key))
-            {
-                Write(block, (ulong)place, localWidth);
-                Write(block, (ulong)ordinal, localWidth);
-            }
-            Write(block, (ulong)_operationCount, localWidth);
-            var operationsStart = block.Count;
-            block.AddRange(_operations);
-            var terminatorOffset = block.Count;
-            var returnWidth = Width((ulong)_returnValue);
-            WriteInstruction(block, 0x83, returnWidth, 0);
-            Write(block, (ulong)_returnValue, returnWidth);
 
             var body = new List<byte>
             {
                 (byte)WidthCode(localWidth),
             };
-            Write(body, 1, localWidth); // block count
+            Write(body, (ulong)blockCount, localWidth);
             Write(body, (ulong)_valueTypes.Count, localWidth);
             Write(body, (ulong)(_places.Count - 1), localWidth);
             Write(body, 0, localWidth); // region count
@@ -1310,30 +1543,79 @@ public static partial class TrRmExecutableCompiler
                 Write(body, (ulong)_bodyTypeIds[TypeRow(type)], localWidth);
                 Write(body, 0, localWidth); // function-root region
                 body.Add(0x04); // initially vacant, non-unique, non-rebindable
-                Write(body, 1, localWidth); // one block uses the place
+                var useBlockCount = _blocks.Count(block => block.PlaceLastUses.ContainsKey(place));
+                Write(body, (ulong)useBlockCount, localWidth);
             }
             for (var value = 0; value < _valueTypes.Count; value++)
             {
                 Write(body, (ulong)_bodyTypeIds[_valueTypes[value]], localWidth);
                 body.Add(_valueKinds[value]);
-                Write(body, (ulong)(_valueLastUses.ContainsKey(value + 1) ? 1 : 0), localWidth);
+                var useBlockCount = _blocks.Count(block => block.ValueLastUses.ContainsKey(value + 1));
+                Write(body, (ulong)useBlockCount, localWidth);
             }
-            Write(body, 0, localWidth); // valueDefStarts[0]
-            Write(body, (ulong)_valueTypes.Count, localWidth); // valueDefStarts[1]
+            var definitionStarts = new int[blockCount + 1];
+            for (var value = 0; value < _definitionBlocks.Count; value++)
+            {
+                if (_definitionBlocks[value] < 0 || _definitionBlocks[value] >= blockCount)
+                {
+                    throw Unsupported("Output Body value definition has no owning block.");
+                }
+                definitionStarts[_definitionBlocks[value] + 1]++;
+            }
+            for (var blockIndex = 0; blockIndex < blockCount; blockIndex++)
+            {
+                definitionStarts[blockIndex + 1] += definitionStarts[blockIndex];
+                Write(body, (ulong)definitionStarts[blockIndex], localWidth);
+            }
+            Write(body, (ulong)definitionStarts[^1], localWidth);
             for (var value = 0; value < _definitionOffsets.Count; value++)
             {
                 var definition = _definitionOffsets[value];
                 if (definition != uint.MaxValue)
                 {
-                    definition = checked((uint)(operationsStart + definition));
+                    var blockIndex = _definitionBlocks[value];
+                    definition = checked((uint)(operationsStarts[blockIndex] + definition));
                 }
                 Write(body, definition, 4);
             }
-            Write(body, 0, 4); // blockOffsets[0]
-            Write(body, (ulong)block.Count, 4); // blockOffsets[1]
-            Write(body, (ulong)terminatorOffset, 4);
-            body.AddRange(block);
+            foreach (var offset in blockOffsets)
+            {
+                Write(body, (ulong)offset, 4);
+            }
+            foreach (var offset in terminatorOffsets)
+            {
+                Write(body, (ulong)offset, 4);
+            }
+            foreach (var block in blocks)
+            {
+                body.AddRange(block);
+            }
             return body.ToArray();
+
+            int[] startingPlacesForEnd()
+                => Enumerable.Range(1, _places.Count - 1).ToArray();
+        }
+
+        private static void WriteConditionalTerminator(List<byte> bytes,
+            int condition, int trueTarget, int falseTarget)
+        {
+            var referenceWidth = Width((ulong)Math.Max(condition,
+                Math.Max(trueTarget, falseTarget)));
+            if (referenceWidth == 1)
+            {
+                bytes.Add(0x81);
+            }
+            else
+            {
+                bytes.Add(0xF0);
+                bytes.Add((byte)(WidthCode(referenceWidth) | (WidthCode(1) << 2)));
+                bytes.Add(0x81);
+            }
+            Write(bytes, (ulong)condition, referenceWidth);
+            Write(bytes, (ulong)trueTarget, referenceWidth);
+            Write(bytes, 0, 1);
+            Write(bytes, (ulong)falseTarget, referenceWidth);
+            Write(bytes, 0, 1);
         }
 
         private int BodyTypeId(int typeRow)
@@ -1375,4 +1657,8 @@ public static partial class TrRmExecutableCompiler
     }
 
     private readonly record struct OutputPlace(int Variable, bool IsParameter);
+
+    private sealed record OutputBlock(byte[] Operations, int OperationCount, int ReturnValue,
+        int Condition, Dictionary<int, int> ValueLastUses,
+        Dictionary<int, int> PlaceLastUses, bool[]? InheritedPlaces);
 }

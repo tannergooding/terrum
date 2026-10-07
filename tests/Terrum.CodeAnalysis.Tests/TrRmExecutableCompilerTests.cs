@@ -100,6 +100,7 @@ public sealed class TrRmExecutableCompilerTests
         var loaded = TrRmExecutableCompiler.Load(artifact);
         Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
         Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+
         Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
     }
 
@@ -372,7 +373,7 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(original, "scalar-output-result");
         var loaded = TrRmExecutableCompiler.Load(artifact);
 
-        Assert.Equal(4u, ScalarInitOutputRevision(artifact));
+        Assert.Equal(5u, ScalarInitOutputRevision(artifact));
         Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
         Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
 
@@ -393,6 +394,9 @@ public sealed class TrRmExecutableCompilerTests
         var revisionThreeArtifact = SetScalarInitOutputRuleRevision(artifact, 3);
         var revisionThree = TrRmExecutableCompiler.Load(revisionThreeArtifact);
         Assert.Equal(42, NativeJit.Execute(revisionThree, NativeRuntimePolicy.FailFast));
+        var revisionFourArtifact = SetScalarInitOutputRuleRevision(artifact, 4);
+        var revisionFour = TrRmExecutableCompiler.Load(revisionFourArtifact);
+        Assert.Equal(42, NativeJit.Execute(revisionFour, NativeRuntimePolicy.FailFast));
     }
 
     [Fact]
@@ -412,7 +416,7 @@ public sealed class TrRmExecutableCompilerTests
             """);
 
         var artifact = TrRmExecutableCompiler.Emit(program, "boolean-output-result");
-        Assert.Equal(4u, ScalarInitOutputRevision(artifact));
+        Assert.Equal(5u, ScalarInitOutputRevision(artifact));
         Assert.Equal(42, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
             NativeRuntimePolicy.FailFast));
 
@@ -421,6 +425,10 @@ public sealed class TrRmExecutableCompilerTests
             var legacyArtifact = SetScalarInitOutputRuleRevision(artifact, revision);
             Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(legacyArtifact));
         }
+
+        var revisionFourArtifact = SetScalarInitOutputRuleRevision(artifact, 4);
+        var revisionFour = TrRmExecutableCompiler.Load(revisionFourArtifact);
+        Assert.Equal(42, NativeJit.Execute(revisionFour, NativeRuntimePolicy.FailFast));
     }
 
     [Theory]
@@ -465,9 +473,107 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(original, "boolean-output-result");
         var loaded = TrRmExecutableCompiler.Load(artifact);
 
-        Assert.Equal(4u, ScalarInitOutputRevision(artifact));
+        Assert.Equal(5u, ScalarInitOutputRevision(artifact));
         Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
         Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+
+        var revisionFourArtifact = SetScalarInitOutputRuleRevision(artifact, 4);
+        Assert.Equal(expected, NativeJit.Execute(TrRmExecutableCompiler.Load(revisionFourArtifact),
+            NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 42)]
+    public void InitOutputConditionalBooleanCallPublishesOnlyOnTrue(bool publish, int expected)
+    {
+        var publishText = publish ? "true" : "false";
+        var source = $$"""
+            bool Fill(bool shouldPublish, init ref<bool> flag,
+                init ref<char16> marker, init ref<int32> result,
+                init ref<uint32> smallCount, init ref<int64> signedCount,
+                init ref<uint64> wideCount, init ref<float32> ratio,
+                init ref<float64> amount) {
+                flag = true;
+                marker = char16(65);
+                result = 42;
+                smallCount = uint32.MaxValue;
+                signedCount = int64.MinValue;
+                wideCount = uint64.MaxValue;
+                ratio = float32(1.5);
+                amount = float64(2.5);
+                return shouldPublish;
+            }
+            int32 Check(bool flag, char16 marker, int32 result, uint32 smallCount,
+                int64 signedCount, uint64 wideCount, float32 ratio, float64 amount) {
+                return flag && marker == char16(65) && result == 42
+                    && smallCount == uint32.MaxValue && signedCount == int64.MinValue
+                    && wideCount == uint64.MaxValue && ratio == float32(1.5)
+                    && amount == float64(2.5) ? 42 : 1;
+            }
+            int32 Refill(init ref<int32> result) {
+                result = 42;
+                return 0;
+            }
+            int32 Run(bool shouldPublish) {
+                init bool flag;
+                init char16 marker;
+                init int32 result;
+                init uint32 smallCount;
+                init int64 signedCount;
+                init uint64 wideCount;
+                init float32 ratio;
+                init float64 amount;
+                init int32 retained;
+                retained = 5;
+                if (Fill(shouldPublish, init flag, init marker, init result,
+                    init smallCount, init signedCount, init wideCount, init ratio, init amount)) {
+                    return Check(flag, marker, result, smallCount, signedCount,
+                        wideCount, ratio, amount) + retained - 5;
+                } else {
+                    return Refill(init result) + result + retained - 47;
+                }
+            }
+            int32 Main() { return Run({{publishText}}); }
+            """;
+        var original = Compile(source);
+        var artifact = TrRmExecutableCompiler.Emit(original, "conditional-output-result");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+
+        Assert.Equal(5u, ScalarInitOutputRevision(artifact));
+        Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+
+        var revisionFourArtifact = SetScalarInitOutputRuleRevision(artifact, 4);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(revisionFourArtifact));
+
+        var forgedTrueState = SetConditionalInheritedPlaceState(artifact, 1, false);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedTrueState));
+        var forgedFalseState = SetConditionalInheritedPlaceState(artifact, 2, true);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedFalseState));
+    }
+
+    [Fact]
+    public void OutputBodyUsesMinimalWidthForLongInstructionStreams()
+    {
+        var additions = string.Join(" + ", Enumerable.Repeat("seed", 64));
+        var source = $$"""
+            void Fill(int32 seed, init ref<int32> result) { result = {{additions}}; }
+            int32 Main() {
+                init int32 result;
+                Fill(1, init result);
+                return result;
+            }
+            """;
+        var original = Compile(source);
+        var artifact = TrRmExecutableCompiler.Emit(original, "long-output-body");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var (widthCode, operationBytes) = LongestSingleBlockOperationSpan(artifact);
+
+        Assert.Equal(0, widthCode);
+        Assert.True(operationBytes > byte.MaxValue);
+        Assert.Equal(64, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(64, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
     }
 
     [Fact]
@@ -2562,6 +2668,208 @@ public sealed class TrRmExecutableCompilerTests
         }
 
         return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static byte[] SetConditionalInheritedPlaceState(byte[] artifact,
+        int blockIndex, bool initialized)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount));
+        var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
+        var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
+        for (var row = 1; row <= bodyCount; row++)
+        {
+            bodyRows[row - 1] = bodies.GetRow(row).ToArray();
+        }
+
+        var found = false;
+        for (var row = 0; row < bodyRows.Length && !found; row++)
+        {
+            var body = bodyRows[row].ToArray();
+            if (body.Length < 2 || body[0] > 2)
+            {
+                continue;
+            }
+
+            var width = 1 << body[0];
+            var position = 1;
+            if (ReadLocal(body, ref position, width) != 3)
+            {
+                continue;
+            }
+
+            var valueCount = ReadLocal(body, ref position, width);
+            var placeCount = ReadLocal(body, ref position, width);
+            _ = ReadLocal(body, ref position, width);
+            var typeCount = ReadLocal(body, ref position, width);
+            position += checked(typeCount * 4);
+            position += checked(placeCount * (3 * width + 1));
+            position += checked(valueCount * (2 * width + 1));
+            position += checked((4 * width) + (valueCount * 4));
+            var blockOffsetsPosition = position;
+            var blockDataStart = checked(blockOffsetsPosition + (4 * 4) + (3 * 4));
+            var blockOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                body.AsSpan(blockOffsetsPosition + blockIndex * 4)));
+            position = checked(blockDataStart + blockOffset);
+            _ = ReadLocal(body, ref position, width);
+            SkipIndexList(body, ref position, width);
+            SkipIndexList(body, ref position, width);
+            SkipIndexList(body, ref position, width);
+            var inheritedCount = ReadLocal(body, ref position, width);
+            if (inheritedCount == 0)
+            {
+                throw new InvalidOperationException("Conditional block has no inherited places.");
+            }
+
+            position += width;
+            body[position] = initialized ? (byte)1 : (byte)0;
+            bodyRows[row] = body;
+            found = true;
+        }
+
+        Assert.True(found, "No three-block output Body was found.");
+        var rewrittenBodies = TrRmVariableTableWriter.EncodeBodies(bodyRows);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags, out var bytes, out var count);
+            sections.Add(new TrRmSection(kind, flags, (uint)count,
+                kind == 0x20 ? rewrittenBodies : bytes.ToArray()));
+        }
+        return TrRmArtifactWriter.Encode(sections);
+
+        static int ReadLocal(byte[] body, ref int position, int width)
+        {
+            var result = width switch
+            {
+                1 => body[position],
+                2 => BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(position)),
+                4 => checked((int)BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(position))),
+                _ => throw new InvalidOperationException("Unsupported local width."),
+            };
+            position += width;
+            return result;
+        }
+
+        static void SkipIndexList(byte[] body, ref int position, int width)
+        {
+            var count = ReadLocal(body, ref position, width);
+            position += checked(count * width);
+        }
+    }
+
+    private static (int WidthCode, int OperationBytes) LongestSingleBlockOperationSpan(
+        byte[] artifact)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount));
+        var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
+        byte[]? body = null;
+        for (var row = 1; row <= bodyCount; row++)
+        {
+            var candidate = bodies.GetRow(row).ToArray();
+            if (body is null || candidate.Length > body.Length)
+            {
+                body = candidate;
+            }
+        }
+        if (body is null)
+        {
+            throw new InvalidOperationException("The artifact has no Body rows.");
+        }
+
+        var widthCode = body[0];
+        if (widthCode > 2)
+        {
+            throw new InvalidOperationException("The Body has an unsupported local width.");
+        }
+
+        var width = 1 << widthCode;
+        var position = 1;
+        if (ReadLocal(body, ref position, width) != 1)
+        {
+            throw new InvalidOperationException("The longest Body is not a single block.");
+        }
+
+        var valueCount = ReadLocal(body, ref position, width);
+        var placeCount = ReadLocal(body, ref position, width);
+        _ = ReadLocal(body, ref position, width);
+        var typeCount = ReadLocal(body, ref position, width);
+        position += checked(typeCount * 4);
+        position += checked(placeCount * (3 * width + 1));
+        position += checked(valueCount * (2 * width + 1));
+        if (ReadLocal(body, ref position, width) != 0
+            || ReadLocal(body, ref position, width) != valueCount)
+        {
+            throw new InvalidOperationException("The Body's value inventory is malformed.");
+        }
+
+        position += checked(valueCount * 4);
+        if (BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(position)) != 0)
+        {
+            throw new InvalidOperationException("The Body block offset is not zero.");
+        }
+        position += 4;
+        var blockLength = BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(position));
+        position += 4;
+        var terminatorOffset = BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(position));
+        position += 4;
+        if (blockLength != body.Length - position)
+        {
+            throw new InvalidOperationException("The Body block extent is malformed.");
+        }
+
+        var blockStart = position;
+        if (ReadLocal(body, ref position, width) != 0)
+        {
+            throw new InvalidOperationException("The Body entry block has a nonzero offset.");
+        }
+        var entryCount = ReadLocal(body, ref position, width);
+        position += checked(entryCount * width);
+        for (var listIndex = 0; listIndex < 3; listIndex++)
+        {
+            if (ReadLocal(body, ref position, width) != 0)
+            {
+                throw new InvalidOperationException("The Body has unexpected block inputs.");
+            }
+        }
+
+        SkipIndexList(body, ref position, width);
+        SkipIndexList(body, ref position, width);
+        SkipLastUses(body, ref position, width, valueCount);
+        SkipLastUses(body, ref position, width, placeCount);
+        _ = ReadLocal(body, ref position, width);
+        var operationOffset = checked((uint)(position - blockStart));
+        return (widthCode, checked((int)(terminatorOffset - operationOffset)));
+
+        static int ReadLocal(byte[] bytes, ref int offset, int localWidth)
+        {
+            var result = localWidth switch
+            {
+                1 => bytes[offset],
+                2 => BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(offset)),
+                4 => checked((int)BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset))),
+                _ => throw new InvalidOperationException("Unsupported local width."),
+            };
+            offset += localWidth;
+            return result;
+        }
+
+        static void SkipIndexList(byte[] bytes, ref int offset, int localWidth)
+        {
+            var count = ReadLocal(bytes, ref offset, localWidth);
+            offset += checked(count * localWidth);
+        }
+
+        static void SkipLastUses(byte[] bytes, ref int offset, int localWidth, int maximum)
+        {
+            var count = ReadLocal(bytes, ref offset, localWidth);
+            if (count > maximum)
+            {
+                throw new InvalidOperationException("The Body has too many last-use entries.");
+            }
+            offset += checked(count * 2 * localWidth);
+        }
     }
 
     private static uint ScalarInitOutputRevision(byte[] artifact)

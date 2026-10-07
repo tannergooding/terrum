@@ -573,12 +573,17 @@ types under ScalarInitOutput rule revision 2. The reader continues to accept
 rule revision 1 artifacts with `int32` referents only. Output-bearing
 functions may return `void` or any supported non-Boolean scalar under rule
 revision 3, and Boolean results conditionally publish their output places only
-on `true` under rule revision 4. Revisions 1 and 2 retain their
+on `true` under rule revision 4. Under rule revision 5, one direct Boolean
+output-call condition may split into two straight-line terminal arms; the true
+edge inherits that call's output places as initialized and the false edge
+inherits them as vacant, while other places retain their audited post-call
+state. Stored results still do not preserve correlation.
+Revisions 1 and 2 retain their
 `void`/`int32` result restriction; revision 3 excludes Boolean results.
 Boolean output callees must still initialize every formal before normal return.
 After a Boolean call, output places are not definitely initialized; stored
 Boolean results do not preserve per-call output correlation. Newly emitted
-ScalarInitOutput artifacts require rule revision 4; revisions 1 through 4
+ScalarInitOutput artifacts require rule revision 5; revisions 1 through 5
 are accepted by the loader, and unsupported revisions remain rejected.
 They also provisionally encode and reconstruct scalar comparisons: equality
 and inequality for `bool`, `char16` and integer types; integer ordering; and
@@ -607,11 +612,12 @@ are also provisionally supported: float32/float64 conversion uses opcode
 float-to-integer uses `0x1F`. Float-to-integer truncates toward zero before
 range checking and retains overflow status `0xE0540001`; `NoThrow` validation
 remains mandatory.
-It uses required Feature section kind `0x0004` and a separately audited
-one-block general Body path, reconstructs bound nodes, and still runs the
-mandatory semantic verifier. Only the profile's bounded output shapes are
-admitted; legacy value-only artifacts remain valid, while `out`, exports and
-broader reference/output behavior remain unsupported. The
+It uses required Feature section kind `0x0004` and separately audited general
+Body paths for one-block output and the revision-5 conditional split,
+reconstructs bound nodes, and still runs the mandatory semantic verifier. Only
+the profile's bounded output shapes are admitted; legacy value-only artifacts
+remain valid, while `out`, exports and broader reference/output behavior
+remain unsupported. The
 [output-parameters proposal](proposals/trrm-output-parameters.md) records the
 provisional profile and unresolved contract question; accepted instruction-set
 semantics and Terrum-authored scalar frontend verification/emission are

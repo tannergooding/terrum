@@ -131,10 +131,18 @@ public sealed partial class CliTests
                 return uint32.MaxValue;
             }
             int32 Check(bool enabled, char16 character, uint64 count, float64 amount,
-                uint32 returned, bool status) {
+                uint32 returned, int32 conditionalFalse, int32 conditionalTrue) {
                 return enabled && character == char16(65) && count == uint64.MaxValue
                     && amount == float64(2.5) && returned == uint32.MaxValue
-                    && !status ? 42 : 0;
+                    && conditionalFalse == 0 && conditionalTrue == 42 ? 42 : 0;
+            }
+            int32 CheckConditional(bool flag, char16 marker, int32 result,
+                uint32 smallCount, int64 signedCount, uint64 wideCount,
+                float32 ratio, float64 amount) {
+                return !flag && marker == char16(65) && result == 0
+                    && smallCount == uint32.MaxValue && signedCount == int64.MinValue
+                    && wideCount == 0 && ratio == float32(1.5)
+                    && amount == 0.0 ? 42 : 1;
             }
             bool TryFill(bool success, init ref<bool> flag,
                 init ref<char16> marker, init ref<int32> result,
@@ -151,26 +159,35 @@ public sealed partial class CliTests
                 conditionalAmount = 0.0;
                 return success;
             }
+            int32 RunConditional(bool success) {
+                init bool flag;
+                init char16 marker;
+                init int32 result;
+                init uint32 smallCount;
+                init int64 signedCount;
+                init uint64 wideCount;
+                init float32 ratio;
+                init float64 amount;
+                if (TryFill(success, init flag, init marker, init result,
+                    init smallCount, init signedCount, init wideCount, init ratio,
+                    init amount)) {
+                    return CheckConditional(flag, marker, result, smallCount,
+                        signedCount, wideCount, ratio, amount);
+                } else {
+                    return 0;
+                }
+            }
             int32 Main() {
                 init bool enabled;
                 init char16 character;
                 init uint64 count;
                 init float64 amount;
-                init bool conditionalFlag;
-                init char16 conditionalMarker;
-                init int32 conditionalResult;
-                init uint32 conditionalSmallCount;
-                init int64 conditionalSignedCount;
-                init uint64 conditionalCount;
-                init float32 conditionalRatio;
-                init float64 conditionalAmount;
                 uint32 returned = Fill(true, init enabled, char16(65), init character,
                     uint64.MaxValue, init count, float64(2.5), init amount);
-                bool status = TryFill(false, init conditionalFlag, init conditionalMarker,
-                    init conditionalResult, init conditionalSmallCount,
-                    init conditionalSignedCount, init conditionalCount,
-                    init conditionalRatio, init conditionalAmount);
-                return Check(enabled, character, count, amount, returned, status);
+                int32 conditionalFalse = RunConditional(false);
+                int32 conditionalTrue = RunConditional(true);
+                return Check(enabled, character, count, amount, returned,
+                    conditionalFalse, conditionalTrue);
             }
             """;
         var prefix = Path.Combine(Directory.GetCurrentDirectory(),

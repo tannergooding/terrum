@@ -27,7 +27,7 @@ Keep the following boundaries explicit:
   `u32 featureId, u32 minimumRuleRevision`. Provisionally assign
   `featureId=1` to `ScalarInitOutput`, initially require rule revision `1`,
   and require each affected module's feature range to name that row. The current
-  provisional reader accepts revisions 1–4 as described below. A module with
+  provisional reader accepts revisions 1–5 as described below. A module with
   no output behavior retains an absent Feature section and `(0, 0)` range.
   Reject unknown feature IDs and unsupported revisions before binding or
   lowering; do not add general same-major/future-minor acceptance.
@@ -40,14 +40,14 @@ Keep the following boundaries explicit:
   results. Other scalar formals remain by-value.
   Preserve the existing mode value `0x02`; reject `out`, Boolean results,
   imports, exported output functions, and serialized `OutputState` clauses.
-- Output-bearing methods and calls use general Body forms `0x00`, `0x01`, or
-  `0x02`, with the narrowest valid local width, exactly one block, no regions,
-  and no normal successors. Map non-value formals to places first in parameter
-  order, then local places; by-value formals remain entry values. The function
-  root block lists all output-formal and local places in `startPlaces`, where
-  they become active and vacant. Initially admit only `int32` output/local
-  places in region `0` with flags `0x04` (initially vacant, not rebindable or
-  unique).
+- Under revisions 1–4, output-bearing methods and calls use general Body forms
+  `0x00`, `0x01`, or `0x02`, with the narrowest valid local width, exactly one
+  block, no regions, and no normal successors. Map non-value formals to places
+  first in parameter order, then local places; by-value formals remain entry
+  values. The function root block lists all output-formal and local places in
+  `startPlaces`, where they become active and vacant. Initially admit only
+  `int32` output/local places in region `0` with flags `0x04` (initially vacant,
+  not rebindable or unique).
 - Admit `PlaceLocal` (`0x0B`), `Load` (`0x0D`), `Initialize` (`0x0E`), and
   mode-aware local `Call` (`0x12`) with the existing supported scalar value
   operations. Reject field places, `Assign`, `Move`, `Drop`, place-handle
@@ -88,9 +88,11 @@ The current provisional writer and loader preserve by-value `bool`, `char16`,
 `int32`, `uint32`, `int64`, `uint64`, `float32` and `float64` formals in
 output-bearing general Bodies. Their values may be forwarded from local
 scalar-returning calls into a local call; this does not widen output places,
-which remain `int32`, output-bearing function results, which remain `void` or
-`int32`. Constants and by-value scalar operations are supported independently
-of the `int32`-only output places, initialized locals and assignments. The
+which support `int32` under revision 1 and all eight non-void scalar types
+under revision 2; output-bearing function results range from `void`/`int32`
+through supported non-Boolean scalars under revision 3 and Boolean under
+revision 4. Constants and by-value scalar operations are supported
+independently of the output places, initialized locals and assignments. The
 writer emits typed `ConstBits` for supported scalar values, and the loader also
 reconstructs audited `ConstSigned` integer constants. The writer and loader
 also provisionally support
@@ -119,17 +121,22 @@ conversion paths are also provisionally implemented: format conversion uses
 `0x1A`, integer-to-float uses `0x1B`, `char16`-to-float uses `0x1E`, and
 float-to-integer uses `0x1F`. Float-to-integer truncates toward zero before
 range checking and preserves the existing overflow status; `NoThrow`
-verification remains in force. The one-block control-flow boundary is
-unchanged. These value, comparison, bitwise, unary, arithmetic and conversion
+verification remains in force. Control flow remains one-block except for the
+single direct-call split under revision 5 described below. These value,
+comparison, bitwise, unary, arithmetic and conversion
 paths are implemented support only, not approval of the proposed executable
 contract.
-The current writer emits required feature rule revision 4 for output Bodies.
+The current writer emits required feature rule revision 5 for output Bodies.
 Rule revision 2 provisionally permits `bool`, `char16`, `int32`, `uint32`,
 `int64`, `uint64`, `float32` and `float64` referents and scalar initialized
 locals; rule revision 1 remains loadable with `int32` referents only. Rule
 revision 3 additionally permits non-Boolean scalar output-bearing results;
 rule revision 4 adds Boolean output-bearing results with conditional
-publication.
+publication. Rule revision 5 admits one direct Boolean output-call condition
+and two straight-line terminal arms, auditing inherited place state
+independently on each edge. The writer emits one such conditional split; the
+reader also accepts either terminal arm to use existing `Fail` reason 1.
+These remain provisional, unapproved implementation boundaries.
 Exact type identity is retained through place descriptors, handles, loads,
 initialization values, call arguments and results. Revisions 1 and 2 retain
 their `void`/`int32` output-bearing result restriction; unsupported revisions
@@ -179,6 +186,31 @@ exact result typing and mandatory normal-return initialization. Keep Boolean
 results, public output targets, non-output place-bodied result widening, and
 all other excluded output behaviors unchanged. This recommendation does not
 approve the executable contract.
+
+## Additional open question: conditional Boolean output control flow
+
+**Summary:** Revision 4 can encode Boolean output calls but its one-block Body
+profile cannot observe the call-specific publication state in executable
+artifacts. The hosted verifier already permits the direct result to establish
+initialization only on the true branch; storing the result does not preserve
+that correlation. Extending this behavior requires a path-sensitive Body
+audit, not merely allowing branch opcodes.
+
+**Recommendation:** Keep the extension provisional in rule revision 5. Admit
+one acyclic conditional split with two straight-line terminal arms in an
+output Body. A direct Boolean output-call condition establishes that call's
+destinations as initialized on the true edge and vacant on the false edge;
+other places retain their audited post-call entry state on both edges. Each
+arm may return normally or use the existing `Fail` reason 1; every
+output formal must still be initialized on every normal return. Do not
+transfer the correlation through stored Boolean results, copies, comparisons,
+negation, short-circuit expressions, other calls or block parameters. Exclude
+joins, nested conditions, loops, regions, cleanup, recovery, forwarding and
+aliases. The reader must independently recognize and reconstruct the direct
+call condition, recompute successor place state rather than trust serialized
+inheritance, and retain the hosted verifier. Preserve revisions 1–4 and reject
+revision-4 artifacts requiring the new Body shape. This is an engineering
+recommendation only; it does not approve the executable contract.
 
 ## Additional open question: Boolean output results
 

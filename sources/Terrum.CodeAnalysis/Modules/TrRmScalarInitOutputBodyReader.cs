@@ -28,11 +28,17 @@ internal static class TrRmScalarInitOutputBodyReader
     // Call Operands are always value IDs, including kind-1 handles. Only PlaceLocal's
     // operand names a place descriptor; ValueInfo.PlaceId resolves its resulting handle.
     internal sealed record Instruction(byte Opcode, int Offset, int Result, int SecondResult,
-        int TypeId, byte Kind, ulong Data, int MethodRow, ImmutableArray<int> Operands);
+        int TypeId, byte Kind, ulong Data, int MethodRow, ImmutableArray<int> Operands,
+        int TrueTarget = 0, int FalseTarget = 0,
+        ImmutableArray<int> OutputPlaces = default);
+    internal sealed record Block(ImmutableArray<int> Parameters, ImmutableArray<int> LiveIns,
+        ImmutableArray<int> LiveOuts, ImmutableArray<(int Place, bool Initialized)> InheritedPlaces,
+        ImmutableArray<int> StartingPlaces, ImmutableArray<int> EndingPlaces,
+        ImmutableArray<Instruction> Operations, Instruction Terminator);
     internal sealed record Body(ImmutableArray<TypeInfo> Types, ImmutableArray<PlaceInfo> Places,
         ImmutableArray<ValueInfo> Values, ImmutableArray<Instruction> Operations,
         Instruction Terminator, ImmutableArray<int> StartingPlaces, ImmutableArray<int> EndingPlaces,
-        uint Effects);
+        uint Effects, ImmutableArray<Block> Blocks);
 
     internal static Body Read(TrRmBodyTableReader bodies, int methodRow,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
@@ -152,6 +158,7 @@ internal static class TrRmScalarInitOutputBodyReader
         private readonly TrRmVariableTableIndex _contracts;
         private readonly uint _ruleRevision;
         private int _position;
+        private int _blockEnd;
         private int _width;
         private int _maximumStructural;
         private int _blockStart;
@@ -164,9 +171,15 @@ internal static class TrRmScalarInitOutputBodyReader
         private uint[] _definitions;
         private int[] _valueUses;
         private int[] _placeUses;
+        private int[] _observedValueBlocks;
+        private int[] _observedPlaceBlocks;
+        private int[] _valueLastSeenBlock;
+        private int[] _placeLastSeenBlock;
+        private int _currentBlock;
         private int[] _placeTypes;
         private int[] _observedValues;
         private int[] _observedPlaces;
+        private int[] _valueOccurrences;
         private int[] _handlePlaces;
         private int[] _valueParameters;
         private int[] _placeParameters;
@@ -187,6 +200,7 @@ internal static class TrRmScalarInitOutputBodyReader
             _contracts = contracts;
             _ruleRevision = ruleRevision;
             _position = 0;
+            _blockEnd = body.Length;
             _width = 1;
             _maximumStructural = 0;
             _blockStart = 0;
@@ -199,9 +213,15 @@ internal static class TrRmScalarInitOutputBodyReader
             _definitions = [];
             _valueUses = [];
             _placeUses = [];
+            _observedValueBlocks = [];
+            _observedPlaceBlocks = [];
+            _valueLastSeenBlock = [];
+            _placeLastSeenBlock = [];
+            _currentBlock = 0;
             _placeTypes = [];
             _observedValues = [];
             _observedPlaces = [];
+            _valueOccurrences = [];
             _handlePlaces = [];
             _valueParameters = [];
             _placeParameters = [];
@@ -218,8 +238,14 @@ internal static class TrRmScalarInitOutputBodyReader
             }
 
             _width = 1 << layout;
-            if (Local() != 1)
+            var blockCount = Local();
+            if (blockCount != 1)
             {
+                if (blockCount == 3 && _ruleRevision >= 5)
+                {
+                    return ReadConditional(signature, effects);
+                }
+
                 throw InvalidBody();
             }
 
@@ -439,9 +465,576 @@ internal static class TrRmScalarInitOutputBodyReader
                     _observedPlaces[index], _initialized[index]));
             }
 
+            var operationList = operations.MoveToImmutable();
             return new Body(ImmutableArray.CreateRange(_map), places.MoveToImmutable(),
-                values.MoveToImmutable(), operations.MoveToImmutable(), terminator,
-                starting, ending, effects);
+                values.MoveToImmutable(), operationList, terminator,
+                starting, ending, effects,
+                [new Block(ImmutableArray<int>.Empty, ImmutableArray<int>.Empty,
+                    ImmutableArray<int>.Empty, ImmutableArray<(int, bool)>.Empty,
+                    starting, ending, operationList, terminator)]);
+        }
+
+        private Body ReadConditional(int signature, uint effects)
+        {
+            var valueCount = Local();
+            var placeCount = Local();
+            var regionCount = Local();
+            var typeCount = Local();
+            if (regionCount != 0 || typeCount > _types.Count
+                || typeCount > Remaining / 4 || valueCount > Remaining / (2 * _width + 1)
+                || placeCount > Remaining / (3 * _width + 1))
+            {
+                throw InvalidBody();
+            }
+
+            _map = new TypeInfo[typeCount];
+            _usedTypes = new bool[typeCount];
+            var mapped = new HashSet<ushort>();
+            for (var index = 0; index < typeCount; index++)
+            {
+                var row = Number(4);
+                if (row == 0 || row > _types.Count)
+                {
+                    throw InvalidBody();
+                }
+
+                var key = TrRmCompactLinearBodyReader.ResolveType(_types, row);
+                if (!mapped.Add(key))
+                {
+                    throw InvalidBody();
+                }
+
+                _map[index] = new TypeInfo(row, key);
+            }
+
+            _placeUses = new int[placeCount];
+            _placeTypes = new int[placeCount];
+            _placeParameters = Filled(placeCount, -1);
+            _active = new bool[placeCount];
+            _initialized = new bool[placeCount];
+            for (var index = 0; index < placeCount; index++)
+            {
+                _placeTypes[index] = Local();
+                if (!Scalar(Type(_placeTypes[index])) || Local() != 0 || Byte() != 4
+                    || (_placeUses[index] = Local()) > 3)
+                {
+                    throw InvalidBody();
+                }
+            }
+
+            _valueTypes = new int[valueCount];
+            _valueKinds = new byte[valueCount];
+            _valueUses = new int[valueCount];
+            _handlePlaces = new int[valueCount];
+            _valueParameters = Filled(valueCount, -1);
+            for (var index = 0; index < valueCount; index++)
+            {
+                _valueTypes[index] = Local();
+                _ = Type(_valueTypes[index]);
+                _valueKinds[index] = Byte();
+                _valueUses[index] = Local();
+                if (_valueKinds[index] > 1 || _valueUses[index] > 3
+                    || _valueKinds[index] == 1 && !Scalar(Type(_valueTypes[index])))
+                {
+                    throw InvalidBody();
+                }
+            }
+
+            _valueOccurrences = new int[valueCount];
+            _observedValueBlocks = new int[valueCount];
+            _observedPlaceBlocks = new int[placeCount];
+            _valueLastSeenBlock = Filled(valueCount, -1);
+            _placeLastSeenBlock = Filled(placeCount, -1);
+            _definitions = new uint[valueCount];
+            var definitionStarts = new int[4];
+            for (var index = 0; index < definitionStarts.Length; index++)
+            {
+                definitionStarts[index] = Local();
+                if (index == 0 && definitionStarts[index] != 0
+                    || index != 0 && definitionStarts[index] < definitionStarts[index - 1])
+                {
+                    throw InvalidBody();
+                }
+            }
+            if (definitionStarts[^1] != valueCount)
+            {
+                throw InvalidBody();
+            }
+
+            for (var index = 0; index < valueCount; index++)
+            {
+                _definitions[index] = (uint)Unsigned(4);
+                var block = 0;
+                while (block < 3 && index >= definitionStarts[block + 1])
+                {
+                    block++;
+                }
+                if (block >= 3 || block != 0 && _definitions[index] == uint.MaxValue)
+                {
+                    throw InvalidBody();
+                }
+            }
+
+            var blockOffsets = new uint[4];
+            for (var index = 0; index < blockOffsets.Length; index++)
+            {
+                blockOffsets[index] = (uint)Unsigned(4);
+                if (index == 0 && blockOffsets[index] != 0
+                    || index != 0 && blockOffsets[index] <= blockOffsets[index - 1])
+                {
+                    throw InvalidBody();
+                }
+            }
+            var terminatorOffsets = new uint[3];
+            for (var index = 0; index < terminatorOffsets.Length; index++)
+            {
+                terminatorOffsets[index] = (uint)Unsigned(4);
+            }
+
+            var blockDataStart = _position;
+            if (blockOffsets[^1] != Remaining)
+            {
+                throw InvalidBody();
+            }
+
+            var (first, parameterCount) = _signatures.GetParamRange(signature);
+            var outputParameterCount = 0;
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                outputParameterCount += _parameters.GetMode(first + ordinal) == 2 ? 1 : 0;
+            }
+            var entryCount = parameterCount - outputParameterCount;
+            if (entryCount > definitionStarts[1] || entryCount > valueCount)
+            {
+                throw InvalidBody();
+            }
+            for (var index = 0; index < valueCount; index++)
+            {
+                if ((index < entryCount) != (_definitions[index] == uint.MaxValue))
+                {
+                    throw InvalidBody();
+                }
+            }
+
+            var entryValues = ImmutableArray.CreateBuilder<int>(entryCount);
+            var formalPlace = 0;
+            var entryValue = 0;
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                var row = first + ordinal;
+                var type = TrRmCompactLinearBodyReader.ResolveType(_types,
+                    _parameters.GetTypeSpec(row));
+                if (_parameters.GetMode(row) == 2)
+                {
+                    if (formalPlace >= placeCount || Type(_placeTypes[formalPlace]) != type)
+                    {
+                        throw InvalidBody();
+                    }
+
+                    _placeParameters[formalPlace++] = ordinal;
+                }
+                else
+                {
+                    if (entryValue >= entryCount || _valueKinds[entryValue] != 0
+                        || Type(_valueTypes[entryValue]) != type
+                        || _definitions[entryValue] != uint.MaxValue)
+                    {
+                        throw InvalidBody();
+                    }
+
+                    _valueParameters[entryValue] = ordinal;
+                    entryValues.Add(++entryValue);
+                }
+            }
+            if (entryValue != entryCount)
+            {
+                throw InvalidBody();
+            }
+
+            var blocks = ImmutableArray.CreateBuilder<Block>(3);
+            var observedValuesByBlock = new int[3][];
+            var declaredLiveOuts = new ImmutableArray<int>[3];
+            var entryOperations = ImmutableArray<Instruction>.Empty;
+            var entryTerminator = default(Instruction);
+            bool[]? entryPlaceState = null;
+            for (var blockIndex = 0; blockIndex < 3; blockIndex++)
+            {
+                var start = checked(blockDataStart + (int)blockOffsets[blockIndex]);
+                var end = checked(blockDataStart + (int)blockOffsets[blockIndex + 1]);
+                if (start >= end || terminatorOffsets[blockIndex] >= end - start)
+                {
+                    throw InvalidBody();
+                }
+
+                _position = start;
+                _blockEnd = end;
+                _blockStart = start;
+                _currentBlock = blockIndex;
+                _ordinal = 0;
+                _observedValues = Filled(valueCount, -1);
+                _observedPlaces = Filled(placeCount, -1);
+                _maximumStructural = Math.Max(_maximumStructural,
+                    Math.Max(blockIndex + 1, definitionStarts[blockIndex + 1]));
+
+                if (Local() != 0)
+                {
+                    throw InvalidBody();
+                }
+
+                var parameterValues = ReadIndexList(valueCount);
+                if (blockIndex == 0)
+                {
+                    if (!parameterValues.AsSpan().SequenceEqual(entryValues.ToArray()))
+                    {
+                        throw InvalidBody();
+                    }
+                }
+                else if (!parameterValues.IsEmpty)
+                {
+                    throw InvalidBody();
+                }
+
+                var liveIns = ReadIndexList(valueCount);
+                var liveOuts = ReadIndexList(valueCount);
+                declaredLiveOuts[blockIndex] = liveOuts;
+                var inherited = ReadInheritedPlaces();
+                var starting = PlaceList();
+                var ending = PlaceList();
+                var declaredValueLastUses = LastUses(valueCount);
+                var declaredPlaceLastUses = LastUses(placeCount);
+                var operationCount = Local();
+                if (operationCount > Remaining / 2
+                    || (blockIndex == 0
+                        ? !liveIns.IsEmpty || !inherited.IsEmpty
+                            || !IsSequential(starting, placeCount)
+                            || !ending.IsEmpty
+                        : !starting.IsEmpty
+                            || !HasEveryPlace(inherited, placeCount)))
+                {
+                    throw InvalidBody();
+                }
+
+                foreach (var place in starting)
+                {
+                    _active[place - 1] = true;
+                    Place(place);
+                }
+                foreach (var (place, initialized) in inherited)
+                {
+                    _active[place - 1] = true;
+                    _initialized[place - 1] = initialized;
+                    Place(place);
+                }
+
+                _defined = definitionStarts[blockIndex];
+                if (blockIndex == 0)
+                {
+                    _defined = entryCount;
+                }
+
+                var operations = ImmutableArray.CreateBuilder<Instruction>(operationCount);
+                for (_ordinal = 0; _ordinal < operationCount; _ordinal++)
+                {
+                    if ((ulong)(_position - _blockStart) >= terminatorOffsets[blockIndex])
+                    {
+                        throw InvalidBody();
+                    }
+                    operations.Add(Operation());
+                    if ((ulong)(_position - _blockStart) > terminatorOffsets[blockIndex])
+                    {
+                        throw InvalidBody();
+                    }
+                }
+
+                if (_defined != definitionStarts[blockIndex + 1]
+                    || (ulong)(_position - _blockStart) != terminatorOffsets[blockIndex])
+                {
+                    throw InvalidBody();
+                }
+
+                foreach (var place in ending)
+                {
+                    Place(place, operationCount);
+                    _active[place - 1] = false;
+                }
+
+                _ordinal = operationCount;
+                var terminator = blockIndex == 0
+                    ? BranchTerminator()
+                    : Terminator(signature);
+                if (_position != _blockEnd)
+                {
+                    throw InvalidBody();
+                }
+
+                if (blockIndex == 0)
+                {
+                    if (!ending.IsEmpty
+                        || terminator.TrueTarget != 2 || terminator.FalseTarget != 3)
+                    {
+                        throw InvalidBody();
+                    }
+                    entryOperations = operations.MoveToImmutable();
+                    entryTerminator = terminator;
+                    entryPlaceState = (bool[])_initialized.Clone();
+                }
+                else if (!IsSequential(ending, placeCount))
+                {
+                    throw InvalidBody();
+                }
+
+                AuditLastUses(declaredValueLastUses, _observedValues);
+                AuditLastUses(declaredPlaceLastUses, _observedPlaces);
+                observedValuesByBlock[blockIndex] = (int[])_observedValues.Clone();
+                blocks.Add(new Block(parameterValues, liveIns, liveOuts, inherited,
+                    starting, ending, blockIndex == 0 ? entryOperations : operations.MoveToImmutable(),
+                    terminator));
+            }
+
+            var expectedWidth = _maximumStructural <= byte.MaxValue ? 1
+                : _maximumStructural <= ushort.MaxValue ? 2 : 4;
+            if (_position != _body.Length || _width != expectedWidth)
+            {
+                throw InvalidBody();
+            }
+
+            if (entryTerminator is null || entryTerminator.Operands.Length != 1)
+            {
+                throw InvalidBody();
+            }
+
+            var trueCondition = entryTerminator.Operands[0];
+            Instruction? conditionCall = null;
+            foreach (var operation in entryOperations)
+            {
+                if (operation.Result == trueCondition)
+                {
+                    conditionCall = operation;
+                }
+            }
+            if (conditionCall is null || entryPlaceState is null || conditionCall.Opcode != 0x12
+                || conditionCall.MethodRow == 0
+                || Type(_valueTypes[trueCondition - 1]) != 1
+                || conditionCall.OutputPlaces.IsDefaultOrEmpty
+                || entryOperations.IsEmpty || entryOperations[^1].Result != trueCondition
+                || _valueOccurrences[trueCondition - 1] != 1)
+            {
+                throw InvalidBody();
+            }
+
+            var expectedTrue = (bool[])entryPlaceState.Clone();
+            foreach (var place in conditionCall.OutputPlaces)
+            {
+                expectedTrue[place - 1] = true;
+            }
+            foreach (var place in blocks[1].InheritedPlaces)
+            {
+                if (place.Initialized != expectedTrue[place.Place - 1])
+                {
+                    throw InvalidBody();
+                }
+            }
+            foreach (var place in blocks[2].InheritedPlaces)
+            {
+                if (place.Initialized != entryPlaceState[place.Place - 1])
+                {
+                    throw InvalidBody();
+                }
+            }
+
+            for (var blockIndex = 1; blockIndex < 3; blockIndex++)
+            {
+                var expectedLiveIns = ImmutableArray.CreateBuilder<int>();
+                for (var value = 1; value <= valueCount; value++)
+                {
+                    if (value - 1 < definitionStarts[1]
+                        && observedValuesByBlock[blockIndex][value - 1] >= 0)
+                    {
+                        expectedLiveIns.Add(value);
+                    }
+                }
+                if (!expectedLiveIns.ToImmutable().AsSpan()
+                    .SequenceEqual(blocks[blockIndex].LiveIns.AsSpan())
+                    || !blocks[blockIndex].LiveOuts.IsEmpty)
+                {
+                    throw InvalidBody();
+                }
+            }
+            var expectedLiveOuts = new bool[valueCount + 1];
+            foreach (var value in blocks[1].LiveIns)
+            {
+                expectedLiveOuts[value] = true;
+            }
+            foreach (var value in blocks[2].LiveIns)
+            {
+                expectedLiveOuts[value] = true;
+            }
+            var liveOutIndex = 0;
+            for (var value = 1; value <= valueCount; value++)
+            {
+                if (expectedLiveOuts[value]
+                    && (liveOutIndex >= declaredLiveOuts[0].Length
+                        || declaredLiveOuts[0][liveOutIndex++] != value))
+                {
+                    throw InvalidBody();
+                }
+            }
+            if (liveOutIndex != declaredLiveOuts[0].Length)
+            {
+                throw InvalidBody();
+            }
+
+            for (var value = 0; value < valueCount; value++)
+            {
+                if (_observedValueBlocks[value] != _valueUses[value])
+                {
+                    throw InvalidBody();
+                }
+            }
+            for (var place = 0; place < placeCount; place++)
+            {
+                if (_observedPlaceBlocks[place] != _placeUses[place])
+                {
+                    throw InvalidBody();
+                }
+            }
+            foreach (var used in _usedTypes)
+            {
+                if (!used)
+                {
+                    throw InvalidBody();
+                }
+            }
+
+            var values = ImmutableArray.CreateBuilder<ValueInfo>(valueCount);
+            for (var index = 0; index < valueCount; index++)
+            {
+                values.Add(new ValueInfo(_valueTypes[index], _valueKinds[index],
+                    _definitions[index] == uint.MaxValue ? -1 : (int)_definitions[index],
+                    _observedValues[index], _handlePlaces[index], _valueParameters[index]));
+            }
+            var places = ImmutableArray.CreateBuilder<PlaceInfo>(placeCount);
+            for (var index = 0; index < placeCount; index++)
+            {
+                places.Add(new PlaceInfo(_placeTypes[index], _placeParameters[index],
+                    _observedPlaces[index], _initialized[index]));
+            }
+
+            return new Body(ImmutableArray.CreateRange(_map), places.MoveToImmutable(),
+                values.MoveToImmutable(), entryOperations, entryTerminator,
+                blocks[0].StartingPlaces, blocks[0].EndingPlaces, effects,
+                blocks.MoveToImmutable());
+        }
+
+        private static bool IsSequential(ImmutableArray<int> values, int count)
+        {
+            if (values.Length != count)
+            {
+                return false;
+            }
+            for (var index = 0; index < count; index++)
+            {
+                if (values[index] != index + 1)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static bool HasEveryPlace(
+            ImmutableArray<(int Place, bool Initialized)> places, int count)
+        {
+            if (places.Length != count)
+            {
+                return false;
+            }
+            for (var index = 0; index < count; index++)
+            {
+                if (places[index].Place != index + 1)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private Instruction BranchTerminator()
+        {
+            var offset = _position - _blockStart;
+            var (opcode, referenceWidth, countWidth, dataWidth) = Envelope();
+            if (opcode != 0x81 || countWidth != 1 || dataWidth != 0)
+            {
+                throw InvalidBody();
+            }
+
+            var condition = Number(referenceWidth);
+            if (UseValue(condition) != 1)
+            {
+                throw InvalidBody();
+            }
+
+            var trueTarget = ReadBranchTarget(referenceWidth, countWidth);
+            var falseTarget = ReadBranchTarget(referenceWidth, countWidth);
+            return new Instruction(opcode, offset, 0, 0, 0, 0, 0, 0, [condition],
+                trueTarget, falseTarget);
+        }
+
+        private int ReadBranchTarget(int referenceWidth, int countWidth)
+        {
+            var target = Number(referenceWidth);
+            if (Number(countWidth) != 0)
+            {
+                throw InvalidBody();
+            }
+            return target;
+        }
+
+        private ImmutableArray<int> ReadIndexList(int maximum)
+        {
+            var count = Local();
+            if (count > maximum || count > Remaining / _width)
+            {
+                throw InvalidBody();
+            }
+
+            var values = ImmutableArray.CreateBuilder<int>(count);
+            var previous = 0;
+            for (var index = 0; index < count; index++)
+            {
+                var value = Local();
+                if (value <= previous || value > maximum)
+                {
+                    throw InvalidBody();
+                }
+                values.Add(value);
+                previous = value;
+            }
+            return values.MoveToImmutable();
+        }
+
+        private ImmutableArray<(int Place, bool Initialized)> ReadInheritedPlaces()
+        {
+            var count = Local();
+            if (count > _active.Length || count > Remaining / ( _width + 1))
+            {
+                throw InvalidBody();
+            }
+
+            var places = ImmutableArray.CreateBuilder<(int, bool)>(count);
+            var previous = 0;
+            for (var index = 0; index < count; index++)
+            {
+                var place = Local();
+                var state = Byte();
+                if (place <= previous || place > _active.Length || state > 1)
+                {
+                    throw InvalidBody();
+                }
+                places.Add((place, state != 0));
+                previous = place;
+            }
+            return places.MoveToImmutable();
         }
 
         private Instruction Operation()
@@ -464,6 +1057,7 @@ internal static class TrRmScalarInitOutputBodyReader
             ushort resultType = 0;
             byte resultKind = 0;
             var placeId = 0;
+            var outputPlaces = ImmutableArray<int>.Empty;
 
             // Results are reserved only after operands have been checked, preventing self-use.
             if (opcode is 1 or 2)
@@ -559,6 +1153,7 @@ internal static class TrRmScalarInitOutputBodyReader
                 }
 
                 var destinations = new HashSet<int>();
+                var outputPlaceIds = ImmutableArray.CreateBuilder<int>();
                 for (var argument = 0; argument < count; argument++)
                 {
                     var valueId = Number(referenceWidth);
@@ -585,6 +1180,7 @@ internal static class TrRmScalarInitOutputBodyReader
                             {
                                 throw InvalidBody();
                             }
+                            outputPlaceIds.Add(place);
 
                             break;
                         }
@@ -601,6 +1197,7 @@ internal static class TrRmScalarInitOutputBodyReader
                 {
                     _initialized[destination - 1] = resultType != 1;
                 }
+                outputPlaces = outputPlaceIds.ToImmutable();
             }
             else if (opcode is 8 or 9)
             {
@@ -725,7 +1322,7 @@ internal static class TrRmScalarInitOutputBodyReader
             }
 
             return new Instruction(opcode, offset, result, secondResult, typeId, kind, data,
-                methodRow, operands.ToImmutable());
+                methodRow, operands.ToImmutable(), OutputPlaces: outputPlaces);
         }
 
         private Instruction Terminator(int signature)
@@ -800,6 +1397,7 @@ internal static class TrRmScalarInitOutputBodyReader
                 throw InvalidBody();
             }
 
+            ObserveValue(value);
             _observedValues[value - 1] = _ordinal;
             return Type(_valueTypes[value - 1]);
         }
@@ -818,18 +1416,39 @@ internal static class TrRmScalarInitOutputBodyReader
                 throw InvalidBody();
             }
             Place(place);
+            ObserveValue(value);
             _observedValues[value - 1] = _ordinal;
             return place;
         }
 
-        private void Place(int place)
+        private void ObserveValue(int value)
+        {
+            if (_valueOccurrences.Length != 0)
+            {
+                _valueOccurrences[value - 1]++;
+                if (_valueLastSeenBlock[value - 1] != _currentBlock)
+                {
+                    _valueLastSeenBlock[value - 1] = _currentBlock;
+                    _observedValueBlocks[value - 1]++;
+                }
+            }
+        }
+
+        private void Place(int place, int? ordinal = null)
         {
             if (place == 0 || place > _active.Length || !_active[place - 1])
             {
                 throw InvalidBody();
             }
 
-            _observedPlaces[place - 1] = Math.Max(_observedPlaces[place - 1], _ordinal);
+            var observedAt = ordinal ?? _ordinal;
+            _observedPlaces[place - 1] = Math.Max(_observedPlaces[place - 1], observedAt);
+            if (_observedPlaceBlocks.Length != 0
+                && _placeLastSeenBlock[place - 1] != _currentBlock)
+            {
+                _placeLastSeenBlock[place - 1] = _currentBlock;
+                _observedPlaceBlocks[place - 1]++;
+            }
         }
 
         private ushort Type(int id)
@@ -905,6 +1524,14 @@ internal static class TrRmScalarInitOutputBodyReader
             }
         }
 
+        private static void AuditLastUses(int[] declared, int[] observed)
+        {
+            if (!declared.AsSpan().SequenceEqual(observed))
+            {
+                throw InvalidBody();
+            }
+        }
+
         private (byte Opcode, int References, int Counts, int Data) Envelope()
         {
             var opcode = Byte();
@@ -940,7 +1567,7 @@ internal static class TrRmScalarInitOutputBodyReader
         }
 
         private byte Byte() => (byte)Unsigned(1);
-        private int Remaining => _body.Length - _position;
+        private int Remaining => Math.Min(_body.Length, _blockEnd) - _position;
 
         private ulong Unsigned(int width)
         {
