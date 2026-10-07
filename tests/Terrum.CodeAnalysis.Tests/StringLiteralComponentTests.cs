@@ -388,6 +388,56 @@ public sealed class StringLiteralComponentTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task Utf8NameRowBuilderPublishesOnlyCompleteRowsAsync(NativeRuntimePolicy policy)
+    {
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        (string Spelling, int Capacity, int[]? Expected)[] cases = [
+            ("\"A\"", 8, [1, 1, 0, 0, 65, 0, 0, 0]),
+            ("\"\u00E9\"", 8, [1, 2, 0, 0, 195, 169, 0, 0]),
+            ("\"\U0001F600\"", 12, [1, 4, 0, 0, 240, 159, 152, 128, 0, 0, 0, 0]),
+            ("\"\"", 8, null),
+            ("\"A\\0B\"", 12, null),
+            ("\"A\"", 7, null),
+        ];
+
+        foreach (var (spelling, capacity, expected) in cases)
+        {
+            var checks = expected is null
+                ? string.Empty
+                : string.Join(Environment.NewLine, expected.Select((value, index) =>
+                    FormattableString.Invariant($"if (row.Read({index}) != {value}) {{ return 3; }}")));
+            var expectedLength = expected?.Length ?? 0;
+            var resultCheck = expected is null
+                ? $"if (TryBuildStringNameRowUtf8(literal, move workspace, init var row)) {{ return 1; }}"
+                : $$"""
+                    if (!TryBuildStringNameRowUtf8(literal, move workspace, init var row)) { return 1; }
+                    mut OwnedInt32Buffer completed = move row;
+                    if (completed.Count != {{expectedLength}} || completed.Capacity != {{expectedLength}}) { return 2; }
+                    {{checks.Replace("row.", "completed.")}}
+                    """;
+            var entry = SyntaxTree.Parse($$"""
+                namespace Terrum.CodeAnalysis;
+                int32 Main() {
+                    require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
+                    require StringLiteral.TryCreate(spelling, init var literal);
+                    require OwnedInt32Buffer.TryCreate({{capacity}}, out var workspace);
+                    {{resultCheck}}
+                    return 0;
+                }
+                """, "string-name-row-builder-entry.terrum");
+            var compilation = Compilation.Create(trees.Add(entry),
+                [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
+                (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.Equal(0, NativeJit.Execute(program, policy));
+            Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+        }
+    }
+
+    [Theory]
     [InlineData("\"\"")]
     [InlineData("\"\\0\"")]
     [InlineData("\"A\\0B\"")]
