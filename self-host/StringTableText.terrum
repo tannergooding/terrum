@@ -1,0 +1,62 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryGetStringTableNameScalarCount(int32 recordCount, int32 row,
+    init ref<int32> scalarCount)
+{
+    if (!TryGetIndexedStringRow(recordCount, row, init var rowStart, init var rowLength))
+    {
+        return false;
+    }
+
+    return TryGetStringNameScalarCount(rowStart, rowLength, init scalarCount);
+}
+
+public static bool TryGetStringTableNamespaceScalarCount(int32 recordCount, int32 row,
+    init ref<int32> scalarCount)
+{
+    if (!TryGetIndexedStringRow(recordCount, row, init var rowStart, init var rowLength))
+    {
+        return false;
+    }
+
+    return TryGetStringNamespaceScalarCount(rowStart, rowLength, init scalarCount);
+}
+
+public static bool TryReadStringTableNameScalarAt(int32 recordCount, int32 row, int32 scalarIndex,
+    init ref<int32> scalar)
+{
+    if (scalarIndex < 0
+        || !TryGetIndexedStringRow(recordCount, row, init var rowStart, init var rowLength))
+    {
+        return false;
+    }
+
+    return TryReadStringNameScalarAt(rowStart, rowLength, scalarIndex, init scalar);
+}
+
+public static bool TryReadStringTableNamespaceScalarAt(int32 recordCount, int32 row, int32 scalarIndex,
+    init ref<int32> scalar)
+{
+    if (scalarIndex < 0
+        || !TryGetIndexedStringRow(recordCount, row, init var rowStart, init var rowLength))
+    {
+        return false;
+    }
+
+    return TryReadStringNamespaceScalarAt(rowStart, rowLength, scalarIndex, init scalar);
+}
+
+bool TryGetIndexedStringRow(int32 recordCount, int32 row,
+    init ref<int32> rowStart, init ref<int32> rowLength)
+{
+    if (!TryGetVariableTableRowExtent(recordCount, 8, 4, row,
+        init var dataRelativeStart, init var selectedLength))
+    {
+        return false;
+    }
+
+    int32 indexByteLength = (recordCount + 1) * 4;
+    rowStart = indexByteLength + dataRelativeStart;
+    rowLength = selectedLength;
+    return true;
+}

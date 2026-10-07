@@ -170,6 +170,12 @@ readers. `StringTableIndex` composes this generic check with `StringRowLayout`
 for every row, including unrequested rows. It remains physical framing only:
 malformed UTF-8 with valid framing is accepted, and text decoding and
 reference-use policy remain with the hosted readers.
+The `StringTableText` candidate instead matches the hosted selected-row
+decoding path: each query validates the whole offset index and physical/text
+contents of only the requested String row. A malformed unrequested row does
+not prevent reading a valid selected row, while malformed offsets still
+reject; this intentionally differs from `StringTableIndex`'s whole-table
+physical-shape validation.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.
