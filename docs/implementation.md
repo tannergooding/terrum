@@ -79,6 +79,11 @@ types. This does not establish generic classes or structs, public generic
 witnesses, runtime generic captures, or support for every accepted generic
 contract. The [native profile](specs/native.md) and
 [source grammar](specs/grammar-spec.md) define the relevant boundaries.
+Bounded output extensions, including mixed generic modes, fixed scalar sides
+and fixed floating results, remain provisional under the individual
+[output proposals](proposals/README.md), including the
+[floating-result slice](proposals/generic-floating-output-results.md). They
+do not establish general reference metadata or executable TRRM support.
 
 ## Executable TRRM scalar interchange
 

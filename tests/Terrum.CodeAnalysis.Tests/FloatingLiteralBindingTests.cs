@@ -86,6 +86,12 @@ public sealed class FloatingLiteralBindingTests
     private delegate long Float64Copy(long value);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int Float32Selector(int selector);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long Float64Selector(int selector);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Float32FourOperands(int a, int b, int c, int d);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -446,6 +452,103 @@ public sealed class FloatingLiteralBindingTests
             foreach (var bits in doubleBits)
             {
                 Assert.Equal(unchecked((long)bits), copyFloat64(unchecked((long)bits)));
+            }
+        }
+        finally
+        {
+            if (library != IntPtr.Zero)
+            {
+                NativeLibrary.Free(library);
+            }
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void GenericFloatingOutputResultsPreserveExactReturnBits()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            float32 Select32<T>(T value, int32 selector, out T copied, init ref<T> initialized,
+                out int32 count, init ref<float64> score) where T : [Copy] {
+                copied = value;
+                initialized = value;
+                count = 2;
+                score = float64(3.5);
+                if (selector == 0) { return float32(0.0); }
+                if (selector == 1) { return float32(-0.0); }
+                if (selector == 2) { return float32(0x1p-149); }
+                if (selector == 3) { return float32(0x1p+128); }
+                if (selector == 4) { return float32(-0x1p+128); }
+                return float32(1.000000059604644775390625);
+            }
+            float64 Select64<T>(T value, int32 selector, out T copied, init ref<T> initialized,
+                out int32 count, init ref<float32> score) where T : [Copy] {
+                copied = value;
+                initialized = value;
+                count = 3;
+                score = float32(4.5);
+                if (selector == 0) { return float64(0.0); }
+                if (selector == 1) { return float64(-0.0); }
+                if (selector == 2) { return float64(0x1p-1074); }
+                if (selector == 3) { return float64(0x1p+1024); }
+                if (selector == 4) { return float64(-0x1p+1024); }
+                return float64(1.00000000000000011102230246251565404236316680908203125);
+            }
+            public float32 Read32(int32 selector) {
+                mut int32 copied = 0;
+                init int32 initialized;
+                mut int32 count = 0;
+                init float64 score;
+                float32 result = Select32<int32>(42, selector, out copied, init initialized,
+                    out count, init score);
+                require copied == 42 && initialized == 42 && count == 2 && score == float64(3.5);
+                return result;
+            }
+            public float64 Read64(int32 selector) {
+                mut int32 copied = 0;
+                init int32 initialized;
+                mut int32 count = 0;
+                init float32 score;
+                float64 result = Select64<int32>(42, selector, out copied, init initialized,
+                    out count, init score);
+                require copied == 42 && initialized == 42 && count == 3 && score == float32(4.5);
+                return result;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-generic-output-float-{Guid.NewGuid():N}.dll");
+        var library = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path,
+                NativeEmitter.EmitLibrary(program, ["Read32", "Read64"], NativeRuntimePolicy.FailFast));
+            library = NativeLibrary.Load(path);
+            var read32 = Export<Float32Selector>(library, "Read32");
+            var read64 = Export<Float64Selector>(library, "Read64");
+            (int Selector, uint Bits)[] singleCases = [
+                (0, 0x00000000),
+                (1, 0x80000000),
+                (2, 0x00000001),
+                (3, 0x7F800000),
+                (4, 0xFF800000),
+                (5, 0x3F800000),
+            ];
+            foreach (var (selector, bits) in singleCases)
+            {
+                Assert.Equal(unchecked((int)bits), read32(selector));
+            }
+            (int Selector, ulong Bits)[] doubleCases = [
+                (0, 0x0000000000000000),
+                (1, 0x8000000000000000),
+                (2, 0x0000000000000001),
+                (3, 0x7FF0000000000000),
+                (4, 0xFFF0000000000000),
+                (5, 0x3FF0000000000000),
+            ];
+            foreach (var (selector, bits) in doubleCases)
+            {
+                Assert.Equal(unchecked((long)bits), read64(selector));
             }
         }
         finally

@@ -473,11 +473,30 @@ public sealed class StaticProtocolOutputTests
 
     [Theory]
     [InlineData("float32 Create<T>(T value) where T : [Copy] { return float32(1.5); }")]
-    [InlineData("float32 Fill<T>(float32 value, out T result) where T : [Copy] { result = value; return float32(1.5); }")]
+    [InlineData("float32 Fill<T>(T value, float32 threshold, out T result) where T : [Copy] { result = value; return float32(1.5); }")]
     public void GenericFloatingResultDoesNotWidenTemplateTypes(string declaration)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
             declaration + " int32 Main() { return 0; }"));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void GenericFloatingResultRequiresAGenericOutputAnchor()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            float32 Fill<T>(T value, out int32 count, init ref<float64> score)
+                where T : [Copy] {
+                count = 2;
+                score = float64(3.5);
+                return float32(1.5);
+            }
+            int32 Main() {
+                Fill(int32(42), out var count, init var score);
+                return 42;
+            }
+            """));
         Assert.True(compilation.HasErrors);
         Assert.Null(compilation.Program);
     }
@@ -491,7 +510,8 @@ public sealed class StaticProtocolOutputTests
                 for (;;) { }
             }
             int32 Main() {
-                None(1, init var result, out var count, init var score);
+                float64 status = None(1, init var result, out var count, init var score);
+                require status == float64(0.0);
                 return 42;
             }
             """));

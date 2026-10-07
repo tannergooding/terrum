@@ -4,12 +4,11 @@
 
 ## Summary
 
-Compilation-local `[Copy]` generic output templates currently require a fixed
-integer-like, `char16`, or `void` result for unconditional non-Boolean
-publication. Ordinary hosted `out` and `init ref<T>` calls already support
-`float32` and `float64` results. Consider admitting those fixed result types
-only for templates that already have a generic-typed output, without changing
-generic output modes or symbolic floating capabilities.
+Compilation-local `[Copy]` generic output templates provisionally support
+fixed `float32` and `float64` results only when a generic-typed output anchors
+the specialization. Consider retaining that bounded hosted extension,
+including fixed scalar side outputs, without changing generic output modes or
+symbolic floating capabilities.
 
 ## Recommendation
 
@@ -62,6 +61,23 @@ unchanged consumers under both runtime policies, retaining exact result width
 and per-parameter mode metadata. Floating result checks must use the existing
 hosted floating semantics and avoid equality as a proxy for signed-zero bit
 identity.
+
+**Progress:** The hosted implementation provisionally supports fixed
+`float32`/`float64` results for compilation-local `[Copy]` templates with
+generic outputs. Direct execution and module replacement already cover generic
+`out T` and `init ref<T>` results, signed zero, subnormals and checked-failure
+publication. An isolated replacement test now combines both floating result
+widths with mixed generic `out T`/`init ref<T>` modes and fixed `out int32` and
+`init ref<float32/float64>` side outputs, explicit and inferred generic
+substitutions, exact mode/type metadata, unchanged consumers, semantic-module
+JIT/AOT and native graph AOT/JIT under both runtime policies; the checked paths
+verify `init` vacancy and retry. A separate native raw-bit oracle checks both
+zero signs, minimum subnormals, both infinities and width-specific rounding
+midpoints for each result width without adding a NaN-payload guarantee.
+Boundary tests reject fixed-floating by-value parameters with an otherwise
+valid generic payload, templates with fixed outputs only, and substitution
+inference from a typed floating result context. These remain provisional
+implementation evidence and do not approve this proposal.
 
 This proposal does not approve the target contract. Any implementation is
 provisional evidence pending review.
