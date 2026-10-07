@@ -26,7 +26,9 @@ public sealed class SourceMapTableValidationComponentTests
                 Host.Expected[3], Host.Expected[4], Host.Expected[5],
                 Host.Expected[6], Host.Expected[7], Host.Expected[8],
                 Host.Expected[9], Host.Expected[10], Host.Expected[11],
-                Host.Expected[12], Host.Expected[13], Host.Expected[14]);
+                Host.Expected[12], Host.Expected[13], Host.Expected[14])
+                && TryValidateCompactLinearSourceMapLocations(
+                    Host.Expected[5], Host.Expected[13]);
             return valid == (Host.Expected[15] != 0) ? 0 : 1;
         }
         """;
@@ -42,10 +44,13 @@ public sealed class SourceMapTableValidationComponentTests
         var unusedSlots = WithSourceMap(valid, MapWithUnusedSlots());
         var cases = new List<TableCase> {
             valid,
+            WithWord(valid, 16, 1),
             twoInstructions,
             twoModuleTransitions,
-            WithWord(valid, 16, uint.MaxValue),
-            WithWord(valid, 12, uint.MaxValue),
+            ChangeWord(valid, 16, uint.MaxValue),
+            ChangeWord(valid, 12, uint.MaxValue),
+            ChangeWord(valid, 12, 2),
+            ChangeWord(valid, 16, 2),
             WithWord(valid, 44, uint.MaxValue - 2),
             WithWord(WithWord(valid, 44, uint.MaxValue), 48, 0),
             unusedSlots,
@@ -133,6 +138,8 @@ public sealed class SourceMapTableValidationComponentTests
                 new HostBuffer("FieldOwners", PrimitiveType.Int32, [123], true),
                 new HostBuffer("BodyOwners", PrimitiveType.Int32,
                     [.. Enumerable.Repeat(123, testCase.BodyCount + 1)], true),
+                new HostBuffer("SourceMapLinearOperationCounts", PrimitiveType.Int32,
+                    [.. LinearOperationCounts(testCase.MethodCount)], false),
                 new HostBuffer("GenericSignatureOwners", PrimitiveType.Int32, [123, 123], true),
                 new HostBuffer("Expected", PrimitiveType.Int32,
                 [
@@ -254,14 +261,23 @@ public sealed class SourceMapTableValidationComponentTests
                 testCase.BodyCount);
             var files = new TrRmSourceFileTableReader(ToBytes(testCase.SourceFiles),
                 testCase.SourceFileCount, stringReader, modules);
-            _ = new TrRmSourceMapTableReader(ToBytes(testCase.SourceMaps),
+            var sourceMaps = new TrRmSourceMapTableReader(ToBytes(testCase.SourceMaps),
                 testCase.RecordCount, methods, files);
+            sourceMaps.ValidateCompactLinearLocations(methods,
+                LinearOperationCounts(methods.Count));
             return true;
         }
         catch (InvalidDataException)
         {
             return false;
         }
+    }
+
+    private static int[] LinearOperationCounts(int methodCount)
+    {
+        var counts = new int[methodCount + 1];
+        Array.Fill(counts, 1, 1, methodCount);
+        return counts;
     }
 
     private static byte[] EncodeModules(int moduleCount, int methodCount, int sourceFileCount)

@@ -113,6 +113,66 @@ public static bool TryValidateSourceMapTable(int32 recordCount,
     return true;
 }
 
+bool TryValidateCompactLinearSourceMapLocations(int32 methodDefCount,
+    int32 bodyCount)
+{
+    if (methodDefCount < 0 || methodDefCount > 0xFF_FFFF
+        || bodyCount < 0 || bodyCount > 0xFF_FFFF
+        || Host.BodyOwners.Length != bodyCount + 1
+        || Host.SourceMapLinearOperationCounts.Length != methodDefCount + 1
+        || Host.SourceMaps.Length < 4
+        || !TryReadSourceMapTableWord(0, init var slotCount)
+        || slotCount > uint32((Host.SourceMaps.Length - 4) / 16))
+    {
+        return false;
+    }
+
+    int32 slotCountInt = int32(slotCount);
+    int32 rowStart = 4 + slotCountInt * 16;
+    if ((Host.SourceMaps.Length - rowStart) % 16 != 0)
+    {
+        return false;
+    }
+
+    for (mut int32 slot = 1; slot <= slotCountInt; slot = slot + 1)
+    {
+        int32 slotOffset = 4 + (slot - 1) * 16;
+        if (!TryReadSourceMapTableHalfWord(slotOffset, init var kind)
+            || !TryReadSourceMapTableHalfWord(slotOffset + 2, init var selector))
+        {
+            return false;
+        }
+
+        if (kind != 0x0020)
+        {
+            continue;
+        }
+
+        if (selector != 1
+            || !TryReadSourceMapTableWord(slotOffset + 4, init var bodyRow)
+            || !TryReadSourceMapTableWord(slotOffset + 8, init var block)
+            || !TryReadSourceMapTableWord(slotOffset + 12, init var ordinal)
+            || bodyRow == 0 || bodyRow > uint32(bodyCount) || block != 1)
+        {
+            return false;
+        }
+
+        int32 methodRow = Host.BodyOwners[int32(bodyRow)];
+        if (methodRow <= 0 || methodRow > methodDefCount)
+        {
+            return false;
+        }
+
+        int32 operationCount = Host.SourceMapLinearOperationCounts[methodRow];
+        if (operationCount < 0 || ordinal > uint32(operationCount))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool TryValidateSourceMapSlot(int32 slot, int32 sourceFileCount,
     int32 methodDefCount, int32 typeDefCount, int32 moduleCount, int32 bodyCount)
 {
