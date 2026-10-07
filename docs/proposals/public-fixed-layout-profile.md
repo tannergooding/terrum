@@ -131,3 +131,22 @@ This proposal does not add a public layout promise, packing or over-alignment
 support, `Union`, a universal wire encoding, or a stable ABI. Existing private
 Sequential layouts, transparent values, semantic-module contracts and native
 test carriers retain their current boundaries.
+
+## Test-only candidate evidence
+
+The test suite now evaluates explicitly marked candidate declarations without
+changing source attributes, binder or verifier behavior, semantic-module
+metadata, or the native emitter. It independently recomputes natural field
+offsets, aggregate alignment and padded size, checks transitive candidate
+membership, and compares declarations compiled with different structure
+indexes by nominal name. The cases cover compatible body-only replacement,
+primitive and nested storage, padding, the 16-byte limit, unsupported types,
+forged offsets/widths/sizes/alignment claims, cycles and excessive nesting,
+plus incompatible profile, target, nominal, field, access, mutation and unsafe
+contracts.
+
+A separate Windows x64 C fixture verifies the selected scalar storage and the
+same nested, padded and over-limit shapes using `sizeof`, `__alignof` and
+`offsetof`. This is evidence for the proposed storage calculation only; it
+does not activate a public layout commitment, approve the proposal, or define
+procedure-call classification or raw-copy behavior.
