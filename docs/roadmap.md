@@ -408,6 +408,10 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `361a8676` | Exercise all eight floating arithmetic raw-bit helpers through the internal Windows x64 DLL against a controlled hosted-emitter oracle, asserting exact non-NaN bits and NaN classification only; arithmetic and NaN-encoding proposals remain unapproved |
+| `382eb317` | Exercise all twelve raw-bit IEEE comparison predicates through the internal Windows x64 DLL against hosted operators, including signed-zero and unordered-NaN boundaries |
+| `55f13ea0` | Exercise raw-bit floating negation through the internal Windows x64 DLL, checking exact sign-bit toggling and involution without approving the TRRM proposal |
+| `56f4221f` | Exercise raw-bit float32/float64 format conversions through the internal Windows x64 DLL, checking finite hosted parity and NaN classification only; the TRRM proposal remains unapproved |
 | `ce67da8f` | Extend provisional revision-63 persistence to existing mutable receiver loans through caller-unsafe fields; require every owner and field value on the loan path to satisfy the public `Copy` layout gate, reconstruct authorization from `BoundUnsafe`, and retain readonly-field-loan and `unsafe(expr)` persistence exclusions |
 | `2e63135c` | Provisionally persist caller-unsafe public instance fields on eligible public, non-unique `Copy` structs in semantic-module revision 63; reconstruct `BoundUnsafe`-only access, enforce exact link compatibility, and reject unsupported graph layouts and field-reference loans |
 | `7862ad88` | Provisionally persist caller-unsafe static and readonly-instance Copy-valued getters in revision 62 using recursive layout eligibility for body-backed and bodyless contracts; keep TRRM and scalar-frontend support excluded |
