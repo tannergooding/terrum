@@ -38,14 +38,27 @@ public sealed class SourceMapTableValidationComponentTests
     {
         var valid = CreateCase();
         var twoInstructions = CreateCase(twoMethods: true);
+        var twoModuleTransitions = CreateCase(twoModules: true, reverseBodyOwners: true);
+        var unusedSlots = WithSourceMap(valid, MapWithUnusedSlots());
         var cases = new List<TableCase> {
             valid,
             twoInstructions,
+            twoModuleTransitions,
             WithWord(valid, 16, uint.MaxValue),
+            WithWord(valid, 12, uint.MaxValue),
+            WithWord(valid, 44, uint.MaxValue - 2),
+            WithWord(WithWord(valid, 44, uint.MaxValue), 48, 0),
+            unusedSlots,
+            Reject(ChangeHalfWord(unusedSlots, 38, 0)),
+            Reject(ChangeWord(unusedSlots, 40, 0)),
+            Reject(ChangeWord(unusedSlots, 44, 0)),
+            Reject(ChangeHalfWord(unusedSlots, 54, 1)),
+            Reject(ChangeWord(unusedSlots, 60, 1)),
             Reject(valid with { RecordCount = 0 }),
             Reject(valid with { RecordCount = 2 }),
             Reject(valid with { SourceMaps = valid.SourceMaps[..^1] }),
             Reject(ChangeWord(valid, 0, 0)),
+            Reject(ChangeWord(valid, 0, uint.MaxValue)),
             Reject(ChangeHalfWord(valid, 4, 0x003F)),
             Reject(ChangeHalfWord(valid, 6, 0)),
             Reject(ChangeWord(valid, 8, 0)),
@@ -58,9 +71,11 @@ public sealed class SourceMapTableValidationComponentTests
             Reject(ChangeWord(valid, 36, 0)),
             Reject(ChangeWord(valid, 36, 2)),
             Reject(ChangeWord(valid, 36, 3)),
+            Reject(ChangeWord(valid, 36, uint.MaxValue)),
             Reject(ChangeWord(valid, 40, 0)),
             Reject(ChangeWord(valid, 40, 1)),
             Reject(ChangeWord(valid, 40, 3)),
+            Reject(ChangeWord(valid, 40, uint.MaxValue)),
             Reject(ChangeWord(valid, 44, uint.MaxValue)),
             Reject(ChangeWord(twoInstructions, 68, 1)),
             Reject(CreateCase(twoModules: true, fileRow: 2)),
@@ -147,7 +162,7 @@ public sealed class SourceMapTableValidationComponentTests
     }
 
     private static TableCase CreateCase(bool twoMethods = false,
-        bool twoModules = false, uint fileRow = 1)
+        bool twoModules = false, uint fileRow = 1, bool reverseBodyOwners = false)
     {
         var names = twoModules
             ? TrRmStringTableWriter.EncodeNames([
@@ -157,7 +172,7 @@ public sealed class SourceMapTableValidationComponentTests
                 ("Module", 0), ("Run", 0), ("src/A", 0),
             ]);
         var moduleCount = twoModules ? 2 : 1;
-        var methodCount = twoMethods ? 2 : 1;
+        var methodCount = twoMethods || twoModules ? 2 : 1;
         var sourceFileCount = twoModules ? 2 : 1;
         var methodName = twoModules ? 3u : 2u;
         var sourceFileBytes = new byte[sourceFileCount * 8];
@@ -172,10 +187,13 @@ public sealed class SourceMapTableValidationComponentTests
         {
             Write(methodBytes, row * 28 + 4, methodName);
             Write(methodBytes, row * 28 + 8, 1);
-            Write(methodBytes, row * 28 + 24, (uint)row + 1);
+            var bodyRow = reverseBodyOwners ? (uint)(methodCount - row) : (uint)row + 1;
+            Write(methodBytes, row * 28 + 24, bodyRow);
         }
 
-        var sourceMap = twoMethods ? TwoInstructionMap() : Map(fileRow);
+        var sourceMap = twoModules && reverseBodyOwners
+            ? TwoModuleMap()
+            : twoMethods ? TwoInstructionMap() : Map(fileRow);
         return new TableCase(
             [.. names.Select(static value => (int)value)],
             [.. EncodeModules(moduleCount, methodCount, sourceFileCount)
@@ -190,7 +208,7 @@ public sealed class SourceMapTableValidationComponentTests
             methodCount,
             sourceFileCount,
             methodCount,
-            methodCount,
+            twoMethods || reverseBodyOwners ? 2 : 1,
             true,
             true);
     }
@@ -200,6 +218,9 @@ public sealed class SourceMapTableValidationComponentTests
 
     private static TableCase ChangeWord(TableCase testCase, int offset, uint value)
         => Reject(WithWord(testCase, offset, value));
+
+    private static TableCase WithSourceMap(TableCase testCase, byte[] sourceMap)
+        => testCase with { SourceMaps = [.. sourceMap.Select(static item => (int)item)] };
 
     private static TableCase WithWord(TableCase testCase, int offset, uint value)
     {
@@ -253,7 +274,7 @@ public sealed class SourceMapTableValidationComponentTests
             Write(modules, offset + 4, 1);
             Write(modules, offset + 28, 1);
             Write(modules, offset + 32, 1);
-            Write(modules, offset + 36, row == 0 ? 1u : (uint)methodCount + 1);
+            Write(modules, offset + 36, row == 0 ? 1u : (uint)methodCount);
             Write(modules, offset + 40, row == 0 ? 1u : (uint)sourceFileCount);
         }
         return modules;
@@ -304,6 +325,49 @@ public sealed class SourceMapTableValidationComponentTests
         Write(bytes, 72, 3);
         Write(bytes, 76, 2);
         Write(bytes, 80, 3);
+        return bytes;
+    }
+
+    private static byte[] TwoModuleMap()
+    {
+        var bytes = new byte[100];
+        Write(bytes, 0, 4);
+        WriteHalfWord(bytes, 4, 0x0020);
+        WriteHalfWord(bytes, 6, 1);
+        Write(bytes, 8, 2);
+        Write(bytes, 12, 1);
+        WriteHalfWord(bytes, 20, 0x0020);
+        WriteHalfWord(bytes, 22, 1);
+        Write(bytes, 24, 1);
+        Write(bytes, 28, 1);
+        WriteHalfWord(bytes, 36, 0x001F);
+        Write(bytes, 40, 1);
+        WriteHalfWord(bytes, 52, 0x001F);
+        Write(bytes, 56, 2);
+        Write(bytes, 68, 1);
+        Write(bytes, 72, 3);
+        Write(bytes, 76, 0);
+        Write(bytes, 80, 2);
+        Write(bytes, 84, 2);
+        Write(bytes, 88, 4);
+        Write(bytes, 92, 2);
+        Write(bytes, 96, 3);
+        return bytes;
+    }
+
+    private static byte[] MapWithUnusedSlots()
+    {
+        var original = Map(1);
+        var bytes = new byte[84];
+        Write(bytes, 0, 4);
+        original.AsSpan(4, 32).CopyTo(bytes.AsSpan(4));
+        WriteHalfWord(bytes, 36, 0x0020);
+        WriteHalfWord(bytes, 38, 1);
+        Write(bytes, 40, 1);
+        Write(bytes, 44, 1);
+        WriteHalfWord(bytes, 52, 0x001F);
+        Write(bytes, 56, 1);
+        original.AsSpan(36, 16).CopyTo(bytes.AsSpan(68));
         return bytes;
     }
 
