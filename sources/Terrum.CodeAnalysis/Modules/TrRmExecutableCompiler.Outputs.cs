@@ -296,6 +296,41 @@ public static partial class TrRmExecutableCompiler
                     }
                     break;
                 }
+                case 4:
+                case 0x1C:
+                {
+                    if (operation.Operands.Length != 1)
+                    {
+                        throw Invalid("Unary requires one value.");
+                    }
+
+                    var operand = ReadValue(operation.Operands[0]);
+                    var isFloatNegation = operation.Opcode == 0x1C;
+                    var valid = isFloatNegation
+                        ? IsFloat(operand.Type)
+                        : operation.Kind switch
+                        {
+                            1 => operand.Type == PrimitiveType.Bool,
+                            2 or 3 => IsInteger(operand.Type),
+                            _ => false,
+                        };
+                    if (!valid)
+                    {
+                        throw Invalid("Unary operand is outside the executable place profile.");
+                    }
+
+                    var token = isFloatNegation
+                        ? TokenKind.Minus
+                        : operation.Kind switch
+                        {
+                            1 => TokenKind.Bang,
+                            2 => TokenKind.Tilde,
+                            _ => TokenKind.Plus,
+                        };
+                    DefineValue(operation.Result,
+                        new BoundUnary(token, operand, operand.Type, default));
+                    break;
+                }
                 case 5:
                 case 0x19:
                 {
@@ -690,6 +725,39 @@ public static partial class TrRmExecutableCompiler
                     _ = AddValue(PrimitiveType.Int32, 0, (uint)constOffset);
                     _operationCount++;
                     return constResult;
+                case BoundUnary unary when unary.Type == unary.Operand.Type
+                    && (unary.Operator switch
+                    {
+                        TokenKind.Bang => unary.Type == PrimitiveType.Bool,
+                        TokenKind.Tilde or TokenKind.Plus => IsInteger(unary.Type),
+                        TokenKind.Minus => IsFloat(unary.Type),
+                        _ => false,
+                    }):
+                {
+                    var unaryOperand = EmitValue(unary.Operand);
+                    var unaryResult = _valueTypes.Count + 1;
+                    var unaryOpcode = unary.Operator == TokenKind.Minus ? (byte)0x1C : (byte)4;
+                    var unaryKind = unary.Operator switch
+                    {
+                        TokenKind.Bang => 1,
+                        TokenKind.Tilde => 2,
+                        TokenKind.Plus => 3,
+                        _ => 0,
+                    };
+                    var unaryWidth = Width((ulong)Math.Max(unaryResult, unaryOperand));
+                    var unaryOffset = _operations.Count;
+                    WriteInstruction(_operations, unaryOpcode, unaryWidth, 0);
+                    Write(_operations, (ulong)unaryResult, unaryWidth);
+                    if (unaryOpcode == 4)
+                    {
+                        _operations.Add((byte)unaryKind);
+                    }
+                    Write(_operations, (ulong)unaryOperand, unaryWidth);
+                    _ = AddValue(unary.Type, 0, (uint)unaryOffset);
+                    UseValue(unaryOperand, _operationCount);
+                    _operationCount++;
+                    return unaryResult;
+                }
                 case BoundBinary binary when binary.Type == binary.Left.Type
                     && binary.Left.Type == binary.Right.Type && IsInteger(binary.Left.Type)
                     && binary.Operator is TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret:

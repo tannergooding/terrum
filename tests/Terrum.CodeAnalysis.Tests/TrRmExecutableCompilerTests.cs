@@ -137,6 +137,17 @@ public sealed class TrRmExecutableCompilerTests
     [InlineData("(Unsigned64One() & Unsigned64Three()) == Unsigned64One()", 42)]
     [InlineData("(Unsigned64One() | Unsigned64Two()) == Unsigned64Three()", 42)]
     [InlineData("(Unsigned64One() ^ Unsigned64Two()) == Unsigned64Three()", 42)]
+    [InlineData("(!FalseValue()) == TrueValue()", 42)]
+    [InlineData("(+Signed32One()) == Signed32One()", 42)]
+    [InlineData("(~Signed32One()) == Signed32MinusTwo()", 42)]
+    [InlineData("(+Unsigned32One()) == Unsigned32One()", 42)]
+    [InlineData("(~Unsigned32One()) == Unsigned32ComplementOne()", 42)]
+    [InlineData("(+Signed64One()) == Signed64One()", 42)]
+    [InlineData("(~Signed64One()) == Signed64MinusTwo()", 42)]
+    [InlineData("(+Unsigned64One()) == Unsigned64One()", 42)]
+    [InlineData("(~Unsigned64One()) == Unsigned64ComplementOne()", 42)]
+    [InlineData("(-SingleOne()) == NegativeSingleOne()", 42)]
+    [InlineData("(-WideOne()) == NegativeWideOne()", 42)]
     [InlineData("SingleOne() == SingleOne()", 42)]
     [InlineData("SingleOne() != SingleTwo()", 42)]
     [InlineData("SingleOne() < SingleTwo()", 42)]
@@ -149,7 +160,7 @@ public sealed class TrRmExecutableCompilerTests
     [InlineData("WideOne() <= WideOne()", 42)]
     [InlineData("WideTwo() > WideOne()", 42)]
     [InlineData("WideOne() >= WideOne()", 42)]
-    public void ScalarComparisonsRoundTripInOutputBodies(string comparison, int expected)
+    public void ScalarOperationsRoundTripInOutputBodies(string expression, int expected)
     {
         var source = $$"""
             void Fill(int32 value, init ref<int32> result) { result = value; }
@@ -161,22 +172,28 @@ public sealed class TrRmExecutableCompilerTests
             int32 Signed32One() { return 1; }
             int32 Signed32Two() { return 2; }
             int32 Signed32Three() { return 3; }
+            int32 Signed32MinusTwo() { return -2; }
             uint32 Unsigned32One() { return uint32(1); }
             uint32 Unsigned32Two() { return uint32(2); }
             uint32 Unsigned32Three() { return uint32(3); }
+            uint32 Unsigned32ComplementOne() { return ~uint32(1); }
             int64 Signed64One() { return int64(1); }
             int64 Signed64Two() { return int64(2); }
             int64 Signed64Three() { return int64(3); }
+            int64 Signed64MinusTwo() { return int64(-2); }
             uint64 Unsigned64One() { return uint64(1); }
             uint64 Unsigned64Two() { return uint64(2); }
             uint64 Unsigned64Three() { return uint64(3); }
+            uint64 Unsigned64ComplementOne() { return ~uint64(1); }
             float32 SingleOne() { return float32(1.0); }
             float32 SingleTwo() { return float32(2.0); }
+            float32 NegativeSingleOne() { return float32(-1.0); }
             float64 WideOne() { return float64(1.0); }
             float64 WideTwo() { return float64(2.0); }
+            float64 NegativeWideOne() { return float64(-1.0); }
             int32 Main() {
                 init int32 result;
-                Fill(Observe({{comparison}}), init result);
+                Fill(Observe({{expression}}), init result);
                 return result;
             }
             """;

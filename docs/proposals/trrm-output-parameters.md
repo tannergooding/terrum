@@ -91,9 +91,11 @@ arithmetic operations. The writer and loader also provisionally support
 Boolean, `char16` and integer equality/inequality, integer ordering, and all
 six floating comparisons, with `bool` results. Non-`int32` local constants
 remain excluded. Integer bitwise AND, OR and XOR are supported for all four
-integer types. The one-block control-flow boundary is unchanged. These value,
-comparison and bitwise paths are implemented support only, not approval of the
-proposed executable contract.
+integer types. Unary support is limited to Boolean NOT, integer NOT and unary
+plus, and floating negation; checked signed-integer negation remains excluded
+to avoid changing this slice's failure contract. The one-block control-flow
+boundary is unchanged. These value, comparison, bitwise and unary paths are
+implemented support only, not approval of the proposed executable contract.
 
 The broader proposal remains unresolved. In particular, Boolean status facts
 are call-specific and require correlation with their particular destinations;
