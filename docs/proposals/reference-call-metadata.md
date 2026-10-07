@@ -75,7 +75,7 @@ replacements, forged unique contracts and bounded rejection of repeated
 nested-layout imports. These checks do not approve the broader proposal or add
 source-free executable authorization.
 
-### Implemented provisionally in semantic-module revision 65: expression-scoped top-level calls
+### Implemented provisionally in semantic-module revision 66: expression-scoped scalar calls
 
 **Summary:** The accepted grammar lets `unsafe(expr)` authorize caller-unsafe
 operations within one expression. Earlier hosted binding flattened that scope
@@ -84,12 +84,13 @@ not distinguish an expression-scoped call from an unscoped forged
 authorization and rejected it. The existing `BoundUnsafe` statement scope
 remains independently retained and reconstructed structurally.
 
-**Implementation:** Binding retains an explicit expression-scope node, and
-revision 65 serializes its exact wrapped-expression extent. Readers reconstruct
-authorization from that structural containment rather than trusting a
-serialized authorization bit. Expression scopes may authorize only existing
-caller-unsafe top-level functions with scalar by-value signatures. Caller-
-unsafe fields and members, expression-scoped reference/output loans, and
+**Implementation:** Revision 65 first persisted expression scopes for
+caller-unsafe top-level functions. Revision 66 extends the same structural
+wrapper to ordinary static methods on eligible public, non-unique `Copy`
+structs. Both call forms require scalar by-value parameters and results.
+Readers reconstruct authorization from the wrapper's structural containment
+rather than trusting a serialized authorization bit. Instance methods,
+getters, operators, fields, expression-scoped reference/output loans and
 executable TRRM expression scopes remain outside this slice. This preserves
 the source contract without approving the broader caller-obligation metadata
 proposal.

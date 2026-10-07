@@ -3125,39 +3125,43 @@ internal sealed partial class Binder
         }
     }
 
-    private bool ContainsAuthorizedTopLevelCall(BoundExpression expression) => expression switch {
-        BoundUnsafeExpression unsafeExpression => ContainsAuthorizedTopLevelCall(unsafeExpression.Expression),
-        BoundRequiredConstant required => ContainsAuthorizedTopLevelCall(required.Operand),
+    private bool ContainsAuthorizedExpressionScopeCall(BoundExpression expression) => expression switch {
+        BoundUnsafeExpression unsafeExpression => ContainsAuthorizedExpressionScopeCall(unsafeExpression.Expression),
+        BoundRequiredConstant required => ContainsAuthorizedExpressionScopeCall(required.Operand),
         BoundCall call => (call.IsUnsafeAuthorized && call.Function >= 0
-            && call.Function < _signatures.Count && _signatures[call.Function].StructName is null)
-            || call.Arguments.Any(ContainsAuthorizedTopLevelCall),
-        BoundUnary unary => ContainsAuthorizedTopLevelCall(unary.Operand),
-        BoundUpdate update => ContainsAuthorizedTopLevelCall(update.Place),
-        BoundNominalUpdate update => ContainsAuthorizedTopLevelCall(update.Place),
-        BoundCompoundAssignment compound => ContainsAuthorizedTopLevelCall(compound.Place)
-            || ContainsAuthorizedTopLevelCall(compound.Right),
-        BoundBinary binary => ContainsAuthorizedTopLevelCall(binary.Left)
-            || ContainsAuthorizedTopLevelCall(binary.Right),
-        BoundConditional conditional => ContainsAuthorizedTopLevelCall(conditional.Condition)
-            || ContainsAuthorizedTopLevelCall(conditional.WhenTrue)
-            || ContainsAuthorizedTopLevelCall(conditional.WhenFalse),
-        BoundCoalesce coalesce => ContainsAuthorizedTopLevelCall(coalesce.Optional)
-            || ContainsAuthorizedTopLevelCall(coalesce.Fallback),
-        BoundCast cast => ContainsAuthorizedTopLevelCall(cast.Operand),
-        BoundFieldRead field => ContainsAuthorizedTopLevelCall(field.Receiver),
-        BoundFieldLoan loan => ContainsAuthorizedTopLevelCall(loan.Place),
-        BoundMutableFieldLoan loan => ContainsAuthorizedTopLevelCall(loan.Place),
-        BoundViewRead view => ContainsAuthorizedTopLevelCall(view.Index),
-        BoundBufferRead buffer => ContainsAuthorizedTopLevelCall(buffer.Index),
-        BoundSpanLength length => ContainsAuthorizedTopLevelCall(length.View),
-        BoundSpanRead read => ContainsAuthorizedTopLevelCall(read.View)
-            || ContainsAuthorizedTopLevelCall(read.Index),
-        BoundSpanAdvance advance => ContainsAuthorizedTopLevelCall(advance.View),
-        BoundOptionalLift lift => ContainsAuthorizedTopLevelCall(lift.Value),
-        BoundReadonlyProjection projection => ContainsAuthorizedTopLevelCall(projection.Value),
-        BoundIsNull test => ContainsAuthorizedTopLevelCall(test.Value),
-        BoundIsSome pattern => ContainsAuthorizedTopLevelCall(pattern.Value),
-        BoundIsVariablePattern pattern => ContainsAuthorizedTopLevelCall(pattern.Value),
+            && call.Function < _signatures.Count
+            && (_signatures[call.Function].StructName is null
+                || _signatures[call.Function] is {
+                    IsStatic: true, IsOperator: false, PropertyName: null,
+                }))
+            || call.Arguments.Any(ContainsAuthorizedExpressionScopeCall),
+        BoundUnary unary => ContainsAuthorizedExpressionScopeCall(unary.Operand),
+        BoundUpdate update => ContainsAuthorizedExpressionScopeCall(update.Place),
+        BoundNominalUpdate update => ContainsAuthorizedExpressionScopeCall(update.Place),
+        BoundCompoundAssignment compound => ContainsAuthorizedExpressionScopeCall(compound.Place)
+            || ContainsAuthorizedExpressionScopeCall(compound.Right),
+        BoundBinary binary => ContainsAuthorizedExpressionScopeCall(binary.Left)
+            || ContainsAuthorizedExpressionScopeCall(binary.Right),
+        BoundConditional conditional => ContainsAuthorizedExpressionScopeCall(conditional.Condition)
+            || ContainsAuthorizedExpressionScopeCall(conditional.WhenTrue)
+            || ContainsAuthorizedExpressionScopeCall(conditional.WhenFalse),
+        BoundCoalesce coalesce => ContainsAuthorizedExpressionScopeCall(coalesce.Optional)
+            || ContainsAuthorizedExpressionScopeCall(coalesce.Fallback),
+        BoundCast cast => ContainsAuthorizedExpressionScopeCall(cast.Operand),
+        BoundFieldRead field => ContainsAuthorizedExpressionScopeCall(field.Receiver),
+        BoundFieldLoan loan => ContainsAuthorizedExpressionScopeCall(loan.Place),
+        BoundMutableFieldLoan loan => ContainsAuthorizedExpressionScopeCall(loan.Place),
+        BoundViewRead view => ContainsAuthorizedExpressionScopeCall(view.Index),
+        BoundBufferRead buffer => ContainsAuthorizedExpressionScopeCall(buffer.Index),
+        BoundSpanLength length => ContainsAuthorizedExpressionScopeCall(length.View),
+        BoundSpanRead read => ContainsAuthorizedExpressionScopeCall(read.View)
+            || ContainsAuthorizedExpressionScopeCall(read.Index),
+        BoundSpanAdvance advance => ContainsAuthorizedExpressionScopeCall(advance.View),
+        BoundOptionalLift lift => ContainsAuthorizedExpressionScopeCall(lift.Value),
+        BoundReadonlyProjection projection => ContainsAuthorizedExpressionScopeCall(projection.Value),
+        BoundIsNull test => ContainsAuthorizedExpressionScopeCall(test.Value),
+        BoundIsSome pattern => ContainsAuthorizedExpressionScopeCall(pattern.Value),
+        BoundIsVariablePattern pattern => ContainsAuthorizedExpressionScopeCall(pattern.Value),
         _ => false,
     };
 
@@ -3188,7 +3192,7 @@ internal sealed partial class Binder
                 {
                     _unsafeDepth--;
                 }
-                expression = !alreadyUnsafe && ContainsAuthorizedTopLevelCall(operand)
+                expression = !alreadyUnsafe && ContainsAuthorizedExpressionScopeCall(operand)
                     ? new BoundUnsafeExpression(operand, node.Span)
                     : operand;
                 break;

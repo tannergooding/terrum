@@ -77,7 +77,7 @@ public sealed partial class NativeManagedClassModuleTests
     {
         var program = Compile(ValueExportSource, NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(program, ["Echo"]);
-        Assert.Equal(65,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(66,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         Assert.Equal("native-19", ModuleCompiler.GetNativeProfileVersion(producer, false));
         Assert.Equal("Echo", Assert.Single(ModuleCompiler.CreateReference(producer).Functions).Name);
         var native = NativeModuleCompiler.CreateProducer(program, ["Echo"], "NodeB",
@@ -99,7 +99,7 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """, NativeRuntimePolicy.FailFast);
         var original = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.Equal(65,BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)));
+        Assert.Equal(66,BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)));
         _ = ModuleCompiler.CreateReference(original);
         var forged = (byte[])original.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(4, 4), 31);
@@ -137,7 +137,7 @@ public sealed partial class NativeManagedClassModuleTests
         var originalProgram = Compile(originalSource, policy);
         var replacementProgram = Compile(replacementSource, policy);
         var original = ModuleCompiler.CreateProducer(originalProgram, ["Vault.Read"]);
-        Assert.Equal(65,BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)));
+        Assert.Equal(66,BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)));
         var reference = ModuleCompiler.CreateReference(original);
         Assert.Equal("Vault", Assert.Single(reference.Structures).Name);
         var consumer = ModuleCompiler.CreateConsumer(Compile(Consumer, policy, reference,
@@ -218,7 +218,7 @@ public sealed partial class NativeManagedClassModuleTests
         var program = Compile(source.ToString(), policy);
         string[] exports = ["Make", "Echo", "CollectGarbage"];
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.Equal(65,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(66,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.Equal(21, reference.Structures.Length);
         Assert.All(reference.Structures, static structure => Assert.Equal(4, structure.Size));
@@ -287,7 +287,7 @@ public sealed partial class NativeManagedClassModuleTests
         var consumerHash = SHA256.HashData(consumer);
         var replacementProgram = Compile(replacementSource, policy);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, exports);
-        Assert.Equal(65,BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
+        Assert.Equal(66,BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
         var reference = ModuleCompiler.CreateReference(replacement);
         Assert.Equal("PublicPair", Assert.Single(reference.Structures).Name);
         var downgraded = (byte[])replacement.Clone();
@@ -385,7 +385,7 @@ public sealed partial class NativeManagedClassModuleTests
         var originalProducer = ModuleCompiler.CreateProducer(originalProgram, exports);
         var program = Compile(ConditionalValueSource, policy);
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.Equal(65,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(66,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var consumer = ModuleCompiler.CreateConsumer(Compile(consumerSource, policy,
             ModuleCompiler.CreateReference(originalProducer), library: false), originalProducer);
         var consumerHash = SHA256.HashData(consumer);
@@ -646,7 +646,7 @@ public sealed partial class NativeManagedClassModuleTests
             ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var replacement = ModuleCompiler.CreateProducer(managedProgram, exports);
-        Assert.Equal(65,BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
+        Assert.Equal(66,BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
         var publicStructure = Assert.Single(ModuleCompiler.CreateReference(replacement).Structures);
         Assert.Equal("Snapshot", publicStructure.Name);
         Assert.Equal(12, publicStructure.Size);

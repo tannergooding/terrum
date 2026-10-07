@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 65;
+    private const int Version = 66;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1095,7 +1095,7 @@ public static partial class ModuleCompiler
         foreach (var owner in consumerOwned)
         {
             functions[owner] = functions[owner] with {
-                Body = (BoundBlock)ResolveStatement(functions[owner].Body, names, resolvedFunctions),
+                Body = (BoundBlock)ResolveStatement(functions[owner].Body, names, resolvedFunctions, allStructures),
             };
         }
         foreach (var owner in producerOwned)
@@ -1107,7 +1107,7 @@ public static partial class ModuleCompiler
                 function = function with { ClassConstructor = producerNames[constructor] };
             }
             functions[owner] = function with {
-                Body = (BoundBlock)ResolveStatement(function.Body, producerNames, resolvedFunctions),
+                Body = (BoundBlock)ResolveStatement(function.Body, producerNames, resolvedFunctions, allStructures),
             };
         }
         var result = new BoundProgram(functions.ToImmutable(), consumer.EntryPoint) {
@@ -1417,25 +1417,25 @@ public static partial class ModuleCompiler
 
     private static void ValidateUnsafeExpressionScopes(BoundProgram program)
     {
+        var valueTypes = new ModuleUnsafeValueTypeCache(program.Structures);
         foreach (var function in program.Functions)
         {
-            _ = Calls(function.Body, visitExpression: expression =>
-            {
+            _ = Calls(function.Body, visitExpression: expression => {
                 if (expression is not BoundUnsafeExpression unsafeExpression)
                 {
                     return;
                 }
                 _ = Calls(new BoundExpressionStatement(unsafeExpression.Expression, unsafeExpression.Span),
-                    visitExpression: scopedExpression =>
-                    {
+                    visitExpression: scopedExpression => {
                         switch (scopedExpression)
                         {
                             case BoundCall { IsUnsafeAuthorized: true } call
                                 when (uint)call.Function < (uint)program.Functions.Length:
-                                if (!IsSupportedModuleUnsafeTopLevelCall(program.Functions[call.Function]))
+                                if (!IsSupportedModuleUnsafeExpressionCall(program.Functions[call.Function],
+                                    program.Structures, valueTypes))
                                 {
                                     throw new ModuleContractException(
-                                        "Expression-scoped unsafe calls require a supported top-level scalar function.");
+                                        "Expression-scoped unsafe calls require a supported scalar callable.");
                                 }
                                 break;
                             case BoundCall { IsUnsafeAuthorized: true }:
@@ -1456,12 +1456,41 @@ public static partial class ModuleCompiler
         }
     }
 
+    private static bool IsSupportedModuleUnsafeExpressionCall(BoundFunction function,
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
+    {
+        if (!function.RequiresUnsafeCaller)
+        {
+            return false;
+        }
+        if (function.DeclaringStruct is null)
+        {
+            return IsSupportedModuleUnsafeTopLevelCall(function);
+        }
+        if (!function.IsStatic || function.IsOperator || function.PropertyName is not null
+            || !IsSupportedModuleUnsafeMethod(function, structures, valueTypes))
+        {
+            return false;
+        }
+        return IsSupportedModuleUnsafeScalarSignature(function);
+    }
+
     private static bool IsSupportedModuleUnsafeTopLevelCall(BoundFunction function)
     {
         if (!function.RequiresUnsafeCaller || function.DeclaringStruct is not null
             || function.IsConstructor || function.IsClassConstructor || function.IsCleanup
             || function.Intrinsic != BoundIntrinsic.None || function.ParameterCount > function.Variables.Length
-            || !IsScalarModuleContractType(function.ReturnType))
+            || !IsSupportedModuleUnsafeScalarSignature(function))
+        {
+            return false;
+        }
+        return true;
+    }
+
+    private static bool IsSupportedModuleUnsafeScalarSignature(BoundFunction function)
+    {
+        if (!IsScalarModuleContractType(function.ReturnType)
+            || function.ParameterCount > function.Variables.Length)
         {
             return false;
         }
@@ -3721,186 +3750,197 @@ public static partial class ModuleCompiler
     {
         var declarations = program.Functions;
         var functions = declarations.Select(function => function with {
-            Body = (BoundBlock)ResolveStatement(function.Body, names, declarations),
+            Body = (BoundBlock)ResolveStatement(function.Body, names, declarations, program.Structures),
         }).ToImmutableArray();
         return program with { Functions = functions };
     }
 
     private static BoundStatement ResolveStatement(BoundStatement statement, IReadOnlyDictionary<string, int> names,
-        IReadOnlyList<BoundFunction> functions, bool inUnsafe = false) => statement switch {
-        BoundBlock block => block with { Statements = [.. block.Statements.Select(child =>
-            ResolveStatement(child, names, functions, inUnsafe))] },
-        BoundLocal local => local with { Initializer = ResolveExpression(local.Initializer, names, functions, inUnsafe) },
-        BoundLifetimeEnd or BoundOwnerDeclaration or BoundVacantLocal => statement,
-        BoundAssignment assignment => assignment with { Value = ResolveExpression(assignment.Value, names, functions, inUnsafe) },
-        BoundOptionalAssignment optionalAssignment => optionalAssignment with {
-            Place = ResolveExpression(optionalAssignment.Place, names, functions, inUnsafe),
-            Value = ResolveExpression(optionalAssignment.Value, names, functions, inUnsafe),
-        },
-        BoundFieldAssignment field => field with {
-            Value = ResolveExpression(field.Value, names, functions, inUnsafe),
-            IsUnsafeAuthorized = inUnsafe,
-        },
-        BoundExpressionStatement expression => expression with {
-            Expression = ResolveExpression(expression.Expression, names, functions, inUnsafe),
-        },
-        BoundIf conditional => conditional with {
-            Condition = ResolveExpression(conditional.Condition, names, functions, inUnsafe),
-            Then = ResolveStatement(conditional.Then, names, functions, inUnsafe),
-            Else = conditional.Else is null ? null : ResolveStatement(conditional.Else, names, functions, inUnsafe),
-        },
-        BoundWhile loop => loop with {
-            Condition = ResolveExpression(loop.Condition, names, functions, inUnsafe),
-            Body = ResolveStatement(loop.Body, names, functions, inUnsafe),
-            Iterator = loop.Iterator is null ? null : ResolveStatement(loop.Iterator, names, functions, inUnsafe),
-        },
-        BoundBreak or BoundContinue => statement,
-        BoundTryFinally cleanup => cleanup with {
-            Body = (BoundBlock)ResolveStatement(cleanup.Body, names, functions, inUnsafe),
-            Finally = (BoundBlock)ResolveStatement(cleanup.Finally, names, functions, inUnsafe),
-        },
-        BoundViewScope view => view with {
-            Owner = ResolveExpression(view.Owner, names, functions, inUnsafe),
-            Start = ResolveExpression(view.Start, names, functions, inUnsafe),
-            Length = ResolveExpression(view.Length, names, functions, inUnsafe),
-            RangeEnd = view.RangeEnd is null ? null : ResolveExpression(view.RangeEnd, names, functions, inUnsafe),
-            Body = (BoundBlock)ResolveStatement(view.Body, names, functions, inUnsafe),
-        },
-        BoundViewSet write => write with {
-            Index = ResolveExpression(write.Index, names, functions, inUnsafe),
-            Value = ResolveExpression(write.Value, names, functions, inUnsafe),
-        },
-        BoundBufferAssignment write => write with {
-            Index = ResolveExpression(write.Index, names, functions, inUnsafe),
-            Value = ResolveExpression(write.Value, names, functions, inUnsafe),
-        },
-        SymbolicDrop drop => drop.Name is null
-            ? new BoundDrop(drop.Variable, -1, drop.Span) { IsOutput = drop.IsOutput }
-            : names.TryGetValue(drop.Name, out var method)
-                ? new BoundDrop(drop.Variable, method, drop.Span) { IsOutput = drop.IsOutput }
-                : throw new ModuleContractException($"Unresolved cleanup target '{drop.Name}'."),
-        BoundDrop => statement,
-        SymbolicLifetimeEnd end => end.Name is null
-            ? new BoundLifetimeEnd(end.Variable, -1, end.Span)
-            : names.TryGetValue(end.Name, out var cleanup)
-                ? new BoundLifetimeEnd(end.Variable, cleanup, end.Span)
-                : throw new ModuleContractException($"Unresolved cleanup target '{end.Name}'."),
-        BoundDropConstructedFields => statement,
-        BoundUnsafe unsafeBlock => unsafeBlock with {
-            Body = (BoundBlock)ResolveStatement(unsafeBlock.Body, names, functions, inUnsafe: true),
-        },
-        BoundTryCatch recovery => recovery with {
-            Body = (BoundBlock)ResolveStatement(recovery.Body, names, functions, inUnsafe),
-            Catch = (BoundBlock)ResolveStatement(recovery.Catch, names, functions, inUnsafe),
-            Finally = recovery.Finally is null
-                ? null : (BoundBlock)ResolveStatement(recovery.Finally, names, functions, inUnsafe),
-        },
-        BoundRequire requirement => requirement with {
-            Condition = ResolveExpression(requirement.Condition, names, functions, inUnsafe),
-        },
-        BoundReturn result => result with {
-            Value = result.Value is null ? null : ResolveExpression(result.Value, names, functions, inUnsafe),
-        },
-        _ => throw new ModuleFormatException("Unknown statement kind."),
-    };
+        IReadOnlyList<BoundFunction> functions, ImmutableArray<BoundStruct> structures, bool inUnsafe = false) => statement switch {
+            BoundBlock block => block with {
+                Statements = [.. block.Statements.Select(child =>
+            ResolveStatement(child, names, functions, structures, inUnsafe))]
+            },
+            BoundLocal local => local with {
+                Initializer = ResolveExpression(local.Initializer, names, functions, structures, inUnsafe),
+            },
+            BoundLifetimeEnd or BoundOwnerDeclaration or BoundVacantLocal => statement,
+            BoundAssignment assignment => assignment with {
+                Value = ResolveExpression(assignment.Value, names, functions, structures, inUnsafe),
+            },
+            BoundOptionalAssignment optionalAssignment => optionalAssignment with {
+                Place = ResolveExpression(optionalAssignment.Place, names, functions, structures, inUnsafe),
+                Value = ResolveExpression(optionalAssignment.Value, names, functions, structures, inUnsafe),
+            },
+            BoundFieldAssignment field => field with {
+                Value = ResolveExpression(field.Value, names, functions, structures, inUnsafe),
+                IsUnsafeAuthorized = inUnsafe,
+            },
+            BoundExpressionStatement expression => expression with {
+                Expression = ResolveExpression(expression.Expression, names, functions, structures, inUnsafe),
+            },
+            BoundIf conditional => conditional with {
+                Condition = ResolveExpression(conditional.Condition, names, functions, structures, inUnsafe),
+                Then = ResolveStatement(conditional.Then, names, functions, structures, inUnsafe),
+                Else = conditional.Else is null ? null
+                    : ResolveStatement(conditional.Else, names, functions, structures, inUnsafe),
+            },
+            BoundWhile loop => loop with {
+                Condition = ResolveExpression(loop.Condition, names, functions, structures, inUnsafe),
+                Body = ResolveStatement(loop.Body, names, functions, structures, inUnsafe),
+                Iterator = loop.Iterator is null ? null
+                    : ResolveStatement(loop.Iterator, names, functions, structures, inUnsafe),
+            },
+            BoundBreak or BoundContinue => statement,
+            BoundTryFinally cleanup => cleanup with {
+                Body = (BoundBlock)ResolveStatement(cleanup.Body, names, functions, structures, inUnsafe),
+                Finally = (BoundBlock)ResolveStatement(cleanup.Finally, names, functions, structures, inUnsafe),
+            },
+            BoundViewScope view => view with {
+                Owner = ResolveExpression(view.Owner, names, functions, structures, inUnsafe),
+                Start = ResolveExpression(view.Start, names, functions, structures, inUnsafe),
+                Length = ResolveExpression(view.Length, names, functions, structures, inUnsafe),
+                RangeEnd = view.RangeEnd is null ? null
+                    : ResolveExpression(view.RangeEnd, names, functions, structures, inUnsafe),
+                Body = (BoundBlock)ResolveStatement(view.Body, names, functions, structures, inUnsafe),
+            },
+            BoundViewSet write => write with {
+                Index = ResolveExpression(write.Index, names, functions, structures, inUnsafe),
+                Value = ResolveExpression(write.Value, names, functions, structures, inUnsafe),
+            },
+            BoundBufferAssignment write => write with {
+                Index = ResolveExpression(write.Index, names, functions, structures, inUnsafe),
+                Value = ResolveExpression(write.Value, names, functions, structures, inUnsafe),
+            },
+            SymbolicDrop drop => drop.Name is null
+                ? new BoundDrop(drop.Variable, -1, drop.Span) { IsOutput = drop.IsOutput }
+                : names.TryGetValue(drop.Name, out var method)
+                    ? new BoundDrop(drop.Variable, method, drop.Span) { IsOutput = drop.IsOutput }
+                    : throw new ModuleContractException($"Unresolved cleanup target '{drop.Name}'."),
+            BoundDrop => statement,
+            SymbolicLifetimeEnd end => end.Name is null
+                ? new BoundLifetimeEnd(end.Variable, -1, end.Span)
+                : names.TryGetValue(end.Name, out var cleanup)
+                    ? new BoundLifetimeEnd(end.Variable, cleanup, end.Span)
+                    : throw new ModuleContractException($"Unresolved cleanup target '{end.Name}'."),
+            BoundDropConstructedFields => statement,
+            BoundUnsafe unsafeBlock => unsafeBlock with {
+                Body = (BoundBlock)ResolveStatement(unsafeBlock.Body, names, functions, structures, inUnsafe: true),
+            },
+            BoundTryCatch recovery => recovery with {
+                Body = (BoundBlock)ResolveStatement(recovery.Body, names, functions, structures, inUnsafe),
+                Catch = (BoundBlock)ResolveStatement(recovery.Catch, names, functions, structures, inUnsafe),
+                Finally = recovery.Finally is null
+                    ? null : (BoundBlock)ResolveStatement(recovery.Finally, names, functions, structures, inUnsafe),
+            },
+            BoundRequire requirement => requirement with {
+                Condition = ResolveExpression(requirement.Condition, names, functions, structures, inUnsafe),
+            },
+            BoundReturn result => result with {
+                Value = result.Value is null ? null
+                    : ResolveExpression(result.Value, names, functions, structures, inUnsafe),
+            },
+            _ => throw new ModuleFormatException("Unknown statement kind."),
+        };
 
     private static BoundExpression ResolveExpression(BoundExpression expression, IReadOnlyDictionary<string, int> names,
-        IReadOnlyList<BoundFunction> functions, bool inUnsafe, bool inUnsafeExpression = false) => expression switch {
-        SymbolicCall call when names.TryGetValue(call.Name, out var index)
-            && (!inUnsafeExpression || !functions[index].RequiresUnsafeCaller
-                || IsSupportedModuleUnsafeTopLevelCall(functions[index])) =>
-            new BoundCall(index, [.. call.Arguments.Select(argument =>
-                ResolveExpression(argument, names, functions, inUnsafe, inUnsafeExpression))], call.Type, call.Span) {
-                ArgumentParameterIndices = call.ArgumentParameterIndices,
-                IsUnsafeAuthorized = (inUnsafe || inUnsafeExpression)
-                    && functions[index].RequiresUnsafeCaller
-                    && (!inUnsafeExpression || functions[index].DeclaringStruct is null),
+        IReadOnlyList<BoundFunction> functions, ImmutableArray<BoundStruct> structures, bool inUnsafe,
+        bool inUnsafeExpression = false) => expression switch {
+            SymbolicCall call when names.TryGetValue(call.Name, out var index)
+                && (!inUnsafeExpression || !functions[index].RequiresUnsafeCaller
+                    || IsSupportedModuleUnsafeExpressionCall(functions[index], structures,
+                        new ModuleUnsafeValueTypeCache(structures))) =>
+                new BoundCall(index, [.. call.Arguments.Select(argument =>
+                ResolveExpression(argument, names, functions, structures, inUnsafe, inUnsafeExpression))],
+                    call.Type, call.Span) {
+                    ArgumentParameterIndices = call.ArgumentParameterIndices,
+                    IsUnsafeAuthorized = (inUnsafe || inUnsafeExpression) && functions[index].RequiresUnsafeCaller,
+                },
+            SymbolicCall call when names.TryGetValue(call.Name, out _) =>
+                throw new ModuleContractException(
+                    "Expression-scoped unsafe calls require a supported scalar callable."),
+            SymbolicCall call =>
+                throw new ModuleContractException($"Unresolved call target '{call.Name}'."),
+            BoundUnsafeExpression unsafeExpression => unsafeExpression with {
+                Expression = ResolveExpression(unsafeExpression.Expression, names, functions,
+                    structures, inUnsafe, inUnsafeExpression: true),
             },
-        SymbolicCall call when names.TryGetValue(call.Name, out _) =>
-            throw new ModuleContractException(
-                "Expression-scoped unsafe calls require a supported top-level scalar function."),
-        SymbolicCall call =>
-            throw new ModuleContractException($"Unresolved call target '{call.Name}'."),
-        BoundUnsafeExpression unsafeExpression => unsafeExpression with {
-            Expression = ResolveExpression(unsafeExpression.Expression, names, functions,
-                inUnsafe, inUnsafeExpression: true),
-        },
-        BoundOutArgument when inUnsafeExpression =>
-            throw new ModuleContractException("Expression-scoped output loans are unsupported."),
-        BoundReceiverLoan or BoundMutableReceiverLoan when inUnsafeExpression =>
-            throw new ModuleContractException("Expression-scoped receiver loans are unsupported."),
-        BoundFieldLoan or BoundMutableFieldLoan when inUnsafeExpression =>
-            throw new ModuleContractException("Expression-scoped field loans are unsupported."),
-        BoundUnary unary => unary with {
-            Operand = ResolveExpression(unary.Operand, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        BoundUpdate update => update with {
-            Place = ResolveExpression(update.Place, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        BoundCompoundAssignment compound => compound with {
-            Place = ResolveExpression(compound.Place, names, functions, inUnsafe, inUnsafeExpression),
-            Right = ResolveExpression(compound.Right, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        SymbolicNominalUpdate update when inUnsafeExpression
-            && names.TryGetValue(update.Name, out var unsafeMethod)
-            && functions[unsafeMethod].RequiresUnsafeCaller =>
-            throw new ModuleContractException("Expression-scoped unsafe operators are unsupported."),
-        SymbolicNominalUpdate update => names.TryGetValue(update.Name, out var method)
-            ? new BoundNominalUpdate(update.Operator,
-                ResolveExpression(update.Place, names, functions, inUnsafe, inUnsafeExpression),
-                update.IsPrefix, method, update.Type, update.Span) {
+            BoundOutArgument when inUnsafeExpression =>
+                throw new ModuleContractException("Expression-scoped output loans are unsupported."),
+            BoundReceiverLoan or BoundMutableReceiverLoan when inUnsafeExpression =>
+                throw new ModuleContractException("Expression-scoped receiver loans are unsupported."),
+            BoundFieldLoan or BoundMutableFieldLoan when inUnsafeExpression =>
+                throw new ModuleContractException("Expression-scoped field loans are unsupported."),
+            BoundUnary unary => unary with {
+                Operand = ResolveExpression(unary.Operand, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            BoundUpdate update => update with {
+                Place = ResolveExpression(update.Place, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            BoundCompoundAssignment compound => compound with {
+                Place = ResolveExpression(compound.Place, names, functions, structures, inUnsafe, inUnsafeExpression),
+                Right = ResolveExpression(compound.Right, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            SymbolicNominalUpdate update when inUnsafeExpression
+                && names.TryGetValue(update.Name, out var unsafeMethod)
+                && functions[unsafeMethod].RequiresUnsafeCaller =>
+                throw new ModuleContractException("Expression-scoped unsafe operators are unsupported."),
+            SymbolicNominalUpdate update => names.TryGetValue(update.Name, out var method)
+                ? new BoundNominalUpdate(update.Operator,
+                    ResolveExpression(update.Place, names, functions, structures, inUnsafe, inUnsafeExpression),
+                    update.IsPrefix, method, update.Type, update.Span) {
                     IsUnsafeAuthorized = inUnsafe && functions[method].RequiresUnsafeCaller,
                 }
-            : throw new ModuleContractException($"Unresolved update operator '{update.Name}'."),
-        BoundBinary binary => binary with {
-            Left = ResolveExpression(binary.Left, names, functions, inUnsafe, inUnsafeExpression),
-            Right = ResolveExpression(binary.Right, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        BoundCoalesce coalesce => coalesce with {
-            Optional = ResolveExpression(coalesce.Optional, names, functions, inUnsafe, inUnsafeExpression),
-            Fallback = ResolveExpression(coalesce.Fallback, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        BoundConditional conditional => conditional with {
-            Condition = ResolveExpression(conditional.Condition, names, functions, inUnsafe, inUnsafeExpression),
-            WhenTrue = ResolveExpression(conditional.WhenTrue, names, functions, inUnsafe, inUnsafeExpression),
-            WhenFalse = ResolveExpression(conditional.WhenFalse, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        BoundCast cast => cast with {
-            Operand = ResolveExpression(cast.Operand, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        BoundOptionalLift lift => lift with {
-            Value = ResolveExpression(lift.Value, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        BoundReadonlyProjection projection => projection with {
-            Value = ResolveExpression(projection.Value, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        BoundIsNull test => test with {
-            Value = ResolveExpression(test.Value, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        BoundIsSome pattern => pattern with {
-            Value = ResolveExpression(pattern.Value, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        BoundIsVariablePattern pattern => pattern with {
-            Value = ResolveExpression(pattern.Value, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        BoundFieldRead field => field with {
-            Receiver = ResolveExpression(field.Receiver, names, functions, inUnsafe, inUnsafeExpression),
-            IsUnsafeAuthorized = inUnsafe,
-        },
-        BoundFieldLoan loan => loan with {
-            Place = (BoundFieldRead)ResolveExpression(loan.Place, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        BoundMutableFieldLoan loan => loan with {
-            Place = (BoundFieldRead)ResolveExpression(loan.Place, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        BoundViewRead view => view with {
-            Index = ResolveExpression(view.Index, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        BoundBufferRead buffer => buffer with {
-            Index = ResolveExpression(buffer.Index, names, functions, inUnsafe, inUnsafeExpression),
-        },
-        _ => expression,
-    };
+                : throw new ModuleContractException($"Unresolved update operator '{update.Name}'."),
+            BoundBinary binary => binary with {
+                Left = ResolveExpression(binary.Left, names, functions, structures, inUnsafe, inUnsafeExpression),
+                Right = ResolveExpression(binary.Right, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            BoundCoalesce coalesce => coalesce with {
+                Optional = ResolveExpression(coalesce.Optional, names, functions, structures, inUnsafe, inUnsafeExpression),
+                Fallback = ResolveExpression(coalesce.Fallback, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            BoundConditional conditional => conditional with {
+                Condition = ResolveExpression(conditional.Condition, names, functions, structures, inUnsafe, inUnsafeExpression),
+                WhenTrue = ResolveExpression(conditional.WhenTrue, names, functions, structures, inUnsafe, inUnsafeExpression),
+                WhenFalse = ResolveExpression(conditional.WhenFalse, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            BoundCast cast => cast with {
+                Operand = ResolveExpression(cast.Operand, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            BoundOptionalLift lift => lift with {
+                Value = ResolveExpression(lift.Value, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            BoundReadonlyProjection projection => projection with {
+                Value = ResolveExpression(projection.Value, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            BoundIsNull test => test with {
+                Value = ResolveExpression(test.Value, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            BoundIsSome pattern => pattern with {
+                Value = ResolveExpression(pattern.Value, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            BoundIsVariablePattern pattern => pattern with {
+                Value = ResolveExpression(pattern.Value, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            BoundFieldRead field => field with {
+                Receiver = ResolveExpression(field.Receiver, names, functions, structures, inUnsafe, inUnsafeExpression),
+                IsUnsafeAuthorized = inUnsafe,
+            },
+            BoundFieldLoan loan => loan with {
+                Place = (BoundFieldRead)ResolveExpression(loan.Place, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            BoundMutableFieldLoan loan => loan with {
+                Place = (BoundFieldRead)ResolveExpression(loan.Place, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            BoundViewRead view => view with {
+                Index = ResolveExpression(view.Index, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            BoundBufferRead buffer => buffer with {
+                Index = ResolveExpression(buffer.Index, names, functions, structures, inUnsafe, inUnsafeExpression),
+            },
+            _ => expression,
+        };
 
     private static PrimitiveType GetType(BinaryReader reader)
     {
