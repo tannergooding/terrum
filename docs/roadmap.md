@@ -73,10 +73,13 @@ prerequisite has already been met.
    caller-unsafe static binary nominal operators on recursively exportable
    public `Copy` owners. The full call must be enclosed, use two exact
    by-value owner operands and canonical positional mapping, and satisfy the
-   existing owner-result or comparison-`bool` signature contract. Unary
-   operators and nominal updates remain outside this expression-scope slice;
-   existing unsafe-block behavior is unchanged. This adds no ABI, TRRM or
-   scalar-frontend support and does not approve the broader proposal.
+   existing owner-result or comparison-`bool` signature contract. Revision 74
+   provisionally adds recognized unary plus, negation, logical-not and
+   ones-complement calls with an exact by-value owner operand and an existing
+   unary-contract result; caller-unsafe nominal updates remain outside
+   expression-scope support. Existing unsafe-block behavior is unchanged.
+   These slices add no ABI, TRRM or scalar-frontend support and do not approve
+   the broader proposal.
    Revision 64 also provisionally
    persists identity for supported static operators on public `Copy` structs,
    preserving unsafe effects and nominal-update target checks. These bounded

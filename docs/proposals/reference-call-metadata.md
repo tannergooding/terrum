@@ -439,6 +439,34 @@ support, nominal updates, operator lowering and ABI are unchanged. This
 bounded persistence slice does not add TRRM or scalar-frontend
 verification/emission support and does not approve the broader proposal.
 
+### Provisional extension: caller-unsafe unary operators in expression scopes
+
+**Summary:** Revision 73 handles eligible caller-unsafe binary static nominal
+operators in `unsafe(expr)`, but unary operator calls still lose their
+expression-scope wrapper during persistence. Nominal `++`/`--` are
+`BoundNominalUpdate` nodes rather than unary `BoundCall`s and need separate
+writeback treatment.
+
+**Recommendation:** Extend persistence only for recognized non-update unary
+operator declarations (`+`, `-`, `!`, `~`) on eligible public, non-unique
+`Copy` owners. Require one by-value operand of the exact owner type, the
+existing unary operator result contract, a complete `BoundCall` within
+`BoundUnsafeExpression`, and canonical default positional mapping. Reuse the
+existing declaration/layout gate and reconstruct authorization from the
+resolved operator and enclosing expression; do not add an authorization bit,
+new call representation, purity promise, ABI, TRRM or scalar-frontend
+verification/emission support. Keep nominal updates outside expression-scope
+support.
+
+**Implemented provisionally in semantic-module revision 74:** The binder
+retains the expression wrapper for eligible recognized unary calls. Both
+writer and reader apply the same unary signature/layout, scope and positional
+mapping checks. Regression coverage exercises the four operator keys,
+distinct result types, consumer-local and imported calls, forged mappings,
+stripped wrappers, operand-only scopes, nominal-update exclusion, semantic
+linking, and native graphs/module sets under both runtime policies. This
+bounded persistence slice does not approve the broader proposal.
+
 ### Provisional extension: caller-unsafe readonly getters
 
 **Summary:** The accepted source contract supports caller-unsafe getter

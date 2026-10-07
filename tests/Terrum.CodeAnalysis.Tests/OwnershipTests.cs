@@ -1885,7 +1885,7 @@ public sealed class OwnershipTests
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var exports = new[] { "Token.Close", "Token.Read", "Pair.Close", "Pair.Read", "Make", "Take" };
         var semanticProducer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.Equal(73,BinaryPrimitives.ReadInt32LittleEndian(semanticProducer.AsSpan(4, 4)));
+        Assert.Equal(74,BinaryPrimitives.ReadInt32LittleEndian(semanticProducer.AsSpan(4, 4)));
         var staleVersion = (byte[])semanticProducer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(staleVersion.AsSpan(4, 4), 13);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(staleVersion));

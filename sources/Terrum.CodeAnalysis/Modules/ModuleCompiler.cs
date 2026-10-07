@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 73;
+    private const int Version = 74;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1557,8 +1557,10 @@ public static partial class ModuleCompiler
         if (function.IsOperator)
         {
             return function.IsStatic && function.DeclaringStruct is string owner
-                && Binder.TryGetStaticOperatorKey(function.Name, owner, out var key) && key.Arity == 2
-                && function.ParameterCount == 2 && arguments.Length == 2
+                && Binder.TryGetStaticOperatorKey(function.Name, owner, out var key)
+                && key.Arity is 1 or 2
+                && key.Operator is not (TokenKind.PlusPlus or TokenKind.MinusMinus)
+                && function.ParameterCount == key.Arity && arguments.Length == key.Arity
                 && argumentParameterIndices.IsDefault
                 && IsSupportedModuleOperatorContract(
                     Contract(function, structures), structures, valueTypes, requirePublic: true);
