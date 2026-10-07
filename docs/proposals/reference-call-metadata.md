@@ -155,6 +155,57 @@ round trips, safe replacement, native module sets and graphs under both
 runtime policies. This remains a persistence experiment, not approval of the
 broader metadata proposal.
 
+### Provisional extension: caller-unsafe field reads in `unsafe(expr)`
+
+**Recommendation:** Extend revision 67's retained expression wrapper to
+caller-unsafe value reads from public instance fields on eligible public,
+non-unique `Copy` structs with recursively exportable layouts. Validate the
+receiver owner, field index and declared/result type at every projected field
+edge, and reuse the existing structure-table-scoped layout whitelist/cache.
+Readers reconstruct authorization only where the wrapper structurally
+contains the read; a safe projection outside the wrapper remains outside its
+scope. This changes expression eligibility and therefore requires a new
+semantic-module revision, but adds no wrapper payload.
+
+Keep the slice read-only. Do not admit field updates, compound or nominal
+updates, field/reference/output loans, getters, instance methods, operators,
+class/static/foreign fields, TRRM expression scopes or scalar-frontend
+verification/emission. Existing unsafe-block field reads, writes, updates and
+supported mutable receiver loans remain unchanged. This recommendation does
+not approve the broader caller-obligation metadata proposal.
+
+**Implemented provisionally:** Semantic-module revision 68 retains
+`unsafe(expr)` around eligible caller-unsafe field-value reads, including
+nested paths, safe projections outside the wrapper, and mixed expressions
+with revision-67 calls. Writer and reader checks use the same recursive
+public-`Copy` boundary. Expression-authorized field paths are rejected when
+used as mutation places, and the existing expression-scope loan exclusions
+remain in force. Both runtime policies are covered through semantic modules,
+native graphs and module sets. The proposal remains unapproved.
+
+### Provisional extension: caller-unsafe getters in `unsafe(expr)`
+
+**Recommendation:** Extend revision 68's retained expression wrapper to
+caller-unsafe readonly instance getters and storage-free static getters on
+eligible public, non-unique `Copy` owners. Allow scalar or recursively
+exportable public `Copy` results. Preserve canonical getter identity,
+accessor-local effects and receiver shape: an instance getter has exactly one
+readonly by-value receiver and no explicit parameters; a static getter has no
+receiver or parameters. Keep “readonly” as a receiver contract, not a purity
+or `NoThrow` promise.
+
+Retain the wrapper for getter-only expressions, and reconstruct authorization
+only for getter accesses structurally within it. Validate serialized getter
+identity strictly, while allowing only the established internal producer
+qualification during linking. A getter result remains a value, not a backing
+place: do not add setter, mutation, loan, auto/backed-property, `field`,
+initializer, mutable/class getter, TRRM or scalar-frontend support. Preserve
+evaluation-once behavior and accessor-local `NoThrow` checks. This changes
+expression-scope eligibility and therefore requires the next semantic-module
+revision under the single-revision reader policy, without adding payload
+fields. The recommendation remains unapproved and does not approve the broader
+reference-call metadata proposal.
+
 ### Provisional extension: caller-unsafe readonly getters
 
 **Summary:** The accepted source contract supports caller-unsafe getter

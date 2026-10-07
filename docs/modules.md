@@ -46,91 +46,24 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 65. Writers use it for every producer,
-consumer and graph library; readers accept only revision 67. Revision 48 adds
-the initialization-aware optional-handle pattern expression, recording its
-source expression, capture slot and whether initialized null is accepted.
-Revision 49 adds expression tag 28 for named-storage initialization tests,
-recording the tested variable slot. Revision 50 records source-order call
-arguments separately from their formal parameter positions, preserving named
-by-value argument binding across producer and consumer artifacts. Revision 51
-adds a separately persisted absolute range end to lexical readonly-view scopes,
-so dynamic absolute endpoints evaluate once in source order. Revision 50 and
-older are retired and must be recreated from source. Revision 52 adds explicit
-relative-mode flags for lexical view endpoints, preserving dynamic end-relative
-offsets through producer and consumer artifacts. Revision 51 and older are
-retired and must be recreated from source. Revision 53 adds the `float32` and
-`float64` primitive payload types; revision 52 and older were retired and must
-be recreated from source. Revision 54 records top-level caller-unsafe function
-contracts and retains explicit unsafe-block scopes in structured semantic
-modules. Import readers derive call authorization from those scopes; at
-revision 54, calls authorized only by `unsafe(expr)`, unsafe fields, accessors,
-operators, and caller-unsafe TRRM Bodies were unsupported. Revision 56 and older were retired
-by the current reader and must be recreated from source. Revision 55
-introduced a provisional invocation-scoped `Host.Source` requirement and
-symbolic source length/read operations. Revision 56 retains that contract and
-adds a named invocation-profile identity plus ordered buffer descriptors
-(name, primitive element type and mutability); it stores no sample contents or
-sample-derived capacities. Structured `BoundBufferAssignment` statements also
-persist as tag 27 so scanner output writes survive producer/consumer storage.
-`NativeJit.ExecuteWithSourceGrant` remains the source-only entry point, while
-`NativeJit.ExecuteWithScannerProfile` binds the canonical `scanner-10` buffers
-fresh for each invocation and publishes copied, validated lexical and integer
-results only after normal completion. The scanner profile includes the source
-grant and rejects unsupported profile compositions. Graphs, module sets,
-native DLLs and persisted AOT remain unsupported. The source-only boundary is
-covered by the still-unapproved
-[source-grant proposal](proposals/invocation-scoped-source-grant.md).
-Revision 57 provisionally extended structured semantic-module caller-unsafe
-support to ordinary readonly instance methods on public, non-unique `Copy`
-structs whose layouts are exportable. Revision 58 adds ordinary static methods
-on the same owners. Revision 59 additionally admits public, non-unique `Copy`
-structs as explicit by-value parameters and results, provided their recursively
-exported layouts contain only public, non-unique `Copy` structs and scalar
-fields. The method slices remain by-value; static methods have no synthesized
-receiver. Readers reconstruct call authorization only from persisted
-`unsafe { }` scopes. An unsafe import remains compatible with a safe
-replacement across semantic links and native graph/module-set links under both
-runtime policies. Revision 60 additionally admits caller-unsafe readonly
-instance getters on those owners when the getter returns a scalar by value.
-Revision 61 additionally admits storage-free caller-unsafe static getters on
-those owners when the getter returns a scalar by value. Revision 62 extends
-both getter slices to return recursively exportable, non-unique `Copy`
-structs by value, while retaining their distinct property identity, static or
-readonly-instance receiver shape, and `BoundUnsafe`-only authorization.
-Revision 63 provisionally persists caller-unsafe public instance fields on
-public, non-unique `Copy` structs with recursively exportable public layouts.
-It persists field obligations, reconstructs access authorization only from
-`BoundUnsafe` blocks and requires exact field-contract compatibility across
-semantic links, native graphs and module sets. Existing mutable receiver loans
-through eligible field paths are supported with authorization checked at each
-field edge. Readonly field loans and `unsafe(expr)`-only persistence remain
-unsupported. Class/static/foreign fields, reference/output, unique, managed,
-buffer/view and other non-Copy member contracts remain unsupported.
-Revision 64 provisionally persists explicit identity for existing safe and
-caller-unsafe static operators on eligible public, non-unique `Copy` structs.
-The marker is checked for canonical owner/name/signature shape in body-backed
-and bodyless declarations, is structural across links, graphs and module sets,
-and is required by nominal update verification. Caller-unsafe operations still
-require persisted `BoundUnsafe` scopes. This does not add operator lowering,
-native ABI, or executable TRRM support.
-Revision 67 provisionally persists explicit `unsafe(expr)` scopes for
-caller-unsafe top-level functions with scalar by-value signatures. Expression
-tag 31 retains the exact expression boundary; readers reconstruct call
-authorization from that structure. Unsafe member/field operations and
-reference/output loans remain unsupported in expression scopes, as does
-executable TRRM expression-scope support. This bounded extension does not
-approve the broader reference-call metadata proposal.
-Executable TRRM member support is unchanged. Revision 64 and older artifacts
-are retired and must be recreated from source.
-These experiments do not approve the broader reference-call metadata proposal.
-The scanner-specific implementation is provisional and its design remains
-unapproved; see the
-[scanner invocation-profile proposal](proposals/scanner-invocation-profile.md).
-This revision is independent of native profile labels, native package and graph
-container formats, and scalar frontend projection revisions. See
-[implementation](implementation.md) for the compiler support boundary and
-[roadmap](roadmap.md) for scheduled format work.
+The current semantic-module revision is 68. Writers emit only revision 68 and
+readers reject every other revision; older artifacts must be recreated from
+source. The current format preserves verified, typed, source-mapped structured
+IR and the supported declaration, layout, initialization, cleanup, and runtime
+contracts described in this reference and the [implementation reference](implementation.md).
+
+Revision 68 provisionally persists caller-unsafe field-value reads inside
+`unsafe(expr)` for eligible public `Copy` paths, alongside the existing
+expression-scoped call slice. Unsafe-block field mutation and supported
+mutable-field loans remain separate; expression scopes do not add mutation,
+loan, TRRM, or scalar-frontend verification/emission support. The broader
+[reference-call metadata proposal](proposals/reference-call-metadata.md)
+remains unapproved.
+
+The invocation-scoped source grant and `scanner-10` profile remain provisional
+semantic-module JIT capabilities under their respective proposals. They bind
+fresh invocation inputs and do not imply graph, module-set, native DLL, or
+persisted AOT support.
 
 ## Current artifact and loading rules
 
@@ -623,173 +556,7 @@ fail-fast process termination counts as NoThrow. A version-ordering policy and
 resilient public layouts remain undefined; cyclic dependencies remain
 unsupported.
 
-### Retired semantic-module revision history
-
-The following feature notes document implementation milestones only. They do
-not describe current writer selection or reader compatibility: current
-artifacts always use revision 67, and older semantic-module revisions are
-rejected.
-
-Version 12 stored the unique layout flag, declared cleanup method, cleanup
-function contract, explicit move/receiver-loan nodes and lexical drop regions.
-Version 13 additionally stored ownership transfer markers on retained function
-declarations, conditional output drops and vacant `out var` owner declarations.
-Version 14 recorded partial-constructor cleanup regions with actual acquisition
-order and readonly owning-field places. Complete owners run their own NoThrow
-cleanup before nested owning fields in reverse declaration order; constructor
-failure cleans only acquired fields in reverse acquisition order. Retained
-composite unique layouts select `native-14` regardless of whether a declaration
-also transfers an owner. The runtime policy remains an independent artifact
-property, separate from the native package container version.
-The semantic profile is computed from retained layouts and declaration
-markers: native-13 requires an owning parameter or output; older native-12
-continues to describe unique locals/returns. Versions 10 through 13 remain
-readable with their original layouts and contracts. Version 14 retains version
-13's scalar wire encoding; composite requirements cannot be downgraded to an
-older format or profile.
-Version 15 added the compiler-owned `OwnedInt32Buffer` identity, its canonical
-intrinsic operation markers and reserved mutable-receiver loans. The resource
-selects `native-15` from retained layouts, function bodies or declaration
-contracts (including imports without bodies); a consumer cannot reinterpret
-an imported owning buffer as a plain eight-byte integer. Native packages keep
-their existing container version; the resource contract and selected runtime
-policy remain in the embedded semantic profile. Versions 10 through 14 remain
-readable under their original profiles.
-Version 16 added lexical `BoundViewScope`, `BoundViewLength` and `BoundViewRead`
-nodes, retaining the owner place and range expressions through serialization,
-remapping and linking. A function with a readonly buffer-view local selects
-`native-16` even when that view does not appear in an exported declaration;
-no view crosses a call or module ABI boundary. Version 15 modules remain
-readable with their original intrinsic and mutable-loan wire tags.
-Readers also preserve v15's historical `native-15` label caused solely by
-a seven-parameter declaration; current writers classify actual value types,
-not parameter counts.
-Version 17 retained the view scope's exclusivity, its checked `BoundViewSet`
-effects, and the canonical `OwnedInt32Buffer.Clear` intrinsic. A retained
-writable view or used clear operation selects `native-17`; an unused intrinsic
-declaration does not promote an existing buffer-only program. Version 16
-readonly-view modules retain their original wire layout and profile. Neither
-view type can appear in a field or exported/imported function contract.
-Version 18 also retained lexical managed-root scope and retirement metadata.
-It admits image-private `ManagedNode` operations in a leaf producer with
-scalar/void, by-value-only public exports. The DLL owns and explicitly collects
-its own unreachable graph; no managed handle crosses a module or native DLL
-boundary. The package reader verifies the retained `native-18` profile, roots
-and node operations before permitting the DLL's bounded heap imports.
-At that milestone, earlier modules remained readable under their original
-versions.
-The version 19 `.trm` variant was written for leaf producers with private
-source classes whose fields are scalar or managed references. It stores their bounded field layouts, constructor/factory
-association, optional-handle expressions and exact lexical roots, and validates
-the complete retained class/function table on reload. Class leaves select
-`native-19`, or `native-20` when optional handles occur; class-free modules keep
-their version 18 wire layout and historical profiles. Exports remain scalar/void
-by-value declarations, and a v19 managed leaf cannot import another provider.
-Source classes and managed handles never become imported module layouts or
-native DLL values. An optional-node-only program without a private source
-class remains outside this bounded module increment. Class leaves with
-acyclic, handle-free Copy struct fields use semantic version 20, retaining
-their private nested value layouts and natural field alignment. Versions 18
-and 19 keep their original wire layouts and reject inline class fields; class
-leaves without those fields still write version 19. Native `native-19` and
-`native-20` profiles still depend on optional handles, not the presence of a
-private Copy field. Collection is local to the leaf image; no DLL-unload heap
-cleanup of live objects is promised. For a runnable version 20 replacement,
-use the [Copy-field class leaf](../samples/native/graph/managed-copy-class-leaf.terrum)
-as the producer source in the [unchanged-root graph example](native-graph.md).
-Semantic version 21 records nearest-loop `break` and `continue` and uses a
-separate iterator-bearing loop tag when `continue` must run a `for` iterator.
-The original while tag and unchanged for lowering retain their existing
-bytes; producers, consumers, and class-free graph libraries write version 21
-only when they retain a loop transfer or explicit iterator. Readers reject the
-new tags in versions 18 through 20. Loop transfers do not change exported
-declarations, native runtime profiles, or module dependency policy.
-Semantic version 22 admits compact handle-free Copy struct parameters in private
-class constructor/factory signatures. It retains and remaps their nested private
-layouts even when the constructor stores only scalar fields. Versions 19 through
-21 reject these parameters rather than interpreting them with the former
-scalar/handle factory convention. Unaffected modules retain their older writer
-versions and bytes. The new signatures stay private behind scalar exports;
-native graph replacement does not rewrite root or intermediate images.
-Semantic version 23 admits class constructors with more than three inputs,
-up to 63 within the ordinary 64-argument receiver/output-inclusive bound.
-It composes with the earlier Copy-argument and loop-transfer features; readers
-of versions through 22 retain the three-input restriction. Native profiles and
-the private managed-leaf dependency policy do not change.
-Semantic version 24 carries the managed class/`ManagedNode` access contract.
-Semantic version 25 adds a distinct `MutReceiver` contract for persisted,
-non-exported mutating methods on non-owning compact structs. Source visibility
-may be public or private; methods can be invoked through named mutable locals
-or their writable nested fields, or forwarded through an existing writable
-`this` and its writable fields. Older headers reject methods
-requiring this contract. Semantic version 26 adds nested mutable-field loan
-expressions; v25 and earlier headers reject the new expression tag. The
-serialized path uses field identities, not unchecked byte offsets, and is
-remapped and verified against the linked private layouts. Writers select v26
-only when a body contains such a loan; whole-local mutable receivers retain
-v25. Semantic v27 permits ordinary mutating methods on unique structs,
-retaining the existing pointer receiver lowering and cleanup contract.
-Readonly loans cannot target those methods, and earlier headers reject
-them even though the method/loan record shapes are unchanged.
-Semantic v28 extends nested mutable-field loans through unique roots and
-children. Writer selection inspects the serialized function's field paths
-against the module's remapped layouts, including loans in symbolic call
-arguments. Earlier headers reject unique-root field loans; programs needing
-only the v25-v27 contracts retain their existing versions.
-Semantic v29 admits mutable owning-buffer field loans only for the existing
-`Set`, `TryAppend` and `Clear` intrinsics. Version selection examines symbolic
-call arguments; earlier headers reject these loans, while programs requiring
-only earlier receiver contracts retain their versions. At v29, the physical
-native ABI and then-current scalar-only public boundary did not change.
-Semantic v30 adds mutable `BoundViewScope` acquisitions whose owner is a
-writable buffer-field loan. Writers select v30 for that scoped contract;
-v29 and earlier headers reject it, while named mutable views and ordinary
-buffer-field calls retain their earlier versions. Field paths are remapped
-against private layouts, and linking revalidates initialization, writable
-access and whole-root exclusion.
-Semantic v31 permits managed-backed leaf producers to export existing public,
-handle-free compact `Copy` structs of at most 16 bytes as by-value parameters
-and results, and through the existing `bool`/`out` conditional-output contract,
-including scalar outputs. Public-field visibility and nominal type provenance
-apply to `Copy` types actually crossing an argument or result ABI, not
-automatically to the export's declaring owner. Existing scalar-only static
-exports on public owner types with private fields remain valid, and a static
-declaration on a unique owner does not transfer that owner. `NoThrow`
-contracts and the existing Windows x64 aggregate classification remain part
-of the contract; returned or published snapshots are values independent of
-the producer's private managed heap. Managed handles, unique values, nested
-managed-containing values, views, reference modes and mutating-receiver ABI
-remain excluded, and v31 managed leaves could not import another producer.
-Writers select semantic v31 when an expanded export contract requires it;
-scalar-only managed producers retain their prior required version, and older
-headers reject expanded contracts. This adds no syntax or native physical ABI
-or profile version.
-Programs requiring none of these contracts retain their existing versions and bytes
-regardless of managedness. The ordinary readonly/by-value receiver ABI is unchanged.
-Public scalar entry wrappers may call non-exported mutating methods; source
-`public` visibility does not expose a public mutating-receiver ABI, and private
-helpers remain private. At the v24 milestone, readers normalized private managed artifacts from
-versions 18 through 23 into explicitly qualified internal IR. That historical
-behavior is retired: current modules record access authority directly and do
-not normalize older revisions. The native physical handle ABI and absence of a
-public managed-handle ABI remain unchanged. The v32 milestone added managed roots and intermediate
-producers in persisted acyclic native graphs, subject to the scalar and
-compact `Copy` value boundary above; it does not create cross-image shared
-collection or graph cycles. Semantic v32 also supports private managed
-consumers through the existing single-provider semantic `CreateConsumer`/
-`Link` path and native single-provider and module-set entry points. Semantic modules
-statically link into one image, remap private class identities, and use one
-heap/root domain. Persisted native EXE/DLL sets retain separate image heaps
-and root chains; imported calls preserve caller roots, and collection remains
-image-local. A compatible semantic provider may be selected each time
-`run-module` starts; JIT code is generated from the persisted artifacts for
-that launch. `link-module` emits a fresh PE for the selected provider;
-replacing a semantic provider does not change an already linked PE. Native
-package replacement leaves the persisted consumer image unchanged. Managed
-handles, unique values, views, reference modes and mutating-receiver ABI
-cannot cross these boundaries. This adds no public semantic `LinkSet` or
-native-set JIT API, syntax, scanner, native physical ABI/profile or graph
-package-format change.
+## Native package and image boundaries
 
 For the managed `Snapshot` consumer, compile both compatible providers and one
 consumer artifact per policy. `run-module` services that same consumer
