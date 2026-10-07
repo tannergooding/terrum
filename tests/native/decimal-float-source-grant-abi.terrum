@@ -1,0 +1,51 @@
+namespace Terrum.CodeAnalysis;
+
+int32 FailSourceGrantArgument()
+{
+    require false;
+    return 0;
+}
+
+int32 ReadOwnedSourceGrantValueHelper(OwnedInt32Buffer value, int32 index)
+{
+    if (Host.Source.Length == 1 && index == 0 && Host.Source[index] == char16(42))
+    {
+        return value.Read(0);
+    }
+    return 0;
+}
+
+public int32 ReadOwnedSourceGrantValue(int32 index)
+{
+    if (Host.Source.Length != 1 || index != 0)
+    {
+        return 0;
+    }
+
+    require OwnedInt32Buffer.TryCreate(1, out var created);
+    mut OwnedInt32Buffer value = move created;
+    require value.TryAppend(int32(Host.Source[index]));
+    return ReadOwnedSourceGrantValueHelper(move value, index);
+}
+
+int32 FailAfterOwnerMoveHelper(OwnedInt32Buffer value, int32 index)
+{
+    if (Host.Source.Length == 1)
+    {
+        return value.Read(index);
+    }
+    return 0;
+}
+
+public int32 FailAfterSourceGrantOwnerMove()
+{
+    if (Host.Source.Length != 1)
+    {
+        return 0;
+    }
+
+    require OwnedInt32Buffer.TryCreate(1, out var created);
+    mut OwnedInt32Buffer value = move created;
+    require value.TryAppend(int32(Host.Source[0]));
+    return FailAfterOwnerMoveHelper(move value, FailSourceGrantArgument());
+}

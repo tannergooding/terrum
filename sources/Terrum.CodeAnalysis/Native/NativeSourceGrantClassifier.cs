@@ -350,23 +350,39 @@ internal static class NativeSourceGrantClassifier
         {
             if (reachable[functionIndex])
             {
-                ValidateDependentFunction(program.Functions[functionIndex]);
+                ValidateDependentFunction(program, program.Functions[functionIndex]);
             }
         }
 
         return dependent;
 
-        static void ValidateDependentFunction(BoundFunction function)
+        static void ValidateDependentFunction(BoundProgram program, BoundFunction function)
         {
-            if (function.IsExternal || function.IndexedBody is not null
-                || function.Intrinsic != BoundIntrinsic.None || function.DeclaringStruct is not null
-                || function.IsConstructor || !IsScalar(function.ReturnType))
+            if (function.Intrinsic != BoundIntrinsic.None)
+            {
+                if (!IsSupportedWorkspaceIntrinsic(function))
+                {
+                    throw Unsupported();
+                }
+
+                return;
+            }
+            if (function.ParameterCount < 0 || function.ParameterCount > function.Variables.Length
+                || function.IsExternal || function.IndexedBody is not null || function.DeclaringStruct is not null
+                || function.IsConstructor || (!IsScalar(function.ReturnType)
+                    && (function.ReturnType != PrimitiveType.OwnedInt32Buffer || !function.IsInternal)))
             {
                 throw Unsupported();
             }
-            foreach (var variable in function.Variables)
+            for (var variableIndex = 0; variableIndex < function.Variables.Length; variableIndex++)
             {
-                if (!IsScalar(variable.Type) || variable.IsOut)
+                var variable = function.Variables[variableIndex];
+                var isParameter = variableIndex < function.ParameterCount;
+                var isOwner = variable.Type == PrimitiveType.OwnedInt32Buffer;
+                var isView = IsBufferView(variable.Type);
+                if ((!IsScalar(variable.Type) && !isOwner && !isView) || variable.IsOut
+                    || (isOwner && ((!function.IsInternal && isParameter) || variable.IsInit))
+                    || (isView && (isParameter || variable.IsInit)))
                 {
                     throw Unsupported();
                 }
@@ -380,7 +396,7 @@ internal static class NativeSourceGrantClassifier
                 while (expressions.Count != 0)
                 {
                     var expression = expressions.Pop();
-                    if (!IsScalar(expression.Type))
+                    if (!IsScalar(expression.Type) && !IsWorkspaceType(expression.Type))
                     {
                         throw Unsupported();
                     }
@@ -389,7 +405,18 @@ internal static class NativeSourceGrantClassifier
                         case BoundUnsafeExpression unsafeExpression:
                             expressions.Push(unsafeExpression.Expression);
                             break;
-                        case BoundConstant or BoundRead:
+                        case BoundConstant:
+                            break;
+                        case BoundRead read when IsScalar(read.Type)
+                            || (IsBufferView(read.Type) && IsBufferViewLocal(function, read.Variable)):
+                            break;
+                        case BoundMove move when move.Type == PrimitiveType.OwnedInt32Buffer:
+                            break;
+                        case BoundReceiverLoan loan when loan.Type == PrimitiveType.OwnedInt32Buffer:
+                            break;
+                        case BoundMutableReceiverLoan loan when loan.Type == PrimitiveType.OwnedInt32Buffer:
+                            break;
+                        case BoundOutArgument output when output.Type == PrimitiveType.OwnedInt32Buffer:
                             break;
                         case BoundBufferLength length when length.Buffer == 0:
                             break;
@@ -412,7 +439,18 @@ internal static class NativeSourceGrantClassifier
                             expressions.Push(conditional.WhenFalse);
                             break;
                         case BoundCall call:
+                            ValidateWorkspaceCall(call);
                             PushExpressions(call.Arguments);
+                            break;
+                        case BoundSpanLength length when IsBufferView(length.View.Type):
+                            expressions.Push(length.View);
+                            break;
+                        case BoundSpanRead read when IsBufferView(read.View.Type):
+                            expressions.Push(read.View);
+                            expressions.Push(read.Index);
+                            break;
+                        case BoundViewRead read when IsBufferViewLocal(function, read.Variable):
+                            expressions.Push(read.Index);
                             break;
                         default:
                             throw Unsupported();
@@ -429,6 +467,13 @@ internal static class NativeSourceGrantClassifier
                         PushStatements(block.Statements);
                         break;
                     case BoundAssignment assignment:
+                        if (!IsValidLocal(function, assignment.Variable)
+                            || (!IsScalar(function.Variables[assignment.Variable].Type)
+                                && function.Variables[assignment.Variable].Type
+                                    != PrimitiveType.OwnedInt32Buffer))
+                        {
+                            throw Unsupported();
+                        }
                         expressions.Push(assignment.Value);
                         break;
                     case BoundLocal local:
@@ -449,6 +494,33 @@ internal static class NativeSourceGrantClassifier
                         expressions.Push(loop.Condition);
                         statements.Push(loop.Body);
                         break;
+                    case BoundTryFinally cleanup when IsWorkspaceCleanup(cleanup.Finally):
+                        statements.Push(cleanup.Body);
+                        statements.Push(cleanup.Finally);
+                        break;
+                    case BoundViewScope view when IsBufferViewLocal(function, view.Variable)
+                        && function.Variables[view.Variable].Type
+                            == (view.IsMutable ? PrimitiveType.MutableInt32BufferView
+                                : PrimitiveType.ReadonlyInt32BufferView):
+                        expressions.Push(view.Owner);
+                        expressions.Push(view.Start);
+                        expressions.Push(view.RangeEnd ?? view.Length);
+                        statements.Push(view.Body);
+                        break;
+                    case BoundViewSet write when IsMutableBufferViewLocal(function, write.Variable):
+                        expressions.Push(write.Index);
+                        expressions.Push(write.Value);
+                        break;
+                    case BoundOwnerDeclaration owner when IsOwnerLocal(function, owner.Variable):
+                        break;
+                    case BoundDrop drop when IsOwnerLocal(function, drop.Variable)
+                        && drop.CleanupFunction < 0:
+                        break;
+                    case BoundDropSpan drop when IsBufferViewLocal(function, drop.Variable):
+                        break;
+                    case BoundLifetimeEnd end when IsWorkspaceLocal(function, end.Variable)
+                        && end.CleanupFunction < 0:
+                        break;
                     case BoundReturn { Value: BoundExpression value }:
                         expressions.Push(value);
                         break;
@@ -460,6 +532,109 @@ internal static class NativeSourceGrantClassifier
                     default:
                         throw Unsupported();
                 }
+            }
+
+            void ValidateWorkspaceCall(BoundCall call)
+            {
+                var callee = program.Functions[call.Function];
+                if (callee.Intrinsic != BoundIntrinsic.None)
+                {
+                    if (!IsSupportedWorkspaceIntrinsic(callee))
+                    {
+                        throw Unsupported();
+                    }
+                    if (callee.Intrinsic == BoundIntrinsic.BufferTryCreate)
+                    {
+                        if (call.Arguments.Length != 2
+                            || call.Arguments[1] is not BoundOutArgument {
+                                Type: PrimitiveType.OwnedInt32Buffer,
+                            })
+                        {
+                            throw Unsupported();
+                        }
+                    }
+                    else if (call.Arguments.IsEmpty
+                        || call.Arguments[0] is not (BoundReceiverLoan {
+                                Type: PrimitiveType.OwnedInt32Buffer,
+                            } or BoundMutableReceiverLoan {
+                                Type: PrimitiveType.OwnedInt32Buffer,
+                            }))
+                    {
+                        throw Unsupported();
+                    }
+
+                    return;
+                }
+
+                var hasOwnerSignature = callee.ReturnType == PrimitiveType.OwnedInt32Buffer;
+                for (var parameter = 0; parameter < callee.ParameterCount; parameter++)
+                {
+                    hasOwnerSignature |= callee.Variables[parameter].Type == PrimitiveType.OwnedInt32Buffer;
+                }
+                if (!hasOwnerSignature)
+                {
+                    return;
+                }
+                if (!callee.IsInternal || callee.IsExternal || callee.DeclaringStruct is not null
+                    || callee.IsConstructor || callee.ParameterCount < 0
+                    || callee.ParameterCount > callee.Variables.Length
+                    || call.Arguments.Length != callee.ParameterCount)
+                {
+                    throw Unsupported();
+                }
+                for (var parameter = 0; parameter < callee.ParameterCount; parameter++)
+                {
+                    if (callee.Variables[parameter].IsOut || callee.Variables[parameter].IsInit
+                        || IsBufferView(callee.Variables[parameter].Type))
+                    {
+                        throw Unsupported();
+                    }
+                    if (callee.Variables[parameter].Type == PrimitiveType.OwnedInt32Buffer
+                        && call.Arguments[parameter] is not BoundMove {
+                            Type: PrimitiveType.OwnedInt32Buffer,
+                        })
+                    {
+                        throw Unsupported();
+                    }
+                }
+            }
+
+            bool IsWorkspaceCleanup(BoundBlock cleanup)
+            {
+                if (cleanup.Statements.IsEmpty)
+                {
+                    return false;
+                }
+                foreach (var statement in cleanup.Statements)
+                {
+                    if (statement is BoundBlock nested)
+                    {
+                        if (!IsWorkspaceCleanup(nested))
+                        {
+                            return false;
+                        }
+                    }
+                    else if (statement is BoundDrop cleanupDrop)
+                    {
+                        if (!IsOwnerLocal(function, cleanupDrop.Variable) || cleanupDrop.CleanupFunction >= 0)
+                        {
+                            return false;
+                        }
+                    }
+                    else if (statement is BoundDropSpan cleanupDropSpan)
+                    {
+                        if (!IsBufferViewLocal(function, cleanupDropSpan.Variable))
+                        {
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
             }
 
             void PushExpressions(ImmutableArray<BoundExpression> items)
@@ -478,6 +653,35 @@ internal static class NativeSourceGrantClassifier
                 }
             }
         }
+
+        static bool IsSupportedWorkspaceIntrinsic(BoundFunction function) =>
+            function.Intrinsic is BoundIntrinsic.BufferTryCreate or BoundIntrinsic.BufferCount
+                or BoundIntrinsic.BufferRead or BoundIntrinsic.BufferSet or BoundIntrinsic.BufferTryAppend
+            && NativeBufferIntrinsics.Matches(function);
+
+        static bool IsWorkspaceType(PrimitiveType type) =>
+            type == PrimitiveType.OwnedInt32Buffer || IsBufferView(type);
+
+        static bool IsBufferView(PrimitiveType type) =>
+            type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView;
+
+        static bool IsWorkspaceLocal(BoundFunction function, int variable) =>
+            IsValidLocal(function, variable) && IsWorkspaceType(function.Variables[variable].Type);
+
+        static bool IsOwnerLocal(BoundFunction function, int variable) =>
+            IsValidLocal(function, variable)
+            && function.Variables[variable].Type == PrimitiveType.OwnedInt32Buffer;
+
+        static bool IsBufferViewLocal(BoundFunction function, int variable) =>
+            IsValidLocal(function, variable)
+            && variable >= function.ParameterCount && IsBufferView(function.Variables[variable].Type);
+
+        static bool IsMutableBufferViewLocal(BoundFunction function, int variable) =>
+            IsBufferViewLocal(function, variable)
+            && function.Variables[variable].Type == PrimitiveType.MutableInt32BufferView;
+
+        static bool IsValidLocal(BoundFunction function, int variable) =>
+            (uint)variable < (uint)function.Variables.Length;
     }
 
     internal static bool IsScalar(PrimitiveType type) =>

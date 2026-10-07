@@ -45,6 +45,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         "--export", "FieldMutation", "--export", "FieldViewMutation",
         "--export", "FormattingWorkspace", "--export", "FormatDigits", "--export", "FormatSignedDigits",
         "--source", Path.GetFullPath(Path.Combine("self-host", "IntegerFormatting.terrum")),
+        "--source", Path.GetFullPath(Path.Combine("self-host", "WideIntegerFacts.terrum")),
         "-o", dll, "--runtime", policy })
     {
         compile.ArgumentList.Add(argument);
@@ -83,6 +84,49 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     await File.WriteAllTextAsync(Path.Combine(artifacts, $"owned-buffer-release-failure-{policy}.log"),
         failureProof).ConfigureAwait(false);
     Console.Write(failureProof);
+}
+
+var decimalSource = Path.GetFullPath(Path.Combine("self-host", "DecimalFloatLiteral.terrum"));
+var sourceGrantProbe = Path.GetFullPath(Path.Combine(
+    "tests", "native", "decimal-float-source-grant-abi.terrum"));
+foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+{
+    var dll = Path.Combine(artifacts, $"decimal-float-source-grant-{policy}.dll");
+    var manifest = Path.Combine(artifacts, $"decimal-float-source-grant-{policy}.abi.json");
+    var compile = new ProcessStartInfo("dotnet");
+    foreach (var argument in new[] {
+        cli, "build-library", decimalSource,
+        "--source", sourceGrantProbe,
+        "--export", "Terrum.CodeAnalysis.GetDecimalFloat32LiteralBitsOrMinusOne",
+        "--export", "Terrum.CodeAnalysis.GetDecimalFloat64LiteralBitsOrMinusOne",
+        "--export", "Terrum.CodeAnalysis.ReadOwnedSourceGrantValue",
+        "--export", "Terrum.CodeAnalysis.FailAfterSourceGrantOwnerMove",
+        "-o", dll, "--runtime", policy, "--source-grant", "--abi-output", manifest,
+    })
+    {
+        compile.ArgumentList.Add(argument);
+    }
+    var buildOutput = await Run(compile, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(
+        Path.Combine(artifacts, $"decimal-float-source-grant-build-{policy}.log"), buildOutput)
+        .ConfigureAwait(false);
+
+    var execute = new ProcessStartInfo(executable);
+    execute.ArgumentList.Add(dll);
+    execute.ArgumentList.Add(policy == "checked-exceptions"
+        ? "source-grant-checked" : "source-grant-fail-fast");
+    var proof = await Run(execute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(
+        Path.Combine(artifacts, $"decimal-float-source-grant-proof-{policy}.log"), proof)
+        .ConfigureAwait(false);
+    var expectedProof = policy == "checked-exceptions"
+        ? "decimal-source-grant scalar-exports=checked source-context=forwarded owner-transfer=checked owner-failure-cleanup=checked allocation-failure=checked heap=tracked live=0"
+        : "decimal-source-grant scalar-exports=checked source-context=forwarded owner-transfer=checked heap=tracked live=0";
+    if (proof.Trim() != expectedProof)
+    {
+        throw new InvalidOperationException("The decimal source-grant ownership proof did not complete.");
+    }
+    Console.Write($"{policy}: {proof}");
 }
 
 static async Task<string> Run(ProcessStartInfo start, TimeSpan timeout, int expectedExitCode = 0)

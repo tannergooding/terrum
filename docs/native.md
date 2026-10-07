@@ -959,6 +959,12 @@ covers mutable field-view updates and checked failures after a view write.
 The probe also checks that only the low 32 bits of the
 `HeapFree` BOOL result determine success, and that failed release terminates
 even while a checked catch is available.
+The same probe builds the provisional DecimalFloat source-grant companion
+under both runtime policies: scalar decimal exports and test-only owner/source
+helpers verify context forwarding, tracked workspace cleanup, invalid-slice
+early rejection, checked unwinding after an owner move and checked allocation
+failure with no live block. The probe does not expose an owner in the DLL
+export ABI.
 
 The [owned source-line index](../self-host/SourceLineIndex.terrum) builds a
 line-start table with exactly one word per line start and publishes a unique immutable index.

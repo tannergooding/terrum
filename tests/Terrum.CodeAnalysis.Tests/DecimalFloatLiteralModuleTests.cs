@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
@@ -188,6 +189,106 @@ public sealed class DecimalFloatLiteralModuleTests
         Assert.Equal(0, ExecuteRecords(consumer,
             CreateRecords(longFractionCancellationFixture, longFractionCancellationBits),
             (NativeRuntimePolicy)policy));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void DecimalFloatLiteralExportsPreserveScalarSourceGrantAbi(BoundRuntimePolicy policy)
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var root = RepositoryRoot();
+        var componentPath = Path.Combine(root, "self-host", "DecimalFloatLiteral.terrum");
+        var componentTree = SyntaxTree.Parse(File.ReadAllText(componentPath), componentPath);
+        var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false) {
+            IsInvocationScoped = true,
+        };
+        var compilation = Compilation.CreateLibrary([componentTree], [sourceBuffer], policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        const string Float32Export = "Terrum.CodeAnalysis.GetDecimalFloat32LiteralBitsOrMinusOne";
+        const string Float64Export = "Terrum.CodeAnalysis.GetDecimalFloat64LiteralBitsOrMinusOne";
+        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program,
+            [Float32Export, Float64Export], (NativeRuntimePolicy)policy);
+        foreach (var descriptor in artifact.Exports)
+        {
+            Assert.True(descriptor.SourceDependent);
+            Assert.Equal(PrimitiveType.Int64, descriptor.ReturnType);
+            Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], descriptor.ParameterTypes.ToArray());
+        }
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-decimal-float-source-grant-{Guid.NewGuid():N}.dll");
+        File.WriteAllBytes(path, artifact.Image);
+        try
+        {
+            var module = NativeLibrary.Load(path);
+            try
+            {
+                var bindings = new NativeSourceGrantTestBindings(module,
+                    [.. artifact.Exports.Select(static export => (export.Name, export.SourceDependent,
+                        export.ReturnType, export.ParameterTypes))]);
+                var fixtures = s_fixtures.Concat(CreateRandomFixtures()).ToArray();
+                var expectedBits = ReadHostedBits(fixtures);
+                for (var index = 0; index < fixtures.Length; index++)
+                {
+                    var fixture = fixtures[index];
+                    Assert.InRange(fixture.Spelling.Length, 1, 16_384);
+                    var source = fixture.Spelling.ToCharArray();
+                    var export = fixture.Precision == 32 ? Float32Export : Float64Export;
+                    var actual = bindings.Invoke<long>(export, source, 0, source.Length);
+                    Assert.Equal(expectedBits[index], unchecked((ulong)actual));
+                }
+
+                foreach (var spelling in s_invalidSpellings)
+                {
+                    var source = spelling.ToCharArray();
+                    Assert.Equal(-1, bindings.Invoke<long>(Float32Export, source, 0, source.Length));
+                    Assert.Equal(-1, bindings.Invoke<long>(Float64Export, source, 0, source.Length));
+                }
+
+                var maximumSpelling = MaximumLengthDecimalOne();
+                Assert.Equal(16_384, maximumSpelling.Length);
+                var maximumSource = maximumSpelling.ToCharArray();
+                Assert.Equal(0x3F800000L,
+                    bindings.Invoke<long>(Float32Export, maximumSource, 0, maximumSource.Length));
+                Assert.Equal(0x3FF0000000000000L,
+                    bindings.Invoke<long>(Float64Export, maximumSource, 0, maximumSource.Length));
+
+                var shortSource = "1.25".ToCharArray();
+                Assert.Equal(-1, bindings.Invoke<long>(Float32Export, null, 0, 1));
+                Assert.Equal(-1, bindings.Invoke<long>(Float64Export, shortSource, int.MinValue, 1));
+                Assert.Equal(-1, bindings.Invoke<long>(Float32Export, shortSource, 0, int.MaxValue));
+                Assert.Equal(-1, bindings.Invoke<long>(Float64Export, shortSource, 4, 1));
+                _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    bindings.Invoke<long>(Float32Export, new char[16_385], 0, 1));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private static string MaximumLengthDecimalOne()
+    {
+        const int FractionalDigits = 15_000;
+        const int Separators = 1_380;
+        var spelling = new System.Text.StringBuilder(16_384);
+        spelling.Append("1.");
+        for (var index = 0; index < FractionalDigits; index++)
+        {
+            spelling.Append('0');
+            if (index < Separators)
+            {
+                spelling.Append('_');
+            }
+        }
+        spelling.Append("e0");
+        return spelling.ToString();
     }
 
     private static Fixture[] CreateBoundaryFixtures()

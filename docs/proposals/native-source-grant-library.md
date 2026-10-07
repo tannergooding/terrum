@@ -836,11 +836,10 @@ and unsupported for this experiment. Readable aligned memory, lifetime, and
 immutability remain caller preconditions; there is no general native pointer
 validation or public wrapper. **Status remains unapproved.**
 
-### Decimal floating-literal slice boundary
+### Decimal floating-literal owned workspace
 
-**Question:** Should the standalone decimal-float converter accept only
-grammar-shaped numeric token slices and remain outside the maintained
-source-grant DLL while its exact-rounding helpers use non-scalar owned-buffer
+**Question:** Should the maintained source-grant companion admit the decimal
+converter's private owned workspace while retaining scalar-only exported
 signatures?
 
 **Summary:** The hosted decimal path delegates to invariant-culture
@@ -848,19 +847,31 @@ signatures?
 the language's numeric tokens. The Terrum helper instead accepts a
 caller-delimited decimal mantissa with optional fractional and exponent
 digits, digit separators only between digits, and no sign because the sign is
-a separate operator. It constructs target-format bits directly and uses an
-owned multi-limb workspace for exact midpoint comparison. The maintained
-source-grant classifier rejects the reachable helper functions because their
-owned-buffer parameters, results and locals are outside its scalar-only
-dependent-function subset. The decimal helper therefore has semantic-module
-coverage only and is not included in the maintained companion.
+a separate operator. It constructs target-format bits directly and uses a
+183-word `OwnedInt32Buffer` workspace for exact midpoint comparison. A narrow
+provisional classifier allowance now permits the internal by-value owner
+transfers, local scoped views, compiler-verified cleanup, and only the
+canonical allocation/count/read/set/append intrinsics needed by this helper.
+The maintained companion exports only the two scalar `int64(int32, int32)`
+entry points; the source-free compiler-primitives DLL and export descriptors
+are unchanged. Direct native DLL parity covers the existing rounding corpus,
+invalid bounds and the maximum-size grant. The tracked native ABI probe covers
+source-context forwarding, successful decimal calls and owner cleanup under
+both runtime policies, plus checked unwinding after an owner moves into a
+source-dependent helper and checked allocation failure with no live owner.
+Allocation failure remains a native checked/fail-fast failure and is not
+represented as malformed input. These pieces are implementation evidence, not
+promotion of the ABI or ownership contract.
 
-**Recommendation:** Keep this helper's input contract limited to the decimal
-numeric token shape and preserve the separate unary-sign boundary. Keep its
-implementation and validation within semantic-module execution; do not
-weaken the source-grant classifier or claim maintained-DLL support to
-accommodate its workspace. Reconsider a source-grant export only if an
-exact-rounding storage strategy fits the existing self-contained scalar
-source-dependent contract. This does not change lexer recovery, the hosted
-floating parser, scalar frontend verification/emission, or any accepted
-target contract.
+**Recommendation:** Keep the extension provisional and the proposal
+unapproved. Retain the decimal helper's grammar-shaped input contract and
+separate unary-sign boundary. Keep `IsScalar` and the public export gate
+unchanged; allow owner results/parameters only on internal ordinary helpers,
+never view parameters/results, owner aggregates, arbitrary output helpers,
+external or nominal owner calls, or cross-DLL transfers. Admit only the
+canonical buffer intrinsics required above and continue relying on the normal
+semantic verifier for ownership, loan, bounds, and cleanup invariants. Do not
+infer general source-dependent owned-buffer support, alter the source-free
+artifact, or move scalar-frontend verification/emission out of the hosted
+implementation. This does not change lexer recovery, the hosted floating
+parser, or any accepted target contract.

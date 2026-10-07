@@ -39,6 +39,8 @@ public sealed class NativeSourceGrantLibraryTests
     private const string StringLiteralEncodedLengthExport = "Terrum.CodeAnalysis.GetStringLiteralEncodedLengthOrMinusOne";
     private const string HexFloat32BitsExport = "Terrum.CodeAnalysis.GetHexFloat32LiteralBitsOrMinusOne";
     private const string HexFloat64BitsExport = "Terrum.CodeAnalysis.GetHexFloat64LiteralBitsOrMinusOne";
+    private const string DecimalFloat32BitsExport = "Terrum.CodeAnalysis.GetDecimalFloat32LiteralBitsOrMinusOne";
+    private const string DecimalFloat64BitsExport = "Terrum.CodeAnalysis.GetDecimalFloat64LiteralBitsOrMinusOne";
     private const string BasedIntegerFloat32BitsExport = "Terrum.CodeAnalysis.GetBasedIntegerFloat32BitsOrMinusOne";
     private const string BasedIntegerFloat64BitsExport = "Terrum.CodeAnalysis.GetBasedIntegerFloat64BitsOrMinusOne";
     private const string LineCountExport = "Terrum.CodeAnalysis.GetSourceLineCount";
@@ -165,6 +167,21 @@ public sealed class NativeSourceGrantLibraryTests
             outputParameterProgram, ["Terrum.CodeAnalysis.TryReadSource"], NativeRuntimePolicy.FailFast));
         Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
             outputParameterProgram, ["Terrum.CodeAnalysis.TryInitializeSource"], NativeRuntimePolicy.FailFast));
+
+        var ownedExport = Compilation.CreateLibrary(
+            [SyntaxTree.Parse("""
+                namespace Terrum.CodeAnalysis;
+                public OwnedInt32Buffer CreateOwnedSourceResult() {
+                    require Host.Source.Length == 1;
+                    require OwnedInt32Buffer.TryCreate(1, out var value);
+                    return move value;
+                }
+                """)],
+            [sourceBuffer], BoundRuntimePolicy.FailFast);
+        Assert.False(ownedExport.HasErrors, string.Join(Environment.NewLine, ownedExport.Diagnostics));
+        var ownedExportProgram = Assert.IsType<BoundProgram>(ownedExport.Program);
+        Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
+            ownedExportProgram, ["Terrum.CodeAnalysis.CreateOwnedSourceResult"], NativeRuntimePolicy.FailFast));
 
         var managedCall = Compilation.CreateLibrary(
             [SyntaxTree.Parse("""
@@ -1355,6 +1372,7 @@ public sealed class NativeSourceGrantLibraryTests
             CanGetSourceRangeExport, DecodeScalarExport,
             BasedIntegerFloat32BitsExport, BasedIntegerFloat64BitsExport,
             CharacterLiteralScalarExport,
+            DecimalFloat32BitsExport, DecimalFloat64BitsExport,
             HexFloat32BitsExport, HexFloat64BitsExport,
             SourceCharacterPositionExport,
             SourceCodeUnitExport,
@@ -1415,6 +1433,14 @@ public sealed class NativeSourceGrantLibraryTests
             Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32],
                 basedIntegerFloatBits.ParameterTypes.ToArray());
         }
+        foreach (var exportName in new[] { DecimalFloat32BitsExport, DecimalFloat64BitsExport })
+        {
+            var decimalFloatBits = Assert.Single(exports, export => export.Name == exportName);
+            Assert.True(decimalFloatBits.SourceDependent);
+            Assert.Equal(PrimitiveType.Int64, decimalFloatBits.ReturnType);
+            Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32],
+                decimalFloatBits.ParameterTypes.ToArray());
+        }
 
         var module = NativeLibrary.Load(imagePath);
         try
@@ -1443,6 +1469,10 @@ public sealed class NativeSourceGrantLibraryTests
             Assert.Equal(12U, bindings.Invoke<uint>(ParseUInt32Export, parserSource, 1, 4, (uint)10));
             Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseInt32Export, parserSource, 1, 4, (uint)10));
             Assert.Equal(12, bindings.Invoke<int>(ParseInt32Export, parserSource, 1, 4, (uint)10));
+            Assert.Equal(0x3DCCCCCDL,
+                bindings.Invoke<long>(DecimalFloat32BitsExport, "0.1".ToCharArray(), 0, 3));
+            Assert.Equal(0x3FB999999999999AL,
+                bindings.Invoke<long>(DecimalFloat64BitsExport, "0.1".ToCharArray(), 0, 3));
             Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseChar16Export, parserSource, 1, 4, (uint)10));
             Assert.Equal((ushort)12, bindings.Invoke<ushort>(ParseChar16Export, parserSource, 1, 4, (uint)10));
             var negativeParserSource = "!-12?".ToCharArray();

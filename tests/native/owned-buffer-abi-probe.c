@@ -15,6 +15,9 @@ typedef Buffer (*FormatSigned)(int64_t, Buffer);
 typedef int32_t (*Consume)(Buffer);
 typedef int32_t (*Check)(void);
 typedef uint8_t (*TryRebuild)(void);
+typedef int64_t (*DecimalFloat)(const uint16_t*, uint32_t, int32_t, int32_t);
+typedef int32_t (*SourceOwnerRead)(const uint16_t*, uint32_t, int32_t);
+typedef int32_t (*SourceOwnerFail)(const uint16_t*, uint32_t);
 
 static void* live[16];
 static HANDLE heaps[16];
@@ -306,10 +309,80 @@ static int RunReleaseFailure(HMODULE image, int checked)
     return 70;
 }
 
+static int RunSourceGrantChecks(HMODULE image, int checked)
+{
+    DecimalFloat decimalFloat32 = (DecimalFloat)GetProcAddress(
+        image, "Terrum.CodeAnalysis.GetDecimalFloat32LiteralBitsOrMinusOne");
+    DecimalFloat decimalFloat64 = (DecimalFloat)GetProcAddress(
+        image, "Terrum.CodeAnalysis.GetDecimalFloat64LiteralBitsOrMinusOne");
+    SourceOwnerRead readOwner = (SourceOwnerRead)GetProcAddress(
+        image, "Terrum.CodeAnalysis.ReadOwnedSourceGrantValue");
+    SourceOwnerFail failAfterMove = (SourceOwnerFail)GetProcAddress(
+        image, "Terrum.CodeAnalysis.FailAfterSourceGrantOwnerMove");
+    VERIFY(decimalFloat32 && decimalFloat64 && readOwner && failAfterMove, 90);
+    VERIFY(ReplaceImport(image, "HeapAlloc", (void*)TrackedAllocate), 91);
+    VERIFY(ReplaceImport(image, "HeapFree", (void*)TrackedRelease), 92);
+
+    const uint16_t source[] = { 42 };
+    Reset();
+    VERIFY(readOwner(source, 1, 0) == 42, 93);
+    VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 94);
+
+    const uint16_t decimal[] = { '1', '.', '2', '5' };
+    Reset();
+    VERIFY(decimalFloat32(decimal, 4, 0, 4) == INT64_C(0x3FA00000), 95);
+    VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 96);
+    Reset();
+    VERIFY(decimalFloat64(decimal, 4, 0, 4) == INT64_C(0x3FF4000000000000), 97);
+    VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 98);
+
+    Reset();
+    VERIFY(decimalFloat64(decimal, 4, 3, 2) == -1, 99);
+    VERIFY(attempts == 0 && releases == 0 && LiveCount() == 0 && !invalid, 100);
+
+    if (checked)
+    {
+        int caught = 0;
+        DWORD caughtCode = 0;
+        Reset();
+        __try
+        {
+            (void)failAfterMove(source, 1);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            caught = 1;
+            caughtCode = GetExceptionCode();
+        }
+        VERIFY(caught && caughtCode == 0xE0540092, 101);
+        VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 102);
+
+        caught = 0;
+        caughtCode = 0;
+        Reset();
+        failAttempt = 1;
+        __try
+        {
+            (void)readOwner(source, 1, 0);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            caught = 1;
+            caughtCode = GetExceptionCode();
+        }
+        VERIFY(caught && caughtCode == 0xE0540092, 103);
+        VERIFY(attempts == 1 && releases == 0 && LiveCount() == 0 && !invalid, 104);
+    }
+
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if ((argc != 3 && argc != 4)
-        || (strcmp(argv[2], "checked") != 0 && strcmp(argv[2], "fail-fast") != 0)
+        || (strcmp(argv[2], "checked") != 0 && strcmp(argv[2], "fail-fast") != 0
+            && strcmp(argv[2], "source-grant-checked") != 0
+            && strcmp(argv[2], "source-grant-fail-fast") != 0)
         || (argc == 4 && strcmp(argv[3], "reject-release") != 0))
     {
         return 1;
@@ -320,11 +393,14 @@ int main(int argc, char** argv)
         fprintf(stderr, "Could not load owned-buffer ABI fixture: %lu\n", GetLastError());
         return 2;
     }
+    int sourceGrant = strncmp(argv[2], "source-grant-", 13) == 0;
+    int checked = strcmp(argv[2], "checked") == 0
+        || strcmp(argv[2], "source-grant-checked") == 0;
     int result;
     __try
     {
-        int checked = strcmp(argv[2], "checked") == 0;
-        result = argc == 4 ? RunReleaseFailure(image, checked) : RunChecks(image, checked);
+        result = sourceGrant ? (argc == 3 ? RunSourceGrantChecks(image, checked) : 1)
+            : (argc == 4 ? RunReleaseFailure(image, checked) : RunChecks(image, checked));
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
@@ -337,7 +413,18 @@ int main(int argc, char** argv)
     }
     if (result == 0)
     {
-        puts("owned-buffer-abi opaque=8 publication=checked views=scoped reuse=checked field=tracked field-view=tracked heap=tracked live=0");
+        if (sourceGrant && checked)
+        {
+            puts("decimal-source-grant scalar-exports=checked source-context=forwarded owner-transfer=checked owner-failure-cleanup=checked allocation-failure=checked heap=tracked live=0");
+        }
+        else if (sourceGrant)
+        {
+            puts("decimal-source-grant scalar-exports=checked source-context=forwarded owner-transfer=checked heap=tracked live=0");
+        }
+        else
+        {
+            puts("owned-buffer-abi opaque=8 publication=checked views=scoped reuse=checked field=tracked field-view=tracked heap=tracked live=0");
+        }
     }
     return result;
 }

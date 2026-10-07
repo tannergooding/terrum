@@ -143,12 +143,20 @@ numeric slices directly to `float32` or `float64` bits, without rounding
 `float32` through `float64`. Its exact midpoint comparisons use an owned
 multi-limb workspace and are covered by semantic-module parity tests for ties,
 subnormal and overflow boundaries, malformed spellings, deterministic random
-values and long significand/exponent inputs under both runtime policies. Its
-reachable owned-buffer helper signatures are outside the maintained
-source-grant classifier's scalar subset, so it is not a maintained source-grant
-DLL export. The scalar frontend compiles it into its semantic-module component;
-that does not move verification or emission out of the hosted implementation.
-The host test runner still orchestrates compilation and assertions in C#.
+values and long significand/exponent inputs under both runtime policies. The
+maintained source-grant companion also exports its two scalar `int64`
+entry points with `int32` start/length parameters. The classifier admits only
+the internal by-value owner transfers, lexical views and canonical buffer
+intrinsics required by their verified helper closure; the exports remain
+scalar-only and the source-free compiler-primitives DLL is unchanged. Direct
+DLL checks cover the exact-rounding corpus and a maximum-length source grant.
+The tracked native ABI probe verifies source-context forwarding, successful
+owner cleanup in both runtime policies, and checked unwinding and allocation
+failure without a live owner. Allocation failure remains a native checked or
+fail-fast failure, distinct from malformed input. The scalar frontend still
+compiles the helper into its semantic-module component, and this does not move
+verification or emission out of the hosted implementation. The host test
+runner still orchestrates compilation and assertions in C#.
 `ComponentTestRunner.terrum` is a bounded Terrum entry harness composing the
 `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`, `Token`,
 `CopyAlgorithms`, finite `Float32MathSelection`/`Float64MathSelection`,

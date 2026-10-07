@@ -49,13 +49,22 @@ decimal numeric slices directly to target-format bits, using exact midpoint
 comparisons rather than an intermediate `float64` for `float32`. Semantic-
 module tests compare both formats with hosted bound constants across ties,
 subnormal and overflow boundaries, malformed slices, deterministic random
-values and long significand/exponent inputs under both runtime policies. Its
-reachable owned-buffer helper signatures are outside the maintained
-source-grant classifier's scalar subset; the helper is not wired into
-scalar-frontend token reconstruction, and verification and emission remain
-hosted.
-Graphs, module sets, native DLLs and persisted AOT images remain outside this
-support.
+values and long significand/exponent inputs under both runtime policies.
+The maintained source-grant companion now includes its two scalar `int64`
+exports, each taking `int32` start/length values. A separate provisional
+classifier allowance admits only internal by-value `OwnedInt32Buffer`
+transfers, lexical buffer views and canonical buffer intrinsics in their
+reachable implementation closure; export descriptors remain scalar-only,
+and the source-free compiler-primitives DLL is unchanged. Direct DLL parity
+covers the exact-rounding corpus and a maximum-length source grant. The
+tracked native ABI probe verifies source-context forwarding, successful owner
+cleanup in both runtime policies, and checked unwinding and allocation failure
+without a live owner. Allocation failure remains a native checked/fail-fast
+failure, not the `-1` malformed-slice result. This does not wire decimal
+literals into scalar-frontend token reconstruction or move verification/emission
+out of the hosted implementation. This bounded decimal DLL export does not
+establish native scalar-frontend DLL support, graphs, module sets or persisted
+AOT images.
 Revision 57 provisionally added structured semantic-module caller-unsafe
 contracts for ordinary readonly instance methods on public, non-unique `Copy`
 structs whose layouts are exportable. Revision 58 extends that bounded slice
