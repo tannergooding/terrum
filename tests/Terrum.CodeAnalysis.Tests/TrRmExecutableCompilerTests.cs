@@ -137,6 +137,30 @@ public sealed class TrRmExecutableCompilerTests
     [InlineData("(Unsigned64One() & Unsigned64Three()) == Unsigned64One()", 42)]
     [InlineData("(Unsigned64One() | Unsigned64Two()) == Unsigned64Three()", 42)]
     [InlineData("(Unsigned64One() ^ Unsigned64Two()) == Unsigned64Three()", 42)]
+    [InlineData("(Signed32One() + Signed32Two()) == Signed32Three()", 42)]
+    [InlineData("(Signed32Two() - Signed32One()) == Signed32One()", 42)]
+    [InlineData("(Signed32Two() * Signed32Two()) == Signed32Four()", 42)]
+    [InlineData("(Signed32Six() / Signed32Two()) == Signed32Three()", 42)]
+    [InlineData("(Signed32Five() % Signed32Two()) == Signed32One()", 42)]
+    [InlineData("(Unsigned32One() + Unsigned32Two()) == Unsigned32Three()", 42)]
+    [InlineData("(Unsigned32Two() - Unsigned32One()) == Unsigned32One()", 42)]
+    [InlineData("(Unsigned32Two() * Unsigned32Two()) == Unsigned32Four()", 42)]
+    [InlineData("(Unsigned32Six() / Unsigned32Two()) == Unsigned32Three()", 42)]
+    [InlineData("(Unsigned32Five() % Unsigned32Two()) == Unsigned32One()", 42)]
+    [InlineData("(Signed64One() + Signed64Two()) == Signed64Three()", 42)]
+    [InlineData("(Signed64Two() - Signed64One()) == Signed64One()", 42)]
+    [InlineData("(Signed64Two() * Signed64Two()) == Signed64Four()", 42)]
+    [InlineData("(Signed64Six() / Signed64Two()) == Signed64Three()", 42)]
+    [InlineData("(Signed64Five() % Signed64Two()) == Signed64One()", 42)]
+    [InlineData("(Unsigned64One() + Unsigned64Two()) == Unsigned64Three()", 42)]
+    [InlineData("(Unsigned64Two() - Unsigned64One()) == Unsigned64One()", 42)]
+    [InlineData("(Unsigned64Two() * Unsigned64Two()) == Unsigned64Four()", 42)]
+    [InlineData("(Unsigned64Six() / Unsigned64Two()) == Unsigned64Three()", 42)]
+    [InlineData("(Unsigned64Five() % Unsigned64Two()) == Unsigned64One()", 42)]
+    [InlineData("(Signed32NegativeFive() / Signed32Two()) == Signed32MinusTwo()", 42)]
+    [InlineData("(Signed32NegativeFive() % Signed32Two()) == Signed32MinusOne()", 42)]
+    [InlineData("(Signed32Minimum() % Signed32MinusOne()) == Signed32Zero()", 42)]
+    [InlineData("(Signed64Minimum() % Signed64MinusOne()) == Signed64Zero()", 42)]
     [InlineData("(!FalseValue()) == TrueValue()", 42)]
     [InlineData("(+Signed32One()) == Signed32One()", 42)]
     [InlineData("(~Signed32One()) == Signed32MinusTwo()", 42)]
@@ -192,11 +216,20 @@ public sealed class TrRmExecutableCompilerTests
             int32 Signed32One() { return 1; }
             int32 Signed32Two() { return 2; }
             int32 Signed32Three() { return 3; }
+            int32 Signed32Four() { return 4; }
+            int32 Signed32Five() { return 5; }
+            int32 Signed32Six() { return 6; }
+            int32 Signed32Zero() { return 0; }
+            int32 Signed32Minimum() { return int32.MinValue; }
+            int32 Signed32NegativeFive() { return -5; }
             int32 Signed32MinusTwo() { return -2; }
             int32 Signed32MinusOne() { return -1; }
             uint32 Unsigned32One() { return uint32(1); }
             uint32 Unsigned32Two() { return uint32(2); }
             uint32 Unsigned32Three() { return uint32(3); }
+            uint32 Unsigned32Four() { return uint32(4); }
+            uint32 Unsigned32Five() { return uint32(5); }
+            uint32 Unsigned32Six() { return uint32(6); }
             uint32 Unsigned32High31() { return uint32(0x7FFFFFFF); }
             uint32 Unsigned32HighBit() { return uint32(0x80000000); }
             uint32 Unsigned32AllBits() { return uint32(0xFFFFFFFF); }
@@ -204,11 +237,20 @@ public sealed class TrRmExecutableCompilerTests
             int64 Signed64One() { return int64(1); }
             int64 Signed64Two() { return int64(2); }
             int64 Signed64Three() { return int64(3); }
+            int64 Signed64Four() { return int64(4); }
+            int64 Signed64Five() { return int64(5); }
+            int64 Signed64Six() { return int64(6); }
+            int64 Signed64Zero() { return int64(0); }
+            int64 Signed64Minimum() { return int64.MinValue; }
+            int64 Signed64NegativeFive() { return int64(-5); }
             int64 Signed64MinusTwo() { return int64(-2); }
             int64 Signed64MinusOne() { return int64(-1); }
             uint64 Unsigned64One() { return uint64(1); }
             uint64 Unsigned64Two() { return uint64(2); }
             uint64 Unsigned64Three() { return uint64(3); }
+            uint64 Unsigned64Four() { return uint64(4); }
+            uint64 Unsigned64Five() { return uint64(5); }
+            uint64 Unsigned64Six() { return uint64(6); }
             uint64 Unsigned64ComplementOne() { return ~uint64(1); }
             float32 SingleOne() { return float32(1.0); }
             float32 SingleTwo() { return float32(2.0); }

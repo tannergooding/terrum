@@ -419,16 +419,25 @@ public static partial class TrRmExecutableCompiler
                     {
                         throw Invalid("Binary requires two values.");
                     }
+
+                    var integerLeft = ReadValue(operation.Operands[0]);
+                    var integerRight = ReadValue(operation.Operands[1]);
+                    if (integerLeft.Type != integerRight.Type || !IsInteger(integerLeft.Type))
+                    {
+                        throw Invalid("Binary operands are outside the executable integer profile.");
+                    }
+
                     var token = operation.Kind switch
                     {
                         1 => TokenKind.Plus,
                         2 => TokenKind.Minus,
                         3 => TokenKind.Star,
+                        4 => TokenKind.Slash,
+                        5 => TokenKind.Percent,
                         _ => throw Invalid("The executable place profile has an unsupported Binary kind."),
                     };
                     DefineValue(operation.Result, new BoundBinary(token,
-                        ReadValue(operation.Operands[0]), ReadValue(operation.Operands[1]),
-                        PrimitiveType.Int32, default));
+                        integerLeft, integerRight, integerLeft.Type, default));
                     break;
                 }
                 default:
@@ -900,30 +909,36 @@ public static partial class TrRmExecutableCompiler
                     _operationCount++;
                     return compareResult;
                 }
-                case BoundBinary binary when binary.Type == PrimitiveType.Int32
-                    && binary.Left.Type == PrimitiveType.Int32 && binary.Right.Type == PrimitiveType.Int32
-                    && binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star:
-                    var left = EmitValue(binary.Left);
-                    var right = EmitValue(binary.Right);
-                    var result = _valueTypes.Count + 1;
-                    var kind = binary.Operator switch
+                case BoundBinary binary when binary.Type == binary.Left.Type
+                    && binary.Left.Type == binary.Right.Type && IsInteger(binary.Left.Type)
+                    && binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star
+                        or TokenKind.Slash or TokenKind.Percent:
+                {
+                    var integerLeft = EmitValue(binary.Left);
+                    var integerRight = EmitValue(binary.Right);
+                    var integerResult = _valueTypes.Count + 1;
+                    var integerKind = binary.Operator switch
                     {
                         TokenKind.Plus => 1,
                         TokenKind.Minus => 2,
-                        _ => 3,
+                        TokenKind.Star => 3,
+                        TokenKind.Slash => 4,
+                        _ => 5,
                     };
-                    var binaryWidth = Width((ulong)Math.Max(result, Math.Max(left, right)));
+                    var binaryWidth = Width((ulong)Math.Max(integerResult,
+                        Math.Max(integerLeft, integerRight)));
                     var binaryOffset = _operations.Count;
                     WriteInstruction(_operations, 0x15, binaryWidth, 0);
-                    Write(_operations, (ulong)result, binaryWidth);
-                    _operations.Add((byte)kind);
-                    Write(_operations, (ulong)left, binaryWidth);
-                    Write(_operations, (ulong)right, binaryWidth);
-                    _ = AddValue(PrimitiveType.Int32, 0, (uint)binaryOffset);
-                    UseValue(left, _operationCount);
-                    UseValue(right, _operationCount);
+                    Write(_operations, (ulong)integerResult, binaryWidth);
+                    _operations.Add((byte)integerKind);
+                    Write(_operations, (ulong)integerLeft, binaryWidth);
+                    Write(_operations, (ulong)integerRight, binaryWidth);
+                    _ = AddValue(binary.Left.Type, 0, (uint)binaryOffset);
+                    UseValue(integerLeft, _operationCount);
+                    UseValue(integerRight, _operationCount);
                     _operationCount++;
-                    return result;
+                    return integerResult;
+                }
                 case BoundCall call:
                     return EmitCall(call);
                 default:

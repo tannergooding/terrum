@@ -65,10 +65,19 @@ public sealed partial class CliTests
             int32 Observe(bool value) { return value ? 42 : 0; }
             bool Enabled() { return true; }
             float64 Scale() { return float64(2.5); }
+            int64 NegativeFive() { return int64(-5); }
+            int64 Two64() { return int64(2); }
+            int64 MinusTwo64() { return int64(-2); }
+            int64 MinusOne64() { return int64(-1); }
+            int64 Zero64() { return int64(0); }
+            int64 Minimum64() { return int64.MinValue; }
             int32 Main() {
                 init int32 result;
                 Fill(Observe(Enabled() == true) + Observe(Scale() < float64(3.5))
-                    + Observe(Scale() * (float64(3.5) - Scale()) == Scale()), init result);
+                    + Observe(Scale() * (float64(3.5) - Scale()) == Scale())
+                    + Observe(NegativeFive() / Two64() == MinusTwo64())
+                    + Observe(NegativeFive() % Two64() == MinusOne64())
+                    + Observe(Minimum64() % MinusOne64() == Zero64()), init result);
                 return result;
             }
             """;
@@ -85,7 +94,7 @@ public sealed partial class CliTests
 
             var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
                 "--runtime", "fail-fast", "--json");
-            Assert.Equal(126, ran);
+            Assert.Equal(252, ran);
             Assert.Empty(runOutput);
             Assert.Empty(runError);
 
@@ -93,7 +102,7 @@ public sealed partial class CliTests
                 "-o", executable, "--runtime", "fail-fast", "--json");
             Assert.True(built == 0, $"{buildOutput}{Environment.NewLine}{buildError}");
             Assert.Empty(buildError);
-            Assert.Equal(126, await ExecuteTrRmImageAsync(executable));
+            Assert.Equal(252, await ExecuteTrRmImageAsync(executable));
         }
         finally
         {

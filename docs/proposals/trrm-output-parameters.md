@@ -86,19 +86,23 @@ The current provisional writer and loader preserve by-value `bool`, `char16`,
 output-bearing general Bodies. Their values may be forwarded from local
 scalar-returning calls into a local call; this does not widen output places,
 which remain `int32`, output-bearing function results, which remain `void` or
-`int32`. Constants, initialized locals, assignments and the existing integer
-arithmetic remain `int32`-only. The writer emits typed `ConstBits` for supported
-scalar values, and the loader also reconstructs audited `ConstSigned` integer
-constants. The writer and loader also provisionally support
+`int32`. Constants and by-value scalar operations are supported independently
+of the `int32`-only output places, initialized locals and assignments. The
+writer emits typed `ConstBits` for supported scalar values, and the loader also
+reconstructs audited `ConstSigned` integer constants. The writer and loader
+also provisionally support
 Boolean, `char16` and integer equality/inequality, integer ordering, and all
 six floating comparisons, with `bool` results. Integer bitwise AND, OR and XOR
 are supported for all four integer types. Unary support is limited to Boolean
 NOT, integer NOT and unary plus, and floating negation; checked signed-integer
 negation remains excluded to avoid changing this slice's failure contract.
 Floating addition, subtraction, multiplication and division are supported for
-both floating types. The one-block control-flow boundary is unchanged. These
-value, comparison, bitwise, unary and floating-arithmetic paths are implemented
-support only, not approval of the proposed executable contract.
+both floating types. Integer addition, subtraction, multiplication, division
+and remainder are supported for all four integer types, including signed
+truncation-toward-zero, dividend-signed remainder, and the minimum-value
+remainder-by-negative-one case. The one-block control-flow boundary is
+unchanged. These value, comparison, bitwise, unary and arithmetic paths are
+implemented support only, not approval of the proposed executable contract.
 
 The broader proposal remains unresolved. In particular, Boolean status facts
 are call-specific and require correlation with their particular destinations;
