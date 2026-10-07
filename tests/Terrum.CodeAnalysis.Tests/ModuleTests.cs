@@ -160,7 +160,7 @@ public sealed class ModuleTests
     public async Task CopyOutputsRetainConditionalPublicationAcrossModuleArtifactsAsync(
         BoundRuntimePolicy policy)
     {
-        var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        const string LibrarySource = """
             public struct Pair {
                 public int32 First;
                 public int32 Second;
@@ -179,7 +179,8 @@ public sealed class ModuleTests
                 result = new Pair(key, 3);
                 return true;
             }
-            """), policy);
+            """;
+        var library = Compilation.CreateLibrary(SyntaxTree.Parse(LibrarySource), policy);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program),
             ["TryGetPair", "TryInitializePair"]);
@@ -215,6 +216,18 @@ public sealed class ModuleTests
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
             Assert.IsType<BoundProgram>(nativeCompilation.Program), [nativeProvider], nativePolicy);
         Assert.Equal(85, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProvider],
+            TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true));
+
+        var replacementLibrary = Compilation.CreateLibrary(SyntaxTree.Parse(
+            LibrarySource.Replace("new Pair(key, 2)", "new Pair(key, 4)", StringComparison.Ordinal)
+                .Replace("new Pair(key, 3)", "new Pair(key, 5)", StringComparison.Ordinal)), policy);
+        Assert.False(replacementLibrary.HasErrors,
+            string.Join(Environment.NewLine, replacementLibrary.Diagnostics));
+        var replacementProvider = NativeModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(replacementLibrary.Program),
+            ["TryGetPair", "TryInitializePair"], "CopyOutputProvider", nativePolicy);
+        NativeModuleCompiler.ValidateGraph(nativeConsumer, [replacementProvider]);
+        Assert.Equal(89, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [replacementProvider],
             TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true));
     }
 
