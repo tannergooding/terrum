@@ -241,17 +241,20 @@ between the floating formats and from `int32`, `uint32`, `int64` and `uint64`
 to either format. V85 provisionally projects `char16`-to-floating and
 floating-to-integer conversions. The eight checked floating-to-integer pairs
 and explicit `char16`-to-floating eligibility are accepted. The
-unreleased source-free executable TRRM `(1, 0)` draft accepts opcode `0x1F`,
-`FloatToInteger rNew, tDest, rSource`, for exactly those eight pairs. It
+unreleased source-free executable TRRM `(1, 0)` draft accepts opcode `0x1E`,
+`Char16ToFloat rNew, tDest, rSource`, for exactly `char16` to `float32` or
+`float64`. It interprets the source as an unsigned UTF-16 code unit, without
+decoding or validating surrogate pairs; conversion is total and valid in
+`NoThrow`. The draft also accepts opcode `0x1F`,
+`FloatToInteger rNew, tDest, rSource`, for exactly the eight checked pairs. It
 truncates toward zero before range checking; NaN, infinities and out-of-range
 results fail fast with overflow status `0xE0540001`. Native lowering preserves
 the caller's floating-point environment. This may-fail operation cannot satisfy
-`NoThrow`; checked-exception control flow, `char16` and alternate conversion
-policies remain outside this draft operation. This is a draft-only encoding
-decision, not a change to the approved IL specifications or a post-release
-compatibility promise. Other source-free TRRM floating operations remain
-provisional under their unapproved proposals, including the separate
-`char16`-to-floating opcode proposal.
+`NoThrow`; checked-exception control flow and alternate conversion policies
+remain outside that operation. These are draft-only encoding decisions, not
+changes to the approved IL specifications or post-release compatibility
+promises. Other source-free TRRM floating operations remain provisional under
+their unapproved proposals.
 Verification and emission continue through the hosted implementation; this
 adds no projection layout or native ABI change.
 

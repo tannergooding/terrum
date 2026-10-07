@@ -89,9 +89,6 @@ approved.
 - [Floating arithmetic in executable TRRM](floating-trrm-arithmetic.md)
   recommends same-format `float32`/`float64` add, subtract, multiply and divide
   using the separate provisional arithmetic-NaN policy.
-- [Char16-to-floating conversions in executable TRRM](char16-to-floating-trrm-conversions.md)
-  recommends a distinct unsigned code-unit conversion operation without
-  widening integer conversions.
 
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,

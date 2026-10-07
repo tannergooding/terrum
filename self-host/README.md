@@ -225,8 +225,8 @@ bits independently against the hosted parser, then consumes the validated
 payloads. It also projects conversions between the floating formats and from
 `int32`, `uint32`, `int64` and `uint64` to either format. Explicit
 `char16`-to-floating conversion is accepted as unsigned code-unit conversion
-and is provisionally projected through v85; verification and emission remain
-hosted. Float-to-integer conversions are
+and is provisionally projected through v85 outside the validated frontend
+subset; verification and emission remain hosted. Float-to-integer conversions are
 provisionally projected through v85 for the eight accepted checked pairs;
 verification and emission remain hosted. Source-free TRRM
 same-format comparisons and exact-bit constants are provisionally implemented
@@ -258,9 +258,9 @@ Remainder and mixed-format arithmetic remain unsupported there.
 The standalone `FloatingIntegerConversion` helper implements raw-bit
 float-to-integer conversion internally and is checked against hosted conversion
 behavior; it is an internal helper, not a public conversion API.
-`char16`-to-floating conversion is provisionally encoded under the unapproved
-[TRRM char16 conversion proposal](../docs/proposals/char16-to-floating-trrm-conversions.md);
-its unsigned code-unit language eligibility is accepted.
+The unreleased `(1, 0)` TRRM draft accepts `Char16ToFloat` opcode `0x1E` for
+the two explicit pairs, with unsigned code-unit semantics and no
+post-release compatibility promise.
 The bounded scalar frontend candidate also provisionally projects this
 conversion. The hosted binder and emitter treat a code unit as an unsigned
 numeric value.
@@ -464,7 +464,7 @@ native emitter or compiler self-build.
 | [Float32MathSelection](Float32MathSelection.terrum) | Unapproved `float32` candidate for absolute value, numeric min/max, and clamp with proposed NaN propagation and signed-zero selection | AOT/JIT and independent-module tests check NaN results, infinities, zero-sign selection and clamp validation order; Windows x64 internal DLL bit-carrier calls check finite values, subnormals, adjacent representations, infinities, signed zeros, and NaN classification; payload/signaling/status effects remain open, and this is not an adopted `Float32Math` API or standard C floating ABI |
 | [Float64MathSelection](Float64MathSelection.terrum) | Unapproved matching-width candidate for `float64` absolute value, numeric min/max, and clamp; exact contract remains in [its proposal](../docs/proposals/float64-math-selection.md) | AOT/JIT and independent-module tests check NaN results, infinities, zero-sign selection and clamp validation order; Windows x64 internal DLL bit-carrier calls check finite values, subnormals, adjacent representations, infinities, signed zeros, and NaN classification; payload/signaling/status effects remain open, and this is not an adopted `Float64Math` API or standard C floating ABI |
 | [IntegerFloatConversion](IntegerFloatConversion.terrum) | Internal exact raw-bit conversion from signed/unsigned 32-/64-bit integers to `float32` and `float64` | Semantic-module JIT compares all eight conversions with hosted target-format results under both policies, covering signed extrema, both precision-tie directions, sticky bits and deterministic values; the independent `ComponentTestRunner` also executes boundary cases under AOT/JIT and both policies; the Windows x64 internal DLL directly invokes all eight helpers with integer carriers against hosted conversions; this does not imply scalar-frontend or TRRM support |
-| [Char16FloatConversion](Char16FloatConversion.terrum) | Internal raw-bit conversion of `char16` as an unsigned UTF-16 code-unit value, composed from the existing `uint32` conversions | Semantic-module JIT exhausts all 65,536 code units for both formats under both policies against independently constructed exact encodings; the independent `ComponentTestRunner` repeats the exhaustive check under AOT/JIT and both policies; hosted native-emitter tests and the Windows x64 internal DLL exhaust the same domain; language eligibility is accepted, but the TRRM opcode remains unapproved, and this helper does not itself imply scalar-frontend or TRRM support |
+| [Char16FloatConversion](Char16FloatConversion.terrum) | Internal raw-bit conversion of `char16` as an unsigned UTF-16 code-unit value, composed from the existing `uint32` conversions | Semantic-module JIT exhausts all 65,536 code units for both formats under both policies against independently constructed exact encodings; the independent `ComponentTestRunner` repeats the exhaustive check under AOT/JIT and both policies; hosted native-emitter tests and the Windows x64 internal DLL exhaust the same domain; language eligibility and draft-only TRRM opcode `0x1E` are accepted, but this helper remains internal and does not promise released-format compatibility |
 | [FloatingComparison](FloatingComparison.terrum) | Internal raw-bit `float32`/`float64` ordering with IEEE equality, inequality and relational predicates; NaNs are unordered and signed zeros compare equal | Semantic-module JIT compares boundary cross-products and deterministic raw-bit pairs against hosted operators under both policies; the independent `ComponentTestRunner` checks signed zero, infinities and NaNs under AOT/JIT and both policies; the Windows x64 internal DLL directly exercises all twelve predicates with integer carriers against hosted operators; the TRRM comparison proposal remains unapproved, with no scalar-frontend or TRRM support implied |
 | [FloatingArithmetic](FloatingArithmetic.terrum) | Internal raw-bit `float32`/`float64` addition, subtraction, multiplication and division with nearest/ties-to-even rounding, gradual underflow and provisional canonical arithmetic NaNs | Semantic-module JIT compares boundary pairs and deterministic raw-bit inputs against the controlled hosted emitter under both policies; the independent `ComponentTestRunner` covers precision ties, subnormal transitions, infinities, NaNs and signed zeros under AOT/JIT and both policies; the Windows x64 internal DLL directly checks all eight raw-bit exports against a controlled hosted-emitter oracle, comparing finite results exactly and NaNs by classification only; arithmetic and NaN-encoding proposals remain unapproved, with no scalar-frontend or TRRM support implied |
 | [FloatingFormatConversion](FloatingFormatConversion.terrum) | Internal raw-bit widening and narrowing between `float32` and `float64`; finite narrowing rounds once to nearest/ties-even with gradual underflow and overflow to infinity | Semantic-module JIT compares finite results with hosted conversions under both policies, including all float32 subnormal leading-bit positions, midpoint neighbors, underflow, overflow and NaN classification; the independent `ComponentTestRunner` exercises representative boundaries under AOT/JIT and both policies; the Windows x64 internal DLL compares finite conversions exactly and NaNs by classification only; exact NaN payload preservation is not promised, and no scalar-frontend or TRRM support is implied |
@@ -868,8 +868,9 @@ the hosted reader validates their token spans and bits independently against
 the hosted parser. Conversion projection covers the two floating formats and the four
 fixed-width integer types. The floating-to-integer v85 projection remains
 provisional, and those authored components still rely on the hosted
-verifier/emitter. `char16`-to-floating and custom literal parser support remain
-outside this subset. Bounded scalar
+verifier/emitter. Although its source eligibility is accepted,
+`char16`-to-floating projection remains provisional and outside this validated
+subset; custom literal parser support is also outside it. Bounded scalar
 `[ConstEval]` is implemented separately from literal registration.
 Contextual integer literal typing/range checks
 and parser routines remain hosted, while

@@ -118,14 +118,15 @@ for signed operands. Integer and `char16` conversions are also provisionally
 carried by opcode `0x16` and reconstructed as checked bound
 casts, preserving overflow failure and `NoThrow` verification. Floating
 conversion paths are also provisionally implemented: format conversion uses
-`0x1A`, integer-to-float uses `0x1B`, and `char16`-to-float uses `0x1E`.
-Float-to-integer opcode `0x1F` is accepted for the unreleased `(1, 0)` draft;
-it truncates toward zero before range checking, preserves the existing
-overflow status, and remains incompatible with `NoThrow`. Control flow remains
-one-block except for the single direct-call split under revisions 5 and 6
-described below. These other value, comparison, bitwise, unary, arithmetic and
-conversion paths are implemented support only, not approval of their proposed
-executable contracts.
+`0x1A` and integer-to-float uses `0x1B`. Char16-to-float opcode `0x1E` is
+accepted for the unreleased `(1, 0)` draft, interpreting `char16` as its
+unsigned code-unit value; it is total and compatible with `NoThrow`.
+Float-to-integer opcode `0x1F` is also accepted for that draft; it truncates
+toward zero before range checking, preserves the existing overflow status, and
+is incompatible with `NoThrow`. Control flow remains one-block except for the
+single direct-call split under revisions 5 and 6 described below. These other
+value, comparison, bitwise, unary, arithmetic and conversion paths are
+implemented support only, not approval of their proposed executable contracts.
 The current writer emits required feature rule revision 6 for output Bodies.
 Rule revision 2 provisionally permits `bool`, `char16`, `int32`, `uint32`,
 `int64`, `uint64`, `float32` and `float64` referents and scalar initialized
