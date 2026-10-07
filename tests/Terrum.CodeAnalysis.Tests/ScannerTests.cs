@@ -144,7 +144,7 @@ public sealed class ScannerTests
     [Fact]
     public async Task NumericScannerMatchesHostedLexerAcrossDeterministicTokenCorpusAsync()
     {
-        const string decimalCharacters = "0123456789_";
+        const string decimalCharacters = "0123456789_.eE+-iIuUfF";
         const string binaryCharacters = "01_23456789xXbB.pPeE+-iuf";
         const string hexadecimalCharacters = "0123456789abcdefABCDEF_xXbB.pPeE+-iuf";
         var random = new Random(0x5EED);
