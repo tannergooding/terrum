@@ -286,6 +286,18 @@ postcondition-driven generic `Copy` outputs remain outside this profile;
 Boolean publication rules are unchanged. Mixed generic `out`/`init` calls are
 governed separately below.
 
+Compilation-local `[Copy]` templates admit `float32` and `float64` as concrete
+generic type arguments. Their substituted `T` values may be passed, returned,
+assigned, and published through the existing specialization and output-mode
+rules, including forwarding through nested `[Copy]` helpers. This does not
+grant symbolic `T` arithmetic, comparison, conversion, or other primitive
+operator rights, or widen shared `Copy` predicates. Floating fields in
+concrete dependencies reached while proving a generic body, floating
+signatures in those dependencies, and managed-class dependency closures
+remain outside this contract; those proof-hydration choices are separate.
+Public generic exports or witnesses, source-free TRRM, and scalar-frontend
+verification or emission also remain outside this hosted profile.
+
 Compilation-local `[Copy]` templates also admit `init ref<T>` outputs with a
 fixed `int32`, `uint32`, `int64`, `uint64`, `char16`, or `void` result. Every
 normal return, including implicit `void` fallthrough, must fully initialize
@@ -298,11 +310,10 @@ alone cannot. The existing `[Copy]` eligibility includes
 compilation-private managed-handle specializations and their rooting and
 cleanup. Closed private specializations survive compatible semantic-module and
 native-graph producer replacements without changing output-mode metadata or
-wire formats. Floating concrete argument eligibility remains separate. Unique
-or owning values, fixed-valued output side parameters, public generic exports
-or witnesses, source-free TRRM, and scalar-frontend verification or emission
-remain outside this standalone profile; mixed modes are governed separately
-below.
+wire formats. Unique or owning values and fixed-valued output side parameters
+remain outside this standalone profile, as do public generic exports or
+witnesses, source-free TRRM, and scalar-frontend verification or emission.
+Mixed modes are governed separately below.
 
 A separate fixed-floating result profile admits `float32` and `float64` as
 results for compilation-local `[Copy]` templates with at least one
@@ -312,12 +323,12 @@ a success discriminator: every output must be fully initialized on every
 normal return. Exceptional departure follows the existing mode rules. Closed
 private specializations preserve their result width across compatible
 semantic-module and native-graph producer replacements without changing
-output-mode metadata or wire formats. This profile does not widen concrete
-generic argument eligibility, admit fixed floating by-value parameters,
-formal-valued results, output-free templates, floating protocol results,
-symbolic floating operations, or source-free TRRM, and it defines no new
-arithmetic or NaN-payload contract. Generic mixed-output and fixed-side-output
-combinations with floating results remain outside this profile.
+output-mode metadata or wire formats. This result profile does not admit fixed
+floating by-value parameters, formal-valued results, output-free templates,
+floating protocol results, symbolic floating operations, or source-free TRRM.
+It defines no new arithmetic or NaN-payload contract. Generic mixed-output and
+fixed-side-output combinations with floating results remain outside this
+profile.
 
 A compilation-local `[Copy]` template may combine generic `out T` and
 `init ref<U>` output formals when its result is fixed `int32`, `uint32`,
@@ -335,8 +346,7 @@ native-graph producer replacements without changing the module ABI or wire
 formats. Boolean-result mixed-mode behavior is unchanged. Fixed-valued output
 side parameters, unique or owning values, formal-valued results, public generic
 exports or witnesses, source-free TRRM, scalar-frontend verification or
-emission, and floating concrete argument eligibility remain outside this
-profile.
+emission remain outside this profile.
 
 A compilation-local `[Copy]` template may also add fixed scalar output
 parameters alongside at least one generic-typed output when its result is a

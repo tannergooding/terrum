@@ -29,10 +29,6 @@ approved.
   has accepted fixed floating results for single-mode generic outputs without
   fixed side parameters; mixed-mode and fixed-side combinations remain
   unapproved.
-- [Floating Copy generic specializations](floating-copy-generic-specializations.md)
-  recommends admitting floating formats only as concrete arguments to hosted
-  Copy-only generic templates; it does not grant symbolic floating operations
-  or source-free generic support.
 - [Concrete floating dependencies in hosted generic proofs](floating-copy-proof-dependencies.md)
   recommends a bounded floating-leaf descriptor and concrete-signature
   hydration slice without expanding managed-class closures.

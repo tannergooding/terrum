@@ -22,9 +22,12 @@ without fixed side outputs. Generic initialization outputs retain
 compilation-private managed-handle support. Fixed scalar side outputs are
 supported with the non-floating result set and one generic output mode;
 floating results combined with mixed generic modes or fixed side outputs
-remain provisional. Public generic exports and executable TRRM support remain
-separate. The native backend emits Terrum-owned code; CIL is neither a
-dependency nor the default.
+remain provisional. Compilation-local `[Copy]` templates also accept concrete
+`float32` and `float64` generic arguments, forwarding and publishing their
+substituted values under existing rules. This grants no symbolic floating
+operations or floating dependency hydration during generic proofs. Public
+generic exports and executable TRRM support remain separate. The native
+backend emits Terrum-owned code; CIL is neither a dependency nor the default.
 
 Current profile markers are syntax language version 45, semantic body features
 v43-v49, semantic-module revision 76, and native profiles native-10 through

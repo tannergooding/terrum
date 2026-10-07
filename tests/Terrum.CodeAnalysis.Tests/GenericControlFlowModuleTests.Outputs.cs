@@ -726,6 +726,68 @@ public sealed partial class GenericControlFlowModuleTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task FloatingCopyArgumentsPersistPrivatelyAcrossSemanticAndNativeModulesAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string FloatingProducer = """
+            [NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }
+            [NoThrow] bool TryCopy<T>(T value, out T result) where T : [Copy] {
+                result = Identity(value);
+                return true;
+            }
+            [NoThrow] bool TryInitialize<T>(T value, init ref<T> result) where T : [Copy] {
+                result = Identity(value);
+                return true;
+            }
+            public int32 PowerProbe() {
+                float32 single = Identity<float32>(float32(40));
+                float64 wide = Identity(float64(2));
+                require TryCopy(single, out var copied);
+                require TryInitialize(wide, init var initialized);
+                if (copied != float32(40) || initialized != float64(2)) { return 1; }
+                return 42;
+            }
+            """;
+
+        var original = ModuleCompiler.CreateProducer(Compile(Stub, policy), ["PowerProbe"]);
+        var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return PowerProbe(); }",
+            policy, ModuleCompiler.CreateReference(original), library: false), original);
+        var consumerHash = SHA256.HashData(consumer);
+        var replacement = ModuleCompiler.CreateProducer(Compile(FloatingProducer, policy), ["PowerProbe"]);
+        var replacementReference = ModuleCompiler.CreateReference(replacement);
+        Assert.Empty(replacementReference.Structures);
+        Assert.Equal("PowerProbe", Assert.Single(replacementReference.Functions).Name);
+
+        var linked = ModuleCompiler.Link(consumer, replacement);
+        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Identity<float32>");
+        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Identity<float64>");
+        Assert.Contains(linked.Functions, static function =>
+            function.Name == "$producer.TryCopy<float32>" && function.Variables[1].IsOut);
+        Assert.Contains(linked.Functions, static function =>
+            function.Name == "$producer.TryInitialize<float64>" && function.Variables[1].IsInit);
+        Assert.Equal(42, NativeJit.Execute(linked, policy));
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.Equal(consumerHash, SHA256.HashData(consumer));
+
+        var nativeOriginal = NativeModuleCompiler.CreateProducer(Compile(Stub, policy),
+            ["PowerProbe"], "NodeB", policy);
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(
+            "int32 Main() { return PowerProbe(); }", policy,
+            NativeModuleCompiler.CreateGraphReference([nativeOriginal]), library: false),
+            [nativeOriginal], policy);
+        var nativeHash = SHA256.HashData(nativeConsumer);
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(Compile(FloatingProducer, policy),
+            ["PowerProbe"], "NodeB", policy);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
+            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task FloatingCopySpecializationsPersistPrivatelyAcrossSemanticAndNativeModulesAsync(
         NativeRuntimePolicy policy)
     {
