@@ -104,18 +104,17 @@ Calls use symbolic function identities rather than binder-local indexes.
 Types use declaration names, visibility and ordered field layouts as their contract;
 public import keys include declaring-type and signature-type visibility, while
 the complete ordered layout is checked separately before execution. The
-current module format does not relax its exact layout checks. The bounded transparent `Copy` wrapper is a specific v35 contract: one-field
+current module format does not relax its exact layout checks. The bounded transparent `Copy` wrapper is a specific contract: one-field
 wrappers over `bool`, `char16`, `int32`, `uint32`, `int64`, or `uint64` retain
 nominal identity and field visibility/mutation rules, while storage and direct
-argument/result classification match the carrier. Semantic artifact v35
-persists the transparent-layout intent for private and exported structures,
-and compatible replacements must preserve that intent. This does not add
+argument/result classification match the carrier. Semantic modules persist
+the transparent-layout intent for private and exported structures, and
+compatible replacements must preserve that intent. This does not add
 implicit conversions or relax exact checks for other module layouts.
-Revision 36 admits up to 32 managed-class fields (previous revisions retain
-the 16-field reader limit); construction tracks the final field in a 32-bit
-initialization mask. The collector descriptor remains an offset list. Private
-wide classes can be retained in producers, graph participants or consumers;
-this does not expose managed handles across module boundaries.
+Managed classes support up to 32 fields; construction tracks the final field
+in a 32-bit initialization mask. The collector descriptor remains an offset
+list. Private wide classes can be retained in producers, graph participants
+or consumers; this does not expose managed handles across module boundaries.
 Current source binding records the selected declaration and its closed generic
 arguments, not just a name. Linking or JIT loading validates and implements
 that selected target; it never reruns source overload resolution against a
