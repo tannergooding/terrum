@@ -157,6 +157,54 @@ public sealed class ModuleTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CopyOutputsRetainConditionalPublicationAcrossModuleArtifactsAsync(
+        BoundRuntimePolicy policy)
+    {
+        var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public struct Pair {
+                public int32 First;
+                public int32 Second;
+                public Pair(int32 first, int32 second) {
+                    First = first;
+                    Second = second;
+                }
+            }
+            public bool TryGetPair(int32 key, out Pair result) {
+                if (key == 0) { return false; }
+                result = new Pair(key, 2);
+                return true;
+            }
+            public bool TryInitializePair(int32 key, init ref<Pair> result) {
+                if (key == 0) { return false; }
+                result = new Pair(key, 3);
+                return true;
+            }
+            """), policy);
+        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program),
+            ["TryGetPair", "TryInitializePair"]);
+
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                if (TryGetPair(0, out var failed)) { return 1; }
+                if (!TryGetPair(40, out var copied)) { return 2; }
+                init Pair initialized;
+                if (TryInitializePair(0, init initialized)) { return 3; }
+                if (!TryInitializePair(40, init initialized)) { return 4; }
+                return copied.First + copied.Second + initialized.First + initialized.Second;
+            }
+            """), ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        var nativePolicy = policy == BoundRuntimePolicy.FailFast
+            ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+        Assert.Equal(85, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, producer), nativePolicy)).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public async Task NamedArgumentExpressionsEvaluateInSourceOrderAcrossModuleArtifactsAsync(
         BoundRuntimePolicy policy)
     {
