@@ -763,6 +763,26 @@ separate compilation-local `Span<Token>` analysis: its dependency ordinals
 remain unpersisted, and current semantic-module/TRRM rejection remains in
 force.
 
+**Provisional implementation gate (unapproved):** The current verifier facts
+represent forwarded backing, not permission to borrow a source descriptor's
+storage. Incoming descriptor roots are tracked separately from the formal
+parameter place, so the candidate `0x01` and `0x03` relations cannot be
+implemented by reinterpreting `ReturnsForwardedBacking` or its source list.
+Keep those relations rejected. If beginning semantic-module persistence, the
+first bounded slice should persist only body-backed, synchronous, non-generic,
+top-level `Span<Token>` results that explicitly forward backing from a
+nonempty parameter source set. It must keep dependency-bearing imports and
+exports, bodyless declarations, receivers, `TokenCursor` capture, storage
+borrowing, broad-default relations, TRRM, graphs and module sets rejected.
+Before admitting even that slice, assign a new semantic-module revision,
+persist and validate canonical source ordinals, include the relation in
+retained contract compatibility, and preserve compiler-known type identity
+through producer qualification and remapping; reject any link that cannot
+prove that identity. The writer, reader, caller verifier and source-order
+argument mapping must agree, and producer bodies—not serialized backing-root
+sets—remain the proof. This is a sequencing recommendation, not an approval of
+the candidate registry or a change to current rejection behavior.
+
 ### 2. How should caller-unsafe declarations cross an import boundary?
 
 **Summary:** The grammar gives `unsafe` on a callable declaration a caller
