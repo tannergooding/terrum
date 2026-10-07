@@ -70,7 +70,7 @@ uint64 MultiplyFloatingBits(uint64 left, uint64 right, bool isFloat32)
     if ((leftEncodedExponent == maximumExponent && leftFraction != 0)
         || (rightEncodedExponent == maximumExponent && rightFraction != 0))
     {
-        return canonicalNaN;
+        return PropagateInputNaN(left, right, exponentMask, fractionMask, fractionBits);
     }
 
     bool leftNegative = (left & signMask) != 0;
@@ -228,7 +228,7 @@ uint64 DivideFloatingBits(uint64 left, uint64 right, bool isFloat32)
     if ((leftEncodedExponent == maximumExponent && leftFraction != 0)
         || (rightEncodedExponent == maximumExponent && rightFraction != 0))
     {
-        return canonicalNaN;
+        return PropagateInputNaN(left, right, exponentMask, fractionMask, fractionBits);
     }
 
     bool leftNegative = (left & signMask) != 0;
@@ -365,7 +365,7 @@ uint64 AddFloatingBits(uint64 left, uint64 right, bool isFloat32, bool subtract)
     if ((leftEncodedExponent == maximumExponent && leftFraction != 0)
         || (rightEncodedExponent == maximumExponent && rightFraction != 0))
     {
-        return canonicalNaN;
+        return PropagateInputNaN(left, right, exponentMask, fractionMask, fractionBits);
     }
 
     mut bool leftNegative = (left & signMask) != 0;
@@ -514,4 +514,20 @@ uint64 ShiftRightJam(uint64 value, int32 shift)
     uint64 shifted = value >> shift;
     uint64 discardedMask = (uint64(1) << shift) - 1;
     return (value & discardedMask) != 0 ? shifted | 1 : shifted;
+}
+
+uint64 PropagateInputNaN(
+    uint64 left,
+    uint64 right,
+    uint64 exponentMask,
+    uint64 fractionMask,
+    int32 fractionBits)
+{
+    uint64 quietBit = uint64(1) << (fractionBits - 1);
+    if ((left & exponentMask) == exponentMask && (left & fractionMask) != 0)
+    {
+        return left | quietBit;
+    }
+
+    return right | quietBit;
 }

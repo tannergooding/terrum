@@ -1,5 +1,17 @@
 namespace Terrum.CodeAnalysis.Tests;
 
+bool IsFloat32NaNBits(uint32 bits)
+{
+    return (bits & 0x7F800000) == 0x7F800000
+        && (bits & 0x007FFFFF) != 0;
+}
+
+bool IsFloat64NaNBits(uint64 bits)
+{
+    return (bits & 0x7FF0000000000000) == 0x7FF0000000000000
+        && (bits & 0x000FFFFFFFFFFFFF) != 0;
+}
+
 public bool CheckFloatingArithmetic()
 {
     if (Float32AddBits(0x3FC00000, 0x40100000) != 0x40700000
@@ -41,21 +53,21 @@ public bool CheckFloatingArithmetic()
         || Float32AddBits(0x80000000, 0x80000000) != 0x80000000
         || Float32SubtractBits(0x80000000, 0x00000000) != 0x80000000
         || Float32MultiplyBits(0x80000000, 0xC0000000) != 0
-        || Float32MultiplyBits(0x00000000, 0x7F800000) != 0x7FC00000
+        || !IsFloat32NaNBits(Float32MultiplyBits(0x00000000, 0x7F800000))
         || Float32MultiplyBits(0x7F800000, 0xC0000000) != 0xFF800000
-        || Float32MultiplyBits(0x7FC12345, 0x3F800000) != 0x7FC00000
+        || Float32MultiplyBits(0x7FC12345, 0x3F800000) != 0x7FC12345
         || Float32DivideBits(0x80000000, 0xBF800000) != 0
         || Float32DivideBits(0x3F800000, 0) != 0x7F800000
         || Float32DivideBits(0xBF800000, 0) != 0xFF800000
-        || Float32DivideBits(0, 0) != 0x7FC00000
-        || Float32DivideBits(0x7F800000, 0x7F800000) != 0x7FC00000
+        || !IsFloat32NaNBits(Float32DivideBits(0, 0))
+        || !IsFloat32NaNBits(Float32DivideBits(0x7F800000, 0x7F800000))
         || Float32DivideBits(0x7F800000, 0xBF800000) != 0xFF800000
         || Float32DivideBits(0x3F800000, 0xFF800000) != 0x80000000
         || Float32SubtractBits(0x3F800000, 0x3F800000) != 0
         || Float32AddBits(0x7F800000, 0xBF800000) != 0x7F800000
         || Float32SubtractBits(0xFF800000, 0x3F800000) != 0xFF800000
-        || Float32AddBits(0x7F800000, 0xFF800000) != 0x7FC00000
-        || Float32AddBits(0x7F800001, 0x3F800000) != 0x7FC00000
+        || !IsFloat32NaNBits(Float32AddBits(0x7F800000, 0xFF800000))
+        || Float32AddBits(0x7F800001, 0x3F800000) != 0x7FC00001
         || Float32AddBits(0x7F7FFFFF, 0x72FFFFFF) != 0x7F7FFFFF
         || Float32AddBits(0x7F7FFFFF, 0x73000000) != 0x7F800000
         || Float32AddBits(0x7F7FFFFF, 0x73000001) != 0x7F800000)
@@ -103,21 +115,21 @@ public bool CheckFloatingArithmetic()
         || Float64AddBits(0x8000000000000000, 0x8000000000000000) != 0x8000000000000000
         || Float64SubtractBits(0x8000000000000000, 0) != 0x8000000000000000
         || Float64MultiplyBits(0x8000000000000000, 0xC000000000000000) != 0
-        || Float64MultiplyBits(0, 0x7FF0000000000000) != 0x7FF8000000000000
+        || !IsFloat64NaNBits(Float64MultiplyBits(0, 0x7FF0000000000000))
         || Float64MultiplyBits(0x7FF0000000000000, 0xC000000000000000) != 0xFFF0000000000000
-        || Float64MultiplyBits(0x7FF8000000001234, 0x3FF0000000000000) != 0x7FF8000000000000
+        || Float64MultiplyBits(0x7FF8000000001234, 0x3FF0000000000000) != 0x7FF8000000001234
         || Float64DivideBits(0x8000000000000000, 0xBFF0000000000000) != 0
         || Float64DivideBits(0x3FF0000000000000, 0) != 0x7FF0000000000000
         || Float64DivideBits(0xBFF0000000000000, 0) != 0xFFF0000000000000
-        || Float64DivideBits(0, 0) != 0x7FF8000000000000
-        || Float64DivideBits(0x7FF0000000000000, 0x7FF0000000000000) != 0x7FF8000000000000
+        || !IsFloat64NaNBits(Float64DivideBits(0, 0))
+        || !IsFloat64NaNBits(Float64DivideBits(0x7FF0000000000000, 0x7FF0000000000000))
         || Float64DivideBits(0x7FF0000000000000, 0xBFF0000000000000) != 0xFFF0000000000000
         || Float64DivideBits(0x3FF0000000000000, 0xFFF0000000000000) != 0x8000000000000000
         || Float64SubtractBits(0x3FF0000000000000, 0x3FF0000000000000) != 0
         || Float64AddBits(0x7FF0000000000000, 0xBFF0000000000000) != 0x7FF0000000000000
         || Float64SubtractBits(0xFFF0000000000000, 0x3FF0000000000000) != 0xFFF0000000000000
-        || Float64AddBits(0x7FF0000000000000, 0xFFF0000000000000) != 0x7FF8000000000000
-        || Float64AddBits(0xFFF0000000000001, 0x3FF0000000000000) != 0x7FF8000000000000
+        || !IsFloat64NaNBits(Float64AddBits(0x7FF0000000000000, 0xFFF0000000000000))
+        || Float64AddBits(0xFFF0000000000001, 0x3FF0000000000000) != 0xFFF8000000000001
         || Float64AddBits(0x7FEFFFFFFFFFFFFF, 0x7C8FFFFFFFFFFFFF) != 0x7FEFFFFFFFFFFFFF
         || Float64AddBits(0x7FEFFFFFFFFFFFFF, 0x7C90000000000000) != 0x7FF0000000000000
         || Float64AddBits(0x7FEFFFFFFFFFFFFF, 0x7C90000000000001) != 0x7FF0000000000000)
@@ -149,8 +161,8 @@ public bool CheckFloat32Division()
         && Float32DivideBits(0x80000000, 0xBF800000) == 0
         && Float32DivideBits(0x3F800000, 0) == 0x7F800000
         && Float32DivideBits(0xBF800000, 0) == 0xFF800000
-        && Float32DivideBits(0, 0) == 0x7FC00000
-        && Float32DivideBits(0x7F800000, 0x7F800000) == 0x7FC00000
+        && IsFloat32NaNBits(Float32DivideBits(0, 0))
+        && IsFloat32NaNBits(Float32DivideBits(0x7F800000, 0x7F800000))
         && Float32DivideBits(0x7F800000, 0xBF800000) == 0xFF800000
         && Float32DivideBits(0x3F800000, 0xFF800000) == 0x80000000;
 }
@@ -184,8 +196,8 @@ public bool CheckFloat64DivisionB()
         && Float64DivideBits(0x8000000000000000, 0xBFF0000000000000) == 0
         && Float64DivideBits(0x3FF0000000000000, 0) == 0x7FF0000000000000
         && Float64DivideBits(0xBFF0000000000000, 0) == 0xFFF0000000000000
-        && Float64DivideBits(0, 0) == 0x7FF8000000000000
-        && Float64DivideBits(0x7FF0000000000000, 0x7FF0000000000000) == 0x7FF8000000000000
+        && IsFloat64NaNBits(Float64DivideBits(0, 0))
+        && IsFloat64NaNBits(Float64DivideBits(0x7FF0000000000000, 0x7FF0000000000000))
         && Float64DivideBits(0x7FF0000000000000, 0xBFF0000000000000) == 0xFFF0000000000000
         && Float64DivideBits(0x3FF0000000000000, 0xFFF0000000000000) == 0x8000000000000000;
 }

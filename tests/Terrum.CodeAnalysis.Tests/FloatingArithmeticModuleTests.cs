@@ -188,6 +188,8 @@ public sealed class FloatingArithmeticModuleTests
         source.AppendLine("if (!CheckFloat64DivisionB()) { return 903; }");
         source.AppendLine("return 0;");
         source.AppendLine("}");
+        source.AppendLine("bool IsOracleFloat32NaNBits(uint32 bits) { return (bits & uint32(0x7F800000)) == uint32(0x7F800000) && (bits & uint32(0x007FFFFF)) != 0; }");
+        source.AppendLine("bool IsOracleFloat64NaNBits(uint64 bits) { return (bits & uint64(0x7FF0000000000000)) == uint64(0x7FF0000000000000) && (bits & uint64(0x000FFFFFFFFFFFFF)) != 0; }");
         source.Append(definitions);
         return source.ToString();
     }
@@ -374,9 +376,16 @@ public sealed class FloatingArithmeticModuleTests
 
     private static void AppendFloat32Check(StringBuilder source, string function, uint left, uint right, uint expected)
     {
-        source.Append("if (").Append(function).Append("(uint32(0x").Append(left.ToString("X8"))
-            .Append("), uint32(0x").Append(right.ToString("X8")).Append(")) != uint32(0x")
-            .Append(expected.ToString("X8")).AppendLine(")) { return false; }");
+        var call = $"{function}(uint32(0x{left:X8}), uint32(0x{right:X8}))";
+        if (IsFloat32NaN(expected))
+        {
+            source.Append("if (!IsOracleFloat32NaNBits(").Append(call).AppendLine(")) { return false; }");
+        }
+        else
+        {
+            source.Append("if (").Append(call).Append(" != uint32(0x")
+                .Append(expected.ToString("X8")).AppendLine(")) { return false; }");
+        }
     }
 
     private static void AppendFloat64Check(
@@ -386,9 +395,27 @@ public sealed class FloatingArithmeticModuleTests
         ulong right,
         ulong expected)
     {
-        source.Append("if (").Append(function).Append("(uint64(0x").Append(left.ToString("X16"))
-            .Append("), uint64(0x").Append(right.ToString("X16")).Append(")) != uint64(0x")
-            .Append(expected.ToString("X16")).AppendLine(")) { return false; }");
+        var call = $"{function}(uint64(0x{left:X16}), uint64(0x{right:X16}))";
+        if (IsFloat64NaN(expected))
+        {
+            source.Append("if (!IsOracleFloat64NaNBits(").Append(call).AppendLine(")) { return false; }");
+        }
+        else
+        {
+            source.Append("if (").Append(call).Append(" != uint64(0x")
+                .Append(expected.ToString("X16")).AppendLine(")) { return false; }");
+        }
+    }
+
+    private static bool IsFloat32NaN(uint bits)
+    {
+        return (bits & 0x7F800000) == 0x7F800000 && (bits & 0x007FFFFF) != 0;
+    }
+
+    private static bool IsFloat64NaN(ulong bits)
+    {
+        return (bits & 0x7FF0000000000000) == 0x7FF0000000000000
+            && (bits & 0x000FFFFFFFFFFFFF) != 0;
     }
 
     private static uint NextUInt32(Random random)

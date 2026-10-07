@@ -717,8 +717,9 @@ public sealed class FloatingLiteralBindingTests
             Assert.Equal(0x40400000, multiply32(0x3FC00000, 0x40000000));
             Assert.Equal(0x40400000, divide32(0x40C00000, 0x40000000));
             Assert.Equal(0x40D00000, nested32(0x3FC00000, 0x40100000, 0x40000000, 0x3F800000));
-            Assert.Equal(0x7FC00000, divide32(0, 0));
-            Assert.Equal(0x7FC00000, add32(unchecked((int)0xFFC12345), 0x3F800000));
+            Assert.True(float.IsNaN(BitConverter.Int32BitsToSingle(divide32(0, 0))));
+            Assert.Equal(unchecked((int)0xFFC12345),
+                add32(unchecked((int)0xFFC12345), 0x3F800000));
             Assert.Equal(1, equal32(unchecked((int)0x80000000), 0));
             Assert.Equal(0, equal32(0x7F800001, 0x3F800000));
             Assert.Equal(1, notEqual32(0x7F800001, 0x3F800000));
@@ -738,8 +739,8 @@ public sealed class FloatingLiteralBindingTests
             Assert.Equal(0x401A000000000000L,
                 nested64(0x3FF8000000000000L, 0x4002000000000000L, 0x4000000000000000L,
                     0x3FF0000000000000L));
-            Assert.Equal(unchecked((long)0x7FF8000000000000UL), divide64(0, 0));
-            Assert.Equal(unchecked((long)0x7FF8000000000000UL),
+            Assert.True(double.IsNaN(BitConverter.Int64BitsToDouble(divide64(0, 0))));
+            Assert.Equal(unchecked((long)0xFFF8123456789ABCUL),
                 add64(unchecked((long)0xFFF8123456789ABCUL), 0x3FF0000000000000L));
             Assert.Equal(1, equal64(long.MinValue, 0));
             Assert.Equal(0, equal64(0x7FF0000000000001L, 0x3FF0000000000000L));

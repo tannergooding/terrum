@@ -4532,34 +4532,12 @@ internal sealed partial class PeCompiler
                 }, 0xC1);
             if (isSingle)
             {
-                _code.Bytes(0x0F, 0x2E, 0xC0); // ucomiss xmm0,xmm0
-            }
-            else
-            {
-                _code.Bytes(0x66, 0x0F, 0x2E, 0xC0); // ucomisd xmm0,xmm0
-            }
-            var notNaN = _code.JumpIf(0x8B);
-            if (isSingle)
-            {
-                _code.Byte(0xB8);
-                _code.Int32(unchecked((int)0x7FC00000));
-            }
-            else
-            {
-                _code.Bytes(0x48, 0xB8);
-                _code.Int64(unchecked((long)0x7FF8000000000000UL));
-            }
-            var done = _code.Jump();
-            _code.PatchRelative(notNaN, _code.Position);
-            if (isSingle)
-            {
                 _code.Bytes(0x66, 0x0F, 0x7E, 0xC0); // movd eax,xmm0
             }
             else
             {
                 _code.Bytes(0x66, 0x48, 0x0F, 0x7E, 0xC0); // movq rax,xmm0
             }
-            _code.PatchRelative(done, _code.Position);
         }
         else
         {

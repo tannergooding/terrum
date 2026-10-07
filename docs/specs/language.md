@@ -678,8 +678,11 @@ truncates toward zero; signed minimum divided by `-1` fails while its remainder
 is zero. Shift counts are checked; left shift is width-truncating bit
 manipulation, not checked multiplication. Floating operations use target-format
 round-to-nearest ties-even without implicit FMA, reassociation, ambient rounding
-or flush dependence; arithmetic NaNs canonicalize in the working profile.
-Arithmetic NaN canonicalization does not apply to bitcasts or copies, which
+or flush dependence. An arithmetic result that is NaN is guaranteed to remain
+NaN, but its sign and payload are unspecified. Implementations should propagate
+and quiet an input NaN when practical; this does not promise a particular
+payload or propagation choice across implementations. Invalid operations that
+produce NaN without a NaN input may use any NaN encoding. Bitcasts and copies
 preserve bits under their representation contracts. Representation-level
 `FromBits`/`ToBits` operations have their own bit contracts.
 Floating-to-floating conversions follow IEEE-754:

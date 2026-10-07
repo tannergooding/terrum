@@ -1797,11 +1797,14 @@ public sealed class TrRmExecutableCompilerTests
                 Assert.Equal(0x40200000, subtract32(0x40800000, 0x3FC00000));
                 Assert.Equal(0x40C00000, multiply32(0x40000000, 0x40400000));
                 Assert.Equal(0x3FC00000, divide32(0x40400000, 0x40000000));
-                Assert.Equal(0x7FC00000, add32(0x7F800000, unchecked((int)0xFF800000)));
-                Assert.Equal(0x7FC00000, subtract32(0x7F800000, 0x7F800000));
-                Assert.Equal(0x7FC00000, multiply32(0, 0x7F800000));
-                Assert.Equal(0x7FC00000, divide32(0, 0));
-                Assert.Equal(unchecked((int)0x7FC00000),
+                Assert.True(float.IsNaN(BitConverter.Int32BitsToSingle(
+                    add32(0x7F800000, unchecked((int)0xFF800000)))));
+                Assert.True(float.IsNaN(BitConverter.Int32BitsToSingle(
+                    subtract32(0x7F800000, 0x7F800000))));
+                Assert.True(float.IsNaN(BitConverter.Int32BitsToSingle(
+                    multiply32(0, 0x7F800000))));
+                Assert.True(float.IsNaN(BitConverter.Int32BitsToSingle(divide32(0, 0))));
+                Assert.Equal(unchecked((int)0xFFC12345),
                     add32(unchecked((int)0xFFC12345), 0x3F800000));
                 Assert.Equal(unchecked((int)0x80000000),
                     multiply32(unchecked((int)0x80000000), 0x3F800000));
@@ -1810,14 +1813,14 @@ public sealed class TrRmExecutableCompilerTests
                 Assert.Equal(0x4004000000000000L, subtract64(0x4010000000000000L, 0x3FF8000000000000L));
                 Assert.Equal(0x4018000000000000L, multiply64(0x4000000000000000L, 0x4008000000000000L));
                 Assert.Equal(0x3FF8000000000000L, divide64(0x4008000000000000L, 0x4000000000000000L));
-                Assert.Equal(0x7FF8000000000000L,
-                    add64(0x7FF0000000000000L, unchecked((long)0xFFF0000000000000UL)));
-                Assert.Equal(0x7FF8000000000000L,
-                    subtract64(0x7FF0000000000000L, 0x7FF0000000000000L));
-                Assert.Equal(0x7FF8000000000000L,
-                    multiply64(0, 0x7FF0000000000000L));
-                Assert.Equal(0x7FF8000000000000L, divide64(0, 0));
-                Assert.Equal(unchecked((long)0x7FF8000000000000UL),
+                Assert.True(double.IsNaN(BitConverter.Int64BitsToDouble(
+                    add64(0x7FF0000000000000L, unchecked((long)0xFFF0000000000000UL)))));
+                Assert.True(double.IsNaN(BitConverter.Int64BitsToDouble(
+                    subtract64(0x7FF0000000000000L, 0x7FF0000000000000L))));
+                Assert.True(double.IsNaN(BitConverter.Int64BitsToDouble(
+                    multiply64(0, 0x7FF0000000000000L))));
+                Assert.True(double.IsNaN(BitConverter.Int64BitsToDouble(divide64(0, 0))));
+                Assert.Equal(unchecked((long)0xFFF8123456789ABCUL),
                     add64(unchecked((long)0xFFF8123456789ABCUL), 0x3FF0000000000000L));
                 Assert.Equal(long.MinValue, multiply64(long.MinValue, 0x3FF0000000000000L));
                 Assert.Equal(unchecked((int)0x80000000),

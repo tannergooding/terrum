@@ -75,7 +75,7 @@ approved.
   it does not add atomic support or change the accepted bitwise-comparison rule.
 - [Floating arithmetic in executable TRRM](floating-trrm-arithmetic.md)
   recommends same-format `float32`/`float64` add, subtract, multiply and divide
-  using the separate provisional arithmetic-NaN policy.
+  using the accepted NaN-result-class contract without fixed payload bits.
 
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,
