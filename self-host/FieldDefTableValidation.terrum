@@ -1,0 +1,113 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateFieldDefTable(int32 recordCount, int32 moduleCount,
+    int32 stringCount, int32 moduleRefCount, int32 typeDefCount, int32 methodDefCount,
+    int32 sourceFileCount, int32 featureCount, int32 fieldCount, int32 genericParamCount,
+    int32 layoutCount, int32 contractCount, int32 typeSpecCount)
+{
+    if (recordCount <= 0 || recordCount > 0xFF_FFFF
+        || recordCount != fieldCount
+        || recordCount * 20 != Host.FieldDefs.Length
+        || typeSpecCount < 0 || typeSpecCount > 0xFF_FFFF
+        || !TryValidateTypeDefTable(typeDefCount, moduleCount, stringCount,
+            moduleRefCount, typeDefCount, methodDefCount, sourceFileCount, featureCount,
+            fieldCount, genericParamCount, layoutCount, contractCount)
+        || (layoutCount == 0 && Host.Layouts.Length != 0))
+    {
+        return false;
+    }
+
+    if (layoutCount > 0
+        && !TryValidateLayoutTable(layoutCount, moduleCount, stringCount,
+            moduleRefCount, typeDefCount, methodDefCount, sourceFileCount, featureCount,
+            fieldCount, genericParamCount, layoutCount, contractCount))
+    {
+        return false;
+    }
+
+    int32 stringIndexByteLength = (stringCount + 1) * 4;
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        if (!TryValidateFieldDefRow(row, typeDefCount, typeSpecCount, layoutCount,
+            stringCount, stringIndexByteLength))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryValidateFieldDefRow(int32 row, int32 typeDefCount, int32 typeSpecCount,
+    int32 layoutCount, int32 stringCount, int32 stringIndexByteLength)
+{
+    int32 rowStart = (row - 1) * 20;
+    if (!TryReadFieldDefTableWord(rowStart, 0, init var owner)
+        || !TryReadFieldDefTableWord(rowStart, 4, init var name)
+        || !TryReadFieldDefTableWord(rowStart, 8, init var typeSpec)
+        || !TryReadFieldDefTableWord(rowStart, 12, init var flags)
+        || !TryReadFieldDefTableWord(rowStart, 16, init var byteOffset)
+        || owner == 0 || owner > uint32(typeDefCount)
+        || owner != uint32(Host.FieldOwners[row])
+        || name == 0 || name > 0xFF_FFFF || name > uint32(stringCount)
+        || typeSpec == 0 || typeSpec > uint32(typeSpecCount)
+        || flags > 7 || (flags & 3) == 3)
+    {
+        return false;
+    }
+
+    if (byteOffset != 0xFFFF_FFFF)
+    {
+        if (!TryReadTypeDefTableWord((int32(owner) - 1) * 40, 28, init var layoutRow)
+            || layoutRow == 0 || layoutRow > uint32(layoutCount)
+            || !TryReadLayoutTableWord((int32(layoutRow) - 1) * 24, 8, init var layoutSize)
+            || byteOffset >= layoutSize)
+        {
+            return false;
+        }
+    }
+
+    if (!TryGetValidatedModuleIdentityExtent(stringCount, stringIndexByteLength,
+            int32(name), init var nameStart, init var nameLength,
+            init var nameEncoding, init var nameContentLength)
+        || !TryValidateModuleIdentityText(nameStart, nameContentLength, nameEncoding))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool TryReadFieldDefTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.FieldDefs.Length - 20
+        || offset < 0 || offset > 16
+        || !TryReadFieldDefTableByte(rowStart + offset, init var first)
+        || !TryReadFieldDefTableByte(rowStart + offset + 1, init var second)
+        || !TryReadFieldDefTableByte(rowStart + offset + 2, init var third)
+        || !TryReadFieldDefTableByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadFieldDefTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.FieldDefs.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.FieldDefs[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}

@@ -255,6 +255,15 @@ remain uninterpreted here and this is not target ABI validation. AOT/JIT
 fixtures compare both runtime policies with the hosted reader, including
 multi-module ownership, duplicate/orphan rows, target/flag failures and
 scratch publication.
+The `FieldDefTableValidation` candidate composes TypeDef and optional Layout
+validation, checks each field's recorded owner, strict decoded name, assigned
+flags and bounded TypeSpec reference, and requires fixed byte offsets to name
+an owner's Layout and fall below its declared size. The TypeSpec table is an
+already validated input, matching the hosted reader's reader-to-reader
+dependency; field size, alignment and complete target-layout correctness are
+not inferred. AOT/JIT fixtures compare with the hosted layout-aware reader
+under both runtime policies, including missing/out-of-range layouts, boundary
+offsets, names, references, flags, counts and malformed bytes.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.
