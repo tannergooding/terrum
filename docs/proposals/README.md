@@ -73,9 +73,6 @@ approved.
 - [Compare-exchange order pairs](atomic-cas-order-pairs.md) recommends a
   finite compile-time-valid table for CAS success/failure memory orders;
   it does not add atomic support or change the accepted bitwise-comparison rule.
-- [Floating negation in executable TRRM](floating-trrm-negation.md)
-  recommends a total sign-bit operation that preserves the remaining payload
-  bits without defining floating arithmetic NaN encodings.
 - [Floating arithmetic in executable TRRM](floating-trrm-arithmetic.md)
   recommends same-format `float32`/`float64` add, subtract, multiply and divide
   using the separate provisional arithmetic-NaN policy.

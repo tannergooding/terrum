@@ -268,6 +268,12 @@ and follows nearest, ties-to-even target-format semantics. It does not extend
 integer `Convert` or `CheckedConvert`; `char16`, floating sources and identity
 conversions are outside this operation.
 
+The draft also accepts opcode `0x1C`,
+`FloatNegate rNew, rSource`, for an operand and result with the same exact
+`float32` or `float64` type. It toggles only the sign bit, preserving every
+other bit, including NaN payloads. This total operation does not perform
+floating arithmetic or depend on an arithmetic-NaN encoding.
+
 The draft also accepts opcode `0x1E`, `Char16ToFloat rNew, tDest, rSource`,
 for exactly `char16` to `float32` or `float64`. It interprets the source as an
 unsigned UTF-16 code unit, without decoding or validating surrogate pairs;

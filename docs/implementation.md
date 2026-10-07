@@ -137,9 +137,12 @@ conversions under nearest/ties-to-even target-format semantics. Their
 implementations and linear/indexed coverage are present. Opcode `0x1B` is
 accepted for the eight fixed-width integer-to-`float32`/`float64` pairs with
 nearest/ties-to-even target-format semantics; its implementation and
-linear/indexed coverage are present. These draft-only encodings do not change
-the approved IL specifications or promise post-release compatibility. Other
-source-free TRRM floating operations remain under unapproved proposals.
+linear/indexed coverage are present. Opcode `0x1C` is accepted for total
+same-format `float32`/`float64` negation by sign-bit toggling, preserving all
+other bits; its implementation and linear/indexed coverage are present. These
+draft-only encodings do not change the approved IL specifications or promise
+post-release compatibility. Remaining source-free TRRM floating operations
+remain under unapproved proposals.
 
 ## Platform and validation
 
