@@ -143,6 +143,18 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     }
 
     [Fact]
+    public void BooleanOutputCallDoesNotDefinitelyInitializeItsDestination()
+    {
+        var fixture = Encode(
+            [[0x0B, 1, 1], [0x12, 2, 2, 1, 1], [0x0D, 3, 1]],
+            [1, 0, 0], [2, -1, -1], [2], valueTypeIds: [1, 2, 1],
+            typeMapRows: [1, 3], terminator: [0x83, 3]);
+
+        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [],
+            voidResult: false, targetModes: [2], targetResultTypeSpecRow: 3));
+    }
+
+    [Fact]
     public void InitializeValueTypeMustMatchItsPlace()
     {
         var fixture = Encode(
@@ -641,6 +653,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         byte[]? targetModes = null, byte targetFlags = 0, byte targetLayout = 0,
         byte? contractKind = null, int resultTypeSpecRow = 0,
         byte[]? paramTypeSpecRows = null,
+        int targetResultTypeSpecRow = 2,
         uint ruleRevision = TrRmFeatureTableReader.ScalarInitOutputRuleRevision)
     {
         var methodCount = targetModes is null ? 1 : 2;
@@ -668,7 +681,8 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             modes.Length == 0 ? 0 : 1, modes.Length);
         if (targetModes is not null)
         {
-            Signature(signatureBytes, 24, 2, targetModes.Length == 0 ? 0 : modes.Length + 1,
+            Signature(signatureBytes, 24, (uint)targetResultTypeSpecRow,
+                targetModes.Length == 0 ? 0 : modes.Length + 1,
                 targetModes.Length);
         }
 

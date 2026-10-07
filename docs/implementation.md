@@ -572,10 +572,13 @@ initialized scalar locals provisionally support all eight non-void scalar
 types under ScalarInitOutput rule revision 2. The reader continues to accept
 rule revision 1 artifacts with `int32` referents only. Output-bearing
 functions may return `void` or any supported non-Boolean scalar under rule
-revision 3; revisions 1 and 2 retain their `void`/`int32` result restriction.
-Boolean output-bearing results remain excluded because hosted Boolean
-`init ref<T>` calls conditionally publish on `true`. Newly emitted
-ScalarInitOutput artifacts require rule revision 3; revisions 1 through 3
+revision 3, and Boolean results conditionally publish their output places only
+on `true` under rule revision 4. Revisions 1 and 2 retain their
+`void`/`int32` result restriction; revision 3 excludes Boolean results.
+Boolean output callees must still initialize every formal before normal return.
+After a Boolean call, output places are not definitely initialized; stored
+Boolean results do not preserve per-call output correlation. Newly emitted
+ScalarInitOutput artifacts require rule revision 4; revisions 1 through 4
 are accepted by the loader, and unsupported revisions remain rejected.
 They also provisionally encode and reconstruct scalar comparisons: equality
 and inequality for `bool`, `char16` and integer types; integer ordering; and

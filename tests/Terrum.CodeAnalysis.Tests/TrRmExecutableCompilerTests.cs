@@ -372,7 +372,7 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(original, "scalar-output-result");
         var loaded = TrRmExecutableCompiler.Load(artifact);
 
-        Assert.Equal(3u, ScalarInitOutputRevision(artifact));
+        Assert.Equal(4u, ScalarInitOutputRevision(artifact));
         Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
         Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
 
@@ -389,10 +389,14 @@ public sealed class TrRmExecutableCompilerTests
                 Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(legacyArtifact));
             }
         }
+
+        var revisionThreeArtifact = SetScalarInitOutputRuleRevision(artifact, 3);
+        var revisionThree = TrRmExecutableCompiler.Load(revisionThreeArtifact);
+        Assert.Equal(42, NativeJit.Execute(revisionThree, NativeRuntimePolicy.FailFast));
     }
 
     [Fact]
-    public void InitOutputCallsRejectBooleanResults()
+    public void InitOutputBooleanResultsRequireRuleRevisionFour()
     {
         var program = Compile("""
             bool Fill(init ref<int32> result) {
@@ -401,13 +405,54 @@ public sealed class TrRmExecutableCompilerTests
             }
             int32 Main() {
                 init int32 result;
-                Fill(init result);
-                return 42;
+                bool success = Fill(init result);
+                return Status(success);
             }
+            int32 Status(bool success) { return success ? 42 : 0; }
             """);
 
-        Assert.Throws<NotSupportedException>(() =>
-            TrRmExecutableCompiler.Emit(program, "boolean-output-result"));
+        var artifact = TrRmExecutableCompiler.Emit(program, "boolean-output-result");
+        Assert.Equal(4u, ScalarInitOutputRevision(artifact));
+        Assert.Equal(42, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast));
+
+        foreach (var revision in new uint[] { 1, 2, 3 })
+        {
+            var legacyArtifact = SetScalarInitOutputRuleRevision(artifact, revision);
+            Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(legacyArtifact));
+        }
+    }
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    public void InitOutputCallsPreserveBooleanResults(bool publish, int expected)
+    {
+        var publishText = publish ? "true" : "false";
+        var source = $$"""
+            bool Fill(bool shouldPublish, init ref<int32> result,
+                init ref<uint64> count, init ref<bool> flag) {
+                result = 0;
+                count = uint64.MaxValue;
+                flag = false;
+                return shouldPublish;
+            }
+            int32 Status(bool value) { return value ? 1 : 0; }
+            int32 Main() {
+                init int32 result;
+                init uint64 count;
+                init bool flag;
+                bool published = Fill({{publishText}}, init result, init count, init flag);
+                return Status(published);
+            }
+            """;
+        var original = Compile(source);
+        var artifact = TrRmExecutableCompiler.Emit(original, "boolean-output-result");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+
+        Assert.Equal(4u, ScalarInitOutputRevision(artifact));
+        Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
     }
 
     [Fact]

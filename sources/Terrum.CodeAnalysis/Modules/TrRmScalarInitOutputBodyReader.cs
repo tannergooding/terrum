@@ -121,8 +121,9 @@ internal static class TrRmScalarInitOutputBodyReader
         var body = bodies.GetRow(methods.GetBodyRow(method));
         var hasGeneralPlaceBody = !body.IsEmpty && body[0] <= 2;
         var resultType = ResultType(types, signatures.GetResultTypeSpec(signature));
-        var widenedOutputResult = hasOutput && ruleRevision >= 3
-            && NonBooleanScalar(resultType);
+        var widenedOutputResult = hasOutput
+            && (ruleRevision >= 3 && NonBooleanScalar(resultType)
+                || ruleRevision >= 4 && resultType == 1);
         if ((hasGeneralPlaceBody && resultType is not (0 or 8) && !widenedOutputResult)
             || (hasOutput && (methods.GetFlags(method) == 2 || !hasGeneralPlaceBody
                 || resultType is not (0 or 8) && !widenedOutputResult)))
@@ -598,7 +599,7 @@ internal static class TrRmScalarInitOutputBodyReader
                 // expression can access an alias during the call's initialization authority.
                 foreach (var destination in destinations)
                 {
-                    _initialized[destination - 1] = true;
+                    _initialized[destination - 1] = resultType != 1;
                 }
             }
             else if (opcode is 8 or 9)

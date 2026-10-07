@@ -25,8 +25,9 @@ Keep the following boundaries explicit:
 - Retain artifact version `(1, 0)`, which is still pre-release. Activate core
   Feature section kind `0x0004` with flags `0` and its assigned eight-byte row
   `u32 featureId, u32 minimumRuleRevision`. Provisionally assign
-  `featureId=1` to `ScalarInitOutput`, accept only rule revision `1`, and
-  require each affected module's feature range to name that row. A module with
+  `featureId=1` to `ScalarInitOutput`, initially require rule revision `1`,
+  and require each affected module's feature range to name that row. The current
+  provisional reader accepts revisions 1–4 as described below. A module with
   no output behavior retains an absent Feature section and `(0, 0)` range.
   Reject unknown feature IDs and unsupported revisions before binding or
   lowering; do not add general same-major/future-minor acceptance.
@@ -37,8 +38,8 @@ Keep the following boundaries explicit:
 - Under initial rule revision 1, admit only non-exported module-local
   functions with `init ref<int32>` output formals and `void` or `int32`
   results. Other scalar formals remain by-value.
-  Preserve the existing mode value `0x02`; reject `out`, Boolean-correlated
-  outputs, imports, exported output functions, and `OutputState` clauses.
+  Preserve the existing mode value `0x02`; reject `out`, Boolean results,
+  imports, exported output functions, and serialized `OutputState` clauses.
 - Output-bearing methods and calls use general Body forms `0x00`, `0x01`, or
   `0x02`, with the narrowest valid local width, exactly one block, no regions,
   and no normal successors. Map non-value formals to places first in parameter
@@ -63,8 +64,9 @@ Keep the following boundaries explicit:
   twice or accessed through another admitted alias. A callee must initialize
   each output formal before every normal `Return`. Ending the formal's place
   retires callee access authority; it does not erase the publication
-  obligation or the initialized value. A successful call publishes every
-  output independently of its `void`/`int32` result.
+  obligation or the initialized value. Revisions 1–3 publish outputs
+  independently of their `void` or scalar result; revision 4 conditionally
+  publishes outputs only when its Boolean result is `true`.
 - Permit only `Fail` reason 1, which preserves the hosted `require false`
   failure path. Reject other failure reasons until this profile can preserve
   their distinct native statuses. No recovery or output state is promised
@@ -121,11 +123,13 @@ verification remains in force. The one-block control-flow boundary is
 unchanged. These value, comparison, bitwise, unary, arithmetic and conversion
 paths are implemented support only, not approval of the proposed executable
 contract.
-The current writer emits required feature rule revision 3 for output Bodies.
+The current writer emits required feature rule revision 4 for output Bodies.
 Rule revision 2 provisionally permits `bool`, `char16`, `int32`, `uint32`,
 `int64`, `uint64`, `float32` and `float64` referents and scalar initialized
 locals; rule revision 1 remains loadable with `int32` referents only. Rule
-revision 3 additionally permits non-Boolean scalar output-bearing results.
+revision 3 additionally permits non-Boolean scalar output-bearing results;
+rule revision 4 adds Boolean output-bearing results with conditional
+publication.
 Exact type identity is retained through place descriptors, handles, loads,
 initialization values, call arguments and results. Revisions 1 and 2 retain
 their `void`/`int32` output-bearing result restriction; unsupported revisions
@@ -173,10 +177,28 @@ Permit output-bearing functions to return `char16`, `uint32`, `int64`, `uint64`,
 `float32` or `float64` in addition to the existing `void`/`int32`; preserve
 exact result typing and mandatory normal-return initialization. Keep Boolean
 results, public output targets, non-output place-bodied result widening, and
-all other excluded output behaviors unchanged. Continue loading revisions 1
-and 2 with their existing result restrictions and reject future revisions.
-This recommendation does not approve the executable contract or change hosted
-Boolean `init ref<T>` behavior.
+all other excluded output behaviors unchanged. This recommendation does not
+approve the executable contract.
+
+## Additional open question: Boolean output results
+
+**Summary:** Hosted Boolean `init ref<T>` calls publish each output only when
+that call returns `true`; false leaves the caller's destination vacant.
+Revisions 1–3 exclude Boolean output results. The hosted verifier correlates a
+direct Boolean call with its own output destinations, but storing that result
+in a Boolean local does not preserve this per-call fact.
+
+**Recommendation:** Keep Boolean output results provisional in rule revision
+4, matching the hosted true-publishes/false-vacant behavior without serialized
+`OutputState` rows or a change to hosted source semantics. Require every
+output formal to be initialized before every normal return in the callee;
+false still withholds publication at its caller. Treat destinations after a
+Boolean call as not definitely initialized and rely on the hosted verifier to
+reject unproven reads, reinitialization and repeated output passing. Do not
+claim that storing the Boolean result proves destination state, and keep
+forwarding, aliasing, recovery, cleanup, exports and general control-flow
+outside this slice. Continue loading revisions 1–3 with their existing
+restrictions. This is not approval of the executable contract.
 
 ## Additional open question: entry-use ordinals for places
 

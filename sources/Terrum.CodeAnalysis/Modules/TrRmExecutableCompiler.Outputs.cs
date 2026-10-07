@@ -560,7 +560,7 @@ public static partial class TrRmExecutableCompiler
         => type == PrimitiveType.Void || IsOutputScalarType(type);
 
     private static bool IsOutputReturnType(PrimitiveType type)
-        => type is PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
+        => type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32
             or PrimitiveType.Float64;
 
@@ -597,7 +597,7 @@ public static partial class TrRmExecutableCompiler
                 || function.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32)
                     && (!HasOutputParameters(function) || !IsOutputReturnType(function.ReturnType)))
             {
-                throw Unsupported("The output Body profile supports at most 256 variables and void/int32 results, or non-Boolean scalar results for output functions.");
+                throw Unsupported("Output Bodies support at most 256 variables and scalar results only for output functions.");
             }
 
             for (var variable = 0; variable < function.ParameterCount; variable++)
@@ -1102,7 +1102,7 @@ public static partial class TrRmExecutableCompiler
                 || target.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32)
                     && !IsOutputReturnType(target.ReturnType)))
             {
-                throw Unsupported("Output targets must be non-exported and return void, int32, or a non-Boolean scalar.");
+                throw Unsupported("Output targets must be non-exported and return void or a scalar.");
             }
 
             var arguments = new int[call.Arguments.Length];
@@ -1195,7 +1195,7 @@ public static partial class TrRmExecutableCompiler
             {
                 if (place != 0)
                 {
-                    _placeInitialized[place] = true;
+                    _placeInitialized[place] = call.Type != PrimitiveType.Bool;
                 }
             }
             return result;
@@ -1222,7 +1222,7 @@ public static partial class TrRmExecutableCompiler
                     || _function.ReturnType != PrimitiveType.Int32
                         && (!HasOutputParameters(_function) || !IsOutputReturnType(_function.ReturnType)))
                 {
-                    throw Unsupported("Output-profile return type must match its permitted scalar signature.");
+                    throw Unsupported("Output-profile return type must match its supported output signature.");
                 }
                 UseValue(_returnValue, _operationCount);
             }

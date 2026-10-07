@@ -131,18 +131,27 @@ public sealed partial class CliTests
                 return uint32.MaxValue;
             }
             int32 Check(bool enabled, char16 character, uint64 count, float64 amount,
-                uint32 returned) {
+                uint32 returned, bool status) {
                 return enabled && character == char16(65) && count == uint64.MaxValue
-                    && amount == float64(2.5) && returned == uint32.MaxValue ? 42 : 0;
+                    && amount == float64(2.5) && returned == uint32.MaxValue
+                    && !status ? 42 : 0;
+            }
+            bool TryFill(bool success, init ref<int32> result, init ref<uint64> count) {
+                result = 0;
+                count = uint64.MaxValue;
+                return success;
             }
             int32 Main() {
                 init bool enabled;
                 init char16 character;
                 init uint64 count;
                 init float64 amount;
+                init int32 conditionalResult;
+                init uint64 conditionalCount;
                 uint32 returned = Fill(true, init enabled, char16(65), init character,
                     uint64.MaxValue, init count, float64(2.5), init amount);
-                return Check(enabled, character, count, amount, returned);
+                bool status = TryFill(false, init conditionalResult, init conditionalCount);
+                return Check(enabled, character, count, amount, returned, status);
             }
             """;
         var prefix = Path.Combine(Directory.GetCurrentDirectory(),
