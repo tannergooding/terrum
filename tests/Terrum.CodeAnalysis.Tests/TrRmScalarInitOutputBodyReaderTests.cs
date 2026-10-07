@@ -135,6 +135,14 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     }
 
     [Fact]
+    public void WidenedResultsRequireAnOutputFormalEvenAtRuleRevisionThree()
+    {
+        var fixture = InitializedOutput();
+        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [],
+            resultTypeSpecRow: 4));
+    }
+
+    [Fact]
     public void InitializeValueTypeMustMatchItsPlace()
     {
         var fixture = Encode(
@@ -652,7 +660,8 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         var types = new TrRmTypeSpecTableReader(
             TrRmVariableTableWriter.EncodeBlobs([
                 new byte[] { 1, 0, 8 }, new byte[] { 1, 0, 0 }, new byte[] { 1, 0, 1 },
-            ]), 3, 0, 0, 0, 0);
+                new byte[] { 1, 0, 9 },
+            ]), 4, 0, 0, 0, 0);
         var signatureBytes = new byte[methodCount * 24];
         Signature(signatureBytes, 0,
             (uint)(resultTypeSpecRow != 0 ? resultTypeSpecRow : voidResult ? 2 : 1),
