@@ -815,7 +815,7 @@ internal static class TrRmScalarInitOutputBodyReader
             if (conditionCall is null || entryPlaceState is null || conditionCall.Opcode != 0x12
                 || conditionCall.MethodRow == 0
                 || Type(_valueTypes[trueCondition - 1]) != 1
-                || conditionCall.OutputPlaces.IsDefaultOrEmpty
+                || (conditionCall.OutputPlaces.IsDefaultOrEmpty && _ruleRevision < 6)
                 || entryOperations.IsEmpty || entryOperations[^1].Result != trueCondition
                 || _valueOccurrences[trueCondition - 1] != 1)
             {

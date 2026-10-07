@@ -833,7 +833,7 @@ public static partial class TrRmExecutableCompiler
         {
             if (conditional.Condition is not BoundCall { Type: PrimitiveType.Bool } call)
             {
-                throw Unsupported("Output Body conditionals require a direct Boolean output call.");
+                throw Unsupported("Output Body conditionals require a direct Boolean call.");
             }
 
             var condition = EmitCall(call);
@@ -856,11 +856,6 @@ public static partial class TrRmExecutableCompiler
                     outputPlaces.Add(_placeByVariable[output.Variable]);
                 }
             }
-            if (outputPlaces.Count == 0)
-            {
-                throw Unsupported("Output Body conditionals require at least one output destination.");
-            }
-
             var falseState = _placeInitialized.ToArray();
             var trueState = (bool[])falseState.Clone();
             foreach (var place in outputPlaces)

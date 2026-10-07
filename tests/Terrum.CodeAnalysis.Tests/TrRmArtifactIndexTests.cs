@@ -95,7 +95,7 @@ public sealed class TrRmArtifactIndexTests
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
             FeatureArtifact(0, 0, [1, 0, 0, 0, 0, 0, 0, 0])));
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
-            FeatureArtifact(0, 0, [1, 0, 0, 0, 6, 0, 0, 0])));
+            FeatureArtifact(0, 0, [1, 0, 0, 0, 7, 0, 0, 0])));
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
             FeatureArtifact(0, 0, [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0])));
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(

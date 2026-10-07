@@ -373,7 +373,7 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(original, "scalar-output-result");
         var loaded = TrRmExecutableCompiler.Load(artifact);
 
-        Assert.Equal(5u, ScalarInitOutputRevision(artifact));
+        Assert.Equal(6u, ScalarInitOutputRevision(artifact));
         Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
         Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
 
@@ -416,7 +416,7 @@ public sealed class TrRmExecutableCompilerTests
             """);
 
         var artifact = TrRmExecutableCompiler.Emit(program, "boolean-output-result");
-        Assert.Equal(5u, ScalarInitOutputRevision(artifact));
+        Assert.Equal(6u, ScalarInitOutputRevision(artifact));
         Assert.Equal(42, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
             NativeRuntimePolicy.FailFast));
 
@@ -473,7 +473,7 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(original, "boolean-output-result");
         var loaded = TrRmExecutableCompiler.Load(artifact);
 
-        Assert.Equal(5u, ScalarInitOutputRevision(artifact));
+        Assert.Equal(6u, ScalarInitOutputRevision(artifact));
         Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
         Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
 
@@ -540,12 +540,15 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(original, "conditional-output-result");
         var loaded = TrRmExecutableCompiler.Load(artifact);
 
-        Assert.Equal(5u, ScalarInitOutputRevision(artifact));
+        Assert.Equal(6u, ScalarInitOutputRevision(artifact));
         Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
         Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
 
         var revisionFourArtifact = SetScalarInitOutputRuleRevision(artifact, 4);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(revisionFourArtifact));
+        var revisionFiveArtifact = SetScalarInitOutputRuleRevision(artifact, 5);
+        Assert.Equal(expected, NativeJit.Execute(
+            TrRmExecutableCompiler.Load(revisionFiveArtifact), NativeRuntimePolicy.FailFast));
 
         var forgedTrueState = SetConditionalInheritedPlaceState(artifact, 1, false);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedTrueState));
@@ -554,21 +557,31 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void InitOutputConditionalArmsPreserveFailReasonOne(bool failOnTrue)
+    [InlineData(true, true, true)]
+    [InlineData(true, false, true)]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    public void InitOutputConditionalArmsPreserveFailReasonOne(
+        bool failOnTrue, bool selected, bool zeroArgumentCall)
     {
-        var condition = failOnTrue ? "true" : "false";
-        var trueArm = failOnTrue ? "require false;" : "return 42;";
-        var falseArm = failOnTrue ? "return 42;" : "require false;";
+        var selectedText = selected ? "true" : "false";
+        var signature = zeroArgumentCall ? "()" : "(bool selected)";
+        var returnExpression = zeroArgumentCall ? selectedText : "selected";
+        var invocation = zeroArgumentCall ? "Select()" : $"Select({selectedText})";
+        var trueArm = failOnTrue ? "require false;" : "return initialized;";
+        var falseArm = failOnTrue ? "return initialized;" : "require false;";
+        var expected = selected == failOnTrue ? unchecked((int)0xE0540003) : 42;
         var source = $$"""
-            bool Select(bool selected, init ref<int32> result) {
-                result = 7;
-                return selected;
-            }
+            bool Select{{signature}} { return {{returnExpression}}; }
             int32 Main() {
-                init int32 result;
-                if (Select({{condition}}, init result)) {
+                init int32 initialized;
+                init int32 vacant;
+                initialized = 42;
+                if ({{invocation}}) {
                     {{trueArm}}
                 } else {
                     {{falseArm}}
@@ -576,8 +589,94 @@ public sealed class TrRmExecutableCompilerTests
             }
             """;
         var original = Compile(source);
-        _ = TrRmExecutableCompiler.Load(
-            TrRmExecutableCompiler.Emit(original, "conditional-output-failure"));
+        var artifact = TrRmExecutableCompiler.Emit(original, "conditional-output-failure");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+            SetScalarInitOutputRuleRevision(artifact, 5)));
+
+        var forgedTrueState = SetConditionalInheritedPlaceState(
+            artifact, blockIndex: 1, initialized: false);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedTrueState));
+        var forgedFalseState = SetConditionalInheritedPlaceState(
+            artifact, blockIndex: 2, initialized: true, placeId: 2);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedFalseState));
+
+        if (expected == 42)
+        {
+            Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+            Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        }
+    }
+
+    [Fact]
+    public void InitOutputConditionalNoOutputCallInheritsArgumentCallState()
+    {
+        var program = Compile("""
+            bool Fill(init ref<int32> result) {
+                result = 7;
+                return false;
+            }
+            bool Select(bool selected) { return selected; }
+            int32 Main() {
+                init int32 initialized;
+                init int32 vacant;
+                initialized = 42;
+                if (Select(Fill(init vacant))) {
+                    return initialized;
+                } else {
+                    require false;
+                }
+            }
+            """);
+        var artifact = TrRmExecutableCompiler.Emit(program, "conditional-value-call-state");
+
+        _ = TrRmExecutableCompiler.Load(artifact);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+            SetConditionalInheritedPlaceState(artifact, blockIndex: 1,
+                initialized: true, placeId: 2)));
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+            SetConditionalInheritedPlaceState(artifact, blockIndex: 2,
+                initialized: false, placeId: 1)));
+    }
+
+    [Theory]
+    [InlineData("true")]
+    [InlineData("stored")]
+    [InlineData("Select(true) && true")]
+    public void InitOutputConditionalStillRequiresDirectBooleanCall(string condition)
+    {
+        var program = Compile($$"""
+            bool Select(bool value) { return value; }
+            int32 Main() {
+                init int32 vacant;
+                bool stored = Select(true);
+                if ({{condition}}) { return 42; }
+                else { return 0; }
+            }
+            """);
+
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.Emit(program, "conditional-nondirect-condition"));
+    }
+
+    [Fact]
+    public void InitOutputConditionalStillRejectsNestedSplits()
+    {
+        var program = Compile("""
+            bool Select(bool value) { return value; }
+            int32 Main() {
+                init int32 vacant;
+                if (Select(true)) {
+                    if (Select(false)) { return 42; }
+                    else { return 0; }
+                } else {
+                    return 1;
+                }
+            }
+            """);
+
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.Emit(program, "conditional-nested-split"));
     }
 
     [Fact]
@@ -2698,7 +2797,7 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     private static byte[] SetConditionalInheritedPlaceState(byte[] artifact,
-        int blockIndex, bool initialized)
+        int blockIndex, bool initialized, int placeId = 1)
     {
         var index = new TrRmArtifactIndex(artifact);
         Assert.True(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount));
@@ -2743,12 +2842,12 @@ public sealed class TrRmExecutableCompilerTests
             SkipIndexList(body, ref position, width);
             SkipIndexList(body, ref position, width);
             var inheritedCount = ReadLocal(body, ref position, width);
-            if (inheritedCount == 0)
+            if (placeId <= 0 || inheritedCount < placeId)
             {
-                throw new InvalidOperationException("Conditional block has no inherited places.");
+                throw new InvalidOperationException("Conditional block has no requested inherited place.");
             }
 
-            position += width;
+            position += checked((placeId - 1) * (width + 1) + width);
             body[position] = initialized ? (byte)1 : (byte)0;
             bodyRows[row] = body;
             found = true;

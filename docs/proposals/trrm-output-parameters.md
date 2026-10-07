@@ -27,7 +27,7 @@ Keep the following boundaries explicit:
   `u32 featureId, u32 minimumRuleRevision`. Provisionally assign
   `featureId=1` to `ScalarInitOutput`, initially require rule revision `1`,
   and require each affected module's feature range to name that row. The current
-  provisional reader accepts revisions 1–5 as described below. A module with
+  provisional reader accepts revisions 1–6 as described below. A module with
   no output behavior retains an absent Feature section and `(0, 0)` range.
   Reject unknown feature IDs and unsupported revisions before binding or
   lowering; do not add general same-major/future-minor acceptance.
@@ -122,11 +122,11 @@ conversion paths are also provisionally implemented: format conversion uses
 float-to-integer uses `0x1F`. Float-to-integer truncates toward zero before
 range checking and preserves the existing overflow status; `NoThrow`
 verification remains in force. Control flow remains one-block except for the
-single direct-call split under revision 5 described below. These value,
+single direct-call split under revisions 5 and 6 described below. These value,
 comparison, bitwise, unary, arithmetic and conversion
 paths are implemented support only, not approval of the proposed executable
 contract.
-The current writer emits required feature rule revision 5 for output Bodies.
+The current writer emits required feature rule revision 6 for output Bodies.
 Rule revision 2 provisionally permits `bool`, `char16`, `int32`, `uint32`,
 `int64`, `uint64`, `float32` and `float64` referents and scalar initialized
 locals; rule revision 1 remains loadable with `int32` referents only. Rule
@@ -136,6 +136,8 @@ publication. Rule revision 5 admits one direct Boolean output-call condition
 and two straight-line terminal arms, auditing inherited place state
 independently on each edge. The writer emits one such conditional split; the
 reader also accepts either terminal arm to use existing `Fail` reason 1.
+Rule revision 6 also admits a direct Boolean call condition with no output
+arguments; both successors inherit the audited post-call place state unchanged.
 These remain provisional, unapproved implementation boundaries.
 Exact type identity is retained through place descriptors, handles, loads,
 initialization values, call arguments and results. Revisions 1 and 2 retain
@@ -211,6 +213,29 @@ call condition, recompute successor place state rather than trust serialized
 inheritance, and retain the hosted verifier. Preserve revisions 1–4 and reject
 revision-4 artifacts requiring the new Body shape. This is an engineering
 recommendation only; it does not approve the executable contract.
+
+## Additional open question: non-output Boolean call conditions
+
+**Summary:** Revision 5's direct Boolean condition is an output call, so the
+reader must correlate that call's result with the publication state of its
+destinations. A direct Boolean call with no output arguments has no such
+correlation: after evaluating its arguments and the call, both successors
+inherit the same audited place state. Argument evaluation may itself affect
+places; no-output on the direct call does not imply that the whole condition is
+side-effect-free. The Body already carries a Boolean call result and a
+three-block terminal split, but the current reader rejects an empty output
+destination list.
+
+**Recommendation:** Keep this extension provisional in rule revision 6.
+Permit one direct Boolean call with no output-mode arguments as the condition
+for the existing two straight-line terminal arms. Recompute the audited
+post-call entry state and require both inherited successor states to match it
+exactly. Preserve revision 5's output-call behavior and the existing Return or
+Fail reason 1 terminals. Continue rejecting arbitrary Boolean expressions,
+stored call results, nested or multiple conditions, joins, loops, cleanup,
+recovery, forwarding and aliases. Preserve revisions 1–5; reject a revision-5
+artifact that requires the new condition shape. This is an engineering
+recommendation only and does not approve the executable contract.
 
 ## Additional open question: Boolean output results
 

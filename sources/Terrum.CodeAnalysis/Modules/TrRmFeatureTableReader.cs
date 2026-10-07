@@ -28,7 +28,7 @@ public readonly ref struct TrRmFeatureTableReader
     public const uint ScalarInitOutputInitialRuleRevision = 1;
 
     /// <summary>The current ScalarInitOutput rule revision supported by this implementation.</summary>
-    public const uint ScalarInitOutputRuleRevision = 5;
+    public const uint ScalarInitOutputRuleRevision = 6;
 
     private const int RowSize = 8;
     private readonly ReadOnlySpan<byte> _rows;
