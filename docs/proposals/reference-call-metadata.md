@@ -185,6 +185,12 @@ native graphs and module sets. The proposal remains unapproved.
 
 ### Provisional extension: caller-unsafe getters in `unsafe(expr)`
 
+**Summary:** Hosted binding already supports caller-unsafe getter access
+inside an explicit unsafe caller scope, and semantic modules persist eligible
+getter calls inside unsafe blocks. The expression-scope wrapper currently
+excludes getters, so this proposal changes persistence eligibility, not source
+syntax or getter ABI.
+
 **Recommendation:** Extend revision 68's retained expression wrapper to
 caller-unsafe readonly instance getters and storage-free static getters on
 eligible public, non-unique `Copy` owners. Allow scalar or recursively
@@ -205,6 +211,12 @@ expression-scope eligibility and therefore requires the next semantic-module
 revision under the single-revision reader policy, without adding payload
 fields. The recommendation remains unapproved and does not approve the broader
 reference-call metadata proposal.
+
+Acceptance evidence should cover getter-only and mixed expressions, canonical
+and producer-qualified identities, recursively exportable results, wrapper
+stripping and scope boundaries, evaluation-once and selected-branch behavior,
+`NoThrow`, value-versus-place and loan exclusions, safe replacement, and
+semantic links plus native graphs/module sets under both runtime policies.
 
 ### Provisional extension: caller-unsafe readonly getters
 
