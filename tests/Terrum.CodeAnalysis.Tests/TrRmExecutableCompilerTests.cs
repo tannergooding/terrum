@@ -185,6 +185,15 @@ public sealed class TrRmExecutableCompilerTests
     [InlineData("(uint64(Unsigned32One()) == Unsigned64One())", 42)]
     [InlineData("(int32(CharacterA()) == int32(65))", 42)]
     [InlineData("(char16(Signed32SixtyFive()) == CharacterA())", 42)]
+    [InlineData("(float64(SingleOne()) == WideOne())", 42)]
+    [InlineData("(float32(WideOne()) == SingleOne())", 42)]
+    [InlineData("(float64(Signed64One()) == WideOne())", 42)]
+    [InlineData("(float32(Unsigned32AllBits()) == SingleUInt32MaxRounded())", 42)]
+    [InlineData("(float64(Unsigned64ComplementOne()) == WideUInt64MaxRounded())", 42)]
+    [InlineData("(float32(CharacterA()) == float32(65.0))", 42)]
+    [InlineData("(int32(SingleOneAndHalf()) == Signed32One())", 42)]
+    [InlineData("(int64(WideOne()) == Signed64One())", 42)]
+    [InlineData("(uint64(WideNegativeHalf()) == Unsigned64Zero())", 42)]
     [InlineData("(uint32(0x7FFFFFFF) == Unsigned32High31())", 42)]
     [InlineData("(uint32(0x80000000) == Unsigned32HighBit())", 42)]
     [InlineData("(uint32(0xFFFFFFFF) == Unsigned32AllBits())", 42)]
@@ -255,6 +264,7 @@ public sealed class TrRmExecutableCompilerTests
             int64 Signed64MinusTwo() { return int64(-2); }
             int64 Signed64MinusOne() { return int64(-1); }
             uint64 Unsigned64One() { return uint64(1); }
+            uint64 Unsigned64Zero() { return uint64(0); }
             uint64 Unsigned64Two() { return uint64(2); }
             uint64 Unsigned64Three() { return uint64(3); }
             uint64 Unsigned64Four() { return uint64(4); }
@@ -265,11 +275,14 @@ public sealed class TrRmExecutableCompilerTests
             float32 SingleTwo() { return float32(2.0); }
             float32 SingleThree() { return float32(3.0); }
             float32 SingleOneAndHalf() { return float32(1.5); }
+            float32 SingleUInt32MaxRounded() { return float32(4294967296.0); }
             float32 NegativeSingleOne() { return float32(-1.0); }
             float64 WideOne() { return float64(1.0); }
             float64 WideTwo() { return float64(2.0); }
             float64 WideThree() { return float64(3.0); }
             float64 WideOneAndHalf() { return float64(1.5); }
+            float64 WideUInt64MaxRounded() { return float64(18446744073709551616.0); }
+            float64 WideNegativeHalf() { return float64(-0.5); }
             float64 NegativeWideOne() { return float64(-1.0); }
             int32 Main() {
                 init int32 result;

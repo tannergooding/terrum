@@ -252,6 +252,10 @@ public static partial class TrRmExecutableCompiler
                     break;
                 }
                 case 0x16:
+                case 0x1A:
+                case 0x1B:
+                case 0x1E:
+                case 0x1F:
                 {
                     if (operation.Operands.Length != 1)
                     {
@@ -260,10 +264,20 @@ public static partial class TrRmExecutableCompiler
 
                     var operand = ReadValue(operation.Operands[0]);
                     var destination = OutputType(body, types, operation.TypeId);
-                    if (!IsOutputIntegerConversionType(operand.Type)
-                        || !IsOutputIntegerConversionType(destination))
+                    var valid = operation.Opcode switch
                     {
-                        throw Invalid("Convert is outside the executable integer profile.");
+                        0x16 => IsOutputIntegerConversionType(operand.Type)
+                            && IsOutputIntegerConversionType(destination),
+                        0x1A => IsFloat(operand.Type) && IsFloat(destination)
+                            && operand.Type != destination,
+                        0x1B => IsInteger(operand.Type) && IsFloat(destination),
+                        0x1E => operand.Type == PrimitiveType.Char16 && IsFloat(destination),
+                        0x1F => IsFloat(operand.Type) && IsInteger(destination),
+                        _ => false,
+                    };
+                    if (!valid)
+                    {
+                        throw Invalid("Convert is outside the executable scalar profile.");
                     }
 
                     DefineValue(operation.Result, new BoundCast(operand, destination, default));
@@ -507,6 +521,9 @@ public static partial class TrRmExecutableCompiler
 
     private static bool IsOutputIntegerConversionType(PrimitiveType type)
         => IsInteger(type) || type == PrimitiveType.Char16;
+
+    private static bool IsOutputConversionType(PrimitiveType type)
+        => IsOutputScalarType(type) && type != PrimitiveType.Bool;
 
     private static bool IsOutputCallResultType(PrimitiveType type)
         => type == PrimitiveType.Void || IsOutputScalarType(type);
@@ -801,16 +818,38 @@ public static partial class TrRmExecutableCompiler
                     _ = AddValue(constant.Type, 0, (uint)constOffset);
                     _operationCount++;
                     return constResult;
-                case BoundCast cast when IsOutputIntegerConversionType(cast.Operand.Type)
-                    && IsOutputIntegerConversionType(cast.Type):
+                case BoundCast cast when IsOutputConversionType(cast.Operand.Type)
+                    && IsOutputConversionType(cast.Type):
                 {
+                    if (cast.Operand.Type == cast.Type)
+                    {
+                        return EmitValue(cast.Operand);
+                    }
+
+                    var conversionOpcode = (cast.Operand.Type, cast.Type) switch
+                    {
+                        (PrimitiveType.Float32 or PrimitiveType.Float64,
+                            PrimitiveType.Float32 or PrimitiveType.Float64) => (byte)0x1A,
+                        (PrimitiveType.Int32 or PrimitiveType.UInt32
+                            or PrimitiveType.Int64 or PrimitiveType.UInt64,
+                            PrimitiveType.Float32 or PrimitiveType.Float64) => (byte)0x1B,
+                        (PrimitiveType.Char16, PrimitiveType.Float32 or PrimitiveType.Float64) => (byte)0x1E,
+                        (PrimitiveType.Float32 or PrimitiveType.Float64,
+                            PrimitiveType.Int32 or PrimitiveType.UInt32
+                                or PrimitiveType.Int64 or PrimitiveType.UInt64) => (byte)0x1F,
+                        (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+                            or PrimitiveType.UInt64 or PrimitiveType.Char16,
+                            PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+                                or PrimitiveType.UInt64 or PrimitiveType.Char16) => (byte)0x16,
+                        _ => throw Unsupported("Conversion is outside the output Body scalar profile."),
+                    };
                     var castOperand = EmitValue(cast.Operand);
                     var castResult = _valueTypes.Count + 1;
                     var castTypeId = BodyTypeId(TypeRow(cast.Type));
                     var castWidth = Width((ulong)Math.Max(castResult,
                         Math.Max(castTypeId, castOperand)));
                     var castOffset = _operations.Count;
-                    WriteInstruction(_operations, 0x16, castWidth, 0);
+                    WriteInstruction(_operations, conversionOpcode, castWidth, 0);
                     Write(_operations, (ulong)castResult, castWidth);
                     Write(_operations, (ulong)castTypeId, castWidth);
                     Write(_operations, (ulong)castOperand, castWidth);

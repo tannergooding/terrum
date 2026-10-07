@@ -581,12 +581,17 @@ Other value operations remain outside this slice. Floating addition,
 subtraction, multiplication and division are supported for
 `float32` and `float64`. Integer addition, subtraction, multiplication,
 division and remainder are also supported for `int32`, `uint32`, `int64` and
-`uint64`; signed quotient/remainder behavior, including the minimum-value
-remainder-by-negative-one case, is covered by output-body execution tests.
+`uint64`; output-body CLI tests cover checked overflow for each arithmetic
+operator, divide-by-zero and remainder-by-zero statuses, and signed minimum
+division/remainder by negative one.
 Integer and `char16` conversions are provisionally encoded by `Convert`
 opcode `0x16` and reconstructed as checked bound casts, retaining the
 mandatory verifier's overflow and `NoThrow` checks. Floating conversions
-remain outside this output-body slice.
+are also provisionally supported: float32/float64 conversion uses opcode
+`0x1A`, integer-to-float uses `0x1B`, `char16`-to-float uses `0x1E`, and
+float-to-integer uses `0x1F`. Float-to-integer truncates toward zero before
+range checking and retains overflow status `0xE0540001`; `NoThrow` validation
+remains mandatory.
 It uses required Feature section kind `0x0004` and a separately audited
 one-block general Body path, reconstructs bound nodes, and still runs the
 mandatory semantic verifier. Only the profile's bounded output shapes are
