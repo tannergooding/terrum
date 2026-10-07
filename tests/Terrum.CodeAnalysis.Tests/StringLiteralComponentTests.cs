@@ -388,20 +388,24 @@ public sealed class StringLiteralComponentTests
     }
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task Utf8NameRowBuilderPublishesOnlyCompleteRowsAsync(NativeRuntimePolicy policy)
+    [InlineData(NativeRuntimePolicy.FailFast, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    public async Task Utf8StringRowBuildersPublishOnlyCompleteRowsAsync(
+        NativeRuntimePolicy policy, bool namespaceRow)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
         (string Spelling, int Capacity, int[]? Expected)[] cases = [
             ("\"A\"", 8, [1, 1, 0, 0, 65, 0, 0, 0]),
             ("\"\u00E9\"", 8, [1, 2, 0, 0, 195, 169, 0, 0]),
             ("\"\U0001F600\"", 12, [1, 4, 0, 0, 240, 159, 152, 128, 0, 0, 0, 0]),
-            ("\"\"", 8, null),
+            ("\"\"", 8, namespaceRow ? [1, 0, 0, 0, 0, 0, 0, 0] : null),
             ("\"A\\0B\"", 12, null),
             ("\"A\"", 7, null),
         ];
 
+        var builder = namespaceRow ? "TryBuildStringNamespaceRowUtf8" : "TryBuildStringNameRowUtf8";
         foreach (var (spelling, capacity, expected) in cases)
         {
             var checks = expected is null
@@ -410,9 +414,9 @@ public sealed class StringLiteralComponentTests
                     FormattableString.Invariant($"if (row.Read({index}) != {value}) {{ return 3; }}")));
             var expectedLength = expected?.Length ?? 0;
             var resultCheck = expected is null
-                ? $"if (TryBuildStringNameRowUtf8(literal, move workspace, init var row)) {{ return 1; }}"
+                ? $"if ({builder}(literal, move workspace, init var row)) {{ return 1; }}"
                 : $$"""
-                    if (!TryBuildStringNameRowUtf8(literal, move workspace, init var row)) { return 1; }
+                    if (!{{builder}}(literal, move workspace, init var row)) { return 1; }
                     mut OwnedInt32Buffer completed = move row;
                     if (completed.Count != {{expectedLength}} || completed.Capacity != {{expectedLength}}) { return 2; }
                     {{checks.Replace("row.", "completed.")}}

@@ -131,11 +131,11 @@ embedded-zero rejection. Ordinal decoded-scalar name and namespace comparison
 APIs match hosted ordinal equality for all nonzero Unicode scalar values in
 bounded batches, using case-varied `\U` spellings, and reject invalid
 empty-name and embedded-zero requests.
-`TryBuildStringNameRowUtf8` also preflights the nonempty UTF-8 name row and
-workspace capacity before publishing one complete encoded row through its
-initialized output. Its refusal cases do not publish a row. This is a
-provisional StringRow library helper, not registered target binding or a
-literal-reference contract.
+The UTF-8 name and namespace row builders also preflight text and workspace
+capacity before publishing one complete encoded row through initialized
+output. Name rows remain nonempty; namespace rows permit empty text. Refusal
+cases do not publish a row. These are provisional StringRow library helpers,
+not registered target binding or a literal-reference contract.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.

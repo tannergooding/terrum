@@ -221,10 +221,10 @@ public static OwnedInt32Buffer EncodeStringNameRow(StringLiteral literal, int32 
         move workspace);
 }
 
-public static bool TryBuildStringNameRowUtf8(StringLiteral literal,
+bool TryBuildStringTextRowUtf8(StringLiteral literal, bool allowEmpty,
     OwnedInt32Buffer workspace, init ref<OwnedInt32Buffer> row)
 {
-    if (!TryMeasureStringTextRow(literal, 1, false, init var contentBytes,
+    if (!TryMeasureStringTextRow(literal, 1, allowEmpty, init var contentBytes,
             init var unitWidth, init var rowBytes)
         || workspace.Capacity < rowBytes)
     {
@@ -235,6 +235,18 @@ public static bool TryBuildStringNameRowUtf8(StringLiteral literal,
         unitWidth, rowBytes, move workspace);
     row = move completed;
     return true;
+}
+
+public static bool TryBuildStringNameRowUtf8(StringLiteral literal,
+    OwnedInt32Buffer workspace, init ref<OwnedInt32Buffer> row)
+{
+    return TryBuildStringTextRowUtf8(literal, false, move workspace, init row);
+}
+
+public static bool TryBuildStringNamespaceRowUtf8(StringLiteral literal,
+    OwnedInt32Buffer workspace, init ref<OwnedInt32Buffer> row)
+{
+    return TryBuildStringTextRowUtf8(literal, true, move workspace, init row);
 }
 
 public static OwnedInt32Buffer EncodeStringNamespaceRow(StringLiteral literal, int32 flags,
