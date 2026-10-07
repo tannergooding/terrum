@@ -327,6 +327,33 @@ public sealed class StaticProtocolOutputTests
     }
 
     [Theory]
+    [InlineData("Fill(new Value(1), new Value(2), init copied, out var initialized);")]
+    [InlineData("Fill(new Value(1), new Value(2), out copied, init copied);")]
+    [InlineData("Fill(new Value(1), new Value(2), out copied, init initialized);")]
+    [InlineData("Fill(new Value(1), new Value(2), out wrong, init var initialized);")]
+    public void GenericMixedOutputsRejectModeAndDestinationMismatches(string call)
+    {
+        var source = Value + """
+            int32 Fill<T, U>(T value, U second, out T result, init ref<U> initialized)
+                where T : [Copy] where U : [Copy] {
+                result = value;
+                initialized = second;
+                return 7;
+            }
+            int32 Main() {
+                mut Value copied = new Value(0);
+                mut Value initialized = new Value(0);
+                mut int32 wrong = 0;
+                CALL
+                return 42;
+            }
+            """.Replace("CALL", call, StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void GenericFixedScalarOutputsCanAccompanyGenericOutputs(bool explicitType)

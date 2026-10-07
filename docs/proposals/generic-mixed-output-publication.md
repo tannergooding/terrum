@@ -4,11 +4,13 @@
 
 ## Summary
 
-Compilation-local `[Copy]` templates now have separate provisional extensions
-for ordinary `out T` and `init ref<T>` outputs with fixed non-Boolean or `void`
-results. Both extensions exclude templates that combine the two output modes.
-Consider allowing such templates while retaining each parameter's existing
-publication contract.
+Compilation-local `[Copy]` templates have separate provisional support for
+ordinary `out T` and `init ref<T>` outputs with fixed non-Boolean or `void`
+results. Mixed-mode support is implemented provisionally, but its current
+integration fixture also exercises fixed-valued output side parameters; this
+proposal tracks the narrower all-output-formal contract and its independent
+replacement evidence. This does not promote the behavior or its broader
+extensions.
 
 ## Question
 
@@ -61,5 +63,18 @@ Exercise semantic-module and native producer replacement behind unchanged
 consumers under both runtime policies; retain the `IsInit`/`IsOut` metadata and
 existing wire formats.
 
-This proposal does not approve the target contract. Any implementation is
-provisional evidence pending review.
+**Progress:** The hosted binder/verifier and direct native tests already cover
+mode preservation, inferred/explicit substitutions, one shared type parameter,
+normal-return publication, checked exceptional departure, vacancy/retry,
+managed-init root retirement and unchanged Boolean behavior. A dedicated
+semantic/native replacement fixture now isolates only generic-typed `out` and
+`init ref<T>` outputs, including an ordinary `void` result; it preserves the
+consumer bytes while running semantic JIT/AOT and native graph AOT/JIT under
+both runtime policies. Its checked-exception case also verifies managed-init
+failure, root retirement and destination reuse. The separately maintained
+fixed-output-side-parameter and floating-result experiments remain broader
+unapproved proposals; they are not prerequisites or approvals of this
+all-generic-output slice.
+
+This proposal does not approve the target contract. The implementation and
+tests remain provisional evidence pending review.

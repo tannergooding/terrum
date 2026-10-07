@@ -228,6 +228,112 @@ public sealed partial class GenericControlFlowModuleTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task MixedGenericOutputsReplacePrivateSpecializationsAcrossModulesAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string ReplacementTemplate = """
+            struct Pair {
+                public int64 First;
+                public int64 Second;
+                public Pair(int64 first, int64 second) { First = first; Second = second; }
+            }
+            int32 CopyMixed<T, U>(T value, U second, int32 status, bool complete,
+                out T result, init ref<U> initialized) where T : [Copy] where U : [Copy] {
+                result = value;
+                initialized = second;
+                require complete;
+                return status;
+            }
+            [NoThrow] void CopyMixedVoid<T, U>(T value, U second, out T result,
+                init ref<U> initialized) where T : [Copy] where U : [Copy] {
+                result = value;
+                initialized = second;
+            }
+            int32 FillManaged(bool complete, out Pair result, init ref<write ManagedNode> initialized) {
+                require ManagedNode.TryCreate(42, out var created);
+                return CopyMixed(new Pair(40, 2), created, 7, complete, out result, init initialized);
+            }
+            public int32 PowerProbe() {
+                int32 status = CopyMixed<Pair, int64>(new Pair(42, 2), int64(5), 7, true,
+                    out var copied, init var initialized);
+                CopyMixedVoid(new Pair(18, 24), int64(6), out var voidCopy, init var voidInitialized);
+                if (status != 7 || copied.First != 42 || initialized != 5
+                    || voidCopy.First != 18 || voidInitialized != 6) { return 1; }
+                MANAGED_PATH
+            }
+            """;
+        var managedPath = policy == NativeRuntimePolicy.CheckedExceptions
+            ? """
+                mut Pair result = new Pair(0, 0);
+                init write ManagedNode node;
+                if (ManagedHeap.Collect() != 0) { return 1; }
+                unsafe {
+                    try {
+                        FillManaged(false, out result, init node);
+                        return 2;
+                    } catch {
+                        if (node is init || ManagedHeap.Collect() != 1) { return 3; }
+                        int32 managedStatus = FillManaged(true, out result, init node);
+                        if (ManagedHeap.Collect() != 0 || result.First != 40 || result.Second != 2) {
+                            return 4;
+                        }
+                        return managedStatus + node.Value;
+                    }
+                }
+                return 0;
+                """
+            : "return 42;";
+        var replacementSource = ReplacementTemplate.Replace("MANAGED_PATH", managedPath,
+            StringComparison.Ordinal);
+
+        var original = ModuleCompiler.CreateProducer(Compile(Stub, policy), ["PowerProbe"]);
+        var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return PowerProbe(); }",
+            policy, ModuleCompiler.CreateReference(original), library: false), original);
+        var consumerHash = SHA256.HashData(consumer);
+        var replacement = ModuleCompiler.CreateProducer(Compile(replacementSource, policy), ["PowerProbe"]);
+        var linked = ModuleCompiler.Link(consumer, replacement);
+        Assert.Equal(PrimitiveType.Int32, Assert.Single(linked.Functions,
+            static function => function.Name.StartsWith("$producer.CopyMixed<Pair, int64>",
+                StringComparison.Ordinal)).ReturnType);
+        var mixed = Assert.Single(linked.Functions,
+            static function => function.Name.StartsWith("$producer.CopyMixed<Pair, int64>",
+                StringComparison.Ordinal));
+        Assert.True(mixed.Variables[4].IsOut);
+        Assert.False(mixed.Variables[4].IsInit);
+        Assert.True(mixed.Variables[5].IsOut);
+        Assert.True(mixed.Variables[5].IsInit);
+        var mixedVoid = Assert.Single(linked.Functions,
+            static function => function.Name.StartsWith("$producer.CopyMixedVoid<Pair, int64>",
+                StringComparison.Ordinal));
+        Assert.Equal(PrimitiveType.Void, mixedVoid.ReturnType);
+        Assert.True(mixedVoid.Variables[2].IsOut);
+        Assert.False(mixedVoid.Variables[2].IsInit);
+        Assert.True(mixedVoid.Variables[3].IsOut);
+        Assert.True(mixedVoid.Variables[3].IsInit);
+        var expected = policy == NativeRuntimePolicy.CheckedExceptions ? 49 : 42;
+        Assert.Equal(expected, NativeJit.Execute(linked, policy));
+        Assert.Equal(expected, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.Equal(consumerHash, SHA256.HashData(consumer));
+
+        var nativeOriginal = NativeModuleCompiler.CreateProducer(Compile(Stub, policy),
+            ["PowerProbe"], "NodeB", policy);
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(
+            "int32 Main() { return PowerProbe(); }", policy,
+            NativeModuleCompiler.CreateGraphReference([nativeOriginal]), library: false),
+            [nativeOriginal], policy);
+        var nativeHash = SHA256.HashData(nativeConsumer);
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(Compile(replacementSource, policy),
+            ["PowerProbe"], "NodeB", policy);
+        Assert.Equal(expected, await NativeModuleCompiler.RunGraphAsync(nativeConsumer,
+            [nativeReplacement], TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(expected, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer,
+            [nativeReplacement], Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CopyOutVarDestinationsPublishForNonBooleanAndVoidCallsAsync(
         NativeRuntimePolicy policy)
     {
