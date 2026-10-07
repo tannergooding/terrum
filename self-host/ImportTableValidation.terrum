@@ -1,0 +1,350 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateImportTable(int32 recordCount,
+    int32 moduleCount, int32 stringCount, int32 moduleRefCount,
+    int32 typeDefCount, int32 methodDefCount, int32 propertyDefCount)
+{
+    if (recordCount < 0 || recordCount > 0xFF_FFFF
+        || moduleCount <= 0 || moduleCount > 0xFF_FFFF
+        || stringCount < 0 || stringCount > 0xFF_FFFF
+        || moduleRefCount < 0 || moduleRefCount > 0xFF_FFFF
+        || typeDefCount < 0 || typeDefCount > 0xFF_FFFF
+        || methodDefCount < 0 || methodDefCount > 0xFF_FFFF
+        || recordCount * 12 != Host.Imports.Length
+        || propertyDefCount < 0 || propertyDefCount > 0xFF_FFFF
+        || moduleCount * 44 != Host.Modules.Length
+        || moduleRefCount * 12 != Host.ModuleRefs.Length
+        || typeDefCount * 40 != Host.TypeDefs.Length
+        || methodDefCount * 28 != Host.Methods.Length
+        || Host.Properties.Length != propertyDefCount * 20
+        || Host.ImportExpectedDefinitions.Length != recordCount + 1
+        || Host.ImportExpectedTargets.Length != recordCount + 1
+        || Host.ImportExpectedPolicies.Length != recordCount + 1)
+    {
+        return false;
+    }
+
+    for (mut int32 slot = 0; slot <= recordCount; slot = slot + 1)
+    {
+        Host.ImportExpectedDefinitions[slot] = 0;
+        Host.ImportExpectedTargets[slot] = 0;
+        Host.ImportExpectedPolicies[slot] = 0;
+    }
+
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        int32 rowStart = (row - 1) * 12;
+        if (!TryReadImportTableWord(rowStart, 0, init var moduleRef)
+            || !TryReadImportTableWord(rowStart, 4, init var key)
+            || !TryReadImportTableWord(rowStart, 8, init var expected))
+        {
+            return false;
+        }
+        if (moduleRef == 0 || moduleRef > uint32(moduleRefCount)
+            || key == 0 || key > 0xFF_FFFF || key > uint32(stringCount))
+        {
+            return false;
+        }
+        if (!TryGetVariableTableRowExtent(stringCount, 8, 4, int32(key),
+            init var keyOffset, init var keyLength))
+        {
+            return false;
+        }
+        if (!TryGetStringNameScalarCount((stringCount + 1) * 4 + int32(keyOffset),
+            keyLength, init var keyScalarCount))
+        {
+            return false;
+        }
+        if (!TryGetImportDefinitionModule(expected, moduleCount,
+            typeDefCount, methodDefCount, propertyDefCount,
+            init var expectedModule, init var body))
+        {
+            return false;
+        }
+        if (!TryGetImportModuleRefOwner(int32(moduleRef), moduleCount,
+            moduleRefCount, init var referenceModule)
+            || expectedModule != referenceModule
+            || ((expected >> 24 == 0x16 || expected >> 24 == 0x1E) && body != 0))
+        {
+            return false;
+        }
+        if (!TryReadModuleRefTableWord(int32(moduleRef), 4,
+            init var target)
+            || !TryReadModuleRefTableWord(int32(moduleRef), 8,
+                init var policy))
+        {
+            return false;
+        }
+
+        Host.ImportExpectedDefinitions[row] = int32(expected);
+        Host.ImportExpectedTargets[row] = int32(target);
+        Host.ImportExpectedPolicies[row] = int32(policy);
+    }
+
+    return TrySortAndCheckImportExpectations(recordCount);
+}
+
+public static bool IsExpectedImportDefinition(uint32 reference, int32 recordCount)
+{
+    if (recordCount < 0
+        || Host.ImportExpectedDefinitions.Length != recordCount + 1)
+    {
+        return false;
+    }
+
+    mut int32 low = 1;
+    mut int32 high = recordCount;
+    while (low <= high)
+    {
+        int32 middle = low + (high - low) / 2;
+        uint32 candidate = uint32(Host.ImportExpectedDefinitions[middle]);
+        if (candidate == reference)
+        {
+            return true;
+        }
+        if (candidate < reference)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle - 1;
+        }
+    }
+
+    return false;
+}
+
+public static bool TryGetExpectedImportRequirements(uint32 reference,
+    int32 recordCount, init ref<uint32> targetRequirement, init ref<uint32> runtimePolicy)
+{
+    if (recordCount < 0
+        || Host.ImportExpectedDefinitions.Length != recordCount + 1
+        || Host.ImportExpectedTargets.Length != recordCount + 1
+        || Host.ImportExpectedPolicies.Length != recordCount + 1)
+    {
+        return false;
+    }
+
+    mut int32 low = 1;
+    mut int32 high = recordCount;
+    while (low <= high)
+    {
+        int32 middle = low + (high - low) / 2;
+        uint32 candidate = uint32(Host.ImportExpectedDefinitions[middle]);
+        if (candidate == reference)
+        {
+            targetRequirement = uint32(Host.ImportExpectedTargets[middle]);
+            runtimePolicy = uint32(Host.ImportExpectedPolicies[middle]);
+            return true;
+        }
+        if (candidate < reference)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle - 1;
+        }
+    }
+
+    return false;
+}
+
+bool TryGetImportDefinitionModule(uint32 reference, int32 moduleCount,
+    int32 typeDefCount, int32 methodDefCount, int32 propertyDefCount,
+    init ref<int32> ownerModule, init ref<uint32> body)
+{
+    uint32 table = reference >> 24;
+    uint32 row = reference & 0xFF_FFFF;
+    if (row == 0)
+    {
+        return false;
+    }
+
+    if (table == 0x13)
+    {
+        if (row > uint32(typeDefCount)
+            || !TryGetImportTableOwnerModule(int32(row), moduleCount, typeDefCount, 32,
+                init ownerModule))
+        {
+            return false;
+        }
+        body = 0;
+        return true;
+    }
+
+    if (table == 0x16)
+    {
+        if (row > uint32(methodDefCount)
+            || !TryGetImportTableOwnerModule(int32(row), moduleCount, methodDefCount, 36,
+                init ownerModule)
+            || !TryReadMethodDefTableWord((int32(row) - 1) * 28, 24, init body))
+        {
+            return false;
+        }
+        return true;
+    }
+
+    if (table == 0x1E)
+    {
+        if (row > uint32(propertyDefCount)
+            || !TryReadPropertyTableWord((int32(row) - 1) * 20, 0, init var ownerType)
+            || !TryGetImportTableOwnerModule(int32(ownerType), moduleCount, typeDefCount, 32,
+                init ownerModule)
+            || !TryReadPropertyTableWord((int32(row) - 1) * 20, 12, init var getter)
+            || !TryReadMethodDefTableWord((int32(getter) - 1) * 28, 24, init body))
+        {
+            return false;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+bool TryGetImportTableOwnerModule(int32 row, int32 moduleCount,
+    int32 tableCount, int32 cursorOffset, init ref<int32> ownerModule)
+{
+    mut int32 low = 1;
+    mut int32 high = moduleCount;
+    while (low <= high)
+    {
+        int32 middle = low + (high - low) / 2;
+        if (!TryReadModuleTableWord((middle - 1) * 44, cursorOffset,
+            init var start))
+        {
+            return false;
+        }
+
+        mut uint32 end = uint32(tableCount + 1);
+        if (middle < moduleCount)
+        {
+            if (!TryReadModuleTableWord(middle * 44, cursorOffset, init var nextStart))
+            {
+                return false;
+            }
+            end = nextStart;
+        }
+
+        if (uint32(row) < start)
+        {
+            high = middle - 1;
+        }
+        else if (uint32(row) >= end)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            ownerModule = middle;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool TryGetImportModuleRefOwner(int32 row, int32 moduleCount,
+    int32 moduleRefCount, init ref<int32> ownerModule)
+    => TryGetImportTableOwnerModule(row, moduleCount, moduleRefCount, 28,
+        init ownerModule);
+
+bool TrySortAndCheckImportExpectations(int32 recordCount)
+{
+    mut int32 root = recordCount / 2;
+    while (root > 0)
+    {
+        SiftImportExpectationHeap(root, recordCount);
+        root = root - 1;
+    }
+
+    mut int32 heapEnd = recordCount;
+    while (heapEnd > 1)
+    {
+        SwapImportExpectations(1, heapEnd);
+        heapEnd = heapEnd - 1;
+        SiftImportExpectationHeap(1, heapEnd);
+    }
+
+    for (mut int32 row = 2; row <= recordCount; row = row + 1)
+    {
+        if (Host.ImportExpectedDefinitions[row - 1]
+            == Host.ImportExpectedDefinitions[row])
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void SiftImportExpectationHeap(int32 root, int32 heapEnd)
+{
+    mut int32 current = root;
+    while (current <= heapEnd / 2)
+    {
+        mut int32 child = current * 2;
+        if (child < heapEnd
+            && Host.ImportExpectedDefinitions[child]
+                < Host.ImportExpectedDefinitions[child + 1])
+        {
+            child = child + 1;
+        }
+        if (Host.ImportExpectedDefinitions[current]
+            >= Host.ImportExpectedDefinitions[child])
+        {
+            break;
+        }
+
+        SwapImportExpectations(current, child);
+        current = child;
+    }
+}
+
+void SwapImportExpectations(int32 first, int32 second)
+{
+    mut int32 value = Host.ImportExpectedDefinitions[first];
+    Host.ImportExpectedDefinitions[first] = Host.ImportExpectedDefinitions[second];
+    Host.ImportExpectedDefinitions[second] = value;
+    value = Host.ImportExpectedTargets[first];
+    Host.ImportExpectedTargets[first] = Host.ImportExpectedTargets[second];
+    Host.ImportExpectedTargets[second] = value;
+    value = Host.ImportExpectedPolicies[first];
+    Host.ImportExpectedPolicies[first] = Host.ImportExpectedPolicies[second];
+    Host.ImportExpectedPolicies[second] = value;
+}
+
+bool TryReadImportTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Imports.Length - 12
+        || offset < 0 || offset > 8
+        || !TryReadImportTableByte(rowStart + offset, init var first)
+        || !TryReadImportTableByte(rowStart + offset + 1, init var second)
+        || !TryReadImportTableByte(rowStart + offset + 2, init var third)
+        || !TryReadImportTableByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadImportTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Imports.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Imports[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
