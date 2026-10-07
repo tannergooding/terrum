@@ -176,6 +176,16 @@ contents of only the requested String row. A malformed unrequested row does
 not prevent reading a valid selected row, while malformed offsets still
 reject; this intentionally differs from `StringTableIndex`'s whole-table
 physical-shape validation.
+The `TypeSpecTableValidation` candidate validates a complete variable table
+and its structural row forms against the hosted `TrRmTypeSpecTableReader`,
+including assigned lengths and codes, qualifier bits, table-reference bounds,
+earlier-row requirements, TypeArg range bounds and canonical inline versus
+indexed built-in forms. Its AOT/JIT fixtures compare valid and malformed
+tables with the hosted reader under both runtime policies. This does not
+validate TypeArg ownership, generic arity or constraints, execute generic
+bodies, or replace the hosted reader. In particular, accepting structural code
+`0x89` does not settle its provisional meaning or establish executable
+`simdmask<T>` support.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.
