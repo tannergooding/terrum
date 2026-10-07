@@ -251,6 +251,24 @@ public static partial class TrRmExecutableCompiler
                     statements.Add(new BoundAssignment(place, ReadValue(operation.Operands[1]), default));
                     break;
                 }
+                case 0x16:
+                {
+                    if (operation.Operands.Length != 1)
+                    {
+                        throw Invalid("Convert requires one value.");
+                    }
+
+                    var operand = ReadValue(operation.Operands[0]);
+                    var destination = OutputType(body, types, operation.TypeId);
+                    if (!IsOutputIntegerConversionType(operand.Type)
+                        || !IsOutputIntegerConversionType(destination))
+                    {
+                        throw Invalid("Convert is outside the executable integer profile.");
+                    }
+
+                    DefineValue(operation.Result, new BoundCast(operand, destination, default));
+                    break;
+                }
                 case 0x12:
                 {
                     if (operation.MethodRow <= 0 || operation.MethodRow > functions.Count)
@@ -486,6 +504,9 @@ public static partial class TrRmExecutableCompiler
         => type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
             or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
             or PrimitiveType.Float32 or PrimitiveType.Float64;
+
+    private static bool IsOutputIntegerConversionType(PrimitiveType type)
+        => IsInteger(type) || type == PrimitiveType.Char16;
 
     private static bool IsOutputCallResultType(PrimitiveType type)
         => type == PrimitiveType.Void || IsOutputScalarType(type);
@@ -780,6 +801,24 @@ public static partial class TrRmExecutableCompiler
                     _ = AddValue(constant.Type, 0, (uint)constOffset);
                     _operationCount++;
                     return constResult;
+                case BoundCast cast when IsOutputIntegerConversionType(cast.Operand.Type)
+                    && IsOutputIntegerConversionType(cast.Type):
+                {
+                    var castOperand = EmitValue(cast.Operand);
+                    var castResult = _valueTypes.Count + 1;
+                    var castTypeId = BodyTypeId(TypeRow(cast.Type));
+                    var castWidth = Width((ulong)Math.Max(castResult,
+                        Math.Max(castTypeId, castOperand)));
+                    var castOffset = _operations.Count;
+                    WriteInstruction(_operations, 0x16, castWidth, 0);
+                    Write(_operations, (ulong)castResult, castWidth);
+                    Write(_operations, (ulong)castTypeId, castWidth);
+                    Write(_operations, (ulong)castOperand, castWidth);
+                    _ = AddValue(cast.Type, 0, (uint)castOffset);
+                    UseValue(castOperand, _operationCount);
+                    _operationCount++;
+                    return castResult;
+                }
                 case BoundBinary binary when binary.Type == binary.Left.Type
                     && binary.Left.Type == binary.Right.Type && IsFloat(binary.Left.Type)
                     && binary.Operator is TokenKind.Plus or TokenKind.Minus

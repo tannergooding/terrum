@@ -179,6 +179,12 @@ public sealed class TrRmExecutableCompilerTests
     [InlineData("(char16(65) == CharacterA())", 42)]
     [InlineData("(int32(-1) == Signed32MinusOne())", 42)]
     [InlineData("(uint32(1) == Unsigned32One())", 42)]
+    [InlineData("(int64(Signed32One()) == Signed64One())", 42)]
+    [InlineData("(int32(Signed64One()) == Signed32One())", 42)]
+    [InlineData("(uint32(Signed32One()) == Unsigned32One())", 42)]
+    [InlineData("(uint64(Unsigned32One()) == Unsigned64One())", 42)]
+    [InlineData("(int32(CharacterA()) == int32(65))", 42)]
+    [InlineData("(char16(Signed32SixtyFive()) == CharacterA())", 42)]
     [InlineData("(uint32(0x7FFFFFFF) == Unsigned32High31())", 42)]
     [InlineData("(uint32(0x80000000) == Unsigned32HighBit())", 42)]
     [InlineData("(uint32(0xFFFFFFFF) == Unsigned32AllBits())", 42)]
@@ -221,6 +227,7 @@ public sealed class TrRmExecutableCompilerTests
             int32 Signed32Four() { return 4; }
             int32 Signed32Five() { return 5; }
             int32 Signed32Six() { return 6; }
+            int32 Signed32SixtyFive() { return 65; }
             int32 Signed32Zero() { return 0; }
             int32 Signed32Minimum() { return int32.MinValue; }
             int32 Signed32NegativeFive() { return -5; }

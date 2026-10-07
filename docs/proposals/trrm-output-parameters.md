@@ -101,9 +101,13 @@ Floating addition, subtraction, multiplication and division are supported for
 both floating types. Integer addition, subtraction, multiplication, division
 and remainder are supported for all four integer types, including signed
 truncation-toward-zero, dividend-signed remainder, and the minimum-value
-remainder-by-negative-one case. The one-block control-flow boundary is
-unchanged. These value, comparison, bitwise, unary and arithmetic paths are
-implemented support only, not approval of the proposed executable contract.
+remainder-by-negative-one case. Integer and `char16` conversions are also
+provisionally carried by opcode `0x16` and reconstructed as checked bound
+casts, preserving overflow failure and `NoThrow` verification; floating
+conversions remain unsupported in output Bodies. The one-block control-flow
+boundary is unchanged. These value, comparison, bitwise, unary, arithmetic
+and conversion paths are implemented support only, not approval of the
+proposed executable contract.
 
 The broader proposal remains unresolved. In particular, Boolean status facts
 are call-specific and require correlation with their particular destinations;

@@ -583,6 +583,10 @@ subtraction, multiplication and division are supported for
 division and remainder are also supported for `int32`, `uint32`, `int64` and
 `uint64`; signed quotient/remainder behavior, including the minimum-value
 remainder-by-negative-one case, is covered by output-body execution tests.
+Integer and `char16` conversions are provisionally encoded by `Convert`
+opcode `0x16` and reconstructed as checked bound casts, retaining the
+mandatory verifier's overflow and `NoThrow` checks. Floating conversions
+remain outside this output-body slice.
 It uses required Feature section kind `0x0004` and a separately audited
 one-block general Body path, reconstructs bound nodes, and still runs the
 mandatory semantic verifier. Only the profile's bounded output shapes are
