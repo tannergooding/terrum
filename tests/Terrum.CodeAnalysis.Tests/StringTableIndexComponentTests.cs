@@ -153,6 +153,9 @@ public sealed class StringTableIndexComponentTests
         var componentPath = Path.Combine(root, "self-host", "StringRowLayout.terrum");
         var layout = SyntaxTree.Parse(await File.ReadAllTextAsync(componentPath).ConfigureAwait(true), componentPath);
         Assert.False(layout.HasErrors, string.Join(Environment.NewLine, layout.Diagnostics));
+        componentPath = Path.Combine(root, "self-host", "VariableTableIndex.terrum");
+        var variableIndexTree = SyntaxTree.Parse(await File.ReadAllTextAsync(componentPath).ConfigureAwait(true), componentPath);
+        Assert.False(variableIndexTree.HasErrors, string.Join(Environment.NewLine, variableIndexTree.Diagnostics));
         componentPath = Path.Combine(root, "self-host", "StringTableIndex.terrum");
         var indexTree = SyntaxTree.Parse(await File.ReadAllTextAsync(componentPath).ConfigureAwait(true), componentPath);
         Assert.False(indexTree.HasErrors, string.Join(Environment.NewLine, indexTree.Diagnostics));
@@ -160,7 +163,7 @@ public sealed class StringTableIndexComponentTests
 
         foreach (var testCase in validCases)
         {
-            var compilation = Compilation.Create([layout, indexTree, entry],
+            var compilation = Compilation.Create([layout, variableIndexTree, indexTree, entry],
             [
                 new HostBuffer("Rows", PrimitiveType.Int32, [.. testCase.Section], false),
                 new HostBuffer("Expected", PrimitiveType.Int32, [.. testCase.Expected.SelectMany(static item => item)], false),

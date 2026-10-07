@@ -149,16 +149,17 @@ supplied byte words and returns the encoding and content byte length. It checks
 byte range, assigned flags, row extent, zero terminator and alignment padding,
 but deliberately leaves UTF-8/16/32 scalar validity, ASCII content, name
 emptiness and embedded-zero policy to reference-use decoding.
-The `StringTableIndex` candidate validates the complete variable-table offset
-index before returning one requested row's data-relative extent and physical
-String-row layout. It checks the count/index extent, byte-word range,
-zero-based first offset, monotone minimum-sized aligned rows, exact final
-offset and every row's physical framing, including unrequested rows. Each
-lookup rescans the complete index; returned layout remains physical only and
-does not decode text or replace the hosted variable-table or String-row
-readers. AOT/JIT fixtures compare hosted-writer rows and malformed table cases
-under both runtime policies, including physically valid rows with malformed
-UTF-8 content.
+The `VariableTableIndex` candidate validates the complete offset index and
+returns one requested row's data-relative extent using caller-supplied minimum
+row size and one- or four-byte alignment. It checks the record-count limit,
+index extent, byte-word range, zero first offset, monotone minimum-sized
+aligned rows and exact final offset; AOT/JIT fixtures compare Blob and Body
+table extents with hosted readers under both runtime policies. Each lookup
+rescans the index and does not interpret row contents or replace hosted
+readers. `StringTableIndex` composes this generic check with `StringRowLayout`
+for every row, including unrequested rows. It remains physical framing only:
+malformed UTF-8 with valid framing is accepted, and text decoding and
+reference-use policy remain with the hosted readers.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.

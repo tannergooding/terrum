@@ -1,0 +1,76 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryReadVariableTableOffset(int32 offsetIndex, init ref<uint32> offset)
+{
+    if (offsetIndex < 0 || offsetIndex >= Host.Rows.Length / 4)
+    {
+        return false;
+    }
+
+    int32 at = offsetIndex * 4;
+    mut uint32 value = 0;
+    for (mut int32 byteIndex = 0; byteIndex < 4; byteIndex = byteIndex + 1)
+    {
+        int32 part = Host.Rows[at + byteIndex];
+        if (part < 0 || part > 255)
+        {
+            return false;
+        }
+        value = value | (uint32(part) << (byteIndex * 8));
+    }
+
+    offset = value;
+    return true;
+}
+
+public static bool TryGetVariableTableRowExtent(int32 recordCount, int32 minimumRowBytes,
+    int32 rowAlignment, int32 row, init ref<int32> rowStart, init ref<int32> rowLength)
+{
+    if (recordCount <= 0 || recordCount > 16777215
+        || minimumRowBytes < 0 || (rowAlignment != 1 && rowAlignment != 4)
+        || row <= 0 || row > recordCount
+        || recordCount > Host.Rows.Length / 4 - 1)
+    {
+        return false;
+    }
+
+    int32 indexByteLength = (recordCount + 1) * 4;
+    int32 dataByteLength = Host.Rows.Length - indexByteLength;
+    if (dataByteLength < minimumRowBytes
+        || !TryReadVariableTableOffset(0, init var firstOffset)
+        || firstOffset != 0)
+    {
+        return false;
+    }
+
+    mut uint32 previous = firstOffset;
+    mut int32 selectedStart = 0;
+    mut int32 selectedLength = 0;
+    for (mut int32 currentRow = 1; currentRow <= recordCount; currentRow = currentRow + 1)
+    {
+        if (!TryReadVariableTableOffset(currentRow, init var next)
+            || next > uint32(dataByteLength)
+            || previous > uint32(dataByteLength - minimumRowBytes)
+            || next < previous + uint32(minimumRowBytes)
+            || (rowAlignment == 4 && (next & 3) != 0))
+        {
+            return false;
+        }
+
+        if (currentRow == row)
+        {
+            selectedStart = int32(previous);
+            selectedLength = int32(next - previous);
+        }
+        previous = next;
+    }
+
+    if (previous != uint32(dataByteLength))
+    {
+        return false;
+    }
+
+    rowStart = selectedStart;
+    rowLength = selectedLength;
+    return true;
+}
