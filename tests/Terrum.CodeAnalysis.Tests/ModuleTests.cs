@@ -186,8 +186,10 @@ public sealed class ModuleTests
 
         const string ConsumerSource = """
             int32 Main() {
-                if (TryGetPair(0, out var failed)) { return 1; }
-                if (!TryGetPair(40, out var copied)) { return 2; }
+                if (!TryGetPair(40, out var original)) { return 1; }
+                mut Pair copied = original;
+                if (TryGetPair(0, out copied) || copied is init) { return 2; }
+                if (!TryGetPair(40, out copied)) { return 2; }
                 init Pair initialized;
                 if (TryInitializePair(0, init initialized)) { return 3; }
                 if (!TryInitializePair(40, init initialized)) { return 4; }

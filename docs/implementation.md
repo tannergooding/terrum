@@ -340,9 +340,9 @@ and the explicit `out` adapter under both policies; this adds neither general
 reference support nor a new public library API.
 Separate public `Copy`-value output tests also link semantic-module artifacts
 and execute the same consumer through an independent native graph. They check
-successful `out` and `init ref` publication plus false-path vacancy and retry
-for `init ref`; this does not make non-value modes executable in source-free
-TRRM or claim a general parameter-mode ABI.
+successful `out` and `init ref` publication, false-path vacancy and retry for
+both modes; this does not make non-value modes executable in source-free TRRM
+or claim a general parameter-mode ABI.
 A persisted semantic-module consumer also exercises `ManagedTokenChain`
 creation, rejected mutation, copied records, cursor read/lookahead and
 invalidation, plus link collection after clear, under both runtime policies.
