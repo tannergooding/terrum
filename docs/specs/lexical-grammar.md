@@ -2,7 +2,7 @@
 
 This document and the [source grammar](grammar-spec.md#2-lexical-notation)
 specify approved source rules. Open recovery and contextual-token details
-are identified explicitly; [implementation](implementation.md) records which
+are identified explicitly; [implementation](../implementation.md) records which
 forms the compiler supports.
 
 ## Definitions and notation
@@ -236,7 +236,7 @@ formatter may guess a different expression from an invalid run.
 
 This is the approved lexical target rule. Adoption across the supported
 hosted, native, scanner and projection paths is in progress; see the
-[implementation boundary](implementation.md) for current status.
+[implementation boundary](../implementation.md) for current status.
 
 `..^` is one defined composite punctuator for an end-relative upper slice
 bound, as in `items[start..^1]`. The grammar also permits separated `..`
@@ -323,7 +323,7 @@ outside it and is not a valid continuation of that comment. Generalized
 fences do not create nesting or a tooling-specific escape from the closer.
 Documentation trivia retains its source extent while participating in
 declaration attachment and separate documentation extraction.
-See the [scanner implementation](scanner.md) for current adoption and
+See the [scanner implementation](../scanner.md) for current adoption and
 historical profile compatibility; fixed-fence empty-comment behavior is not
 generalized-fence conformance.
 The final zero-width EOF token owns trailing trivia. Unterminated block

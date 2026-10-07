@@ -2,7 +2,7 @@
 
 > **Status: unapproved proposal.** This document records a recommended
 > encoding and source-attribute schema for the already accepted
-> [static initialization contract](../grammar-spec.md#static-initialization-and-load-scoped-storage).
+> [static initialization contract](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage).
 > It does not change that contract or claim compiler support.
 
 ## Summary

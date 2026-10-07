@@ -9,11 +9,11 @@ static-method experiments and getter support on `Copy` structs,
 caller-unsafe public `Copy`-struct fields and mutable receiver loans through
 eligible fields, and validated indexed executable unsafe scopes; their
 boundaries are described in
-[the module format](../modules.md) and [implementation notes](../implementation.md).
+[the module format](../specs/modules.md) and [implementation notes](../implementation.md).
 
 ## Current boundary
 
-The accepted [lifetime contracts](../lifetimes.md) distinguish readonly
+The accepted [lifetime contracts](../specs/lifetimes.md) distinguish readonly
 references, writable references, initialization loans, backing, roots and
 ownership. The source grammar separately defines caller-unsafe declarations
 and explicit unsafe scopes. Their cross-call metadata and general executable
@@ -839,5 +839,5 @@ for declared result-correlated publication; do not infer publication from a
 method name. This proposal does not select new source syntax, new clause
 numbers, a standalone verifier, or general reference migration.
 
-Relevant boundaries are the [roadmap](../roadmap.md), [source contracts](../grammar-spec.md),
-[lifetime contracts](../lifetimes.md), and [metadata design](../il-metadata.md).
+Relevant boundaries are the [roadmap](../roadmap.md), [source contracts](../specs/grammar-spec.md),
+[lifetime contracts](../specs/lifetimes.md), and [metadata design](../specs/il-metadata.md).

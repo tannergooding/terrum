@@ -9,10 +9,10 @@ approved or executable library. Accepted semantic direction, proposed
 signatures and open choices are marked separately below; examples do not
 establish conformance. This is not an ABI layout specification.
 
-Canonical language and library contracts live in [language](../language.md),
-[libraries](../libraries.md), [language contracts](../language-contracts.md),
-[lifetimes](../lifetimes.md), [type families](../type-families.md),
-[conversions](../conversions.md) and [memory model](../memory-model.md).
+Canonical language and library contracts live in [language](../specs/language.md),
+[libraries](../specs/libraries.md), [language contracts](../specs/language-contracts.md),
+[lifetimes](../specs/lifetimes.md), [type families](../specs/type-families.md),
+[conversions](../specs/conversions.md) and [memory model](../specs/memory-model.md).
 The design-only [`library/*.api.terrum`](../../library/) sketches are inventory
 inputs, not reference assemblies.
 
@@ -110,7 +110,7 @@ and feature-to-runtime support remain open.
 - `write Span<T>` lends write access to backing slots; `mut Span<T>` only permits descriptor rebinding. `Span<write C>` is separately writable through each retained handle. Generic substitutions preserve their complete qualification.
 - `[Copy]`, `[Sized]`, `[ManagedStorable]`, `[TextCodeUnit]`, and `[SimdElement]` are checked properties/capabilities, not user assertions inferred from an interface name.
 - The approved interface grammar permits an optional first `<this TSelf>` formal, but does not force every protocol to use it. Associated defaults and interface-qualified bindings have approved declaration forms; selecting a witness and conditional family registration still need checked contracts. `.via<I>` and `default<I>` are not arbitrary runtime dispatch or construction: `default<I>` is restricted to the conforming `this` in an interface default body.
-- The approved [extension-provider selector](../grammar-spec.md#extension-provider-selection), `.via<Provider>`, selects an explicitly eligible nominal non-interface provider; the receiver supplies one argument and is evaluated once. It does not add an interface witness, widen access or define extension declaration/import eligibility syntax.
+- The approved [extension-provider selector](../specs/grammar-spec.md#extension-provider-selection), `.via<Provider>`, selects an explicitly eligible nominal non-interface provider; the receiver supplies one argument and is evaluated once. It does not add an interface witness, widen access or define extension declaration/import eligibility syntax.
 - A `params` parameter must be final; its approved production does not include a default expression. Eligible ordinary by-value parameters may have compile-time `[Copy]` defaults under the approved call rules. Neither a defaulted parameter nor `init ref<T>` supplies an uninitialized value to the callee; `init` remains a vacant output until publication. Constructor and `init`-property guarantees belong to contract clauses; mixed property backing and `init` mutability do not turn a readonly receiver into writable storage.
 - A signature does not express all dependencies. A returned view retains its backing/root/lease and any shape metadata. Ownership, allocation, checked failure, effect and task-completion rules are stated under the relevant family.
 
@@ -179,7 +179,7 @@ table. The proposed `Option<T>` alias is separately described in
 
 The accepted semantic direction normalizes optional `T?` substitutions: `T?` with already-optional `T` remains one optional layer. `Option<T>` is a proposed transparent alias for that same normalized presence type, not a nominal `Some(T)` wrapper; alias scope and syntax are approved, while this concrete library export remains open. `Option<void>` still represents absent versus present `()`.
 
-A distinct nominal union can preserve distinctions that optional normalization cannot, including missing versus present-null by making its payload itself optional. Named semicolon-terminated cases and qualified construction are now [approved target declaration forms](../grammar-spec.md#31-source-file-structure-and-declarations), not current compiler support. These concrete Core type shapes remain proposals:
+A distinct nominal union can preserve distinctions that optional normalization cannot, including missing versus present-null by making its payload itself optional. Named semicolon-terminated cases and qualified construction are now [approved target declaration forms](../specs/grammar-spec.md#31-source-file-structure-and-declarations), not current compiler support. These concrete Core type shapes remain proposals:
 
 ```terrum
 // Approved alias declaration form; this particular exported alias is PROPOSED.
@@ -217,7 +217,7 @@ required-type list. `int32` and `uint32` concrete sketches are in §6 and §8;
 source spelling/availability for additional widths must be checked against
 the target's approved primitive inventory before adoption. Unary operators,
 literal typing, conversion witnesses and checked policy belong to the
-[grammar](../grammar-spec.md) and [conversions](../conversions.md), not to a
+[grammar](../specs/grammar-spec.md) and [conversions](../specs/conversions.md), not to a
 fictional shared primitive base class.
 
 ## 2. Explicit equality, keying and formatting witnesses
@@ -561,7 +561,7 @@ not normalize or fold. Its `TryIndexOfOrdinal`/`TryLastIndexOfOrdinal` false
 outcomes leave `scalarIndex` vacant.
 
 The existing ordinal-search signatures use the same
-[Unicode scalar-sequence identity across encodings](../type-families.md#text-views),
+[Unicode scalar-sequence identity across encodings](../specs/type-families.md#text-views),
 not byte identity or UTF-16 code-unit ordering. Source and needle may have
 different validated encodings; matching does not require allocating a
 transcoded copy. A match consumes the complete needle at a source scalar
@@ -1636,10 +1636,10 @@ public interface IAsyncConsumingCursor<T>
 The associated `Cursor` spelling uses the grammar's associated-type
 declaration form, but its binding and selection contract is not adopted here.
 Parameter-directed result dependencies are
-[accepted](../grammar-spec.md#result-dependency-declarations), with `nameof`
+[accepted](../specs/grammar-spec.md#result-dependency-declarations), with `nameof`
 preferred for named parameters. The receiver selector
 `[return: DependsOn("this")]` remains a candidate spelling; the
-[accepted relationship contract](../grammar-spec.md#result-dependency-declarations)
+[accepted relationship contract](../specs/grammar-spec.md#result-dependency-declarations)
 requires receiver-storage and forwarded-backing selectors to remain distinct;
 it is **UNAPPROVED** and does not itself specify which advancement invalidates
 the borrow. The accepted direction separates creation/completion obligations
@@ -1650,7 +1650,7 @@ dependency rather than being shortened to cursor-state lifetime. Async item
 loans retain backing and access obligations through each awaitable completion.
 Only exact producer protocol and phase identities remain open; the source
 grammar's producer and iteration boundaries are summarized in its
-[coverage index](../grammar-spec.md#6-source-form-coverage-and-open-boundaries).
+[coverage index](../specs/grammar-spec.md#6-source-form-coverage-and-open-boundaries).
 
 `TryMoveNext(init ref<T>)` and its async counterpart are alternative
 consuming-advance candidates: a successful completion would transfer one
@@ -1661,7 +1661,7 @@ unresolved; no consuming or writable binding is implied by ordinary
 by-value iteration. Selection among by-value, borrowed and consuming element
 modes, including when advancement invalidates an item, remains open; the
 grammar's iteration entry records the corresponding source boundary in its
-[coverage index](../grammar-spec.md#6-source-form-coverage-and-open-boundaries).
+[coverage index](../specs/grammar-spec.md#6-source-form-coverage-and-open-boundaries).
 
 ### Proposed ordered and sequential collection declarations
 
@@ -1883,8 +1883,8 @@ borrowed dependency annotations and representation remain **OPEN**. A
 deterministic snapshot requires an explicit allocated result and policy.
 Collection-expression registration is checked per builder, not inferred from
 `TryAdd` spelling. The accepted lazy-start, structured-close and
-awaited-close rules are in the [grammar's iteration contract](../grammar-spec.md#33-statements-and-local-declarations)
-and [producer contract](../grammar-spec.md#512-modifiers-cleanup-and-finalization);
+awaited-close rules are in the [grammar's iteration contract](../specs/grammar-spec.md#33-statements-and-local-declarations)
+and [producer contract](../specs/grammar-spec.md#512-modifiers-cleanup-and-finalization);
 those operational rules do not approve the candidate member names above.
 
 ### Collection `params` binding (accepted direction; signatures illustrative)
@@ -1928,7 +1928,7 @@ remain specification work.
 **ACCEPTED DIRECTION:** Numeric literals construct directly in their target;
 already typed numeric operands do not promote implicitly. Integer arithmetic
 is checked by default. Floating conversion follows the canonical
-[conversion policies](../conversions.md#conversion-policies). The following
+[conversion policies](../specs/conversions.md#conversion-policies). The following
 **PROPOSED** reference signatures extend the design-only
 [numeric sketch](../../library/numerics.api.terrum), not implemented
 primitive exports or a required universal number root. Core's privileged
@@ -2028,12 +2028,12 @@ For floats NaN is unordered and `==` leaves NaN unequal.
 below shows approved `type Name = Type;` bindings. The maximum width need not have
 a `Wider` or this witness at all. Relations confer no conversion and do
 not infer `T` backward from `T.Wider`. The approved
-[associated-identity clause](../grammar-spec.md#54-aliases-and-associated-types-candidate-declarations-open-binding)
+[associated-identity clause](../specs/grammar-spec.md#54-aliases-and-associated-types-candidate-declarations-open-binding)
 uses `where T.via<ISource>.Item is U` after ordinary inference and witness
 selection; it compares complete resolved type identity, including access and
 ownership qualification. These particular integer relationships, complete
 checking diagnostics and metadata remain **OPEN**; see
-[type families](../type-families.md#nominal-witnesses-and-associated-relationships).
+[type families](../specs/type-families.md#nominal-witnesses-and-associated-relationships).
 
 ### Existing sampled declarations
 
@@ -2151,7 +2151,7 @@ public struct decimal32 : IParsable<decimal32>, IFormattable, IScalarIeee754<dec
 
 `IScalarNumber` and `IScalarIeee754` are optional composites; universal number protocol is not required. `TOther`/`TResult` may differ from `TSelf`. Vector arithmetic is not scalar classification. Named integer associated types such as `Wider`/`Signed`/`Unsigned` resolve through the selected interface witness, with no reverse inference from a projection. Associated declarations, explicit `.via<I>` witness selection and associated-identity constraints have approved forms; these particular numeric/conversion witness relationships and their complete checking/metadata remain open.
 
-`int32.TryAdd/Subtract/Multiply` are checked expected failures; false publishes no output. `int32.FromBits` and `float32.ToBits` reinterpret bits, not numerically convert. Integer arithmetic is checked by default. Bare numeric literals have no default width; target context selects their type. The canonical [conversion policy](../conversions.md#conversion-policies) is: checked integer conversion preserves or throws, unchecked integer conversion wraps to destination-width bits, and saturation is explicit; floating-to-floating conversion follows IEEE-754 without language failure; float-to-int truncates toward zero, then checked conversion throws on out-of-range results or NaN, while unchecked or explicitly saturating conversion clamps out-of-range results and converts NaN to zero, never modulo-narrowing. Floating APIs are target-specific; exact source/destination witness lookup and user-defined declarations remain open.
+`int32.TryAdd/Subtract/Multiply` are checked expected failures; false publishes no output. `int32.FromBits` and `float32.ToBits` reinterpret bits, not numerically convert. Integer arithmetic is checked by default. Bare numeric literals have no default width; target context selects their type. The canonical [conversion policy](../specs/conversions.md#conversion-policies) is: checked integer conversion preserves or throws, unchecked integer conversion wraps to destination-width bits, and saturation is explicit; floating-to-floating conversion follows IEEE-754 without language failure; float-to-int truncates toward zero, then checked conversion throws on out-of-range results or NaN, while unchecked or explicitly saturating conversion clamps out-of-range results and converts NaN to zero, never modulo-narrowing. Floating APIs are target-specific; exact source/destination witness lookup and user-defined declarations remain open.
 
 ### Candidate primitive member families
 
@@ -2161,7 +2161,7 @@ unary, ordinary equality/comparison and identity witnesses from above,
 `Zero`/`One`/range members, parse/format members and named checked/wrapping
 helpers as applicable. The row does not declare that witness, representation
 or ABI; the shaped concrete examples below illustrate substitutions. These
-are the [proposed language spellings](../language.md#primitives-strict-arithmetic-and-text),
+are the [proposed language spellings](../specs/language.md#primitives-strict-arithmetic-and-text),
 not a compiler-required-type list or presently implemented matrix.
 
 | Candidate width family | Per-type application of shaped declarations |
@@ -2374,7 +2374,7 @@ not additional source operators or inferred primitive witnesses:
 | `GreatestCommonDivisor` | Return the nonnegative greatest common divisor in the corresponding unsigned width. Signs do not affect it; two zero operands return zero, and one zero operand returns the other's full magnitude. |
 
 `DivRem` follows the existing combined checked division/remainder contract in
-the [instruction-set reference](../il-instruction-set.md#terminators-and-cfg),
+the [instruction-set reference](../specs/il-instruction-set.md#terminators-and-cfg),
 including its difference from remainder alone: signed minimum `% -1` yields
 zero, but `DivRem` must reject because the quotient is unrepresentable.
 Tuple labels are source-view information, not a new two-result foreign ABI.
@@ -2575,7 +2575,7 @@ The two reduction names are only a place to review distinct
 strict/relaxed policies. Their exact policy definitions and lane order are
 **OPEN**; floating-point reduction, reassociation and contraction must not be
 silently selected. The approved
-[associated-identity clause](../grammar-spec.md#54-aliases-and-associated-types-candidate-declarations-open-binding)
+[associated-identity clause](../specs/grammar-spec.md#54-aliases-and-associated-types-candidate-declarations-open-binding)
 can check a separately declared and selected result relationship; it does not
 define this vector family's relationship, infer a witness or approve a generic
 conversion signature.
@@ -2624,7 +2624,7 @@ signatures. Creation/result backing syntax is **OPEN**: a shape must preserve
 its own metadata lifetime, and a returned view must preserve both storage and
 shape dependencies. The following signatures are inventory shapes wherever
 they need those unresolved dependency annotations; none selects new syntax.
-See the [lifetime contract](../lifetimes.md#three-independent-dependencies)
+See the [lifetime contract](../specs/lifetimes.md#three-independent-dependencies)
 for the distinction between receiver, backing and access dependencies.
 
 ```terrum
@@ -2772,7 +2772,7 @@ Task // expands to Task<void>, not general type erasure
 
 Async methods return task-like completion, including `Task<void>` for no
 result; `async void` is not allowed. The accepted
-[async execution direction](../language.md#storage-concurrency-entry-and-boundaries)
+[async execution direction](../specs/language.md#storage-concurrency-entry-and-boundaries)
 is eager inline start through actual suspension, inline continuation for
 completed awaits, and no automatic caller-executor capture or mandatory
 worker hop for incomplete awaits. Declared affinity and checked
@@ -2857,7 +2857,7 @@ Standard output is default; `Error` selects stderr. Writes can expose partial pr
 
 This proposal records the library/API choices and their dependencies.
 Source-language choices and unspecified forms remain in the
-[grammar specification](../grammar-spec.md), not in this API inventory.
+[grammar specification](../specs/grammar-spec.md), not in this API inventory.
 
 The following separates semantic constraints from source and API decisions
 that remain open:
@@ -2889,7 +2889,7 @@ The following distinctions and signature questions remain open:
 - `TensorShape.Lengths`/`Strides` are `Span` properties but docs require immutable independently live metadata. Their exact readonly/view qualification and ownership source are not expressed by these signatures.
 - `TensorViews.View` must preserve both data and shape dependencies, but no final multi-source lifetime/anchor syntax exists; shown signature alone is insufficient proof.
 - `IParsable.TryParse(... init ref<T>)` follows the canonical parse contract: true fully initializes, false leaves the output vacant. The library declarations and their compiled conditional-outcome metadata must encode and prove this contract; the signature alone does not.
-- The [memory model](../memory-model.md) defines accepted operation families, result forms and ordering; the signatures above propose source forms while exact grammar, target range contracts and some CAS declarations remain open.
+- The [memory model](../specs/memory-model.md) defines accepted operation families, result forms and ordering; the signatures above propose source forms while exact grammar, target range contracts and some CAS declarations remain open.
 - `Task<TResult = void>` uses the approved generic-default syntax; this particular library type and its task members are not finalized. `Task` does not erase an owning `Task<T>` result. Optional normalization is semantic; source `T?` is approved, while exported `Option<T>` is only proposed.
 - [Filesystem metadata and traversal](#proposed-filesystem-metadata-and-directory-traversal) propose a terminal-on-error lending cursor and scoped rename operations. Review link traversal, enumeration invalidation, metadata availability/precision and which target rename guarantees are required; these are API/host-profile choices, not newly adopted source syntax.
 - [Address/datagram operations](#proposed-address-values-and-datagram-operations) propose family-preserving address keys, capability-qualified binding and whole-message sends. Review numeric address grammar/scope IDs, client/listener capability separation and error consumption reporting before adopting these signatures.
@@ -2914,7 +2914,7 @@ remains subject to the accepted access, lifetime, and failure semantics.
 | Presence versus expected failure | `T?` for absence; `Result<T, E>` as `Success(T)` / `Failure(E)` only if an API genuinely exposes a closed domain-failure set | Treat `T?` as the canonical presence spelling; do not add a second `Option<T>` runtime representation. Add nominal `Result<T,E>` only after `E`, initialization, and failure cleanup are specified. It makes domain errors composable, at the cost of a union/witness and more explicit handling. Keep thrown exceptions separate. |
 | Conditional output | `bool TryParse(TextSpan, init ref<T> value);` | Preserve false => vacant and success => fully initialized; grammar and guarded outcome metadata must be specified together. `require` is a caller-side lift, not an exception convention. This avoids default fabrication but makes output-flow checking a language/metadata obligation. |
 | CAS observation | `CompareExchangeObservation<T> AtomicCompareExchangeObserve<T>(...)`, with `bool Exchanged` and `T Previous`; distinct from success-only `bool AtomicCompareExchange<T>(...)` | Use a named observation record only when callers need both success and the previous bits. Restrict it to copied values with eligible defined representations; do not infer success through user `==`. ABI, validity and order-pair rules remain open. |
-| Task responsibility | `Task<TResult = void>` remains a completion result; responsibility belongs to a structured owner/supervisor contract | Do not make possession or dropping of a task silently imply join, cancellation, or cleanup. A separate structured owner is more explicit and permits transfer/supervision, but requires a defined scope/ownership API. The accepted [async execution direction](../language.md#storage-concurrency-entry-and-boundaries) is independent of concurrency and parallelism; exact responsibility APIs remain separate library work. |
+| Task responsibility | `Task<TResult = void>` remains a completion result; responsibility belongs to a structured owner/supervisor contract | Do not make possession or dropping of a task silently imply join, cancellation, or cleanup. A separate structured owner is more explicit and permits transfer/supervision, but requires a defined scope/ownership API. The accepted [async execution direction](../specs/language.md#storage-concurrency-entry-and-boundaries) is independent of concurrency and parallelism; exact responsibility APIs remain separate library work. |
 | General conversion matrix | `T(value)` for checked; separately declared checked/saturating/truncating source-destination witnesses | Accepted: checked integer-to-integer preserves or throws, unchecked wraps destination-width bits, and saturation is explicit; floating-to-floating conversion follows IEEE-754 with nearest/ties-even default and no language failure for inexactness, infinity, underflow or NaN; float-to-int truncates toward zero, then checked conversion throws on out-of-range results or NaN, while unchecked or explicitly saturating conversion clamps out-of-range results and converts NaN to zero, never modulo-narrowing. Keep floating support target-only; specify witness lookup and APIs separately. |
 | Collection `params` | `Collect<T>(params List<T> values)` | `params` changes call form, not parameter type: bind a matching collection directly in normal form, or use expanded form to construct new slots. Apply ordinary match quality/specificity; fixed arity beats expanded `params` only on an otherwise equal match. Diagnose unresolved ambiguity; exact severity remains open. Explicit collection construction expresses nesting, and future enumeration requires spread. |
 | Time and randomness | Proposed signatures in §13 | Do not copy `DateTime`/`Random` APIs by analogy. §13 proposes distinct UTC and monotonic clock contracts, checked nanosecond duration arithmetic, and leaves RNG quality/entropy/cryptographic guarantees unspecified. This gains testable time APIs without pretending resolution equals precision, at the cost of separate timestamp domains and explicit clock injection. |
@@ -2928,7 +2928,7 @@ the inventory is not mandatory for language conformance. Feature-specific
 runtime dependencies remain explicit when used; a missing facility does not
 weaken semantics or trigger an implicit fallback. The task lifecycle proposed
 below does not change the accepted async function-call model. The accepted
-[async execution direction](../language.md#storage-concurrency-entry-and-boundaries)
+[async execution direction](../specs/language.md#storage-concurrency-entry-and-boundaries)
 does not select concurrent/parallel execution. Fields below are semantic
 public state, not frozen private layout or wire ABI.
 

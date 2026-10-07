@@ -5,7 +5,7 @@ without an established type is constructed directly in its target format; a
 typed expression uses a checked conversion contract. Bare numeric literals
 have no fallback type. Numeric operators are checked by default in every
 build. Actual support for conversions, literal forms and constant evaluation
-is documented in [implementation](implementation.md).
+is documented in [implementation](../implementation.md).
 
 ## Definitions and notation
 
@@ -74,9 +74,9 @@ per an unapproved eligibility proposal. The hosted implementation also
 provisionally converts `char16` to either floating format as its unsigned
 code-unit value; this is not Unicode scalar decoding and its exact eligibility
 remains unapproved in the
-[eligibility proposal](proposals/char16-floating-conversion-eligibility.md).
+[eligibility proposal](../proposals/char16-floating-conversion-eligibility.md).
 Current executable coverage is documented in
-[implementation](implementation.md). A value-based
+[implementation](../implementation.md). A value-based
 conversion still range-checks its source: `int32(uint32(0xFFFF_FFFF))` fails,
 while `int64(int32(0xFFFF_FFFF))` sign-extends the typed value to `-1`.
 Leading zeroes and separators do not increase a based literal's significant
@@ -154,7 +154,7 @@ signature-based result-type lookup remains distinct from type-argument
 inference. Constructor/method inference, ordinary overload inference, partial
 holes and a public generic ABI remain separate design work. The bounded
 inference profile and literal support are documented in
-[implementation](implementation.md).
+[implementation](../implementation.md).
 
 For a Copy-only `T Identity<T>(T value)`, `int64 result = Identity(42)`
 establishes `T` from the expected result before the literal is checked;
@@ -225,7 +225,7 @@ other per-pair APIs remain specification work.
 
 Granular `ICheckedConversion<TSelf, TSource>`,
 `ISaturatingConversion<...>` and `ITruncatingConversion<...>` sketches in
-[numerics](../library/numerics.api.terrum) let generic algorithms request only a
+[numerics](../../library/numerics.api.terrum) let generic algorithms request only a
 supported policy for a source/destination pair. Neither a broad number marker
 nor the existence of a checked conversion promises the other two. Final
 source/destination witness lookup remains to be specified. A user conversion
@@ -276,7 +276,7 @@ This does not make arbitrary raw `char8`/`char16` values valid scalars.
 Changing quotes alone is not evidence of an allocation or throughput improvement.
 
 Character literal notation is provisional; current syntax support is
-documented in [implementation](implementation.md). The explicit
+documented in [implementation](../implementation.md). The explicit
 `char16(value)` conversion checks the code-unit range, not Unicode scalar
 validity; surrogate code units are representable and must be validated when
 decoding text.
@@ -294,6 +294,6 @@ borrows immutable source text and does not require an allocated `String`.
 Family declarations, general generic inference, registration grammar and
 general user-defined conversion witnesses remain open design work. Support for
 boolean requirements, conditional outputs, initialization loans and checked
-failures is documented in [implementation](implementation.md). An
+failures is documented in [implementation](../implementation.md). An
 `init ref<T>` migration requires coordinated declaration and call-site
 contracts.

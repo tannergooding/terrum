@@ -85,7 +85,7 @@ performs filter search before unwind cleanup; source cleanup therefore cannot
 be modeled by eagerly running it in those first-pass search callbacks.
 The bounded marker/reason filters above are native identity discriminators,
 not authored source `when` predicates. The target
-[source handler contract](grammar-spec.md#33-statements-and-local-declarations)
+[source handler contract](specs/grammar-spec.md#33-statements-and-local-declarations)
 instead unwinds to each candidate's live scope before testing its catches and
 filters. Adopting that contract requires staged language-level dispatch or
 another checked integration; the probe and current bounded dispatcher do not

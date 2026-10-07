@@ -12,8 +12,8 @@ closure.
 
 This document specifies implemented bounded, acyclic native graphs and their
 CLI behavior. It does not define a general package manager or native-code
-sandbox. See [implementation](implementation.md) for the broader compiler
-support boundary and [roadmap](roadmap.md) for future format work.
+sandbox. See [implementation](../implementation.md) for the broader compiler
+support boundary and [roadmap](../roadmap.md) for future format work.
 
 A `.trng` library package stores one verified DLL, its symbolic semantic
 library, public exports and exact direct DLL-import ownership. A `.trng` root
@@ -202,7 +202,7 @@ without optional handles selects `native-19`. Neither class layout nor handle
 is part of the imported `Leaf()` declaration, and no other DLL can share the
 leaf's managed roots.
 
-The [Copy-field variant](../samples/native/graph/managed-copy-class-leaf.terrum)
+The [Copy-field variant](../../samples/native/graph/managed-copy-class-leaf.terrum)
 can replace that same leaf with nested inline Copy values alongside its optional
 edges. Use it in place of `managed-class-leaf.terrum` in the producer command
 below. It writes current semantic-module revision 76 while retaining the

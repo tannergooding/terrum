@@ -1,7 +1,7 @@
 # Terrum specification proposals
 
-The [source grammar](../grammar-spec.md), [metadata design](../il-metadata.md)
-and bounded [coded instruction set](../il-instruction-set.md) are approved
+The [source grammar](../specs/grammar-spec.md), [metadata design](../specs/il-metadata.md)
+and bounded [coded instruction set](../specs/il-instruction-set.md) are approved
 target designs, not claims of implementation or released formats. The
 proposal documents in this directory contain unapproved choices. The source
 grammar records its own open choices and scope boundaries. An **accepted
@@ -122,11 +122,11 @@ approved.
 
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,
-cleanup and proof contracts are in [language contracts](../language-contracts.md);
+cleanup and proof contracts are in [language contracts](../specs/language-contracts.md);
 other accepted direction lives in the relevant [language](../language.md),
-[lifetime](../lifetimes.md), [conversion](../conversions.md),
-[layout](../data-layout-and-abi.md), [type-family](../type-families.md),
-[memory](../memory-model.md) and [library](../libraries.md) specifications.
+[lifetime](../specs/lifetimes.md), [conversion](../specs/conversions.md),
+[layout](../specs/data-layout-and-abi.md), [type-family](../specs/type-families.md),
+[memory](../specs/memory-model.md) and [library](../specs/libraries.md) specifications.
 Current support and sequencing are in the [implementation reference](../implementation.md)
 and [roadmap](../roadmap.md); candidate compiler components are in
 [self-host](../../self-host/README.md).

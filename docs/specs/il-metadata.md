@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > Approved current design for the specified `TRRM` metadata and framing
 > contracts, not a released byte schema or a claim of compiler support.
-> See [implementation](implementation.md) for the current executable
+> See [implementation](../implementation.md) for the current executable
 > boundary. Terms such as "must" apply to the specified `(1, 0)` design;
 > explicitly open contracts require further specification before use.
 
@@ -347,7 +347,7 @@ and only in columns marked `?`. Other kinds reject, including `0xFF`,
 which is reserved for a future required indirection encoding, not
 defined or accepted here.
 
-The [candidate inline built-in type-word extension](proposals/il-extensions.md#inline-built-in-type-reference)
+The [candidate inline built-in type-word extension](../proposals/il-extensions.md#inline-built-in-type-reference)
 is not part of `(1, 0)`; its reserved kind rejects until a format revision
 adopts it. The approved fixed `u32` kind/row partition does not imply it.
 

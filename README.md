@@ -26,7 +26,7 @@ reader audits source-order target identities, with v75 adding void calls as
 statement roots, before using the hosted verifier/emitter. This is separate
 from source-free TRRM support and is not a bootstrap compiler.
 
-The [grammar](docs/grammar-spec.md) and design documents specify target
+The [grammar](docs/specs/grammar-spec.md) and design documents specify target
 contracts independently of compiler support. Places default to readonly,
 `mut` qualifies writable places/receivers, and `write` grants writable
 reference/view access. Legacy `bool`/`out` and vacancy-only `bool`/`init ref<T>`
@@ -82,8 +82,8 @@ self-host compiler or executable scanner/parser; see
 | `samples/design`, `library` | Language and API sketches |
 | `self-host` | Candidate compiler components and their execution gates |
 
-Read the [language design](docs/language.md), [language contracts](docs/language-contracts.md),
-[lifetime contracts](docs/lifetimes.md), [library design](docs/libraries.md),
+Read the [language design](docs/language.md), [language contracts](docs/specs/language-contracts.md),
+[lifetime contracts](docs/specs/lifetimes.md), [library design](docs/specs/libraries.md),
 [sample catalog](docs/samples.md), and [roadmap](docs/roadmap.md).
 The [proposal index](docs/proposals/README.md) distinguishes unapproved
 alternatives from accepted contracts.
@@ -92,9 +92,9 @@ The C# compiler host does not imply managed output. The native backend emits
 Terrum-owned Windows x64 code for AOT and JIT; CIL is neither a dependency nor
 the default.
 Native execution tests require Windows x64, though emission does not invoke an
-installed platform toolchain. The [native profile](docs/native.md) defines the
-runtime and ABI; [JIT](docs/jit.md), [modules](docs/modules.md),
-[module sets](docs/module-sets.md) and [native graphs](docs/native-graph.md)
+installed platform toolchain. The [native profile](docs/specs/native.md) defines the
+runtime and ABI; [JIT](docs/specs/jit.md), [modules](docs/specs/modules.md),
+[module sets](docs/specs/module-sets.md) and [native graphs](docs/specs/native-graph.md)
 document bounded execution and replacement proofs, not a production runtime.
 The [compiled scanner](docs/scanner.md) documents its executable boundary.
 
@@ -103,5 +103,6 @@ For machine protocols, use the built `terrumc.dll` rather than mixing
 0 on success, 1 for source/compile diagnostics, and 2 for usage or I/O errors.
 Execution workers return the program's status; component workers can terminate
 on native failure and must be supervised. `check` is syntax-only; `analyze`
-binds. The implementation reference documents coordinates, recovery,
-schema-versioning and content-bound edits.
+binds. The [CLI machine protocol](docs/specs/cli-protocol.md) documents
+coordinates, diagnostic versions, and output shapes; syntax edits are bound
+to the source content ID.

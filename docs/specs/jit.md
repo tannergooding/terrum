@@ -9,8 +9,8 @@ JIT execution; it is not an in-process code-servicing API.
 
 This document states the implemented Windows x64 JIT execution, memory, unwind,
 and runtime-policy contract. It is not a general-purpose runtime or sandbox.
-See [implementation](implementation.md) for the broader compiler support
-boundary and [roadmap](roadmap.md) for future runtime work.
+See [implementation](../implementation.md) for the broader compiler support
+boundary and [roadmap](../roadmap.md) for future runtime work.
 
 The JIT consumes the same verified bound program and `NativeEmitter.EmitCode`
 result as the PE writer. It is a second artifact consumer, not a second

@@ -5,8 +5,8 @@ This document records accepted execution and checking contracts that refine
 candidate syntax, a proof budget or a new semantic-IL representation.
 Approved source forms and remaining open choices are in the [source grammar](grammar-spec.md)
 and the remaining proof rules and budgets in the
-[proof proposal](proposals/static-proof-and-constant-evaluation.md).
-[Implementation](implementation.md) remains the executable support boundary;
+[proof proposal](../proposals/static-proof-and-constant-evaluation.md).
+[Implementation](../implementation.md) remains the executable support boundary;
 concurrency follows the separately [accepted memory model](memory-model.md).
 Implicit arguments expand to ordinary operations, conditional outputs carry
 checked state facts, and executable contracts participate in ordinary
@@ -526,7 +526,7 @@ still apply. Start with exact constant floating evaluation only when its
 target evaluator is specified; otherwise classify such proof requests unknown.
 
 The minimum catalog and conformance vectors are still to specify; the
-[proof proposal](proposals/static-proof-and-constant-evaluation.md#portable-proof-floor)
+[proof proposal](../proposals/static-proof-and-constant-evaluation.md#portable-proof-floor)
 collects candidates, not a required floor. Sound beyond-floor analysis does
 not change the versioned minimum or source semantics. No proof-certificate
 format, metadata carrier, ABI or solver is selected.
@@ -538,7 +538,7 @@ readonly access alone does not prove an observation stable or repeatable.
 Opaque imports can publish checked facts without exposing bodies, but their
 constant execution requires an eligible body or separately specified trusted
 intrinsic. Exact effect footprints and the initial admissible predicate subset
-remain [proposed](proposals/static-proof-and-constant-evaluation.md#effect-footprints-and-observations).
+remain [proposed](../proposals/static-proof-and-constant-evaluation.md#effect-footprints-and-observations).
 
 If a predicate can fault, retain that failure behavior unless it too is proven
 absent. Eliminating a known-true check is not permission to remove argument
@@ -561,7 +561,7 @@ identity-bearing host objects need separate representation contracts; none
 acquires an automatic constant-evaluation fallback.
 
 The exact work units and resource ceilings are not approved. The
-[evaluator proposal](proposals/static-proof-and-constant-evaluation.md#deterministic-evaluator-and-proposed-budgets)
+[evaluator proposal](../proposals/static-proof-and-constant-evaluation.md#deterministic-evaluator-and-proposed-budgets)
 records candidate budgets and accounting; no implementation may treat a
 candidate number as the language limit.
 

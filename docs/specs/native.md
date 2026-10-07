@@ -12,12 +12,12 @@ compiler's managed host process.
 
 This document specifies implemented native-profile behavior and its current
 boundaries. The broader executable implementation status is in
-[implementation](implementation.md); scheduled work is in [roadmap](roadmap.md).
+[implementation](../implementation.md); scheduled work is in [roadmap](../roadmap.md).
 The profile is deliberately narrower than the syntax grammar and proposed
 libraries. It does not imply general ownership/lifetime checking, general
 semantic IL, general managed graphs, or standard-library execution.
 
-The additive [approved-TRRM scalar path](implementation.md#executable-trrm-scalar-interchange)
+The additive [approved-TRRM scalar path](../implementation.md#executable-trrm-scalar-interchange)
 loads audited compact-linear/indexed Bodies into this same backend for JIT,
 EXE and DLL output. Indexed merges and nested loops lower to direct native
 branches; edge arguments are snapshotted before block-parameter writes.
@@ -67,8 +67,8 @@ small selected set of older versions for comparison or validation, not as
 compatibility commitments or roadmap milestones. Progress toward metadata
 v1.0 does not require a version bump per increment; preview versioning, if any,
 is decided explicitly when shipping a preview. Compiler evolution is summarized in
-[implementation](implementation.md); scheduled changes are in
-[roadmap](roadmap.md).
+[implementation](../implementation.md); scheduled changes are in
+[roadmap](../roadmap.md).
 
 `native-10` (explicit fail-fast), `native-11` (explicit checked exceptions),
 `native-12` (compact unique locals/returns), `native-13` (owned
@@ -132,7 +132,7 @@ and emission; ordinary calls remain executable. Checked arithmetic,
 short-circuiting and branch/loop behavior follow the source contracts. The
 64-call and 4,096-step limits diagnose during compilation; imported functions
 cannot satisfy required constant calls. See the
-[implementation reference](implementation.md) for the exact evaluator and
+[implementation reference](../implementation.md) for the exact evaluator and
 proof boundaries.
 
 The current host parser language version is 46. The bounded native scalar
@@ -161,9 +161,9 @@ host-buffer indexing and `..`/`..^` ranges for readonly `OwnedInt32Buffer`
 lexical views;
 `?.` remains token-only. Scanner tokens do not imply support in the native
 scalar frontend or general indexer/slice contracts. See the
-[scanner contract](scanner.md) for spans and current record shapes. Hosted
+[scanner contract](../scanner.md) for spans and current record shapes. Hosted
 role-specific punctuation rules are in the
-[implementation reference](implementation.md). The bounded frontend produces
+[implementation reference](../implementation.md). The bounded frontend produces
 and accepts only v85: a 392-word single-function buffer or a separate 4,284-word
 complete-program buffer, with fixed source/token/local/statement/node/parameter/
 depth/work limits. Independent source audits check the current supported syntax
@@ -281,7 +281,7 @@ checks extents and scope before lowering to the existing managed `BoundBlock`;
 failed validation publishes no partial projection. Versions 1–51 retain their
 feature restrictions. The 392-word shape, record widths, existing bounds,
 scanner IDs and semantic/native ABI remain unchanged. See the
-[implementation reference](implementation.md) for name resolution and scope
+[implementation reference](../implementation.md) for name resolution and scope
 rules. Projection v54 supports named transfers to enclosing loop headers; the
 source-free indexed TRRM path uses its separate routing protocol, which remains
 fail-fast-only and unchanged.
@@ -297,14 +297,14 @@ kind 15 alongside newer kinds. This appends only a provisional frontend feature
 version: source grammar (host language version 44), scanner-10/schema-10,
 diagnostic/token inventories, semantic/ISA/Contract/TRRM formats, native
 formats and ABI do not change. The exact record and publication contract is
-in the [implementation reference](implementation.md).
+in the [implementation reference](../implementation.md).
 
 Projection v55 adds standalone `require condition;` to the bounded native
 scalar frontend. It uses the existing Boolean binding and checked-require
 behavior, under both runtime policies, without a hidden local or new source
 scope. Versions 1–54 retain their prior shapes; later projections may carry
 kind 21 with earlier feature kinds. It does not extend the source-free
-indexed-TRRM contract; see the [implementation reference](implementation.md)
+indexed-TRRM contract; see the [implementation reference](../implementation.md)
 for the bounded audit and flow rules.
 
 Projection v56 adopts existing braced `void` function contracts in the bounded
@@ -315,7 +315,7 @@ existing primitive-parameter ABI. The six-primitive expression, local and
 parameter domains are unchanged. Versions 1–55 retain their void restrictions.
 These v56 payloads do not admit void expression bodies; general calls remain
 excluded. The
-[implementation reference](implementation.md) specifies exact source auditing
+[implementation reference](../implementation.md) specifies exact source auditing
 and completion behavior. This does not widen source-free indexed TRRM.
 
 Projection v57 adds void arrow bodies containing exactly one existing
@@ -324,7 +324,7 @@ statement/body/function spans, managed lexical wrapping and implicit null
 completion at the semicolon under both policies. Earlier versions retain their
 arrow restrictions, and braced void functions without `else if` remain v56. It adds no unit
 expression domain, calls, assignment/update arrows or ABI change; the
-[implementation reference](implementation.md) defines the exact record and
+[implementation reference](../implementation.md) defines the exact record and
 source-audit boundary.
 
 Projection v58 adds existing `else if` chains to braced scalar and void
@@ -333,7 +333,7 @@ lexical blocks; selected conditions, local scopes, loop targets and checked
 failures retain hosted behavior under both policies. Existing structural,
 record and expression limits still apply to each nested conditional. Versions
 1–57 retain their restrictions, and arrow bodies are not widened. The
-[implementation reference](implementation.md) specifies marker association,
+[implementation reference](../implementation.md) specifies marker association,
 source coverage and feature precedence. Source-free indexed TRRM and the
 native ABI are unchanged.
 
@@ -346,7 +346,7 @@ raw spelling, distinct flags, all source coverage, hosted spans/scopes and
 conservative failure proofs. Normalized exports retain the existing
 primitive-parameter ABI. Versions 1–58 keep their restrictions, all resource
 limits remain, and general attributes/calls are not added. The
-[implementation reference](implementation.md) specifies header bits and body
+[implementation reference](../implementation.md) specifies header bits and body
 shapes; source-free indexed TRRM is unchanged.
 
 Projection v60 adds explicit lifetime ending for a visible named scalar local.
@@ -603,7 +603,7 @@ ensure` proofs, compilation-local generic substitutions and nominal operator
 protocols. Expression-bodied functions, methods, static operators,
 constructors and explicit by-value getters reuse checked return, statement and
 cleanup paths. Their source, proof and specialization boundaries are detailed
-in the [implementation reference](implementation.md).
+in the [implementation reference](../implementation.md).
 
 The hosted `init ref<T>` contract publishes vacant storage only on true for a
 Boolean result; a non-Boolean or void result requires complete initialization
@@ -866,7 +866,7 @@ Primitive
 `OwnedInt32Buffer` views keep their separate legacy access rules; general
 `ref<T>`/view/`own<T>` and general `init ref<T>` call-site implementations
 remain unsupported beyond the bounded conditional-init subset.
-The [class sample](../samples/native/managed-classes.terrum)
+The [class sample](../../samples/native/managed-classes.terrum)
 returns 42 through shared aliases and heterogeneous managed edges. The independent
 C heap probe checks multiple-edge liveness, pointer-shaped scalar nonroots,
 allocation failure, direct/indirect Copy arguments, collection during construction,
@@ -885,7 +885,7 @@ non-null handle. `null` requires an optional target type; lifting a non-null
 handle does not allocate. Scalar options and general generic optional
 normalization remain outside this profile; bounded generic functions may use
 the existing optional source-class/`ManagedNode` handle forms described in the
-[generic implementation contract](implementation.md#bounded-generic-functions).
+[generic implementation contract](../implementation.md#bounded-generic-functions).
 
 `value is null` tests absence. `value is some item` snapshots the present
 non-null handle and publishes it only on the successful condition path,
@@ -895,7 +895,7 @@ successful extraction. Optional fields still require explicit initialization,
 and failed `bool`/`out` calls do not publish even an absent value.
 Descriptors include optional reference slots; tracing ignores zero without
 treating it as uninitialized source storage. The
-[cycle sample](../samples/native/managed-optional-cycle.terrum) exercises
+[cycle sample](../../samples/native/managed-optional-cycle.terrum) exercises
 source-defined cycles and snapshots across edge clearing and collection.
 Version 19 and 20 semantic modules retain optional IR and types only inside a private
 source-class leaf. Neither this nor the version 18 private-node module exposes
@@ -914,36 +914,36 @@ without reading their payload. Native lowering uses managed-root flags or
 unique-owner live flags where available and a frame flag for queried scalar
 storage; assignments, successful output publication and lifetime end update
 that flag. Fields and arbitrary expression tests are not supported.
-See the [current support boundary](implementation.md).
+See the [current support boundary](../implementation.md).
 The independent C probe additionally fills a 4,096-object source-class cycle,
 checks that capacity refusal makes no extra allocation, then accounts for every
 release and repeats full-capacity reuse. AOT/JIT fixtures exercise the same
 limit and interleaved class/node descriptors, aliases and scalar nonroots.
 
-The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
+The [static-protocol quadratic sample](../../samples/native/static-protocol-quadratic.terrum)
 uses source-declared `+` and `*` constraints and two nominal Copy wrappers,
 returning 46 through AOT and JIT. Closed specialization emits ordinary concrete
 calls through this backend; there is no second evaluator or generic runtime.
-The [integer-power sample](../samples/native/static-protocol-power.terrum)
+The [integer-power sample](../../samples/native/static-protocol-power.terrum)
 returns 42 using a structured generic body, scalar exponent and a separately
 specialized constrained square helper. Its repeated-squaring loop skips the final unused square:
 that operation could overflow even when the requested result is representable.
 An exponent of zero returns the supplied identity without multiplying.
-The [binary-protocol sample](../samples/native/static-protocol-binary.terrum)
+The [binary-protocol sample](../../samples/native/static-protocol-binary.terrum)
 also returns 42, using explicitly declared subtraction, division, remainder
 and bitwise `&`, `|`, `^` witnesses. The same concrete call lowering preserves
 ordinary checked arithmetic and declaration-site effect checks; bitwise
 spelling alone does not make an arbitrary operator implementation NoThrow.
 The hosted compiler supports the six nominal Copy-struct equality/comparison protocols
 (`==`, `!=`, `<`, `<=`, `>` and `>=`); see the
-[bounded generic contract](implementation.md#bounded-generic-functions).
+[bounded generic contract](../implementation.md#bounded-generic-functions).
 Templates and witnesses remain compilation-local. Bounded generic functions
 can also select existing source-class/`ManagedNode` handles as `Copy` type
 arguments, preserving their readonly/write and supported optional forms and
 using the established access/rooting rules. This does not create a public
 generic or managed-handle ABI, or grant operations beyond the function's
 constraints. See the
-[bounded generic contract](implementation.md#bounded-generic-functions) for
+[bounded generic contract](../implementation.md#bounded-generic-functions) for
 inference, results, outputs and remaining limits; this does not implement the
 proposed generic standard library or replaceable generic witnesses.
 
@@ -966,7 +966,7 @@ early rejection, checked unwinding after an owner move and checked allocation
 failure with no live block. The probe does not expose an owner in the DLL
 export ABI.
 
-The [owned source-line index](../self-host/SourceLineIndex.terrum) builds a
+The [owned source-line index](../../self-host/SourceLineIndex.terrum) builds a
 line-start table with exactly one word per line start and publishes a unique immutable index.
 Its position queries use binary search over initialized words, without a
 retained source pointer or a general span/allocator API.
@@ -1103,7 +1103,7 @@ numeric range or user-invariant inference; unreachable operations are still
 checked conservatively. NoThrow says nothing about termination or fatal
 operating-system faults.
 
-The [no-throw sample](../samples/native/no-throw.terrum) returns 42 through
+The [no-throw sample](../../samples/native/no-throw.terrum) returns 42 through
 checked constructors, methods, widening conversion and conditional output
 publication, using the same AOT/JIT encoder. `CharacterFacts` publishes
 NoThrow on its two comparison-only classification helpers.
@@ -1170,7 +1170,7 @@ storage never overlap cleanup-call spills. Fail-fast termination still does
 not unwind. The separate `OwnedInt32Buffer` intrinsic allocates and frees
 one fixed-capacity process-heap block; arbitrary owning graphs, general
 OS-resource handles, stored loans and GC are not implied by this proof.
-The [sample](../samples/native/unique-owner.terrum)
+The [sample](../../samples/native/unique-owner.terrum)
 updates an owner through a mutating method, then exercises checked recovery
 after a failed replacement while preserving the updated, still-live owner.
 
@@ -1194,13 +1194,13 @@ may be combined for an infallible nonterminating body, while `require false`
 satisfies only the no-normal-return guarantee. Both promises persist in module
 contracts and may independently strengthen, but not weaken, during replacement.
 
-The [no-return sample](../samples/native/no-return.terrum) returns 42 on success.
+The [no-return sample](../../samples/native/no-return.terrum) returns 42 on success.
 Changing its entry to `Select(false)` reaches the nonreturning failure helper
 and terminates with the explicit requirement-failure status. AOT and JIT retain
 the same native call ABI; the no-return proof does not require a fabricated
 return value. General catch objects and GC root tracking remain unimplemented.
 
-Structured [`try`/`finally`](../samples/native/try-finally.terrum) executes
+Structured [`try`/`finally`](../../samples/native/try-finally.terrum) executes
 cleanup on ordinary fallthrough, every normal return and exiting loop transfers, from inner region
 to outer. Body locals are not in scope in the cleanup block; shared outer
 locals remain accessible. Cleanup independently obeys NoThrow even within a
@@ -1221,7 +1221,7 @@ Windows also invokes it during exceptional unwind, inside-out; the explicit
 fail-fast policy still terminates without unwinding it.
 No owning values or destructor semantics are provided.
 
-The independent [Windows SEH ABI probe](native-seh.md) checks filter search,
+The independent [Windows SEH ABI probe](../native-seh.md) checks filter search,
 normal/exceptional finally order, frame-local access and dynamic unwind-table
 lifetime against a C reference; the compiler now separately emits and tests the
 matching bounded native contract.
@@ -1280,7 +1280,7 @@ native image layouts are rejected rather than loaded for compatibility.
 | Storage | Explicitly granted, initialized fixed host buffers with checked indexing and read/write access; capabilities are not first-class source values |
 
 Fixed host buffers still use the explicit 32-bit-word interchange described in
-the [scanner contract](scanner.md). Adding 64-bit scalar values does not enlarge
+the [scanner contract](../scanner.md). Adding 64-bit scalar values does not enlarge
 that storage contract: `int64`/`uint64` buffer descriptors are rejected.
 
 Literal context comes from declarations, parameters, return types or a known
@@ -1311,8 +1311,8 @@ owner survives continue and retires on loop exit. Transfers out of `finally`
 are rejected; loops entirely within a `finally` may use their own transfers.
 Checked cleanup failures take the exception path instead of completing the
 transfer; fail-fast termination still does not unwind.
-[The loop sample](../samples/native/for-loops.terrum) returns 285.
-The [native loop-transfer fixture](../tests/native/managed-loop-transfer-abi.terrum)
+[The loop sample](../../samples/native/for-loops.terrum) returns 285.
+The [native loop-transfer fixture](../../tests/native/managed-loop-transfer-abi.terrum)
 combines a retained initializer buffer, nested transfers/finally and managed
 cycles. Its C caller checks exact allocation/release counts under both policies.
 
@@ -1390,7 +1390,7 @@ fields, conditional outputs and persisted modules. Widening a signed negative
 value preserves its sign; narrowing or crossing signedness checks the numeric
 range rather than reinterpreting bits. The same signed-minimum division and
 remainder rules apply at both signed widths. The
-[wide integer candidate](../self-host/WideIntegerFacts.terrum) uses these rules
+[wide integer candidate](../../self-host/WideIntegerFacts.terrum) uses these rules
 for non-overflowing signed-addition checks and bounded decimal accumulation
 through `uint64.MaxValue`, with true-only output publication.
 
@@ -1426,11 +1426,11 @@ same verified scratch/publication and native output ABI. Exported init
 contracts remain distinct from out contracts. General references and
 predicate-based postconditions remain scheduled.
 
-[`self-host/SourceRange`](../self-host/SourceRange.terrum),
-[`CharacterFacts`](../self-host/CharacterFacts.terrum),
-[`RangeTests`](../self-host/RangeTests.terrum) and
-[`Token`](../self-host/Token.terrum) execute through this profile.
-The [scanner component](scanner.md) additionally uses fixed checked buffers;
+[`self-host/SourceRange`](../../self-host/SourceRange.terrum),
+[`CharacterFacts`](../../self-host/CharacterFacts.terrum),
+[`RangeTests`](../../self-host/RangeTests.terrum) and
+[`Token`](../../self-host/Token.terrum) execute through this profile.
+The [scanner component](../scanner.md) additionally uses fixed checked buffers;
 this does not implement a general span ABI or a complete lifetime checker.
 
 ## Runtime policy

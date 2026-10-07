@@ -4,7 +4,7 @@
 > memory guarantees, opaque-layout direction and boundary-preservation rules
 > below are accepted. This is not a completed target ABI specification or a
 > universal Terrum managed ABI. Current support remains defined by
-> [implementation](implementation.md) and the [native profile](native.md);
+> [implementation](../implementation.md) and the [native profile](native.md);
 > concurrency semantics are defined by the [memory model](memory-model.md).
 
 ## Definitions
@@ -24,14 +24,14 @@
 Per-target size/alignment/representation tables, procedure-call classification
 and compiler conformance remain target-profile work; current compiler support
 for any part of this contract is tracked in
-[implementation](implementation.md) and the [native profile](native.md), not
+[implementation](../implementation.md) and the [native profile](native.md), not
 restated here.
 
 Unimplemented does not mean unapproved. Completing a table from an already
 selected target contract does not reopen the language policy; choosing a new
 observable representation or independently replaceable public boundary does.
-The [proposal index](proposals/README.md) and
-[roadmap](roadmap.md) track pending designs and implementation without making
+The [proposal index](../proposals/README.md) and
+[roadmap](../roadmap.md) track pending designs and implementation without making
 the accepted core provisional.
 
 A `Blittable` or `Transparent` commitment is a compatibility promise: changes
@@ -158,7 +158,7 @@ A `Sequential` annotation on a nonpublic compact struct is a checked subset of
 this contract, not a `Blittable` or stable public ABI promise: it does not by
 itself cover public fields, unique owners, or packing/aggregate-alignment
 controls. Current compiler support for this annotation is tracked in
-[implementation](implementation.md).
+[implementation](../implementation.md).
 
 ### Packing and aggregate alignment
 

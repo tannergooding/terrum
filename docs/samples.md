@@ -4,7 +4,7 @@ This catalog describes **design sketches, not executable tests or compiled MVP p
 
 The sketches distinguish `mut` places/receivers from `write` reference/view access. `init ref<T>` and `init value` are the approved target forms for vacancy-only destinations; the executable profile supports a bounded boolean-success subset, while general references and migration from `out` remain pending. Inline vacant-output declarations remain schematic. Legacy `out`/`ref` call patterns are not target invocation syntax. The executable profile retains legacy `bool`/`out` beside distinct `bool`/`init ref<T>` contracts.
 
-The numeric subset supports contextual decimal, hexadecimal and binary integers with digit separators; based literals use the expected target width as a bit pattern. Native buffer-view samples still use separate legacy access rules, not general `Span<T>` or reference/view support. Treat sketch outputs as acceptance criteria, not observed compiler results. [`samples/native`](../samples/native) contains runnable recursion (factorial: 720), loop/mutation (45), and six-argument call (91) examples under the [native runtime profile](native.md). See [language](language.md), [lifetimes](lifetimes.md), [libraries](libraries.md) and [implementation](implementation.md).
+The numeric subset supports contextual decimal, hexadecimal and binary integers with digit separators; based literals use the expected target width as a bit pattern. Native buffer-view samples still use separate legacy access rules, not general `Span<T>` or reference/view support. Treat sketch outputs as acceptance criteria, not observed compiler results. [`samples/native`](../samples/native) contains runnable recursion (factorial: 720), loop/mutation (45), and six-argument call (91) examples under the [native runtime profile](specs/native.md). See [language](language.md), [lifetimes](specs/lifetimes.md), [libraries](specs/libraries.md) and [implementation](implementation.md).
 
 The runnable [NoThrow example](../samples/native/no-throw.terrum) returns 42
 through annotated value construction, widening and conditional outputs; its
@@ -62,7 +62,7 @@ complete tokens, with checked count/version updates and independent copied resul
 The [private managed-node leaf](../samples/native/graph/managed-node-leaf.terrum)
 replaces a scalar-only producer without changing its persisted consumer or
 intermediate DLL. Its cycle allocation and explicit collection stay inside the
-leaf under AOT and root-only JIT; see the [graph commands](native-graph.md).
+leaf under AOT and root-only JIT; see the [graph commands](specs/native-graph.md).
 The [private class leaf](../samples/native/graph/managed-class-leaf.terrum)
 extends that replacement proof to source-defined optional cycles and checked
 class metadata, without exposing a managed module ABI.
@@ -77,14 +77,14 @@ private two-node managed cycle before returning the copied snapshot. The
 returns 40 with the original and 42 with the replacement, demonstrating
 semantic-v31 by-value and `bool`/`out` Copy exports without exposing the
 producer's private managed records. Exact AOT and root-only JIT commands are
-in the [native graph guide](native-graph.md).
+in the [native graph guide](specs/native-graph.md).
 The [managed Copy middle](../samples/native/graph/managed-copy-middle.terrum)
 and [managed Copy root](../samples/native/graph/managed-copy-root.terrum)
 extend the same replacement to a managed intermediate and root. Both images
 keep private managed records while exchanging only the leaf's public
 handle-free `Snapshot` and scalar values; the unchanged graph returns 42 with
 the original leaf and 44 with the managed replacement under AOT and root-only
-JIT. See the [graph commands](native-graph.md).
+JIT. See the [graph commands](specs/native-graph.md).
 The [managed Copy semantic consumer](../samples/native/modules/managed-copy-consumer.terrum)
 uses the original and managed `Snapshot` providers above through the semantic
 v32 single-provider consumer contract. Its private `Record` deliberately
@@ -92,7 +92,7 @@ shares a name with provider-private state, and remains rooted across provider
 collection. The same persisted consumer artifact returns 42 or 44 when
 `run-module` selects the original or managed provider; each `link-module`
 command emits a fresh PE for its selected provider. Exact commands for both
-runtime policies are in the [module guide](modules.md).
+runtime policies are in the [module guide](specs/modules.md).
 The [multi-type generic sample](../samples/native/multi-type-generics.terrum)
 infers `int32` and the 16-byte `WidePair` independently in
 `TrySelectPair<TFirst, TSecond>`. Its reversed helper forwards the ordered
@@ -154,7 +154,7 @@ builders are still design-only. Checked casts among `int32`, `uint32`,
 publication for supported copy values run in the native profile. These
 sketches' richer types and cleanup still need
 later semantics.
-See [conversion contracts](conversions.md)
-and [type families](type-families.md), not parser success, for their rationale.
+See [conversion contracts](specs/conversions.md)
+and [type families](specs/type-families.md), not parser success, for their rationale.
 
 The triangle's `NOTICE.txt` contains the Microsoft Tutorial02 attribution and license. Its README describes platform contracts and deliberate exclusions rather than a runnable recipe. All design examples use provisional source notation; unsupported declarations are not silently treated as a compiler feature. For current executable parser/syntax fixtures, consult [implementation](implementation.md) instead.

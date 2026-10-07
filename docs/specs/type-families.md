@@ -7,7 +7,7 @@ conditional members, extension declaration/import eligibility and witnesses rema
 itself requires an explicit family opt-in with declared projections and
 constraints. The local pseudo-code below labels relationships rather than
 specifying Terrum grammar. Current compiler support for any part of this
-document is tracked in [implementation](implementation.md), not restated here.
+document is tracked in [implementation](../implementation.md), not restated here.
 
 ## Definitions
 

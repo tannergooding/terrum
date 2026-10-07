@@ -7,7 +7,7 @@
 The accepted memory model treats a failed compare-exchange as a read, not a
 release, and requires both success and failure orderings. Failure ordering
 cannot be `Release` or `AcquireRelease`. The complete legal order-pair table
-remains open in the [memory model](../memory-model.md) and
+remains open in the [memory model](../specs/memory-model.md) and
 [core-library proposal](core-library-reference.md).
 
 ## Recommendation

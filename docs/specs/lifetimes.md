@@ -73,8 +73,8 @@ formation itself does not warn or require unsafe; dereference still does.
 These are accepted target contracts, not current executable pin support.
 
 Current executable ownership, view and managed-root boundaries are documented
-in [implementation](implementation.md) and [native](native.md); staged work
-is tracked in [roadmap](roadmap.md). A slice does not thereby become the
+in [implementation](../implementation.md) and [native](native.md); staged work
+is tracked in [roadmap](../roadmap.md). A slice does not thereby become the
 proposed generic `Span<T>`.
 
 Transfer/share proofs cover the complete qualified form, including backing
@@ -168,7 +168,7 @@ lifetime semantics; there is no universal size threshold or adaptive type
 attribute. Results remain `T` or an explicit `ref<T>` with declared lifetime
 metadata; no adaptive generic value-or-loan result family is selected. This
 contract is accepted direction; current compiler support is documented in
-[implementation](implementation.md).
+[implementation](../implementation.md).
 
 The receiver/callable and then named or positional arguments are evaluated
 in source order. Form a place by evaluating its receiver, indices and checks
@@ -288,7 +288,7 @@ clause placement/grammar and metadata remain to be specified. The
 boolean-success and other-result defaults above are language-versioned, not
 inferred from method names. Legacy `bool`/`out` conditional publication is
 distinct from `init ref<T>`; current support for each is documented in
-[implementation](implementation.md).
+[implementation](../implementation.md).
 
 The task handle alone does not discharge responsibility for a started
 operation. Its obligation remains with a structured owner that joins it, an
@@ -316,7 +316,7 @@ registration, richer-status spellings, metadata and exact reference extraction
 remain work. A selected exception applies to the false condition only and does
 not catch an exception raised while evaluating the call. These are target
 contracts; current compiler support is documented in
-[implementation](implementation.md).
+[implementation](../implementation.md).
 
 An eligible view source can provide backing/borrowed access; outputs and independent scalars do not automatically qualify. A numeric parser's result is independent; a parser returning a view of input text retains the input dependency. A parameterless projection generally uses its receiver. An independent freshly allocated result needs its own owner/root and cost contract. More than one eligible input is not resolved by inspecting current control flow. Returning a view does **not** authorize storing it in an unrelated receiver. Constructor capture, exported callback factories and registrations need a declared destination/boundary. Local closures carry actual capture relationships; consuming a unique owner retains its ordinary transfer/cleanup rules rather than becoming an invisible borrowed capture.
 
@@ -456,6 +456,6 @@ general stored-view representation.
 Exact rules for partial owning-field moves, expression temporaries, result
 escapes, place disjointness, return anchors, interface refinement and dynamic
 dependency binding remain open. Current executable boundaries are documented
-in [implementation](implementation.md) and staged in [roadmap](roadmap.md).
+in [implementation](../implementation.md) and staged in [roadmap](../roadmap.md).
 An escape without a declared and checked contract diagnoses; it must not
 silently box, clone, register, retain or copy.

@@ -18,7 +18,7 @@ rebinding, and writable element referents are distinct capabilities.
 Forwarding a descriptor does not keep its backing allocation or guard alive;
 the backing dependencies must remain valid through each use. The exact anchor
 representation, calling convention and source relationships remain open in
-the [lifetime specification](../lifetimes.md) outside this slice. For the
+the [lifetime specification](../specs/lifetimes.md) outside this slice. For the
 initial cursor, use a fixed 16-byte x64 descriptor containing a data address
 and element count; keep backing and guard provenance compiler-checked rather
 than storing runtime roots or leases. The bounded `TokenCursor` path below
@@ -100,7 +100,7 @@ publishing its descriptor. On the current Windows x64
 profile, the owned buffer's eight-byte header follows 16-byte-aligned
 `HeapAlloc` storage, so the record base and each four-byte field remain
 naturally aligned; the bounded buffer implementation documents that guarantee
-in [`native.md`](../native.md).
+in [`native.md`](../specs/native.md).
 
 `OwnedInt32Buffer` remains an eight-byte unique handle and does not expose its
 data pointer. The compiler-owned Span descriptor is 16 bytes on x64 and holds
@@ -255,5 +255,5 @@ snapshots, cursor dependency forwarding, and windowed parsing without storing
 the borrowed view. It does not add arbitrary stored views, general slicing,
 generic collection iteration, writable spans, new cleanup rules or public
 parser APIs. The bridge does not repurpose the separate
-[`HostBuffer`](../native.md) interchange surfaces or `ManagedTokenChain`;
+[`HostBuffer`](../specs/native.md) interchange surfaces or `ManagedTokenChain`;
 both remain distinct contracts and neither is a Span substitute.

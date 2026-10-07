@@ -91,7 +91,7 @@ bounded subset has already encoded. If these informative examples move to a
 companion document, retain this contract map and links from the
 normative rules; splitting the examples must not orphan the fast-import
 story or silently promote unsupported Body shapes to executable status.
-The [example fixture checks](../tests/Terrum.CodeAnalysis.Tests/TrRmBodyExampleTests.cs)
+The [example fixture checks](../../tests/Terrum.CodeAnalysis.Tests/TrRmBodyExampleTests.cs)
 independently decode the compact bytes below and general-form bytes kept
 in the tests; they are test-only checks of the approved bytes, not an
 executable TRRM Body reader.
@@ -130,7 +130,7 @@ The [approved reference word](il-metadata.md#metadata-logical-tables-and-row-sem
 is a fixed `u32` split into an 8-bit kind and 24-bit row data; no separate
 `uint24` storage type is required. The present `typeMap` holds indexed
 TypeSpec references. The separately described
-[inline built-in extension](proposals/il-extensions.md#inline-built-in-type-reference)
+[inline built-in extension](../proposals/il-extensions.md#inline-built-in-type-reference)
 would assign kind `0xFE` to complete built-in type words and requires a
 future metadata revision and reader/writer support; the approved `u32`
 split alone does not adopt that additional kind. Body-local `t` IDs
@@ -2164,10 +2164,10 @@ These are requirements for future broader executable profiles and complete
 interchange, not permissions to invent semantics or serialize the current
 private bound tree. The bounded subset specified above is approved; forms
 missing the stated contracts remain non-executable.
-See [implementation](implementation.md) for what the repository actually
+See [implementation](../implementation.md) for what the repository actually
 executes. The source-language [portable proof floor](language-contracts.md#4-a-reproducible-proof-and-evaluation-foundation)
 is distinct from decoder and verifier work budgets.
 
 The compact tags and their bytes are approved for the bounded subset;
 writer-selection policy and other unapproved performance extensions remain
-in the [IL extension proposal](proposals/il-extensions.md#compact-profile-selection-and-follow-up).
+in the [IL extension proposal](../proposals/il-extensions.md#compact-profile-selection-and-follow-up).

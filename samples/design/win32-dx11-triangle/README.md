@@ -6,7 +6,7 @@
 repository now has a bounded Windows x64 native compiler and runtime, but does
 not implement this sketch's COM, Win32, DXGI or Direct3D 11 interop surface.
 See the current [compiler support boundary](../../../docs/implementation.md)
-and [native profile](../../../docs/native.md). Proposed target: Windows desktop,
+and [native profile](../../../docs/specs/native.md). Proposed target: Windows desktop,
 x64 first; feature level 11.0, fixed-size window, one immediate context.
 Default hardware device; `--warp` explicitly selects software. No automatic
 driver fallback, resizing, device recreation, multithreaded rendering or

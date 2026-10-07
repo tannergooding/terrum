@@ -9,12 +9,12 @@ Accepted call and lifetime rules live in [language](language.md),
 [lifetimes](lifetimes.md) and [language contracts](language-contracts.md);
 source forms and their open boundaries are in the
 [grammar](grammar-spec.md), and candidate proof rules are in the
-[static-proof proposal](proposals/static-proof-and-constant-evaluation.md).
+[static-proof proposal](../proposals/static-proof-and-constant-evaluation.md).
 [Data layout and ABI contracts](data-layout-and-abi.md) separates required
 primitive guarantees from physical layout, interchange and procedure calls;
 its remaining [profile and implementation work](data-layout-and-abi.md#profile-specification-and-implementation-work)
 does not reopen the accepted memory guarantees.
-[Implementation](implementation.md) remains the executable support boundary;
+[Implementation](../implementation.md) remains the executable support boundary;
 this document does not claim a concurrent runtime or these atomic APIs exist.
 
 ## Definitions

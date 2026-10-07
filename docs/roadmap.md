@@ -1,7 +1,7 @@
 # Development roadmap
 
 The project is a bounded checked native compiler, not the whole language.
-[Language and grammar specifications](grammar-spec.md) define target
+[Language and grammar specifications](specs/grammar-spec.md) define target
 contracts; the [implementation reference](implementation.md) records current
 support; [proposals](proposals/README.md) collect unapproved choices.
 Approval, implementation, and pre-v1 stability are separate.
@@ -104,7 +104,7 @@ prerequisite has already been met.
    general `out`/`init ref<T>` declaration and call migration with definite
    initialization, cleanup and publication rules. Preserve their distinct
    contracts; this is not a parser-only rename. Carry the
-   [static initialization contracts](grammar-spec.md#static-initialization-and-load-scoped-storage)
+   [static initialization contracts](specs/grammar-spec.md#static-initialization-and-load-scoped-storage)
    through separate metadata/schema work before compiler adoption: loaded
    closed-type groups and lazy units, explicit constructor triggers, checked
    sharing, failure/recovery, initialization effects and load-scope cleanup.
@@ -300,7 +300,7 @@ erasure and arbitrary callback vectorization are excluded from these stages.
 
 ## Memory-model implementation sequence
 
-The [memory model](memory-model.md) is accepted design, not implemented
+The [memory model](specs/memory-model.md) is accepted design, not implemented
 concurrency support. Integrate it through the four roadmap areas above, while
 preserving existing single-threaded behavior.
 

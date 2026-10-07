@@ -4,7 +4,7 @@
 > Pending specification, not an approved rule catalog, resource budget or
 > implementation promise. The accepted distinction between executable
 > checks, required static proofs and required constant evaluation is in
-> [language contracts](../language-contracts.md#4-a-reproducible-proof-and-evaluation-foundation).
+> [language contracts](../specs/language-contracts.md#4-a-reproducible-proof-and-evaluation-foundation).
 
 ## Portable proof floor
 

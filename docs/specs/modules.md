@@ -14,7 +14,7 @@ The artifact contains verified, typed, source-mapped structured IR, not source
 text or a native DLL. It is distinct from the approved current
 [`TRRM` metadata design](il-metadata.md), whose candidate `(1, 0)`
 framing and rows are not this development semantic-module writer's output.
-The separate [`compile-trrm` execution path](implementation.md#executable-trrm-scalar-interchange)
+The separate [`compile-trrm` execution path](../implementation.md#executable-trrm-scalar-interchange)
 now emits approved metadata and compact-linear/indexed Bodies to `.trrm` files
 for a self-contained, fail-fast scalar subset with bounded branches and loops,
 integer shifts, initialized writable-local compounds/updates and direct
@@ -50,7 +50,7 @@ The current semantic-module revision is 76. Writers emit only revision 76 and
 readers reject every other revision; older artifacts must be recreated from
 source. The current format preserves verified, typed, source-mapped structured
 IR and the supported declaration, layout, initialization, cleanup, and runtime
-contracts described in this reference and the [implementation reference](implementation.md).
+contracts described in this reference and the [implementation reference](../implementation.md).
 
 Revision 68 provisionally persists caller-unsafe field-value reads inside
 `unsafe(expr)` for eligible public `Copy` paths, alongside the existing
@@ -69,7 +69,7 @@ validates an owner-relative method identifier and admits producer
 qualification only during linking. Revision 70 did not support mutable or loan
 receivers, constructors, operators, reference/output modes, TRRM, or
 scalar-frontend verification/emission. The broader
-[reference-call metadata proposal](proposals/reference-call-metadata.md)
+[reference-call metadata proposal](../proposals/reference-call-metadata.md)
 remains unapproved.
 
 Revision 71 provisionally persists a mutable field-receiver loan only as

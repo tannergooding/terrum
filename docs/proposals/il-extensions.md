@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > Pending revisions and performance decisions only. The approved `(1, 0)`
-> [metadata](../il-metadata.md) and [coded instructions](../il-instruction-set.md)
+> [metadata](../specs/il-metadata.md) and [coded instructions](../specs/il-instruction-set.md)
 > do not use these extensions. Existing readers reject unassigned words and
 > unsupported executable forms.
 

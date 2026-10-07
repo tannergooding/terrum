@@ -8,7 +8,7 @@ the accepted contract.
 
 ## Current boundary
 
-The [conversion policy](../conversions.md#conversion-policies) defines checked
+The [conversion policy](../specs/conversions.md#conversion-policies) defines checked
 floating-to-integer conversion as truncation toward zero followed by a range
 check. The truncated result must be representable by the destination; NaN and
 out-of-range values, including infinities, fail. Exact source/destination

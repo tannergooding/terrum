@@ -10,8 +10,8 @@ machine import** is an emitted call represented in the PE import table.
 Declaration retention does not by itself create a machine import.
 
 A module set is a flat, leaf-only native deployment contract. The broader
-compiler support boundary is in [implementation](implementation.md); future
-formats and servicing work are tracked in [roadmap](roadmap.md).
+compiler support boundary is in [implementation](../implementation.md); future
+formats and servicing work are tracked in [roadmap](../roadmap.md).
 
 A native module set persists **one** Windows x64 consumer EXE and its checked
 semantic contract. Two to sixteen independently compiled leaf DLL packages
