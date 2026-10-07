@@ -122,6 +122,56 @@ public static bool TryGetArtifactSection(int32 queryKind,
         return false;
     }
 
+    for (mut int32 entry = 1; entry <= entryCount; entry = entry + 1)
+    {
+        if (Host.SectionFlags[entry] != 2)
+        {
+            continue;
+        }
+
+        int32 slotSectionStart = Host.SectionStarts[entry];
+        int32 slotSectionLength = Host.SectionLengths[entry];
+        int32 sectionKind = Host.SectionKinds[entry];
+        if (slotSectionLength < 4
+            || !TryReadArtifactWord(slotSectionStart, init var slotCount)
+            || int64(4) + int64(slotCount) * 16 > int64(slotSectionLength)
+            || (sectionKind == 0x7F00
+                && int64(4) + int64(slotCount) * 16
+                    + int64(Host.SectionCounts[entry]) * 16 != int64(slotSectionLength)))
+        {
+            return false;
+        }
+
+        for (mut int32 slot = 0; slot < int32(slotCount); slot = slot + 1)
+        {
+            int32 slotOffset = slotSectionStart + 4 + slot * 16;
+            if (!TryReadArtifactHalfWord(slotOffset, init var targetKind)
+                || !TryReadArtifactHalfWord(slotOffset + 2, init var selector)
+                || !TryReadArtifactWord(slotOffset + 4, init var targetRow)
+                || !TryReadArtifactWord(slotOffset + 8, init var block)
+                || !TryReadArtifactWord(slotOffset + 12, init var ordinal))
+            {
+                return false;
+            }
+
+            int32 targetKindValue = int32(targetKind);
+            if (targetRow == 0 || targetRow > 0xFF_FFFF
+                || targetKindValue < 1 || targetKindValue > 0x0020
+                || targetKindValue == 0x0004
+                || GetArtifactSectionStride(targetKindValue) < 0
+                || targetRow > GetArtifactSectionCount(targetKindValue)
+                || (selector == 0 && (block != 0 || ordinal != 0))
+                || (selector == 1 && (targetKindValue != 0x0020 || block == 0))
+                || (sectionKind == 0x7F00
+                    && !((selector == 0 && targetKindValue == 0x001F)
+                        || (selector == 1 && targetKindValue == 0x0020)))
+                || selector > 1)
+            {
+                return false;
+            }
+        }
+    }
+
     mut int32 low = 1;
     mut int32 high = entryCount + 1;
     while (low < high)
@@ -174,6 +224,31 @@ int32 GetArtifactSectionStride(int32 kind)
     if (kind == 0x001F) { return 8; }
 
     return -1;
+}
+
+uint32 GetArtifactSectionCount(int32 queryKind)
+{
+    mut int32 low = 1;
+    mut int32 high = Host.SectionKinds.Length;
+    while (low < high)
+    {
+        int32 middle = low + (high - low) / 2;
+        if (Host.SectionKinds[middle] < queryKind)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+
+    if (low < Host.SectionKinds.Length && Host.SectionKinds[low] == queryKind)
+    {
+        return uint32(Host.SectionCounts[low]);
+    }
+
+    return 0;
 }
 
 bool TryReadArtifactHalfWord(int32 offset, init ref<uint32> value)

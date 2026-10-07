@@ -41,17 +41,22 @@ public sealed class ArtifactDirectoryValidationComponentTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task ArtifactDirectoryValidationMatchesHostedIndex(BoundRuntimePolicy policy)
+    public async Task ArtifactDirectoryValidationMatchesHostedIndexExceptPayloadOrdering(
+        BoundRuntimePolicy policy)
     {
         byte[] minimal = MinimalArtifact();
         byte[] extensions = ExtensionArtifact();
         byte[] outOfOrder = OutOfOrderArtifact();
+        byte[] referenceSlots = ReferenceSlotArtifact();
         var cases = new List<TestCase> {
             NewCase(minimal, 0x0002),
             NewCase(minimal, 0x0010),
             InvalidQuery(minimal, -1),
             InvalidQuery(minimal, 0x1_0000),
             NewCase(extensions, 0x8001),
+            NewCase(referenceSlots, 0x8000),
+            NewCase(BodyReferenceSlotArtifact(), 0x8000),
+            NewCase(SourceMapArtifact(new TrRmReferenceSlot(0x001F, 0, 1, 0, 0)), 0x7F00),
             NewCase(WithZeroGap(minimal), 0x0002),
             Invalid(ChangeByte(minimal, 0, (byte)'X')),
             Invalid(ChangeHalfWord(minimal, 4, 2)),
@@ -72,6 +77,21 @@ public sealed class ArtifactDirectoryValidationComponentTests
             Invalid(ChangeByte(WithZeroGap(minimal), 109, 1)),
             Invalid(AppendTrailingByte(minimal)),
             Invalid(NoModuleArtifact()),
+            Invalid(ChangeExtensionSlotHalfWord(referenceSlots, 0, 0x0021)),
+            Invalid(ChangeExtensionSlotHalfWord(referenceSlots, 0, 0x0004)),
+            Invalid(ChangeExtensionSlotHalfWord(referenceSlots, 0, 0x0010)),
+            Invalid(ChangeExtensionSlotHalfWord(referenceSlots, 2, 2)),
+            Invalid(ChangeExtensionSlotWord(referenceSlots, 4, 0)),
+            Invalid(ChangeExtensionSlotWord(referenceSlots, 4, 2)),
+            Invalid(ChangeExtensionSlotWord(referenceSlots, 8, 1)),
+            Invalid(ChangeExtensionSlotWord(referenceSlots, 12, 1)),
+            Invalid(ChangeExtensionSlotHalfWord(referenceSlots, 2, 1)),
+            Invalid(ChangeExtensionSlotHalfWord(referenceSlots, 0, 5)),
+            Invalid(ChangeSlotCount(referenceSlots, 2)),
+            Invalid(ChangeExtensionSlotWord(BodyReferenceSlotArtifact(), 8, 0)),
+            Invalid(ChangeSourceMapSlotHalfWord(
+                SourceMapArtifact(new TrRmReferenceSlot(0x001F, 0, 1, 0, 0)), 0, 0x0002)),
+            Invalid(SourceMapWithTrailingPayload()),
             InvalidWithHostedAccepted(outOfOrder, 0x8001),
             InvalidIntByte(minimal, 64, 256),
         };
@@ -208,6 +228,52 @@ public sealed class ArtifactDirectoryValidationComponentTests
             new TrRmSection(0x8001, 3, 1, new byte[] { 0xA5 }),
         ]);
 
+    private static byte[] ReferenceSlotArtifact()
+    {
+        var extension = TrRmOptionalSectionSlots.Create(0x8000, 1,
+            [new TrRmReferenceSlot(0x0002, 0, 1, 0, 0)], new byte[] { 0xA5 });
+        return TrRmOptionalSectionSlots.InsertInArtifact(MinimalArtifact(), extension);
+    }
+
+    private static byte[] BodyReferenceSlotArtifact()
+    {
+        var extension = TrRmOptionalSectionSlots.Create(0x8000, 1,
+            [new TrRmReferenceSlot(0x0020, 1, 1, 1, 0)], new byte[] { 0xA5 });
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, new byte[44]),
+            new TrRmSection(0x0002, 0, 1,
+                TrRmStringTableWriter.EncodeNames([("A", 0)])),
+            new TrRmSection(0x0020, 0, 1, new byte[] { 0x01 }),
+            extension,
+        ]);
+    }
+
+    private static byte[] SourceMapArtifact(TrRmReferenceSlot slot)
+    {
+        var sourceMap = new byte[36];
+        WriteWord(sourceMap, 0, 1);
+        WriteSlot(sourceMap, 4, slot);
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, new byte[44]),
+            new TrRmSection(0x0002, 0, 1,
+                TrRmStringTableWriter.EncodeNames([("A", 0)])),
+            new TrRmSection(0x001F, 0, 1, new byte[8]),
+            new TrRmSection(0x7F00, 2, 1, sourceMap),
+        ]);
+    }
+
+    private static byte[] SourceMapWithTrailingPayload()
+    {
+        var artifact = SourceMapArtifact(new TrRmReferenceSlot(0x001F, 0, 1, 0, 0));
+        var row = FindDirectoryRow(artifact, 0x7F00);
+        var length = checked((int)ReadWord(artifact, row + 12));
+        var result = new byte[artifact.Length + 1];
+        artifact.CopyTo(result, 0);
+        WriteWord(result, 16, (uint)result.Length);
+        WriteWord(result, row + 12, (uint)(length + 1));
+        return result;
+    }
+
     private static byte[] OutOfOrderArtifact()
     {
         var artifact = TrRmArtifactWriter.Encode([
@@ -265,6 +331,63 @@ public sealed class ArtifactDirectoryValidationComponentTests
         WriteWord(result, 48 + 8, checked(ReadWord(result, 48 + 8) + (uint)delta));
         WriteWord(result, 48 + 12, checked(ReadWord(result, 48 + 12) - (uint)delta));
         return result;
+    }
+
+    private static byte[] ChangeExtensionSlotHalfWord(byte[] artifact, int slotOffset, ushort value)
+    {
+        var result = (byte[])artifact.Clone();
+        var start = checked((int)ReadWord(result, FindDirectoryRow(result, 0x8000) + 8));
+        WriteHalfWord(result, start + 4 + slotOffset, value);
+        return result;
+    }
+
+    private static byte[] ChangeExtensionSlotWord(byte[] artifact, int slotOffset, uint value)
+    {
+        var result = (byte[])artifact.Clone();
+        var start = checked((int)ReadWord(result, FindDirectoryRow(result, 0x8000) + 8));
+        WriteWord(result, start + 4 + slotOffset, value);
+        return result;
+    }
+
+    private static byte[] ChangeSlotCount(byte[] artifact, uint value)
+    {
+        var result = (byte[])artifact.Clone();
+        var start = checked((int)ReadWord(result, FindDirectoryRow(result, 0x8000) + 8));
+        WriteWord(result, start, value);
+        return result;
+    }
+
+    private static byte[] ChangeSourceMapSlotHalfWord(
+        byte[] artifact, int slotOffset, ushort value)
+    {
+        var result = (byte[])artifact.Clone();
+        var start = checked((int)ReadWord(result, FindDirectoryRow(result, 0x7F00) + 8));
+        WriteHalfWord(result, start + 4 + slotOffset, value);
+        return result;
+    }
+
+    private static int FindDirectoryRow(byte[] artifact, ushort kind)
+    {
+        var entryCount = checked((int)ReadWord(artifact, 12));
+        for (var entry = 0; entry < entryCount; entry++)
+        {
+            var row = 32 + entry * 16;
+            if (ReadHalfWord(artifact, row) == kind)
+            {
+                return row;
+            }
+        }
+
+        throw new InvalidOperationException($"Missing section kind 0x{kind:X4}.");
+    }
+
+    private static void WriteSlot(byte[] bytes, int offset, TrRmReferenceSlot slot)
+    {
+        WriteHalfWord(bytes, offset, slot.TargetKind);
+        WriteHalfWord(bytes, offset + 2, slot.Selector);
+        WriteWord(bytes, offset + 4, slot.TargetRow);
+        WriteWord(bytes, offset + 8, slot.Block);
+        WriteWord(bytes, offset + 12, slot.Ordinal);
     }
 
     private static byte[] ChangeByte(byte[] artifact, int index, byte value)
