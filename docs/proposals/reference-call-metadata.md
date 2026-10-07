@@ -495,6 +495,28 @@ scope and rejects a stripped wrapper. Existing unsafe-block update behavior
 and expression-place field-path rejection remain unchanged. This bounded
 persistence extension does not settle or approve the broader proposal.
 
+### Provisional extension: caller-unsafe constructors
+
+**Summary:** The accepted source contract permits caller-unsafe instance
+constructors, but semantic-module persistence previously excluded them.
+
+**Recommendation:** Persist only constructors for public, non-unique `Copy`
+owners with recursively exportable public layouts and supported by-value
+explicit parameters. Validate canonical constructor identity, owner receiver
+and result types, explicit parameter slots, and call argument mappings
+separately from the implicit receiver. Preserve named mappings and derive
+authorization only from the enclosing unsafe expression or block. Keep
+managed-class factories, unique owners, reference/output inputs and
+unsupported layouts outside this slice.
+
+**Implemented provisionally in semantic-module revision 76:** Writers and
+readers validate body-backed and bodyless constructor contracts and retain
+complete authorized scopes. Regression coverage exercises consumer-local and
+imported constructors, zero-argument and named-argument calls, unsafe blocks,
+stripped scopes, semantic linking, and native graphs/module sets under both
+runtime policies. This adds no ABI, TRRM or scalar-frontend
+verification/emission support and does not approve the broader proposal.
+
 ### Provisional extension: caller-unsafe readonly getters
 
 **Summary:** The accepted source contract supports caller-unsafe getter

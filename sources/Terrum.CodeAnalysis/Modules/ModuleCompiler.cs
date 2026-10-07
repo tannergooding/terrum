@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 75;
+    private const int Version = 76;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1423,7 +1423,8 @@ public static partial class ModuleCompiler
     {
         var valueTypes = new ModuleUnsafeValueTypeCache(program.Structures);
         return program.Functions.Any(function => function.RequiresUnsafeCaller && function.DeclaringStruct is not null
-            && !IsSupportedModuleUnsafeMethod(function, program.Structures, valueTypes))
+            && !IsSupportedModuleUnsafeMethod(function, program.Structures, valueTypes)
+            && !IsSupportedModuleUnsafeConstructor(function, program.Structures, valueTypes))
             || ContainsUnsupportedModuleCallerUnsafeFieldContracts(program.Structures, program.Classes)
             || program.Functions.Any(function => ContainsUnsupportedModuleCallerUnsafeFieldLoan(
                 function.Body, program.Structures, valueTypes));
@@ -1563,6 +1564,11 @@ public static partial class ModuleCompiler
         {
             return false;
         }
+        if (function.IsConstructor)
+        {
+            return IsSupportedModuleUnsafeConstructorCall(
+                function, arguments, argumentParameterIndices, structures, valueTypes);
+        }
         if (function.IsOperator)
         {
             return function.IsStatic && function.DeclaringStruct is string owner
@@ -1596,6 +1602,81 @@ public static partial class ModuleCompiler
         }
         return IsSupportedModuleOperatorContract(
             Contract(function, structures), structures, valueTypes, requirePublic: true);
+    }
+
+    private static bool IsSupportedModuleUnsafeConstructorCall(BoundFunction function,
+        ImmutableArray<BoundExpression> arguments, ImmutableArray<int> argumentParameterIndices,
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
+    {
+        if (!IsSupportedModuleUnsafeConstructor(function, structures, valueTypes)
+            || arguments.Length != function.ParameterCount
+            || !IsValidModuleCallParameterMapping(
+                argumentParameterIndices, arguments.Length, function.ParameterCount))
+        {
+            return false;
+        }
+
+        for (var index = 0; index < arguments.Length; index++)
+        {
+            var parameterIndex = argumentParameterIndices.IsDefault
+                ? index : argumentParameterIndices[index];
+            var parameter = function.Variables[parameterIndex + 1];
+            if (arguments[index].Type != parameter.Type)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsSupportedModuleUnsafeConstructor(BoundFunction function,
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
+    {
+        if (!function.RequiresUnsafeCaller || !function.IsConstructor || function.IsClassConstructor
+            || function.IsStatic || function.IsCleanup || function.IsOperator
+            || function.PropertyName is not null || function.Intrinsic != BoundIntrinsic.None
+            || function.DeclaringStruct is not string ownerName
+            || function.Name != ownerName + ".#ctor"
+            || function.ParameterCount < 0 || function.ParameterCount >= function.Variables.Length)
+        {
+            return false;
+        }
+
+        var ownerIndex = -1;
+        for (var index = 0; index < structures.Length; index++)
+        {
+            if (structures[index].Name == ownerName)
+            {
+                ownerIndex = index;
+                break;
+            }
+        }
+        if (ownerIndex < 0)
+        {
+            return false;
+        }
+
+        var owner = structures[ownerIndex];
+        var ownerType = (PrimitiveType)(100 + ownerIndex);
+        if (function.IsPrivate || function.IsInternal || owner.IsUnique || owner.IsPrivate || owner.IsInternal
+            || function.ReturnType != ownerType || function.Variables[0].Type != ownerType
+            || !valueTypes.IsSupported(ownerType)
+            || !PublicLayout(ownerType, true, structures, new HashSet<(int Index, bool PublicFields)>()))
+        {
+            return false;
+        }
+
+        for (var index = 0; index < function.ParameterCount; index++)
+        {
+            var parameter = function.Variables[index + 1];
+            if (parameter.IsOut || parameter.IsInit || !valueTypes.IsSupported(parameter.Type))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool IsSupportedModuleUnsafeExpressionMutableFieldLoanCall(BoundFunction function,
@@ -1896,7 +1977,9 @@ public static partial class ModuleCompiler
         if (function.Function is BoundFunction body)
         {
             return (body.RequiresUnsafeCaller && body.DeclaringStruct is not null
-                    && !body.IsOperator && !IsSupportedModuleUnsafeMethod(body, structures, valueTypes))
+                    && !body.IsOperator
+                    && !IsSupportedModuleUnsafeMethod(body, structures, valueTypes)
+                    && !IsSupportedModuleUnsafeConstructor(body, structures, valueTypes))
                 || ContainsUnsupportedModuleCallerUnsafeFieldLoan(
                     body.Body, structures, valueTypes);
         }
@@ -2059,6 +2142,10 @@ public static partial class ModuleCompiler
         }
 
         var parts = signature.ToString().Split('|');
+        if (parts.Length > 2 && parts[2] == "C")
+        {
+            return IsSupportedModuleUnsafeConstructorContract(parts, structures, valueTypes);
+        }
         var isStatic = parts.Length > 4 && parts[4] == "S";
         if (parts.Length < 8 || parts[2] != "F" || parts[3] != "E"
             || (!isStatic && parts[4] != "I") || parts[5] == "-" || parts[6] != "E"
@@ -2114,6 +2201,55 @@ public static partial class ModuleCompiler
                 return false;
             }
         }
+        return true;
+    }
+
+    private static bool IsSupportedModuleUnsafeConstructorContract(string[] parts,
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
+    {
+        if (parts.Length < 8 || parts[2] != "C" || parts[3] != "E" || parts[4] != "I"
+            || parts[5] == "-" || parts[6] != "E"
+            || parts[0] != parts[5] + ".#ctor"
+            || !int.TryParse(parts[7], System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var parameterCount)
+            || parts.Length != 8 + parameterCount)
+        {
+            return false;
+        }
+
+        var ownerIndex = -1;
+        for (var index = 0; index < structures.Length; index++)
+        {
+            if (structures[index].Name == parts[5])
+            {
+                ownerIndex = index;
+                break;
+            }
+        }
+        if (ownerIndex < 0)
+        {
+            return false;
+        }
+
+        var owner = structures[ownerIndex];
+        var ownerType = (PrimitiveType)(100 + ownerIndex);
+        if (owner.IsUnique || owner.IsPrivate || owner.IsInternal
+            || parts[1] != ContractType(ownerType, structures)
+            || !PublicLayout(ownerType, true, structures, new HashSet<(int Index, bool PublicFields)>()))
+        {
+            return false;
+        }
+
+        for (var index = 0; index < parameterCount; index++)
+        {
+            var parameter = parts[8 + index];
+            if (!parameter.StartsWith("in:", StringComparison.Ordinal)
+                || !valueTypes.IsSupported(parameter.AsSpan("in:".Length)))
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 

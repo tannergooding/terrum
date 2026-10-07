@@ -52,7 +52,7 @@ external compatibility contracts.
   unwind after persistence.
 - Reject exported/imported spans, dependency-bearing fields, captures,
   outputs, generic declarations and operations outside the exact profile.
-- Confirm revision 75 and unsupported revisions 69, 70, 71, 72, 73, 74 or future revisions fail closed; retain
+- Confirm revision 76 and unsupported revisions 69, 70, 71, 72, 73, 74, 75 or future revisions fail closed; retain
   rejection of persisted AOT/native packages, graphs/module sets when
   invocation profiles do not permit them, and source-free TRRM.
 

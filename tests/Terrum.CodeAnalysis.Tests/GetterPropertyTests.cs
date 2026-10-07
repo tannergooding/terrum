@@ -406,7 +406,7 @@ public sealed class GetterPropertyTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.Equal(75,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             ModuleCompiler.CreateReference(producer), boundPolicy);
         Assert.False(consumerCompilation.HasErrors,
@@ -478,7 +478,7 @@ public sealed class GetterPropertyTests
             }
             """, NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.Equal(75,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             ModuleCompiler.CreateReference(producer));
         Assert.False(consumerCompilation.HasErrors,

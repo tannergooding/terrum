@@ -79,7 +79,12 @@ prerequisite has already been met.
    unary-contract result. Revision 75 provisionally adds caller-unsafe
    nominal prefix/postfix `++`/`--` updates through the same complete
    expression-scope boundary; unsafe field mutation places remain excluded.
-   Existing unsafe-block behavior is unchanged.
+   The update slice leaves existing unsafe-block behavior unchanged.
+   Revision 76 provisionally adds caller-unsafe constructors for eligible
+   public, non-unique `Copy` owners with recursively exportable layouts and
+   by-value explicit parameters. It preserves valid named-argument mappings
+   and supports both expression and unsafe-block scopes; managed-class
+   factories, unique owners and reference/output parameters remain excluded.
    These slices add no ABI, TRRM or scalar-frontend support and do not approve
    the broader proposal.
    Revision 64 also provisionally

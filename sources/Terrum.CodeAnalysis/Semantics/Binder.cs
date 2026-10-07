@@ -3136,6 +3136,9 @@ internal sealed partial class Binder
                     IsStatic: true, IsOperator: false, PropertyName: null,
                 }
                 || _signatures[call.Function] is {
+                    IsConstructor: true, IsClassConstructor: false,
+                }
+                || _signatures[call.Function] is {
                     IsOperator: false, PropertyName: not null,
                 }
                 || _signatures[call.Function] is {

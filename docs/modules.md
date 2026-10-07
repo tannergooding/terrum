@@ -46,7 +46,7 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 75. Writers emit only revision 75 and
+The current semantic-module revision is 76. Writers emit only revision 76 and
 readers reject every other revision; older artifacts must be recreated from
 source. The current format preserves verified, typed, source-mapped structured
 IR and the supported declaration, layout, initialization, cleanup, and runtime
@@ -127,6 +127,16 @@ or expression scope, not persisted as a separate capability; stripping the
 only scope fails closed. This adds no ABI, TRRM or scalar-frontend
 verification/emission support and does not approve the broader
 reference-call metadata proposal.
+
+Revision 76 provisionally persists caller-unsafe instance-constructor calls
+for eligible public, non-unique `Copy` owners with recursively exportable
+layouts and by-value explicit parameters. Constructor receiver slots are
+separate from explicit inputs, and valid named-argument mappings are
+preserved. Both expression and unsafe-block scopes are retained and validated;
+the reader reconstructs authorization from the enclosing scope. Managed-class
+factories, unique owners, unsupported parameter modes and non-exportable
+layouts remain outside this slice. This adds no ABI, TRRM or scalar-frontend
+verification/emission support and does not approve the broader proposal.
 
 The invocation-scoped source grant and `scanner-10` profile remain provisional
 semantic-module JIT capabilities under their respective proposals. They bind
