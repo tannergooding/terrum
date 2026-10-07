@@ -2831,15 +2831,17 @@ public sealed partial class ManagedScannerComponentTests
     [Theory]
     [InlineData("\uD800")]
     [InlineData("a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a")]
-    public async Task FailedCursorScanDoesNotPublishAsync(string text)
+    public async Task FailedManagedScansLeaveOutputsVacantAsync(string text)
     {
         var lexical = Lexer.Lex(SourceText.From(text));
         Assert.True(lexical.Diagnostics.Length != 0 || lexical.Tokens.Length > 64);
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
-                if (TryScanManagedCursor(init var cursor)) { return 1; }
-                if (cursor is init) { return 2; }
+                if (TryScanManaged(init var chain)) { return 1; }
+                if (chain is init) { return 2; }
+                if (TryScanManagedCursor(init var cursor)) { return 3; }
+                if (cursor is init) { return 4; }
                 return 42;
             }
             """;
