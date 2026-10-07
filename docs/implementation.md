@@ -212,6 +212,11 @@ The same DLL also exports `FloatingNegation`'s two raw-bit helpers. Direct
 calls check exact sign-bit toggling and involution across zero, subnormal,
 infinity, NaN and deterministic raw-bit inputs; this internal evidence does
 not approve the unapproved TRRM negation proposal or add frontend/TRRM support.
+The same DLL exports the twelve `FloatingComparison` predicates using raw
+integer carriers. Direct calls compare all six IEEE relations with hosted
+operators across signed zeros, infinities, NaNs, subnormal/normal boundaries
+and deterministic pairs; this remains internal candidate evidence, not
+TRRM or scalar-frontend support.
 The same DLL directly invokes both existing `SourceRange` end-query forms,
 `GetEnd` and the `End` property getter, with every successful boundary produced
 by `TryCreate` and compares them with hosted `TextSpan.End`. These calls exercise
