@@ -1,0 +1,156 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidatePropertyDefTable(int32 recordCount,
+    int32 stringCount, int32 typeDefCount, int32 typeSpecCount,
+    int32 methodDefCount, int32 methodSigCount)
+{
+    if (recordCount <= 0 || recordCount > 0xFF_FFFF
+        || stringCount < 0 || stringCount > 0xFF_FFFF
+        || typeDefCount < 0 || typeDefCount > 0xFF_FFFF
+        || typeSpecCount < 0 || typeSpecCount > 0xFF_FFFF
+        || methodDefCount < 0 || methodDefCount > 0xFF_FFFF
+        || methodSigCount < 0 || methodSigCount > 0xFF_FFFF
+        || recordCount * 20 != Host.Properties.Length
+        || typeDefCount * 40 != Host.TypeDefs.Length
+        || methodDefCount * 28 != Host.Methods.Length
+        || methodSigCount * 24 != Host.Signatures.Length)
+    {
+        return false;
+    }
+
+    int32 stringIndexByteLength = (stringCount + 1) * 4;
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        int32 rowStart = (row - 1) * 20;
+        if (!TryReadPropertyTableWord(rowStart, 0, init var owner)
+            || !TryReadPropertyTableWord(rowStart, 4, init var name)
+            || !TryReadPropertyTableWord(rowStart, 8, init var type)
+            || !TryReadPropertyTableWord(rowStart, 12, init var getter)
+            || !TryReadPropertyTableWord(rowStart, 16, init var flags)
+            || owner == 0 || owner > uint32(typeDefCount)
+            || name == 0 || name > 0xFF_FFFF || name > uint32(stringCount)
+            || type == 0 || type > uint32(typeSpecCount)
+            || getter == 0 || getter > uint32(methodDefCount)
+            || flags > 2
+            || !TryGetVariableTableRowExtent(stringCount, 8, 4, int32(name),
+                init var nameOffset, init var nameLength)
+            || !TryGetStringNameScalarCount(stringIndexByteLength + int32(nameOffset),
+                nameLength, init var nameScalarCount)
+            || !TryReadPropertyMethodWord((int32(getter) - 1) * 28, 0,
+                init var getterOwner)
+            || getterOwner != owner
+            || !TryReadPropertyMethodWord((int32(getter) - 1) * 28, 8,
+                init var signature)
+            || signature == 0 || signature > uint32(methodSigCount)
+            || !TryReadPropertySignatureWord((int32(signature) - 1) * 24, 0,
+                init var resultType)
+            || resultType != type)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryReadPropertyTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Properties.Length - 20
+        || offset < 0 || offset > 16
+        || !TryReadPropertyTableByte(rowStart + offset, init var first)
+        || !TryReadPropertyTableByte(rowStart + offset + 1, init var second)
+        || !TryReadPropertyTableByte(rowStart + offset + 2, init var third)
+        || !TryReadPropertyTableByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadPropertyTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Properties.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Properties[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool TryReadPropertyMethodWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Methods.Length - 28
+        || offset < 0 || offset > 24
+        || !TryReadPropertyMethodByte(rowStart + offset, init var first)
+        || !TryReadPropertyMethodByte(rowStart + offset + 1, init var second)
+        || !TryReadPropertyMethodByte(rowStart + offset + 2, init var third)
+        || !TryReadPropertyMethodByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadPropertyMethodByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Methods.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Methods[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool TryReadPropertySignatureWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Signatures.Length - 24
+        || offset < 0 || offset > 20
+        || !TryReadPropertySignatureByte(rowStart + offset, init var first)
+        || !TryReadPropertySignatureByte(rowStart + offset + 1, init var second)
+        || !TryReadPropertySignatureByte(rowStart + offset + 2, init var third)
+        || !TryReadPropertySignatureByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadPropertySignatureByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Signatures.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Signatures[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
