@@ -136,9 +136,19 @@ public sealed partial class CliTests
                     && amount == float64(2.5) && returned == uint32.MaxValue
                     && !status ? 42 : 0;
             }
-            bool TryFill(bool success, init ref<int32> result, init ref<uint64> count) {
+            bool TryFill(bool success, init ref<bool> flag,
+                init ref<char16> marker, init ref<int32> result,
+                init ref<uint32> smallCount, init ref<int64> signedCount,
+                init ref<uint64> wideCount, init ref<float32> ratio,
+                init ref<float64> conditionalAmount) {
+                flag = false;
+                marker = char16(65);
                 result = 0;
-                count = uint64.MaxValue;
+                smallCount = uint32.MaxValue;
+                signedCount = int64.MinValue;
+                wideCount = 0;
+                ratio = float32(1.5);
+                conditionalAmount = 0.0;
                 return success;
             }
             int32 Main() {
@@ -146,11 +156,20 @@ public sealed partial class CliTests
                 init char16 character;
                 init uint64 count;
                 init float64 amount;
+                init bool conditionalFlag;
+                init char16 conditionalMarker;
                 init int32 conditionalResult;
+                init uint32 conditionalSmallCount;
+                init int64 conditionalSignedCount;
                 init uint64 conditionalCount;
+                init float32 conditionalRatio;
+                init float64 conditionalAmount;
                 uint32 returned = Fill(true, init enabled, char16(65), init character,
                     uint64.MaxValue, init count, float64(2.5), init amount);
-                bool status = TryFill(false, init conditionalResult, init conditionalCount);
+                bool status = TryFill(false, init conditionalFlag, init conditionalMarker,
+                    init conditionalResult, init conditionalSmallCount,
+                    init conditionalSignedCount, init conditionalCount,
+                    init conditionalRatio, init conditionalAmount);
                 return Check(enabled, character, count, amount, returned, status);
             }
             """;

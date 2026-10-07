@@ -430,19 +430,34 @@ public sealed class TrRmExecutableCompilerTests
     {
         var publishText = publish ? "true" : "false";
         var source = $$"""
-            bool Fill(bool shouldPublish, init ref<int32> result,
-                init ref<uint64> count, init ref<bool> flag) {
-                result = 0;
-                count = uint64.MaxValue;
+            bool Fill(bool shouldPublish, init ref<bool> flag,
+                init ref<char16> marker, init ref<int32> result,
+                init ref<uint32> smallCount, init ref<int64> signedCount,
+                init ref<uint64> wideCount, init ref<float32> ratio,
+                init ref<float64> amount) {
                 flag = false;
+                marker = char16(65);
+                result = 0;
+                smallCount = uint32.MaxValue;
+                signedCount = int64.MinValue;
+                wideCount = 0;
+                ratio = float32(1.5);
+                amount = 0.0;
                 return shouldPublish;
             }
             int32 Status(bool value) { return value ? 1 : 0; }
             int32 Main() {
-                init int32 result;
-                init uint64 count;
                 init bool flag;
-                bool published = Fill({{publishText}}, init result, init count, init flag);
+                init char16 marker;
+                init int32 result;
+                init uint32 smallCount;
+                init int64 signedCount;
+                init uint64 wideCount;
+                init float32 ratio;
+                init float64 amount;
+                bool published = Fill({{publishText}}, init flag, init marker,
+                    init result, init smallCount, init signedCount, init wideCount,
+                    init ratio, init amount);
                 return Status(published);
             }
             """;
@@ -453,6 +468,25 @@ public sealed class TrRmExecutableCompilerTests
         Assert.Equal(4u, ScalarInitOutputRevision(artifact));
         Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
         Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void StoredBooleanResultDoesNotCorrelateItsOutputDestination()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            bool Fill(bool publish, init ref<int32> result) {
+                result = 42;
+                return publish;
+            }
+            int32 Main() {
+                init int32 result;
+                bool success = Fill(false, init result);
+                return success ? result : 0;
+            }
+            """));
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
     }
 
     [Fact]
