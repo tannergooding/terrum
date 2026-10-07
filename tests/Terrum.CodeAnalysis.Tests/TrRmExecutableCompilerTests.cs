@@ -157,6 +157,18 @@ public sealed class TrRmExecutableCompilerTests
     [InlineData("(Unsigned64Two() * Unsigned64Two()) == Unsigned64Four()", 42)]
     [InlineData("(Unsigned64Six() / Unsigned64Two()) == Unsigned64Three()", 42)]
     [InlineData("(Unsigned64Five() % Unsigned64Two()) == Unsigned64One()", 42)]
+    [InlineData("(Signed32One() << Signed32Two()) == Signed32Four()", 42)]
+    [InlineData("(Signed32Four() >> Signed32One()) == Signed32Two()", 42)]
+    [InlineData("(Signed32One() << Signed32ThirtyOne()) == Signed32Minimum()", 42)]
+    [InlineData("(Unsigned32One() << Signed32Two()) == Unsigned32Four()", 42)]
+    [InlineData("(Unsigned32Four() >> Signed32One()) == Unsigned32Two()", 42)]
+    [InlineData("(Signed64One() << Signed32Two()) == Signed64Four()", 42)]
+    [InlineData("(Signed64Four() >> Signed32One()) == Signed64Two()", 42)]
+    [InlineData("(Signed64One() << Signed32SixtyThree()) == Signed64Minimum()", 42)]
+    [InlineData("(Unsigned64One() << Signed32Two()) == Unsigned64Four()", 42)]
+    [InlineData("(Unsigned64Four() >>> Signed32One()) == Unsigned64Two()", 42)]
+    [InlineData("((Unsigned64One() << Signed32SixtyThree()) >>> Signed32One()) == (Unsigned64One() << Signed32SixtyTwo())", 42)]
+    [InlineData("(Signed64MinusTwo() >> Signed32One()) == Signed64MinusOne()", 42)]
     [InlineData("(Signed32NegativeFive() / Signed32Two()) == Signed32MinusTwo()", 42)]
     [InlineData("(Signed32NegativeFive() % Signed32Two()) == Signed32MinusOne()", 42)]
     [InlineData("(Signed32Minimum() % Signed32MinusOne()) == Signed32Zero()", 42)]
@@ -237,6 +249,9 @@ public sealed class TrRmExecutableCompilerTests
             int32 Signed32Five() { return 5; }
             int32 Signed32Six() { return 6; }
             int32 Signed32SixtyFive() { return 65; }
+            int32 Signed32ThirtyOne() { return 31; }
+            int32 Signed32SixtyThree() { return 63; }
+            int32 Signed32SixtyTwo() { return 62; }
             int32 Signed32Zero() { return 0; }
             int32 Signed32Minimum() { return int32.MinValue; }
             int32 Signed32NegativeFive() { return -5; }

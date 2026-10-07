@@ -103,8 +103,14 @@ and remainder are supported for all four integer types, including signed
 truncation-toward-zero, dividend-signed remainder, and the minimum-value
 remainder-by-negative-one case. CLI execution tests also preserve checked
 overflow status for each arithmetic operator and the distinct division and
-remainder zero-divisor statuses. Integer and `char16` conversions are also
-provisionally carried by opcode `0x16` and reconstructed as checked bound
+remainder zero-divisor statuses. Checked-count `<<` and `>>` are supported
+for all four integer types; unsigned `>>>` is supported where it is
+equivalent to `>>`. The source `int32` count is converted to the Body's
+`uint32` count slot and back through checked casts, preserving overflow status
+for negative and out-of-width counts. Signed logical `>>>` remains outside
+this path because the output-body lowering has no bit-reinterpretation step
+for signed operands. Integer and `char16` conversions are also provisionally
+carried by opcode `0x16` and reconstructed as checked bound
 casts, preserving overflow failure and `NoThrow` verification. Floating
 conversion paths are also provisionally implemented: format conversion uses
 `0x1A`, integer-to-float uses `0x1B`, `char16`-to-float uses `0x1E`, and

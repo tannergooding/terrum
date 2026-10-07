@@ -29,6 +29,12 @@ public sealed partial class CliTests
     [InlineData("Unsigned32Zero() - Unsigned32One() == Unsigned32Zero()", unchecked((int)0xE0540001))]
     [InlineData("Signed64Minimum() - Signed64One() == Signed64Zero()", unchecked((int)0xE0540001))]
     [InlineData("Unsigned64Zero() - Unsigned64One() == Unsigned64Zero()", unchecked((int)0xE0540001))]
+    [InlineData("Signed32One() << Signed32NegativeOne() == Signed32Zero()", unchecked((int)0xE0540001))]
+    [InlineData("Unsigned32One() << Signed32ThirtyTwo() == Unsigned32Zero()", unchecked((int)0xE0540001))]
+    [InlineData("Signed32One() >> Signed32ThirtyTwo() == Signed32Zero()", unchecked((int)0xE0540001))]
+    [InlineData("Signed64One() >> Signed32SixtyFour() == Signed64Zero()", unchecked((int)0xE0540001))]
+    [InlineData("Unsigned64One() >>> Signed32SixtyFour() == Unsigned64Zero()", unchecked((int)0xE0540001))]
+    [InlineData("Unsigned64One() >>> Signed32NegativeOne() == Unsigned64Zero()", unchecked((int)0xE0540001))]
     [InlineData("Signed32Maximum() * Signed32Two() == Signed32Zero()", unchecked((int)0xE0540001))]
     [InlineData("Unsigned32Maximum() * Unsigned32Two() == Unsigned32Zero()", unchecked((int)0xE0540001))]
     [InlineData("Signed64Maximum() * Signed64Two() == Signed64Zero()", unchecked((int)0xE0540001))]
@@ -50,6 +56,8 @@ public sealed partial class CliTests
             int64 Signed64Maximum() { return int64.MaxValue; }
             int64 Signed64NegativeOne() { return int64(-1); }
             int32 Signed32Two() { return 2; }
+            int32 Signed32ThirtyTwo() { return 32; }
+            int32 Signed32SixtyFour() { return 64; }
             int64 Signed64Two() { return int64(2); }
             uint32 Unsigned32One() { return uint32(1); }
             uint32 Unsigned32Zero() { return uint32(0); }

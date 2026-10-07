@@ -458,7 +458,11 @@ public static partial class TrRmExecutableCompiler
 
                     var integerLeft = ReadValue(operation.Operands[0]);
                     var integerRight = ReadValue(operation.Operands[1]);
-                    if (integerLeft.Type != integerRight.Type || !IsInteger(integerLeft.Type))
+                    var isShift = operation.Kind is 6 or 7;
+                    if (!IsInteger(integerLeft.Type)
+                        || (isShift
+                            ? integerRight.Type != PrimitiveType.UInt32
+                            : integerLeft.Type != integerRight.Type))
                     {
                         throw Invalid("Binary operands are outside the executable integer profile.");
                     }
@@ -470,10 +474,15 @@ public static partial class TrRmExecutableCompiler
                         3 => TokenKind.Star,
                         4 => TokenKind.Slash,
                         5 => TokenKind.Percent,
+                        6 => TokenKind.ShiftLeft,
+                        7 => TokenKind.ShiftRight,
                         _ => throw Invalid("The executable place profile has an unsupported Binary kind."),
                     };
+                    BoundExpression rightValue = isShift
+                        ? new BoundCast(integerRight, PrimitiveType.Int32, default)
+                        : integerRight;
                     DefineValue(operation.Result, new BoundBinary(token,
-                        integerLeft, integerRight, integerLeft.Type, default));
+                        integerLeft, rightValue, integerLeft.Type, default));
                     break;
                 }
                 default:
@@ -524,6 +533,19 @@ public static partial class TrRmExecutableCompiler
 
     private static bool IsOutputConversionType(PrimitiveType type)
         => IsOutputScalarType(type) && type != PrimitiveType.Bool;
+
+    private static bool IsOutputIntegerBinary(BoundBinary binary)
+        => binary.Type == binary.Left.Type && IsInteger(binary.Left.Type)
+            && (binary.Operator switch
+            {
+                TokenKind.Plus or TokenKind.Minus or TokenKind.Star
+                    or TokenKind.Slash or TokenKind.Percent => binary.Right.Type == binary.Left.Type,
+                TokenKind.ShiftLeft or TokenKind.ShiftRight =>
+                    binary.Right.Type == PrimitiveType.Int32,
+                TokenKind.ShiftRightUnsigned => binary.Right.Type == PrimitiveType.Int32
+                    && binary.Left.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64,
+                _ => false,
+            });
 
     private static bool IsOutputCallResultType(PrimitiveType type)
         => type == PrimitiveType.Void || IsOutputScalarType(type);
@@ -994,13 +1016,14 @@ public static partial class TrRmExecutableCompiler
                     _operationCount++;
                     return compareResult;
                 }
-                case BoundBinary binary when binary.Type == binary.Left.Type
-                    && binary.Left.Type == binary.Right.Type && IsInteger(binary.Left.Type)
-                    && binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star
-                        or TokenKind.Slash or TokenKind.Percent:
+                case BoundBinary binary when IsOutputIntegerBinary(binary):
                 {
                     var integerLeft = EmitValue(binary.Left);
-                    var integerRight = EmitValue(binary.Right);
+                    var isShift = binary.Operator is TokenKind.ShiftLeft or TokenKind.ShiftRight
+                        or TokenKind.ShiftRightUnsigned;
+                    var integerRight = isShift
+                        ? EmitValue(new BoundCast(binary.Right, PrimitiveType.UInt32, default))
+                        : EmitValue(binary.Right);
                     var integerResult = _valueTypes.Count + 1;
                     var integerKind = binary.Operator switch
                     {
@@ -1008,7 +1031,9 @@ public static partial class TrRmExecutableCompiler
                         TokenKind.Minus => 2,
                         TokenKind.Star => 3,
                         TokenKind.Slash => 4,
-                        _ => 5,
+                        TokenKind.Percent => 5,
+                        TokenKind.ShiftLeft => 6,
+                        _ => 7,
                     };
                     var binaryWidth = Width((ulong)Math.Max(integerResult,
                         Math.Max(integerLeft, integerRight)));

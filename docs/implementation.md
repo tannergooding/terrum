@@ -584,6 +584,11 @@ division and remainder are also supported for `int32`, `uint32`, `int64` and
 `uint64`; output-body CLI tests cover checked overflow for each arithmetic
 operator, divide-by-zero and remainder-by-zero statuses, and signed minimum
 division/remainder by negative one.
+Checked-count `<<` and `>>` are also supported for all four integer types;
+unsigned `>>>` is supported where it is equivalent to `>>`. Source `int32`
+counts are bridged to the Body's `uint32` count slot with checked casts, so
+negative and out-of-width counts retain overflow status `0xE0540001`. Signed
+logical `>>>` remains outside this output-body slice.
 Integer and `char16` conversions are provisionally encoded by `Convert`
 opcode `0x16` and reconstructed as checked bound casts, retaining the
 mandatory verifier's overflow and `NoThrow` checks. Floating conversions
