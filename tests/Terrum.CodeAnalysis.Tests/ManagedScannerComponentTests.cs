@@ -761,6 +761,26 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task MissingIntegerRecordsDoNotPublishCompilerInputAsync(NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 count = Scan();
+                Host.IntegerValues[0] = 1;
+                if (TryBuildCompilerInput(count, init var tokens, init var trivia,
+                    init var integers)) { return 1; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("42 3", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData("42", 0, 43, 0)]
     [InlineData("42", 1, 0, 0)]
     [InlineData("18446744073709551616", 0, 0, 0)]

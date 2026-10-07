@@ -123,18 +123,26 @@ public unique struct TokenIntegerSnapshot
         }
 
         mut OwnedInt32Buffer records = move created;
-        mut int32 previousIndex = -1;
-        for (mut int32 index = 0; index < count; index = index + 1)
+        mut int32 recordIndex = 0;
+        for (mut int32 tokenIndex = 0; tokenIndex < tokenCount - 1; tokenIndex = tokenIndex + 1)
         {
-            int32 offset = index * 5 + 1;
-            int32 tokenIndex = Host.IntegerValues[offset];
+            if (Host.Tokens[tokenIndex * 3] != 3)
+            {
+                continue;
+            }
+
+            if (recordIndex >= count)
+            {
+                return false;
+            }
+
+            int32 offset = recordIndex * 5 + 1;
+            int32 recordedIndex = Host.IntegerValues[offset];
             int32 status = Host.IntegerValues[offset + 1];
             int32 low = Host.IntegerValues[offset + 2];
             int32 high = Host.IntegerValues[offset + 3];
             int32 tag = Host.IntegerValues[offset + 4];
-            if (tokenIndex <= previousIndex || tokenIndex >= tokenCount - 1
-                || status < 0 || status > 1 || tag != 0
-                || Host.Tokens[tokenIndex * 3] != 3
+            if (recordedIndex != tokenIndex || status < 0 || status > 1 || tag != 0
                 || (status == 1 && (low != 0 || high != 0))
                 || !MatchesSourceMagnitude(tokenIndex, status, low, high))
             {
@@ -145,7 +153,12 @@ public unique struct TokenIntegerSnapshot
             require records.TryAppend(status);
             require records.TryAppend(low);
             require records.TryAppend(high);
-            previousIndex = tokenIndex;
+            recordIndex = recordIndex + 1;
+        }
+
+        if (recordIndex != count)
+        {
+            return false;
         }
 
         result = new TokenIntegerSnapshot(move records, count);

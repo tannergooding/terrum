@@ -684,8 +684,9 @@ keeps them inside the comment until an exact closer or EOF, which reports
 `TRM0003`. Documentation line/block trivia use kinds 4/5. Token and trivia
 adapters validate source-owned records without re-lexing native tokens. The
 self-hosted `TokenIntegerSnapshot` separately reparses each integer source
-slice through `IntegerParsing` and checks the full magnitude and overflow
-status against the scanner record; general binding remains hosted.
+slice through `IntegerParsing`, requires one ordered record for every integer
+token, and checks the full magnitude and overflow status against the scanner
+record; general binding remains hosted.
 
 The current scanner is version 8/schema 8; it appends diagnostic kinds 11/12
 for invalid/unsupported maximal punctuation runs to the prior diagnostic
