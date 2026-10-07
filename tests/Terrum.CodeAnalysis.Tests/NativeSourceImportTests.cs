@@ -17,6 +17,7 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class NativeSourceImportTests
 {
     private const string ImportKey = "windows-x64.system32.kernel32.GetCurrentThreadId";
+    private const string SleepImportKey = "windows-x64.system32.kernel32.Sleep";
     private const string SignedFixtureKey = "test.application.native-import-abi.NativeFfiSigned";
     private const string UnsignedFixtureKey = "test.application.native-import-abi.NativeFfiUnsigned";
     private const string Utf16ZFixtureKey = "test.application.native-import-abi.NativeFfiUtf16Z";
@@ -42,9 +43,8 @@ public sealed class NativeSourceImportTests
     [Fact]
     public void SourceImportSleepMatchesExactFixedWidthSystemSignature()
     {
-        const string sleepKey = "windows-x64.system32.kernel32.Sleep";
         var source = $$"""
-            [Terrum.Interop.NativeImport("{{sleepKey}}")]
+            [Terrum.Interop.NativeImport("{{SleepImportKey}}")]
             [NoThrow]
             extern void Sleep(uint32 milliseconds);
 
@@ -58,7 +58,7 @@ public sealed class NativeSourceImportTests
 
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var sleep = Assert.Single(program.Functions, static function => function.IsExternal);
-        Assert.Equal(sleepKey, sleep.NativeImportKey);
+        Assert.Equal(SleepImportKey, sleep.NativeImportKey);
         Assert.Equal(PrimitiveType.Void, sleep.ReturnType);
         Assert.Equal(PrimitiveType.UInt32, Assert.Single(sleep.Variables).Type);
         Assert.True(sleep.IsNoThrow);
@@ -76,7 +76,7 @@ public sealed class NativeSourceImportTests
         })
         {
             var invalidSource = $$"""
-                [Terrum.Interop.NativeImport("{{sleepKey}}")]
+                [Terrum.Interop.NativeImport("{{SleepImportKey}}")]
                 {{declaration}}
                 int32 Main() { Sleep(16); return 0; }
                 """;
@@ -357,10 +357,15 @@ public sealed class NativeSourceImportTests
             [NoThrow]
             extern uint32 CurrentThreadId();
 
+            [Terrum.Interop.NativeImport("{{SleepImportKey}}")]
+            [NoThrow]
+            extern void Sleep(uint32 milliseconds);
+
             int32 Main() {
                 if (CurrentThreadId() == 0) {
                     return 1;
                 }
+                Sleep(1);
                 return 0;
             }
 
@@ -370,7 +375,7 @@ public sealed class NativeSourceImportTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         Assert.Equal(NativeImportCatalog.WindowsX64.Identity, program.NativeImportCatalogId);
-        Assert.Single(program.Functions, static function => function.IsExternal);
+        Assert.Equal(2, program.Functions.Count(static function => function.IsExternal));
 
         var image = NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast);
         _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitWithImports(program,
