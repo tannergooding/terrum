@@ -53,5 +53,4 @@ Compare source-compiled and source-free JIT/native results, and verify that
 existing integer Body bytes and execution remain unchanged.
 
 This proposal does not resolve floating arithmetic NaN encodings,
-`char16`-to-floating eligibility, floating-to-integer TRRM encoding, or
-general TRRM floating arithmetic.
+floating-to-integer TRRM encoding, or general TRRM floating arithmetic.

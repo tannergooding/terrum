@@ -122,8 +122,9 @@ Based integers can also construct directly as floating values. Float-format
 conversions follow IEEE-754 nearest/ties-to-even behavior; integer/floating
 conversions, floating arithmetic/comparisons, custom literal parsing and
 registered literal targets remain outside this executable profile.
-The provisional hosted `char16`-to-floating conversion is also outside this
-profile and does not expand the native scalar frontend or source-free TRRM.
+The provisional hosted `char16`-to-floating projection remains outside this
+executable profile and does not add a supported native scalar or source-free
+TRRM operation.
 
 The hosted compiler supports internal scalar `[ConstEval]` functions,
 required `const T name = expression;` locals and nested scalar `const`
@@ -239,7 +240,7 @@ reconstructs exact target-format literal bits. It also projects conversions
 between the floating formats and from `int32`, `uint32`, `int64` and `uint64`
 to either format. V85 provisionally projects `char16`-to-floating and
 floating-to-integer conversions. The eight checked floating-to-integer pairs
-are accepted; `char16`-to-floating eligibility remains unapproved. The
+and explicit `char16`-to-floating eligibility are accepted. The
 unreleased source-free executable TRRM `(1, 0)` draft accepts opcode `0x1F`,
 `FloatToInteger rNew, tDest, rSource`, for exactly those eight pairs. It
 truncates toward zero before range checking; NaN, infinities and out-of-range
@@ -249,7 +250,8 @@ the caller's floating-point environment. This may-fail operation cannot satisfy
 policies remain outside this draft operation. This is a draft-only encoding
 decision, not a change to the approved IL specifications or a post-release
 compatibility promise. Other source-free TRRM floating operations remain
-provisional under their unapproved proposals.
+provisional under their unapproved proposals, including the separate
+`char16`-to-floating opcode proposal.
 Verification and emission continue through the hosted implementation; this
 adds no projection layout or native ABI change.
 

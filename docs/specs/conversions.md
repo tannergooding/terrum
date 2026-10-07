@@ -73,11 +73,13 @@ from either floating format to each current integer primitive—`int32`,
 `uint32`, `int64`, and `uint64`—are accepted as checked conversions. The
 hosted implementation and v85 scalar-frontend projections remain provisional;
 verification and emission remain hosted. Direct conversion to `char16` is not
-included: it is a code-unit type, not an integer primitive. A separate hosted
-implementation provisionally converts `char16` to either floating format as
-its unsigned code-unit value; this is not Unicode scalar decoding and its
-exact eligibility remains unapproved in the
-[eligibility proposal](../proposals/char16-floating-conversion-eligibility.md).
+included: it is a code-unit type, not an integer primitive. Explicit
+conversion from `char16` to either floating format is accepted as conversion
+of its unsigned code-unit value; every value is exact in both formats, so the
+conversion is total and valid in `[NoThrow]`. This does not decode or validate
+surrogate pairs as Unicode scalar values. Its hosted implementation and v85
+scalar-frontend projection remain provisional; verification and emission
+remain hosted.
 Current executable coverage is documented in
 [implementation](../implementation.md). A value-based
 conversion still range-checks its source: `int32(uint32(0xFFFF_FFFF))` fails,
@@ -218,6 +220,7 @@ failure. Numeric conversion is distinct from bit reinterpretation.
 | Floating to integer, checked | For either floating source and each of `int32`, `uint32`, `int64` and `uint64`, truncate toward zero, then range-check; throw if the truncated result is out of range. NaN has no integer representation and throws; infinities are out of range. `char16` is excluded as a code-unit destination. |
 | Floating to integer, unchecked or explicitly saturating | Truncate toward zero, then saturate out-of-range results to the destination endpoints, including infinities. NaN converts to zero. This is **not** modulo narrowing. |
 | Integer/floating to floating | Follow IEEE-754 target-format conversion with default round-to-nearest, ties-to-even. Inexact results, finite overflow to infinity, and underflow to subnormal/zero do not fail; NaN and infinities are ordinary floating values. No floating-point exception traps are enabled. Other rounding modes require explicit APIs/adapters; there is no global floating-point control-word API. |
+| `char16` to floating | For explicit conversion to `float32` or `float64`, interpret the source as its unsigned UTF-16 code-unit value in `[0, 65535]`. All values are exactly representable, so conversion is total and valid in `[NoThrow]`; this is not Unicode scalar decoding. |
 | Bit reinterpretation | `FromBits`/`ToBits` preserve the specified representation, including payload bits; this is not numeric conversion. Width, validity and representation must match the declared operation. |
 
 Floating-to-floating numeric conversion does not promise fixed NaN payload

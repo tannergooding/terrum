@@ -73,9 +73,6 @@ approved.
 - [Compare-exchange order pairs](atomic-cas-order-pairs.md) recommends a
   finite compile-time-valid table for CAS success/failure memory orders;
   it does not add atomic support or change the accepted bitwise-comparison rule.
-- [Char16-to-floating eligibility](char16-floating-conversion-eligibility.md)
-  recommends treating `char16` as an unsigned code-unit value for explicit
-  floating conversion; exact pair eligibility remains unapproved.
 - [Floating comparisons in executable TRRM](floating-trrm-comparisons.md)
   recommends a separately assigned IEEE comparison opcode and raw-bit
   constants in the unreleased `(1, 0)` profile; it does not add floating

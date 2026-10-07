@@ -4,18 +4,16 @@
 
 ## Summary
 
-The hosted implementation provisionally supports explicit conversion from
-`char16` to `float32` or `float64` as the unsigned UTF-16 code-unit value.
-Executable TRRM provisionally encodes this pair with opcode `0x1E` in both
-linear and indexed Bodies. This implementation remains unapproved; eligibility
-also remains unapproved in the separate
-[source-conversion proposal](char16-floating-conversion-eligibility.md).
+Explicit language conversion from `char16` to `float32` or `float64` is
+accepted as conversion of the unsigned UTF-16 code-unit value. Executable TRRM
+provisionally encodes this pair with opcode `0x1E` in both linear and indexed
+Bodies; that encoding remains unapproved.
 
 ## Question
 
-Should this provisional opcode and its exact type eligibility be adopted in
-the executable TRRM contract? Its current implementation is an unreleased
-draft choice, not an approved IL specification.
+Should this provisional opcode be adopted in the executable TRRM contract?
+Its current implementation is an unreleased draft choice, not an approved IL
+specification; the source-language eligibility is settled separately.
 
 ## Recommendation
 
@@ -28,7 +26,7 @@ Keep `IntToFloat` and integer `Convert` operations restricted to their stated
 integer source types.
 
 This operation is provisional and does not change the approved IL
-specifications or resolve the separate source eligibility proposal. Amend the
+specifications or alter the accepted source-language contract. Amend the
 unreleased `(1, 0)` draft without inventing a compatibility reader or
 incrementing the internal patch moniker; any post-release evolution must make
 its version and compatibility policy explicit.
