@@ -1,0 +1,62 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateFeatureTable(int32 recordCount)
+{
+    if (recordCount < 0 || recordCount > 0xFF_FFFF
+        || recordCount * 8 != Host.Features.Length)
+    {
+        return false;
+    }
+
+    mut uint32 previousFeatureId = 0;
+    for (mut int32 row = 0; row < recordCount; row = row + 1)
+    {
+        int32 rowStart = row * 8;
+        if (!TryReadFeatureTableWord(rowStart, init var featureId)
+            || !TryReadFeatureTableWord(rowStart + 4, init var minimumRuleRevision)
+            || featureId <= previousFeatureId
+            || minimumRuleRevision == 0
+            || featureId != 1
+            || minimumRuleRevision > 6)
+        {
+            return false;
+        }
+
+        previousFeatureId = featureId;
+    }
+
+    return true;
+}
+
+bool TryReadFeatureTableWord(int32 offset, init ref<uint32> value)
+{
+    if (offset < 0 || offset > Host.Features.Length - 4
+        || !TryReadFeatureTableByte(offset, init var first)
+        || !TryReadFeatureTableByte(offset + 1, init var second)
+        || !TryReadFeatureTableByte(offset + 2, init var third)
+        || !TryReadFeatureTableByte(offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadFeatureTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Features.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Features[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
