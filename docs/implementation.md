@@ -124,6 +124,11 @@ metadata and Bodies, reconstruct typed inputs, and invoke the shared mandatory
 verifier and backend; there is no producer-trust bypass. General imported-call
 linking and checked-exception Body support are not implemented. This path does
 not move source verification or emission into Terrum-authored components.
+The unreleased `(1, 0)` draft also accepts opcode `0x1F` for the eight accepted
+checked floating-to-integer pairs; the implementation and linear/indexed
+coverage are present. This fail-fast-only draft encoding does not change the
+approved IL specifications or promise post-release compatibility. Other
+source-free TRRM floating operations remain under unapproved proposals.
 
 ## Platform and validation
 

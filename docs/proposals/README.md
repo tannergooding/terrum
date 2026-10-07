@@ -95,9 +95,6 @@ approved.
 - [Char16-to-floating conversions in executable TRRM](char16-to-floating-trrm-conversions.md)
   recommends a distinct unsigned code-unit conversion operation without
   widening integer conversions.
-- [Floating-to-integer conversions in executable TRRM](floating-to-integer-trrm-conversions.md)
-  recommends a distinct fail-fast operation for the eight accepted
-  floating-to-fixed-width-integer pairs; the TRRM encoding remains unapproved.
 
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,

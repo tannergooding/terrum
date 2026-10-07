@@ -239,9 +239,17 @@ reconstructs exact target-format literal bits. It also projects conversions
 between the floating formats and from `int32`, `uint32`, `int64` and `uint64`
 to either format. V85 provisionally projects `char16`-to-floating and
 floating-to-integer conversions. The eight checked floating-to-integer pairs
-are accepted; `char16`-to-floating eligibility remains unapproved. Source-free
-TRRM floating operations are separately provisional under unapproved
-proposals and remain outside the approved Body profile.
+are accepted; `char16`-to-floating eligibility remains unapproved. The
+unreleased source-free executable TRRM `(1, 0)` draft accepts opcode `0x1F`,
+`FloatToInteger rNew, tDest, rSource`, for exactly those eight pairs. It
+truncates toward zero before range checking; NaN, infinities and out-of-range
+results fail fast with overflow status `0xE0540001`. Native lowering preserves
+the caller's floating-point environment. This may-fail operation cannot satisfy
+`NoThrow`; checked-exception control flow, `char16` and alternate conversion
+policies remain outside this draft operation. This is a draft-only encoding
+decision, not a change to the approved IL specifications or a post-release
+compatibility promise. Other source-free TRRM floating operations remain
+provisional under their unapproved proposals.
 Verification and emission continue through the hosted implementation; this
 adds no projection layout or native ABI change.
 
