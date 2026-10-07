@@ -1344,7 +1344,7 @@ public sealed class TokenCursorTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         string[] names = ["SourceRange", "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "CharacterLiteral", "StringEscape", "Token",
             "ManagedTokenChain", "Scanner", "ManagedScanner", "TokenSnapshot", "TokenTriviaSnapshot",
-            "TokenIntegerSnapshot", "TokenDiagnosticSnapshot", "TokenCursor"];
+            "WideIntegerFacts", "IntegerParsing", "TokenIntegerSnapshot", "TokenDiagnosticSnapshot", "TokenCursor"];
         var trees = new List<SyntaxTree>(names.Length + 1);
         foreach (var name in names)
         {

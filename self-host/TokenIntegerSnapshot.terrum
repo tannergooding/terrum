@@ -1,4 +1,45 @@
+using Terrum.CodeAnalysis.Numerics64;
+
 namespace Terrum.CodeAnalysis;
+
+bool MatchesSourceMagnitude(int32 tokenIndex, int32 status, int32 low, int32 high)
+{
+    int32 tokenOffset = tokenIndex * 3;
+    mut int32 start = Host.Tokens[tokenOffset + 1];
+    mut int32 length = Host.Tokens[tokenOffset + 2];
+    if (start < 0 || length <= 0 || start > Host.Source.Length
+        || length > Host.Source.Length - start)
+    {
+        return false;
+    }
+
+    mut uint32 radix = 10;
+    if (length >= 2 && Host.Source[start] == char16(48))
+    {
+        int32 prefix = int32(Host.Source[start + 1]);
+        if (prefix == 120 || prefix == 88)
+        {
+            radix = 16;
+            start = start + 2;
+            length = length - 2;
+        }
+        else if (prefix == 98 || prefix == 66)
+        {
+            radix = 2;
+            start = start + 2;
+            length = length - 2;
+        }
+    }
+
+    if (!TryParseUInt64Base(start, length, radix, init var magnitude))
+    {
+        return status == 1 && low == 0 && high == 0;
+    }
+
+    return status == 0
+        && low == EncodeWord(uint32(magnitude & uint64(uint32.MaxValue)))
+        && high == EncodeWord(uint32(magnitude >> 32));
+}
 
 // Magnitudes retain the scanner's raw low/high uint32 bit patterns as int32 words.
 public unique struct TokenIntegerSnapshot
@@ -94,7 +135,8 @@ public unique struct TokenIntegerSnapshot
             if (tokenIndex <= previousIndex || tokenIndex >= tokenCount - 1
                 || status < 0 || status > 1 || tag != 0
                 || Host.Tokens[tokenIndex * 3] != 3
-                || (status == 1 && (low != 0 || high != 0)))
+                || (status == 1 && (low != 0 || high != 0))
+                || !MatchesSourceMagnitude(tokenIndex, status, low, high))
             {
                 return false;
             }

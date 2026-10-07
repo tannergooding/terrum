@@ -761,6 +761,34 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("42", 0, 43, 0)]
+    [InlineData("42", 1, 0, 0)]
+    [InlineData("18446744073709551616", 0, 0, 0)]
+    [InlineData("18446744073709551615", 0, -1, 0)]
+    public async Task CompilerInputRejectsIntegerMagnitudeRecordsThatDisagreeWithSourceAsync(
+        string text, int status, int low, int high)
+    {
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 count = Scan();
+                Host.IntegerValues[2] = {{status}};
+                Host.IntegerValues[3] = {{low}};
+                Host.IntegerValues[4] = {{high}};
+                if (TryBuildCompilerInput(count, init var tokens, init var trivia,
+                    init var integers)) { return 1; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OverflowIntegerRecordRequiresZeroPayloadAsync(NativeRuntimePolicy policy)
@@ -4694,7 +4722,7 @@ public sealed partial class ManagedScannerComponentTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         string[] names = ["SourceRange", "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "CharacterLiteral", "StringEscape",
             "Token", "ManagedTokenChain", "Scanner", "ManagedScanner",
-            "TokenSnapshot", "TokenTriviaSnapshot", "TokenIntegerSnapshot",
+            "TokenSnapshot", "TokenTriviaSnapshot", "WideIntegerFacts", "IntegerParsing", "TokenIntegerSnapshot",
             "TokenDiagnosticSnapshot"];
         if (parserName is not null)
         {
