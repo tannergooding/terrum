@@ -91,9 +91,9 @@ public sealed class NativeManagedClassTests
     }
 
     [Theory]
-    [InlineData("mut Leaf alias = leaf; alias.Value = 0;")]
-    [InlineData("Leaf alias = leaf; alias.Value = 0;")]
-    [InlineData("Leaf? alias = leaf; require alias is some projected; projected.Value = 0;")]
+    [InlineData("mut Leaf @alias = leaf; @alias.Value = 0;")]
+    [InlineData("Leaf @alias = leaf; @alias.Value = 0;")]
+    [InlineData("Leaf? @alias = leaf; require @alias is some projected; projected.Value = 0;")]
     [InlineData("write Leaf writable = leaf; Leaf view = writable; view.Value = 0;")]
     public void LocalRebindingAndReadonlyProjectionsDoNotUpgradeReferentAccess(string body)
     {
@@ -187,8 +187,8 @@ public sealed class NativeManagedClassTests
                 require Leaf.TryCreate(20, out var right);
                 require ManagedNode.TryCreate(2, out var edge);
                 require Pair.TryCreate(left, right, edge, out var pair);
-                write Leaf alias = pair.Left;
-                alias.Value = 21;
+                write Leaf @alias = pair.Left;
+                @alias.Value = 21;
                 return pair.Left.Value + pair.Right.Value + pair.Edge.Value - 1;
             }
             """;
@@ -221,8 +221,8 @@ public sealed class NativeManagedClassTests
             }
             int32 Main() {
                 require Leaf.TryCreate(42, out var leaf);
-                Leaf alias = leaf;
-                alias.Value = 0;
+                Leaf @alias = leaf;
+                @alias.Value = 0;
                 return leaf.Value;
             }
             """;
@@ -257,7 +257,7 @@ public sealed class NativeManagedClassTests
 
     [Theory]
     [InlineData("this.Read(); Value = value;")]
-    [InlineData("Leaf alias = this; Value = value;")]
+    [InlineData("Leaf @alias = this; Value = value;")]
     public void RejectsPartialThisCallsAndEscapes(string body)
     {
         var source = "class Leaf { public int32 Value; public Leaf(int32 value) { " + body

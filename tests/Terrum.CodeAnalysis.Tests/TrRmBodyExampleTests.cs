@@ -1685,7 +1685,7 @@ public sealed class TrRmBodyExampleTests
 
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var document = File.ReadAllText(Path.Combine(root, "docs",
+        var document = File.ReadAllText(Path.Combine(root, "docs", "specs",
             "il-instruction-set.md"));
         var start = document.IndexOf(heading, StringComparison.Ordinal);
         Assert.True(start >= 0);
