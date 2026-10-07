@@ -345,6 +345,62 @@ unique-layout rejection, reserved-sibling conflicts, and semantic/native
 graphs and module sets under both runtime policies. This remains a provisional
 experiment; the broader metadata proposal is still unapproved.
 
+### Provisional follow-up: caller-unsafe mutable receiver methods
+
+**Summary:** Existing source contracts allow caller-unsafe mutable instance
+methods. Before revision 72, semantic-module persistence rejected those
+methods, even though revision 71 already persisted the existing mutable
+field-receiver loan as source argument zero mapped to formal receiver zero
+inside `unsafe(expr)`. Method contracts record mutable receiver identity with
+`MutReceiver`; body-bearing declarations preserve and validate that marker
+against the serialized receiver mode.
+
+**Recommendation:** Provisionally extend the revision-71 expression scope to
+caller-unsafe ordinary mutable instance methods on eligible public,
+non-unique `Copy` owners with recursively exportable by-value explicit
+parameters and results. Require the same direct receiver-loan shape and
+canonical receiver mapping as revision 71, and require the complete call to
+remain structurally enclosed by `unsafe(expr)`. Validate the complete
+source-to-formal argument mapping: receiver zero is unique and explicit named
+arguments may permute only their own formal parameters. Reconstruct the
+caller-unsafe effect from the callable contract and the authorization from the
+enclosing expression; persist no authorization bit. Keep the existing
+per-field caller-unsafe declarations, layout, place, initialization,
+ownership, reservation, evaluation-order and cleanup checks.
+
+Separate declaration eligibility from invocation eligibility. Do not admit a
+newly supported mutable caller-unsafe target from an unsafe block, a named
+receiver, a receiver-only wrapper or any call not wholly under the expression
+scope. Enforce this call-shape and scope rule independently when writing and
+reading module bodies, including graph, module-set and consumer restoration.
+Retain the existing `Exportable` boundary for mutable struct receivers and
+reject bodyless mutable receiver imports; the eligible method remains an
+implementation target behind a by-value module export, not a new mutable
+cross-module ABI.
+
+This follow-up does not admit other receiver loans, output/reference
+parameters, returned or stored references, constructors, operators,
+accessors, class/unique/managed layouts, or TRRM and scalar-frontend
+verification/emission. It adds no source form or ABI and does not approve the
+broader reference-call metadata proposal. Acceptance evidence should exercise
+the writer, reader and consumer-link rejection boundaries for mismatched
+receiver markers, complete mappings, and scope escapes, plus leaf/nested paths,
+named explicit arguments, reservation conflicts, and native graphs/module sets
+under both runtime policies. Safe mutable methods and existing explicit
+unsafe-block behavior must remain unchanged.
+
+**Implemented provisionally in semantic-module revision 72:** The writer and
+reader admit caller-unsafe mutable instance methods only through that exact
+field-loan shape and only when the complete call is structurally enclosed by
+`unsafe(expr)`. The reader rejects such calls in unsafe blocks, local mutable
+receiver loans and forged/wrapped/remapped receivers; method declarations
+retain the `MutReceiver` body contract without making it importable or
+directly exportable. Full argument mappings are checked, and caller-unsafe
+authorization remains reconstructed from the method effect and scope.
+Regression coverage includes producer and consumer-local calls, forged
+contracts/mappings/scopes, and native module sets and graphs under both
+runtime policies. The broader proposal remains unapproved.
+
 ### Provisional extension: caller-unsafe readonly getters
 
 **Summary:** The accepted source contract supports caller-unsafe getter

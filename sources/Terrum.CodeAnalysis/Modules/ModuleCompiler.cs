@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 71;
+    private const int Version = 72;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1441,6 +1441,7 @@ public static partial class ModuleCompiler
             {
                 continue;
             }
+            var supportedCallerUnsafeMutableCalls = new HashSet<BoundCall>(ReferenceEqualityComparer.Instance);
             _ = Calls(function.Body, visitExpression: expression => {
                 if (expression is not BoundUnsafeExpression unsafeExpression)
                 {
@@ -1457,6 +1458,12 @@ public static partial class ModuleCompiler
                                 program.Structures, module.Structures, callValueTypes, fieldValueTypes))
                         {
                             _ = supportedMutableFieldLoans.Add(call.Arguments[0]);
+                            if (program.Functions[call.Function].RequiresUnsafeCaller
+                                && HasMutableStructReceiver(program.Functions[call.Function])
+                                && call.IsUnsafeAuthorized)
+                            {
+                                _ = supportedCallerUnsafeMutableCalls.Add(call);
+                            }
                         }
                     });
                 _ = Calls(new BoundExpressionStatement(unsafeExpression.Expression, unsafeExpression.Span),
@@ -1525,6 +1532,16 @@ public static partial class ModuleCompiler
                             "Expression-scoped unsafe field paths cannot be used as mutation places.");
                 }
             });
+            _ = Calls(function.Body, visitExpression: expression => {
+                if (expression is BoundCall call && (uint)call.Function < (uint)program.Functions.Length
+                    && program.Functions[call.Function].RequiresUnsafeCaller
+                    && HasMutableStructReceiver(program.Functions[call.Function])
+                    && !supportedCallerUnsafeMutableCalls.Contains(call))
+                {
+                    throw new ModuleContractException(
+                        "Caller-unsafe mutable methods require a supported expression-scoped field receiver.");
+                }
+            });
         }
     }
 
@@ -1555,7 +1572,9 @@ public static partial class ModuleCompiler
             || function.DeclaringStruct is not string ownerName || function.IsStatic
             || function.IsConstructor || function.IsClassConstructor || function.IsCleanup
             || function.IsOperator || function.PropertyName is not null || function.Intrinsic != BoundIntrinsic.None
-            || function.RequiresUnsafeCaller || function.ParameterCount != arguments.Length
+            || !IsValidModuleCallParameterMapping(
+                argumentParameterIndices, arguments.Length, function.ParameterCount)
+            || function.ParameterCount != arguments.Length
             || function.ParameterCount > function.Variables.Length || function.ParameterCount < 1
             || loan.Place.Type != loan.Type
             || !function.Variables[0].IsMutable || function.Variables[0].IsOut || function.Variables[0].IsInit
@@ -1603,6 +1622,33 @@ public static partial class ModuleCompiler
             {
                 return false;
             }
+        }
+        return true;
+    }
+
+    private static bool IsValidModuleCallParameterMapping(ImmutableArray<int> argumentParameterIndices,
+        int argumentCount, int parameterCount)
+    {
+        if (parameterCount < 0 || argumentCount != parameterCount)
+        {
+            return false;
+        }
+        if (argumentParameterIndices.IsDefault)
+        {
+            return true;
+        }
+        if (argumentParameterIndices.Length != argumentCount)
+        {
+            return false;
+        }
+        var assigned = new bool[parameterCount];
+        foreach (var parameterIndex in argumentParameterIndices)
+        {
+            if ((uint)parameterIndex >= (uint)parameterCount || assigned[parameterIndex])
+            {
+                return false;
+            }
+            assigned[parameterIndex] = true;
         }
         return true;
     }
@@ -1838,7 +1884,8 @@ public static partial class ModuleCompiler
             return false;
         }
         if (!function.IsStatic && (function.ParameterCount < 1 || function.Variables.IsEmpty
-            || function.Variables[0].IsMutable || function.Variables[0].IsOut || function.Variables[0].IsInit))
+            || function.Variables[0].IsOut || function.Variables[0].IsInit
+            || function.PropertyName is not null && function.Variables[0].IsMutable))
         {
             return false;
         }
@@ -4099,6 +4146,11 @@ public static partial class ModuleCompiler
         IReadOnlyList<BoundFunction> functions, ImmutableArray<BoundStruct> structures,
         ModuleUnsafeValueTypeCache valueTypes, bool inUnsafe, bool inUnsafeExpression = false,
         bool allowExpressionScopedMutableFieldLoan = false) => expression switch {
+            SymbolicCall call when names.TryGetValue(call.Name, out var index)
+                && functions[index].RequiresUnsafeCaller && HasMutableStructReceiver(functions[index])
+                && !inUnsafeExpression =>
+                throw new ModuleContractException(
+                    "Caller-unsafe mutable methods require a supported expression-scoped field receiver."),
             SymbolicCall call when names.TryGetValue(call.Name, out var index)
                 && (!inUnsafeExpression || !functions[index].RequiresUnsafeCaller
                     || IsSupportedModuleUnsafeExpressionCall(functions[index], structures, valueTypes)) =>

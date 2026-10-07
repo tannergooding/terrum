@@ -46,7 +46,7 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 71. Writers emit only revision 71 and
+The current semantic-module revision is 72. Writers emit only revision 72 and
 readers reject every other revision; older artifacts must be recreated from
 source. The current format preserves verified, typed, source-mapped structured
 IR and the supported declaration, layout, initialization, cleanup, and runtime
@@ -83,6 +83,16 @@ reservation checks enforced. The loan is nonescaping and reuses the existing
 authorization-bit change. Reordered or wrapped receivers, readonly field
 loans, caller-unsafe mutable method contracts and other reference/output modes
 remain unsupported.
+
+Revision 72 provisionally permits the same direct receiver loan to target a
+caller-unsafe mutable instance method only when the complete call remains
+inside `unsafe(expr)`. The method's by-value explicit parameters and result
+must pass the recursive public `Copy` layout gate, and the complete argument
+mapping, `MutReceiver` body contract, receiver shape and scope are checked by
+both writer and reader. It adds no receiver ABI or authorization bit, and
+continues to reject mutable receiver imports, direct mutable-method exports,
+wrapped/remapped receiver loans, unsafe-block calls, and unsupported
+reference/output modes.
 
 The invocation-scoped source grant and `scanner-10` profile remain provisional
 semantic-module JIT capabilities under their respective proposals. They bind

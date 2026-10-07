@@ -83,7 +83,7 @@ public sealed class VacantAssignmentTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.Equal(71,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(72,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         foreach (var version in new[] { 40, 41, 42, 43, 44, 45 })
         {
             var historical = (byte[])producer.Clone();

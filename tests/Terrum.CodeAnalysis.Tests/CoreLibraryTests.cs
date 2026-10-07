@@ -35,7 +35,7 @@ public sealed class CoreLibraryTests
         Assert.Empty(program.Structures);
         var producer = ModuleCompiler.CreateProducer(program,
             ["int32.TryParse", "int32.TryFormat", "int32.Identity", "int32.ReadBacking"]);
-        Assert.Equal(71,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)));
+        Assert.Equal(72,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)));
         var consumer = Compilation.Create(SyntaxTree.Parse(
             """
             int32 Main() {
@@ -49,7 +49,7 @@ public sealed class CoreLibraryTests
         Assert.False(consumer.HasErrors, string.Join(Environment.NewLine, consumer.Diagnostics));
         var consumerBytes = ModuleCompiler.CreateConsumer(
             Assert.IsType<BoundProgram>(consumer.Program), producer);
-        Assert.Equal(71,BinaryPrimitives.ReadInt32LittleEndian(consumerBytes.AsSpan(4)));
+        Assert.Equal(72,BinaryPrimitives.ReadInt32LittleEndian(consumerBytes.AsSpan(4)));
         var linked = ModuleCompiler.Link(consumerBytes, producer);
         Assert.Equal(42, NativeJit.Execute(linked, NativeRuntimePolicy.FailFast));
 
@@ -124,14 +124,14 @@ public sealed class CoreLibraryTests
             function => function.Name == $"{name}.get_Value").PropertyName);
         var exports = new[] { $"{name}.Identity", $"{name}.#get:Value", $"{name}.ReadPrivate" };
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.Equal(71,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)));
+        Assert.Equal(72,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(source),
             ModuleCompiler.CreateReference(producer), runtimePolicy);
         Assert.False(consumerCompilation.HasErrors,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
             Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
-        Assert.Equal(71,BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4)));
+        Assert.Equal(72,BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4)));
         var linked = ModuleCompiler.Link(consumer, producer);
         var policy = (NativeRuntimePolicy)runtimePolicy;
         Assert.Equal(7, NativeJit.Execute(linked, policy));

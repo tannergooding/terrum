@@ -60,9 +60,16 @@ prerequisite has already been met.
    non-unique `Copy` layouts and all existing access, initialization, place, ownership
    and reservation checks remain mandatory; wrapped/reordered loans,
    caller-unsafe mutable methods, escaping references, TRRM and scalar
-   frontend support remain excluded. This uses existing call/loan
-   representations and does not approve the broader reference metadata
-   proposal. Revision 64 also provisionally
+   frontend support remain excluded from revision 71. This uses existing
+   call/loan representations and does not approve the broader reference
+   metadata proposal. Revision 72 provisionally extends the expression scope
+   to caller-unsafe mutable receiver methods, using the same direct field-loan
+   shape and requiring the complete call to remain in `unsafe(expr)`. The
+   writer and reader validate the complete argument mapping and `MutReceiver`
+   body contract; mutable receiver imports and direct exports remain
+   unsupported. This bounded implementation adds no ABI or authorization bit
+   and does not approve the broader reference-call metadata proposal.
+   Revision 64 also provisionally
    persists identity for supported static operators on public `Copy` structs,
    preserving unsafe effects and nominal-update target checks. These bounded
    implementations do not settle the general schema or approve the
