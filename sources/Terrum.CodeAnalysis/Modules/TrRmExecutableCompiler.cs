@@ -127,7 +127,7 @@ public static partial class TrRmExecutableCompiler
                 if (!Scalar(variable.Type) || variable.Type == PrimitiveType.Void
                     || variable.IsInitializationLocal
                     || variable.IsOut != variable.IsInit
-                    || variable.IsInit && variable.Type != PrimitiveType.Int32)
+                    || variable.IsInit && !IsOutputScalarType(variable.Type))
                 {
                     throw Unsupported($"Function '{function.Name}' has a non-value scalar parameter.");
                 }
@@ -279,12 +279,14 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("Only fail-fast Windows x64 target requirement 1 is executable.");
         }
         var (firstFeature, requiredFeatureCount) = modules.GetFeatureRange(1);
-        var supportsScalarInitOutput = false;
+        uint scalarInitOutputRuleRevision = 0;
         for (var feature = firstFeature; feature < firstFeature + requiredFeatureCount; feature++)
         {
             var required = featureTable.GetFeature(feature);
-            supportsScalarInitOutput |= required.FeatureId == TrRmFeatureTableReader.ScalarInitOutputFeatureId
-                && required.MinimumRuleRevision <= TrRmFeatureTableReader.ScalarInitOutputRuleRevision;
+            if (required.FeatureId == TrRmFeatureTableReader.ScalarInitOutputFeatureId)
+            {
+                scalarInitOutputRuleRevision = required.MinimumRuleRevision;
+            }
         }
 
         var sigs = new TrRmMethodSigTableReader(sigBytes, sigCount, types, paramCount, 0);
@@ -344,8 +346,10 @@ public static partial class TrRmExecutableCompiler
                 var mode = parameters.GetMode(first + param);
                 if (type == PrimitiveType.Void
                     || mode != 0 && mode != 2
-                    || mode == 2 && (!supportsScalarInitOutput
-                        || type != PrimitiveType.Int32 || flags == 2))
+                    || mode == 2 && (scalarInitOutputRuleRevision == 0
+                        || scalarInitOutputRuleRevision == TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision
+                            && type != PrimitiveType.Int32
+                        || flags == 2))
                 {
                     throw Invalid("Unsupported parameter type or mode.");
                 }
@@ -463,7 +467,7 @@ public static partial class TrRmExecutableCompiler
             }
             else if (bodyForm == 0)
             {
-                if (!supportsScalarInitOutput)
+                if (scalarInitOutputRuleRevision == 0)
                 {
                     throw Invalid("A general place Body requires the ScalarInitOutput feature.");
                 }
@@ -476,7 +480,8 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 variables = declaration.Variables.ToBuilder();
-                statements = DecodeOutputBody(outputBody, types, variables, functions);
+                statements = DecodeOutputBody(outputBody, types, variables, functions,
+                    scalarInitOutputRuleRevision);
             }
             else
             {

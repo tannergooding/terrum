@@ -34,8 +34,9 @@ Keep the following boundaries explicit:
   call, and executable place body, including uncalled methods. Presence of the
   feature never waives the body's structural, type, lifetime, or semantic
   audit. Do not encode this behavior in an optional extension.
-- Admit only non-exported module-local functions with `init ref<int32>` output
-  formals and `void` or `int32` results. Other scalar formals remain by-value.
+- Under initial rule revision 1, admit only non-exported module-local
+  functions with `init ref<int32>` output formals and `void` or `int32`
+  results. Other scalar formals remain by-value.
   Preserve the existing mode value `0x02`; reject `out`, Boolean-correlated
   outputs, imports, exported output functions, and `OutputState` clauses.
 - Output-bearing methods and calls use general Body forms `0x00`, `0x01`, or
@@ -120,6 +121,33 @@ verification remains in force. The one-block control-flow boundary is
 unchanged. These value, comparison, bitwise, unary, arithmetic and conversion
 paths are implemented support only, not approval of the proposed executable
 contract.
+The current writer emits required feature rule revision 2 for output Bodies,
+which provisionally permits `bool`, `char16`, `int32`, `uint32`, `int64`,
+`uint64`, `float32` and `float64` referents and scalar initialized locals.
+Rule revision 1 remains loadable with `int32` referents only; unsupported
+revisions reject. Exact type identity is retained through place descriptors,
+handles, loads, initialization values and call arguments, while output-bearing
+results remain `void` or `int32`.
+
+## Additional open question: scalar output referent set
+
+**Summary:** The initial `ScalarInitOutput` profile requires `int32` output
+referents and initialized local places. The existing Body value and place
+operations can represent the other supported non-void scalar types without
+changing initialization, aliasing, or publication behavior, but older
+rule-revision-1 readers understand only `int32` referents.
+
+**Recommendation:** Add an explicitly provisional rule revision 2 that admits
+`bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`, `float32` and
+`float64` output referents and scalar initialized locals. Preserve exact
+type identity across declarations, place descriptors, handles, loads,
+initialization values and call arguments; do not add conversions, forwarding,
+recovery or Boolean-correlated publication. Keep `void`/`int32` output-bearing
+results and all other profile limits unchanged. Rule revision 1 remains the
+`int32`-only profile; newer readers may accept both revisions and must reject
+revision-2 behavior when an artifact requires only revision 1. This is an
+implementation recommendation only and does not approve either revision as
+the executable TRRM contract.
 
 The broader proposal remains unresolved. In particular, Boolean status facts
 are call-specific and require correlation with their particular destinations;

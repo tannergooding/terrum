@@ -24,8 +24,11 @@ public readonly ref struct TrRmFeatureTableReader
     /// <summary>The provisional feature identifier assigned to ScalarInitOutput.</summary>
     public const uint ScalarInitOutputFeatureId = 1;
 
-    /// <summary>The only ScalarInitOutput rule revision supported by this implementation.</summary>
-    public const uint ScalarInitOutputRuleRevision = 1;
+    /// <summary>The initial ScalarInitOutput rule revision supported by this implementation.</summary>
+    public const uint ScalarInitOutputInitialRuleRevision = 1;
+
+    /// <summary>The current ScalarInitOutput rule revision supported by this implementation.</summary>
+    public const uint ScalarInitOutputRuleRevision = 2;
 
     private const int RowSize = 8;
     private readonly ReadOnlySpan<byte> _rows;
@@ -55,7 +58,7 @@ public readonly ref struct TrRmFeatureTableReader
             var minimumRuleRevision = Read(offset + 4);
             if (featureId <= previousFeatureId || minimumRuleRevision == 0
                 || featureId != ScalarInitOutputFeatureId
-                || minimumRuleRevision != ScalarInitOutputRuleRevision)
+                || minimumRuleRevision > ScalarInitOutputRuleRevision)
             {
                 throw InvalidFeature();
             }

@@ -117,6 +117,64 @@ public sealed partial class CliTests
     }
 
     [Fact]
+    public async Task PersistedInitOutputSupportsMixedScalarReferentsAsync()
+    {
+        const string source = """
+            void Fill(bool enabled, init ref<bool> enabledResult,
+                char16 character, init ref<char16> characterResult,
+                uint64 count, init ref<uint64> countResult,
+                float64 amount, init ref<float64> amountResult) {
+                enabledResult = enabled;
+                characterResult = character;
+                countResult = count;
+                amountResult = amount;
+            }
+            int32 Check(bool enabled, char16 character, uint64 count, float64 amount) {
+                return enabled && character == char16(65) && count == uint64.MaxValue
+                    && amount == float64(2.5) ? 42 : 0;
+            }
+            int32 Main() {
+                init bool enabled;
+                init char16 character;
+                init uint64 count;
+                init float64 amount;
+                Fill(true, init enabled, char16(65), init character,
+                    uint64.MaxValue, init count, float64(2.5), init amount);
+                return Check(enabled, character, count, amount);
+            }
+            """;
+        var prefix = Path.Combine(Directory.GetCurrentDirectory(),
+            $"trrm-init-output-scalars-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var executable = prefix + ".exe";
+        try
+        {
+            var (compiled, compileOutput, compileError) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "compile-trrm", "-", "--identity",
+                "init-output-scalars", "-o", artifact, "--runtime", "fail-fast", "--json");
+            Assert.Equal(0, compiled);
+            Assert.Empty(compileError);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.Equal(42, ran);
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+
+            var (built, buildOutput, buildError) = await RunAsync([], "build-trrm", artifact,
+                "-o", executable, "--runtime", "fail-fast", "--json");
+            Assert.Equal(0, built);
+            Assert.Empty(buildError);
+            Assert.Equal(42, await ExecuteTrRmImageAsync(executable));
+        }
+        finally
+        {
+            File.Delete(artifact);
+            File.Delete(executable);
+        }
+    }
+
+    [Fact]
     public async Task PersistedInitOutputSignedNegationPreservesOverflowStatusAsync()
     {
         const string source = """

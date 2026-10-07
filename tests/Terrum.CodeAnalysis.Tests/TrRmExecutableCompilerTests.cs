@@ -314,6 +314,110 @@ public sealed class TrRmExecutableCompilerTests
         Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
     }
 
+    [Theory]
+    [InlineData("bool", "true", "true")]
+    [InlineData("char16", "char16(0xD800)", "char16(0xD800)")]
+    [InlineData("int32", "int32.MinValue", "int32.MinValue")]
+    [InlineData("uint32", "uint32.MaxValue", "uint32.MaxValue")]
+    [InlineData("int64", "int64.MinValue", "int64.MinValue")]
+    [InlineData("uint64", "uint64.MaxValue", "uint64.MaxValue")]
+    [InlineData("float32", "float32(1.5)", "float32(1.5)")]
+    [InlineData("float64", "float64(2.5)", "float64(2.5)")]
+    public void InitOutputPlacesRoundTripWithScalarReferents(
+        string type, string value, string expected)
+    {
+        var source = $$"""
+            void Fill({{type}} value, init ref<{{type}}> result) { result = value; }
+            int32 Observe({{type}} value) { return value == {{expected}} ? 42 : 0; }
+            int32 Main() {
+                init {{type}} result;
+                Fill({{value}}, init result);
+                return Observe(result);
+            }
+            """;
+        var original = Compile(source);
+        var loaded = TrRmExecutableCompiler.Load(
+            TrRmExecutableCompiler.Emit(original, "scalar-output-referent"));
+
+        Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void InitOutputPlacesPreserveMixedTypesAndInterleavedArguments()
+    {
+        var source = """
+            void Fill(float64 wide, init ref<uint32> unsigned, int64 signed,
+                init ref<bool> flag, char16 marker, init ref<float32> ratio,
+                init ref<char16> code, uint64 count, init ref<int32> result,
+                int32 value, init ref<int64> signedWide) {
+                unsigned = uint32.MaxValue;
+                flag = true;
+                ratio = float32(1.5);
+                code = marker;
+                result = value;
+                signedWide = signed;
+            }
+            int32 Check(uint32 unsigned, bool flag, float32 ratio, char16 code,
+                int32 result, int64 signedWide, float64 wide, uint64 count) {
+                return unsigned == uint32.MaxValue && flag && ratio == float32(1.5)
+                    && code == char16(65) && result == 42 && signedWide == int64(-7)
+                    && wide == float64(3.5) && count == uint64(9) ? 42 : 0;
+            }
+            int32 Main() {
+                init uint32 unsigned;
+                init bool flag;
+                init float32 ratio;
+                init char16 code;
+                init int32 result;
+                init int64 signedWide;
+                mut float64 wide = float64(2.5);
+                wide = float64(3.5);
+                Fill(wide, init unsigned, int64(-7), init flag, char16(65),
+                    init ratio, init code, uint64(9), init result, 42, init signedWide);
+                return Check(unsigned, flag, ratio, code, result, signedWide, wide, uint64(9));
+            }
+            """;
+        var original = Compile(source);
+        var loaded = TrRmExecutableCompiler.Load(
+            TrRmExecutableCompiler.Emit(original, "mixed-scalar-output-referents"));
+
+        Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void InitOutputRuleRevisionOneRemainsLimitedToInt32Referents()
+    {
+        const string int32Source = """
+            void Fill(int32 value, init ref<int32> result) { result = value; }
+            int32 Main() {
+                init int32 result;
+                Fill(42, init result);
+                return result;
+            }
+            """;
+        var legacyArtifact = TrRmExecutableCompiler.Emit(Compile(int32Source), "legacy-output");
+        legacyArtifact = SetScalarInitOutputRuleRevision(legacyArtifact,
+            TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision);
+        var loaded = TrRmExecutableCompiler.Load(legacyArtifact);
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+
+        const string boolSource = """
+            void Fill(bool value, init ref<bool> result) { result = value; }
+            int32 Observe(bool value) { return value ? 42 : 0; }
+            int32 Main() {
+                init bool result;
+                Fill(true, init result);
+                return Observe(result);
+            }
+            """;
+        var unsupportedArtifact = TrRmExecutableCompiler.Emit(Compile(boolSource), "legacy-output-bool");
+        unsupportedArtifact = SetScalarInitOutputRuleRevision(unsupportedArtifact,
+            TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(unsupportedArtifact));
+    }
+
     [Fact]
     public void OutputBodyCallsEncodeWideMethodReferenceSeparatelyFromArgumentCount()
     {
@@ -2292,6 +2396,23 @@ public sealed class TrRmExecutableCompilerTests
             index.GetSection(section, out var kind, out var flags, out var bytes, out var count);
             sections.Add(new TrRmSection(kind, flags, (uint)count,
                 kind == 0x20 ? rewrittenBodies : bytes.ToArray()));
+        }
+        return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static byte[] SetScalarInitOutputRuleRevision(byte[] artifact, uint revision)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x0004, out var featureBytes, out var featureCount));
+        Assert.Equal(1, featureCount);
+        var features = featureBytes.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(features.AsSpan(4), revision);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags, out var bytes, out var count);
+            sections.Add(new TrRmSection(kind, flags, (uint)count,
+                kind == 0x0004 ? features : bytes.ToArray()));
         }
         return TrRmArtifactWriter.Encode(sections);
     }

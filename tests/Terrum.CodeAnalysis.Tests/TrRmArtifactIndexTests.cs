@@ -62,7 +62,15 @@ public sealed class TrRmArtifactIndexTests
         Assert.Equal(TrRmFeatureRow.ScalarInitOutput, features.GetFeature(1));
         Assert.True(features.TryGetFeature(TrRmFeatureTableReader.ScalarInitOutputFeatureId,
             out var feature));
-        Assert.Equal(1u, feature.MinimumRuleRevision);
+        Assert.Equal(TrRmFeatureTableReader.ScalarInitOutputRuleRevision,
+            feature.MinimumRuleRevision);
+
+        var legacyBytes = TrRmFeatureTableWriter.Encode(
+            [new TrRmFeatureRow(TrRmFeatureTableReader.ScalarInitOutputFeatureId,
+                TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision)]);
+        var legacy = new TrRmFeatureTableReader(legacyBytes, 1);
+        Assert.Equal(TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision,
+            legacy.GetFeature(1).MinimumRuleRevision);
 
         Assert.True(index.TryGetSection(0x0002, out var stringBytes, out var stringCount));
         var strings = new TrRmStringTableReader(stringBytes, stringCount);
@@ -87,7 +95,7 @@ public sealed class TrRmArtifactIndexTests
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
             FeatureArtifact(0, 0, [1, 0, 0, 0, 0, 0, 0, 0])));
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
-            FeatureArtifact(0, 0, [1, 0, 0, 0, 2, 0, 0, 0])));
+            FeatureArtifact(0, 0, [1, 0, 0, 0, 3, 0, 0, 0])));
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
             FeatureArtifact(0, 0, [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0])));
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(

@@ -104,7 +104,7 @@ internal static class TrRmScalarInitOutputBodyReader
             var mode = parameters.GetMode(first + index);
             var type = TrRmCompactLinearBodyReader.ResolveType(types,
                 parameters.GetTypeSpec(first + index));
-            if (mode == 2 && type == 8)
+            if (mode == 2 && Scalar(type))
             {
                 hasOutput = true;
             }
@@ -158,6 +158,7 @@ internal static class TrRmScalarInitOutputBodyReader
         private uint[] _definitions;
         private int[] _valueUses;
         private int[] _placeUses;
+        private int[] _placeTypes;
         private int[] _observedValues;
         private int[] _observedPlaces;
         private int[] _handlePlaces;
@@ -191,6 +192,7 @@ internal static class TrRmScalarInitOutputBodyReader
             _definitions = [];
             _valueUses = [];
             _placeUses = [];
+            _placeTypes = [];
             _observedValues = [];
             _observedPlaces = [];
             _handlePlaces = [];
@@ -248,14 +250,14 @@ internal static class TrRmScalarInitOutputBodyReader
             }
 
             _placeUses = new int[placeCount];
+            _placeTypes = new int[placeCount];
             _placeParameters = Filled(placeCount, -1);
             _active = new bool[placeCount];
             _initialized = new bool[placeCount];
-            var placeTypes = new int[placeCount];
             for (var index = 0; index < placeCount; index++)
             {
-                placeTypes[index] = Local();
-                if (Type(placeTypes[index]) != 8 || Local() != 0 || Byte() != 4
+                _placeTypes[index] = Local();
+                if (!Scalar(Type(_placeTypes[index])) || Local() != 0 || Byte() != 4
                     || (_placeUses[index] = Local()) > 1)
                 {
                     throw InvalidBody();
@@ -274,7 +276,7 @@ internal static class TrRmScalarInitOutputBodyReader
                 _valueKinds[index] = Byte();
                 _valueUses[index] = Local();
                 if (_valueKinds[index] > 1 || _valueUses[index] > 1
-                    || _valueKinds[index] == 1 && Type(_valueTypes[index]) != 8)
+                    || _valueKinds[index] == 1 && !Scalar(Type(_valueTypes[index])))
                 {
                     throw InvalidBody();
                 }
@@ -318,7 +320,7 @@ internal static class TrRmScalarInitOutputBodyReader
                 var type = TrRmCompactLinearBodyReader.ResolveType(_types, _parameters.GetTypeSpec(row));
                 if (_parameters.GetMode(row) == 2)
                 {
-                    if (formalPlace >= placeCount)
+                    if (formalPlace >= placeCount || Type(_placeTypes[formalPlace]) != type)
                     {
                         throw InvalidBody();
                     }
@@ -426,7 +428,7 @@ internal static class TrRmScalarInitOutputBodyReader
             var places = ImmutableArray.CreateBuilder<PlaceInfo>(placeCount);
             for (var index = 0; index < placeCount; index++)
             {
-                places.Add(new PlaceInfo(placeTypes[index], _placeParameters[index],
+                places.Add(new PlaceInfo(_placeTypes[index], _placeParameters[index],
                     _observedPlaces[index], _initialized[index]));
             }
 
@@ -497,7 +499,7 @@ internal static class TrRmScalarInitOutputBodyReader
                 placeId = Number(referenceWidth);
                 Place(placeId);
                 operands.Add(placeId);
-                resultType = 8;
+                resultType = Type(_placeTypes[placeId - 1]);
                 resultKind = 1;
             }
             else if (opcode is 0x0D or 0x0E)
@@ -512,11 +514,12 @@ internal static class TrRmScalarInitOutputBodyReader
                         throw InvalidBody();
                     }
 
-                    resultType = 8;
+                    resultType = Type(_placeTypes[placeId - 1]);
                 }
                 else
                 {
-                    if (_initialized[placeId - 1] || Operand(referenceWidth, operands) != 8)
+                    if (_initialized[placeId - 1]
+                        || Operand(referenceWidth, operands) != Type(_placeTypes[placeId - 1]))
                     {
                         throw InvalidBody();
                     }
@@ -802,6 +805,11 @@ internal static class TrRmScalarInitOutputBodyReader
             }
 
             var place = _handlePlaces[value - 1];
+            if (place <= 0 || place > _placeTypes.Length
+                || Type(_valueTypes[value - 1]) != Type(_placeTypes[place - 1]))
+            {
+                throw InvalidBody();
+            }
             Place(place);
             _observedValues[value - 1] = _ordinal;
             return place;
@@ -959,6 +967,8 @@ internal static class TrRmScalarInitOutputBodyReader
 
     private static bool Integer(ushort type) => type is 8 or 9 or 0x0D or 0x0E;
     private static bool Float(ushort type) => type is 0x14 or 0x15;
+    private static bool Scalar(ushort type)
+        => type is 1 or 3 or 8 or 9 or 0x0D or 0x0E or 0x14 or 0x15;
 
     private static InvalidDataException InvalidBody()
         => new("Invalid or unsupported provisional TRRM ScalarInitOutput Body.");

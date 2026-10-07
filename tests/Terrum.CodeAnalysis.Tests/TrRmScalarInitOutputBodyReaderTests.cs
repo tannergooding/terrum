@@ -124,6 +124,28 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     }
 
     [Fact]
+    public void FormalPlaceTypeMustMatchItsDescriptor()
+    {
+        var fixture = Encode(
+            [[0x0B, 1, 1], [0x01, 2, 2, 1], [0x0E, 1, 2]],
+            [1, 0], [2, 2], [3], terminator: [0x83, 0],
+            valueTypeIds: [2, 2], placeTypeIds: [2], typeMapRows: [1, 3]);
+
+        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+    }
+
+    [Fact]
+    public void InitializeValueTypeMustMatchItsPlace()
+    {
+        var fixture = Encode(
+            [[0x0B, 1, 1], [0x01, 2, 2, 1], [0x0E, 1, 2]],
+            [1, 0], [2, 2], [3], terminator: [0x83, 0],
+            valueTypeIds: [1, 2], placeTypeIds: [1], typeMapRows: [1, 3]);
+
+        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+    }
+
+    [Fact]
     public void CheckedDivRemAccountsForBothDefinitionsIncludingUnusedQuotient()
     {
         var fixture = Encode([[0x18, 3, 4, 1, 2]], [0, 0, 0, 0], [0, 0, -1, 1], [],

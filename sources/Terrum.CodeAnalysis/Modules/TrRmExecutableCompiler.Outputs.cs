@@ -81,7 +81,7 @@ public static partial class TrRmExecutableCompiler
     private static ImmutableArray<BoundStatement> DecodeOutputBody(
         TrRmScalarInitOutputBodyReader.Body body, TrRmTypeSpecTableReader types,
         ImmutableArray<BoundVariable>.Builder variables,
-        ImmutableArray<BoundFunction>.Builder functions)
+        ImmutableArray<BoundFunction>.Builder functions, uint ruleRevision)
     {
         var statements = ImmutableArray.CreateBuilder<BoundStatement>(
             body.Operations.Length + body.Places.Length + 1);
@@ -89,16 +89,20 @@ public static partial class TrRmExecutableCompiler
         for (var index = 0; index < body.Places.Length; index++)
         {
             var place = body.Places[index];
-            if (OutputType(body, types, place.TypeId) != PrimitiveType.Int32)
+            var placeType = OutputType(body, types, place.TypeId);
+            if (!IsOutputScalarType(placeType)
+                || ruleRevision == TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision
+                    && placeType != PrimitiveType.Int32)
             {
-                throw Invalid("The executable place profile requires int32 referents.");
+                throw Invalid("The executable place profile has an unsupported referent type.");
             }
 
             if (place.ParameterOrdinal >= 0)
             {
                 if (place.ParameterOrdinal >= variables.Count
                     || !variables[place.ParameterOrdinal].IsOut
-                    || !variables[place.ParameterOrdinal].IsInit)
+                    || !variables[place.ParameterOrdinal].IsInit
+                    || variables[place.ParameterOrdinal].Type != placeType)
                 {
                     throw Invalid("An output place does not match its formal parameter.");
                 }
@@ -107,7 +111,7 @@ public static partial class TrRmExecutableCompiler
             else
             {
                 placeVariables[index] = variables.Count;
-                variables.Add(new BoundVariable($"place{index + 1}", PrimitiveType.Int32,
+                variables.Add(new BoundVariable($"place{index + 1}", placeType,
                     false, default)
                 {
                     IsInitializationLocal = true,
@@ -238,7 +242,7 @@ public static partial class TrRmExecutableCompiler
                     }
                     var place = PlaceVariable(PlaceForHandle(operation.Operands[0]));
                     DefineValue(operation.Result,
-                        new BoundRead(place, PrimitiveType.Int32, default));
+                        new BoundRead(place, variables[place].Type, default));
                     break;
                 }
                 case 0x0E:
@@ -302,12 +306,17 @@ public static partial class TrRmExecutableCompiler
                         var argument = operation.Operands[parameter];
                         if (formal.IsOut || formal.IsInit)
                         {
-                            if (!formal.IsOut || !formal.IsInit || formal.Type != PrimitiveType.Int32)
+                            if (!formal.IsOut || !formal.IsInit
+                                || !IsOutputScalarType(formal.Type))
                             {
-                                throw Invalid("Only init ref<int32> output arguments are supported.");
+                                throw Invalid("The output formal type is outside the executable profile.");
                             }
 
                             var place = PlaceVariable(PlaceForHandle(argument));
+                            if (variables[place].Type != formal.Type)
+                            {
+                                throw Invalid("Output argument type does not match its formal.");
+                            }
                             arguments.Add(new BoundOutArgument(place, false, formal.Type, default)
                             {
                                 IsInit = true,
@@ -590,9 +599,10 @@ public static partial class TrRmExecutableCompiler
                 var parameter = function.Variables[variable];
                 if (parameter.IsOut || parameter.IsInit)
                 {
-                    if (!parameter.IsOut || !parameter.IsInit || parameter.Type != PrimitiveType.Int32)
+                    if (!parameter.IsOut || !parameter.IsInit
+                        || !IsOutputScalarType(parameter.Type))
                     {
-                        throw Unsupported("The output Body profile only supports init ref<int32> parameters.");
+                        throw Unsupported("The output Body profile requires scalar init ref parameters.");
                     }
                     AddPlace(variable, isParameter: true);
                 }
@@ -616,15 +626,15 @@ public static partial class TrRmExecutableCompiler
                 }
                 if (local.IsInitializationLocal)
                 {
-                    if (local.Type != PrimitiveType.Int32 || local.IsMutable)
+                    if (!IsOutputScalarType(local.Type) || local.IsMutable)
                     {
-                        throw Unsupported("The output Body profile only supports vacant int32 local places.");
+                        throw Unsupported("The output Body profile only supports vacant scalar local places.");
                     }
                     AddPlace(variable, isParameter: false);
                 }
-                else if (local.Type != PrimitiveType.Int32)
+                else if (!IsOutputScalarType(local.Type))
                 {
-                    throw Unsupported("The output Body profile currently supports only int32 locals.");
+                    throw Unsupported("The output Body profile currently supports only scalar locals.");
                 }
             }
 
@@ -669,7 +679,6 @@ public static partial class TrRmExecutableCompiler
         private int AddValue(PrimitiveType type, byte kind, uint definitionOffset)
         {
             if (!IsOutputScalarType(type) || kind > 1
-                || kind == 1 && type != PrimitiveType.Int32
                 || _valueTypes.Count >= SemanticVerifier.MaximumVariables)
             {
                 throw Unsupported("The output Body profile supports scalar values within the verifier limit.");
@@ -691,7 +700,8 @@ public static partial class TrRmExecutableCompiler
             WriteInstruction(_operations, 0x0B, width, 0);
             Write(_operations, (ulong)result, width);
             Write(_operations, (ulong)place, width);
-            _ = AddValue(PrimitiveType.Int32, 1, (uint)offset);
+            var type = _function.Variables[_places[place].Variable].Type;
+            _ = AddValue(type, 1, (uint)offset);
             _placeHandles[place] = result;
             UsePlace(place, _operationCount);
             _operationCount++;
@@ -710,7 +720,7 @@ public static partial class TrRmExecutableCompiler
                     if ((uint)vacant.Variable >= (uint)_placeByVariable.Length
                         || _placeByVariable[vacant.Variable] == 0)
                     {
-                        throw Unsupported("Vacant locals must map to int32 local places.");
+                        throw Unsupported("Vacant locals must map to scalar local places.");
                     }
                     var vacantPlace = _placeByVariable[vacant.Variable];
                     if (_placeDeclared[vacantPlace])
@@ -722,9 +732,10 @@ public static partial class TrRmExecutableCompiler
                 case BoundLocal local:
                     if ((uint)local.Variable >= (uint)_currentValues.Length
                         || _placeByVariable[local.Variable] != 0
-                        || local.Initializer.Type != PrimitiveType.Int32)
+                        || !IsOutputScalarType(local.Initializer.Type)
+                        || local.Initializer.Type != _function.Variables[local.Variable].Type)
                     {
-                        throw Unsupported("The output Body profile supports initialized int32 value locals.");
+                        throw Unsupported("The output Body profile supports initialized scalar value locals.");
                     }
                     _currentValues[local.Variable] = EmitValue(local.Initializer);
                     break;
@@ -754,9 +765,11 @@ public static partial class TrRmExecutableCompiler
 
             var place = _placeByVariable[assignment.Variable];
             var value = EmitValue(assignment.Value);
-            if (_valueTypes[value - 1] != TypeRow(PrimitiveType.Int32))
+            var variableType = _function.Variables[assignment.Variable].Type;
+            if (!IsOutputScalarType(variableType)
+                || _valueTypes[value - 1] != TypeRow(variableType))
             {
-                throw Unsupported("Output assignment requires an int32 value.");
+                throw Unsupported("Output assignment requires an exactly typed scalar value.");
             }
             if (place == 0)
             {
@@ -807,7 +820,7 @@ public static partial class TrRmExecutableCompiler
                         WriteInstruction(_operations, 0x0D, width, 0);
                         Write(_operations, (ulong)loadResult, width);
                         Write(_operations, (ulong)handle, width);
-                        _ = AddValue(PrimitiveType.Int32, 0, (uint)offset);
+                        _ = AddValue(read.Type, 0, (uint)offset);
                         UseValue(handle, _operationCount);
                         UsePlace(place, _operationCount);
                         _operationCount++;
@@ -1100,21 +1113,23 @@ public static partial class TrRmExecutableCompiler
                 var value = call.Arguments[argument];
                 if (parameter.IsOut || parameter.IsInit)
                 {
-                    if (!parameter.IsOut || !parameter.IsInit || parameter.Type != PrimitiveType.Int32
+                    if (!parameter.IsOut || !parameter.IsInit || !IsOutputScalarType(parameter.Type)
                         || value is not BoundOutArgument
                         {
                             IsInit: true,
                             DeclaresVariable: false,
-                            Type: PrimitiveType.Int32,
+                            Type: var outputType,
                         } output
+                        || outputType != parameter.Type
                         || (uint)output.Variable >= (uint)_placeByVariable.Length
                         || _placeByVariable[output.Variable] == 0
+                        || _function.Variables[output.Variable].Type != parameter.Type
                         || output.Variable < _function.ParameterCount
                         || !_placeDeclared[_placeByVariable[output.Variable]]
                         || _placeInitialized[_placeByVariable[output.Variable]]
                         || !outputTargets.Add(output.Variable))
                     {
-                        throw Unsupported("Mode 0x02 requires a distinct vacant local int32 place.");
+                        throw Unsupported("Mode 0x02 requires a distinct vacant local place of the formal type.");
                     }
                     var place = _placeByVariable[output.Variable];
                     arguments[argument] = _placeHandles[place];
@@ -1208,7 +1223,7 @@ public static partial class TrRmExecutableCompiler
                 UsePlace(place, _operationCount);
                 if (_places[place].IsParameter && !_placeInitialized[place])
                 {
-                    throw Unsupported("Every init ref<int32> formal must be initialized before normal return.");
+                    throw Unsupported("Every init ref scalar formal must be initialized before normal return.");
                 }
             }
             _ended = true;
@@ -1216,7 +1231,6 @@ public static partial class TrRmExecutableCompiler
 
         private byte[] BuildBody()
         {
-            var int32TypeId = BodyTypeId(TypeRow(PrimitiveType.Int32));
             var localWidth = Width((ulong)Math.Max(
                 Math.Max(_valueTypes.Count, _places.Count - 1),
                 Math.Max(_operationCount, _parameterValues.Count)));
@@ -1283,7 +1297,8 @@ public static partial class TrRmExecutableCompiler
             }
             for (var place = 1; place < _places.Count; place++)
             {
-                Write(body, (ulong)int32TypeId, localWidth);
+                var type = _function.Variables[_places[place].Variable].Type;
+                Write(body, (ulong)_bodyTypeIds[TypeRow(type)], localWidth);
                 Write(body, 0, localWidth); // function-root region
                 body.Add(0x04); // initially vacant, non-unique, non-rebindable
                 Write(body, 1, localWidth); // one block uses the place
