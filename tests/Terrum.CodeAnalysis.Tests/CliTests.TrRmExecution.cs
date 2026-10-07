@@ -56,6 +56,50 @@ public sealed partial class CliTests
     }
 
     [Fact]
+    public async Task PersistedInitOutputCallsRunAndBuildWithoutProducerSourceAsync()
+    {
+        const string source = """
+            int32 Fill(int32 prefix, init ref<int32> result, int32 suffix) {
+                result = prefix + suffix;
+                return suffix;
+            }
+            int32 Main() {
+                init int32 result;
+                int32 status = Fill(20, init result, 2);
+                return result + status;
+            }
+            """;
+        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-init-output-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var executable = prefix + ".exe";
+        try
+        {
+            var (compiled, compileOutput, compileError) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "compile-trrm", "-", "--identity",
+                "init-output", "-o", artifact, "--runtime", "fail-fast", "--json");
+            Assert.True(compiled == 0, $"{compileOutput}{Environment.NewLine}{compileError}");
+            Assert.Empty(compileError);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.Equal(24, ran);
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+
+            var (built, buildOutput, buildError) = await RunAsync([], "build-trrm", artifact,
+                "-o", executable, "--runtime", "fail-fast", "--json");
+            Assert.True(built == 0, $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.Empty(buildError);
+            Assert.Equal(24, await ExecuteTrRmImageAsync(executable));
+        }
+        finally
+        {
+            File.Delete(artifact);
+            File.Delete(executable);
+        }
+    }
+
+    [Fact]
     public async Task PersistedNestedAcyclicBreaksRunAndBuildWithoutProducerSourceAsync()
     {
         const string source = """
