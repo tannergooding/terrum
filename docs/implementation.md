@@ -149,6 +149,16 @@ supplied byte words and returns the encoding and content byte length. It checks
 byte range, assigned flags, row extent, zero terminator and alignment padding,
 but deliberately leaves UTF-8/16/32 scalar validity, ASCII content, name
 emptiness and embedded-zero policy to reference-use decoding.
+The `StringRowText` candidate layers strict content decoding over that shape
+check without allocating a string. It exposes scalar counts and zero-based
+Unicode-scalar reads for name and namespace rows, rejects embedded U+0000,
+uses strict ASCII/UTF-8/UTF-16LE/UTF-32LE decoding, and permits empty
+namespaces but not empty names. ASCII content accepts only `0x01` through
+`0x7F`; BOMs and Unicode noncharacters remain ordinary content. Each query
+validates the complete row before publishing output, so malformed suffixes
+cannot yield a valid prefix; repeated indexed reads rescan the row. It applies
+no normalization, case folding or identifier grammar and does not replace the
+hosted reader.
 The `VariableTableIndex` candidate validates the complete offset index and
 returns one requested row's data-relative extent using caller-supplied minimum
 row size and one- or four-byte alignment. It checks the record-count limit,
