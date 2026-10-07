@@ -2160,6 +2160,18 @@ validity with a single hosted lexer token and lengths with strict host
 encoders; semantic-module tests compare all selector results with aggregate
 `StringLiteral.TryGet*Length` over the existing exhaustive scalar corpus.
 This adds sizing evidence only, not encoding, scanner or frontend support.
+`GetStringNameRowByteLengthOrMinusOne(start, length)` separately measures a
+validated, nonempty UTF-8 metadata-name row, including its fixed header,
+terminator and four-byte padding; it returns `-1` for an invalid spelling,
+empty text, embedded NUL or a row too large for its encoded content-length
+field. After complete literal validation, it uses the same strict UTF-8
+measurement pass as the encoded-length query and is exported only from the
+provisional source-grant companion. Direct DLL
+tests compare it with host UTF-8 lengths and the current row framing across
+exact slices, malformed literals and maximum grants. This is measurement
+support only: it neither allocates nor emits a row and does not implement
+registered string-target binding or move frontend verification/emission out
+of the hosted compiler.
 `GetHexFloat32LiteralBitsOrMinusOne(start, length)` and
 `GetHexFloat64LiteralBitsOrMinusOne(start, length)` provisionally convert one
 caller-delimited, grammar-shaped hexadecimal-float slice directly to positive

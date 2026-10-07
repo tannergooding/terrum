@@ -37,6 +37,7 @@ public sealed class NativeSourceGrantLibraryTests
     private const string StringLiteralScalarCountExport = "Terrum.CodeAnalysis.GetStringLiteralScalarCountOrMinusOne";
     private const string StringLiteralScalarAtExport = "Terrum.CodeAnalysis.GetStringLiteralScalarOrMinusOne";
     private const string StringLiteralEncodedLengthExport = "Terrum.CodeAnalysis.GetStringLiteralEncodedLengthOrMinusOne";
+    private const string StringNameRowByteLengthExport = "Terrum.CodeAnalysis.GetStringNameRowByteLengthOrMinusOne";
     private const string HexFloat32BitsExport = "Terrum.CodeAnalysis.GetHexFloat32LiteralBitsOrMinusOne";
     private const string HexFloat64BitsExport = "Terrum.CodeAnalysis.GetHexFloat64LiteralBitsOrMinusOne";
     private const string DecimalFloat32BitsExport = "Terrum.CodeAnalysis.GetDecimalFloat32LiteralBitsOrMinusOne";
@@ -946,7 +947,7 @@ public sealed class NativeSourceGrantLibraryTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
-    public void StringLiteralEncodedLengthMatchesHostEncoders(BoundRuntimePolicy policy)
+    public void StringLiteralLengthsMatchHostEncodersAndNameRows(BoundRuntimePolicy policy)
     {
         Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
@@ -967,12 +968,18 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
             Assert.IsType<BoundProgram>(compilation.Program),
-            [StringLiteralEncodedLengthExport], (NativeRuntimePolicy)policy);
-        var export = Assert.Single(artifact.Exports);
+            [StringLiteralEncodedLengthExport, StringNameRowByteLengthExport], (NativeRuntimePolicy)policy);
+        var export = Assert.Single(artifact.Exports,
+            static item => item.Name == StringLiteralEncodedLengthExport);
         Assert.True(export.SourceDependent);
         Assert.Equal(PrimitiveType.Int32, export.ReturnType);
         Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32],
             export.ParameterTypes.ToArray());
+        var nameRowLengthExport = Assert.Single(artifact.Exports,
+            static item => item.Name == StringNameRowByteLengthExport);
+        Assert.True(nameRowLengthExport.SourceDependent);
+        Assert.Equal(PrimitiveType.Int32, nameRowLengthExport.ReturnType);
+        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], nameRowLengthExport.ParameterTypes.ToArray());
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-string-literal-length-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -1001,6 +1008,20 @@ public sealed class NativeSourceGrantLibraryTests
                     {
                         return null;
                     }
+                }
+                int? TryGetStringNameRowLength(string text)
+                {
+                    if (text.Length == 0 || text.Contains('\0'))
+                    {
+                        return null;
+                    }
+                    int? contentBytes = TryGetByteCount(strictUtf8, text);
+                    if (contentBytes is null || contentBytes.Value > 16_777_215)
+                    {
+                        return null;
+                    }
+                    var extent = 5 + contentBytes.Value;
+                    return (extent + 3) & ~3;
                 }
 
                 (string Text, string Source, int Start, int Length, bool IsValid)[] fixtures = [
@@ -1046,6 +1067,12 @@ public sealed class NativeSourceGrantLibraryTests
                             bindings.Invoke<int>(StringLiteralEncodedLengthExport, fixture.Source.ToCharArray(),
                                 fixture.Start, fixture.Length, encoding));
                     }
+                    var expectedNameRowLength = fixture.IsValid
+                        ? TryGetStringNameRowLength(fixture.Text) ?? -1
+                        : -1;
+                    Assert.Equal(expectedNameRowLength,
+                        bindings.Invoke<int>(StringNameRowByteLengthExport, fixture.Source.ToCharArray(),
+                            fixture.Start, fixture.Length));
                 }
 
                 foreach (var invalidEncoding in new[] { -1, 6, int.MaxValue })
@@ -1053,6 +1080,14 @@ public sealed class NativeSourceGrantLibraryTests
                     Assert.Equal(-1,
                         bindings.Invoke<int>(StringLiteralEncodedLengthExport, "\"A\"".ToCharArray(),
                             0, 3, invalidEncoding));
+                }
+                foreach (var (start, length) in new[] {
+                    (-1, 3), (0, int.MaxValue), (int.MaxValue, 3), (0, 1),
+                })
+                {
+                    Assert.Equal(-1,
+                        bindings.Invoke<int>(StringNameRowByteLengthExport, "\"A\"".ToCharArray(),
+                            start, length));
                 }
 
                 foreach (var (start, length) in new[] {
@@ -1072,6 +1107,9 @@ public sealed class NativeSourceGrantLibraryTests
                         bindings.Invoke<int>(StringLiteralEncodedLengthExport,
                             maximumAsciiSource.ToCharArray(), 0, maximumAsciiSource.Length, encoding));
                 }
+                Assert.Equal(16_388,
+                    bindings.Invoke<int>(StringNameRowByteLengthExport,
+                        maximumAsciiSource.ToCharArray(), 0, maximumAsciiSource.Length));
 
                 var maximumUtf8Text = new string('\u0800', 16_382);
                 var maximumUtf8Source = "\"" + maximumUtf8Text + "\"";
@@ -1090,6 +1128,9 @@ public sealed class NativeSourceGrantLibraryTests
                         bindings.Invoke<int>(StringLiteralEncodedLengthExport,
                             maximumUtf8Source.ToCharArray(), 0, maximumUtf8Source.Length, encoding));
                 }
+                Assert.Equal(49_152,
+                    bindings.Invoke<int>(StringNameRowByteLengthExport,
+                        maximumUtf8Source.ToCharArray(), 0, maximumUtf8Source.Length));
 
                 var maximumLatin1Text = new string('\u00FF', 16_382);
                 var maximumLatin1Source = "\"" + maximumLatin1Text + "\"";
@@ -1378,7 +1419,7 @@ public sealed class NativeSourceGrantLibraryTests
             SourceCodeUnitExport,
             SourceLineContentEndExport, LineCountExport, SourceLineEndExport, SourceLineNumberExport,
             SourceOffsetExport, SourceLengthExport, StringLiteralEncodedLengthExport,
-            StringLiteralScalarCountExport, StringLiteralScalarAtExport,
+            StringLiteralScalarCountExport, StringLiteralScalarAtExport, StringNameRowByteLengthExport,
             CanParseChar16Export,
             CanParseInt32Export, CanParseInt64Export, CanParseUInt32Export, CanParseUInt64Export,
             ParseChar16Export, ParseInt32Export, ParseInt64Export, ParseUInt32Export, ParseUInt64Export,
@@ -1417,6 +1458,11 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.Equal(PrimitiveType.Int32, encodedLength.ReturnType);
         Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32],
             encodedLength.ParameterTypes.ToArray());
+        var nameRowLength = Assert.Single(exports,
+            static export => export.Name == StringNameRowByteLengthExport);
+        Assert.True(nameRowLength.SourceDependent);
+        Assert.Equal(PrimitiveType.Int32, nameRowLength.ReturnType);
+        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], nameRowLength.ParameterTypes.ToArray());
         foreach (var exportName in new[] { HexFloat32BitsExport, HexFloat64BitsExport })
         {
             var hexFloatBits = Assert.Single(exports, export => export.Name == exportName);
@@ -1460,6 +1506,8 @@ public sealed class NativeSourceGrantLibraryTests
                 bindings.Invoke<int>(StringLiteralScalarAtExport, "\"a\\n\"".ToCharArray(), 0, 5, 1));
             Assert.Equal(2,
                 bindings.Invoke<int>(StringLiteralEncodedLengthExport, "\"a\\n\"".ToCharArray(), 0, 5, 2));
+            Assert.Equal(8,
+                bindings.Invoke<int>(StringNameRowByteLengthExport, "\"a\\n\"".ToCharArray(), 0, 5));
             var parserSource = "!1__2?".ToCharArray();
             Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseUInt64Export, parserSource, 1, 4, (uint)10));
             Assert.Equal(12UL, bindings.Invoke<ulong>(ParseUInt64Export, parserSource, 1, 4, (uint)10));

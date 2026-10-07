@@ -7,8 +7,26 @@ public static int32 GetStringLiteralEncodedLengthOrMinusOne(int32 start, int32 l
         return -1;
     }
 
+    return GetStringLiteralEncodedLengthCore(start, length, encoding, false, false);
+}
+
+public static int32 GetStringNameRowByteLengthOrMinusOne(int32 start, int32 length)
+{
+    int32 contentBytes = GetStringLiteralEncodedLengthCore(start, length, 2, true, true);
+    if (contentBytes < 0 || contentBytes > 16777215)
+    {
+        return -1;
+    }
+
+    int32 extent = 5 + contentBytes;
+    return extent + ((4 - (extent & 3)) & 3);
+}
+
+int32 GetStringLiteralEncodedLengthCore(int32 start, int32 length, int32 encoding,
+    bool rejectEmpty, bool rejectEmbeddedZero)
+{
     int32 scalarCount = GetStringLiteralScalarCountOrMinusOne(start, length);
-    if (scalarCount < 0)
+    if (scalarCount < 0 || (rejectEmpty && scalarCount == 0))
     {
         return -1;
     }
@@ -51,6 +69,11 @@ public static int32 GetStringLiteralEncodedLengthOrMinusOne(int32 start, int32 l
         else
         {
             scalar = int32(character);
+        }
+
+        if (rejectEmbeddedZero && scalar == 0)
+        {
+            return -1;
         }
 
         mut int32 encodedWidth = 0;

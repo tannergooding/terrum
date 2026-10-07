@@ -6,8 +6,9 @@
 
 The self-hosted string-literal component validates and decodes string literals,
 and the string-row component already measures and encodes the UTF-8
-`StringNameRow` representation. The scalar source-grant companion exposes
-literal queries, but registered string targets remain unsupported. The
+`StringNameRow` representation. The scalar source-grant companion also exposes
+the row's validated byte-length query, but registered string targets and row
+emission through that companion remain unsupported. The
 accepted builder/handler direction requires explicit target selection,
 eager source capture, defined ownership transfer, refusal without rollback,
 and publication only after validation and freezing; it does not define this

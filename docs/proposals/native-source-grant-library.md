@@ -9,7 +9,8 @@ semantic-module JIT execution. Ordinary native-library emission still rejects
 programs that require `Host.Source`; an explicit opt-in CLI path now emits a
 separate provisional Windows x64 companion for a checked scalar adapter and
 a scalar source-length, source-code-unit, source-offset, source-line-count
-and source-position queries.
+and source-position queries, plus validated string-literal length queries
+including UTF-8 name-row size.
 This proposal addresses promotion of that native-library boundary; it does
 not extend the scanner profile or move scalar frontend verification or
 emission out of the hosted compiler.
@@ -434,6 +435,32 @@ under both policies, including empty literals, every valid scalar in bounded
 batches, unrepresentable single-byte values and maximum grants. Do not expose
 encoded buffers, literal aggregates, cursors, scanner or frontend support,
 widen the classifier, change the source-free DLL, or approve a stable ABI.
+
+### Provisional scalar UTF-8 string-name-row length export
+
+**Question:** Should the maintained companion expose the size of the existing
+UTF-8 `StringNameRow` representation without exporting or allocating a row?
+
+**Summary:** The self-hosted `StringRow` component measures a nonempty text
+row, rejects embedded zero, and includes the four-byte header, one-byte
+terminator, and final four-byte alignment. A scalar-only source-grant query
+can reuse the validated literal and strict UTF-8 measurement path, then add
+the row framing size; it does not require exporting an aggregate literal,
+workspace, or encoded buffer.
+
+**Recommendation:** Keep
+`GetStringNameRowByteLengthOrMinusOne(int32 start, int32 length) -> int32` as
+provisional measurement support. Return `-1` for invalid literal spelling,
+empty text, embedded zero, or content exceeding the row's 24-bit byte count;
+otherwise return the complete row byte length including framing and padding.
+The maintained companion implementation compares direct results with strict
+host UTF-8 byte counts and the existing row framing, including empty/NUL
+refusal, malformed literals, exact slices and maximum grants. This does not
+emit or allocate a row and does not implement the separately proposed
+registered string-target binding
+([proposal](registered-string-target-binding.md)).
+Keep source-grant ABI promotion, the source-free DLL, classifier boundaries,
+and hosted frontend verification/emission unchanged.
 
 ### Provisional scalar source-offset export
 
