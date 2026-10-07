@@ -332,6 +332,139 @@ public sealed partial class GenericControlFlowModuleTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    public async Task FixedSideOutputsReplacePrivateSpecializationsAcrossModulesAsync(
+        NativeRuntimePolicy policy, bool explicitType)
+    {
+        const string ReplacementTemplate = """
+            struct Pair {
+                public int64 First;
+                public int64 Second;
+                public Pair(int64 first, int64 second) { First = first; Second = second; }
+            }
+            int32 Fill<T>(T value, bool complete, out T copied, out int32 count,
+                init ref<float64> score) where T : [Copy] {
+                copied = value;
+                count = 2;
+                score = float64(3.5);
+                require complete;
+                return 7;
+            }
+            void FillInit<U>(U value, bool complete, init ref<U> initialized, out int32 count,
+                init ref<float64> score) where U : [Copy] {
+                initialized = value;
+                count = 3;
+                score = float64(4.5);
+                require complete;
+            }
+            public int32 PowerProbe() {
+                mut Pair copied = new Pair(0, 0);
+                mut int32 count = 0;
+                init float64 score;
+                int32 status = FILL(new Pair(42, 2), true, out copied, out count, init score);
+                init Pair initialized;
+                mut int32 initCount = 0;
+                init float64 initScore;
+                FILLINIT(new Pair(40, 2), true, init initialized, out initCount, init initScore);
+                if (status != 7 || copied.First != 42 || copied.Second != 2 || count != 2
+                    || score != float64(3.5) || initialized.First != 40 || initialized.Second != 2
+                    || initCount != 3 || initScore != float64(4.5)) { return 1; }
+                FAILURE_PATH
+                return 42;
+            }
+            """;
+        var failurePath = policy == NativeRuntimePolicy.CheckedExceptions
+            ? """
+                mut Pair failedCopy = new Pair(0, 0);
+                mut int32 failedCount = 0;
+                init float64 failedScore;
+                init Pair failedInitialized;
+                mut int32 failedInitCount = 0;
+                init float64 failedInitScore;
+                unsafe {
+                    try {
+                        Fill(new Pair(1, 2), false, out failedCopy, out failedCount, init failedScore);
+                        return 2;
+                    } catch {
+                        if (failedScore is init) { return 3; }
+                        int32 retryStatus = Fill(new Pair(44, 2), true,
+                            out failedCopy, out failedCount, init failedScore);
+                        if (retryStatus != 7 || failedCopy.First != 44 || failedCount != 2
+                            || failedScore != float64(3.5)) { return 4; }
+                    }
+                    try {
+                        FillInit(new Pair(1, 2), false, init failedInitialized,
+                            out failedInitCount, init failedInitScore);
+                        return 5;
+                    } catch {
+                        if (failedInitialized is init || failedInitScore is init) { return 6; }
+                        FillInit(new Pair(45, 2), true, init failedInitialized,
+                            out failedInitCount, init failedInitScore);
+                        if (failedInitialized.First != 45 || failedInitCount != 3
+                            || failedInitScore != float64(4.5)) { return 7; }
+                    }
+                }
+                """
+            : string.Empty;
+        var fillCall = explicitType ? "Fill<Pair>(" : "Fill(";
+        var fillInitCall = explicitType ? "FillInit<Pair>(" : "FillInit(";
+        var replacementSource = ReplacementTemplate
+            .Replace("FILL(", fillCall, StringComparison.Ordinal)
+            .Replace("FILLINIT(", fillInitCall, StringComparison.Ordinal)
+            .Replace("FAILURE_PATH", failurePath, StringComparison.Ordinal);
+
+        var original = ModuleCompiler.CreateProducer(Compile(Stub, policy), ["PowerProbe"]);
+        var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return PowerProbe(); }",
+            policy, ModuleCompiler.CreateReference(original), library: false), original);
+        var consumerHash = SHA256.HashData(consumer);
+        var replacement = ModuleCompiler.CreateProducer(Compile(replacementSource, policy), ["PowerProbe"]);
+        var linked = ModuleCompiler.Link(consumer, replacement);
+        var fill = Assert.Single(linked.Functions,
+            static function => function.Name == "$producer.Fill<Pair>");
+        Assert.Equal(PrimitiveType.Int32, fill.ReturnType);
+        Assert.Equal(PrimitiveType.Int32, fill.Variables[3].Type);
+        Assert.True(fill.Variables[2].IsOut);
+        Assert.False(fill.Variables[2].IsInit);
+        Assert.True(fill.Variables[3].IsOut);
+        Assert.False(fill.Variables[3].IsInit);
+        Assert.Equal(PrimitiveType.Float64, fill.Variables[4].Type);
+        Assert.True(fill.Variables[4].IsOut);
+        Assert.True(fill.Variables[4].IsInit);
+        var fillInit = Assert.Single(linked.Functions,
+            static function => function.Name == "$producer.FillInit<Pair>");
+        Assert.Equal(PrimitiveType.Void, fillInit.ReturnType);
+        Assert.True(fillInit.Variables[2].IsOut);
+        Assert.True(fillInit.Variables[2].IsInit);
+        Assert.Equal(PrimitiveType.Int32, fillInit.Variables[3].Type);
+        Assert.True(fillInit.Variables[3].IsOut);
+        Assert.False(fillInit.Variables[3].IsInit);
+        Assert.Equal(PrimitiveType.Float64, fillInit.Variables[4].Type);
+        Assert.True(fillInit.Variables[4].IsOut);
+        Assert.True(fillInit.Variables[4].IsInit);
+        Assert.Equal(42, NativeJit.Execute(linked, policy));
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.Equal(consumerHash, SHA256.HashData(consumer));
+
+        var nativeOriginal = NativeModuleCompiler.CreateProducer(Compile(Stub, policy),
+            ["PowerProbe"], "NodeB", policy);
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(
+            "int32 Main() { return PowerProbe(); }", policy,
+            NativeModuleCompiler.CreateGraphReference([nativeOriginal]), library: false),
+            [nativeOriginal], policy);
+        var nativeHash = SHA256.HashData(nativeConsumer);
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(Compile(replacementSource, policy),
+            ["PowerProbe"], "NodeB", policy);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer,
+            [nativeReplacement], TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer,
+            [nativeReplacement], Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CopyOutVarDestinationsPublishForNonBooleanAndVoidCallsAsync(

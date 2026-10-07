@@ -403,6 +403,37 @@ public sealed class StaticProtocolOutputTests
     }
 
     [Theory]
+    [InlineData("count = 2;")]
+    [InlineData("score = float64(3.5);")]
+    public void GenericFixedVoidOutputsRequirePublicationOnFallthrough(string body)
+    {
+        var source = Value
+            + "void Fill<T>(T value, out T result, out int32 count, init ref<float64> score)"
+            + " where T : [Copy] { result = value; " + body + " }"
+            + "int32 Main() { return 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void GenericFixedOutputsDoNotInferGenericTypeFromDestinations()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Fill<T>(init ref<T> result, out int32 count, init ref<float64> score)
+                where T : [Copy] {
+                for (;;) { }
+            }
+            int32 Main() {
+                Fill(init var result, out var count, init var score);
+                return 42;
+            }
+            """));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
     [InlineData("float32", "float32(-0.0)")]
     [InlineData("float64", "float64(-0.0)")]
     public void GenericFloatingResultsPreserveOutputModes(string resultType, string resultValue)

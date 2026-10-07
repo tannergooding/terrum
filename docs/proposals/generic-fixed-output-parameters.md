@@ -4,11 +4,11 @@
 
 ## Summary
 
-Compilation-local `[Copy]` generic templates with fixed non-Boolean or `void`
-results currently require every output parameter to use a generic type
-parameter. Consider allowing fixed scalar `out` and `init ref<T>` side outputs
-alongside at least one generic output, while retaining each output's existing
-mode and publication contract.
+Compilation-local `[Copy]` generic templates provisionally allow fixed scalar
+`out` and `init ref<T>` side outputs alongside at least one generic-typed
+output. This remains an unapproved hosted experiment. The existing broad module
+fixture couples fixed side outputs with mixed generic outputs and floating
+results; separate evidence is tracked below without changing those boundaries.
 
 ## Recommendation
 
@@ -43,5 +43,18 @@ Exercise direct native execution and semantic/native private-specialization
 replacement behind unchanged consumers under both runtime policies. Retain
 the existing Boolean mixed-mode behavior.
 
-This proposal does not approve the target contract. Any implementation is
-provisional evidence pending review.
+**Progress:** Binding and direct native tests cover explicit/inferred
+substitutions, scalar fixed outputs, mode preservation, normal-return
+publication and checked failure. The new fixed-side-output replacement fixture
+uses non-floating `int32` and `void` results, generic output anchors in
+separate helpers, and fixed `out int32`/`init ref<float64>` sides. It asserts
+their exact metadata and preserves consumer bytes while exercising semantic
+JIT/AOT and native graph AOT/JIT under both runtime policies; the checked case
+also verifies write-then-fail vacancy and retry for `init` destinations. Fixed
+outputs do not infer generic substitutions, and proof rejects missing fixed
+outputs on both explicit returns and implicit `void` fallthrough. The separate
+mixed-output and floating-result proposals remain unapproved and are not
+promoted by this evidence.
+
+This proposal does not approve the target contract. The implementation and
+tests remain provisional evidence pending review.
