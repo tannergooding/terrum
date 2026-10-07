@@ -1313,6 +1313,8 @@ internal sealed partial class PeCompiler
                 return Math.Max(ExpressionSpills(conditional.Condition, ref maximumArguments),
                     Math.Max(ExpressionSpills(conditional.WhenTrue, ref maximumArguments),
                         ExpressionSpills(conditional.WhenFalse, ref maximumArguments)));
+            case BoundUnsafeExpression unsafeExpression:
+                return ExpressionSpills(unsafeExpression.Expression, ref maximumArguments);
             case BoundCall call:
                 maximumArguments = Math.Max(maximumArguments,
                     call.Arguments.Length + (IsIndirect(call.Type) ? 1 : 0)
@@ -1511,6 +1513,9 @@ internal sealed partial class PeCompiler
                 case BoundCoalesce coalesce:
                     VisitExpression(coalesce.Optional);
                     VisitExpression(coalesce.Fallback);
+                    break;
+                case BoundUnsafeExpression unsafeExpression:
+                    VisitExpression(unsafeExpression.Expression);
                     break;
                 case BoundCall call:
                     foreach (var argument in call.Arguments)
@@ -3524,6 +3529,9 @@ internal sealed partial class PeCompiler
                 _code.PatchRelative(done, _code.Position);
                 break;
             }
+            case BoundUnsafeExpression unsafeExpression:
+                Expression(unsafeExpression.Expression, spill);
+                break;
             case BoundCall call:
                 var argumentsBase = spill + 1;
                 List<(int Value, int Live, PrimitiveType Type)>? staged = null;

@@ -243,7 +243,7 @@ frontend with source-audited `unsafe(expr)` scopes and caller-unsafe callable
 declarations. Both projection families use only v85; verification and emission
 remain hosted.
 
-Separately, semantic-module revision 64 provisionally persists top-level
+Separately, semantic-module revision 65 provisionally persists top-level
 caller-unsafe contracts, bounded readonly-instance and static method slices,
 and readonly instance and storage-free static getters with scalar or
 recursively exportable non-unique `Copy` results for public non-unique owners;
@@ -251,7 +251,10 @@ it also persists caller-unsafe public instance fields on public non-unique
 `Copy` structs with recursively exportable layouts. Calls and field reads,
 writes and updates, plus existing mutable receiver loans through eligible
 field paths, require explicit `unsafe { }` blocks, from which readers
-reconstruct authorization at every field edge. Executable TRRM provisionally
+reconstruct authorization at every field edge. Revision 65 additionally
+persists `unsafe(expr)` extents for caller-unsafe top-level functions with
+scalar by-value signatures; the expression scope does not authorize unsafe
+members or fields and cannot carry reference/output loans. Executable TRRM provisionally
 round-trips top-level caller-unsafe Effects and supports calls only inside
 validated indexed Body unsafe scopes. Class/static/foreign fields, readonly
 field loans, cross-module reference/output loans and other unsafe members
@@ -277,13 +280,14 @@ prerequisite has already been met.
 1. **Full runtime/structured contracts — references and safety.** General
    reference/access/loan metadata and caller-unsafe member contracts still
    need definition before wider use across calls or imports. Structured
-   semantic-module revision 64 provisionally carries top-level caller-unsafe
+   semantic-module revision 65 provisionally carries top-level caller-unsafe
    obligations, narrow readonly-instance and static `Copy` method slices,
    recursively exportable by-value Copy signatures, and readonly instance and
    storage-free static getters with recursively exportable `Copy` results,
    plus caller-unsafe public instance fields and existing mutable receiver
    loans through eligible public `Copy` struct paths, all through explicit
-   unsafe-block scopes. Revision 64 also provisionally persists identity for
+   unsafe-block scopes, with revision 65 adding the narrower top-level scalar
+   `unsafe(expr)` call scope. Revision 64 also provisionally persists identity for
    supported static operators on public `Copy` structs, preserving unsafe
    effects and nominal-update target checks. These bounded implementations do
    not settle

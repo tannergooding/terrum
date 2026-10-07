@@ -48,15 +48,16 @@ contracts for top-level functions and calls enclosed by explicit `unsafe { }`
 blocks in structured semantic modules only. Persist the declaration
 obligation, retain the `BoundUnsafe` scope, and reconstruct call authorization
 from that scope when reading; do not trust a serialized authorization bit by
-itself. `unsafe(expr)` remains same-compilation-only because its scope is
-currently represented only by a bound-call authorization fact. Keep unsafe
-fields and operators outside this semantic-module slice. Top-level
-declarations also provisionally round-trip the assigned Effects bit in
-executable TRRM, but that metadata alone does not authorize calls; executable
-call support is limited to the separately validated indexed unsafe regions in
-section 3. This slice changes the internal semantic-module format and must
-advance its revision. It is an implementation experiment, not approval of
-general reference metadata or the broader proposal.
+itself. Revision 65 separately adds a narrow `unsafe(expr)` slice for
+caller-unsafe top-level functions with scalar by-value signatures; expression
+scopes still do not authorize unsafe fields, members or reference/output
+loans. Keep broader unsafe fields and operators outside this semantic-module
+slice. Top-level declarations also provisionally round-trip the assigned
+Effects bit in executable TRRM, but that metadata alone does not authorize
+calls; executable call support is limited to the separately validated indexed
+unsafe regions in section 3. This slice changes the internal semantic-module
+format and must advance its revision. It is an implementation experiment, not
+approval of general reference metadata or the broader proposal.
 
 **Implemented provisionally:** Semantic-module revision 61 persists top-level
 caller obligations and the bounded method, instance-getter and static-getter
@@ -73,6 +74,25 @@ including stack-passed scalar arguments, reordered provider type tables, safe
 replacements, forged unique contracts and bounded rejection of repeated
 nested-layout imports. These checks do not approve the broader proposal or add
 source-free executable authorization.
+
+### Implemented provisionally in semantic-module revision 65: expression-scoped top-level calls
+
+**Summary:** The accepted grammar lets `unsafe(expr)` authorize caller-unsafe
+operations within one expression. Earlier hosted binding flattened that scope
+into authorization facts on bound operations, so semantic-module writers could
+not distinguish an expression-scoped call from an unscoped forged
+authorization and rejected it. The existing `BoundUnsafe` statement scope
+remains independently retained and reconstructed structurally.
+
+**Implementation:** Binding retains an explicit expression-scope node, and
+revision 65 serializes its exact wrapped-expression extent. Readers reconstruct
+authorization from that structural containment rather than trusting a
+serialized authorization bit. Expression scopes may authorize only existing
+caller-unsafe top-level functions with scalar by-value signatures. Caller-
+unsafe fields and members, expression-scoped reference/output loans, and
+executable TRRM expression scopes remain outside this slice. This preserves
+the source contract without approving the broader caller-obligation metadata
+proposal.
 
 **Revision-59 recommendation:** Keep the by-value aggregate-signature
 extension provisional and limited to public, non-unique `Copy` structs whose
@@ -328,8 +348,9 @@ individual call was authorized.
 ### 3. How should executable Bodies validate caller-unsafe scope?
 
 **Summary:** The source caller obligation and assigned Effects bit `0x04` are
-settled, and semantic-module revision 64 reconstructs authorization from
-explicit `BoundUnsafe` scopes. Executable TRRM provisionally round-trips
+settled, and semantic-module revisions 64–65 reconstruct authorization from
+explicit `BoundUnsafe` and bounded `BoundUnsafeExpression` scopes.
+Executable TRRM provisionally round-trips
 caller-unsafe declarations and supports calls only inside validated indexed
 Body unsafe scopes. Compact-linear Bodies still cannot prove explicit
 unsafe-block enclosure.

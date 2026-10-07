@@ -185,6 +185,9 @@ public static partial class SemanticVerifier
                 case BoundSpanAdvance advance:
                     Source(destination, advance.View, depth + 1);
                     break;
+                case BoundUnsafeExpression unsafeExpression:
+                    Source(destination, unsafeExpression.Expression, depth + 1);
+                    break;
                 case BoundCall call when (uint)call.Function < (uint)program.Functions.Length
                     && program.Functions[call.Function].IsConstructor
                     && TokenSpanContract.IsCursor(call.Type, program.Structures):
@@ -413,6 +416,8 @@ public static partial class SemanticVerifier
                 return facts.Sources[loan.Variable] ?? EmptyBackingSources;
             case BoundFieldRead field:
                 return BackingOf(field.Receiver, facts, program, ref remaining, depth + 1);
+            case BoundUnsafeExpression unsafeExpression:
+                return BackingOf(unsafeExpression.Expression, facts, program, ref remaining, depth + 1);
             case BoundSpanAdvance advance:
                 return BackingOf(advance.View, facts, program, ref remaining, depth + 1);
             case BoundCall call when (uint)call.Function < (uint)program.Functions.Length

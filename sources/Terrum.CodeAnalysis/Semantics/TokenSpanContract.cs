@@ -161,6 +161,9 @@ internal static class TokenSpanContract
                 case BoundReturn { Value: BoundExpression value }:
                     pending.Push(value);
                     break;
+                case BoundUnsafeExpression unsafeExpression:
+                    pending.Push(unsafeExpression.Expression);
+                    break;
                 case BoundSnapshotSpan or BoundSpanLength or BoundSpanRead or BoundSpanAdvance:
                     return true;
                 case BoundCall call:

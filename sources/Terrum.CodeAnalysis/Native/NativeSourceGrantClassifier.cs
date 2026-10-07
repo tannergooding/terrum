@@ -44,6 +44,9 @@ internal static class NativeSourceGrantClassifier
                     var expression = expressions.Pop();
                     switch (expression)
                     {
+                        case BoundUnsafeExpression unsafeExpression:
+                            expressions.Push(unsafeExpression.Expression);
+                            break;
                         case BoundCall call:
                             AddCall(call.Function);
                             foreach (var argument in call.Arguments)
@@ -383,6 +386,9 @@ internal static class NativeSourceGrantClassifier
                     }
                     switch (expression)
                     {
+                        case BoundUnsafeExpression unsafeExpression:
+                            expressions.Push(unsafeExpression.Expression);
+                            break;
                         case BoundConstant or BoundRead:
                             break;
                         case BoundBufferLength length when length.Buffer == 0:

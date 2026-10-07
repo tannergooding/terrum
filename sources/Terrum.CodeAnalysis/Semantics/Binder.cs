@@ -2632,7 +2632,7 @@ internal sealed partial class Binder
                 var value = BindExpression(expressionNode, null);
                 if (value.Type == PrimitiveType.Void)
                 {
-                    if (value is BoundCall)
+                    if (value is BoundCall or BoundUnsafeExpression { Expression: BoundCall })
                     {
                         return new BoundExpressionStatement(value, node.Span);
                     }
@@ -2695,10 +2695,10 @@ internal sealed partial class Binder
                     if (valueNode is not null)
                     {
                         var value = BindExpression(valueNode, PrimitiveType.Void);
-                        if (value is BoundCall call)
+                        if (value is BoundCall or BoundUnsafeExpression { Expression: BoundCall })
                         {
                             return new BoundBlock(
-                                [new BoundExpressionStatement(call, valueNode.Span), new BoundReturn(null, node.Span)],
+                                [new BoundExpressionStatement(value, valueNode.Span), new BoundReturn(null, node.Span)],
                                 node.Span);
                         }
                     }
@@ -3125,6 +3125,42 @@ internal sealed partial class Binder
         }
     }
 
+    private bool ContainsAuthorizedTopLevelCall(BoundExpression expression) => expression switch {
+        BoundUnsafeExpression unsafeExpression => ContainsAuthorizedTopLevelCall(unsafeExpression.Expression),
+        BoundRequiredConstant required => ContainsAuthorizedTopLevelCall(required.Operand),
+        BoundCall call => (call.IsUnsafeAuthorized && call.Function >= 0
+            && call.Function < _signatures.Count && _signatures[call.Function].StructName is null)
+            || call.Arguments.Any(ContainsAuthorizedTopLevelCall),
+        BoundUnary unary => ContainsAuthorizedTopLevelCall(unary.Operand),
+        BoundUpdate update => ContainsAuthorizedTopLevelCall(update.Place),
+        BoundNominalUpdate update => ContainsAuthorizedTopLevelCall(update.Place),
+        BoundCompoundAssignment compound => ContainsAuthorizedTopLevelCall(compound.Place)
+            || ContainsAuthorizedTopLevelCall(compound.Right),
+        BoundBinary binary => ContainsAuthorizedTopLevelCall(binary.Left)
+            || ContainsAuthorizedTopLevelCall(binary.Right),
+        BoundConditional conditional => ContainsAuthorizedTopLevelCall(conditional.Condition)
+            || ContainsAuthorizedTopLevelCall(conditional.WhenTrue)
+            || ContainsAuthorizedTopLevelCall(conditional.WhenFalse),
+        BoundCoalesce coalesce => ContainsAuthorizedTopLevelCall(coalesce.Optional)
+            || ContainsAuthorizedTopLevelCall(coalesce.Fallback),
+        BoundCast cast => ContainsAuthorizedTopLevelCall(cast.Operand),
+        BoundFieldRead field => ContainsAuthorizedTopLevelCall(field.Receiver),
+        BoundFieldLoan loan => ContainsAuthorizedTopLevelCall(loan.Place),
+        BoundMutableFieldLoan loan => ContainsAuthorizedTopLevelCall(loan.Place),
+        BoundViewRead view => ContainsAuthorizedTopLevelCall(view.Index),
+        BoundBufferRead buffer => ContainsAuthorizedTopLevelCall(buffer.Index),
+        BoundSpanLength length => ContainsAuthorizedTopLevelCall(length.View),
+        BoundSpanRead read => ContainsAuthorizedTopLevelCall(read.View)
+            || ContainsAuthorizedTopLevelCall(read.Index),
+        BoundSpanAdvance advance => ContainsAuthorizedTopLevelCall(advance.View),
+        BoundOptionalLift lift => ContainsAuthorizedTopLevelCall(lift.Value),
+        BoundReadonlyProjection projection => ContainsAuthorizedTopLevelCall(projection.Value),
+        BoundIsNull test => ContainsAuthorizedTopLevelCall(test.Value),
+        BoundIsSome pattern => ContainsAuthorizedTopLevelCall(pattern.Value),
+        BoundIsVariablePattern pattern => ContainsAuthorizedTopLevelCall(pattern.Value),
+        _ => false,
+    };
+
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unsupported syntax kinds are rejected by the default branch.")]
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Runtime struct IDs are represented by enum values outside the declared primitive range.")]
     private BoundExpression BindExpression(SyntaxNode node, PrimitiveType? expected)
@@ -3141,15 +3177,20 @@ internal sealed partial class Binder
 
             case SyntaxKind.UnsafeExpression:
             {
+                var alreadyUnsafe = _unsafeDepth != 0;
                 _unsafeDepth++;
+                BoundExpression operand;
                 try
                 {
-                    expression = BindExpression((SyntaxNode)node.Children[2], expected);
+                    operand = BindExpression((SyntaxNode)node.Children[2], expected);
                 }
                 finally
                 {
                     _unsafeDepth--;
                 }
+                expression = !alreadyUnsafe && ContainsAuthorizedTopLevelCall(operand)
+                    ? new BoundUnsafeExpression(operand, node.Span)
+                    : operand;
                 break;
             }
 

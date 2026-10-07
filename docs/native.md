@@ -593,7 +593,7 @@ existing initialization authority; ordinary immutable locals cannot. Failed
 initialization leaves vacancy and does not reactivate a root or cleanup bit.
 Retained end nodes were added at the v47 feature milestone and are audited through
 producer/reference/consumer linking and private native graphs. Both PE and
-JIT policies use the same lowering under current semantic-module revision 64,
+JIT policies use the same lowering under current semantic-module revision 65,
 with no native ABI/profile or scanner change. Parameter/receiver aliases, fields, indexers, const aliases and
 unresolved/vacant locals reject. General ref/pin types, enums, arbitrary
 guards/ARC, view rebinding, source-free TRRM and the compiled scalar frontend
@@ -1316,7 +1316,7 @@ cleanup. Labels may identify enclosing `while`, `for` and `do` loops.
 The bounded implementation rejects duplicate enclosing labels and permits
 reuse in disjoint scopes; the general source collision policy remains
 unspecified. The v39 feature milestone added post-tested loops and non-nearest
-transfer depths; current semantic-module revision 64 serializes these nodes
+transfer depths; current semantic-module revision 65 serializes these nodes
 when present. Native calling conventions, cleanup funclets and public ABI do
 not change.
 

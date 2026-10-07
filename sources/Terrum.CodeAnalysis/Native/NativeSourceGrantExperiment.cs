@@ -116,6 +116,9 @@ internal static class NativeSourceGrantExperiment
             }
             switch (expression)
             {
+                case BoundUnsafeExpression unsafeExpression:
+                    VisitExpression(unsafeExpression.Expression, function);
+                    break;
                 case BoundConstant:
                 case BoundRead:
                     break;

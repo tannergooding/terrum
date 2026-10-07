@@ -255,6 +255,9 @@ public sealed class Compilation
                                 expressions.Push(argument);
                             }
                             break;
+                        case BoundUnsafeExpression unsafeExpression:
+                            expressions.Push(unsafeExpression.Expression);
+                            break;
                         case BoundBinary binary:
                             expressions.Push(binary.Left);
                             expressions.Push(binary.Right);

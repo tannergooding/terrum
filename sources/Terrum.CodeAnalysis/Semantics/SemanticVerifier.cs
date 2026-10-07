@@ -770,6 +770,9 @@ public static partial class SemanticVerifier
                         throw InvalidEffect(output.Span, "Ownership");
                     }
                     break;
+                case BoundUnsafeExpression unsafeExpression:
+                    Expression(unsafeExpression.Expression, scope, depth + 1);
+                    break;
                 case BoundCall call:
                     if (call.Arguments.IsDefault)
                     {
@@ -1294,6 +1297,9 @@ public static partial class SemanticVerifier
                 case BoundRead localRead when localRead.Variable < 0 || localRead.Variable >= roots.Length
                     || (exclusive[localRead.Variable] && localRead.Variable != acquiringRoot):
                     throw InvalidEffect(localRead.Span, "Ownership");
+                case BoundUnsafeExpression unsafeExpression:
+                    Expression(unsafeExpression.Expression, depth + 1, acquiringRoot);
+                    break;
                 case BoundCall call:
                     if (call.Arguments.IsDefault)
                     {
@@ -2043,18 +2049,19 @@ public static partial class SemanticVerifier
                 failures?.Add(initialized, fieldMasks);
                 return false;
             case BoundExpressionStatement expressionStatement:
-                if (expressionStatement.Expression is not (BoundCall or BoundViewRead or BoundUpdate
+                var effect = UnwrapUnsafeExpression(expressionStatement.Expression);
+                if (effect is not (BoundCall or BoundViewRead or BoundUpdate
                     or BoundNominalUpdate or BoundCompoundAssignment))
                 {
                     throw Invalid();
                 }
-                if (IsUnique(program, expressionStatement.Expression.Type))
+                if (IsUnique(program, effect.Type))
                 {
                     throw InvalidEffect(expressionStatement.Span, "Ownership");
                 }
                 Expression(expressionStatement.Expression, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures, statementCompound: expressionStatement.Expression is BoundCompoundAssignment);
-                return expressionStatement.Expression is BoundCall statementCall
+                    ref remaining, depth + 1, failures, statementCompound: effect is BoundCompoundAssignment);
+                return effect is BoundCall statementCall
                     && program.Functions[statementCall.Function].DoesNotReturn;
             case BoundIf conditional:
                 var beforeCondition = initialized.Clone();
@@ -2937,13 +2944,23 @@ public static partial class SemanticVerifier
     }
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Unsupported token kinds must remain invalid rather than becoming accepted operators.")]
+    private static BoundExpression UnwrapUnsafeExpression(BoundExpression expression)
+    {
+        while (expression is BoundUnsafeExpression unsafeExpression)
+        {
+            expression = unsafeExpression.Expression;
+        }
+        return expression;
+    }
+
     private static void Expression(BoundExpression expression, InitializationState initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function,
         BoundProgram program, ref int remaining, int depth, FailureEdges? failures = null,
         bool statementCompound = false)
     {
         Count(ref remaining, depth);
-        if (expression is null || !ValidType(expression.Type, allowVoid: expression is BoundCall, program))
+        if (expression is null || !ValidType(expression.Type,
+            allowVoid: expression is BoundCall or BoundUnsafeExpression { Type: PrimitiveType.Void }, program))
         {
             throw Invalid();
         }
@@ -2967,6 +2984,10 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                break;
+            case BoundUnsafeExpression unsafeExpression:
+                Expression(unsafeExpression.Expression, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
                 break;
             case BoundOptionalLift lift:
                 if (!ManagedClassTypes.IsOptional(lift.Type)
@@ -4063,6 +4084,10 @@ public static partial class SemanticVerifier
         {
             return Outcome(unary.Operand, initialized, !result, ref remaining);
         }
+        if (expression is BoundUnsafeExpression unsafeExpression)
+        {
+            return Outcome(unsafeExpression.Expression, initialized, result, ref remaining);
+        }
         if (expression is BoundBinary { Operator: TokenKind.AmpersandAmpersand } and)
         {
             if (result)
@@ -4200,6 +4225,9 @@ public static partial class SemanticVerifier
         Count(ref remaining, 0);
         switch (expression)
         {
+            case BoundUnsafeExpression unsafeExpression:
+                VacateNestedOutputs(unsafeExpression.Expression, state, ref remaining);
+                break;
             case BoundCall call:
                 foreach (var argument in call.Arguments)
                 {
@@ -4385,6 +4413,8 @@ public static partial class SemanticVerifier
         }
 
         facts = expression switch {
+            BoundUnsafeExpression unsafeExpression =>
+                FlowFacts(unsafeExpression.Expression, flowFacts, ref remaining),
             BoundCall call => FlowFacts(call.Arguments, flowFacts, ref remaining),
             BoundBinary binary => AddFlowFact(AddFlowFact(0, binary.Left, flowFacts, ref remaining),
                 binary.Right, flowFacts, ref remaining),
@@ -4584,6 +4614,10 @@ public static partial class SemanticVerifier
         }
         if (expression is not BoundConditional conditional)
         {
+            if (expression is BoundUnsafeExpression unsafeExpression)
+            {
+                return KnownOptionalPresence(unsafeExpression.Expression, initialized, ref remaining);
+            }
             return structuralPresenceAnalyzed
                 ? null : KnownOptionalPresence(expression, initialized.CanBeFacts, ref remaining);
         }
@@ -4626,6 +4660,8 @@ public static partial class SemanticVerifier
 
         var canBe = expression switch {
             BoundConstant { Type: PrimitiveType.Bool } constant => constant.Value != (result ? 0 : 1),
+            BoundUnsafeExpression unsafeExpression =>
+                CanBe(unsafeExpression.Expression, result, ref remaining, remainingCanBeFacts),
             BoundUnary { Operator: TokenKind.Bang } unary =>
                 CanBe(unary.Operand, !result, ref remaining, remainingCanBeFacts),
             BoundIsNull test => KnownOptionalPresence(test.Value, remainingCanBeFacts,

@@ -102,6 +102,27 @@ public sealed class NativeSourceGrantLibraryTests
     }
 
     [Fact]
+    public void SourceDependencyTracksCallerUnsafeExpressionCallees()
+    {
+        var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false)
+        {
+            IsInvocationScoped = true,
+        };
+        var compilation = Compilation.CreateLibrary(
+            [SyntaxTree.Parse("""
+                namespace Terrum.CodeAnalysis;
+                unsafe int32 ReadValue(int32 at) { return int32(Host.Source[at]); }
+                public int32 GetValue(int32 at) { return unsafe(ReadValue(at)); }
+                """)],
+            [sourceBuffer], BoundRuntimePolicy.FailFast);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program,
+            ["Terrum.CodeAnalysis.GetValue"], NativeRuntimePolicy.FailFast);
+        Assert.True(Assert.Single(artifact.Exports).SourceDependent);
+    }
+
+    [Fact]
     public void RejectsUnsupportedSourceGrantCallAndExportShapes()
     {
         var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false)

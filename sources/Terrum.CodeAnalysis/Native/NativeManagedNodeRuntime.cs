@@ -259,6 +259,9 @@ internal sealed partial class PeCompiler
                     CollectExpression(coalesce.Optional, spill);
                     CollectExpression(coalesce.Fallback, spill);
                     break;
+                case BoundUnsafeExpression unsafeExpression:
+                    CollectExpression(unsafeExpression.Expression, spill);
+                    break;
                 case BoundCall call:
                     var argumentsBase = spill + 1;
                     for (var i = 0; i < call.Arguments.Length; i++)

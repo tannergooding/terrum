@@ -11,6 +11,21 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class ConstEvalTests
 {
     [Fact]
+    public void CallerUnsafeConstEvalUsesExpressionScope()
+    {
+        const string source = """
+            [ConstEval] unsafe int32 Value() { return 42; }
+            int32 Main() { return const (unsafe(Value())); }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var main = Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions,
+            function => function.Name == "Main");
+        Assert.Equal(42, Assert.IsType<BoundConstant>(
+            Assert.IsType<BoundReturn>(main.Body.Statements[0]).Value).Value);
+    }
+
+    [Fact]
     public void NamedConstEvalArgumentsBindToFormalSlots()
     {
         const string source = """

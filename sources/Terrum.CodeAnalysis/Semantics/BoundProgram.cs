@@ -676,6 +676,10 @@ public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arg
 /// <summary>A checked conversion between supported scalar types.</summary>
 public sealed record BoundCast(BoundExpression Operand, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
+/// <summary>A lexical unsafe scope limited to one expression.</summary>
+public sealed record BoundUnsafeExpression(BoundExpression Expression, TextSpan Span)
+    : BoundExpression(Expression.Type, Span);
+
 /// <summary>Reads a field from a copied struct value.</summary>
 public sealed record BoundFieldRead(BoundExpression Receiver, int Field, PrimitiveType Type, TextSpan Span)
     : BoundExpression(Type, Span)

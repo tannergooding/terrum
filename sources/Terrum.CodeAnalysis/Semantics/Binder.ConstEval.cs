@@ -112,6 +112,8 @@ internal sealed partial class Binder
         }
         switch (expression)
         {
+            case BoundUnsafeExpression unsafeExpression:
+                return CheckConstExpression(unsafeExpression.Expression, out unsupported);
             case BoundRequiredConstant required:
                 return CheckConstExpression(required.Operand, out unsupported);
             case BoundConstant or BoundRead:
@@ -289,6 +291,10 @@ internal sealed partial class Binder
     {
         switch (expression)
         {
+            case BoundUnsafeExpression unsafeExpression:
+                return unsafeExpression with {
+                    Expression = ResolveConstExpression(unsafeExpression.Expression, locals, functions, variableCount),
+                };
             case BoundRequiredConstant required:
             {
                 var operand = ResolveConstExpression(required.Operand, locals, functions, variableCount);
@@ -399,6 +405,8 @@ internal sealed partial class Binder
         state.Step();
         switch (expression)
         {
+            case BoundUnsafeExpression unsafeExpression:
+                return EvaluateConstExpression(unsafeExpression.Expression, slots, functions, depth, state);
             case BoundRequiredConstant required:
                 return EvaluateConstExpression(required.Operand, slots, functions, depth, state);
             case BoundConstant constant:
