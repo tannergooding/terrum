@@ -123,7 +123,7 @@ bool TryValidateModuleRow(int32 row, int32 recordCount, int32 stringCount,
         return false;
     }
 
-    Host.IdentitySlots[row] = int32(identity);
+    Host.IdentitySlots[row] = row;
     moduleRefStartResult = moduleRefStart;
     typeDefStartResult = typeDefStart;
     methodDefStartResult = methodDefStart;
@@ -159,7 +159,7 @@ bool TrySortAndCheckModuleIdentities(int32 recordCount, int32 stringCount,
 
     for (mut int32 row = 2; row <= recordCount; row = row + 1)
     {
-        if (!TryCompareModuleIdentityRows(stringCount, stringIndexByteLength,
+        if (!TryCompareModuleRowsByIdentity(stringCount, stringIndexByteLength,
             Host.IdentitySlots[row - 1], Host.IdentitySlots[row], init var comparison)
             || comparison == 0)
         {
@@ -179,7 +179,7 @@ bool TrySiftModuleIdentityHeap(int32 root, int32 heapEnd,
         mut int32 child = current * 2;
         if (child < heapEnd)
         {
-            if (!TryCompareModuleIdentityRows(stringCount, stringIndexByteLength,
+            if (!TryCompareModuleRowsByIdentity(stringCount, stringIndexByteLength,
                 Host.IdentitySlots[child], Host.IdentitySlots[child + 1], init var childComparison))
             {
                 return false;
@@ -190,7 +190,7 @@ bool TrySiftModuleIdentityHeap(int32 root, int32 heapEnd,
             }
         }
 
-        if (!TryCompareModuleIdentityRows(stringCount, stringIndexByteLength,
+        if (!TryCompareModuleRowsByIdentity(stringCount, stringIndexByteLength,
             Host.IdentitySlots[current], Host.IdentitySlots[child], init var parentComparison))
         {
             return false;
@@ -207,6 +207,24 @@ bool TrySiftModuleIdentityHeap(int32 root, int32 heapEnd,
     }
 
     return true;
+}
+
+bool TryCompareModuleRowsByIdentity(int32 stringCount, int32 stringIndexByteLength,
+    int32 firstModuleRow, int32 secondModuleRow, init ref<int32> comparison)
+{
+    if (firstModuleRow == secondModuleRow)
+    {
+        comparison = 0;
+        return true;
+    }
+    if (!TryReadModuleTableWord((firstModuleRow - 1) * 44, 0, init var firstIdentity)
+        || !TryReadModuleTableWord((secondModuleRow - 1) * 44, 0, init var secondIdentity))
+    {
+        return false;
+    }
+
+    return TryCompareModuleIdentityRows(stringCount, stringIndexByteLength,
+        int32(firstIdentity), int32(secondIdentity), init comparison);
 }
 
 bool TryCompareModuleIdentityRows(int32 stringCount, int32 stringIndexByteLength,
@@ -262,6 +280,48 @@ bool TryCompareModuleIdentityRows(int32 stringCount, int32 stringIndexByteLength
         firstPosition = firstPosition + firstBytesRead;
         secondPosition = secondPosition + secondBytesRead;
     }
+}
+
+// Requires the identity slots left sorted by TryValidateModuleTable.
+bool TryFindModuleTableRowByIdentity(int32 moduleCount, int32 stringCount,
+    int32 stringIndexByteLength, int32 identityStringRow, init ref<int32> moduleRow)
+{
+    if (identityStringRow <= 0 || identityStringRow > stringCount)
+    {
+        return false;
+    }
+
+    mut int32 low = 1;
+    mut int32 high = moduleCount;
+    while (low <= high)
+    {
+        int32 middle = low + (high - low) / 2;
+        int32 candidateModuleRow = Host.IdentitySlots[middle];
+        if (!TryReadModuleTableWord((candidateModuleRow - 1) * 44, 0,
+                init var candidateIdentity)
+            || !TryCompareModuleIdentityRows(stringCount, stringIndexByteLength,
+                int32(candidateIdentity), identityStringRow, init var comparison))
+        {
+            return false;
+        }
+
+        if (comparison == 0)
+        {
+            moduleRow = candidateModuleRow;
+            return true;
+        }
+        if (comparison < 0)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle - 1;
+        }
+    }
+
+    moduleRow = 0;
+    return true;
 }
 
 // The outer pass validates the complete index and each referenced row before comparisons.

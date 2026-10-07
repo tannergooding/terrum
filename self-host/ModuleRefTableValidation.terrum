@@ -1,0 +1,125 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateModuleRefTable(int32 recordCount, int32 moduleCount,
+    int32 stringCount, int32 moduleRefCount, int32 typeDefCount, int32 methodDefCount,
+    int32 sourceFileCount, int32 featureCount)
+{
+    if (recordCount < 0 || recordCount > 0xFF_FFFF
+        || recordCount != moduleRefCount
+        || recordCount * 12 != Host.ModuleRefs.Length)
+    {
+        return false;
+    }
+
+    if (!TryValidateModuleTable(moduleCount, stringCount, moduleRefCount,
+        typeDefCount, methodDefCount, sourceFileCount, featureCount))
+    {
+        return false;
+    }
+
+    int32 stringIndexByteLength = (stringCount + 1) * 4;
+    for (mut int32 module = 1; module <= moduleCount; module = module + 1)
+    {
+        int32 moduleStart = (module - 1) * 44;
+        if (!TryReadModuleTableWord(moduleStart, 28, init var firstModuleRef))
+        {
+            return false;
+        }
+
+        mut uint32 endModuleRef = uint32(recordCount + 1);
+        if (module < moduleCount)
+        {
+            if (!TryReadModuleTableWord(module * 44, 28, init var nextModuleRef))
+            {
+                return false;
+            }
+            endModuleRef = nextModuleRef;
+        }
+
+        for (mut int32 row = int32(firstModuleRef); row < int32(endModuleRef); row = row + 1)
+        {
+            if (!TryValidateModuleRefRow(row, stringCount,
+                stringIndexByteLength, init var producer, init var target, init var policy)
+                || !TryFindModuleTableRowByIdentity(moduleCount, stringCount,
+                    stringIndexByteLength, producer, init var selectedModule))
+            {
+                return false;
+            }
+
+            if (selectedModule != 0)
+            {
+                int32 selectedModuleStart = (selectedModule - 1) * 44;
+                if (!TryReadModuleTableWord(selectedModuleStart, 4, init var selectedTarget)
+                    || !TryReadModuleTableWord(selectedModuleStart, 8, init var selectedPolicy)
+                    || target != selectedTarget || policy != selectedPolicy)
+                {
+                    return false;
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+bool TryValidateModuleRefRow(int32 row, int32 stringCount,
+    int32 stringIndexByteLength, init ref<int32> producerResult,
+    init ref<uint32> targetResult, init ref<uint32> policyResult)
+{
+    if (!TryReadModuleRefTableWord(row, 0, init var producer)
+        || !TryReadModuleRefTableWord(row, 4, init var target)
+        || !TryReadModuleRefTableWord(row, 8, init var policy)
+        || producer == 0 || producer > 0xFF_FFFF || producer > uint32(stringCount)
+        || target > 1 || policy > 1)
+    {
+        return false;
+    }
+
+    if (!TryGetValidatedModuleIdentityExtent(stringCount, stringIndexByteLength,
+            int32(producer), init var identityStart, init var identityLength,
+            init var identityEncoding, init var identityContentLength)
+        || !TryValidateModuleIdentityText(identityStart, identityContentLength, identityEncoding))
+    {
+        return false;
+    }
+
+    producerResult = int32(producer);
+    targetResult = target;
+    policyResult = policy;
+    return true;
+}
+
+bool TryReadModuleRefTableWord(int32 row, int32 offset, init ref<uint32> value)
+{
+    int32 rowStart = (row - 1) * 12;
+    if (row <= 0 || rowStart < 0 || rowStart > Host.ModuleRefs.Length - 12
+        || offset < 0 || offset > 8
+        || !TryReadModuleRefTableByte(rowStart + offset, init var first)
+        || !TryReadModuleRefTableByte(rowStart + offset + 1, init var second)
+        || !TryReadModuleRefTableByte(rowStart + offset + 2, init var third)
+        || !TryReadModuleRefTableByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadModuleRefTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.ModuleRefs.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.ModuleRefs[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}

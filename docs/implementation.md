@@ -209,15 +209,26 @@ The `ModuleTableValidation` candidate checks fixed-row fields, Feature bounds,
 nondecreasing table cursors, entry-method ownership and unique decoded
 identities against the hosted `TrRmModuleTableReader`. It uses
 `IdentitySlots` as caller-provided writable scratch of exactly
-`recordCount + 1` words (slot zero is unused; contents are not preserved) and
-deterministic in-place heapsort, comparing strict Unicode-scalar sequences so
-equal names across String encodings are rejected without a collision-dependent
-hash path. Its AOT/JIT fixtures cover both
+`recordCount + 1` words (slot zero is unused; the remaining slots hold sorted
+one-based Module row ordinals after success, and contents are not preserved on
+failure) and deterministic in-place heapsort, comparing strict Unicode-scalar
+sequences so equal names across String encodings are rejected without a
+collision-dependent hash path. The sorted Module row ordinals also support
+bounded local-identity lookup by later metadata candidates. Its AOT/JIT fixtures cover both
 runtime policies, cursor/Feature boundaries, duplicate and equal-prefix names,
 malformed referenced identities, and malformed unreferenced String rows.
 Like the hosted Module reader, it validates the complete String offset index
 but decodes only referenced identity rows; this structural candidate does not
 replace the hosted reader or establish module linking or execution support.
+The `ModuleRefTableValidation` candidate composes Module validation, then
+checks the fixed ModuleRef extent, producer-name references and decoded text,
+assigned target/runtime values, and requirement equality for producer
+identities found in the artifact. It uses the Module candidate's sorted row
+ordinals for bounded local-identity lookup; unmatched external producers are
+retained without binding. AOT/JIT fixtures compare with the hosted reader under
+both runtime policies, including local matches/mismatches, external producers,
+invalid names, counts and byte words. This remains structural validation, not
+producer binding or import execution support.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.
