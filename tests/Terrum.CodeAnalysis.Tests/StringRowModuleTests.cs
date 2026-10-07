@@ -81,6 +81,25 @@ public sealed class StringRowModuleTests
         public int32 VerifyNamespaceUtf8() { return VerifyRow(1, 1); }
         public int32 VerifyNamespaceUtf16Le() { return VerifyRow(1, 2); }
         public int32 VerifyNamespaceUtf32Le() { return VerifyRow(1, 3); }
+
+        public int32 VerifyMaximumUtf8Name() {
+            if (Host.Source.Length != 16384) { return -1; }
+            if (!SourceRange.TryCreate(0, Host.Source.Length, init var spelling)) { return -2; }
+            if (!OwnedInt32Buffer.TryCreate(49152, out var workspace)) { return -3; }
+            if (!TryBuildStringNameRowUtf8(spelling, move workspace, init var row)) { return -4; }
+            if (row.Count != 49152 || row.Capacity != 49152) { return -5; }
+            if (row.Read(0) != 1 || row.Read(1) != 250 || row.Read(2) != 191 || row.Read(3) != 0) {
+                return -6;
+            }
+            for (mut int32 index = 4; index < 49150; index = index + 1) {
+                int32 phase = (index - 4) % 3;
+                if ((phase == 0 && row.Read(index) != 224)
+                    || (phase == 1 && row.Read(index) != 160)
+                    || (phase == 2 && row.Read(index) != 128)) { return -7; }
+            }
+            if (row.Read(49150) != 0 || row.Read(49151) != 0) { return -8; }
+            return 0;
+        }
         """;
 
     [Theory]
@@ -120,6 +139,7 @@ public sealed class StringRowModuleTests
             "VerifyNamespaceUtf8",
             "VerifyNamespaceUtf16Le",
             "VerifyNamespaceUtf32Le",
+            "VerifyMaximumUtf8Name",
         };
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
             [.. exports.Select(static name => "Terrum.CodeAnalysis." + name)]);
@@ -233,6 +253,16 @@ public sealed class StringRowModuleTests
         {
             VerifyBatch();
         }
+
+        var maximumText = new string('\u0800', 16_382);
+        var maximumSpelling = "\"" + maximumText + "\"";
+        Assert.Equal(16_384, maximumSpelling.Length);
+        var maximumGrant = new HostBuffer("Source", PrimitiveType.Char16,
+            [.. maximumSpelling.Select(static unit => (int)unit)], false) {
+            IsInvocationScoped = true,
+        };
+        Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(consumers[^1], [maximumGrant],
+            (NativeRuntimePolicy)policy));
     }
 
     private static int[] GetExpectedRow(RowFixture fixture)

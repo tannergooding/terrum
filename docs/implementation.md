@@ -141,7 +141,9 @@ text. Refusal cases do not publish a row. These are provisional StringRow
 library helpers, not registered target binding or a literal-reference
 contract. A maximum-length quoted U+0800 spelling produces a 49,152-byte UTF-8
 row; both builders match the hosted writer with exact capacity and leave output
-vacant on one-byte-short refusal under both runtime policies and AOT/JIT.
+vacant on one-byte-short refusal under both runtime policies and AOT/JIT. The
+name builder also succeeds for that maximum source grant through the persisted
+semantic-module JIT, including the UTF-8 byte-count header and terminator.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.
