@@ -791,6 +791,53 @@ public sealed partial class ManagedScannerComponentTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ScalarFrontendRejectsMismatchedScannerMagnitudeAsync(NativeRuntimePolicy policy)
+    {
+        const string Text = "int32 Value() { return 42; }";
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                Host.IntegerValues[3] = 43;
+                if (TryParseScalarFrontend(move tokens, init var result)) { return 1; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync(Text, Entry, (BoundRuntimePolicy)policy, "ScalarFrontend")
+            .ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ScalarProgramRejectsMismatchedScannerMagnitudeAsync(NativeRuntimePolicy policy)
+    {
+        const string Text = "int32 First() { return 42; } int32 Second() { return First(); }";
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                Host.IntegerValues[3] = 43;
+                int32 count = tokens.GetCount();
+                Span<Token> tokenView = tokens.AsSpan();
+                require SourceRange.TryCreate(0, 0, init var spacing);
+                if (TryPublishScalarFrontendProgram(tokenView, count, spacing, init var handled)) {
+                    return 1;
+                }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync(Text, Entry, (BoundRuntimePolicy)policy, "ScalarFrontend")
+            .ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OverflowIntegerRecordRequiresZeroPayloadAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """
