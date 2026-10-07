@@ -48,6 +48,8 @@ public sealed class ArtifactDirectoryValidationComponentTests
         byte[] extensions = ExtensionArtifact();
         byte[] outOfOrder = OutOfOrderArtifact();
         byte[] referenceSlots = ReferenceSlotArtifact();
+        byte[] featureArtifact = FeatureArtifact(1, 1,
+            TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 6)]));
         var cases = new List<TestCase> {
             NewCase(minimal, 0x0002),
             NewCase(minimal, 0x0010),
@@ -57,6 +59,9 @@ public sealed class ArtifactDirectoryValidationComponentTests
             NewCase(referenceSlots, 0x8000),
             NewCase(BodyReferenceSlotArtifact(), 0x8000),
             NewCase(SourceMapArtifact(new TrRmReferenceSlot(0x001F, 0, 1, 0, 0)), 0x7F00),
+            NewCase(featureArtifact, 0x0004),
+            NewCase(FeatureArtifact(0, 0,
+                TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 1)])), 0x0001),
             NewCase(WithZeroGap(minimal), 0x0002),
             Invalid(ChangeByte(minimal, 0, (byte)'X')),
             Invalid(ChangeHalfWord(minimal, 4, 2)),
@@ -92,6 +97,19 @@ public sealed class ArtifactDirectoryValidationComponentTests
             Invalid(ChangeSourceMapSlotHalfWord(
                 SourceMapArtifact(new TrRmReferenceSlot(0x001F, 0, 1, 0, 0)), 0, 0x0002)),
             Invalid(SourceMapWithTrailingPayload()),
+            Invalid(ChangeSectionWord(featureArtifact, 0x0004, 0, 2)),
+            Invalid(ChangeSectionWord(featureArtifact, 0x0004, 4, 0)),
+            Invalid(ChangeSectionWord(featureArtifact, 0x0004, 4, 7)),
+            Invalid(AddSecondFeatureRow(
+                FeatureArtifact(0, 0,
+                    TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 1)])),
+                new TrRmFeatureRow(1, 1))),
+            Invalid(ChangeSectionWord(minimal, 0x0001, 16, 1)),
+            Invalid(ChangeSectionWord(minimal, 0x0001, 20, 1)),
+            Invalid(ChangeSectionWord(featureArtifact, 0x0001, 16, 0)),
+            Invalid(ChangeSectionWord(featureArtifact, 0x0001, 20, 0x0100_0000)),
+            Invalid(ChangeSectionWord(featureArtifact, 0x0001, 16, 0x0100_0000)),
+            Invalid(ChangeSectionWord(featureArtifact, 0x0001, 16, 0x00FF_FFFF)),
             InvalidWithHostedAccepted(outOfOrder, 0x8001),
             InvalidIntByte(minimal, 64, 256),
         };
@@ -262,6 +280,35 @@ public sealed class ArtifactDirectoryValidationComponentTests
         ]);
     }
 
+    private static byte[] FeatureArtifact(uint featureFirst, uint moduleFeatureCount,
+        byte[] featureBytes)
+    {
+        var module = new byte[44];
+        WriteWord(module, 16, featureFirst);
+        WriteWord(module, 20, moduleFeatureCount);
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, module),
+            new TrRmSection(0x0002, 0, 1,
+                TrRmStringTableWriter.EncodeNames([("A", 0)])),
+            new TrRmSection(0x0004, 0, (uint)(featureBytes.Length / 8), featureBytes),
+        ]);
+    }
+
+    private static byte[] AddSecondFeatureRow(byte[] artifact, TrRmFeatureRow row)
+    {
+        var result = new byte[artifact.Length + 8];
+        artifact.CopyTo(result, 0);
+        var directoryRow = FindDirectoryRow(result, 0x0004);
+        var sectionStart = checked((int)ReadWord(result, directoryRow + 8));
+        var sectionLength = ReadWord(result, directoryRow + 12);
+        WriteWord(result, 16, (uint)result.Length);
+        WriteWord(result, directoryRow + 4, 2);
+        WriteWord(result, directoryRow + 12, sectionLength + 8);
+        WriteWord(result, sectionStart + 8, row.FeatureId);
+        WriteWord(result, sectionStart + 12, row.MinimumRuleRevision);
+        return result;
+    }
+
     private static byte[] SourceMapWithTrailingPayload()
     {
         var artifact = SourceMapArtifact(new TrRmReferenceSlot(0x001F, 0, 1, 0, 0));
@@ -271,6 +318,15 @@ public sealed class ArtifactDirectoryValidationComponentTests
         artifact.CopyTo(result, 0);
         WriteWord(result, 16, (uint)result.Length);
         WriteWord(result, row + 12, (uint)(length + 1));
+        return result;
+    }
+
+    private static byte[] ChangeSectionWord(byte[] artifact, ushort kind,
+        int sectionOffset, uint value)
+    {
+        var result = (byte[])artifact.Clone();
+        var sectionStart = checked((int)ReadWord(result, FindDirectoryRow(result, kind) + 8));
+        WriteWord(result, sectionStart + sectionOffset, value);
         return result;
     }
 

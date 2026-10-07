@@ -172,6 +172,11 @@ public static bool TryGetArtifactSection(int32 queryKind,
         }
     }
 
+    if (!TryValidateArtifactFeatures())
+    {
+        return false;
+    }
+
     mut int32 low = 1;
     mut int32 high = entryCount + 1;
     while (low < high)
@@ -228,6 +233,11 @@ int32 GetArtifactSectionStride(int32 kind)
 
 uint32 GetArtifactSectionCount(int32 queryKind)
 {
+    return uint32(Host.SectionCounts[FindArtifactSection(queryKind)]);
+}
+
+int32 FindArtifactSection(int32 queryKind)
+{
     mut int32 low = 1;
     mut int32 high = Host.SectionKinds.Length;
     while (low < high)
@@ -245,10 +255,61 @@ uint32 GetArtifactSectionCount(int32 queryKind)
 
     if (low < Host.SectionKinds.Length && Host.SectionKinds[low] == queryKind)
     {
-        return uint32(Host.SectionCounts[low]);
+        return low;
     }
 
     return 0;
+}
+
+bool TryValidateArtifactFeatures()
+{
+    uint32 featureCount = GetArtifactSectionCount(0x0004);
+    if (featureCount != 0)
+    {
+        int32 featureStart = Host.SectionStarts[FindArtifactSection(0x0004)];
+        mut uint32 previousFeatureId = 0;
+        for (mut int32 row = 0; row < int32(featureCount); row = row + 1)
+        {
+            int32 rowStart = featureStart + row * 8;
+            if (!TryReadArtifactWord(rowStart, init var featureId)
+                || !TryReadArtifactWord(rowStart + 4, init var minimumRuleRevision)
+                || featureId <= previousFeatureId
+                || featureId != 1
+                || minimumRuleRevision == 0 || minimumRuleRevision > 6)
+            {
+                return false;
+            }
+
+            previousFeatureId = featureId;
+        }
+    }
+
+    int32 moduleStart = Host.SectionStarts[FindArtifactSection(0x0001)];
+    uint32 moduleCount = GetArtifactSectionCount(0x0001);
+    for (mut int32 row = 0; row < int32(moduleCount); row = row + 1)
+    {
+        int32 rowStart = moduleStart + row * 44;
+        if (!TryReadArtifactWord(rowStart + 16, init var featureFirst)
+            || !TryReadArtifactWord(rowStart + 20, init var moduleFeatureCount))
+        {
+            return false;
+        }
+
+        if (featureFirst == 0 && moduleFeatureCount == 0)
+        {
+            continue;
+        }
+        if (featureFirst == 0 || moduleFeatureCount == 0
+            || featureFirst > 0xFF_FFFF || moduleFeatureCount > 0xFF_FFFF
+            || int64(featureFirst) + int64(moduleFeatureCount) - 1 > 0xFF_FFFF
+            || int64(featureFirst) + int64(moduleFeatureCount)
+                > int64(featureCount) + 1)
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool TryReadArtifactHalfWord(int32 offset, init ref<uint32> value)
