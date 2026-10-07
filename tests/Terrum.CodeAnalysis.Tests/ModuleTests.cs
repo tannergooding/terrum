@@ -184,7 +184,7 @@ public sealed class ModuleTests
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program),
             ["TryGetPair", "TryInitializePair"]);
 
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        const string ConsumerSource = """
             int32 Main() {
                 if (TryGetPair(0, out var failed)) { return 1; }
                 if (!TryGetPair(40, out var copied)) { return 2; }
@@ -193,13 +193,27 @@ public sealed class ModuleTests
                 if (!TryInitializePair(40, init initialized)) { return 4; }
                 return copied.First + copied.Second + initialized.First + initialized.Second;
             }
-            """), ModuleCompiler.CreateReference(producer), policy);
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+            ModuleCompiler.CreateReference(producer), policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
         var nativePolicy = policy == BoundRuntimePolicy.FailFast
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
         Assert.Equal(85, await ExecuteAsync(NativeEmitter.Emit(
             ModuleCompiler.Link(consumer, producer), nativePolicy)).ConfigureAwait(true));
+
+        var program = Assert.IsType<BoundProgram>(library.Program);
+        var nativeProvider = NativeModuleCompiler.CreateProducer(program,
+            ["TryGetPair", "TryInitializePair"], "CopyOutputProvider", nativePolicy);
+        var nativeCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+            NativeModuleCompiler.CreateGraphReference([nativeProvider]), runtimePolicy: policy);
+        Assert.False(nativeCompilation.HasErrors,
+            string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
+            Assert.IsType<BoundProgram>(nativeCompilation.Program), [nativeProvider], nativePolicy);
+        Assert.Equal(85, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProvider],
+            TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true));
     }
 
     [Theory]
