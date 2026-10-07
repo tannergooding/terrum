@@ -175,6 +175,7 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData(2, -1)]
     [InlineData(2, 2)]
     [InlineData(3, -1)]
+    [InlineData(3, 0)]
     [InlineData(3, 2)]
     public async Task InvalidDiagnosticRecordsDoNotPublishSnapshotAsync(int word, int value)
     {
