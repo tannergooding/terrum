@@ -52,8 +52,17 @@ prerequisite has already been met.
    `unsafe(expr)`, validating the owner-relative language identifier under
    Unicode-XID plus the underscore exception and
    allowing the exact shared-owner producer qualification only during
-   linking. Mutable or loan receivers, constructors, operators and
-   reference/output modes remain excluded. Revision 64 also provisionally
+   linking. Revision 70 did not support mutable or loan receivers,
+   constructors, operators or reference/output modes. Revision 71 provisionally
+   carries a mutable field-receiver loan only as source/formal argument zero
+   for an ordinary synchronous mutable instance-method call wholly inside
+   `unsafe(expr)`. At least one caller-unsafe field edge, recursively public
+   non-unique `Copy` layouts and all existing access, initialization, place, ownership
+   and reservation checks remain mandatory; wrapped/reordered loans,
+   caller-unsafe mutable methods, escaping references, TRRM and scalar
+   frontend support remain excluded. This uses existing call/loan
+   representations and does not approve the broader reference metadata
+   proposal. Revision 64 also provisionally
    persists identity for supported static operators on public `Copy` structs,
    preserving unsafe effects and nominal-update target checks. These bounded
    implementations do not settle the general schema or approve the

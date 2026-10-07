@@ -46,7 +46,7 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 70. Writers emit only revision 70 and
+The current semantic-module revision is 71. Writers emit only revision 71 and
 readers reject every other revision; older artifacts must be recreated from
 source. The current format preserves verified, typed, source-mapped structured
 IR and the supported declaration, layout, initialization, cleanup, and runtime
@@ -66,11 +66,23 @@ verification/emission support. Revision 70 additionally persists eligible
 caller-unsafe readonly instance methods inside `unsafe(expr)`, with a single
 by-value receiver and recursively exportable by-value parameters/results. It
 validates an owner-relative method identifier and admits producer
-qualification only during linking. Mutable or loan receivers, constructors,
-operators, reference/output modes, TRRM, and scalar-frontend
-verification/emission remain excluded. The broader
+qualification only during linking. Revision 70 did not support mutable or loan
+receivers, constructors, operators, reference/output modes, TRRM, or
+scalar-frontend verification/emission. The broader
 [reference-call metadata proposal](proposals/reference-call-metadata.md)
 remains unapproved.
+
+Revision 71 provisionally persists a mutable field-receiver loan only as
+source argument zero mapped to formal parameter zero of an ordinary
+synchronous mutable instance method inside `unsafe(expr)`. At least one field
+edge must be caller-unsafe, with each edge's declared access authority checked
+independently and existing recursive public, non-unique `Copy` layout,
+declaration-access, initialization, place, mutability, ownership and
+reservation checks enforced. The loan is nonescaping and reuses the existing
+`BoundCall`/`BoundMutableFieldLoan` representation without an ABI or
+authorization-bit change. Reordered or wrapped receivers, readonly field
+loans, caller-unsafe mutable method contracts and other reference/output modes
+remain unsupported.
 
 The invocation-scoped source grant and `scanner-10` profile remain provisional
 semantic-module JIT capabilities under their respective proposals. They bind

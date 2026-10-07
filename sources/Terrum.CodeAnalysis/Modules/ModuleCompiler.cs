@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 70;
+    private const int Version = 71;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1429,6 +1429,8 @@ public static partial class ModuleCompiler
                 function.Body, program.Structures, valueTypes));
     }
 
+    [SuppressMessage("Style", "IDE0010:Populate switch",
+        Justification = "Only unsafe-expression constructs with additional module restrictions need scanning.")]
     private static void ValidateUnsafeExpressionScopes(BoundProgram program, Module module)
     {
         var callValueTypes = new ModuleUnsafeValueTypeCache(program.Structures);
@@ -1444,6 +1446,19 @@ public static partial class ModuleCompiler
                 {
                     return;
                 }
+                var supportedMutableFieldLoans = new HashSet<BoundExpression>(ReferenceEqualityComparer.Instance);
+                _ = Calls(new BoundExpressionStatement(unsafeExpression.Expression, unsafeExpression.Span),
+                    visitExpression: scopedExpression => {
+                        if (scopedExpression is BoundCall call
+                            && (uint)call.Function < (uint)program.Functions.Length
+                            && call.Arguments.Length > 0
+                            && IsSupportedModuleUnsafeExpressionMutableFieldLoanCall(
+                                program.Functions[call.Function], call.Arguments, call.ArgumentParameterIndices, 0,
+                                program.Structures, module.Structures, callValueTypes, fieldValueTypes))
+                        {
+                            _ = supportedMutableFieldLoans.Add(call.Arguments[0]);
+                        }
+                    });
                 _ = Calls(new BoundExpressionStatement(unsafeExpression.Expression, unsafeExpression.Span),
                     visitExpression: scopedExpression => {
                         switch (scopedExpression)
@@ -1484,9 +1499,12 @@ public static partial class ModuleCompiler
                                 throw new ModuleContractException(
                                     "Expression-scoped unsafe field paths cannot be used as mutation places.");
                             case BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
-                                or BoundFieldLoan or BoundMutableFieldLoan:
+                                or BoundFieldLoan:
                                 throw new ModuleContractException(
                                     "Expression-scoped reference and output loans are unsupported.");
+                            case BoundMutableFieldLoan loan when !supportedMutableFieldLoans.Contains(loan):
+                                throw new ModuleContractException(
+                                    "Expression-scoped field loans require a supported mutable receiver call.");
                         }
                     });
             });
@@ -1522,6 +1540,71 @@ public static partial class ModuleCompiler
             return IsSupportedModuleUnsafeTopLevelCall(function, valueTypes);
         }
         return !function.IsOperator && IsSupportedModuleUnsafeMethod(function, structures, valueTypes);
+    }
+
+    private static bool IsSupportedModuleUnsafeExpressionMutableFieldLoanCall(BoundFunction function,
+        ImmutableArray<BoundExpression> arguments, ImmutableArray<int> argumentParameterIndices,
+        int argumentIndex, ImmutableArray<BoundStruct> functionStructures,
+        ImmutableArray<BoundStruct> fieldStructures, ModuleUnsafeValueTypeCache functionValueTypes,
+        ModuleUnsafeValueTypeCache fieldValueTypes)
+    {
+        if ((uint)argumentIndex >= (uint)arguments.Length || argumentIndex != 0
+            || (!argumentParameterIndices.IsDefault
+                && (argumentParameterIndices.Length != arguments.Length || argumentParameterIndices[argumentIndex] != 0))
+            || arguments[argumentIndex] is not BoundMutableFieldLoan loan
+            || function.DeclaringStruct is not string ownerName || function.IsStatic
+            || function.IsConstructor || function.IsClassConstructor || function.IsCleanup
+            || function.IsOperator || function.PropertyName is not null || function.Intrinsic != BoundIntrinsic.None
+            || function.RequiresUnsafeCaller || function.ParameterCount != arguments.Length
+            || function.ParameterCount > function.Variables.Length || function.ParameterCount < 1
+            || loan.Place.Type != loan.Type
+            || !function.Variables[0].IsMutable || function.Variables[0].IsOut || function.Variables[0].IsInit
+            || !functionValueTypes.IsSupported(function.ReturnType)
+            || !ContainsCallerUnsafeField(loan.Place, fieldStructures)
+            || HasUnsupportedModuleCallerUnsafeFieldLoanPath(loan.Place, fieldStructures, fieldValueTypes))
+        {
+            return false;
+        }
+
+        var ownerIndex = -1;
+        for (var index = 0; index < functionStructures.Length; index++)
+        {
+            if (functionStructures[index].Name == ownerName)
+            {
+                ownerIndex = index;
+                break;
+            }
+        }
+        var fieldOwnerIndex = -1;
+        for (var index = 0; index < fieldStructures.Length; index++)
+        {
+            if (fieldStructures[index].Name == ownerName)
+            {
+                fieldOwnerIndex = index;
+                break;
+            }
+        }
+        if (ownerIndex < 0 || fieldOwnerIndex < 0 || functionStructures[ownerIndex].IsUnique
+            || functionStructures[ownerIndex].IsPrivate || functionStructures[ownerIndex].IsInternal
+            || function.Variables[0].Type != (PrimitiveType)(100 + ownerIndex)
+            || loan.Type != (PrimitiveType)(100 + fieldOwnerIndex)
+            || !functionValueTypes.IsSupported(function.Variables[0].Type)
+            || !fieldValueTypes.IsSupported(loan.Type)
+            || !PublicLayout((PrimitiveType)(100 + ownerIndex), true, functionStructures,
+                new HashSet<(int Index, bool PublicFields)>()))
+        {
+            return false;
+        }
+
+        for (var index = 1; index < function.ParameterCount; index++)
+        {
+            var parameter = function.Variables[index];
+            if (parameter.IsOut || parameter.IsInit || !functionValueTypes.IsSupported(parameter.Type))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static bool IsSupportedModuleUnsafeMethodName(string name, string ownerName)
@@ -1635,7 +1718,7 @@ public static partial class ModuleCompiler
             return false;
         }
         for (BoundFieldRead? current = field; current is not null;
-            current = current.Receiver as BoundFieldRead)
+            current = GetProjectedFieldReceiver(current.Receiver))
         {
             if (!valueTypes.IsSupported(current.Type)
                 || !valueTypes.IsSupported(current.Receiver.Type))
@@ -4014,12 +4097,16 @@ public static partial class ModuleCompiler
 
     private static BoundExpression ResolveExpression(BoundExpression expression, IReadOnlyDictionary<string, int> names,
         IReadOnlyList<BoundFunction> functions, ImmutableArray<BoundStruct> structures,
-        ModuleUnsafeValueTypeCache valueTypes, bool inUnsafe, bool inUnsafeExpression = false) => expression switch {
+        ModuleUnsafeValueTypeCache valueTypes, bool inUnsafe, bool inUnsafeExpression = false,
+        bool allowExpressionScopedMutableFieldLoan = false) => expression switch {
             SymbolicCall call when names.TryGetValue(call.Name, out var index)
                 && (!inUnsafeExpression || !functions[index].RequiresUnsafeCaller
                     || IsSupportedModuleUnsafeExpressionCall(functions[index], structures, valueTypes)) =>
-                new BoundCall(index, [.. call.Arguments.Select(argument =>
-                ResolveExpression(argument, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression))],
+                new BoundCall(index, [.. call.Arguments.Select((argument, argumentIndex) => ResolveExpression(
+                    argument, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression,
+                    inUnsafeExpression && IsSupportedModuleUnsafeExpressionMutableFieldLoanCall(
+                        functions[index], call.Arguments, call.ArgumentParameterIndices, argumentIndex,
+                        structures, structures, valueTypes, valueTypes)))],
                     call.Type, call.Span) {
                     ArgumentParameterIndices = call.ArgumentParameterIndices,
                     IsUnsafeAuthorized = (inUnsafe || inUnsafeExpression) && functions[index].RequiresUnsafeCaller,
@@ -4037,7 +4124,9 @@ public static partial class ModuleCompiler
                 throw new ModuleContractException("Expression-scoped output loans are unsupported."),
             BoundReceiverLoan or BoundMutableReceiverLoan when inUnsafeExpression =>
                 throw new ModuleContractException("Expression-scoped receiver loans are unsupported."),
-            BoundFieldLoan or BoundMutableFieldLoan when inUnsafeExpression =>
+            BoundFieldLoan when inUnsafeExpression =>
+                throw new ModuleContractException("Expression-scoped field loans are unsupported."),
+            BoundMutableFieldLoan when inUnsafeExpression && !allowExpressionScopedMutableFieldLoan =>
                 throw new ModuleContractException("Expression-scoped field loans are unsupported."),
             BoundUnary unary => unary with {
                 Operand = ResolveExpression(unary.Operand, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),

@@ -3963,6 +3963,8 @@ public static partial class SemanticVerifier
             return false;
         }
         return expression switch {
+            BoundUnsafeExpression unsafeExpression => InvalidatesReservedOwner(
+                unsafeExpression.Expression, variable, ref remaining, depth + 1),
             BoundMove move => move.Variable == variable,
             BoundOutArgument output => output.Variable == variable,
             BoundMutableReceiverLoan loan => loan.Variable == variable,

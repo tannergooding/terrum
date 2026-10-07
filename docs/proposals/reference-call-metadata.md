@@ -294,6 +294,57 @@ expression scope. The extension preserves receiver and method effects
 without adding a loan or purity promise. It remains a provisional persistence
 experiment and does not approve the broader metadata proposal.
 
+### Provisional follow-up: mutable field-receiver loans in `unsafe(expr)`
+
+**Status: unapproved recommendation.** Semantic-module revision 63 already
+persists existing synchronous mutable receiver loans through eligible
+caller-unsafe field paths inside explicit `unsafe { ... }` blocks. Revision 70
+expression scopes excluded those loans, even though the hosted binder and
+native emitter already represent and execute the same `BoundMutableFieldLoan`
+shape.
+
+**Recommendation:** Provisionally persist only a `BoundMutableFieldLoan`
+appearing directly as source argument zero and mapped to formal parameter zero
+of its existing ordinary synchronous mutable struct-instance call, with the
+complete invocation structurally enclosed by `unsafe(expr)`. Require at least
+one caller-unsafe field edge in the loan path and retain the recursive public,
+non-unique `Copy` layout gate for every owner and field value along that path.
+Reconstruct authorization independently from each field declaration and the
+enclosing expression scope; persist no access or loan authorization bit. Keep
+the existing place, initialization, mutability, ownership, reservation,
+evaluation-order and cleanup checks. Treat `BoundUnsafeExpression` as
+transparent when detecting invalidation of an already reserved mutable root;
+the scope wrapper must not hide a conflicting loan through a sibling field.
+
+Keep readonly loans, named receiver loans, output/reference arguments,
+wrapped/reordered receiver loans, returned or stored references, caller-unsafe
+mutable method contracts, constructors, operators, accessors, class/unique/
+managed layouts, TRRM and scalar-frontend verification/emission outside this
+extension. This is a provisional semantic-module persistence increment, not a
+new source rule, receiver ABI, or general loan contract, and does not approve
+the broader metadata proposal.
+
+Acceptance evidence should cover leaf and nested field paths, canonical
+receiver mapping with named explicit arguments, expression-wrapper stripping
+at writer and reader boundaries, conflict rejection across a reserved root
+and sibling path, semantic links plus native graphs/module sets under both
+runtime policies, and unchanged explicit unsafe-block authorization.
+
+**Implemented provisionally in semantic-module revision 71:** The writer and
+reader/link paths admit this existing loan only as source argument zero mapped
+to formal parameter zero of a synchronous mutable instance call. At least one
+field edge must require caller-unsafe access; every edge's declaration,
+initialization, place, mutability, ownership, reservation and recursive public
+non-unique `Copy` layout obligations remain independently enforced. The
+receiver and call representations, ABI and authorization metadata are
+unchanged. Regression coverage includes pruned structure-index remapping for
+producer and consumer artifacts, named explicit arguments, rejection of
+wrapped/remapped receiver shapes and caller-unsafe mutable targets, malformed
+serialized receiver wrappers at producer-reader and consumer-link boundaries,
+unique-layout rejection, reserved-sibling conflicts, and semantic/native
+graphs and module sets under both runtime policies. This remains a provisional
+experiment; the broader metadata proposal is still unapproved.
+
 ### Provisional extension: caller-unsafe readonly getters
 
 **Summary:** The accepted source contract supports caller-unsafe getter

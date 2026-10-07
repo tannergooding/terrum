@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -116,10 +117,17 @@ public sealed class CallerUnsafeTests
         }
         """;
     private const string UnsafeMutableFieldLoanModuleSource = """
+        public struct DiscardedBeforeLoanCounter {
+            public int32 Value;
+        }
         public struct LoanCounter {
             public mut int32 Number;
             public LoanCounter(int32 number) { Number = number; }
             public mut int32 Next() { Number = Number + 1; return Number; }
+            public mut int32 NextBy(int32 first, int32 second) {
+                Number = Number + first * 10 + second;
+                return Number;
+            }
         }
         public struct UnsafeLeafOwner {
             public unsafe mut LoanCounter Value;
@@ -144,7 +152,12 @@ public sealed class CallerUnsafeTests
         }
         public int32 InvokeExpressionScoped() {
             mut UnsafeLeafOwner owner = new UnsafeLeafOwner(new LoanCounter(40));
-            return unsafe(owner.Value.Next());
+            return unsafe(owner.Value.NextBy(second: 1, first: 0));
+        }
+        public int32 InvokeExpressionScopedAncestor() {
+            mut UnsafeAncestorOwner owner =
+                new UnsafeAncestorOwner(new SafeLoanInner(new LoanCounter(0)));
+            return unsafe(owner.Value.Value.NextBy(second: 1, first: 0));
         }
         """;
     private const string CopyValueMethodSource =
@@ -362,6 +375,92 @@ public sealed class CallerUnsafeTests
         var value = Encoding.UTF8.GetString(module, valueOffset, valueLength);
         Assert.StartsWith(valuePrefix, value, StringComparison.Ordinal);
         return value;
+    }
+
+    private static byte[] StripSerializedUnsafeExpression(byte[] module, BoundUnsafeExpression expression)
+    {
+        Span<byte> wrapper = stackalloc byte[1 + sizeof(int) + (2 * sizeof(int))];
+        wrapper[0] = 31;
+        BinaryPrimitives.WriteInt32LittleEndian(wrapper[1..], (int)expression.Type);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            wrapper[(1 + sizeof(int))..], expression.Span.Start);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            wrapper[(1 + (2 * sizeof(int)))..], expression.Span.Length);
+        var offset = module.AsSpan().IndexOf(wrapper);
+        Assert.True(offset >= 0);
+        var stripped = new byte[module.Length - wrapper.Length];
+        module.AsSpan(0, offset).CopyTo(stripped);
+        module.AsSpan(offset + wrapper.Length).CopyTo(stripped.AsSpan(offset));
+        return stripped;
+    }
+
+    private static byte[] WrapSerializedMutableFieldLoan(byte[] module, BoundMutableFieldLoan loan)
+    {
+        const int expressionHeaderLength = 1 + sizeof(int) + (2 * sizeof(int));
+        var offset = -1;
+        for (var index = 0; index <= module.Length - expressionHeaderLength; index++)
+        {
+            var header = module.AsSpan(index, expressionHeaderLength);
+            if (header[0] == 20
+                && BinaryPrimitives.ReadInt32LittleEndian(header[(1 + sizeof(int))..]) == loan.Span.Start
+                && BinaryPrimitives.ReadInt32LittleEndian(header[(1 + (2 * sizeof(int)))..])
+                    == loan.Span.Length)
+            {
+                offset = index;
+                break;
+            }
+        }
+        Assert.True(offset >= 0);
+        var serializedType = BinaryPrimitives.ReadInt32LittleEndian(module.AsSpan(offset + 1, sizeof(int)));
+
+        Span<byte> wrapper = stackalloc byte[expressionHeaderLength];
+        wrapper[0] = 31;
+        BinaryPrimitives.WriteInt32LittleEndian(wrapper[1..], serializedType);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            wrapper[(1 + sizeof(int))..], loan.Span.Start);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            wrapper[(1 + (2 * sizeof(int)))..], loan.Span.Length);
+        var wrapped = new byte[module.Length + wrapper.Length];
+        module.AsSpan(0, offset).CopyTo(wrapped);
+        wrapper.CopyTo(wrapped.AsSpan(offset));
+        module.AsSpan(offset).CopyTo(wrapped.AsSpan(offset + wrapper.Length));
+        return wrapped;
+    }
+
+    private static BoundCall WithArgumentParameterIndices(BoundCall call, ImmutableArray<int> parameterIndices)
+    {
+        var property = typeof(BoundCall).GetProperty(
+            "ArgumentParameterIndices", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(property);
+        var clone = call with { };
+        property.SetValue(clone, parameterIndices);
+        return clone;
+    }
+
+    private static byte[] RemapSerializedCallReceiver(byte[] module, string functionName)
+    {
+        var serializedName = Encoding.UTF8.GetBytes(functionName);
+        var nameOffset = -1;
+        for (var index = 17; index <= module.Length - serializedName.Length; index++)
+        {
+            if (module[index - 17] == 5
+                && BinaryPrimitives.ReadInt32LittleEndian(module.AsSpan(index - 4, sizeof(int)))
+                    == serializedName.Length
+                && module.AsSpan(index, serializedName.Length).SequenceEqual(serializedName)
+                && BinaryPrimitives.ReadInt32LittleEndian(
+                    module.AsSpan(index + serializedName.Length, sizeof(int))) == 3
+                && module[index + serializedName.Length + sizeof(int)] == 1)
+            {
+                nameOffset = index;
+                break;
+            }
+        }
+        Assert.True(nameOffset >= 0);
+
+        var remapped = (byte[])module.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            remapped.AsSpan(nameOffset + serializedName.Length + sizeof(int) + sizeof(byte), sizeof(int)), 1);
+        return remapped;
     }
 
     [Theory]
@@ -651,7 +750,7 @@ public sealed class CallerUnsafeTests
         var producer = ModuleCompiler.CreateProducer(
         CompileLibrary(UnsafeFieldExpressionModuleSource, policy),
         ["MakeOuter", "MakeLeafOuter", "ReadValue"]);
-        Assert.Equal(70,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
+        Assert.Equal(71,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
 
         var reference = ModuleCompiler.CreateReference(producer);
         foreach (var (owner, fieldName, expected) in new[]
@@ -689,9 +788,9 @@ public sealed class CallerUnsafeTests
         var expressionReturn = Assert.IsType<BoundReturn>(expressionMain.Body.Statements[^1]);
         var unsafeRead = Assert.IsType<BoundUnsafeExpression>(expressionReturn.Value);
         var expressionConsumer = ModuleCompiler.CreateConsumer(expressionProgram, producer);
-        Assert.Equal(70,BinaryPrimitives.ReadInt32LittleEndian(
+        Assert.Equal(71,BinaryPrimitives.ReadInt32LittleEndian(
             expressionConsumer.AsSpan(4, sizeof(int))));
-        foreach (var unsupportedVersion in new[] { 68, 69 })
+        foreach (var unsupportedVersion in new[] { 69, 70 })
         {
             var unsupportedConsumer = (byte[])expressionConsumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -820,8 +919,8 @@ public sealed class CallerUnsafeTests
         Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(forgedProgram, producer));
 
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        Assert.Equal(70,BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))));
-        foreach (var unsupportedVersion in new[] { 68, 69 })
+        Assert.Equal(71,BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))));
+        foreach (var unsupportedVersion in new[] { 69, 70 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -914,11 +1013,68 @@ public sealed class CallerUnsafeTests
     public void SemanticModulesRoundTripCallerUnsafeMutableFieldReceiverLoans(BoundRuntimePolicy policy)
     {
         var program = CompileLibrary(UnsafeMutableFieldLoanModuleSource, policy);
-        string[] exports = ["InvokeUnsafeLeaf", "InvokeUnsafeAncestor"];
+        string[] blockExports = ["InvokeUnsafeLeaf", "InvokeUnsafeAncestor"];
+        string[] expressionExports = ["InvokeExpressionScoped", "InvokeExpressionScopedAncestor"];
+        string[] exports = [.. blockExports, .. expressionExports];
         var producer = ModuleCompiler.CreateProducer(program, exports);
+        var callerUnsafeMutableMethodProgram = CompileLibrary(UnsafeMutableFieldLoanModuleSource.Replace(
+            "public mut int32 NextBy(", "public unsafe mut int32 NextBy(", StringComparison.Ordinal), policy);
+        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(
+            callerUnsafeMutableMethodProgram, ["InvokeExpressionScoped"]));
+
+        var expressionFunction = Assert.Single(
+            program.Functions, function => function.Name == "InvokeExpressionScoped");
+        var expressionFunctionIndex = program.Functions.IndexOf(expressionFunction);
+        var expressionReturn = Assert.IsType<BoundReturn>(expressionFunction.Body.Statements[^1]);
+        var expressionScope = Assert.IsType<BoundUnsafeExpression>(expressionReturn.Value);
+        var expressionCall = Assert.IsType<BoundCall>(expressionScope.Expression);
+        var receiverLoan = Assert.IsType<BoundMutableFieldLoan>(expressionCall.Arguments[0]);
+
+        var wrappedReceiverCall = expressionCall with {
+            Arguments = expressionCall.Arguments.SetItem(
+                0, new BoundUnsafeExpression(receiverLoan, receiverLoan.Span)),
+        };
+        var wrappedReceiverFunction = expressionFunction with {
+            Body = expressionFunction.Body with {
+                Statements = expressionFunction.Body.Statements.SetItem(
+                    expressionFunction.Body.Statements.Length - 1,
+                    expressionReturn with { Value = expressionScope with { Expression = wrappedReceiverCall } }),
+            },
+        };
+        var wrappedReceiverProgram = program with {
+            Functions = program.Functions.SetItem(expressionFunctionIndex, wrappedReceiverFunction),
+        };
+        var wrappedReceiverException = Record.Exception(() =>
+            ModuleCompiler.CreateProducer(wrappedReceiverProgram, ["InvokeExpressionScoped"]));
+        Assert.True(wrappedReceiverException is ModuleContractException or ArgumentException,
+            wrappedReceiverException?.ToString());
+
+        var remappedReceiverCall = WithArgumentParameterIndices(expressionCall, [1, 0, 2]);
+        var remappedReceiverFunction = expressionFunction with {
+            Body = expressionFunction.Body with {
+                Statements = expressionFunction.Body.Statements.SetItem(
+                    expressionFunction.Body.Statements.Length - 1,
+                    expressionReturn with { Value = expressionScope with { Expression = remappedReceiverCall } }),
+            },
+        };
+        var remappedReceiverProgram = program with {
+            Functions = program.Functions.SetItem(expressionFunctionIndex, remappedReceiverFunction),
+        };
+        var remappedReceiverException = Record.Exception(() =>
+            ModuleCompiler.CreateProducer(remappedReceiverProgram, ["InvokeExpressionScoped"]));
+        Assert.True(remappedReceiverException is ModuleContractException or ArgumentException,
+            remappedReceiverException?.ToString());
+        Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateReference(WrapSerializedMutableFieldLoan(producer, receiverLoan)));
+        Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateReference(RemapSerializedCallReceiver(producer, "LoanCounter.NextBy")));
+
         var reference = ModuleCompiler.CreateReference(producer);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
-            int32 Main() { return InvokeUnsafeLeaf() + InvokeUnsafeAncestor(); }
+            int32 Main() {
+                return InvokeUnsafeLeaf() + InvokeUnsafeAncestor()
+                    + InvokeExpressionScoped() + InvokeExpressionScopedAncestor();
+            }
             """), reference, policy);
         Assert.False(consumerCompilation.HasErrors,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
@@ -927,9 +1083,48 @@ public sealed class CallerUnsafeTests
         var linked = ModuleCompiler.Link(consumer, producer);
         var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
             ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast;
-        Assert.Equal(42, NativeJit.Execute(linked, runtimePolicy));
+        Assert.Equal(84, NativeJit.Execute(linked, runtimePolicy));
 
-        foreach (var export in exports)
+        var receiverConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            struct DiscardedBeforeLoanCounter { public int32 Value; }
+            public struct LoanCounter {
+                public mut int32 Number;
+                public LoanCounter(int32 number) { Number = number; }
+                public mut int32 Next() { Number = Number + 1; return Number; }
+                public mut int32 NextBy(int32 first, int32 second) {
+                    Number = Number + first * 10 + second;
+                    return Number;
+                }
+            }
+            public struct UnsafeLeafOwner {
+                public unsafe mut LoanCounter Value;
+                public UnsafeLeafOwner(LoanCounter value) { unsafe { Value = value; } }
+            }
+            int32 Main() {
+                mut UnsafeLeafOwner owner = new UnsafeLeafOwner(new LoanCounter(40));
+                return unsafe(owner.Value.NextBy(second: 1, first: 0));
+            }
+            """), policy);
+        Assert.False(receiverConsumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, receiverConsumerCompilation.Diagnostics));
+        var receiverConsumerProgram = Assert.IsType<BoundProgram>(receiverConsumerCompilation.Program);
+        var unrelatedProducer = ModuleCompiler.CreateProducer(
+            CompileLibrary("public int32 Helper() { return 0; }", policy), ["Helper"]);
+        var receiverConsumer = ModuleCompiler.CreateConsumer(receiverConsumerProgram, unrelatedProducer);
+        Assert.Equal(41, NativeJit.Execute(
+            ModuleCompiler.Link(receiverConsumer, unrelatedProducer), runtimePolicy));
+        var receiverConsumerMain = Assert.Single(
+            receiverConsumerProgram.Functions, function => function.Name == "Main");
+        var receiverConsumerReturn = Assert.IsType<BoundReturn>(receiverConsumerMain.Body.Statements[^1]);
+        var receiverConsumerScope = Assert.IsType<BoundUnsafeExpression>(receiverConsumerReturn.Value);
+        var receiverConsumerCall = Assert.IsType<BoundCall>(receiverConsumerScope.Expression);
+        var receiverConsumerLoan = Assert.IsType<BoundMutableFieldLoan>(receiverConsumerCall.Arguments[0]);
+        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(
+            WrapSerializedMutableFieldLoan(receiverConsumer, receiverConsumerLoan), unrelatedProducer));
+        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(
+            RemapSerializedCallReceiver(receiverConsumer, "LoanCounter.NextBy"), unrelatedProducer));
+
+        foreach (var export in blockExports)
         {
             var function = Assert.Single(program.Functions, function => function.Name == export);
             var functionIndex = program.Functions.IndexOf(function);
@@ -943,7 +1138,10 @@ public sealed class CallerUnsafeTests
             var forgedProgram = program with {
                 Functions = program.Functions.SetItem(functionIndex, forgedFunction),
             };
-            Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(forgedProgram, [export]));
+            var forgedProgramException = Record.Exception(
+                () => ModuleCompiler.CreateProducer(forgedProgram, [export]));
+            Assert.True(forgedProgramException is ModuleContractException or ArgumentException,
+                forgedProgramException?.ToString());
 
             var singleExport = ModuleCompiler.CreateProducer(program, [export]);
             var unsafeScope = new byte[1 + (2 * sizeof(int))];
@@ -960,8 +1158,62 @@ public sealed class CallerUnsafeTests
             Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedArtifact));
         }
 
-        Assert.Throws<ModuleContractException>(() =>
-            ModuleCompiler.CreateProducer(program, ["InvokeExpressionScoped"]));
+        foreach (var export in expressionExports)
+        {
+            var function = Assert.Single(program.Functions, function => function.Name == export);
+            var functionIndex = program.Functions.IndexOf(function);
+            var returnStatement = Assert.IsType<BoundReturn>(function.Body.Statements[^1]);
+            var unsafeExpression = Assert.IsType<BoundUnsafeExpression>(returnStatement.Value);
+            var forgedFunction = function with {
+                Body = function.Body with {
+                    Statements = function.Body.Statements.SetItem(
+                        function.Body.Statements.Length - 1,
+                        returnStatement with { Value = unsafeExpression.Expression }),
+                },
+            };
+            var forgedProgram = program with {
+                Functions = program.Functions.SetItem(functionIndex, forgedFunction),
+            };
+            var forgedProgramException = Record.Exception(
+                () => ModuleCompiler.CreateProducer(forgedProgram, [export]));
+            Assert.True(forgedProgramException is ModuleContractException or ArgumentException,
+                forgedProgramException?.ToString());
+
+            var singleExport = ModuleCompiler.CreateProducer(program, [export]);
+            var forgedArtifact = StripSerializedUnsafeExpression(singleExport, unsafeExpression);
+            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedArtifact));
+        }
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void UnsafeExpressionLoanCannotInvalidateAnAlreadyReservedSibling(BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            public struct LoanCounter {
+                public mut int32 Number;
+                public LoanCounter(int32 number) { Number = number; }
+                public mut int32 Next() { Number = Number + 1; return Number; }
+                public mut int32 Add(int32 amount) { Number = Number + amount; return Number; }
+            }
+            public struct UnsafeLoanOwner {
+                public mut LoanCounter SafeChild;
+                public unsafe mut LoanCounter UnsafeChild;
+                public UnsafeLoanOwner(LoanCounter safeChild, LoanCounter unsafeChild) {
+                    SafeChild = safeChild;
+                    unsafe { UnsafeChild = unsafeChild; }
+                }
+            }
+            int32 Main() {
+                mut UnsafeLoanOwner owner =
+                    new UnsafeLoanOwner(new LoanCounter(10), new LoanCounter(20));
+                return owner.SafeChild.Add(unsafe(owner.UnsafeChild.Next()));
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source), policy);
+
+        Assert.True(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Theory]
@@ -972,7 +1224,10 @@ public sealed class CallerUnsafeTests
     {
         var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
             ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast;
-        string[] exports = ["InvokeUnsafeLeaf", "InvokeUnsafeAncestor"];
+        string[] exports = [
+            "InvokeUnsafeLeaf", "InvokeUnsafeAncestor",
+            "InvokeExpressionScoped", "InvokeExpressionScopedAncestor",
+        ];
         var provider = NativeModuleCompiler.CreateProducer(
             CompileLibrary(UnsafeMutableFieldLoanModuleSource, policy), exports,
             "UnsafeLoanProvider", runtimePolicy);
@@ -982,18 +1237,24 @@ public sealed class CallerUnsafeTests
         byte[][] providers = [provider, helper];
 
         var setCompilation = Compilation.Create(SyntaxTree.Parse("""
-            int32 Main() { return InvokeUnsafeLeaf() + InvokeUnsafeAncestor(); }
+            int32 Main() {
+                return InvokeUnsafeLeaf() + InvokeUnsafeAncestor()
+                    + InvokeExpressionScoped() + InvokeExpressionScopedAncestor();
+            }
             """), NativeModuleCompiler.CreateReferenceSet(providers), policy);
         Assert.False(setCompilation.HasErrors,
             string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
             Assert.IsType<BoundProgram>(setCompilation.Program), providers, runtimePolicy);
         NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
-        Assert.Equal(42, await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
+        Assert.Equal(84, await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
 
         var middleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            public int32 Forward() { return InvokeUnsafeLeaf() + InvokeUnsafeAncestor(); }
+            public int32 Forward() {
+                return InvokeUnsafeLeaf() + InvokeUnsafeAncestor()
+                    + InvokeExpressionScoped() + InvokeExpressionScopedAncestor();
+            }
             """), NativeModuleCompiler.CreateGraphReference([provider]), policy);
         Assert.False(middleCompilation.HasErrors,
             string.Join(Environment.NewLine, middleCompilation.Diagnostics));
@@ -1008,7 +1269,7 @@ public sealed class CallerUnsafeTests
         var root = NativeModuleCompiler.CreateGraphConsumer(
             Assert.IsType<BoundProgram>(rootCompilation.Program), [middle], runtimePolicy);
         NativeModuleCompiler.ValidateGraph(root, [middle, provider]);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [provider, middle],
+        Assert.Equal(84, await NativeModuleCompiler.RunGraphAsync(root, [provider, middle],
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true));
     }
 
@@ -1292,7 +1553,7 @@ public sealed class CallerUnsafeTests
             "int32 Main() { unsafe { return Danger(); } }"), reference);
         Assert.False(scopedCall.HasErrors, string.Join(Environment.NewLine, scopedCall.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(scopedCall.Program), producer);
-        foreach (var unsupportedVersion in new[] { 68, 69 })
+        foreach (var unsupportedVersion in new[] { 69, 70 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -1399,7 +1660,7 @@ public sealed class CallerUnsafeTests
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
             Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
-        foreach (var unsupportedVersion in new[] { 68, 69 })
+        foreach (var unsupportedVersion in new[] { 69, 70 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -1484,7 +1745,7 @@ public sealed class CallerUnsafeTests
         ];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.Equal(70, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
+        Assert.Equal(71, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
         var computeContract = GetModuleStringStartingWith(producer, "Value.Compute|");
         var forgedProducer = ReplaceModuleString(producer, "Value.Compute", "Value.$producer.Compute");
         forgedProducer = ReplaceModuleString(forgedProducer, computeContract,
@@ -1514,7 +1775,7 @@ public sealed class CallerUnsafeTests
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumerProgram = Assert.IsType<BoundProgram>(consumerCompilation.Program);
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        foreach (var unsupportedVersion in new[] { 68, 69 })
+        foreach (var unsupportedVersion in new[] { 69, 70 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -1573,19 +1834,7 @@ public sealed class CallerUnsafeTests
         Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(strippedProgram, producer));
 
         var identityConsumer = ModuleCompiler.CreateConsumer(identityProgram, producer);
-        Span<byte> wrapperPrefix = stackalloc byte[1 + sizeof(int) + (2 * sizeof(int))];
-        wrapperPrefix[0] = 31;
-        BinaryPrimitives.WriteInt32LittleEndian(wrapperPrefix[1..], (int)identityWrapper.Type);
-        BinaryPrimitives.WriteInt32LittleEndian(
-            wrapperPrefix[(1 + sizeof(int))..], identityWrapper.Span.Start);
-        BinaryPrimitives.WriteInt32LittleEndian(
-            wrapperPrefix[(1 + (2 * sizeof(int)))..], identityWrapper.Span.Length);
-        var wrapperOffset = identityConsumer.AsSpan().IndexOf(wrapperPrefix);
-        Assert.True(wrapperOffset >= 0);
-        var strippedConsumer = new byte[identityConsumer.Length - wrapperPrefix.Length];
-        identityConsumer.AsSpan(0, wrapperOffset).CopyTo(strippedConsumer);
-        identityConsumer.AsSpan(wrapperOffset + wrapperPrefix.Length)
-            .CopyTo(strippedConsumer.AsSpan(wrapperOffset));
+        var strippedConsumer = StripSerializedUnsafeExpression(identityConsumer, identityWrapper);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(strippedConsumer, producer));
 
         var safeReplacementSource = Source
@@ -1645,7 +1894,7 @@ public sealed class CallerUnsafeTests
         ];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.Equal(70,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
+        Assert.Equal(71,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var getter = Assert.Single(reference.Functions, static function => function.Name == "Value.#get:Read");
@@ -1770,7 +2019,7 @@ public sealed class CallerUnsafeTests
         string[] exports = ["Value.#get:Read", "Value.SafeRead"];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.Equal(70,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
+        Assert.Equal(71,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var getter = Assert.Single(reference.Functions,
@@ -1791,7 +2040,7 @@ public sealed class CallerUnsafeTests
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
             Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
-        foreach (var unsupportedVersion in new[] { 68, 69 })
+        foreach (var unsupportedVersion in new[] { 69, 70 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -1853,7 +2102,7 @@ public sealed class CallerUnsafeTests
             "ScalarOps.ReadInstance", "Top", "Forward", "MakeScalarOps", "EchoForward",
         ];
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(source, policy), exports);
-        Assert.Equal(70,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
+        Assert.Equal(71,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
 
         var reference = ModuleCompiler.CreateReference(producer);
         foreach (var name in exports[..3])
@@ -1879,8 +2128,8 @@ public sealed class CallerUnsafeTests
         var returned = Assert.IsType<BoundReturn>(main.Body.Statements[1]);
         var unsafeExpression = Assert.IsType<BoundUnsafeExpression>(returned.Value);
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        Assert.Equal(70,BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))));
-        foreach (var unsupportedVersion in new[] { 68, 69 })
+        Assert.Equal(71,BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))));
+        foreach (var unsupportedVersion in new[] { 69, 70 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -1953,14 +2202,14 @@ public sealed class CallerUnsafeTests
         ];
         var producer = ModuleCompiler.CreateProducer(
             CompileLibrary(CopyValueExpressionProviderSource, policy), exports);
-        Assert.Equal(70,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
+        Assert.Equal(71,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
         var reference = ModuleCompiler.CreateReference(producer);
         var compilation = Compilation.Create(
             SyntaxTree.Parse(CopyValueExpressionConsumerSource), reference, policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumerProgram = Assert.IsType<BoundProgram>(compilation.Program);
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        foreach (var unsupportedVersion in new[] { 68, 69 })
+        foreach (var unsupportedVersion in new[] { 69, 70 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -2118,7 +2367,7 @@ public sealed class CallerUnsafeTests
             "GetterOwner.#get:StaticNested",
         ];
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(CopyValueGetterSource, policy), exports);
-        Assert.Equal(70,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
+        Assert.Equal(71,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))));
         var reference = ModuleCompiler.CreateReference(producer);
 
         foreach (var (name, isStatic, parameterCount) in new[]
@@ -2153,7 +2402,7 @@ public sealed class CallerUnsafeTests
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
             Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
-        foreach (var unsupportedVersion in new[] { 68, 69 })
+        foreach (var unsupportedVersion in new[] { 69, 70 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -2245,7 +2494,7 @@ public sealed class CallerUnsafeTests
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
             Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
-        foreach (var unsupportedVersion in new[] { 68, 69 })
+        foreach (var unsupportedVersion in new[] { 69, 70 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -2308,7 +2557,7 @@ public sealed class CallerUnsafeTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
             Assert.IsType<BoundProgram>(compilation.Program), producer);
-        foreach (var unsupportedVersion in new[] { 68, 69 })
+        foreach (var unsupportedVersion in new[] { 69, 70 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
@@ -3613,6 +3862,13 @@ public sealed class CallerUnsafeTests
                 StringComparison.Ordinal));
         Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(unsafeUniqueOwnerProgram, ["Invoke"]));
+        var unsafeUniqueExpressionLoanProgram = CompileLibrary(uniqueOwnerFieldLoanSource
+            .Replace("public mut Counter Value;", "public unsafe mut Counter Value;",
+                StringComparison.Ordinal)
+            .Replace("unsafe { return owner.Nested.Value.Next(); }",
+                "return unsafe(owner.Nested.Value.Next());", StringComparison.Ordinal));
+        Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducer(unsafeUniqueExpressionLoanProgram, ["Invoke"]));
 
         var safeUniqueOwnerModule = ModuleCompiler.CreateProducer(
             CompileLibrary(uniqueOwnerFieldLoanSource), ["Invoke"]);
