@@ -49,26 +49,27 @@ bodyless top-level or static `extern` callables use the exact
 `Terrum.Interop.NativeImport` attribute and a key in the compiler-owned
 immutable catalog. Binding, mandatory verification and PE emission check the
 catalogued fixed-width integer/`void` signature and effects; the production
-catalog currently contains only `GetCurrentThreadId`. Unsupported
-module/JIT/TRRM persistence paths reject these imports. This is not general
-foreign-function support and does not move scalar frontend verification or
-emission into Terrum. Test-only fixtures exercise the proposed static
-UTF-16-NUL literal pointer subgate using read-only image storage and catalogued
-readonly/no-escape parameters against an independent C reader, and the
-sample-specific `HWND.NoOwner` marker against a nonmodal ABI-equivalent C
-function. The production catalog also includes the exact `user32.dll!MessageBoxW`
-signature, callable only with `HWND.NoOwner` and static readonly UTF-16-NUL
-literals. The provisional target scope is supported Windows x64 desktop-class
-NT releases where `user32.dll` is a KnownDLL; the separate static-import probe
-checks the current host with application-directory, current-directory and
-`PATH` shadow DLLs present, not a cross-version matrix. The opt-in
-`terrumc build-native-import` command explicitly selects this immutable
-catalog; ordinary `build` remains unchanged. Its runnable sample returns
+catalog contains `GetCurrentThreadId` and the sample-specific `MessageBoxW`.
+Unsupported module/JIT/TRRM persistence paths reject these imports. This is
+not general foreign-function support and does not move scalar frontend
+verification or emission into Terrum. Test-only fixtures exercise the
+proposed static UTF-16-NUL literal pointer subgate using read-only image
+storage and catalogued readonly/no-escape parameters against an independent C
+reader, and the sample-specific `HWND.NoOwner` marker against a nonmodal
+ABI-equivalent C function. The production catalog also includes the exact
+`user32.dll!MessageBoxW` signature, callable only with `HWND.NoOwner` and
+static readonly UTF-16-NUL literals. The provisional target scope is supported
+Windows x64 desktop-class NT releases where `user32.dll` is a KnownDLL. A
+separate static-import probe checks the current host with
+application-directory, current-directory and `PATH` shadow DLLs present, not a
+cross-version matrix. The opt-in command `terrumc build-native-import`
+explicitly selects this immutable catalog; ordinary `build` remains unchanged.
+Its runnable sample returns
 success only for `MessageBoxW`'s `IDOK` result. Unattended tests build and
-inspect the import without calling the modal API. The opt-in smoke process
-returned success, but the displayed text and caption were not confirmed;
-visual acceptance remains pending. This is a narrow provisional slice, not
-general pointer, handle or foreign-function support.
+inspect the import without calling the modal API. The user-confirmed smoke
+displayed the expected text and caption, and OK closed the dialog; that
+observable gate is verified on this host. This is a narrow provisional slice,
+not general pointer, handle or foreign-function support.
 
 ## Syntax and CLI
 

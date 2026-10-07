@@ -211,10 +211,11 @@ shadow DLLs. The production catalog now includes the exact `MessageBoxW`
 signature under the directed desktop target scope, and
 `terrumc build-native-import` emits a runnable sample while ordinary `build`
 remains unchanged. The opt-in smoke image was launched and returned success,
-which the sample does only after `MessageBoxW` returns `IDOK`; the displayed
-text and caption were not confirmed, so visual acceptance remains pending.
-The representation and import remain provisional under this unapproved
-proposal.
+which the sample does only after `MessageBoxW` returns `IDOK`. The user
+confirmed the expected text and caption appeared and dismissed the dialog with
+OK, closing this observable gate on the current host. The representation and
+import remain provisional under this unapproved proposal; this does not
+establish general FFI or the DX11 sample.
 
 See Microsoft's [`MessageBoxW` contract](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-messageboxw)
 and [DLL search order](https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order)
