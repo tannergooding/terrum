@@ -17,6 +17,7 @@ public sealed class TrRmArtifactIndexTests
         var index = new TrRmArtifactIndex(artifact);
         Assert.True(index.TryGetSection(0x0002, out var stringSection, out var stringCount));
         var strings = new TrRmStringTableReader(stringSection, stringCount);
+        Assert.False(index.TryGetSection(0x0004, out _, out _));
         Assert.True(index.TryGetSection(0x0001, out var moduleSection, out var moduleCount));
         var modules = new TrRmModuleTableReader(moduleSection, moduleCount, strings, 0, 0, 0, 0);
         Assert.Equal("A", modules.GetIdentity(1));
@@ -48,6 +49,53 @@ public sealed class TrRmArtifactIndexTests
             Assert.True(absent.IsEmpty);
             Assert.Equal(0, count);
         }
+    }
+
+    [Fact]
+    public void ReadsTheProvisionalScalarInitOutputFeatureAndModuleRange()
+    {
+        var artifact = FeatureArtifact(1, 1,
+            TrRmFeatureTableWriter.Encode([TrRmFeatureRow.ScalarInitOutput]));
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x0004, out var featureBytes, out var featureCount));
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount);
+        Assert.Equal(TrRmFeatureRow.ScalarInitOutput, features.GetFeature(1));
+        Assert.True(features.TryGetFeature(TrRmFeatureTableReader.ScalarInitOutputFeatureId,
+            out var feature));
+        Assert.Equal(1u, feature.MinimumRuleRevision);
+
+        Assert.True(index.TryGetSection(0x0002, out var stringBytes, out var stringCount));
+        var strings = new TrRmStringTableReader(stringBytes, stringCount);
+        Assert.True(index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount));
+        var modules = new TrRmModuleTableReader(moduleBytes, moduleCount, strings,
+            0, 0, 0, 0, featureCount);
+        Assert.Equal((1, 1), modules.GetFeatureRange(1));
+    }
+
+    [Fact]
+    public void RejectsUnsupportedFeaturesMalformedPayloadsAndModuleRanges()
+    {
+        var feature = TrRmFeatureTableWriter.Encode([TrRmFeatureRow.ScalarInitOutput]);
+        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
+            FeatureArtifact(0, 1, feature)));
+        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
+            FeatureArtifact(1, 2, feature)));
+        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
+            FeatureArtifact(0, 0, [0, 0, 0, 0, 1, 0, 0, 0])));
+        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
+            FeatureArtifact(0, 0, [2, 0, 0, 0, 1, 0, 0, 0])));
+        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
+            FeatureArtifact(0, 0, [1, 0, 0, 0, 0, 0, 0, 0])));
+        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
+            FeatureArtifact(0, 0, [1, 0, 0, 0, 2, 0, 0, 0])));
+        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
+            FeatureArtifact(0, 0, [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0])));
+        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
+            FeatureArtifact(0, 0, [1, 0, 0, 0, 1])));
+        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
+            FeatureArtifact(1, 1, null)));
+        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
+            FeatureArtifact(2, 1, feature)));
     }
 
     [Fact]
@@ -465,6 +513,48 @@ public sealed class TrRmArtifactIndexTests
         Write(artifact, 64 + 36, 1);
         Write(artifact, 64 + 40, 1);
         strings.CopyTo(artifact.AsSpan(108));
+        return artifact;
+    }
+
+    private static byte[] FeatureArtifact(uint featureFirst, uint moduleFeatureCount,
+        byte[]? featureBytes)
+    {
+        var source = MinimalArtifact();
+        var module = source.AsSpan(64, 44).ToArray();
+        Write(module, 16, featureFirst);
+        Write(module, 20, moduleFeatureCount);
+        var strings = TrRmStringTableWriter.EncodeNames([("A", 0)]);
+        var sectionCount = featureBytes is null ? 2 : 3;
+        var moduleOffset = 32 + sectionCount * 16;
+        var stringOffset = moduleOffset + module.Length;
+        var featureOffset = stringOffset + strings.Length;
+        var artifact = new byte[featureOffset + (featureBytes?.Length ?? 0)];
+        "TRRM"u8.CopyTo(artifact);
+        WriteU16(artifact, 4, 1);
+        Write(artifact, 8, 32);
+        Write(artifact, 12, (uint)sectionCount);
+        Write(artifact, 16, (uint)artifact.Length);
+        Write(artifact, 20, 32);
+
+        WriteU16(artifact, 32, 0x0001);
+        Write(artifact, 32 + 4, 1);
+        Write(artifact, 32 + 8, (uint)moduleOffset);
+        Write(artifact, 32 + 12, (uint)module.Length);
+        WriteU16(artifact, 48, 0x0002);
+        Write(artifact, 48 + 4, 1);
+        Write(artifact, 48 + 8, (uint)stringOffset);
+        Write(artifact, 48 + 12, (uint)strings.Length);
+        module.CopyTo(artifact.AsSpan(moduleOffset));
+        strings.CopyTo(artifact.AsSpan(stringOffset));
+        if (featureBytes is not null)
+        {
+            WriteU16(artifact, 64, 0x0004);
+            Write(artifact, 64 + 4, (uint)Math.Max(1, featureBytes.Length / 8));
+            Write(artifact, 64 + 8, (uint)featureOffset);
+            Write(artifact, 64 + 12, (uint)featureBytes.Length);
+            featureBytes.CopyTo(artifact.AsSpan(featureOffset));
+        }
+
         return artifact;
     }
 

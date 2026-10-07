@@ -77,7 +77,7 @@ public readonly ref struct TrRmArtifactIndex
             }
 
             var stride = FixedStride(kind);
-            if (kind == 0x0004 || (kind < 0x8000 && stride == -1)
+            if ((kind < 0x8000 && stride == -1)
                 || (kind < 0x8000 && flags != (kind == 0x7F00 ? 2 : 0))
                 || (kind >= 0x8000 && flags is not (1 or 2 or 3))
                 || (stride > 0 && length != (long)count * stride)
@@ -95,6 +95,34 @@ public readonly ref struct TrRmArtifactIndex
         if (!moduleFound)
         {
             throw InvalidArtifact();
+        }
+
+        var featureCount = (int)sectionCounts[0x0004];
+        if (featureCount != 0)
+        {
+            if (!TryGetSection(0x0004, out var featureBytes, out var actualFeatureCount)
+                || actualFeatureCount != featureCount)
+            {
+                throw InvalidArtifact();
+            }
+
+            _ = new TrRmFeatureTableReader(featureBytes, featureCount);
+        }
+
+        if (!TryGetSection(0x0001, out var moduleBytes, out var moduleCount))
+        {
+            throw InvalidArtifact();
+        }
+
+        for (var module = 0; module < moduleCount; module++)
+        {
+            var offset = module * 44;
+            var featureFirst = ReadU32(moduleBytes, offset + 16);
+            var moduleFeatureCount = ReadU32(moduleBytes, offset + 20);
+            if (!ValidFeatureRange(featureFirst, moduleFeatureCount, featureCount))
+            {
+                throw InvalidArtifact();
+            }
         }
 
         var cursor = (int)directoryEnd;
@@ -261,6 +289,19 @@ public readonly ref struct TrRmArtifactIndex
         0x001D => 8, 0x001E => 20, 0x001F => 8,
         _ => -1,
     };
+
+    private static bool ValidFeatureRange(uint first, uint count, int featureCount)
+    {
+        if (first == 0 && count == 0)
+        {
+            return true;
+        }
+
+        return first != 0 && count != 0
+            && first <= 0xFF_FFFF && count <= 0xFF_FFFF
+            && ((ulong)first + count - 1) <= 0xFF_FFFF
+            && ((ulong)first + count) <= ((ulong)featureCount + 1);
+    }
 
     private static ushort ReadU16(ReadOnlySpan<byte> bytes, int offset)
         => BinaryPrimitives.ReadUInt16LittleEndian(bytes.Slice(offset, sizeof(ushort)));

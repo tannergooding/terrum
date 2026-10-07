@@ -29,14 +29,24 @@ public readonly ref struct TrRmModuleTableReader
     public int MethodDefCount => _methodDefCount;
     public int SourceFileCount => _sourceFileCount;
 
+    /// <summary>Validates fixed Module rows and their cross-table ranges.</summary>
+    /// <param name="section">The borrowed Module section bytes.</param>
+    /// <param name="recordCount">The number of Module rows.</param>
+    /// <param name="strings">The validated String table used for module identities.</param>
+    /// <param name="moduleRefCount">The number of artifact ModuleRef rows.</param>
+    /// <param name="typeDefCount">The number of artifact TypeDef rows.</param>
+    /// <param name="methodDefCount">The number of artifact MethodDef rows.</param>
+    /// <param name="sourceFileCount">The number of artifact SourceFile rows.</param>
+    /// <param name="featureCount">The number of artifact Feature rows, or -1 to skip cross-table bounds checks.</param>
     public TrRmModuleTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, int moduleRefCount, int typeDefCount,
-        int methodDefCount, int sourceFileCount)
+        int methodDefCount, int sourceFileCount, int featureCount = -1)
     {
         if (recordCount <= 0 || recordCount > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length
             || !ValidCount(moduleRefCount) || !ValidCount(typeDefCount)
-            || !ValidCount(methodDefCount) || !ValidCount(sourceFileCount))
+            || !ValidCount(methodDefCount) || !ValidCount(sourceFileCount)
+            || featureCount < -1 || featureCount > 0xFF_FFFF)
         {
             throw InvalidModule();
         }
@@ -54,8 +64,9 @@ public readonly ref struct TrRmModuleTableReader
         Span<int> tableCounts = [moduleRefCount, typeDefCount, methodDefCount, sourceFileCount];
         for (var row = 0; row < recordCount; row++)
         {
-            if (Read(row, 4) > 1 || Read(row, 8) > 1 || Read(row, 16) != 0
-                || Read(row, 20) != 0 || Read(row, 24) != 0
+            if (Read(row, 4) > 1 || Read(row, 8) > 1
+                || !ValidFeatureRange(Read(row, 16), Read(row, 20), featureCount)
+                || Read(row, 24) != 0
                 || !_identities.TryAdd(ReadIdentity(row), row + 1))
             {
                 throw InvalidModule();
@@ -178,6 +189,18 @@ public readonly ref struct TrRmModuleTableReader
         return (target, policy);
     }
 
+    /// <summary>Gets the one-based Feature row start and row count assigned to a module.</summary>
+    /// <param name="row">The one-based Module row number.</param>
+    public (int First, int Count) GetFeatureRange(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidModule();
+        }
+
+        return ((int)Read(row - 1, 16), (int)Read(row - 1, 20));
+    }
+
     public bool TryFindModule(string identity, out int row)
     {
         ArgumentNullException.ThrowIfNull(identity);
@@ -205,6 +228,19 @@ public readonly ref struct TrRmModuleTableReader
 
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
+
+    private static bool ValidFeatureRange(uint first, uint count, int featureCount)
+    {
+        if (first == 0 && count == 0)
+        {
+            return true;
+        }
+
+        return first != 0 && count != 0
+            && first <= 0xFF_FFFF && count <= 0xFF_FFFF
+            && ((ulong)first + count - 1) <= 0xFF_FFFF
+            && (featureCount < 0 || ((ulong)first + count) <= ((ulong)featureCount + 1));
+    }
 
     private static bool IsValidIdentity(string value)
     {

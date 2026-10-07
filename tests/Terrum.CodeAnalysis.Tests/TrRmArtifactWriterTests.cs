@@ -56,6 +56,35 @@ public sealed class TrRmArtifactWriterTests
     }
 
     [Fact]
+    public void EncodesOnlyTheSupportedProvisionalFeatureAssignment()
+    {
+        var features = TrRmFeatureTableWriter.Encode([TrRmFeatureRow.ScalarInitOutput]);
+        Assert.Equal(new byte[] { 1, 0, 0, 0, 1, 0, 0, 0 }, features);
+        var strings = TrRmStringTableWriter.EncodeNames([("A", 0)]);
+        var artifact = TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, Module()),
+            new TrRmSection(0x0002, 0, 1, strings),
+            new TrRmSection(0x0004, 0, 1, features),
+        ]);
+        Assert.True(new TrRmArtifactIndex(artifact).TryGetSection(0x0004, out _, out _));
+        Assert.Throws<InvalidDataException>(() => TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, Module()),
+            new TrRmSection(0x0002, 0, 1, strings),
+            new TrRmSection(0x0004, 1, 1, features),
+        ]));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(0, 1)]));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 0)]));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 2)]));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode([
+                TrRmFeatureRow.ScalarInitOutput, TrRmFeatureRow.ScalarInitOutput,
+            ]));
+    }
+
+    [Fact]
     public void RejectsInvalidOrderCountsAndDirectoryPolicies()
     {
         var module = new TrRmSection(0x0001, 0, 1, Module());

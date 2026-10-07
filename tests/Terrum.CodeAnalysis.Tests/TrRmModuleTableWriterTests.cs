@@ -36,6 +36,17 @@ public sealed class TrRmModuleTableWriterTests
         Assert.Equal("A", modules.GetIdentity(1));
 
         var minimalNames = TrRmStringTableWriter.EncodeNames([("Only", 0)]);
+        var featureRow = new TrRmModuleRow(1, 0, 0, 0, 1, 1, 1, 1,
+            FeatureFirst: 1, FeatureCount: 1);
+        var featureBytes = TrRmModuleTableWriter.Encode([featureRow],
+            new TrRmStringTableReader(minimalNames, 1), 0, 0, 0, 0, 1);
+        var featureModules = new TrRmModuleTableReader(featureBytes, 1,
+            new TrRmStringTableReader(minimalNames, 1), 0, 0, 0, 0, 1);
+        Assert.Equal((1, 1), featureModules.GetFeatureRange(1));
+        Assert.Throws<InvalidDataException>(() => TrRmModuleTableWriter.Encode(
+            [featureRow with { FeatureFirst = 2 }],
+            new TrRmStringTableReader(minimalNames, 1), 0, 0, 0, 0, 1));
+
         var minimalStrings = new TrRmStringTableReader(minimalNames, 1);
         var minimal = TrRmModuleTableWriter.Encode(
             [new TrRmModuleRow(1, 0, 0, 0, 1, 1, 1, 1)], minimalStrings, 0, 0, 0, 0);

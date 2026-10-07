@@ -4,65 +4,103 @@
 
 ## Summary
 
-TRRM metadata assigns structural parameter modes for `out` and `init ref<T>`
-and defines Boolean-correlated `OutputState` rows, while executable
-source-free TRRM currently accepts only by-value parameters. The body model
-contains place descriptors and place operations, but those shapes alone do not
-specify executable output behavior: the writer and loader reject non-value
-parameters, and `OutputState` is not an executable contract.
+The accepted executable TRRM contract still admits only by-value parameters.
+The implementation provisionally executes a bounded `ScalarInitOutput` subset
+behind a required Feature assignment without changing that contract.
+Structural parameter modes, Boolean-correlated `OutputState` rows, and the
+place shapes alone do not specify executable output behavior.
 
 ## Question
 
-Should a future executable TRRM profile admit `out` and `init ref<T>` output
-parameters, with publication and vacancy behavior validated from the body and
-declared output-state contract?
+Should the bounded `ScalarInitOutput` profile below become an accepted
+executable TRRM contract?
 
 ## Recommendation
 
-Keep current TRRM execution fail-fast and reject non-value parameter modes
-until one profile defines the complete place, call and output-state contract.
-Do not infer publication from a Boolean return, a normal return, or the
-structural `OutputState` row alone. Preserve the existing distinction:
-`out` designates output storage, while `init ref<T>` designates vacant storage
-that may only be initialized. Do not widen compact-linear bodies or reinterpret
-by-value operands as places.
+Implement this as a **provisional, unapproved** profile while preserving the
+existing `(1, 0)` by-value executable subset. This is an engineering
+recommendation, not acceptance of a language or interchange contract.
+Keep the following boundaries explicit:
 
-Any future profile should specify and validate:
+- Retain artifact version `(1, 0)`, which is still pre-release. Activate core
+  Feature section kind `0x0004` with flags `0` and its assigned eight-byte row
+  `u32 featureId, u32 minimumRuleRevision`. Provisionally assign
+  `featureId=1` to `ScalarInitOutput`, accept only rule revision `1`, and
+  require each affected module's feature range to name that row. A module with
+  no output behavior retains an absent Feature section and `(0, 0)` range.
+  Reject unknown feature IDs and unsupported revisions before binding or
+  lowering; do not add general same-major/future-minor acceptance.
+- Require `ScalarInitOutput` for every output declaration, output-bearing
+  call, and executable place body, including uncalled methods. Presence of the
+  feature never waives the body's structural, type, lifetime, or semantic
+  audit. Do not encode this behavior in an optional extension.
+- Admit only non-exported module-local functions with `init ref<int32>` output
+  formals and `void` or `int32` results. Other scalar formals remain by-value.
+  Preserve the existing mode value `0x02`; reject `out`, Boolean-correlated
+  outputs, imports, exported output functions, and `OutputState` clauses.
+- Output-bearing methods and calls use general Body forms `0x00`, `0x01`, or
+  `0x02`, with the narrowest valid local width, exactly one block, no regions,
+  and no normal successors. Map non-value formals to places first in parameter
+  order, then local places; by-value formals remain entry values. The function
+  root block lists all output-formal and local places in `startPlaces`, where
+  they become active and vacant. Initially admit only `int32` output/local
+  places in region `0` with flags `0x04` (initially vacant, not rebindable or
+  unique).
+- Admit `PlaceLocal` (`0x0B`), `Load` (`0x0D`), `Initialize` (`0x0E`), and
+  mode-aware local `Call` (`0x12`) with the existing supported scalar value
+  operations. Reject field places, `Assign`, `Move`, `Drop`, place-handle
+  copying/escape, and forwarding an output formal. Compact-linear and
+  compact-indexed bodies remain valid for value-only functions, but cannot
+  carry place arguments. In a general-form `Call`, each argument ID is
+  a value ID interpreted by the selected formal's mode: mode `0x00` requires
+  a kind-0 value, while mode `0x02` requires a kind-1 value denoting a place
+  handle (not a place descriptor ID). The ordered argument count still
+  exactly matches the signature, and zero is never an argument.
+- Calls require exact parameter order, type and mode matches; every output
+  destination is a distinct vacant local place. The call grants temporary
+  exclusive initialization authority, so a destination cannot be supplied
+  twice or accessed through another admitted alias. A callee must initialize
+  each output formal before every normal `Return`. Ending the formal's place
+  retires callee access authority; it does not erase the publication
+  obligation or the initialized value. A successful call publishes every
+  output independently of its `void`/`int32` result.
+- Permit only `Fail` reason 1, which preserves the hosted `require false`
+  failure path. Reject other failure reasons until this profile can preserve
+  their distinct native statuses. No recovery or output state is promised
+  after failure. Use private staging only to preserve the existing normal-
+  return commit order; it does not make body effects transactional or promise
+  rollback. Exclude cleanup, authored exception handling, checked-exception
+  policy, postconditions, and exceptional output publication.
 
-- How local and field places are created, typed, authorized, and kept within
-  their owner and region; how place arguments map to formal ordinals; and which
-  aliases or overlapping loans reject.
-- How each mode is represented in calls and imports, including exact type
-  matching, storage vacancy or initialization requirements, and any producer
-  qualification or compatibility obligations.
-- Which stores publish output, when publication becomes observable, and how
-  control-flow joins correlate each call's saved status with its particular
-  destinations. Define how those facts flow through values and control flow,
-  and invalidate them after relevant mutation, alias or lifetime changes; an
-  undiscriminated maybe-live owner cannot be transferred.
-- The required state on every normal return and the state on exceptional
-  departure at each failure edge, including the effects of writes completed
-  before that edge and the ordering of body `finally`, cleanup and
-  postconditions. Preserve the accepted no-rollback contract: failure does not
-  transactionally undo body effects or replay completed cleanup. Define
-  exceptional publication only for an admitted exception model; fail-fast
-  execution promises neither recovery nor cleanup and must not be mistaken for
-  checked-exception support.
-- How the writer, loader, verifier and native executor prove these rules
-  together, and how malformed or contradictory metadata is rejected. Assign
-  the required semantic feature and schema/revision compatibility rules before
-  emission; unsupported consumers must reject before binding or lowering.
-  Existing structural rows or skippable optional extensions cannot enable
-  output execution.
+The assigned Body shapes already describe these operations, but the accepted
+executable profile does not execute them. The provisional implementation adds
+a separately audited general-place Body path and changes to the writer, loader
+and semantic-verification path; it does not promote those changes into an
+accepted contract. Any promotion must retain the legacy compact-body rule that
+rejects non-value modes and place operands.
 
-Boolean status facts are call-specific, not reusable merely because a Boolean
-has the same value. Their checked correlation must remain attached to the
-designated destinations until a relevant mutation, alias or lifetime change
-invalidates it. This profile must not transfer or clean up an owner whose
-output state is still ambiguous.
+The broader proposal remains unresolved. In particular, Boolean status facts
+are call-specific and require correlation with their particular destinations;
+`out`, fields, aliases, imports, forwarding, cleanup, checked exceptions,
+exceptional publication, and general reference/loan contracts remain outside
+this provisional slice. This proposal does not approve a general
+`out`-to-`init ref<T>` migration, scalar-frontend verification/emission, or
+any public ABI change.
 
-This proposal does not assign opcodes, body forms, parameter metadata changes,
-or native ABI rules. It does not approve broader reference-call metadata,
-checked-exception TRRM, scalar-frontend verification/emission, or a general
-`out`-to-`init ref<T>` migration. Implementation remains blocked on review of
-the target contract.
+## Additional open question: entry-use ordinals for places
+
+**Summary:** The Body contract counts place activation and inherited state as
+uses, and requires each listed `placeLastUses` ordinal to identify an actual
+use. It assigns no ordinal to the entry-state use itself, leaving a started
+place with no later operand or end transition without a representable final
+use.
+
+**Recommendation:** Within this still-unapproved profile, count each place in
+`startPlaces` or `inheritedPlaces` as an actual place use at block entry with
+ordinal 0. Its `placeLastUses` entry records the maximum ordinal among that
+entry use and all instruction-operand, terminator-operand, and end-place
+transition uses in the block, with coincident ordinals permitted, including in
+blocks with zero operations. Inherited state continues an existing activation;
+it does not restart the place or reset its initialization state. This
+completes the profile's inventory rule without changing the accepted
+instruction-set text or implying general TRRM conformance.

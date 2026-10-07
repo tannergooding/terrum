@@ -70,6 +70,7 @@ public static partial class TrRmExecutableCompiler
 
         var functionFeatures = new (bool HasFloatingTypes, bool HasIndexedFlow,
             bool HasNonScalarStorage)[program.Functions.Length];
+        var outputFeatures = new bool[program.Functions.Length];
         var hasFloatingTypes = false;
         var parameterCount = 0;
         var effectCount = 0;
@@ -79,6 +80,7 @@ public static partial class TrRmExecutableCompiler
             var function = program.Functions[index];
             var features = AnalyzeFunction(function);
             functionFeatures[index] = features;
+            outputFeatures[index] = HasOutputFeature(function);
             hasFloatingTypes |= features.HasFloatingTypes;
             parameterCount = checked(parameterCount + function.ParameterCount);
             effectCount += function.IsNoThrow || function.DoesNotReturn || function.RequiresUnsafeCaller ? 1 : 0;
@@ -111,6 +113,10 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Unsupported($"Function '{function.Name}' contains non-scalar storage.");
             }
+            if (HasOutputParameters(function) && !function.IsPrivate && !function.IsInternal)
+            {
+                throw Unsupported($"Output function '{function.Name}' must not be exported.");
+            }
 
             nameRows[index] = names.Count + 1;
             names.Add((function.Name, 1));
@@ -119,19 +125,24 @@ public static partial class TrRmExecutableCompiler
             {
                 var variable = function.Variables[parameter];
                 if (!Scalar(variable.Type) || variable.Type == PrimitiveType.Void
-                    || variable.IsOut || variable.IsInit || variable.IsInitializationLocal)
+                    || variable.IsInitializationLocal
+                    || variable.IsOut != variable.IsInit
+                    || variable.IsInit && variable.Type != PrimitiveType.Int32)
                 {
                     throw Unsupported($"Function '{function.Name}' has a non-value scalar parameter.");
                 }
 
-                parameters.Add(new TrRmParamRow(index + 1, parameter, TypeRow(variable.Type), 0));
+                parameters.Add(new TrRmParamRow(index + 1, parameter, TypeRow(variable.Type),
+                    variable.IsInit ? (byte)2 : (byte)0));
             }
 
             signatures.Add(new TrRmMethodSigRow(TypeRow(function.ReturnType), 0,
                 first, function.ParameterCount, 0, 0));
-            bodies.Add(functionFeatures[index].HasIndexedFlow
-                ? new IndexedBuilder(function, program, functionFeatures[index].HasFloatingTypes).Encode()
-                : EncodeBody(function, functionFeatures[index].HasFloatingTypes));
+            bodies.Add(outputFeatures[index]
+                ? EncodeOutputBody(function, program)
+                : functionFeatures[index].HasIndexedFlow
+                    ? new IndexedBuilder(function, program, functionFeatures[index].HasFloatingTypes).Encode()
+                    : EncodeBody(function, functionFeatures[index].HasFloatingTypes));
             var effectMask = (function.IsNoThrow ? 1u : 0u)
                 | (function.DoesNotReturn ? 2u : 0u)
                 | (function.RequiresUnsafeCaller ? 4u : 0u);
@@ -153,10 +164,17 @@ public static partial class TrRmExecutableCompiler
 
         var stringsBytes = TrRmStringTableWriter.EncodeNames(names);
         var strings = new TrRmStringTableReader(stringsBytes, names.Count);
+        var hasOutputFeatures = outputFeatures.Any(static enabled => enabled);
+        var featureBytes = hasOutputFeatures
+            ? TrRmFeatureTableWriter.Encode([TrRmFeatureRow.ScalarInitOutput])
+            : [];
+        var featureCount = hasOutputFeatures ? 1 : 0;
         var moduleBytes = TrRmModuleTableWriter.Encode(
-            [new TrRmModuleRow(1, 1, 0, program.EntryPoint + 1, 1, 1, 1, 1)],
-            strings, 0, 0, methods.Count, 0);
-        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 0, 0, methods.Count, 0);
+            [new TrRmModuleRow(1, 1, 0, program.EntryPoint + 1, 1, 1, 1, 1,
+                hasOutputFeatures ? 1 : 0, featureCount)],
+            strings, 0, 0, methods.Count, 0, featureCount);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 0, 0,
+            methods.Count, 0, featureCount);
         var typeRows = hasFloatingTypes ? s_typeRows : s_nonFloatTypeRows;
         var typeBytes = TrRmTypeSpecTableWriter.Encode(typeRows, 0, 0, 0, 0);
         var types = new TrRmTypeSpecTableReader(typeBytes, typeRows.Length, 0, 0, 0, 0);
@@ -174,16 +192,21 @@ public static partial class TrRmExecutableCompiler
             : TrRmContractTableWriter.Encode(effects, typeDefs, defs, sigs, paramReader, types);
         var exportBytes = exports.Count == 0 ? []
             : TrRmExportTableWriter.Encode(exports, strings, typeDefs, defs, default, default);
-        var sectionCount = 6 + (parameters.Count != 0 ? 1 : 0)
+        var sectionCount = 6 + (featureCount != 0 ? 1 : 0)
+            + (parameters.Count != 0 ? 1 : 0)
             + (effects.Count != 0 ? 1 : 0) + (exports.Count != 0 ? 1 : 0);
         var sections = new List<TrRmSection>(sectionCount)
         {
             new(1, 0, 1, moduleBytes),
             new(2, 0, (uint)names.Count, stringsBytes),
-            new(0x11, 0, (uint)typeRows.Length, typeBytes),
-            new(0x16, 0, (uint)methods.Count, methodBytes),
-            new(0x17, 0, (uint)signatures.Count, sigBytes),
         };
+        if (featureCount != 0)
+        {
+            sections.Add(new(4, 0, (uint)featureCount, featureBytes));
+        }
+        sections.Add(new(0x11, 0, (uint)typeRows.Length, typeBytes));
+        sections.Add(new(0x16, 0, (uint)methods.Count, methodBytes));
+        sections.Add(new(0x17, 0, (uint)signatures.Count, sigBytes));
         if (parameters.Count != 0)
         {
             sections.Add(new(0x18, 0, (uint)parameters.Count, paramBytes));
@@ -219,7 +242,7 @@ public static partial class TrRmExecutableCompiler
         for (var section = 0; section < index.SectionCount; section++)
         {
             index.GetSection(section, out var kind, out _, out _, out _);
-            if (kind is not (1 or 2 or 0x11 or 0x16 or 0x17 or 0x18 or 0x1B or 0x1D or 0x20))
+            if (kind is not (1 or 2 or 4 or 0x11 or 0x16 or 0x17 or 0x18 or 0x1B or 0x1D or 0x20))
             {
                 throw Invalid($"Section 0x{kind:X4} is not executable.");
             }
@@ -231,6 +254,7 @@ public static partial class TrRmExecutableCompiler
         index.TryGetSection(0x16, out var methodBytes, out var methodCount);
         index.TryGetSection(0x17, out var sigBytes, out var sigCount);
         index.TryGetSection(0x18, out var paramBytes, out var paramCount);
+        index.TryGetSection(4, out var featureBytes, out var featureCount);
         index.TryGetSection(0x1B, out var contractBytes, out var contractCount);
         index.TryGetSection(0x1D, out var exportBytes, out var exportCount);
         index.TryGetSection(0x20, out var bodyBytes, out var bodyCount);
@@ -240,6 +264,7 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("Expected one self-contained scalar module with one Body per method.");
         }
 
+        var featureTable = new TrRmFeatureTableReader(featureBytes, featureCount);
         var types = new TrRmTypeSpecTableReader(typeBytes, typeCount, 0, 0, 0, 0);
         var hasOptionalScalarTypes = false;
         for (var row = 1; row <= typeCount; row++)
@@ -247,10 +272,19 @@ public static partial class TrRmExecutableCompiler
             hasOptionalScalarTypes |= TrRmOptionalScalar.IsOptionalType(BodyTypeFromRow(types, row));
         }
         var strings = new TrRmStringTableReader(stringBytes, stringCount);
-        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 0, 0, methodCount, 0);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 0, 0,
+            methodCount, 0, featureCount);
         if (modules.GetRequirements(1) != (1u, 0u))
         {
             throw Invalid("Only fail-fast Windows x64 target requirement 1 is executable.");
+        }
+        var (firstFeature, requiredFeatureCount) = modules.GetFeatureRange(1);
+        var supportsScalarInitOutput = false;
+        for (var feature = firstFeature; feature < firstFeature + requiredFeatureCount; feature++)
+        {
+            var required = featureTable.GetFeature(feature);
+            supportsScalarInitOutput |= required.FeatureId == TrRmFeatureTableReader.ScalarInitOutputFeatureId
+                && required.MinimumRuleRevision <= TrRmFeatureTableReader.ScalarInitOutputRuleRevision;
         }
 
         var sigs = new TrRmMethodSigTableReader(sigBytes, sigCount, types, paramCount, 0);
@@ -307,11 +341,19 @@ public static partial class TrRmExecutableCompiler
             for (var param = 0; param < count; param++)
             {
                 var type = FromRow(types, parameters.GetTypeSpec(first + param));
-                if (type == PrimitiveType.Void || parameters.GetMode(first + param) != 0)
+                var mode = parameters.GetMode(first + param);
+                if (type == PrimitiveType.Void
+                    || mode != 0 && mode != 2
+                    || mode == 2 && (!supportsScalarInitOutput
+                        || type != PrimitiveType.Int32 || flags == 2))
                 {
                     throw Invalid("Unsupported parameter type or mode.");
                 }
-                variables.Add(new BoundVariable($"arg{param}", type, false, default));
+                variables.Add(new BoundVariable($"arg{param}", type, mode == 2, default)
+                {
+                    IsOut = mode == 2,
+                    IsInit = mode == 2,
+                });
             }
 
             var (contractFirst, contracts) = defs.GetContractRange(row);
@@ -373,7 +415,8 @@ public static partial class TrRmExecutableCompiler
             TrRmScalarGraph? indexed = null;
             ImmutableArray<BoundVariable>.Builder variables;
             ImmutableArray<BoundStatement> statements;
-            if ((body[0] & 0x08) != 0)
+            var bodyForm = body[0] & 0x0C;
+            if (bodyForm == 0x08)
             {
                 TrRmCompactIndexedBodyReader.ValidateOnly(bodies, row, modules, defs, sigs,
                     parameters, types);
@@ -387,7 +430,7 @@ public static partial class TrRmExecutableCompiler
                 }
                 statements = [];
             }
-            else
+            else if (bodyForm == 0x04)
             {
                 variables = declaration.Variables.ToBuilder();
                 _ = new TrRmCompactLinearBodyReader(bodies, row, modules, defs, sigs, parameters, types);
@@ -418,6 +461,28 @@ public static partial class TrRmExecutableCompiler
                     statements = [];
                 }
             }
+            else if (bodyForm == 0)
+            {
+                if (!supportsScalarInitOutput)
+                {
+                    throw Invalid("A general place Body requires the ScalarInitOutput feature.");
+                }
+
+                var outputBody = TrRmScalarInitOutputBodyReader.Read(bodies, row, modules,
+                    defs, sigs, parameters, types, contractBytes);
+                if (outputBody.Places.IsEmpty)
+                {
+                    throw Invalid("The executable general Body profile requires places.");
+                }
+
+                variables = declaration.Variables.ToBuilder();
+                statements = DecodeOutputBody(outputBody, types, variables, functions);
+            }
+            else
+            {
+                throw Invalid("Unsupported executable Body form.");
+            }
+
             functions[row - 1] = declaration with
             {
                 Variables = variables.ToImmutable(),

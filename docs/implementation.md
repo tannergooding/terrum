@@ -563,6 +563,20 @@ exported safe wrapper under both runtime policies; unscoped unsafe calls reject
 with the hosted `TRM3028` diagnostic and without replacing an existing library
 artifact.
 
+Executable TRRM also has a provisional, unapproved `ScalarInitOutput` profile
+for non-exported module-local `init ref<int32>` functions and local output
+calls. It uses required Feature section kind `0x0004` and a separately audited
+one-block general Body path, reconstructs bound nodes, and still runs the
+mandatory semantic verifier. Only the profile's bounded output shapes are
+admitted; legacy value-only artifacts remain valid, while `out`, exports and
+broader reference/output behavior remain unsupported. The
+[output-parameters proposal](proposals/trrm-output-parameters.md) records the
+provisional profile and unresolved contract question; accepted instruction-set
+semantics and Terrum-authored scalar frontend verification/emission are
+unchanged. The general Body loader currently admits only `Fail` reason 1,
+because the other reasons have distinct native statuses that this bound-body
+translation cannot preserve.
+
 Target type matching also preserves generic/concrete consistency, including
 reference/pointer forms, without pattern-driven reference formation. Checked
 runtime type captures require witnesses and supported generic execution.

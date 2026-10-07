@@ -77,10 +77,32 @@ public sealed class TrRmModuleTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(TwoModules(), methodDefCount: -1));
     }
 
-    private static void Create(byte[] modules, byte[]? names = null, int methodDefCount = 2)
+    [Fact]
+    public void ReadsFeatureRangesAndRejectsMalformedOrOutOfRangeRanges()
+    {
+        var moduleBytes = TwoModules();
+        Write(moduleBytes, 16, 1);
+        Write(moduleBytes, 20, 1);
+        var strings = new TrRmStringTableReader(TwoNames(), 2);
+        var modules = new TrRmModuleTableReader(moduleBytes, 2, strings,
+            0, 0, 2, 0, 1);
+        Assert.Equal((1, 1), modules.GetFeatureRange(1));
+        Assert.Equal((0, 0), modules.GetFeatureRange(2));
+        Assert.Throws<InvalidDataException>(() => Create(moduleBytes, featureCount: 0));
+
+        Write(moduleBytes, 20, 0);
+        Assert.Throws<InvalidDataException>(() => Create(moduleBytes, featureCount: 1));
+        Write(moduleBytes, 16, 2);
+        Write(moduleBytes, 20, 1);
+        Assert.Throws<InvalidDataException>(() => Create(moduleBytes, featureCount: 1));
+    }
+
+    private static void Create(byte[] modules, byte[]? names = null,
+        int methodDefCount = 2, int featureCount = -1)
     {
         var strings = new TrRmStringTableReader(names ?? TwoNames(), 2);
-        _ = new TrRmModuleTableReader(modules, 2, strings, 0, 0, methodDefCount, 0);
+        _ = new TrRmModuleTableReader(modules, 2, strings, 0, 0,
+            methodDefCount, 0, featureCount);
     }
 
     private static string GetIdentity(byte[] modules, int row)

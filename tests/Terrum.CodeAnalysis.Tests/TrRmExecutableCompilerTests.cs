@@ -44,6 +44,116 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Theory]
+    [InlineData("""
+        int32 Fill(int32 prefix, init ref<int32> result, int32 suffix) {
+            result = prefix + suffix;
+            return suffix;
+        }
+        int32 Main() {
+            init int32 result;
+            int32 status = Fill(20, init result, 2);
+            return result + status;
+        }
+        """, 24)]
+    [InlineData("""
+        void Fill(init ref<int32> first, init ref<int32> second) {
+            first = 40;
+            second = 2;
+        }
+        int32 Main() {
+            init int32 first;
+            init int32 second;
+            Fill(init first, init second);
+            return first + second;
+        }
+        """, 42)]
+    public void InitOutputCallsRoundTripWithFeatureAndPublishOnNormalReturn(string source, int expected)
+    {
+        var original = Compile(source);
+        var artifact = TrRmExecutableCompiler.Emit(original, "init-output");
+        var index = new TrRmArtifactIndex(artifact);
+
+        Assert.True(index.TryGetSection(4, out var featureBytes, out var featureCount));
+        Assert.Equal(1, featureCount);
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount);
+        Assert.Equal(TrRmFeatureRow.ScalarInitOutput, features.GetFeature(1));
+
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void OutputBodyCallsEncodeWideMethodReferenceSeparatelyFromArgumentCount()
+    {
+        var fillers = string.Join(Environment.NewLine,
+            Enumerable.Range(0, 255).Select(static index => $"void Helper{index}() {{ return; }}"));
+        var source = $$"""
+            {{fillers}}
+            void Target(int32 value) { return; }
+            int32 Main() {
+                init int32 result;
+                int32 value = 1;
+                Target(value);
+                result = 42;
+                return result;
+            }
+            """;
+        var loaded = TrRmExecutableCompiler.Load(
+            TrRmExecutableCompiler.Emit(Compile(source), "wide-output-method-reference"));
+
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void InitOutputParameterRequiresModuleFeatureAssignment()
+    {
+        var artifact = TrRmExecutableCompiler.Emit(Compile("""
+            void Fill(init ref<int32> result) { result = 42; }
+            int32 Main() {
+                init int32 result;
+                Fill(init result);
+                return result;
+            }
+            """), "missing-feature");
+        var index = new TrRmArtifactIndex(artifact);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out _, out _, out _);
+            if (kind != 1)
+            {
+                continue;
+            }
+
+            var offset = (int)BinaryPrimitives.ReadUInt32LittleEndian(
+                artifact.AsSpan(32 + section * 16 + 8));
+            BinaryPrimitives.WriteUInt32LittleEndian(artifact.AsSpan(offset + 16), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(artifact.AsSpan(offset + 20), 0);
+            Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+            return;
+        }
+
+        throw new InvalidOperationException("Module section missing.");
+    }
+
+    [Fact]
+    public void ExportedInitOutputFunctionRemainsOutsideTheProvisionalProfile()
+    {
+        const string source = """
+            public void Fill(init ref<int32> result) { result = 42; }
+            int32 Main() {
+                init int32 result;
+                Fill(init result);
+                return result;
+            }
+            """;
+
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.Emit(Compile(source), "exported-output"));
+    }
+
+    [Theory]
     [InlineData("float32", "1.5", "<", "2.0")]
     [InlineData("float32", "2.0", "<=", "2.0")]
     [InlineData("float32", "2.0", ">", "1.5")]
@@ -1108,7 +1218,6 @@ public sealed class TrRmExecutableCompilerTests
 
     [Theory]
     [InlineData("out int32 value")]
-    [InlineData("init ref<int32> value")]
     public void ExecutableWriterRejectsOutputParameters(string parameter)
     {
         var source = $"int32 Output({parameter}) {{ value = 42; return 0; }} "
