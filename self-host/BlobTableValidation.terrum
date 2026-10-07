@@ -1,0 +1,15 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryGetBlobTableRowExtent(int32 recordCount, int32 row,
+    init ref<int32> blobStart, init ref<int32> blobLength)
+{
+    if (!TryGetVariableTableRowExtent(recordCount, 0, 1, row,
+        init var rowStart, init var rowLength))
+    {
+        return false;
+    }
+
+    blobStart = rowStart;
+    blobLength = rowLength;
+    return true;
+}
