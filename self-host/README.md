@@ -9,6 +9,10 @@ results leave their destinations vacant; this narrow migration does not settle
 the general `out`-to-`init ref<T>` migration.
 They are not linked into the C# implementation. The native profile executes
 the range, character, integer and nested token components and a bounded token scanner.
+The hosted `frontend-component` also composes `WideIntegerFacts` and
+`IntegerParsing` with `TokenIntegerSnapshot` to revalidate scanner integer
+magnitudes during frontend construction; projection still uses the hosted
+verifier and emitter.
 The full-solution build also produces
 `artifacts\bin\self-host\<configuration>\terrum-compiler-primitives.dll`
 from `BitOperations`, `CharacterFacts`, `Float32MathSelection`,

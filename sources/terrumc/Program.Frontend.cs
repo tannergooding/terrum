@@ -42,7 +42,7 @@ internal static partial class Program
         string[] names = ["SourceRange", "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "Token", "ManagedTokenChain",
             "StringEscape", "Scanner",
             "ManagedScanner", "TokenSnapshot", "TokenTriviaSnapshot",
-            "TokenIntegerSnapshot", "TokenDiagnosticSnapshot", "ScalarParserTypes",
+            "WideIntegerFacts", "IntegerParsing", "TokenIntegerSnapshot", "TokenDiagnosticSnapshot", "ScalarParserTypes",
             "CharacterLiteral", "HexDigitValue", "BasedIntegerFloatLiteral", "HexFloatLiteral",
             "DecimalFloatLiteral", "ScalarFrontend", "TokenCursor",
             "ScalarFrontendProgram", "ScalarFrontendProjection"];
