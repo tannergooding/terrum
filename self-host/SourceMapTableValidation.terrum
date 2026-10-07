@@ -113,13 +113,15 @@ public static bool TryValidateSourceMapTable(int32 recordCount,
     return true;
 }
 
-bool TryValidateCompactLinearSourceMapLocations(int32 methodDefCount,
+// Call after Body validation; operation-count spans are one-based by method.
+bool TryValidateCompactSourceMapLocations(int32 methodDefCount,
     int32 bodyCount)
 {
     if (methodDefCount < 0 || methodDefCount > 0xFF_FFFF
         || bodyCount < 0 || bodyCount > 0xFF_FFFF
         || Host.BodyOwners.Length != bodyCount + 1
-        || Host.SourceMapLinearOperationCounts.Length != methodDefCount + 1
+        || Host.SourceMapOperationBlockStarts.Length != methodDefCount + 1
+        || Host.SourceMapOperationBlockCounts.Length != methodDefCount + 1
         || Host.SourceMaps.Length < 4
         || !TryReadSourceMapTableWord(0, init var slotCount)
         || slotCount > uint32((Host.SourceMaps.Length - 4) / 16))
@@ -127,9 +129,10 @@ bool TryValidateCompactLinearSourceMapLocations(int32 methodDefCount,
         return false;
     }
 
+    int32 operationCountLength = Host.SourceMapOperationCounts.Length;
     int32 slotCountInt = int32(slotCount);
     int32 rowStart = 4 + slotCountInt * 16;
-    if ((Host.SourceMaps.Length - rowStart) % 16 != 0)
+    if (operationCountLength == 0 || (Host.SourceMaps.Length - rowStart) % 16 != 0)
     {
         return false;
     }
@@ -152,7 +155,7 @@ bool TryValidateCompactLinearSourceMapLocations(int32 methodDefCount,
             || !TryReadSourceMapTableWord(slotOffset + 4, init var bodyRow)
             || !TryReadSourceMapTableWord(slotOffset + 8, init var block)
             || !TryReadSourceMapTableWord(slotOffset + 12, init var ordinal)
-            || bodyRow == 0 || bodyRow > uint32(bodyCount) || block != 1)
+            || bodyRow == 0 || bodyRow > uint32(bodyCount) || block == 0)
         {
             return false;
         }
@@ -163,7 +166,17 @@ bool TryValidateCompactLinearSourceMapLocations(int32 methodDefCount,
             return false;
         }
 
-        int32 operationCount = Host.SourceMapLinearOperationCounts[methodRow];
+        int32 blockCount = Host.SourceMapOperationBlockCounts[methodRow];
+        int32 firstOperationCount = Host.SourceMapOperationBlockStarts[methodRow];
+        if (blockCount <= 0 || block > uint32(blockCount)
+            || firstOperationCount <= 0 || firstOperationCount >= operationCountLength
+            || blockCount > operationCountLength - firstOperationCount)
+        {
+            return false;
+        }
+
+        int32 operationCount = Host.SourceMapOperationCounts[
+            firstOperationCount + int32(block) - 1];
         if (operationCount < 0 || ordinal > uint32(operationCount))
         {
             return false;

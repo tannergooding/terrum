@@ -27,7 +27,7 @@ public sealed class SourceMapTableValidationComponentTests
                 Host.Expected[6], Host.Expected[7], Host.Expected[8],
                 Host.Expected[9], Host.Expected[10], Host.Expected[11],
                 Host.Expected[12], Host.Expected[13], Host.Expected[14])
-                && TryValidateCompactLinearSourceMapLocations(
+                && TryValidateCompactSourceMapLocations(
                     Host.Expected[5], Host.Expected[13]);
             return valid == (Host.Expected[15] != 0) ? 0 : 1;
         }
@@ -41,10 +41,20 @@ public sealed class SourceMapTableValidationComponentTests
         var valid = CreateCase();
         var twoInstructions = CreateCase(twoMethods: true);
         var twoModuleTransitions = CreateCase(twoModules: true, reverseBodyOwners: true);
+        var twoBlockBody = valid with {
+            SourceMapOperationBlockStarts = [0, 1],
+            SourceMapOperationBlockCounts = [0, 2],
+            SourceMapOperationCounts = [0, 1, 2],
+        };
+        var secondBlock = WithWord(twoBlockBody, 12, 2);
         var unusedSlots = WithSourceMap(valid, MapWithUnusedSlots());
         var cases = new List<TableCase> {
             valid,
             WithWord(valid, 16, 1),
+            secondBlock,
+            WithWord(secondBlock, 16, 2),
+            ChangeWord(secondBlock, 12, 3),
+            ChangeWord(secondBlock, 16, 3),
             twoInstructions,
             twoModuleTransitions,
             ChangeWord(valid, 16, uint.MaxValue),
@@ -138,8 +148,12 @@ public sealed class SourceMapTableValidationComponentTests
                 new HostBuffer("FieldOwners", PrimitiveType.Int32, [123], true),
                 new HostBuffer("BodyOwners", PrimitiveType.Int32,
                     [.. Enumerable.Repeat(123, testCase.BodyCount + 1)], true),
-                new HostBuffer("SourceMapLinearOperationCounts", PrimitiveType.Int32,
-                    [.. LinearOperationCounts(testCase.MethodCount)], false),
+                new HostBuffer("SourceMapOperationBlockStarts", PrimitiveType.Int32,
+                    [.. testCase.SourceMapOperationBlockStarts], false),
+                new HostBuffer("SourceMapOperationBlockCounts", PrimitiveType.Int32,
+                    [.. testCase.SourceMapOperationBlockCounts], false),
+                new HostBuffer("SourceMapOperationCounts", PrimitiveType.Int32,
+                    [.. testCase.SourceMapOperationCounts], false),
                 new HostBuffer("GenericSignatureOwners", PrimitiveType.Int32, [123, 123], true),
                 new HostBuffer("Expected", PrimitiveType.Int32,
                 [
@@ -190,12 +204,18 @@ public sealed class SourceMapTableValidationComponentTests
         }
 
         var methodBytes = new byte[methodCount * 28];
+        var operationBlockStarts = new int[methodCount + 1];
+        var operationBlockCounts = new int[methodCount + 1];
+        var operationCounts = new int[methodCount + 1];
         for (var row = 0; row < methodCount; row++)
         {
             Write(methodBytes, row * 28 + 4, methodName);
             Write(methodBytes, row * 28 + 8, 1);
             var bodyRow = reverseBodyOwners ? (uint)(methodCount - row) : (uint)row + 1;
             Write(methodBytes, row * 28 + 24, bodyRow);
+            operationBlockStarts[row + 1] = row + 1;
+            operationBlockCounts[row + 1] = 1;
+            operationCounts[row + 1] = 1;
         }
 
         var sourceMap = twoModules && reverseBodyOwners
@@ -215,6 +235,9 @@ public sealed class SourceMapTableValidationComponentTests
             methodCount,
             sourceFileCount,
             methodCount,
+            operationBlockStarts,
+            operationBlockCounts,
+            operationCounts,
             twoMethods || reverseBodyOwners ? 2 : 1,
             true,
             true);
@@ -263,21 +286,22 @@ public sealed class SourceMapTableValidationComponentTests
                 testCase.SourceFileCount, stringReader, modules);
             var sourceMaps = new TrRmSourceMapTableReader(ToBytes(testCase.SourceMaps),
                 testCase.RecordCount, methods, files);
-            sourceMaps.ValidateCompactLinearLocations(methods,
-                LinearOperationCounts(methods.Count));
+            var operationCounts = new int[methods.Count + 1][];
+            for (var method = 1; method <= methods.Count; method++)
+            {
+                var blockCount = testCase.SourceMapOperationBlockCounts[method];
+                var counts = new int[blockCount + 1];
+                var firstCount = testCase.SourceMapOperationBlockStarts[method];
+                Array.Copy(testCase.SourceMapOperationCounts, firstCount, counts, 1, blockCount);
+                operationCounts[method] = counts;
+            }
+            sourceMaps.ValidateCompactLocations(methods, operationCounts);
             return true;
         }
         catch (InvalidDataException)
         {
             return false;
         }
-    }
-
-    private static int[] LinearOperationCounts(int methodCount)
-    {
-        var counts = new int[methodCount + 1];
-        Array.Fill(counts, 1, 1, methodCount);
-        return counts;
     }
 
     private static byte[] EncodeModules(int moduleCount, int methodCount, int sourceFileCount)
@@ -424,5 +448,6 @@ public sealed class SourceMapTableValidationComponentTests
     private sealed record TableCase(int[] Strings, int[] Modules, int[] TypeDefs,
         int[] Methods, int[] Signatures, int[] SourceFiles, int[] SourceMaps,
         int ModuleCount, int StringCount, int MethodCount, int SourceFileCount,
-        int BodyCount, int RecordCount, bool ExpectedValid, bool HasHostedOracle);
+        int BodyCount, int[] SourceMapOperationBlockStarts, int[] SourceMapOperationBlockCounts,
+        int[] SourceMapOperationCounts, int RecordCount, bool ExpectedValid, bool HasHostedOracle);
 }
