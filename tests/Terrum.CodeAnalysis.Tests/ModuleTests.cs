@@ -232,7 +232,7 @@ public sealed class ModuleTests
     }
 
     [Fact]
-    public async Task NativeGraphKeepsCopyInitializationOutputVacantAfterImportedFailureAsync()
+    public async Task NativeGraphDoesNotPublishCopyInitializationOutputAfterImportedFailureAsync()
     {
         const string librarySource = """
             public struct Pair {
@@ -243,9 +243,9 @@ public sealed class ModuleTests
                     Second = second;
                 }
             }
-            public void FailBeforeInitializePair(int32 key, init ref<Pair> result) {
-                if (key == 0) { require false; }
+            public void FailAfterInitializePair(int32 key, init ref<Pair> result) {
                 result = new Pair(key, 3);
+                if (key == 0) { require false; }
             }
             public bool TryInitializePair(int32 key, init ref<Pair> result) {
                 if (key == 0) { return false; }
@@ -258,14 +258,14 @@ public sealed class ModuleTests
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = NativeModuleCompiler.CreateProducer(
             Assert.IsType<BoundProgram>(library.Program),
-            ["FailBeforeInitializePair", "TryInitializePair"], "CopyOutputFailure",
+            ["FailAfterInitializePair", "TryInitializePair"], "CopyOutputFailure",
             NativeRuntimePolicy.CheckedExceptions);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 init Pair initialized;
                 unsafe {
                     try {
-                        FailBeforeInitializePair(0, init initialized);
+                        FailAfterInitializePair(0, init initialized);
                         return 1;
                     } catch {
                         if (initialized is init) { return 2; }
