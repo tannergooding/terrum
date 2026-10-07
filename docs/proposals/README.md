@@ -67,6 +67,10 @@ approved.
 - [Native source-grant library](native-source-grant-library.md) proposes a
   bounded per-call source ABI for internal native-library exports; it does not
   extend the semantic-module source-grant profile or establish DLL support.
+- [Sample-driven Windows native FFI](windows-native-ffi.md) recommends checked
+  Windows x64 scalar imports first, followed by only the storage, pointer,
+  callback and closed-COM slices needed by the Win32/DX11 design sample; it
+  does not establish general interop or change accepted contracts.
 - [Persisted scanner invocation profile](scanner-invocation-profile.md)
   considers a named, scanner-specific invocation profile and copied result
   publication without generalizing source grants to arbitrary buffers.
