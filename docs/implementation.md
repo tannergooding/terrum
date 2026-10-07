@@ -208,6 +208,10 @@ helpers. Direct calls compare non-NaN results with hosted conversions and check
 only NaN classification, not payload or signaling state. This is internal
 integer-carrier ABI evidence and does not approve the still-unapproved
 [floating TRRM conversion proposal](proposals/floating-trrm-format-conversions.md).
+The same DLL also exports `FloatingNegation`'s two raw-bit helpers. Direct
+calls check exact sign-bit toggling and involution across zero, subnormal,
+infinity, NaN and deterministic raw-bit inputs; this internal evidence does
+not approve the unapproved TRRM negation proposal or add frontend/TRRM support.
 The same DLL directly invokes both existing `SourceRange` end-query forms,
 `GetEnd` and the `End` property getter, with every successful boundary produced
 by `TryCreate` and compares them with hosted `TextSpan.End`. These calls exercise

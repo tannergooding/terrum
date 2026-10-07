@@ -15,7 +15,7 @@ from `BitOperations`, `CharacterFacts`, `Float32MathSelection`,
 `Float64MathSelection`, `IntegerCheckedArithmetic`, `IntegerFormatting`,
 `IntegerCheckedConversions`, `IntegerFloatConversion`, `Char16FloatConversion`,
 `FloatingFormatConversion`, `IntegerMath`, `SourceRange`, `Token`,
-`IntegerSaturation`, `IntegerWrapping`,
+`FloatingNegation`, `IntegerSaturation`, `IntegerWrapping`,
 `Utf16CodeUnits`, `WideIntegerFacts`, `IntegerFacts` and `CopyAlgorithms`.
 The test build also includes
 `tests\native\integer-formatting-abi.terrum` for workspace setup and
