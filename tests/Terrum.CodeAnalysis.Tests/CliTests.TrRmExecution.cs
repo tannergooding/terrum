@@ -221,6 +221,66 @@ public sealed partial class CliTests
         }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PersistedInitOutputConditionalFailurePreservesFailFastStatusAsync(
+        bool failOnTrue)
+    {
+        var condition = failOnTrue ? "true" : "false";
+        var trueArm = failOnTrue ? "require false;" : "return 42;";
+        var falseArm = failOnTrue ? "return 42;" : "require false;";
+        var source = $$"""
+            bool Select(init ref<int32> result) {
+                result = 7;
+                return {{condition}};
+            }
+            int32 Main() {
+                init int32 result;
+                if (Select(init result)) {
+                    {{trueArm}}
+                } else {
+                    {{falseArm}}
+                }
+            }
+            """;
+        var prefix = Path.Combine(Directory.GetCurrentDirectory(),
+            $"trrm-init-output-conditional-failure-{failOnTrue}-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var executable = prefix + ".exe";
+        try
+        {
+            var (compiled, compileOutput, compileError) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "compile-trrm", "-", "--identity",
+                "init-output-conditional-failure", "-o", artifact, "--runtime", "fail-fast", "--json");
+            Assert.True(compiled == 0, $"{compileOutput}{Environment.NewLine}{compileError}");
+            Assert.Empty(compileError);
+
+            var (jitted, jitOutput, jitError) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "jit", "-", "--runtime", "fail-fast", "--json");
+            Assert.Equal(unchecked((int)0xE0540003), jitted);
+            Assert.Empty(jitOutput);
+            Assert.Empty(jitError);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.Equal(unchecked((int)0xE0540003), ran);
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+
+            var (built, buildOutput, buildError) = await RunAsync([], "build-trrm", artifact,
+                "-o", executable, "--runtime", "fail-fast", "--json");
+            Assert.True(built == 0, $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.Empty(buildError);
+            Assert.Equal(unchecked((int)0xE0540003), await ExecuteTrRmImageAsync(executable));
+        }
+        finally
+        {
+            File.Delete(artifact);
+            File.Delete(executable);
+        }
+    }
+
     [Fact]
     public async Task PersistedInitOutputSignedNegationPreservesOverflowStatusAsync()
     {

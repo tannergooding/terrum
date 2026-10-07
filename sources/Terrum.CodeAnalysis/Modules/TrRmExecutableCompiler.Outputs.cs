@@ -641,6 +641,7 @@ public static partial class TrRmExecutableCompiler
         private readonly Dictionary<int, int> _placeLastUses = [];
         private int _operationCount;
         private int _returnValue;
+        private int _failureReason;
         private int _currentBlock;
         private bool _ended;
 
@@ -871,7 +872,7 @@ public static partial class TrRmExecutableCompiler
             _currentBlock = 1;
             RestorePlaceState(trueState);
             var trueEntryState = _placeInitialized.ToArray();
-            EmitBranchReturn(conditional.Then);
+            EmitBranchTerminal(conditional.Then);
             CaptureBlock(inheritedPlaces: trueEntryState);
 
             _currentBlock = 2;
@@ -881,21 +882,39 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported("Output Body conditionals require two terminal arms.");
             }
             var falseEntryState = _placeInitialized.ToArray();
-            EmitBranchReturn(conditional.Else);
+            EmitBranchTerminal(conditional.Else);
             CaptureBlock(inheritedPlaces: falseEntryState);
             _ended = true;
         }
 
-        private void EmitBranchReturn(BoundStatement statement)
+        private void EmitBranchTerminal(BoundStatement statement)
         {
-            var result = statement switch
+            var terminal = statement switch
             {
-                BoundReturn returned => returned,
                 BoundBlock { RetiredManagedLocals.IsEmpty: true, Statements.Length: 1 } block
-                    when block.Statements[0] is BoundReturn returned => returned,
-                _ => throw Unsupported("Conditional output arms require one terminal Return."),
+                    => block.Statements[0],
+                _ => statement,
             };
-            EmitReturn(result);
+
+            switch (terminal)
+            {
+                case BoundReturn returned:
+                    EmitReturn(returned);
+                    break;
+                case BoundRequire
+                {
+                    Condition: BoundConstant { Type: PrimitiveType.Bool, Value: 0 },
+                }:
+                    for (var place = 1; place < _places.Count; place++)
+                    {
+                        UsePlace(place, _operationCount);
+                    }
+                    _failureReason = 1;
+                    _ended = true;
+                    break;
+                default:
+                    throw Unsupported("Conditional output arms require one terminal Return or Fail reason 1.");
+            }
         }
 
         private void RestorePlaceState(bool[] initialized)
@@ -914,7 +933,7 @@ public static partial class TrRmExecutableCompiler
         private void CaptureBlock(int condition = 0, bool[]? inheritedPlaces = null)
         {
             _blocks.Add(new OutputBlock(_operations.ToArray(), _operationCount, _returnValue,
-                condition, new Dictionary<int, int>(_valueLastUses),
+                _failureReason, condition, new Dictionary<int, int>(_valueLastUses),
                 new Dictionary<int, int>(_placeLastUses),
                 _currentBlock == 0 ? null : inheritedPlaces ?? _placeInitialized.ToArray()));
             _operations.Clear();
@@ -922,6 +941,7 @@ public static partial class TrRmExecutableCompiler
             _placeLastUses.Clear();
             _operationCount = 0;
             _returnValue = 0;
+            _failureReason = 0;
             _ended = false;
         }
 
@@ -1510,15 +1530,24 @@ public static partial class TrRmExecutableCompiler
                 operationsStarts[blockIndex] = block.Count;
                 block.AddRange(current.Operations);
                 terminatorOffsets[blockIndex] = block.Count;
-                if (current.Condition == 0)
+                if (current.Condition != 0)
+                {
+                    WriteConditionalTerminator(block, current.Condition,
+                        trueTarget: 2, falseTarget: 3);
+                }
+                else if (current.FailureReason == 1)
+                {
+                    block.Add(0x87);
+                    block.Add(1);
+                }
+                else if (current.FailureReason == 0)
                 {
                     WriteInstruction(block, 0x83, Width((ulong)current.ReturnValue), 0);
                     Write(block, (ulong)current.ReturnValue, Width((ulong)current.ReturnValue));
                 }
                 else
                 {
-                    WriteConditionalTerminator(block, current.Condition,
-                        trueTarget: 2, falseTarget: 3);
+                    throw Unsupported("Output Body failure reason is outside the profile.");
                 }
                 blocks[blockIndex] = block;
                 blockOffsets[blockIndex + 1] = checked(blockOffsets[blockIndex] + block.Count);
@@ -1659,6 +1688,6 @@ public static partial class TrRmExecutableCompiler
     private readonly record struct OutputPlace(int Variable, bool IsParameter);
 
     private sealed record OutputBlock(byte[] Operations, int OperationCount, int ReturnValue,
-        int Condition, Dictionary<int, int> ValueLastUses,
+        int FailureReason, int Condition, Dictionary<int, int> ValueLastUses,
         Dictionary<int, int> PlaceLastUses, bool[]? InheritedPlaces);
 }

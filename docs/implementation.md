@@ -622,8 +622,9 @@ remain unsupported. The
 provisional profile and unresolved contract question; accepted instruction-set
 semantics and Terrum-authored scalar frontend verification/emission are
 unchanged. The general Body loader currently admits only `Fail` reason 1,
-because the other reasons have distinct native statuses that this bound-body
-translation cannot preserve.
+and the conditional output writer emits it only for a terminal branch arm;
+other reasons have distinct native statuses that this bound-body translation
+cannot preserve.
 
 Target type matching also preserves generic/concrete consistency, including
 reference/pointer forms, without pattern-driven reference formation. Checked

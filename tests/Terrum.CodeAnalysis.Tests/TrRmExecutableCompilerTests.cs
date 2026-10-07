@@ -553,6 +553,33 @@ public sealed class TrRmExecutableCompilerTests
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedFalseState));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void InitOutputConditionalArmsPreserveFailReasonOne(bool failOnTrue)
+    {
+        var condition = failOnTrue ? "true" : "false";
+        var trueArm = failOnTrue ? "require false;" : "return 42;";
+        var falseArm = failOnTrue ? "return 42;" : "require false;";
+        var source = $$"""
+            bool Select(bool selected, init ref<int32> result) {
+                result = 7;
+                return selected;
+            }
+            int32 Main() {
+                init int32 result;
+                if (Select({{condition}}, init result)) {
+                    {{trueArm}}
+                } else {
+                    {{falseArm}}
+                }
+            }
+            """;
+        var original = Compile(source);
+        _ = TrRmExecutableCompiler.Load(
+            TrRmExecutableCompiler.Emit(original, "conditional-output-failure"));
+    }
+
     [Fact]
     public void OutputBodyUsesMinimalWidthForLongInstructionStreams()
     {
