@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 72;
+    private const int Version = 73;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1473,6 +1473,7 @@ public static partial class ModuleCompiler
                             case BoundCall { IsUnsafeAuthorized: true } call
                                 when (uint)call.Function < (uint)program.Functions.Length:
                                 if (!IsSupportedModuleUnsafeExpressionCall(program.Functions[call.Function],
+                                    call.Arguments, call.ArgumentParameterIndices,
                                     program.Structures, callValueTypes))
                                 {
                                     throw new ModuleContractException(
@@ -1546,11 +1547,21 @@ public static partial class ModuleCompiler
     }
 
     private static bool IsSupportedModuleUnsafeExpressionCall(BoundFunction function,
+        ImmutableArray<BoundExpression> arguments, ImmutableArray<int> argumentParameterIndices,
         ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
     {
         if (!function.RequiresUnsafeCaller)
         {
             return false;
+        }
+        if (function.IsOperator)
+        {
+            return function.IsStatic && function.DeclaringStruct is string owner
+                && Binder.TryGetStaticOperatorKey(function.Name, owner, out var key) && key.Arity == 2
+                && function.ParameterCount == 2 && arguments.Length == 2
+                && argumentParameterIndices.IsDefault
+                && IsSupportedModuleOperatorContract(
+                    Contract(function, structures), structures, valueTypes, requirePublic: true);
         }
         if (function.DeclaringStruct is null)
         {
@@ -4153,7 +4164,8 @@ public static partial class ModuleCompiler
                     "Caller-unsafe mutable methods require a supported expression-scoped field receiver."),
             SymbolicCall call when names.TryGetValue(call.Name, out var index)
                 && (!inUnsafeExpression || !functions[index].RequiresUnsafeCaller
-                    || IsSupportedModuleUnsafeExpressionCall(functions[index], structures, valueTypes)) =>
+                    || IsSupportedModuleUnsafeExpressionCall(functions[index],
+                        call.Arguments, call.ArgumentParameterIndices, structures, valueTypes)) =>
                 new BoundCall(index, [.. call.Arguments.Select((argument, argumentIndex) => ResolveExpression(
                     argument, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression,
                     inUnsafeExpression && IsSupportedModuleUnsafeExpressionMutableFieldLoanCall(

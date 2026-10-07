@@ -3131,6 +3131,7 @@ internal sealed partial class Binder
         BoundCall call => (call.IsUnsafeAuthorized && call.Function >= 0
             && call.Function < _signatures.Count
             && (_signatures[call.Function].StructName is null
+                || IsBinaryStaticOperator(_signatures[call.Function])
                 || _signatures[call.Function] is {
                     IsStatic: true, IsOperator: false, PropertyName: null,
                 }
@@ -3172,6 +3173,10 @@ internal sealed partial class Binder
         BoundIsVariablePattern pattern => ContainsAuthorizedExpressionScopeCall(pattern.Value),
         _ => false,
     };
+
+    private static bool IsBinaryStaticOperator(Signature signature) =>
+        signature.IsStatic && signature.IsOperator && signature.StructName is string owner
+        && TryGetStaticOperatorKey(signature.Name, owner, out var key) && key.Arity == 2;
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unsupported syntax kinds are rejected by the default branch.")]
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Runtime struct IDs are represented by enum values outside the declared primitive range.")]

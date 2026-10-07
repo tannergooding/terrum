@@ -69,6 +69,14 @@ prerequisite has already been met.
    body contract; mutable receiver imports and direct exports remain
    unsupported. This bounded implementation adds no ABI or authorization bit
    and does not approve the broader reference-call metadata proposal.
+   Revision 73 provisionally extends `unsafe(expr)` persistence to eligible
+   caller-unsafe static binary nominal operators on recursively exportable
+   public `Copy` owners. The full call must be enclosed, use two exact
+   by-value owner operands and canonical positional mapping, and satisfy the
+   existing owner-result or comparison-`bool` signature contract. Unary
+   operators and nominal updates remain outside this expression-scope slice;
+   existing unsafe-block behavior is unchanged. This adds no ABI, TRRM or
+   scalar-frontend support and does not approve the broader proposal.
    Revision 64 also provisionally
    persists identity for supported static operators on public `Copy` structs,
    preserving unsafe effects and nominal-update target checks. These bounded

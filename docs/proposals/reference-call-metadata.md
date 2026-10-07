@@ -401,6 +401,44 @@ Regression coverage includes producer and consumer-local calls, forged
 contracts/mappings/scopes, and native module sets and graphs under both
 runtime policies. The broader proposal remains unapproved.
 
+### Provisional extension: caller-unsafe binary operators in `unsafe(expr)`
+
+**Summary:** The accepted source contract permits caller-unsafe static nominal
+operators, and `unsafe(expr)` authorizes operations evaluated within its
+expression. Binary nominal operators already lower to ordinary `BoundCall`
+nodes with declaration identity; the expression wrapper is the structural
+authorization boundary. Their existing persisted support is limited to
+`BoundUnsafe` statement scopes.
+
+**Recommendation:** Extend only caller-unsafe static binary operators whose
+recognized owner-relative operator key has arity two, whose operands are
+both by-value values of the exact owner type, and whose result satisfies the
+existing arithmetic/bitwise owner-result or comparison-`bool` contract.
+Require the complete call to be within the persisted `BoundUnsafeExpression`,
+validate the declaration using the existing public, non-unique `Copy` owner
+and recursively exportable layout gate, and require the canonical positional
+argument mapping. Reconstruct authorization from the resolved declaration
+and wrapper; persist no authorization bit or new call representation.
+
+Here, non-mutating excludes operator-place writeback, not effects or purity:
+operand evaluation and the operator body retain their existing ordering,
+once-only evaluation, effects and failure behavior. The bound representation
+does not preserve whether an ordinary operator `BoundCall` originated from
+infix syntax, so the eligibility rule is declaration-based rather than
+syntax-origin-based.
+
+**Implemented provisionally in semantic-module revision 73:** The binder
+retains an operator-only expression wrapper for recognized binary operator
+calls. Writers and readers enforce the same exact signature/layout gate,
+complete-wrapper scope and positional mapping; stripped wrappers and forged
+argument mappings fail closed. Regression coverage includes nested arithmetic,
+comparison results, operand-only scope rejection, unary exclusion, consumer
+local and imported calls, semantic linking, and native graph/module-set
+execution under both runtime policies. Existing unsafe-block operator
+support, nominal updates, operator lowering and ABI are unchanged. This
+bounded persistence slice does not add TRRM or scalar-frontend
+verification/emission support and does not approve the broader proposal.
+
 ### Provisional extension: caller-unsafe readonly getters
 
 **Summary:** The accepted source contract supports caller-unsafe getter

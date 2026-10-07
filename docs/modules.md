@@ -46,7 +46,7 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 72. Writers emit only revision 72 and
+The current semantic-module revision is 73. Writers emit only revision 73 and
 readers reject every other revision; older artifacts must be recreated from
 source. The current format preserves verified, typed, source-mapped structured
 IR and the supported declaration, layout, initialization, cleanup, and runtime
@@ -93,6 +93,19 @@ both writer and reader. It adds no receiver ABI or authorization bit, and
 continues to reject mutable receiver imports, direct mutable-method exports,
 wrapped/remapped receiver loans, unsafe-block calls, and unsupported
 reference/output modes.
+
+Revision 73 provisionally persists caller-unsafe static binary nominal
+operator calls inside `unsafe(expr)` for eligible public, non-unique `Copy`
+owners with recursively exportable layouts. The exact recognized binary
+operator contract requires two by-value owner-typed operands and either the
+owner result type or `bool` for comparisons; the complete `BoundCall` must be
+inside the wrapper and retain the canonical positional argument mapping.
+Writers and readers validate the same declaration contract and reconstruct
+authorization from the expression scope. Unary operators and nominal
+updates remain outside this new expression-scope slice; existing unsafe-block
+operator support is unchanged. This adds no ABI, TRRM or scalar-frontend
+verification/emission support and does not approve the broader
+reference-call metadata proposal.
 
 The invocation-scoped source grant and `scanner-10` profile remain provisional
 semantic-module JIT capabilities under their respective proposals. They bind
