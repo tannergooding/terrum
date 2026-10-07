@@ -724,7 +724,7 @@ The [source attachment rule](grammar-spec.md#33-statements-and-local-declaration
 requires one label on the loop introducer's source line; the current parser
 and native source audits enforce that additional restriction.
 The v39 feature milestone added retained post-tested loops and non-nearest
-transfers. Current modules serialize them under revision 71, with no native
+transfers. Current modules serialize them under revision 72, with no native
 ABI, scanner-5 record or syntax-protocol schema change.
 
 The parser and binder support standalone `init T name;` and `init var name;` vacant locals,
@@ -733,7 +733,7 @@ checked `init` completion publishes them, while false or failure leaves them
 vacant. Inferred declarations require a type established by a checked
 initialization. Existing definite-assignment, owner cleanup and managed-root
 rules apply. The v40 feature milestone added persisted vacant declarations;
-current modules serialize them under revision 71, with no native ABI change.
+current modules serialize them under revision 72, with no native ABI change.
 The bounded constant evaluator does not support vacant declarations.
 Hosted `=` assignment can also initialize a definitely vacant `init` local.
 The first supported assignment fixes an inferred local's type; later
@@ -751,7 +751,7 @@ their joined state.
 Never-published inline initialization outputs may still retry after failure;
 vacancy after retiring an immutable value does not grant the same authority.
 The v46 feature milestone added persisted assignments to initialization locals.
-Current revision 71 records the assignment and vacant declaration together;
+Current revision 72 records the assignment and vacant declaration together;
 the native ABI is unchanged.
 Hosted `name = _;` is a distinct lifetime-end statement, not assignment of a
 discard/default value. It requires a definitely live, resolved named local
