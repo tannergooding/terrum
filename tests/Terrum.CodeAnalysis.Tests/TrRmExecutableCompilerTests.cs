@@ -148,6 +148,18 @@ public sealed class TrRmExecutableCompilerTests
     [InlineData("(~Unsigned64One()) == Unsigned64ComplementOne()", 42)]
     [InlineData("(-SingleOne()) == NegativeSingleOne()", 42)]
     [InlineData("(-WideOne()) == NegativeWideOne()", 42)]
+    [InlineData("true", 42)]
+    [InlineData("false", 0)]
+    [InlineData("(char16(65) == CharacterA())", 42)]
+    [InlineData("(int32(-1) == Signed32MinusOne())", 42)]
+    [InlineData("(uint32(1) == Unsigned32One())", 42)]
+    [InlineData("(uint32(0x7FFFFFFF) == Unsigned32High31())", 42)]
+    [InlineData("(uint32(0x80000000) == Unsigned32HighBit())", 42)]
+    [InlineData("(uint32(0xFFFFFFFF) == Unsigned32AllBits())", 42)]
+    [InlineData("(int64(-1) == Signed64MinusOne())", 42)]
+    [InlineData("(uint64(1) == Unsigned64One())", 42)]
+    [InlineData("(float32(-1.0) == NegativeSingleOne())", 42)]
+    [InlineData("(float64(1.0) == WideOne())", 42)]
     [InlineData("(SingleOne() + SingleTwo()) == SingleThree()", 42)]
     [InlineData("(SingleTwo() - SingleOne()) == SingleOne()", 42)]
     [InlineData("(SingleOne() * SingleTwo()) == SingleTwo()", 42)]
@@ -181,14 +193,19 @@ public sealed class TrRmExecutableCompilerTests
             int32 Signed32Two() { return 2; }
             int32 Signed32Three() { return 3; }
             int32 Signed32MinusTwo() { return -2; }
+            int32 Signed32MinusOne() { return -1; }
             uint32 Unsigned32One() { return uint32(1); }
             uint32 Unsigned32Two() { return uint32(2); }
             uint32 Unsigned32Three() { return uint32(3); }
+            uint32 Unsigned32High31() { return uint32(0x7FFFFFFF); }
+            uint32 Unsigned32HighBit() { return uint32(0x80000000); }
+            uint32 Unsigned32AllBits() { return uint32(0xFFFFFFFF); }
             uint32 Unsigned32ComplementOne() { return ~uint32(1); }
             int64 Signed64One() { return int64(1); }
             int64 Signed64Two() { return int64(2); }
             int64 Signed64Three() { return int64(3); }
             int64 Signed64MinusTwo() { return int64(-2); }
+            int64 Signed64MinusOne() { return int64(-1); }
             uint64 Unsigned64One() { return uint64(1); }
             uint64 Unsigned64Two() { return uint64(2); }
             uint64 Unsigned64Three() { return uint64(3); }

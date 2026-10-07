@@ -64,13 +64,11 @@ public sealed partial class CliTests
             }
             int32 Observe(bool value) { return value ? 42 : 0; }
             bool Enabled() { return true; }
-            bool AlsoEnabled() { return true; }
             float64 Scale() { return float64(2.5); }
-            float64 Limit() { return float64(3.5); }
             int32 Main() {
                 init int32 result;
-                Fill(Observe(Enabled() == AlsoEnabled()) + Observe(Scale() < Limit())
-                    + Observe(Scale() * (Limit() - Scale()) == Scale()), init result);
+                Fill(Observe(Enabled() == true) + Observe(Scale() < float64(3.5))
+                    + Observe(Scale() * (float64(3.5) - Scale()) == Scale()), init result);
                 return result;
             }
             """;

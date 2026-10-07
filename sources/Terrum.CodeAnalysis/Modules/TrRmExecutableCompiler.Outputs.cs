@@ -213,13 +213,21 @@ public static partial class TrRmExecutableCompiler
                 case 2:
                 {
                     var type = OutputType(body, types, operation.TypeId);
-                    if (type != PrimitiveType.Int32)
+                    if (!IsOutputScalarType(type) || operation.Opcode == 2 && !IsInteger(type))
                     {
-                        throw Invalid("The executable place profile currently supports int32 constants.");
+                        throw Invalid("Constant type is outside the executable place profile.");
                     }
 
+                    var constantValue = type switch
+                    {
+                        PrimitiveType.Int32 or PrimitiveType.UInt32
+                            => unchecked((int)operation.Data),
+                        PrimitiveType.Float32 => unchecked((uint)operation.Data),
+                        PrimitiveType.Bool or PrimitiveType.Char16 => (long)operation.Data,
+                        _ => unchecked((long)operation.Data),
+                    };
                     DefineValue(operation.Result,
-                        new BoundConstant(unchecked((int)operation.Data), type, default));
+                        new BoundConstant(constantValue, type, default));
                     break;
                 }
                 case 0x0D:
@@ -739,18 +747,24 @@ public static partial class TrRmExecutableCompiler
                         throw Unsupported("Read of an uninitialized or mismatched scalar value.");
                     }
                     return current;
-                case BoundConstant constant when constant.Type == PrimitiveType.Int32:
+                case BoundConstant constant when IsOutputScalarType(constant.Type):
                     var constResult = _valueTypes.Count + 1;
-                    var bits = unchecked((uint)constant.Value);
+                    var bits = constant.Type switch
+                    {
+                        PrimitiveType.Bool or PrimitiveType.Char16 => (ulong)constant.Value,
+                        PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Float32
+                            => unchecked((uint)constant.Value),
+                        _ => unchecked((ulong)constant.Value),
+                    };
                     var dataWidth = Width(bits);
-                    var int32TypeId = BodyTypeId(TypeRow(PrimitiveType.Int32));
-                    var referenceWidth = Width((ulong)Math.Max(constResult, int32TypeId));
+                    var constantTypeId = BodyTypeId(TypeRow(constant.Type));
+                    var referenceWidth = Width((ulong)Math.Max(constResult, constantTypeId));
                     var constOffset = _operations.Count;
                     WriteInstruction(_operations, 0x01, referenceWidth, dataWidth);
                     Write(_operations, (ulong)constResult, referenceWidth);
-                    Write(_operations, (ulong)int32TypeId, referenceWidth);
+                    Write(_operations, (ulong)constantTypeId, referenceWidth);
                     Write(_operations, bits, dataWidth);
-                    _ = AddValue(PrimitiveType.Int32, 0, (uint)constOffset);
+                    _ = AddValue(constant.Type, 0, (uint)constOffset);
                     _operationCount++;
                     return constResult;
                 case BoundBinary binary when binary.Type == binary.Left.Type
