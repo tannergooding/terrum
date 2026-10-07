@@ -93,9 +93,10 @@ reconstructs audited `ConstSigned` integer constants. The writer and loader
 also provisionally support
 Boolean, `char16` and integer equality/inequality, integer ordering, and all
 six floating comparisons, with `bool` results. Integer bitwise AND, OR and XOR
-are supported for all four integer types. Unary support is limited to Boolean
-NOT, integer NOT and unary plus, and floating negation; checked signed-integer
-negation remains excluded to avoid changing this slice's failure contract.
+are supported for all four integer types. Unary support includes Boolean NOT,
+integer NOT and unary plus, checked `int32`/`int64` negation, and floating
+negation. Signed-minimum negation retains the existing checked overflow
+status; unsigned negation remains outside the slice.
 Floating addition, subtraction, multiplication and division are supported for
 both floating types. Integer addition, subtraction, multiplication, division
 and remainder are supported for all four integer types, including signed

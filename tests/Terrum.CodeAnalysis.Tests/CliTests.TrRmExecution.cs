@@ -112,6 +112,39 @@ public sealed partial class CliTests
     }
 
     [Fact]
+    public async Task PersistedInitOutputSignedNegationPreservesOverflowStatusAsync()
+    {
+        const string source = """
+            void Fill(int32 value, init ref<int32> result) { result = value; }
+            int32 Main() {
+                init int32 result;
+                Fill(-int32.MinValue, init result);
+                return result;
+            }
+            """;
+        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-init-negate-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        try
+        {
+            var (compiled, compileOutput, compileError) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "compile-trrm", "-", "--identity",
+                "init-output-negate", "-o", artifact, "--runtime", "fail-fast", "--json");
+            Assert.True(compiled == 0, $"{compileOutput}{Environment.NewLine}{compileError}");
+            Assert.Empty(compileError);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.Equal(unchecked((int)0xE0540001), ran);
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+        }
+        finally
+        {
+            File.Delete(artifact);
+        }
+    }
+
+    [Fact]
     public async Task PersistedNestedAcyclicBreaksRunAndBuildWithoutProducerSourceAsync()
     {
         const string source = """

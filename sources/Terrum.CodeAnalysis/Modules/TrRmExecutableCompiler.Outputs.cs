@@ -305,6 +305,7 @@ public static partial class TrRmExecutableCompiler
                     break;
                 }
                 case 4:
+                case 0x17:
                 case 0x1C:
                 {
                     if (operation.Operands.Length != 1)
@@ -314,20 +315,23 @@ public static partial class TrRmExecutableCompiler
 
                     var operand = ReadValue(operation.Operands[0]);
                     var isFloatNegation = operation.Opcode == 0x1C;
+                    var isCheckedIntegerNegation = operation.Opcode == 0x17;
                     var valid = isFloatNegation
                         ? IsFloat(operand.Type)
-                        : operation.Kind switch
-                        {
-                            1 => operand.Type == PrimitiveType.Bool,
-                            2 or 3 => IsInteger(operand.Type),
-                            _ => false,
-                        };
+                        : isCheckedIntegerNegation
+                            ? operand.Type is PrimitiveType.Int32 or PrimitiveType.Int64
+                            : operation.Kind switch
+                            {
+                                1 => operand.Type == PrimitiveType.Bool,
+                                2 or 3 => IsInteger(operand.Type),
+                                _ => false,
+                            };
                     if (!valid)
                     {
                         throw Invalid("Unary operand is outside the executable place profile.");
                     }
 
-                    var token = isFloatNegation
+                    var token = isFloatNegation || isCheckedIntegerNegation
                         ? TokenKind.Minus
                         : operation.Kind switch
                         {
@@ -810,13 +814,16 @@ public static partial class TrRmExecutableCompiler
                     {
                         TokenKind.Bang => unary.Type == PrimitiveType.Bool,
                         TokenKind.Tilde or TokenKind.Plus => IsInteger(unary.Type),
-                        TokenKind.Minus => IsFloat(unary.Type),
+                        TokenKind.Minus => IsFloat(unary.Type)
+                            || unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64,
                         _ => false,
                     }):
                 {
                     var unaryOperand = EmitValue(unary.Operand);
                     var unaryResult = _valueTypes.Count + 1;
-                    var unaryOpcode = unary.Operator == TokenKind.Minus ? (byte)0x1C : (byte)4;
+                    var unaryOpcode = unary.Operator == TokenKind.Minus
+                        ? IsFloat(unary.Type) ? (byte)0x1C : (byte)0x17
+                        : (byte)4;
                     var unaryKind = unary.Operator switch
                     {
                         TokenKind.Bang => 1,
