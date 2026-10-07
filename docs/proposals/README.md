@@ -73,6 +73,9 @@ approved.
 - [Checked-exception TRRM](checked-exception-trrm.md) records the unapproved
   exceptional-control-flow contract needed before source-free checked-exception
   Bodies can be considered.
+- [Output parameters in executable TRRM](trrm-output-parameters.md) records
+  the unapproved place, publication and exceptional-state contract required
+  before `out` or `init ref<T>` modes can execute from source-free artifacts.
 - [Optional scalar TRRM execution](optional-scalar-trrm-execution.md) records
   a proposed internal execution boundary that does not imply source-language
   or public native ABI support.
