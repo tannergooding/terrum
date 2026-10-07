@@ -90,8 +90,9 @@ which remain `int32`, output-bearing function results, which remain `void` or
 arithmetic operations. The writer and loader also provisionally support
 Boolean, `char16` and integer equality/inequality, integer ordering, and all
 six floating comparisons, with `bool` results. Non-`int32` local constants
-remain excluded. The one-block control-flow boundary is unchanged. These
-value and comparison paths are implemented support only, not approval of the
+remain excluded. Integer bitwise AND, OR and XOR are supported for all four
+integer types. The one-block control-flow boundary is unchanged. These value,
+comparison and bitwise paths are implemented support only, not approval of the
 proposed executable contract.
 
 The broader proposal remains unresolved. In particular, Boolean status facts

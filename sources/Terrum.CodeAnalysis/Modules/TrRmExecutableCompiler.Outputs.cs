@@ -311,6 +311,7 @@ public static partial class TrRmExecutableCompiler
                     {
                         1 or 2 when isFloat => IsFloat(left.Type),
                         3 or 4 or 5 or 6 when isFloat => IsFloat(left.Type),
+                        1 or 2 or 3 => !isFloat && IsInteger(left.Type),
                         4 or 5 => left.Type is PrimitiveType.Bool or PrimitiveType.Char16
                             or PrimitiveType.Int32 or PrimitiveType.UInt32
                             or PrimitiveType.Int64 or PrimitiveType.UInt64,
@@ -324,16 +325,21 @@ public static partial class TrRmExecutableCompiler
 
                     var token = (isFloat, operation.Kind) switch
                     {
+                        (false, 1) => TokenKind.Ampersand,
+                        (false, 2) => TokenKind.Pipe,
+                        (false, 3) => TokenKind.Caret,
                         (true, 1) or (false, 4) => TokenKind.EqualsEquals,
                         (true, 2) or (false, 5) => TokenKind.BangEquals,
                         (true, 3) or (false, 6) => TokenKind.Less,
                         (true, 4) or (false, 7) => TokenKind.LessEquals,
                         (true, 5) or (false, 8) => TokenKind.Greater,
                         (true, 6) or (false, 9) => TokenKind.GreaterEquals,
-                        _ => throw Invalid("Unsupported comparison kind."),
+                        _ => throw Invalid("Unsupported Binary kind."),
                     };
                     DefineValue(operation.Result,
-                        new BoundBinary(token, left, right, PrimitiveType.Bool, default));
+                        new BoundBinary(token, left, right,
+                            !isFloat && operation.Kind is >= 1 and <= 3
+                                ? left.Type : PrimitiveType.Bool, default));
                     break;
                 }
                 case 0x15:
@@ -684,6 +690,33 @@ public static partial class TrRmExecutableCompiler
                     _ = AddValue(PrimitiveType.Int32, 0, (uint)constOffset);
                     _operationCount++;
                     return constResult;
+                case BoundBinary binary when binary.Type == binary.Left.Type
+                    && binary.Left.Type == binary.Right.Type && IsInteger(binary.Left.Type)
+                    && binary.Operator is TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret:
+                {
+                    var bitwiseLeft = EmitValue(binary.Left);
+                    var bitwiseRight = EmitValue(binary.Right);
+                    var bitwiseResult = _valueTypes.Count + 1;
+                    var bitwiseKind = binary.Operator switch
+                    {
+                        TokenKind.Ampersand => 1,
+                        TokenKind.Pipe => 2,
+                        _ => 3,
+                    };
+                    var bitwiseWidth = Width((ulong)Math.Max(bitwiseResult,
+                        Math.Max(bitwiseLeft, bitwiseRight)));
+                    var bitwiseOffset = _operations.Count;
+                    WriteInstruction(_operations, 5, bitwiseWidth, 0);
+                    Write(_operations, (ulong)bitwiseResult, bitwiseWidth);
+                    _operations.Add((byte)bitwiseKind);
+                    Write(_operations, (ulong)bitwiseLeft, bitwiseWidth);
+                    Write(_operations, (ulong)bitwiseRight, bitwiseWidth);
+                    _ = AddValue(binary.Type, 0, (uint)bitwiseOffset);
+                    UseValue(bitwiseLeft, _operationCount);
+                    UseValue(bitwiseRight, _operationCount);
+                    _operationCount++;
+                    return bitwiseResult;
+                }
                 case BoundBinary binary when binary.Type == PrimitiveType.Bool
                     && binary.Left.Type == binary.Right.Type
                     && binary.Operator is TokenKind.EqualsEquals or TokenKind.BangEquals

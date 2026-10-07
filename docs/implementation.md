@@ -572,8 +572,9 @@ remain `int32`, and output-bearing functions return only `void` or `int32`.
 They also provisionally encode and reconstruct scalar comparisons: equality
 and inequality for `bool`, `char16` and integer types; integer ordering; and
 all six comparisons for `float32` and `float64`. Comparison results are
-`bool`. Other value operations and non-`int32` local constants remain outside
-this slice.
+`bool`. Integer-width-preserving bitwise AND, OR and XOR are also provisionally
+supported for the four integer types. Other value operations and non-`int32`
+local constants remain outside this slice.
 It uses required Feature section kind `0x0004` and a separately audited
 one-block general Body path, reconstructs bound nodes, and still runs the
 mandatory semantic verifier. Only the profile's bounded output shapes are
