@@ -203,6 +203,11 @@ helpers and checks every `char16` code unit against hosted conversion. This is
 internal fail-fast ABI evidence for the candidate helpers; it does not approve
 a conversion API, the separate char16-to-floating eligibility proposal or
 general compiler support.
+The same DLL exports the two existing `FloatingFormatConversion` raw-bit
+helpers. Direct calls compare non-NaN results with hosted conversions and check
+only NaN classification, not payload or signaling state. This is internal
+integer-carrier ABI evidence and does not approve the still-unapproved
+[floating TRRM conversion proposal](proposals/floating-trrm-format-conversions.md).
 The same DLL directly invokes both existing `SourceRange` end-query forms,
 `GetEnd` and the `End` property getter, with every successful boundary produced
 by `TryCreate` and compares them with hosted `TextSpan.End`. These calls exercise
