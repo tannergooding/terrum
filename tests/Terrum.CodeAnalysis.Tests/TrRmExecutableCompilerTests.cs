@@ -103,6 +103,72 @@ public sealed class TrRmExecutableCompilerTests
         Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
     }
 
+    [Theory]
+    [InlineData("TrueValue() == TrueValue()", 42)]
+    [InlineData("TrueValue() != FalseValue()", 42)]
+    [InlineData("FalseValue() == TrueValue()", 0)]
+    [InlineData("CharacterA() == CharacterA()", 42)]
+    [InlineData("CharacterA() != CharacterB()", 42)]
+    [InlineData("Signed32One() == Signed32One()", 42)]
+    [InlineData("Signed32One() != Signed32Two()", 42)]
+    [InlineData("Signed32One() < Signed32Two()", 42)]
+    [InlineData("Signed32Two() <= Signed32Two()", 42)]
+    [InlineData("Signed32Two() > Signed32One()", 42)]
+    [InlineData("Signed32Two() >= Signed32Two()", 42)]
+    [InlineData("Signed32Two() < Signed32One()", 0)]
+    [InlineData("Unsigned32One() < Unsigned32Two()", 42)]
+    [InlineData("Unsigned32Two() >= Unsigned32Two()", 42)]
+    [InlineData("Signed64Two() > Signed64One()", 42)]
+    [InlineData("Signed64One() <= Signed64One()", 42)]
+    [InlineData("Unsigned64Two() > Unsigned64One()", 42)]
+    [InlineData("SingleOne() == SingleOne()", 42)]
+    [InlineData("SingleOne() != SingleTwo()", 42)]
+    [InlineData("SingleOne() < SingleTwo()", 42)]
+    [InlineData("SingleOne() <= SingleOne()", 42)]
+    [InlineData("SingleTwo() > SingleOne()", 42)]
+    [InlineData("SingleOne() >= SingleOne()", 42)]
+    [InlineData("WideOne() == WideOne()", 42)]
+    [InlineData("WideOne() != WideTwo()", 42)]
+    [InlineData("WideOne() < WideTwo()", 42)]
+    [InlineData("WideOne() <= WideOne()", 42)]
+    [InlineData("WideTwo() > WideOne()", 42)]
+    [InlineData("WideOne() >= WideOne()", 42)]
+    public void ScalarComparisonsRoundTripInOutputBodies(string comparison, int expected)
+    {
+        var source = $$"""
+            void Fill(int32 value, init ref<int32> result) { result = value; }
+            int32 Observe(bool value) { return value ? 42 : 0; }
+            bool TrueValue() { return true; }
+            bool FalseValue() { return false; }
+            char16 CharacterA() { return char16(65); }
+            char16 CharacterB() { return char16(66); }
+            int32 Signed32One() { return 1; }
+            int32 Signed32Two() { return 2; }
+            uint32 Unsigned32One() { return uint32(1); }
+            uint32 Unsigned32Two() { return uint32(2); }
+            int64 Signed64One() { return int64(1); }
+            int64 Signed64Two() { return int64(2); }
+            uint64 Unsigned64One() { return uint64(1); }
+            uint64 Unsigned64Two() { return uint64(2); }
+            float32 SingleOne() { return float32(1.0); }
+            float32 SingleTwo() { return float32(2.0); }
+            float64 WideOne() { return float64(1.0); }
+            float64 WideTwo() { return float64(2.0); }
+            int32 Main() {
+                init int32 result;
+                Fill(Observe({{comparison}}), init result);
+                return result;
+            }
+            """;
+        var original = Compile(source);
+        var loaded = TrRmExecutableCompiler.Load(
+            TrRmExecutableCompiler.Emit(original, "output-comparisons"));
+
+        Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
+    }
+
     [Fact]
     public void OutputBodyCallsEncodeWideMethodReferenceSeparatelyFromArgumentCount()
     {

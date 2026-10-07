@@ -296,6 +296,45 @@ public static partial class TrRmExecutableCompiler
                     }
                     break;
                 }
+                case 5:
+                case 0x19:
+                {
+                    if (operation.Operands.Length != 2)
+                    {
+                        throw Invalid("Comparison requires two values.");
+                    }
+
+                    var left = ReadValue(operation.Operands[0]);
+                    var right = ReadValue(operation.Operands[1]);
+                    var isFloat = operation.Opcode == 0x19;
+                    var valid = left.Type == right.Type && (operation.Kind switch
+                    {
+                        1 or 2 when isFloat => IsFloat(left.Type),
+                        3 or 4 or 5 or 6 when isFloat => IsFloat(left.Type),
+                        4 or 5 => left.Type is PrimitiveType.Bool or PrimitiveType.Char16
+                            or PrimitiveType.Int32 or PrimitiveType.Int64,
+                        6 or 7 or 8 or 9 => IsInteger(left.Type),
+                        _ => false,
+                    });
+                    if (!valid)
+                    {
+                        throw Invalid("Comparison operands are outside the executable place profile.");
+                    }
+
+                    var token = (isFloat, operation.Kind) switch
+                    {
+                        (true, 1) or (false, 4) => TokenKind.EqualsEquals,
+                        (true, 2) or (false, 5) => TokenKind.BangEquals,
+                        (true, 3) or (false, 6) => TokenKind.Less,
+                        (true, 4) or (false, 7) => TokenKind.LessEquals,
+                        (true, 5) or (false, 8) => TokenKind.Greater,
+                        (true, 6) or (false, 9) => TokenKind.GreaterEquals,
+                        _ => throw Invalid("Unsupported comparison kind."),
+                    };
+                    DefineValue(operation.Result,
+                        new BoundBinary(token, left, right, PrimitiveType.Bool, default));
+                    break;
+                }
                 case 0x15:
                 {
                     if (operation.Operands.Length != 2)
@@ -644,6 +683,49 @@ public static partial class TrRmExecutableCompiler
                     _ = AddValue(PrimitiveType.Int32, 0, (uint)constOffset);
                     _operationCount++;
                     return constResult;
+                case BoundBinary binary when binary.Type == PrimitiveType.Bool
+                    && binary.Left.Type == binary.Right.Type
+                    && binary.Operator is TokenKind.EqualsEquals or TokenKind.BangEquals
+                        or TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater
+                        or TokenKind.GreaterEquals:
+                {
+                    var isFloat = IsFloat(binary.Left.Type);
+                    var isEquality = binary.Operator is TokenKind.EqualsEquals or TokenKind.BangEquals;
+                    if (!IsOutputScalarType(binary.Left.Type)
+                        || !isFloat && (isEquality
+                            ? binary.Left.Type is not (PrimitiveType.Bool or PrimitiveType.Char16
+                                or PrimitiveType.Int32 or PrimitiveType.Int64)
+                            : !IsInteger(binary.Left.Type)))
+                    {
+                        throw Unsupported("Comparison operands are outside the output Body profile.");
+                    }
+
+                    var comparisonLeft = EmitValue(binary.Left);
+                    var comparisonRight = EmitValue(binary.Right);
+                    var compareResult = _valueTypes.Count + 1;
+                    var compareKind = binary.Operator switch
+                    {
+                        TokenKind.EqualsEquals => isFloat ? 1 : 4,
+                        TokenKind.BangEquals => isFloat ? 2 : 5,
+                        TokenKind.Less => isFloat ? 3 : 6,
+                        TokenKind.LessEquals => isFloat ? 4 : 7,
+                        TokenKind.Greater => isFloat ? 5 : 8,
+                        _ => isFloat ? 6 : 9,
+                    };
+                    var compareWidth = Width((ulong)Math.Max(compareResult,
+                        Math.Max(comparisonLeft, comparisonRight)));
+                    var compareOffset = _operations.Count;
+                    WriteInstruction(_operations, isFloat ? (byte)0x19 : (byte)5, compareWidth, 0);
+                    Write(_operations, (ulong)compareResult, compareWidth);
+                    _operations.Add((byte)compareKind);
+                    Write(_operations, (ulong)comparisonLeft, compareWidth);
+                    Write(_operations, (ulong)comparisonRight, compareWidth);
+                    _ = AddValue(PrimitiveType.Bool, 0, (uint)compareOffset);
+                    UseValue(comparisonLeft, _operationCount);
+                    UseValue(comparisonRight, _operationCount);
+                    _operationCount++;
+                    return compareResult;
+                }
                 case BoundBinary binary when binary.Type == PrimitiveType.Int32
                     && binary.Left.Type == PrimitiveType.Int32 && binary.Right.Type == PrimitiveType.Int32
                     && binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star:
