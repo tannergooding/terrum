@@ -73,9 +73,6 @@ approved.
 - [Compare-exchange order pairs](atomic-cas-order-pairs.md) recommends a
   finite compile-time-valid table for CAS success/failure memory orders;
   it does not add atomic support or change the accepted bitwise-comparison rule.
-- [Floating format conversions in executable TRRM](floating-trrm-format-conversions.md)
-  recommends a distinct opcode for the accepted `float32`/`float64` conversion
-  pair without extending integer conversion policies or adding other pairs.
 - [Integer-to-floating conversions in executable TRRM](integer-to-floating-trrm-conversions.md)
   recommends a distinct opcode for the eight accepted fixed-width
   integer-to-floating conversion pairs.

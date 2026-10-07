@@ -132,6 +132,9 @@ behavior; its implementation and linear/indexed coverage are also present.
 Opcode `0x19` and `ConstBits` are accepted for same-format `float32`/`float64`
 comparisons and exact raw-bit constants; float TypeSpecs also use the existing
 type-directed signature, `Copy` and eager `Select` rules. These draft-only
+encodings also include opcode `0x1A` for distinct `float32`/`float64`
+conversions under nearest/ties-to-even target-format semantics. Their
+implementations and linear/indexed coverage are present. These draft-only
 encodings do not change the approved IL specifications or promise post-release
 compatibility. Other source-free TRRM floating operations remain under
 unapproved proposals.

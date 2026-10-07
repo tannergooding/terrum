@@ -252,6 +252,15 @@ NaN, and signed zeros compare equal. It does not extend integer `Binary` kinds.
 These floating TypeSpecs also participate in scalar signatures, `Copy` and
 eager `Select` under their existing type-directed contracts.
 
+The draft also accepts opcode `0x1A`,
+`FloatConvert rNew, tDest, rSource`, for distinct unqualified
+`float32`/`float64` source and destination types. It follows nearest,
+ties-to-even target-format conversion: inexact results round, finite overflow
+may produce infinity, and underflow may produce a subnormal or zero. Conversion
+is total; NaNs and infinities remain floating values, but fixed NaN payload
+preservation is not promised. Identity conversions remain ordinary `Copy`
+values.
+
 The draft also accepts opcode `0x1E`, `Char16ToFloat rNew, tDest, rSource`,
 for exactly `char16` to `float32` or `float64`. It interprets the source as an
 unsigned UTF-16 code unit, without decoding or validating surrogate pairs;

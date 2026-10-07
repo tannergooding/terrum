@@ -116,11 +116,12 @@ for negative and out-of-width counts. Signed logical `>>>` remains outside
 this path because the output-body lowering has no bit-reinterpretation step
 for signed operands. Integer and `char16` conversions are also provisionally
 carried by opcode `0x16` and reconstructed as checked bound
-casts, preserving overflow failure and `NoThrow` verification. Floating
-conversion paths are also provisionally implemented: format conversion uses
-`0x1A` and integer-to-float uses `0x1B`. Char16-to-float opcode `0x1E` is
-accepted for the unreleased `(1, 0)` draft, interpreting `char16` as its
-unsigned code-unit value; it is total and compatible with `NoThrow`.
+casts, preserving overflow failure and `NoThrow` verification. FloatConvert
+opcode `0x1A` is accepted for the unreleased `(1, 0)` draft, converting
+between distinct `float32`/`float64` types with target-format rounding.
+Integer-to-float opcode `0x1B` remains provisional. Char16-to-float opcode
+`0x1E` is accepted for the unreleased `(1, 0)` draft, interpreting `char16`
+as its unsigned code-unit value; it is total and compatible with `NoThrow`.
 Float-to-integer opcode `0x1F` is also accepted for that draft; it truncates
 toward zero before range checking, preserves the existing overflow status, and
 is incompatible with `NoThrow`. Control flow remains one-block except for the
