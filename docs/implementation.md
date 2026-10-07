@@ -596,6 +596,10 @@ After a Boolean call, output places are not definitely initialized; stored
 Boolean results do not preserve per-call output correlation. Newly emitted
 ScalarInitOutput artifacts require rule revision 6; revisions 1 through 6
 are accepted by the loader, and unsupported revisions remain rejected.
+The reader counts each block's starting or inherited place state as a use at
+ordinal 0 and audits the exact per-block last-use inventory. Emitted places
+receive `PlaceLocal` setup in the entry block, and operand and terminal
+transitions contribute their actual use ordinals in later blocks.
 They also provisionally encode and reconstruct scalar comparisons: equality
 and inequality for `bool`, `char16` and integer types; integer ordering; and
 all six comparisons for `float32` and `float64`. Comparison results are

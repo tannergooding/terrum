@@ -608,6 +608,33 @@ public sealed class TrRmExecutableCompilerTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InitOutputConditionalDirectConditionInitializesPlaceInEitherArm(bool selected)
+    {
+        var selection = selected ? "true" : "false";
+        var program = Compile($$"""
+            int32 Fill(init ref<int32> result) {
+                result = 42;
+                return 42;
+            }
+            bool Select() { return {{selection}}; }
+            int32 Main() {
+                init int32 result;
+                if (Select()) {
+                    return Fill(init result);
+                } else {
+                    return Fill(init result);
+                }
+            }
+            """);
+        var artifact = TrRmExecutableCompiler.Emit(program, "conditional-output-arms");
+
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+    }
+
     [Fact]
     public void InitOutputConditionalNoOutputCallInheritsArgumentCallState()
     {

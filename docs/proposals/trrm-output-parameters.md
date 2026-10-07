@@ -274,3 +274,10 @@ blocks with zero operations. Inherited state continues an existing activation;
 it does not restart the place or reset its initialization state. This
 completes the profile's inventory rule without changing the accepted
 instruction-set text or implying general TRRM conformance.
+
+**Implementation status:** The provisional reader and writer implement this
+recommendation: starting and inherited places are observed at block entry with
+ordinal 0, while `PlaceLocal`, operand and terminal uses produce the matching
+last-use summaries. Regression coverage exercises a vacant place initialized
+in either arm of a direct Boolean-condition split. This remains provisional
+implementation evidence, not approval of the executable contract.
