@@ -941,6 +941,10 @@ public sealed class WideCandidateTests
             "Terrum.CodeAnalysis.Numerics64.TryAddInt64",
             "Terrum.CodeAnalysis.Numerics64.TrySubtractInt64",
             "Terrum.CodeAnalysis.Numerics64.TryMultiplyInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryDivideInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryRemainderInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryDivideUInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryRemainderUInt64",
             "Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal",
             "Terrum.CodeAnalysis.Numerics64.TryAccumulateBase",
         ]);

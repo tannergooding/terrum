@@ -59,7 +59,9 @@ public sealed class TrRmArtifactWriterTests
     public void EncodesOnlyTheSupportedProvisionalFeatureAssignment()
     {
         var features = TrRmFeatureTableWriter.Encode([TrRmFeatureRow.ScalarInitOutput]);
-        Assert.Equal(new byte[] { 1, 0, 0, 0, 1, 0, 0, 0 }, features);
+        Assert.Equal(8, features.Length);
+        Assert.Equal(TrRmFeatureTableReader.ScalarInitOutputFeatureId, Read(features, 0));
+        Assert.Equal(TrRmFeatureTableReader.ScalarInitOutputRuleRevision, Read(features, sizeof(uint)));
         var strings = TrRmStringTableWriter.EncodeNames([("A", 0)]);
         var artifact = TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, Module()),
@@ -77,7 +79,8 @@ public sealed class TrRmArtifactWriterTests
         Assert.Throws<InvalidDataException>(() =>
             TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 0)]));
         Assert.Throws<InvalidDataException>(() =>
-            TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 2)]));
+            TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1,
+                TrRmFeatureTableReader.ScalarInitOutputRuleRevision + 1)]));
         Assert.Throws<InvalidDataException>(() =>
             TrRmFeatureTableWriter.Encode([
                 TrRmFeatureRow.ScalarInitOutput, TrRmFeatureRow.ScalarInitOutput,
