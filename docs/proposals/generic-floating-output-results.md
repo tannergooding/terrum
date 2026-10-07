@@ -1,35 +1,34 @@
 # Floating results from generic Copy output templates
 
-**Status: Unapproved**
+**Status: Partially accepted**
 
 ## Summary
 
-Compilation-local `[Copy]` templates have an accepted bounded profile for
-fixed scalar side outputs with `int32`, `uint32`, `int64`, `uint64`, `char16`,
-or `void` results when a generic-typed output anchors the specialization and
-all generic outputs use one mode. This proposal remains unapproved and
-considers fixed `float32` and `float64` results, including their interaction
-with mixed generic outputs and fixed side outputs, without changing symbolic
-floating capabilities. Those wider result and mode combinations remain
-unapproved.
+Fixed `float32` and `float64` results are accepted for compilation-local
+`[Copy]` templates with at least one generic-typed output when all generic
+outputs use one mode and there are no fixed-valued output side parameters.
+Fixed scalar side outputs are separately accepted with `int32`, `uint32`,
+`int64`, `uint64`, `char16`, or `void` results when generic outputs use one
+mode. This proposal remains for the unapproved combinations of floating
+results with mixed generic output modes and/or fixed scalar side outputs; it
+does not change symbolic floating capabilities.
 
-## Recommendation
+## Remaining recommendation
 
-Provisionally allow `float32` and `float64` as fixed results for
-compilation-local `[Copy]` templates that have at least one `out` or
-`init ref<T>` output whose formal type is a generic parameter. Fixed scalar
-outputs may appear as side outputs but cannot be the template's only outputs;
-output-free templates remain outside this extension. Keep the existing
-every-normal-return publication proof: floating results are non-Boolean and
-do not correlate with whether an output is initialized. Checked exceptional
-departure publishes no output; `init` destinations remain vacant, while
-ordinary `out` destinations retain their existing lack of
-rollback/readability guarantees.
+Extend the accepted fixed-floating result profile to templates whose
+generic-typed outputs combine `out` and `init ref<T>` modes, and permit fixed
+scalar outputs as side outputs. Fixed scalar outputs cannot be the template's
+only outputs; output-free templates remain outside this extension. Keep the
+existing every-normal-return publication proof: floating results are
+non-Boolean and do not correlate with whether an output is initialized.
+Checked exceptional departure follows each output mode's existing rules:
+`init` destinations remain vacant, while ordinary `out` destinations retain
+their lack of rollback and catch-path readability guarantees.
 
-The accepted fixed-side profile is narrower: it covers only fixed
-`int32`/`uint32`/`int64`/`uint64`/`char16`/`void` results and templates whose
-generic-typed outputs use one mode. Floating results and fixed side outputs
-combined with generic mixed modes remain unapproved.
+The accepted fixed-floating profile covers only single-mode generic outputs
+without fixed side outputs. The accepted fixed-side profile covers only
+`int32`/`uint32`/`int64`/`uint64`/`char16`/`void` results and single-mode
+generic outputs. The interactions above remain unapproved.
 
 Use a result-specific eligibility gate rather than widening shared generic
 scalar/type parsing. This does not admit fixed floating by-value parameters,
@@ -45,9 +44,9 @@ declarations/witnesses. Boolean-result conditional publication is unchanged.
 Reuse existing fixed floating result transport and private semantic/native
 module formats and ABI.
 
-This is a hosted implementation experiment, not an accepted contract. It
-does not extend source-free TRRM or the Terrum-authored scalar frontend beyond
-hosted verification/emission.
+The remaining combinations are a hosted implementation experiment, not an
+accepted contract. They do not extend source-free TRRM or the Terrum-authored
+scalar frontend beyond hosted verification/emission.
 
 ## Required evidence
 
@@ -84,8 +83,10 @@ zero signs, minimum subnormals, both infinities and width-specific rounding
 midpoints for each result width without adding a NaN-payload guarantee.
 Boundary tests reject fixed-floating by-value parameters with an otherwise
 valid generic payload, templates with fixed outputs only, and substitution
-inference from a typed floating result context. These remain provisional
-implementation evidence and do not approve this proposal.
+inference from a typed floating result context. The single-mode,
+no-fixed-side floating-result profile is accepted and specified in the
+language contracts. The combined-mode and fixed-side extensions remain
+provisional evidence and unapproved.
 
-This proposal does not approve the target contract. Any implementation is
-provisional evidence pending review.
+This proposal remains partially accepted; its broader recommended
+combinations are not approved.

@@ -17,12 +17,14 @@ support non-unique, handle-free `Copy`-struct `out` values on non-Boolean and
 compilation-local `[Copy]` templates support the bounded generic `out T` and
 `init ref<T>` profiles with fixed `int32`, `uint32`, `int64`, `uint64`,
 `char16`, or `void` results, plus the mixed all-generic-output profile.
-Generic initialization outputs retain compilation-private managed-handle
-support. Fixed scalar side outputs are supported alongside a single generic
-output mode; floating-result extensions and side outputs combined with mixed
-generic modes remain provisional. Public generic exports and executable TRRM
-support remain separate. The native backend emits Terrum-owned code; CIL is
-neither a dependency nor the default.
+Single-mode generic outputs also support fixed `float32` and `float64` results
+without fixed side outputs. Generic initialization outputs retain
+compilation-private managed-handle support. Fixed scalar side outputs are
+supported with the non-floating result set and one generic output mode;
+floating results combined with mixed generic modes or fixed side outputs
+remain provisional. Public generic exports and executable TRRM support remain
+separate. The native backend emits Terrum-owned code; CIL is neither a
+dependency nor the default.
 
 Current profile markers are syntax language version 45, semantic body features
 v43-v49, semantic-module revision 76, and native profiles native-10 through
@@ -101,11 +103,12 @@ types. This does not establish generic classes or structs, public generic
 witnesses, runtime generic captures, or support for every accepted generic
 contract. The [native profile](specs/native.md) and
 [source grammar](specs/grammar-spec.md) define the relevant boundaries.
-Bounded output extensions, including mixed generic modes, fixed scalar sides
-and fixed floating results, remain provisional under the individual
-[output proposals](proposals/README.md), including the
-[floating-result slice](proposals/generic-floating-output-results.md). They
-do not establish general reference metadata or executable TRRM support.
+Bounded output combinations remain provisional only where they extend the
+accepted profiles: fixed sides alongside mixed generic modes, or floating
+results with mixed modes or fixed side outputs. These boundaries are tracked
+in the individual [output proposals](proposals/README.md), including the
+[floating-result slice](proposals/generic-floating-output-results.md). They do
+not establish general reference metadata or executable TRRM support.
 
 ## Executable TRRM scalar interchange
 

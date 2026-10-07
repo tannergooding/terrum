@@ -26,8 +26,9 @@ approved.
   bounded indexed-Body unsafe-region contract; its dependency-relation profile,
   general output-call migration and other extensions remain unapproved.
 - [Floating results from generic Copy output templates](generic-floating-output-results.md)
-  recommends allowing fixed floating result types without adding symbolic
-  floating generic operations or conditional output semantics.
+  has accepted fixed floating results for single-mode generic outputs without
+  fixed side parameters; mixed-mode and fixed-side combinations remain
+  unapproved.
 - [Floating Copy generic specializations](floating-copy-generic-specializations.md)
   recommends admitting floating formats only as concrete arguments to hosted
   Copy-only generic templates; it does not grant symbolic floating operations

@@ -353,6 +353,85 @@ public sealed class ModuleTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task GenericFloatingResultsReplaceSingleModeSpecializationsAcrossModulesAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string LibrarySource = """
+            struct Pair {
+                public int32 First;
+                public int32 Second;
+                public Pair(int32 first, int32 second) {
+                    First = first;
+                    Second = second;
+                }
+            }
+            float32 FillOut<T>(T value, out T result) where T : [Copy] {
+                result = value;
+                return float32(1.5);
+            }
+            float64 FillInit<T>(T value, init ref<T> result) where T : [Copy] {
+                result = value;
+                return float64(2.5);
+            }
+            public int32 Read() {
+                float32 outResult = FillOut(new Pair(20, 22), out var copied);
+                float64 initResult = FillInit(new Pair(5, 2), init var initialized);
+                if (outResult != float32(1.5) || copied.First != 20 || copied.Second != 22
+                    || initResult != float64(2.5) || initialized.First != 5 || initialized.Second != 2) {
+                    return 1;
+                }
+                return 42;
+            }
+            """;
+        const string ConsumerSource = "int32 Main() { return Read(); }";
+        var library = Compilation.CreateLibrary(SyntaxTree.Parse(LibrarySource), policy);
+        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(library.Program);
+        var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
+        var compilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+            ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(compilation.Program), producer);
+        var nativePolicy = policy == BoundRuntimePolicy.FailFast
+            ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, producer), nativePolicy)).ConfigureAwait(true));
+
+        var replacementSource = LibrarySource
+            .Replace("float32(1.5)", "float32(3.5)", StringComparison.Ordinal)
+            .Replace("float64(2.5)", "float64(4.5)", StringComparison.Ordinal)
+            .Replace("return 42;", "return 43;", StringComparison.Ordinal);
+        var replacementLibrary = Compilation.CreateLibrary(
+            SyntaxTree.Parse(replacementSource), policy);
+        Assert.False(replacementLibrary.HasErrors,
+            string.Join(Environment.NewLine, replacementLibrary.Diagnostics));
+        var replacementProgram = Assert.IsType<BoundProgram>(replacementLibrary.Program);
+        var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["Read"]);
+        Assert.Equal(43, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, replacement), nativePolicy)).ConfigureAwait(true));
+
+        var nativeProducer = NativeModuleCompiler.CreateProducer(
+            program, ["Read"], "GenericFloatingOutputProvider", nativePolicy);
+        var nativeCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+            NativeModuleCompiler.CreateGraphReference([nativeProducer]), runtimePolicy: policy);
+        Assert.False(nativeCompilation.HasErrors,
+            string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
+            Assert.IsType<BoundProgram>(nativeCompilation.Program), [nativeProducer], nativePolicy);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true));
+
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(
+            replacementProgram, ["Read"], "GenericFloatingOutputProvider", nativePolicy);
+        NativeModuleCompiler.ValidateGraph(nativeConsumer, [nativeReplacement]);
+        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(nativeConsumer,
+            [nativeReplacement], TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CopyOutputsRetainConditionalPublicationAcrossModuleArtifactsAsync(
         BoundRuntimePolicy policy)
     {

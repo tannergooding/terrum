@@ -304,6 +304,21 @@ or witnesses, source-free TRRM, and scalar-frontend verification or emission
 remain outside this standalone profile; mixed modes are governed separately
 below.
 
+A separate fixed-floating result profile admits `float32` and `float64` as
+results for compilation-local `[Copy]` templates with at least one
+generic-typed output, provided all generic outputs use one mode and the
+template has no fixed-valued output side parameters. A floating result is not
+a success discriminator: every output must be fully initialized on every
+normal return. Exceptional departure follows the existing mode rules. Closed
+private specializations preserve their result width across compatible
+semantic-module and native-graph producer replacements without changing
+output-mode metadata or wire formats. This profile does not widen concrete
+generic argument eligibility, admit fixed floating by-value parameters,
+formal-valued results, output-free templates, floating protocol results,
+symbolic floating operations, or source-free TRRM, and it defines no new
+arithmetic or NaN-payload contract. Generic mixed-output and fixed-side-output
+combinations with floating results remain outside this profile.
+
 A compilation-local `[Copy]` template may combine generic `out T` and
 `init ref<U>` output formals when its result is fixed `int32`, `uint32`,
 `int64`, `uint64`, `char16`, or `void`. Every output must be fully initialized
