@@ -2956,8 +2956,10 @@ against hosted conversions under both runtime policies, including signed and
 unsigned boundaries, non-finite inputs, negative fractions and deterministic
 values; the independent `ComponentTestRunner` also exercises representative
 boundaries under AOT/JIT and both policies. This internal helper does not
-approve the floating-to-integer pair matrix or add scalar-frontend,
-source-free DLL or TRRM support.
+approve the floating-to-integer pair matrix or add scalar-frontend or TRRM
+support. The Windows x64 internal DLL directly exercises all eight
+status-plus-output helpers with integer-carried inputs, checked-cast parity,
+preserved failure outputs and adjacent canaries.
 `Char16FloatConversion` composes unsigned code-unit widening with the existing
 integer-to-floating bit helpers. Its semantic-module tests exhaust all 65,536
 code units for both formats and both runtime policies against independently
