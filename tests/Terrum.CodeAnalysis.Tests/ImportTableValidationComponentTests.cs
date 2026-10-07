@@ -16,7 +16,7 @@ using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
 
-public sealed class ImportTableValidationComponentTests
+public sealed partial class ImportTableValidationComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;

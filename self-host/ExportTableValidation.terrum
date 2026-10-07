@@ -1,0 +1,347 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateExportTable(int32 recordCount,
+    int32 moduleCount, int32 stringCount, int32 moduleRefCount,
+    int32 typeDefCount, int32 methodDefCount, int32 propertyDefCount,
+    int32 importRecordCount)
+{
+    if (recordCount < 0 || recordCount > 0xFF_FFFF
+        || moduleCount <= 0 || moduleCount > 0xFF_FFFF
+        || stringCount < 0 || stringCount > 0xFF_FFFF
+        || moduleRefCount < 0 || moduleRefCount > 0xFF_FFFF
+        || typeDefCount < 0 || typeDefCount > 0xFF_FFFF
+        || methodDefCount < 0 || methodDefCount > 0xFF_FFFF
+        || propertyDefCount < 0 || propertyDefCount > 0xFF_FFFF
+        || importRecordCount < 0 || importRecordCount > 0xFF_FFFF
+        || recordCount * 8 != Host.Exports.Length
+        || moduleCount * 44 != Host.Modules.Length
+        || moduleRefCount * 12 != Host.ModuleRefs.Length
+        || typeDefCount * 40 != Host.TypeDefs.Length
+        || methodDefCount * 28 != Host.Methods.Length
+        || propertyDefCount * 20 != Host.Properties.Length
+        || Host.ImportExpectedDefinitions.Length != importRecordCount + 1
+        || Host.ExportModules.Length != recordCount + 1
+        || Host.ExportKeyStarts.Length != recordCount + 1
+        || Host.ExportKeyLengths.Length != recordCount + 1
+        || Host.ExportKeyEncodings.Length != recordCount + 1
+        || Host.ExportKeyContentLengths.Length != recordCount + 1)
+    {
+        return false;
+    }
+
+    for (mut int32 slot = 0; slot <= recordCount; slot = slot + 1)
+    {
+        Host.ExportModules[slot] = 0;
+        Host.ExportKeyStarts[slot] = 0;
+        Host.ExportKeyLengths[slot] = 0;
+        Host.ExportKeyEncodings[slot] = 0;
+        Host.ExportKeyContentLengths[slot] = 0;
+    }
+
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        int32 rowStart = (row - 1) * 8;
+        if (!TryReadExportTableWord(rowStart, 0, init var definition)
+            || !TryReadExportTableWord(rowStart, 4, init var key))
+        {
+            return false;
+        }
+        if (key == 0 || key > 0xFF_FFFF || key > uint32(stringCount))
+        {
+            return false;
+        }
+        if (!TryGetImportDefinitionModule(definition, moduleCount,
+            typeDefCount, methodDefCount, propertyDefCount,
+            init var ownerModule, init var unusedBody)
+            || !TryGetExportVisibilityOwner(definition,
+                typeDefCount, methodDefCount, propertyDefCount,
+                init var visibility, init var ownerType)
+            || visibility != 2
+            || IsExpectedImportDefinition(definition, importRecordCount))
+        {
+            return false;
+        }
+        if (ownerType != 0)
+        {
+            if (!TryReadTypeDefTableWord((ownerType - 1) * 40, 8, init var ownerFlags)
+                || (ownerFlags & 3) != 2)
+            {
+                return false;
+            }
+        }
+        if (!TryGetVariableTableRowExtent(stringCount, 8, 4, int32(key),
+            init var keyOffset, init var keyLength))
+        {
+            return false;
+        }
+        int32 keyStart = (stringCount + 1) * 4 + int32(keyOffset);
+        if (!TryGetStringNameScalarCount(keyStart, keyLength, init var keyScalarCount)
+            || !TryGetStringRowLayout(keyStart, keyLength,
+                init var keyEncoding, init var keyContentLength))
+        {
+            return false;
+        }
+
+        Host.ExportModules[row] = ownerModule;
+        Host.ExportKeyStarts[row] = keyStart;
+        Host.ExportKeyLengths[row] = keyLength;
+        Host.ExportKeyEncodings[row] = keyEncoding;
+        Host.ExportKeyContentLengths[row] = keyContentLength;
+    }
+
+    return TrySortAndCheckExportKeys(recordCount);
+}
+
+bool TryGetExportVisibilityOwner(uint32 definition,
+    int32 typeDefCount, int32 methodDefCount, int32 propertyDefCount,
+    init ref<uint32> visibility, init ref<int32> ownerType)
+{
+    uint32 table = definition >> 24;
+    uint32 row = definition & 0xFF_FFFF;
+    if (row == 0)
+    {
+        return false;
+    }
+
+    if (table == 0x13)
+    {
+        if (row > uint32(typeDefCount)
+            || !TryReadTypeDefTableWord((int32(row) - 1) * 40, 8,
+                init var flags))
+        {
+            return false;
+        }
+        visibility = flags & 3;
+        ownerType = 0;
+        return true;
+    }
+
+    if (table == 0x16)
+    {
+        if (row > uint32(methodDefCount)
+            || !TryReadMethodDefTableWord((int32(row) - 1) * 28, 12,
+                init var flags)
+            || !TryReadMethodDefTableWord((int32(row) - 1) * 28, 0,
+                init var owner))
+        {
+            return false;
+        }
+        visibility = flags & 3;
+        ownerType = int32(owner);
+        return true;
+    }
+
+    if (table == 0x1E)
+    {
+        if (row > uint32(propertyDefCount)
+            || !TryReadPropertyTableWord((int32(row) - 1) * 20, 16,
+                init var flags)
+            || !TryReadPropertyTableWord((int32(row) - 1) * 20, 0,
+                init var owner))
+        {
+            return false;
+        }
+        visibility = flags & 3;
+        ownerType = int32(owner);
+        return true;
+    }
+
+    return false;
+}
+
+bool TrySortAndCheckExportKeys(int32 recordCount)
+{
+    mut int32 root = recordCount / 2;
+    while (root > 0)
+    {
+        if (!TrySiftExportKeyHeap(root, recordCount))
+        {
+            return false;
+        }
+        root = root - 1;
+    }
+
+    mut int32 heapEnd = recordCount;
+    while (heapEnd > 1)
+    {
+        SwapExportKeys(1, heapEnd);
+        heapEnd = heapEnd - 1;
+        if (!TrySiftExportKeyHeap(1, heapEnd))
+        {
+            return false;
+        }
+    }
+
+    for (mut int32 row = 2; row <= recordCount; row = row + 1)
+    {
+        if (!TryCompareExportSlots(row - 1, row, init var comparison))
+        {
+            return false;
+        }
+        if (comparison == 0)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TrySiftExportKeyHeap(int32 root, int32 heapEnd)
+{
+    mut int32 current = root;
+    while (current <= heapEnd / 2)
+    {
+        mut int32 child = current * 2;
+        if (child < heapEnd)
+        {
+            if (!TryCompareExportSlots(child, child + 1,
+                init var childComparison))
+            {
+                return false;
+            }
+            if (childComparison < 0)
+            {
+                child = child + 1;
+            }
+        }
+
+        if (!TryCompareExportSlots(current, child, init var parentComparison))
+        {
+            return false;
+        }
+        if (parentComparison >= 0)
+        {
+            break;
+        }
+
+        SwapExportKeys(current, child);
+        current = child;
+    }
+
+    return true;
+}
+
+bool TryCompareExportSlots(int32 first, int32 second, init ref<int32> comparison)
+{
+    int32 firstModule = Host.ExportModules[first];
+    int32 secondModule = Host.ExportModules[second];
+    if (firstModule < secondModule)
+    {
+        comparison = -1;
+        return true;
+    }
+    if (firstModule > secondModule)
+    {
+        comparison = 1;
+        return true;
+    }
+
+    return TryCompareExportKeyText(first, second, init comparison);
+}
+
+bool TryCompareExportKeyText(int32 first, int32 second, init ref<int32> comparison)
+{
+    int32 firstStart = Host.ExportKeyStarts[first];
+    int32 secondStart = Host.ExportKeyStarts[second];
+    int32 firstContentLength = Host.ExportKeyContentLengths[first];
+    int32 secondContentLength = Host.ExportKeyContentLengths[second];
+    int32 firstEncoding = Host.ExportKeyEncodings[first];
+    int32 secondEncoding = Host.ExportKeyEncodings[second];
+    mut int32 firstPosition = 0;
+    mut int32 secondPosition = 0;
+
+    while (firstPosition < firstContentLength
+        && secondPosition < secondContentLength)
+    {
+        if (!TryDecodeStringRowScalar(firstStart, firstPosition,
+            firstContentLength, firstEncoding,
+            init var firstScalar, init var firstBytesRead)
+            || !TryDecodeStringRowScalar(secondStart, secondPosition,
+                secondContentLength, secondEncoding,
+                init var secondScalar, init var secondBytesRead))
+        {
+            return false;
+        }
+        if (firstScalar < secondScalar)
+        {
+            comparison = -1;
+            return true;
+        }
+        if (firstScalar > secondScalar)
+        {
+            comparison = 1;
+            return true;
+        }
+
+        firstPosition = firstPosition + firstBytesRead;
+        secondPosition = secondPosition + secondBytesRead;
+    }
+
+    if (firstPosition < firstContentLength)
+    {
+        comparison = 1;
+    }
+    else if (secondPosition < secondContentLength)
+    {
+        comparison = -1;
+    }
+    else
+    {
+        comparison = 0;
+    }
+    return true;
+}
+
+void SwapExportKeys(int32 first, int32 second)
+{
+    mut int32 value = Host.ExportModules[first];
+    Host.ExportModules[first] = Host.ExportModules[second];
+    Host.ExportModules[second] = value;
+    value = Host.ExportKeyStarts[first];
+    Host.ExportKeyStarts[first] = Host.ExportKeyStarts[second];
+    Host.ExportKeyStarts[second] = value;
+    value = Host.ExportKeyLengths[first];
+    Host.ExportKeyLengths[first] = Host.ExportKeyLengths[second];
+    Host.ExportKeyLengths[second] = value;
+    value = Host.ExportKeyEncodings[first];
+    Host.ExportKeyEncodings[first] = Host.ExportKeyEncodings[second];
+    Host.ExportKeyEncodings[second] = value;
+    value = Host.ExportKeyContentLengths[first];
+    Host.ExportKeyContentLengths[first] = Host.ExportKeyContentLengths[second];
+    Host.ExportKeyContentLengths[second] = value;
+}
+
+bool TryReadExportTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Exports.Length - 8
+        || offset < 0 || offset > 4
+        || !TryReadExportTableByte(rowStart + offset, init var first)
+        || !TryReadExportTableByte(rowStart + offset + 1, init var second)
+        || !TryReadExportTableByte(rowStart + offset + 2, init var third)
+        || !TryReadExportTableByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadExportTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Exports.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Exports[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
