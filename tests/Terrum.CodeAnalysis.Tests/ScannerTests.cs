@@ -142,6 +142,48 @@ public sealed class ScannerTests
     }
 
     [Fact]
+    public async Task NumericScannerMatchesHostedLexerAcrossDeterministicTokenCorpusAsync()
+    {
+        const string decimalCharacters = "0123456789_";
+        const string binaryCharacters = "01_23456789xXbB.pPeE+-iuf";
+        const string hexadecimalCharacters = "0123456789abcdefABCDEF_xXbB.pPeE+-iuf";
+        var random = new Random(0x5EED);
+        var source = new StringBuilder();
+        for (var index = 0; index < 384; index++)
+        {
+            var form = index % 3;
+            _ = source.Append(form switch {
+                0 => (char)('1' + random.Next(9)),
+                1 or 2 => '0',
+                _ => throw new InvalidOperationException(),
+            });
+            if (form == 1)
+            {
+                _ = source.Append('x');
+            }
+            else if (form == 2)
+            {
+                _ = source.Append('b');
+            }
+
+            var characters = form switch {
+                0 => decimalCharacters,
+                1 => hexadecimalCharacters,
+                2 => binaryCharacters,
+                _ => throw new InvalidOperationException(),
+            };
+            var length = random.Next(1, 25);
+            for (var characterIndex = 0; characterIndex < length; characterIndex++)
+            {
+                _ = source.Append(characters[random.Next(characters.Length)]);
+            }
+            _ = source.Append(index % 16 == 15 ? "\r\n" : " ");
+        }
+
+        await CheckScannerAsync(source.ToString()).ConfigureAwait(true);
+    }
+
+    [Fact]
     public async Task LongHexFloatMantissaKeepsScannerParityAsync()
     {
         var source = "0x" + new string('A', 2048) + "." + new string('F', 2048) + "p+10";
