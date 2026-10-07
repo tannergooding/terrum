@@ -139,7 +139,9 @@ workspace capacity before publishing one complete encoded row through
 initialized output. Name rows remain nonempty; namespace rows permit empty
 text. Refusal cases do not publish a row. These are provisional StringRow
 library helpers, not registered target binding or a literal-reference
-contract.
+contract. A maximum-length quoted U+0800 spelling produces a 49,152-byte UTF-8
+row; both builders match the hosted writer with exact capacity and leave output
+vacant on one-byte-short refusal under both runtime policies and AOT/JIT.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.

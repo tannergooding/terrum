@@ -453,6 +453,54 @@ public sealed class StringLiteralComponentTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    public async Task Utf8StringRowBuildersHandleMaximumExactCapacityAsync(
+        NativeRuntimePolicy policy, bool namespaceRow)
+    {
+        const int maximumSourceLength = 16_384;
+        const int expectedRowLength = 49_152;
+        var text = new string('\u0800', maximumSourceLength - 2);
+        var spelling = "\"" + text + "\"";
+        var expectedSection = namespaceRow
+            ? TrRmStringTableWriter.EncodeTextRows([(text, 1)])
+            : TrRmStringTableWriter.EncodeNames([(text, 1)]);
+        var expectedRow = new TrRmVariableTableIndex(expectedSection, 1, 8, 4).GetRow(1).ToArray();
+        Assert.Equal(maximumSourceLength, spelling.Length);
+        Assert.Equal(expectedRowLength, expectedRow.Length);
+
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var builder = namespaceRow ? "TryBuildStringNamespaceRowUtf8" : "TryBuildStringNameRowUtf8";
+        var entry = SyntaxTree.Parse($$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (Host.Expected.Length != {{expectedRowLength}}) { return 1; }
+                require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
+                require OwnedInt32Buffer.TryCreate({{expectedRowLength - 1}}, out var undersized);
+                if ({{builder}}(spelling, move undersized, init var row)) { return 2; }
+                require OwnedInt32Buffer.TryCreate({{expectedRowLength}}, out var workspace);
+                if (!{{builder}}(spelling, move workspace, init row)) { return 3; }
+                if (row.Count != {{expectedRowLength}} || row.Capacity != {{expectedRowLength}}) { return 4; }
+                for (mut int32 index = 0; index < row.Count; index = index + 1) {
+                    if (row.Read(index) != Host.Expected[index]) { return 5; }
+                }
+                return 0;
+            }
+            """, "maximum-utf8-string-row-builder-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+        [
+            new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false),
+            new HostBuffer("Expected", PrimitiveType.Int32, [.. expectedRow.Select(static value => (int)value)], false),
+        ], (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, policy));
+        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+    }
+
+    [Theory]
     [InlineData("\"\"")]
     [InlineData("\"\\0\"")]
     [InlineData("\"A\\0B\"")]
