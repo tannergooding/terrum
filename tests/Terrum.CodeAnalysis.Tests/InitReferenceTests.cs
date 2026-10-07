@@ -541,7 +541,7 @@ public sealed class InitReferenceTests
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producerProgram = Assert.IsType<BoundProgram>(library.Program);
         var producer = ModuleCompiler.CreateProducer(producerProgram, ["Read"]);
-        Assert.Equal(66,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(67,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         var compilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             ModuleCompiler.CreateReference(producer), runtimePolicy: sourcePolicy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -647,7 +647,7 @@ public sealed class InitReferenceTests
             """));
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Read"]);
-        Assert.Equal(66,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(67,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
     }
 
     [Fact]
@@ -669,7 +669,7 @@ public sealed class InitReferenceTests
             """));
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Read"]);
-        Assert.Equal(66,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(67,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         BinaryPrimitives.WriteInt32LittleEndian(producer.AsSpan(4, 4), 48);
         _ = Assert.Throws<ModuleFormatException>(() => _ = ModuleCompiler.CreateReference(producer));
     }

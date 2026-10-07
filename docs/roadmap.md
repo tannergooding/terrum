@@ -243,7 +243,7 @@ frontend with source-audited `unsafe(expr)` scopes and caller-unsafe callable
 declarations. Both projection families use only v85; verification and emission
 remain hosted.
 
-Separately, semantic-module revision 66 provisionally persists top-level
+Separately, semantic-module revision 67 provisionally persists top-level
 caller-unsafe contracts, bounded readonly-instance and static method slices,
 and readonly instance and storage-free static getters with scalar or
 recursively exportable non-unique `Copy` results for public non-unique owners;
@@ -251,10 +251,11 @@ it also persists caller-unsafe public instance fields on public non-unique
 `Copy` structs with recursively exportable layouts. Calls and field reads,
 writes and updates, plus existing mutable receiver loans through eligible
 field paths, require explicit `unsafe { }` blocks, from which readers
-reconstruct authorization at every field edge. Revision 66 additionally
+reconstruct authorization at every field edge. Revision 67 additionally
 persists `unsafe(expr)` extents for caller-unsafe top-level functions and
 ordinary static methods on eligible public, non-unique `Copy` structs, with
-scalar by-value parameters and results; the expression scope does not
+scalar or recursively exportable public `Copy` by-value parameters and
+results; the expression scope does not
 authorize instance methods, getters, operators, fields or reference/output
 loans. Executable TRRM provisionally
 round-trips top-level caller-unsafe Effects and supports calls only inside
@@ -282,14 +283,14 @@ prerequisite has already been met.
 1. **Full runtime/structured contracts — references and safety.** General
    reference/access/loan metadata and caller-unsafe member contracts still
    need definition before wider use across calls or imports. Structured
-   semantic-module revision 66 provisionally carries top-level caller-unsafe
+   semantic-module revision 67 provisionally carries top-level caller-unsafe
    obligations, narrow readonly-instance and static `Copy` method slices,
    recursively exportable by-value Copy signatures, and readonly instance and
    storage-free static getters with recursively exportable `Copy` results,
    plus caller-unsafe public instance fields and existing mutable receiver
    loans through eligible public `Copy` struct paths, all through explicit
-   unsafe-block scopes, with revision 66 adding top-level and eligible static
-   scalar `unsafe(expr)` call scopes. Revision 64 also provisionally persists identity for
+   unsafe-block scopes, with revision 67 adding top-level and eligible static
+   scalar/`Copy` `unsafe(expr)` call scopes. Revision 64 also provisionally persists identity for
    supported static operators on public `Copy` structs, preserving unsafe
    effects and nominal-update target checks. These bounded implementations do
    not settle
@@ -422,6 +423,8 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `a0a9c044` | Provisionally persist `unsafe(expr)` calls to ordinary caller-unsafe static methods on eligible public non-unique `Copy` structs with scalar by-value signatures under semantic-module revision 66 |
+| `8cd0160b` | Provisionally persist `unsafe(expr)` calls to caller-unsafe top-level functions with scalar by-value signatures under semantic-module revision 65 |
 | `6c22d83a` | Exercise all eight checked floating-to-integer helpers through the internal Windows x64 DLL with checked-cast parity, exact status/output checks and adjacent canaries; pair-matrix and TRRM proposals remain unapproved |
 | `361a8676` | Exercise all eight floating arithmetic raw-bit helpers through the internal Windows x64 DLL against a controlled hosted-emitter oracle, asserting exact non-NaN bits and NaN classification only; arithmetic and NaN-encoding proposals remain unapproved |
 | `382eb317` | Exercise all twelve raw-bit IEEE comparison predicates through the internal Windows x64 DLL against hosted operators, including signed-zero and unordered-NaN boundaries |

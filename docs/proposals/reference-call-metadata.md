@@ -75,7 +75,7 @@ replacements, forged unique contracts and bounded rejection of repeated
 nested-layout imports. These checks do not approve the broader proposal or add
 source-free executable authorization.
 
-### Implemented provisionally in semantic-module revision 66: expression-scoped scalar calls
+### Implemented provisionally in semantic-module revision 66: scalar expression-scoped calls
 
 **Summary:** The accepted grammar lets `unsafe(expr)` authorize caller-unsafe
 operations within one expression. Earlier hosted binding flattened that scope
@@ -121,6 +121,39 @@ matches its canonical getter name. Mutable-receiver methods, constructors,
 class members, other accessors, operators, fields and reference/output modes
 remain excluded. This is a narrow persistence experiment, not approval of
 general caller-unsafe member metadata.
+
+### Provisional extension: Copy-value expression-scoped calls
+
+**Summary:** Revision 66 persists expression-scoped caller-unsafe calls only
+for scalar by-value signatures. The existing provisional method contract also
+supports recursively exportable public `Copy` values, but that shape must not
+be inferred from `Copy` alone: private fields, unique ownership, cleanup,
+cycles and unsupported nested layouts remain outside the boundary.
+
+**Recommendation:** Provisionally extend `unsafe(expr)` persistence to
+ordinary caller-unsafe top-level functions and eligible ordinary static
+methods on public, non-unique `Copy` owners when every explicit parameter and
+the result is either a scalar or a recursively exportable public, non-unique,
+cleanup-free `Copy` value. Reuse the existing module value-type whitelist and
+reconstruct authorization from the same structural wrapper. Preserve
+by-value-only modes; do not admit instance receivers, getters, operators,
+fields, outputs, reference loans, managed handles, buffers/views, empty or
+cyclic layouts, executable TRRM, or scalar-frontend projection. This changes
+eligibility but adds no wrapper payload; it still requires a new current
+semantic-module revision under the single-revision reader policy. This
+recommendation remains provisional and does not approve the broader metadata
+proposal.
+
+**Implemented provisionally:** Semantic-module revision 67 admits these
+top-level and static call signatures, using the same recursively validated
+layout boundary for writer checks and reader authorization. Reader resolution
+shares its layout cache across the module's body reconstruction to avoid
+repeatedly traversing nested signatures. Regression coverage exercises
+top-level and static calls, scalar-only and aggregate-only sides, nested and
+floating-field values, named-argument parameter mapping, producer/consumer
+round trips, safe replacement, native module sets and graphs under both
+runtime policies. This remains a persistence experiment, not approval of the
+broader metadata proposal.
 
 ### Provisional extension: caller-unsafe readonly getters
 
