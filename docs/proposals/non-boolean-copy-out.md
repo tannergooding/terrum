@@ -1,32 +1,29 @@
 # Copy outputs for non-Boolean calls
 
-**Status: Unapproved**
+**Status: Accepted bounded contract.** The accepted slice is the existing
+unconditional non-Boolean/void output contract described below; custom
+conditional postcondition-driven `Copy` outputs remain outside this proposal.
 
 ## Summary
 
-The accepted output contract makes Boolean-result `out` publication conditional
-on `true`; outputs of other return types must be initialized on every normal
-return. The hosted compiler now also supports ordinary non-unique Copy-struct
-`out` declarations on non-Boolean and void functions. Whether this hosted
-support should be adopted as an accepted target contract remains unapproved.
+The accepted output contract makes Boolean-result `out` publication
+conditional on `true`; non-Boolean and `void` outputs are initialized on every
+normal return unless a declaration postcondition explicitly states a
+conditional relationship. The accepted bounded profile adds ordinary
+non-unique, handle-free `Copy`-struct `out` values to non-Boolean and `void`
+functions, including public semantic-module, native-module and native-graph
+exports.
 
-## Question
+## Accepted contract
 
-Should the existing hosted support for handle-free Copy-struct `out`
-parameters on non-Boolean and void functions be adopted as an accepted target
-contract, including public semantic-module, native-module and native-graph
-exports?
-
-## Recommendation
-
-The original bounded implementation recommendation has been carried out:
-retain the hosted support while keeping this proposal unapproved until the
-target-contract decision is reviewed. The implementation admits non-unique
-struct values through the existing checked publication rule: every normal
-return must initialize the output, and exceptional departure does not publish
-the output. `out var` continues to infer the declared parameter type. It
-reuses the existing Copy layout and output ABI without changing `out` into
-`init ref<T>`.
+Admit only ordinary non-unique, handle-free `Copy`-struct outputs with
+non-Boolean or `void` results. Every normal return must fully initialize the
+output; the function result is not a success discriminator. Exceptional
+departure publishes no output, and the caller cannot read that destination on
+the exceptional path. `out var` infers the declared parameter type. Reuse the
+existing `Copy` layout and output ABI without changing `out` into `init ref<T>`.
+Compatible public semantic-module and native-module exports, including native
+graph imports, preserve the contract.
 
 Keep unique, managed-handle, buffer-view and cursor outputs outside this
 non-Boolean slice. Preserve Boolean conditional publication, existing scalar
@@ -34,8 +31,8 @@ support, generic static-protocol restrictions and the scalar frontend's
 hosted-verifier/emitter boundary. Compilation-local generic outputs are a
 separate question in the
 [generic Copy-output proposal](generic-copy-out-publication.md). This
-experiment does not approve broader output metadata or resolve general
-`out`/`init ref<T>` migration.
+acceptance does not approve broader output metadata, custom conditional
+postcondition-driven `Copy` outputs, or general `out`/`init ref<T>` migration.
 
 ## Implemented hosted support
 
@@ -46,9 +43,9 @@ producer replacements. The checked-exception case also verifies unwind
 cleanup and rejects reading either Copy output in the catch path. CLI JIT,
 semantic linking and native graph execution are covered.
 
-This is implementation evidence, not approval of a language contract. It
-does not add executable `out`/`init ref<T>` support to compact-indexed TRRM
-or make Terrum-authored scalar frontend components independent of the hosted
+This implementation supports the accepted bounded contract. It does not add
+executable `out`/`init ref<T>` support to compact-indexed TRRM or make
+Terrum-authored scalar frontend components independent of the hosted
 verifier/emitter.
 
 ## Scope and validation
@@ -59,4 +56,5 @@ producer/consumer boundaries under fail-fast and checked-exception policies.
 It verifies semantic-module linking, native AOT emission, native consumer
 execution and managed native graph imports. Existing export-shape tests reject
 unique or managed-containing values. The implementation and its tests remain
-provisional pending approval of the target contract.
+evidence for this accepted slice only; they do not imply support for excluded
+output forms.

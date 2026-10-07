@@ -259,6 +259,19 @@ outputs must be initialized on every normal return unless a declaration
 postcondition explicitly states a conditional relationship. These defaults do
 not come from method names.
 
+The accepted non-Boolean/void `out` profile also admits ordinary non-unique,
+handle-free `Copy`-struct outputs. These outputs are unconditional: every
+normal return fully initializes them, and the return value is not treated as a
+success discriminator. Exceptional departure publishes no output, and the
+caller cannot read the destination on that exceptional path. `out var` infers
+the declared parameter type. Compatible public semantic-module and native
+module exports and native graphs preserve this contract. This profile does
+not include unique values, managed-handle-bearing values, buffers, views,
+cursors, generic outputs, or executable TRRM; it does not change Boolean
+conditional `out` or `init ref<T>`. Custom conditional postcondition-driven
+`Copy` outputs are outside this profile; explicit postconditions remain
+governed by the general outcome rules above.
+
 ### 2.3 Checking and consuming the contract
 
 The body must prove that every promised output is completely initialized on

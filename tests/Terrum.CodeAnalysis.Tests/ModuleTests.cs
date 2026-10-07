@@ -157,6 +157,66 @@ public sealed class ModuleTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task NonBooleanCopyOutputsBindAndExecuteAcrossModuleArtifactsAsync(
+        BoundRuntimePolicy policy)
+    {
+        var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public struct Pair {
+                public int32 First;
+                public int32 Second;
+                public Pair(int32 first, int32 second) {
+                    First = first;
+                    Second = second;
+                }
+            }
+            public int32 Fill(int32 first, int32 second, out Pair result) {
+                result = new Pair(first, second);
+                return first;
+            }
+            public void FillVoid(out Pair result) {
+                result = new Pair(20, 22);
+            }
+            """), policy);
+        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(library.Program);
+        var producer = ModuleCompiler.CreateProducer(program, ["Fill", "FillVoid"]);
+
+        const string ConsumerSource = """
+            int32 Main() {
+                int32 zeroStatus = Fill(0, 1, out var zero);
+                int32 nonzeroStatus = Fill(40, 41, out var nonzero);
+                FillVoid(out var voidResult);
+                if (zeroStatus != 0 || zero.First != 0 || zero.Second != 1) { return 1; }
+                if (nonzeroStatus != 40 || nonzero.First != 40 || nonzero.Second != 41) { return 2; }
+                if (voidResult.First != 20 || voidResult.Second != 22) { return 3; }
+                return 42;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+            ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(compilation.Program), producer);
+        var nativePolicy = policy == BoundRuntimePolicy.FailFast
+            ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, producer), nativePolicy)).ConfigureAwait(true));
+
+        var nativeProducer = NativeModuleCompiler.CreateProducer(program,
+            ["Fill", "FillVoid"], "NonBooleanCopyOutputProvider", nativePolicy);
+        var nativeCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
+            NativeModuleCompiler.CreateGraphReference([nativeProducer]), runtimePolicy: policy);
+        Assert.False(nativeCompilation.HasErrors,
+            string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
+            Assert.IsType<BoundProgram>(nativeCompilation.Program), [nativeProducer], nativePolicy);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CopyOutputsRetainConditionalPublicationAcrossModuleArtifactsAsync(
         BoundRuntimePolicy policy)
     {

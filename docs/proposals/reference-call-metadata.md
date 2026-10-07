@@ -852,6 +852,10 @@ leaves complete place matching, overload binding and conditional-output
 metadata open. The hosted scalar projections implement bounded existing
 `out`/`init ref<T>` cases; they do not determine general reference, aliasing or
 publication rules.
+The accepted ordinary non-Boolean/void `Copy`-struct `out` profile is a
+separate bounded contract; it does not resolve the general metadata and
+migration questions in this section. See
+[Copy outputs for non-Boolean calls](non-boolean-copy-out.md).
 
 **Recommendation:** Specify eligible destination places, exact selected-callee
 and argument mapping, and live/vacant/exceptional publication states before

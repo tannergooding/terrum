@@ -26,6 +26,15 @@ public sealed class CheckedRecoveryTests
     [InlineData("int32 Main() { unsafe { try { require false; } catch { return 42; } } try { return 1; } finally { require false; } }", BoundRuntimePolicy.CheckedExceptions, "TRM3017")]
     [InlineData("bool Take(out int32 x, int32 divisor) { try { x = 10 / divisor; return true; } finally { Observe(x); } } [NoThrow] void Observe(int32 x) {} int32 Main() { return 0; }", BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
     [InlineData("bool Take(out int32 x, int32 divisor) { unsafe { try { require false; } catch { x = 10 / divisor; return true; } finally { Observe(x); } } } [NoThrow] void Observe(int32 x) {} int32 Main() { return 0; }", BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
+    [InlineData("""
+        struct Pair { public int32 Value; public Pair(int32 value) { Value = value; } }
+        int32 Fail(out Pair result) { result = new Pair(42); require false; return 0; }
+        int32 Main() {
+            mut Pair result = new Pair(7);
+            unsafe { try { Fail(out result); } catch { return result.Value; } }
+            return 0;
+        }
+        """, BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
     public void RecoveryRequiresPolicyAndFailureEdgeInitialization(string source, BoundRuntimePolicy policy, string diagnostic)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);

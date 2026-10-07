@@ -11,8 +11,11 @@ The compiler host is written in C#. It exposes a Unicode-aware, lossless
 syntax API and a bounded Windows x64 native profile with direct PE emission
 and a JIT worker. The implemented language subset includes checked scalar
 operations, compact values and unique owners, conditional outputs, bounded
-generics, managed roots/classes, and deterministic cleanup. The native backend
-emits Terrum-owned code; CIL is neither a dependency nor the default.
+generics, managed roots/classes, and deterministic cleanup. Hosted calls also
+support non-unique, handle-free `Copy`-struct `out` values on non-Boolean and
+`void` functions across semantic modules, native libraries and native graphs;
+this does not add generic Copy outputs or executable TRRM support. The native
+backend emits Terrum-owned code; CIL is neither a dependency nor the default.
 
 Current profile markers are syntax language version 45, semantic body features
 v43-v49, semantic-module revision 76, and native profiles native-10 through
