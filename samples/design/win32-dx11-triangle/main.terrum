@@ -5,6 +5,8 @@ using Terrum.Interop.DirectX;
 using Terrum.Interop.Windows;
 using Triangle.Interop;
 
+namespace Triangle;
+
 [Layout(Sequential)]
 public struct Vertex
 {
@@ -20,277 +22,294 @@ public struct Vertex
     }
 }
 
-public static int32 Main(Span<TextSpan> args)
+internal static class Program
 {
-    if (args.Length > 1 || (args.Length == 1 && !args[0].EqualsOrdinal("--warp")))
+    public static int32 Main(Span<TextSpan> args)
     {
-        Terminal.WriteLine("usage: triangle [--warp]", output: TerminalOutput.Error);
-
-        return 2;
-    }
-
-    unsafe
-    {
-        var instance = Win32.GetModuleHandleW(null);
-        NativeError.RequireHandle(instance, "GetModuleHandleW");
-
-        mut var windowClass = WNDCLASSEXW.Zero;
-        windowClass.cbSize = uint32(sizeof(WNDCLASSEXW));
-        windowClass.lpfnWndProc = &WindowProcedure;
-        windowClass.hInstance = instance;
-        windowClass.lpszClassName = utf16z("TerrumTriangle");
-
-        var atom = Win32.RegisterClassExW(&windowClass);
-        NativeError.RequireAtom(atom, "RegisterClassExW");
-
-        using var registration = WindowClassOwner.Adopt(instance, atom);
-
-        uint32 style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-        mut var rectangle = RECT.Zero;
-        rectangle.right = 800;
-        rectangle.bottom = 600;
-
-        NativeError.RequireTrue(Win32.AdjustWindowRect(&rectangle, style, 0), "AdjustWindowRect");
-
-        var handle = Win32.CreateWindowExW(
-            0, utf16z("TerrumTriangle"), utf16z("Terrum - Direct3D 11"),
-            style, CW_USEDEFAULT, CW_USEDEFAULT,
-            rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
-            null, null, instance, null);
-
-        NativeError.RequireHandle(handle, "CreateWindowExW");
-
-        using var window = WindowOwner.Adopt(handle);
-        Win32.ShowWindow(window.Handle, SW_SHOWNORMAL); // Return describes prior visibility.
-
-        mut var client = RECT.Zero;
-        NativeError.RequireTrue(Win32.GetClientRect(window.Handle, &client), "GetClientRect");
-
-        uint32 width = uint32(client.right - client.left);
-        uint32 height = uint32(client.bottom - client.top);
-
-        mut var swapDescription = DXGI_SWAP_CHAIN_DESC.Zero;
-        swapDescription.BufferDesc.Width = width;
-        swapDescription.BufferDesc.Height = height;
-        swapDescription.BufferDesc.Format = DXGI_FORMAT.R8G8B8A8_UNORM;
-        swapDescription.SampleDesc.Count = 1;
-        swapDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        swapDescription.BufferCount = 1;
-        swapDescription.OutputWindow = window.Handle;
-        swapDescription.Windowed = 1;
-        swapDescription.SwapEffect = DXGI_SWAP_EFFECT.DISCARD;
-
-        D3D_DRIVER_TYPE driver = args.Length == 1 ? D3D_DRIVER_TYPE.WARP : D3D_DRIVER_TYPE.HARDWARE;
-        InlineArray<D3D_FEATURE_LEVEL, 1> levels = [D3D_FEATURE_LEVEL.LEVEL_11_0];
-        mut D3D_FEATURE_LEVEL selectedLevel = D3D_FEATURE_LEVEL.LEVEL_11_0;
-
-        using mut var deviceOutput = new ComSlot<ID3D11Device>();
-        using mut var contextOutput = new ComSlot<ID3D11DeviceContext>();
-        using mut var swapOutput = new ComSlot<IDXGISwapChain>();
-
-        NativeError.ThrowIfFailed(D3D11CreateDeviceAndSwapChain(
-            null, driver, null, 0, &levels[0], 1, D3D11_SDK_VERSION,
-            &swapDescription, swapOutput.Address(), deviceOutput.Address(),
-            &selectedLevel, contextOutput.Address()), "D3D11CreateDeviceAndSwapChain");
-
-        using var device = deviceOutput.Take();
-        using var context = contextOutput.Take();
-        using var swap = swapOutput.Take();
-
-        using mut var factoryOutput = new ComSlot<IDXGIFactory>();
-        // COM's `void**` output ABI writes the pointer slot only. The cast does
-        // not establish access through the returned interface pointer.
-        NativeError.ThrowIfFailed(swap.Pointer->GetParent(
-            IDXGIFactory.IidPointer, (write ptr<ptr<void>>)factoryOutput.Address()), "GetParent");
-
-        using var factory = factoryOutput.Take();
-        NativeError.ThrowIfFailed(factory.Pointer->MakeWindowAssociation(
-            window.Handle, DXGI_MWA_NO_ALT_ENTER), "MakeWindowAssociation");
-
-        using mut var backBufferOutput = new ComSlot<ID3D11Texture2D>();
-        NativeError.ThrowIfFailed(swap.Pointer->GetBuffer(
-            0, ID3D11Texture2D.IidPointer, (write ptr<ptr<void>>)backBufferOutput.Address()), "GetBuffer");
-
-        using var backBuffer = backBufferOutput.Take();
-
-        using mut var targetOutput = new ComSlot<ID3D11RenderTargetView>();
-        NativeError.ThrowIfFailed(device.Pointer->CreateRenderTargetView(
-            backBuffer.Pointer, null, targetOutput.Address()), "CreateRenderTargetView");
-
-        using var target = targetOutput.Take();
-
-        using var shaderPath = NativeUtf16Z.FromApplicationAsset("triangle.hlsl");
-        using var vertexCode = CompileShader(shaderPath.Pointer, utf8z("VertexMain"), utf8z("vs_5_0"));
-        using var pixelCode = CompileShader(shaderPath.Pointer, utf8z("PixelMain"), utf8z("ps_5_0"));
-
-        using mut var vertexShaderOutput = new ComSlot<ID3D11VertexShader>();
-        using mut var pixelShaderOutput = new ComSlot<ID3D11PixelShader>();
-
-        NativeError.ThrowIfFailed(device.Pointer->CreateVertexShader(
-            vertexCode.Pointer->GetBufferPointer(), vertexCode.Pointer->GetBufferSize(),
-            null, vertexShaderOutput.Address()), "CreateVertexShader");
-
-        using var vertexShader = vertexShaderOutput.Take();
-
-        NativeError.ThrowIfFailed(device.Pointer->CreatePixelShader(
-            pixelCode.Pointer->GetBufferPointer(), pixelCode.Pointer->GetBufferSize(),
-            null, pixelShaderOutput.Address()), "CreatePixelShader");
-
-        using var pixelShader = pixelShaderOutput.Take();
-
-        mut var element = D3D11_INPUT_ELEMENT_DESC.Zero;
-        element.SemanticName = utf8z("POSITION");
-        element.Format = DXGI_FORMAT.R32G32B32_FLOAT;
-        element.InputSlotClass = D3D11_INPUT_CLASSIFICATION.PER_VERTEX_DATA;
-
-        using mut var layoutOutput = new ComSlot<ID3D11InputLayout>();
-        NativeError.ThrowIfFailed(device.Pointer->CreateInputLayout(
-            &element, 1, vertexCode.Pointer->GetBufferPointer(),
-            vertexCode.Pointer->GetBufferSize(), layoutOutput.Address()), "CreateInputLayout");
-
-        using var layout = layoutOutput.Take();
-
-        InlineArray<Vertex, 3> vertices =
-        [
-            new Vertex(0, 0.6, 0.5),
-            new Vertex(0.6, -0.5, 0.5),
-            new Vertex(-0.6, -0.5, 0.5)
-        ];
-
-        uint32 stride = uint32(sizeof(Vertex));
-        uint32 offset = 0;
-
-        mut var bufferDescription = D3D11_BUFFER_DESC.Zero;
-        bufferDescription.ByteWidth = stride * 3;
-        bufferDescription.Usage = D3D11_USAGE.IMMUTABLE;
-        bufferDescription.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-
-        mut var initialData = D3D11_SUBRESOURCE_DATA.Zero;
-        initialData.pSysMem = &vertices[0];
-
-        using mut var bufferOutput = new ComSlot<ID3D11Buffer>();
-        NativeError.ThrowIfFailed(device.Pointer->CreateBuffer(
-            &bufferDescription, &initialData, bufferOutput.Address()), "CreateBuffer");
-
-        using var buffer = bufferOutput.Take();
-        // CreateBuffer copied the vertices; it does not retain this stack address.
-
-        mut var viewport = D3D11_VIEWPORT.Zero;
-        viewport.Width = (float32)width;
-        viewport.Height = (float32)height;
-        viewport.MaxDepth = 1;
-
-        var targetPointer = target.Pointer;
-        var bufferPointer = buffer.Pointer;
-
-        // Declared after resource owners: ClearState runs before their Release calls.
-        using var bindings = new ContextBindingsGuard(context.Pointer);
-
-        context.Pointer->OMSetRenderTargets(1, &targetPointer, null);
-        context.Pointer->RSSetViewports(1, &viewport);
-        context.Pointer->IASetInputLayout(layout.Pointer);
-        context.Pointer->IASetVertexBuffers(0, 1, &bufferPointer, &stride, &offset);
-        context.Pointer->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY.TRIANGLELIST);
-        context.Pointer->VSSetShader(vertexShader.Pointer, null, 0);
-        context.Pointer->PSSetShader(pixelShader.Pointer, null, 0);
-
-        InlineArray<float32, 4> clearColor = [0.03, 0.06, 0.12, 1];
-        mut var message = MSG.Zero;
-        mut bool running = true;
-
-        while (running)
+        if (args.Length > 1 || (args.Length == 1 && !args[0].EqualsOrdinal("--warp")))
         {
-            while (Win32.PeekMessageW(&message, null, 0, 0, PM_REMOVE) != 0)
+            Terminal.WriteLine("usage: triangle [--warp]", output: TerminalOutput.Error);
+
+            return 2;
+        }
+
+        return TriangleApplication.Run(args.Length == 1);
+    }
+}
+
+internal static class TriangleApplication
+{
+    public static int32 Run(bool useWarp)
+    {
+        unsafe
+        {
+            var instance = Win32.GetModuleHandleW(null);
+            NativeError.RequireHandle(instance, "GetModuleHandleW");
+
+            mut var windowClass = WNDCLASSEXW.Zero;
+            windowClass.cbSize = uint32(sizeof(WNDCLASSEXW));
+            windowClass.lpfnWndProc = &WindowProcedure;
+            windowClass.hInstance = instance;
+            windowClass.lpszClassName = utf16z("TerrumTriangle");
+
+            var atom = Win32.RegisterClassExW(&windowClass);
+            NativeError.RequireAtom(atom, "RegisterClassExW");
+
+            using var registration = WindowClassOwner.Adopt(instance, atom);
+
+            uint32 style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+            mut var rectangle = RECT.Zero;
+            rectangle.right = 800;
+            rectangle.bottom = 600;
+
+            NativeError.RequireTrue(Win32.AdjustWindowRect(&rectangle, style, 0), "AdjustWindowRect");
+
+            var handle = Win32.CreateWindowExW(
+                0, utf16z("TerrumTriangle"), utf16z("Terrum - Direct3D 11"),
+                style, CW_USEDEFAULT, CW_USEDEFAULT,
+                rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
+                null, null, instance, null);
+
+            NativeError.RequireHandle(handle, "CreateWindowExW");
+
+            using var window = WindowOwner.Adopt(handle);
+            Win32.ShowWindow(window.Handle, SW_SHOWNORMAL); // Return describes prior visibility.
+
+            mut var client = RECT.Zero;
+            NativeError.RequireTrue(Win32.GetClientRect(window.Handle, &client), "GetClientRect");
+
+            uint32 width = uint32(client.right - client.left);
+            uint32 height = uint32(client.bottom - client.top);
+
+            mut var swapDescription = DXGI_SWAP_CHAIN_DESC.Zero;
+            swapDescription.BufferDesc.Width = width;
+            swapDescription.BufferDesc.Height = height;
+            swapDescription.BufferDesc.Format = DXGI_FORMAT.R8G8B8A8_UNORM;
+            swapDescription.SampleDesc.Count = 1;
+            swapDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+            swapDescription.BufferCount = 1;
+            swapDescription.OutputWindow = window.Handle;
+            swapDescription.Windowed = 1;
+            swapDescription.SwapEffect = DXGI_SWAP_EFFECT.DISCARD;
+
+            D3D_DRIVER_TYPE driver = useWarp ? D3D_DRIVER_TYPE.WARP : D3D_DRIVER_TYPE.HARDWARE;
+            InlineArray<D3D_FEATURE_LEVEL, 1> levels = [D3D_FEATURE_LEVEL.LEVEL_11_0];
+            mut D3D_FEATURE_LEVEL selectedLevel = D3D_FEATURE_LEVEL.LEVEL_11_0;
+
+            using mut var deviceOutput = new ComSlot<ID3D11Device>();
+            using mut var contextOutput = new ComSlot<ID3D11DeviceContext>();
+            using mut var swapOutput = new ComSlot<IDXGISwapChain>();
+
+            NativeError.ThrowIfFailed(D3D11CreateDeviceAndSwapChain(
+                null, driver, null, 0, &levels[0], 1, D3D11_SDK_VERSION,
+                &swapDescription, swapOutput.Address(), deviceOutput.Address(),
+                &selectedLevel, contextOutput.Address()), "D3D11CreateDeviceAndSwapChain");
+
+            using var device = deviceOutput.Take();
+            using var context = contextOutput.Take();
+            using var swap = swapOutput.Take();
+
+            using mut var factoryOutput = new ComSlot<IDXGIFactory>();
+            // COM's `void**` output ABI writes the pointer slot only. The cast does
+            // not establish access through the returned interface pointer.
+            NativeError.ThrowIfFailed(swap.Pointer->GetParent(
+                IDXGIFactory.IidPointer, (write ptr<ptr<void>>)factoryOutput.Address()), "GetParent");
+
+            using var factory = factoryOutput.Take();
+            NativeError.ThrowIfFailed(factory.Pointer->MakeWindowAssociation(
+                window.Handle, DXGI_MWA_NO_ALT_ENTER), "MakeWindowAssociation");
+
+            using mut var backBufferOutput = new ComSlot<ID3D11Texture2D>();
+            NativeError.ThrowIfFailed(swap.Pointer->GetBuffer(
+                0, ID3D11Texture2D.IidPointer, (write ptr<ptr<void>>)backBufferOutput.Address()), "GetBuffer");
+
+            using var backBuffer = backBufferOutput.Take();
+
+            using mut var targetOutput = new ComSlot<ID3D11RenderTargetView>();
+            NativeError.ThrowIfFailed(device.Pointer->CreateRenderTargetView(
+                backBuffer.Pointer, null, targetOutput.Address()), "CreateRenderTargetView");
+
+            using var target = targetOutput.Take();
+
+            using var shaderPath = NativeUtf16Z.FromApplicationAsset("triangle.hlsl");
+            using var vertexCode = CompileShader(shaderPath.Pointer, utf8z("VertexMain"), utf8z("vs_5_0"));
+            using var pixelCode = CompileShader(shaderPath.Pointer, utf8z("PixelMain"), utf8z("ps_5_0"));
+
+            using mut var vertexShaderOutput = new ComSlot<ID3D11VertexShader>();
+            using mut var pixelShaderOutput = new ComSlot<ID3D11PixelShader>();
+
+            NativeError.ThrowIfFailed(device.Pointer->CreateVertexShader(
+                vertexCode.Pointer->GetBufferPointer(), vertexCode.Pointer->GetBufferSize(),
+                null, vertexShaderOutput.Address()), "CreateVertexShader");
+
+            using var vertexShader = vertexShaderOutput.Take();
+
+            NativeError.ThrowIfFailed(device.Pointer->CreatePixelShader(
+                pixelCode.Pointer->GetBufferPointer(), pixelCode.Pointer->GetBufferSize(),
+                null, pixelShaderOutput.Address()), "CreatePixelShader");
+
+            using var pixelShader = pixelShaderOutput.Take();
+
+            mut var element = D3D11_INPUT_ELEMENT_DESC.Zero;
+            element.SemanticName = utf8z("POSITION");
+            element.Format = DXGI_FORMAT.R32G32B32_FLOAT;
+            element.InputSlotClass = D3D11_INPUT_CLASSIFICATION.PER_VERTEX_DATA;
+
+            using mut var layoutOutput = new ComSlot<ID3D11InputLayout>();
+            NativeError.ThrowIfFailed(device.Pointer->CreateInputLayout(
+                &element, 1, vertexCode.Pointer->GetBufferPointer(),
+                vertexCode.Pointer->GetBufferSize(), layoutOutput.Address()), "CreateInputLayout");
+
+            using var layout = layoutOutput.Take();
+
+            InlineArray<Vertex, 3> vertices =
+            [
+                new Vertex(0, 0.6, 0.5),
+                new Vertex(0.6, -0.5, 0.5),
+                new Vertex(-0.6, -0.5, 0.5)
+            ];
+
+            uint32 stride = uint32(sizeof(Vertex));
+            uint32 offset = 0;
+
+            mut var bufferDescription = D3D11_BUFFER_DESC.Zero;
+            bufferDescription.ByteWidth = stride * 3;
+            bufferDescription.Usage = D3D11_USAGE.IMMUTABLE;
+            bufferDescription.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+
+            mut var initialData = D3D11_SUBRESOURCE_DATA.Zero;
+            initialData.pSysMem = &vertices[0];
+
+            using mut var bufferOutput = new ComSlot<ID3D11Buffer>();
+            NativeError.ThrowIfFailed(device.Pointer->CreateBuffer(
+                &bufferDescription, &initialData, bufferOutput.Address()), "CreateBuffer");
+
+            using var buffer = bufferOutput.Take();
+            // CreateBuffer copied the vertices; it does not retain this stack address.
+
+            mut var viewport = D3D11_VIEWPORT.Zero;
+            viewport.Width = (float32)width;
+            viewport.Height = (float32)height;
+            viewport.MaxDepth = 1;
+
+            var targetPointer = target.Pointer;
+            var bufferPointer = buffer.Pointer;
+
+            // Declared after resource owners: ClearState runs before their Release calls.
+            using var bindings = new ContextBindingsGuard(context.Pointer);
+
+            context.Pointer->OMSetRenderTargets(1, &targetPointer, null);
+            context.Pointer->RSSetViewports(1, &viewport);
+            context.Pointer->IASetInputLayout(layout.Pointer);
+            context.Pointer->IASetVertexBuffers(0, 1, &bufferPointer, &stride, &offset);
+            context.Pointer->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY.TRIANGLELIST);
+            context.Pointer->VSSetShader(vertexShader.Pointer, null, 0);
+            context.Pointer->PSSetShader(pixelShader.Pointer, null, 0);
+
+            InlineArray<float32, 4> clearColor = [0.03, 0.06, 0.12, 1];
+            mut var message = MSG.Zero;
+            mut bool running = true;
+
+            while (running)
             {
-                if (message.message == WM_QUIT)
+                while (Win32.PeekMessageW(&message, null, 0, 0, PM_REMOVE) != 0)
                 {
-                    running = false;
+                    if (message.message == WM_QUIT)
+                    {
+                        running = false;
+                        break;
+                    }
+
+                    Win32.TranslateMessage(&message); // False also means "no character translation".
+                    Win32.DispatchMessageW(&message);
+                }
+
+                if (!running)
+                {
                     break;
                 }
 
-                Win32.TranslateMessage(&message); // False also means "no character translation".
-                Win32.DispatchMessageW(&message);
+                var status = RenderFrame(context.Pointer, target.Pointer, swap.Pointer, &clearColor[0]);
+
+                if (status == DXGI_STATUS_OCCLUDED)
+                {
+                    Win32.Sleep(16);
+                    continue;
+                }
+
+                if (status == DXGI_ERROR_DEVICE_REMOVED || status == DXGI_ERROR_DEVICE_RESET)
+                {
+                    NativeDiagnostics.WriteHResult(status, "Present");
+                    NativeDiagnostics.WriteHResult(device.Pointer->GetDeviceRemovedReason(), "Device reason");
+
+                    return 3;
+                }
+
+                NativeError.ThrowIfFailed(status, "Present");
             }
 
-            if (!running)
-            {
-                break;
-            }
-
-            context.Pointer->ClearRenderTargetView(target.Pointer, &clearColor[0]);
-            context.Pointer->Draw(3, 0);
-
-            var status = swap.Pointer->Present(1, 0);
-
-            if (status == DXGI_STATUS_OCCLUDED)
-            {
-                Win32.Sleep(16);
-                continue;
-            }
-
-            if (status == DXGI_ERROR_DEVICE_REMOVED || status == DXGI_ERROR_DEVICE_RESET)
-            {
-                NativeDiagnostics.WriteHResult(status, "Present");
-                NativeDiagnostics.WriteHResult(device.Pointer->GetDeviceRemovedReason(), "Device reason");
-
-                return 3;
-            }
-
-            NativeError.ThrowIfFailed(status, "Present");
+            return 0;
         }
-
-        return 0;
-    }
-}
-
-private static unsafe ComOwner<ID3DBlob> CompileShader(ptr<char16> path, ptr<char8> entryPoint, ptr<char8> target)
-{
-    using mut var code = new ComSlot<ID3DBlob>();
-    using mut var diagnostics = new ComSlot<ID3DBlob>();
-
-    var status = D3DCompileFromFile(
-        path, null, null, entryPoint, target, D3DCOMPILE_ENABLE_STRICTNESS, 0,
-        code.Address(), diagnostics.Address());
-
-    if (diagnostics.HasValue)
-    {
-        NativeDiagnostics.WriteCompilerOutput(diagnostics.Pointer);
     }
 
-    NativeError.ThrowIfFailed(status, "D3DCompileFromFile");
-
-    return code.Take();
-}
-
-[NativeExport(CallingConvention = NativeCallingConvention.Winapi)]
-private static nint WindowProcedure(HWND window, uint32 message, nuint wParam, nint lParam)
-{
-    unsafe
+    private static unsafe HRESULT RenderFrame(ptr<ID3D11DeviceContext> context,
+        ptr<ID3D11RenderTargetView> target, ptr<IDXGISwapChain> swap,
+        ptr<float32> clearColor)
     {
-        try
+        context->ClearRenderTargetView(target, clearColor);
+        context->Draw(3, 0);
+        return swap->Present(1, 0);
+    }
+
+    private static unsafe ComOwner<ID3DBlob> CompileShader(ptr<char16> path, ptr<char8> entryPoint, ptr<char8> target)
+    {
+        using mut var code = new ComSlot<ID3DBlob>();
+        using mut var diagnostics = new ComSlot<ID3DBlob>();
+
+        var status = D3DCompileFromFile(
+            path, null, null, entryPoint, target, D3DCOMPILE_ENABLE_STRICTNESS, 0,
+            code.Address(), diagnostics.Address());
+
+        if (diagnostics.HasValue)
         {
-            if (message == WM_CLOSE)
-            {
-                // Exit the loop; the owner, not this callback, destroys the window.
-                Win32.PostQuitMessage(0);
-
-                return 0;
-            }
-
-            if (message == WM_PAINT)
-            {
-                mut var paint = PAINTSTRUCT.Zero;
-                NativeError.RequireHandle(Win32.BeginPaint(window, &paint), "BeginPaint");
-                NativeError.RequireTrue(Win32.EndPaint(window, &paint), "EndPaint");
-
-                return 0;
-            }
-
-            return Win32.DefWindowProcW(window, message, wParam, lParam);
+            NativeDiagnostics.WriteCompilerOutput(diagnostics.Pointer);
         }
-        catch
+
+        NativeError.ThrowIfFailed(status, "D3DCompileFromFile");
+
+        return code.Take();
+    }
+
+    [NativeExport(CallingConvention = NativeCallingConvention.Winapi)]
+    private static nint WindowProcedure(HWND window, uint32 message, nuint wParam, nint lParam)
+    {
+        unsafe
         {
-            Runtime.FailFastCurrentException();
+            try
+            {
+                if (message == WM_CLOSE)
+                {
+                    // Exit the loop; the owner, not this callback, destroys the window.
+                    Win32.PostQuitMessage(0);
+
+                    return 0;
+                }
+
+                if (message == WM_PAINT)
+                {
+                    mut var paint = PAINTSTRUCT.Zero;
+                    NativeError.RequireHandle(Win32.BeginPaint(window, &paint), "BeginPaint");
+                    NativeError.RequireTrue(Win32.EndPaint(window, &paint), "EndPaint");
+
+                    return 0;
+                }
+
+                return Win32.DefWindowProcW(window, message, wParam, lParam);
+            }
+            catch
+            {
+                Runtime.FailFastCurrentException();
+            }
         }
     }
 }

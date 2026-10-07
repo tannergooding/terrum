@@ -14,6 +14,16 @@ application-state callback capture.
 
 The flow follows [Microsoft's Tutorial02](https://github.com/walbourn/directx-sdk-samples-reworked/tree/main/Direct3D11Tutorials/Tutorial02), with independent Terrum source and different ownership/error handling. See [NOTICE](NOTICE.txt). Keep `triangle.hlsl` beside the eventual executable and provide the D3DCompiler 47 runtime; shader compilation here is D3DCompiler, not a Terrum compiler.
 
+## Organization
+
+`Program.Main` validates the optional `--warp` argument and delegates to
+`TriangleApplication.Run`, which owns window/device setup and the message
+loop. `RenderFrame` isolates the per-frame clear, draw and present operations;
+`CompileShader` keeps shader compilation and diagnostics together. The
+`WindowProcedure` remains a static, noncapturing native callback. This
+organization makes the application lifecycle and per-frame work visible
+without implying compiler support for the sketch's native interop surface.
+
 ## Visible boundaries
 
 `RegisterClassExW` / `CreateWindowExW`, the message pump and native callback are explicit. Device/swap-chain creation, back buffer, render target, shaders, input layout, immutable vertex buffer, viewport, binding, draw and present are all in the source.
