@@ -444,6 +444,9 @@ public sealed class IntegerParsingRadixModuleTests
         {
             yield return new(api, radix, "0");
             yield return new(api, radix, "?");
+            yield return new(api, radix, "\u0661");
+            yield return new(api, radix, "\uFF11");
+            yield return new(api, radix, "\U0001D7D9");
             yield return new(api, radix, "1_0");
             yield return new(api, radix, "1__0");
             yield return new(api, radix, "1_");
