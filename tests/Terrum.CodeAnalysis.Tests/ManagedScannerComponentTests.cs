@@ -2839,6 +2839,7 @@ public sealed partial class ManagedScannerComponentTests
             using Terrum.CodeAnalysis;
             int32 Main() {
                 if (TryScanManagedCursor(init var cursor)) { return 1; }
+                if (cursor is init) { return 2; }
                 return 42;
             }
             """;
@@ -2946,6 +2947,7 @@ public sealed partial class ManagedScannerComponentTests
                 int32 count = Scan();
                 Host.Tokens[{{word}}] = {{value}};
                 if (TryBuildManagedTokenChain(count, init var chain)) { return 1; }
+                if (chain is init) { return 3; }
                 if (ManagedHeap.Collect() != {{collected}}) { return 2; }
                 return 42;
             }
@@ -2969,6 +2971,7 @@ public sealed partial class ManagedScannerComponentTests
                 int32 count = Scan();
                 Host.Tokens[{{word}}] = {{value}};
                 if (TryBuildManagedTokenChain(count, init var chain)) { return 1; }
+                if (chain is init) { return 3; }
                 if (ManagedHeap.Collect() != 2) { return 2; }
                 return 42;
             }
