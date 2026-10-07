@@ -231,6 +231,60 @@ public sealed class ModuleTests
             TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true));
     }
 
+    [Fact]
+    public async Task NativeGraphKeepsCopyInitializationOutputVacantAfterImportedFailureAsync()
+    {
+        const string librarySource = """
+            public struct Pair {
+                public int32 First;
+                public int32 Second;
+                public Pair(int32 first, int32 second) {
+                    First = first;
+                    Second = second;
+                }
+            }
+            public void FailBeforeInitializePair(int32 key, init ref<Pair> result) {
+                if (key == 0) { require false; }
+                result = new Pair(key, 3);
+            }
+            public bool TryInitializePair(int32 key, init ref<Pair> result) {
+                if (key == 0) { return false; }
+                result = new Pair(key, 3);
+                return true;
+            }
+            """;
+        var library = Compilation.CreateLibrary(SyntaxTree.Parse(librarySource),
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = NativeModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(library.Program),
+            ["FailBeforeInitializePair", "TryInitializePair"], "CopyOutputFailure",
+            NativeRuntimePolicy.CheckedExceptions);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                init Pair initialized;
+                unsafe {
+                    try {
+                        FailBeforeInitializePair(0, init initialized);
+                        return 1;
+                    } catch {
+                        if (initialized is init) { return 2; }
+                        if (!TryInitializePair(40, init initialized)) { return 3; }
+                    }
+                }
+                return initialized.First + initialized.Second;
+            }
+            """), NativeModuleCompiler.CreateGraphReference([producer]),
+            runtimePolicy: BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateGraphConsumer(
+            Assert.IsType<BoundProgram>(consumerCompilation.Program), [producer],
+            NativeRuntimePolicy.CheckedExceptions);
+        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+    }
+
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]

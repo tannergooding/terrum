@@ -344,6 +344,9 @@ replacement by a provider with unchanged contracts. They check successful
 `out` and `init ref` publication, false-path vacancy and retry for both modes;
 this does not make non-value modes executable in source-free TRRM or claim a
 general parameter-mode ABI.
+Checked native-graph execution also catches an imported failure before a
+public `Copy` initialization output is written, verifies that its destination
+remains vacant, then successfully retries that destination.
 A persisted semantic-module consumer also exercises `ManagedTokenChain`
 creation, rejected mutation, copied records, cursor read/lookahead and
 invalidation, plus link collection after clear, under both runtime policies.
