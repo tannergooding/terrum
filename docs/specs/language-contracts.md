@@ -292,11 +292,24 @@ assigned, and published through the existing specialization and output-mode
 rules, including forwarding through nested `[Copy]` helpers. This does not
 grant symbolic `T` arithmetic, comparison, conversion, or other primitive
 operator rights, or widen shared `Copy` predicates. Floating fields in
-concrete dependencies reached while proving a generic body, floating
-signatures in those dependencies, and managed-class dependency closures
-remain outside this contract; those proof-hydration choices are separate.
-Public generic exports or witnesses, source-free TRRM, and scalar-frontend
-verification or emission also remain outside this hosted profile.
+concrete dependencies reached while proving a generic body are governed by
+the separate proof-hydration profile below; admitting floating generic
+arguments does not itself widen that profile. Public generic exports or
+witnesses, source-free TRRM, and scalar-frontend verification or emission also
+remain outside this hosted profile.
+
+While proving a compilation-local `[Copy]` generic body, the compiler may
+hydrate reached `float32` and `float64` leaves only in non-unique `Copy`-struct
+descriptors and reached top-level or struct-owned concrete callable signatures.
+Hydration preserves descriptor identity, fields, layout, visibility,
+mutability, effects, caller-safety, output mode (`out` versus `init`),
+specialization limits, and existing persistence rules. These are concrete
+dependencies; this does not confer symbolic `T` capabilities. Floating fields
+or signatures in managed-class dependency closures remain outside this profile.
+It does not alter shared `Copy` predicates, primitive operator-witness
+eligibility or results, generic scalar parameter tables, `ConstEval`, scalar
+floating getters, public generic ABI, source-free TRRM, or scalar-frontend
+verification or emission.
 
 Compilation-local `[Copy]` templates also admit `init ref<T>` outputs with a
 fixed `int32`, `uint32`, `int64`, `uint64`, `char16`, or `void` result. Every

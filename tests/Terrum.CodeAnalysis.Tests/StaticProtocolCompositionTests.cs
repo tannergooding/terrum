@@ -323,7 +323,7 @@ public sealed class StaticProtocolCompositionTests
     }
 
     [Fact]
-    public void ConcreteFloatingCopyDependenciesHydrateWithInitMode()
+    public void ConcreteFloatingCopyDependenciesPreserveOutputModes()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             struct Inner {
@@ -341,10 +341,16 @@ public sealed class StaticProtocolCompositionTests
                 result = new Pair(new Inner(float32(1), 42), float64(2));
                 return true;
             }
+            [NoThrow] bool TryCreatePairOut(out Pair result) {
+                result = new Pair(new Inner(float32(1), 42), float64(2));
+                return true;
+            }
             [NoThrow] float32 CopyFloat(float32 value) { return value; }
             [NoThrow] T Forward<T>(T value) where T : [Copy] {
                 if (!TryCreatePair(init var pair)) { return value; }
-                if (CopyFloat(pair.ReadSingle()) != float32(1) || pair.Wide != float64(2)) { return value; }
+                if (!TryCreatePairOut(out var copiedPair)) { return value; }
+                if (CopyFloat(pair.ReadSingle()) != float32(1) || pair.Wide != float64(2)
+                    || copiedPair.Wide != float64(2)) { return value; }
                 return Identity(value);
             }
             [NoThrow] U Identity<U>(U value) where U : [Copy] { return value; }
@@ -352,6 +358,10 @@ public sealed class StaticProtocolCompositionTests
             """));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var functions = Assert.IsType<BoundProgram>(compilation.Program).Functions;
+        Assert.Contains(functions, static function =>
+            function.Name == "TryCreatePair" && function.Variables[0].IsInit);
+        Assert.Contains(functions, static function =>
+            function.Name == "TryCreatePairOut" && function.Variables[0].IsOut);
         Assert.Contains(functions, static function => function.Name == "Forward<int32>");
         Assert.Contains(functions, static function => function.Name == "Identity<int32>");
         Assert.DoesNotContain(functions, static function => function.IsExternal

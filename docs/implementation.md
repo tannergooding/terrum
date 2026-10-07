@@ -25,9 +25,11 @@ floating results combined with mixed generic modes or fixed side outputs
 remain provisional. Compilation-local `[Copy]` templates also accept concrete
 `float32` and `float64` generic arguments, forwarding and publishing their
 substituted values under existing rules. This grants no symbolic floating
-operations or floating dependency hydration during generic proofs. Public
-generic exports and executable TRRM support remain separate. The native
-backend emits Terrum-owned code; CIL is neither a dependency nor the default.
+operations. Generic proofs hydrate floating leaves only for reached
+non-unique `Copy`-struct descriptors and concrete non-class callable
+signatures; managed-class dependency closures remain separate. Public generic
+exports and executable TRRM support remain separate. The native backend emits
+Terrum-owned code; CIL is neither a dependency nor the default.
 
 Current profile markers are syntax language version 45, semantic body features
 v43-v49, semantic-module revision 76, and native profiles native-10 through

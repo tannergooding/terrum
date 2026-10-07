@@ -29,9 +29,6 @@ approved.
   has accepted fixed floating results for single-mode generic outputs without
   fixed side parameters; mixed-mode and fixed-side combinations remain
   unapproved.
-- [Concrete floating dependencies in hosted generic proofs](floating-copy-proof-dependencies.md)
-  recommends a bounded floating-leaf descriptor and concrete-signature
-  hydration slice without expanding managed-class closures.
 - [Span-backed token cursor](span-backed-token-cursor.md) records the open
   backing, capture, indexing and construction contracts needed for the
   existing zero-copy self-host cursor candidate.
