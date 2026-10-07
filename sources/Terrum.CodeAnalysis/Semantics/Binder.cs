@@ -280,6 +280,7 @@ internal sealed partial class Binder
                         continue;
                     }
                     if (qualified == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
+                        || qualified == NativeWindowHandleContract.TypeName
                         || name == "Span" || qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
                         or "MutableInt32BufferView"
                         || name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
@@ -318,6 +319,10 @@ internal sealed partial class Binder
         if (_usesManagedNode)
         {
             _ = _structNames.TryAdd(NativeManagedNodeIntrinsics.TypeName, PrimitiveType.ManagedNode);
+        }
+        if (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeWindowHandle) == true)
+        {
+            _ = _structNames.TryAdd(NativeWindowHandleContract.TypeName, PrimitiveType.NativeWindowHandle);
         }
         DeclareAliases();
         foreach (var index in _structDeclarations.Keys)
@@ -716,7 +721,8 @@ internal sealed partial class Binder
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
 
     private static bool IsNativeImportParameterType(PrimitiveType type) =>
-        IsNativeImportInteger(type) || type == PrimitiveType.NativeUtf16ZPointer;
+        IsNativeImportInteger(type) || type is PrimitiveType.NativeUtf16ZPointer
+            or PrimitiveType.NativeWindowHandle;
 
     internal static bool TryPrimitiveType(string name, out PrimitiveType type)
     {
@@ -3590,6 +3596,15 @@ internal sealed partial class Binder
                 }
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Name;
                 var receiverNode = (SyntaxNode)node.Children[0];
+                if (member == NativeWindowHandleContract.NoOwnerMemberName
+                    && !HasVariableReceiverName(receiverNode)
+                    && ResolveTypeName(NameText(receiverNode), out var nativeHandleType)
+                        == DeclaredTypeResolution.Unique
+                    && nativeHandleType == PrimitiveType.NativeWindowHandle)
+                {
+                    expression = new BoundNativeNoOwner(node.Span);
+                    break;
+                }
                 var receiverType = KnownType(receiverNode);
                 if (receiverType == PrimitiveType.TokenSpan && member == "Length")
                 {
@@ -5251,6 +5266,7 @@ internal sealed partial class Binder
         PrimitiveType.MutableInt32BufferView => "MutableInt32BufferView",
         PrimitiveType.TokenSpan => "Span<Token>",
         PrimitiveType.NativeUtf16ZPointer => "ptr<char16>",
+        PrimitiveType.NativeWindowHandle => NativeWindowHandleContract.TypeName,
         PrimitiveType.ManagedNode => "ManagedNode",
         PrimitiveType.WriteManagedNode => "write ManagedNode",
         PrimitiveType.OptionalManagedNode => "ManagedNode?",

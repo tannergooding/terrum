@@ -154,6 +154,70 @@ does not promote the proposal or add a pointer import to the production
 catalog. `MessageBoxW` and its sample-specific handle representation remain
 the next observable gate.
 
+### Proposed `MessageBoxW` owner-handle subgate (unapproved)
+
+**Summary:** The observable pointer-call gate needs the exact Windows x64
+`MessageBoxW(HWND, LPCWSTR, LPCWSTR, UINT) -> int` shape. Its owner is optional;
+native zero means that the message box has no owner. Modeling that argument as
+an integer, `ptr<void>`, or general `null` would blur distinct handle and
+pointer contracts. `MessageBoxW` is modal, so unattended tests must not call
+the production import and wait for user interaction.
+
+**Recommendation:** Use one compiler-owned nominal identity, provisionally
+`Terrum.Interop.Windows.HWND`, with `Terrum.Interop.Windows.HWND.NoOwner` as
+the only source form. Lower it to an eight-byte zero but keep it distinct from
+integer, pointer and managed-reference values. Permit the dedicated no-owner
+expression only as a direct argument to the owner parameter of the exact
+catalog record; mandatory verification must recheck the record and mapped
+parameter ordinal. Reject constants, forwarding, computations, conversions,
+comparisons, returns, locals, fields, generic use and writable/optional
+qualifications. Do not model the sentinel as a static field or getter.
+
+Keep both text parameters on the existing static readonly/no-escape UTF-16
+literal path. The reviewed signature is
+`HWND, ptr<char16>, ptr<char16>, uint32 -> int32`; preserve the result,
+including zero on failure. `[NoThrow]` describes Terrum's failure effect, not
+absence of blocking, native faults, reentrancy or Win32 failure. Use a test
+catalog and independent C fixture to validate argument ABI without showing a
+dialog, then compile a runnable production sample and perform an explicit
+interactive smoke test before claiming the observable gate.
+
+The Windows loader documentation says the OS uses its copy when a DLL is in
+the running system's KnownDLL set, which is checked before ordinary
+application-directory, current-directory and `PATH` search. The current
+development host is Windows 11 x64 build 26300 and lists `user32.dll` in its
+KnownDLL registry key; that is host evidence only. The set is OS-dependent,
+and DLL redirection, SxS redirection and loaded-module reuse precede the
+KnownDLL check. The catalog's `System32` policy does not enforce a path.
+
+**Trusted-loader acceptance condition:** Limit a production `MessageBoxW`
+entry to explicitly validated Windows x64 desktop release/configuration
+families where `user32.dll` is a KnownDLL. Assume a trusted OS installation and
+normal process startup; application-controlled DLL/SxS redirection and
+substituted providers are outside the gate. The compiler-host registry is not
+evidence about another execution target, and ordinary DLL-search fallback is
+not an accepted basis. Before adding the production entry, record supported
+target coverage and verify a nonmodal static-import probe resolves the system
+image despite application-directory, current-directory and `PATH` shadow
+files. This does not authorize other DLLs merely because they share the
+`System32` policy.
+
+**Progress:** A test-only `HWND.NoOwner` source marker now binds only as the
+direct owner argument of a catalogued call and lowers to native zero; an
+independent C fixture verifies the named-argument mapping and ABI without
+displaying a dialog. A separate nonmodal static-import probe passed on the
+Windows 11 x64 development host (build 26300), confirming that the loaded
+`user32.dll` image matches the system-directory path despite application,
+current-directory and `PATH` shadow DLLs. This is evidence for that host only:
+the production catalog still has no `MessageBoxW` entry, supported target
+coverage beyond this host is unvalidated, and there is no runnable sample or
+interactive smoke test. The representation and import remain provisional under
+this unapproved proposal.
+
+See Microsoft's [`MessageBoxW` contract](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-messageboxw)
+and [DLL search order](https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order)
+documentation.
+
 Start AOT-only and explicitly reject this surface in unsupported persistence
 and JIT paths rather than dropping its contracts. At every gate, source
 grammar, semantic verification, binding metadata, emitter imports and runtime

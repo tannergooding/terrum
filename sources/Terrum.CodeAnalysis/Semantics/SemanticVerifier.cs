@@ -181,6 +181,7 @@ public static partial class SemanticVerifier
         {
             if (@class is null || string.IsNullOrWhiteSpace(@class.Name)
                 || @class.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
+                    or NativeWindowHandleContract.TypeName
                 || !classNames.Add(@class.Name) || structNames.Contains(@class.Name)
                 || @class.Fields.IsDefaultOrEmpty || @class.Fields.Length > ManagedClassTypes.MaximumFields
                 || @class.Size is < 8 or > ManagedClassTypes.MaximumPayload || (@class.Size & 7) != 0)
@@ -194,7 +195,7 @@ public static partial class SemanticVerifier
                 if (field is null || !ValidType(field.Type, allowVoid: false, program)
                     || field.Type is PrimitiveType.OwnedInt32Buffer or PrimitiveType.ReadonlyInt32BufferView
                         or PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer
-                        or PrimitiveType.MutableInt32BufferView
+                        or PrimitiveType.NativeWindowHandle or PrimitiveType.MutableInt32BufferView
                     || IsUnique(program, field.Type))
                 {
                     throw Invalid();
@@ -239,7 +240,8 @@ public static partial class SemanticVerifier
             var structure = program.Structures[index];
             if (structure is null || string.IsNullOrWhiteSpace(structure.Name)
                 || structure.Name is NativeBufferIntrinsics.TypeName or NativeManagedNodeIntrinsics.TypeName
-                    or NativeManagedNodeIntrinsics.HeapName || !structNames.Add(structure.Name)
+                    or NativeManagedNodeIntrinsics.HeapName or NativeWindowHandleContract.TypeName
+                || !structNames.Add(structure.Name)
                 || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty || structure.Size is < 1 or > ValueLayout.MaximumSize)
             {
@@ -252,7 +254,7 @@ public static partial class SemanticVerifier
             foreach (var field in structure.Fields)
             {
                 if (field is null || !ValidType(field.Type, allowVoid: false, program)
-                    || field.Type == PrimitiveType.NativeUtf16ZPointer)
+                    || field.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeWindowHandle)
                 {
                     throw Invalid();
                 }
@@ -338,7 +340,7 @@ public static partial class SemanticVerifier
             if (function is null || string.IsNullOrEmpty(function.Name) || !names.Add(function.Name)
                 || (function.IsPrivate && function.IsInternal)
                 || (function.DoesNotReturn && function.ReturnType != PrimitiveType.Void)
-                || function.ReturnType == PrimitiveType.NativeUtf16ZPointer
+                || function.ReturnType is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeWindowHandle
                 || !ValidType(function.ReturnType, allowVoid: true, program) || function.Variables.IsDefault
                 || function.ParameterCount < 0 || function.ParameterCount > function.Variables.Length
                 || function.Body is null)
@@ -357,6 +359,9 @@ public static partial class SemanticVerifier
                     if (variable is null || string.IsNullOrEmpty(variable.Name)
                         || (variable.Type == PrimitiveType.NativeUtf16ZPointer
                             && (!function.IsExternal || variableIndex >= function.ParameterCount))
+                        || (variable.Type == PrimitiveType.NativeWindowHandle
+                            && (!function.IsExternal || variableIndex != 0
+                                || variableIndex >= function.ParameterCount))
                         || (variable.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
                             ? variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                                 || variable.IsMutable != (variable.Type == PrimitiveType.MutableInt32BufferView)
@@ -865,7 +870,7 @@ public static partial class SemanticVerifier
                     break;
                 case BoundSnapshotSpan:
                     break;
-                case BoundConstant or BoundNull or BoundRead or BoundMove or BoundReceiverLoan
+                case BoundConstant or BoundNull or BoundNativeNoOwner or BoundRead or BoundMove or BoundReceiverLoan
                     or BoundMutableReceiverLoan or BoundOutArgument or BoundViewLength or BoundBufferLength:
                     break;
                 default:
@@ -1369,7 +1374,7 @@ public static partial class SemanticVerifier
                 case BoundBufferRead buffer:
                     Expression(buffer.Index, depth + 1, acquiringRoot);
                     break;
-                case BoundConstant or BoundNull or BoundRead or BoundBufferLength:
+                case BoundConstant or BoundNull or BoundNativeNoOwner or BoundRead or BoundBufferLength:
                     break;
                 default:
                     throw Invalid();
@@ -1683,6 +1688,8 @@ public static partial class SemanticVerifier
         {
             if (program.NativeImportCatalogId is not null
                 || program.Functions.Any(static function => function.NativeImportKey is not null)
+                || program.Functions.Any(static function => function.ReturnType == PrimitiveType.NativeWindowHandle
+                    || function.Variables.Any(static variable => variable.Type == PrimitiveType.NativeWindowHandle))
                 || !program.NativeUtf16ZLiterals.IsEmpty)
             {
                 throw InvalidEffect(default, "NativeImport");
@@ -1732,6 +1739,14 @@ public static partial class SemanticVerifier
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
         if (program.NativeImportCatalog is not null || program.NativeImportCatalogId is not null
             || program.Functions.Any(static function => function.NativeImportKey is not null)
+            || program.Functions.Any(static function => function.ReturnType == PrimitiveType.NativeWindowHandle
+                || function.Variables.Any(static variable => variable.Type == PrimitiveType.NativeWindowHandle))
+            || (!program.Structures.IsDefaultOrEmpty && program.Structures.Any(
+                static structure => structure.Fields.Any(
+                    static field => field.Type == PrimitiveType.NativeWindowHandle)))
+            || (!program.Classes.IsDefaultOrEmpty && program.Classes.Any(
+                static @class => @class.Fields.Any(
+                    static field => field.Type == PrimitiveType.NativeWindowHandle)))
             || !program.NativeUtf16ZLiterals.IsEmpty)
         {
             throw new NotSupportedException($"Source native imports are not supported by {target}.");
@@ -3056,6 +3071,8 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
                 break;
+            case BoundNativeNoOwner:
+                throw InvalidEffect(expression.Span, "NativeImport");
             case BoundNull:
                 if (!ManagedClassTypes.IsOptional(expression.Type))
                 {
@@ -3767,7 +3784,28 @@ public static partial class SemanticVerifier
                         }
                         else
                         {
-                            if (target.Variables[parameterSlot].Type == PrimitiveType.NativeUtf16ZPointer
+                            if (target.Variables[parameterSlot].Type == PrimitiveType.NativeWindowHandle)
+                            {
+                                if (argument is not BoundNativeNoOwner
+                                    || parameterIndex != 0 || !target.IsExternal
+                                    || target.NativeImportKey is not string handleKey
+                                    || program.NativeImportCatalog is not NativeImportCatalog handleCatalog
+                                    || !handleCatalog.TryGetImport(handleKey, out var handleDefinition)
+                                    || handleDefinition is null
+                                    || handleDefinition.ParameterTypes[parameterIndex]
+                                        != PrimitiveType.NativeWindowHandle
+                                    || handleDefinition.ParameterContracts[parameterIndex]
+                                        != NativeImportParameterContract.NoOwnerWindowHandle)
+                                {
+                                    throw InvalidEffect(argument.Span, "NativeImport");
+                                }
+                            }
+                            else if (argument is BoundNativeNoOwner
+                                || argument.Type == PrimitiveType.NativeWindowHandle)
+                            {
+                                throw InvalidEffect(argument.Span, "NativeImport");
+                            }
+                            else if (target.Variables[parameterSlot].Type == PrimitiveType.NativeUtf16ZPointer
                                 && (argument is not BoundConstant {
                                         Type: PrimitiveType.NativeUtf16ZPointer,
                                         Value: >= 0,
@@ -3876,12 +3914,16 @@ public static partial class SemanticVerifier
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
-                                if (IsUnique(program, argument.Type)
-                                    && argument is not (BoundMove or BoundCall))
+                                if (argument is not BoundNativeNoOwner)
                                 {
-                                    throw InvalidEffect(argument.Span, "Ownership");
+                                    if (IsUnique(program, argument.Type)
+                                        && argument is not (BoundMove or BoundCall))
+                                    {
+                                        throw InvalidEffect(argument.Span, "Ownership");
+                                    }
+                                    Expression(argument, initialized, fieldMasks, declarations, function, program,
+                                        ref remaining, depth + 1, failures);
                                 }
-                                Expression(argument, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                             }
                         }
                         if (parameterIndex == 0 && loanRoot >= 0)
@@ -3990,6 +4032,7 @@ public static partial class SemanticVerifier
             or PrimitiveType.Float32 or PrimitiveType.Float64
             or PrimitiveType.Char16 or PrimitiveType.Bool or PrimitiveType.OwnedInt32Buffer or PrimitiveType.TokenSpan
             or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode or PrimitiveType.NativeUtf16ZPointer
+            or PrimitiveType.NativeWindowHandle
             || (allowVoid && type == PrimitiveType.Void)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length)
             || (ManagedClassTypes.IsManaged(type) && (ManagedClassTypes.Readonly(type) is
@@ -4491,6 +4534,7 @@ public static partial class SemanticVerifier
             case BoundBufferLength:
             case BoundConstant:
             case BoundNull:
+            case BoundNativeNoOwner:
             case BoundRead:
             case BoundReceiverLoan:
             case BoundMutableReceiverLoan:
@@ -4564,7 +4608,7 @@ public static partial class SemanticVerifier
                 read.Index, flowFacts, ref remaining),
             BoundSpanAdvance advance => FlowFacts(advance.View, flowFacts, ref remaining),
             BoundSnapshotSpan => 0,
-            BoundViewLength or BoundBufferLength or BoundConstant or BoundNull or BoundRead or BoundReceiverLoan
+            BoundViewLength or BoundBufferLength or BoundConstant or BoundNull or BoundNativeNoOwner or BoundRead or BoundReceiverLoan
                 or BoundMutableReceiverLoan or BoundMutableFieldLoan or BoundFieldLoan => 0,
             _ => AllFlowFacts,
         };

@@ -31,8 +31,9 @@ public sealed class NativeImportCatalog
 
     private static bool ValidParameterContracts(NativeImportDefinition import)
     {
-        var hasUtf16Z = import.ParameterTypes.Contains(PrimitiveType.NativeUtf16ZPointer);
-        if (!hasUtf16Z)
+        var hasRestrictedContract = import.ParameterTypes.Contains(PrimitiveType.NativeUtf16ZPointer)
+            || import.ParameterTypes.Contains(PrimitiveType.NativeWindowHandle);
+        if (!hasRestrictedContract)
         {
             return import.ParameterContracts.IsDefaultOrEmpty;
         }
@@ -42,10 +43,14 @@ public sealed class NativeImportCatalog
         }
         for (var index = 0; index < import.ParameterTypes.Length; index++)
         {
-            var expected = import.ParameterTypes[index] == PrimitiveType.NativeUtf16ZPointer
-                ? NativeImportParameterContract.ReadonlyUtf16ZNoEscape
-                : NativeImportParameterContract.Value;
-            if (import.ParameterContracts[index] != expected)
+            var type = import.ParameterTypes[index];
+            var expected = type switch {
+                PrimitiveType.NativeUtf16ZPointer => NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
+                PrimitiveType.NativeWindowHandle => NativeImportParameterContract.NoOwnerWindowHandle,
+                _ => NativeImportParameterContract.Value,
+            };
+            if (import.ParameterContracts[index] != expected
+                || (type == PrimitiveType.NativeWindowHandle && index != 0))
             {
                 return false;
             }
@@ -71,7 +76,7 @@ public sealed class NativeImportCatalog
                     or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
                 || import.ParameterTypes.Any(static type => type is not (PrimitiveType.Int32
                     or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
-                    or PrimitiveType.NativeUtf16ZPointer))
+                    or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeWindowHandle))
                 || !ValidParameterContracts(import)
                 || import.DeploymentPolicy is not (NativeImportDeploymentPolicy.System32
                     or NativeImportDeploymentPolicy.ApplicationDirectory)
@@ -98,6 +103,9 @@ public sealed class NativeImportCatalog
     internal bool TryGetImport(string key, out NativeImportDefinition? definition)
         => _imports.TryGetValue(key, out definition);
 
+    internal bool SupportsParameterType(PrimitiveType type) =>
+        _imports.Values.Any(import => import.ParameterTypes.Contains(type));
+
     internal bool MatchesFunction(BoundFunction function, NativeImportDefinition definition)
     {
         if (!function.IsExternal || function.NativeImportKey != definition.Key
@@ -122,7 +130,10 @@ public sealed class NativeImportCatalog
                 || function.Variables[parameter].IsMutable
                 || (definition.ParameterTypes[parameter] == PrimitiveType.NativeUtf16ZPointer
                     && definition.ParameterContracts[parameter]
-                        != NativeImportParameterContract.ReadonlyUtf16ZNoEscape))
+                        != NativeImportParameterContract.ReadonlyUtf16ZNoEscape)
+                || (definition.ParameterTypes[parameter] == PrimitiveType.NativeWindowHandle
+                    && (parameter != 0 || definition.ParameterContracts[parameter]
+                        != NativeImportParameterContract.NoOwnerWindowHandle)))
             {
                 return false;
             }
@@ -149,6 +160,13 @@ internal enum NativeImportParameterContract
 {
     Value,
     ReadonlyUtf16ZNoEscape,
+    NoOwnerWindowHandle,
+}
+
+internal static class NativeWindowHandleContract
+{
+    internal const string TypeName = "Terrum.Interop.Windows.HWND";
+    internal const string NoOwnerMemberName = "NoOwner";
 }
 
 internal static class NativeUtf16ZContract

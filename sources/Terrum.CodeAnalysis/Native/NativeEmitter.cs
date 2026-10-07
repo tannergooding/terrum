@@ -1696,7 +1696,7 @@ internal sealed partial class PeCompiler
             || target is PrimitiveType.Float32 or PrimitiveType.Float64;
     private static bool IsWide(PrimitiveType type) =>
         type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.OwnedInt32Buffer
-            or PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer
+            or PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeWindowHandle
             || ManagedClassTypes.IsManaged(type);
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
     private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
@@ -3100,6 +3100,9 @@ internal sealed partial class PeCompiler
         _cancellationToken.ThrowIfCancellationRequested();
         switch (expression)
         {
+            case BoundNativeNoOwner:
+                _code.Bytes(0x31, 0xC0); // xor eax,eax
+                break;
             case BoundConstant constant:
                 if (constant.Type == PrimitiveType.NativeUtf16ZPointer)
                 {

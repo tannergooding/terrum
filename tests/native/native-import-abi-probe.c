@@ -79,3 +79,40 @@ __declspec(dllexport) int32_t __cdecl NativeFfiUtf16Z(
     }
     return 0;
 }
+
+__declspec(dllexport) int32_t __cdecl NativeFfiMessageBox(
+    const void* owner, const uint16_t* text, const uint16_t* caption, uint32_t flags)
+{
+    static const uint16_t expectedText[] = { 0x0041, 0x000A, 0xD83D, 0xDE42, 0x0000 };
+    static const uint16_t expectedCaption[] = {
+        0x0063, 0x0061, 0x0070, 0x0074, 0x0069, 0x006F, 0x006E, 0x0000
+    };
+    if (owner != NULL)
+    {
+        return 1;
+    }
+    if (text == NULL || caption == NULL || ((uintptr_t)text & 1) != 0
+        || ((uintptr_t)caption & 1) != 0)
+    {
+        return 2;
+    }
+    if (flags != 0)
+    {
+        return 3;
+    }
+    for (size_t index = 0; index < sizeof(expectedText) / sizeof(expectedText[0]); index++)
+    {
+        if (text[index] != expectedText[index])
+        {
+            return 4;
+        }
+    }
+    for (size_t index = 0; index < sizeof(expectedCaption) / sizeof(expectedCaption[0]); index++)
+    {
+        if (caption[index] != expectedCaption[index])
+        {
+            return 5;
+        }
+    }
+    return 1;
+}

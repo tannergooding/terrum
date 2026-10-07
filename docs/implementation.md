@@ -52,11 +52,15 @@ catalogued fixed-width integer/`void` signature and effects; the production
 catalog currently contains only `GetCurrentThreadId`. Unsupported
 module/JIT/TRRM persistence paths reject these imports. This is not general
 foreign-function support and does not move scalar frontend verification or
-emission into Terrum. The tests also exercise a proposed static UTF-16-NUL
-literal pointer subgate using read-only image storage and catalogued
-readonly/no-escape parameters against an independent C reader. That fixture
-does not add a pointer import to the production catalog or establish general
-pointer or handle support; `MessageBoxW` remains unimplemented.
+emission into Terrum. Test-only fixtures exercise the proposed static
+UTF-16-NUL literal pointer subgate using read-only image storage and catalogued
+readonly/no-escape parameters against an independent C reader, and the
+sample-specific `HWND.NoOwner` marker against a nonmodal ABI-equivalent C
+function. A separate static `user32.dll` import probe checks the loaded image
+while application-directory, current-directory and `PATH` shadow DLLs are
+present. These tests do not add pointer or HWND imports to the production
+catalog or establish general pointer or handle support; `MessageBoxW` remains
+unimplemented.
 
 ## Syntax and CLI
 

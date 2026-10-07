@@ -51,6 +51,8 @@ public enum PrimitiveType
     TokenSpan,
     /// <summary>A compiler-owned UTF-16-NUL image address, restricted to reviewed no-escape imports.</summary>
     NativeUtf16ZPointer,
+    /// <summary>A closed Windows x64 HWND carrier, restricted to a catalogued no-owner argument.</summary>
+    NativeWindowHandle,
 }
 
 /// <summary>Disjoint source-class type identifiers start above the complete inline-struct range.</summary>
@@ -545,6 +547,10 @@ public abstract record BoundExpression(PrimitiveType Type, TextSpan Span);
 /// <param name="Type">The constant type.</param>
 /// <param name="Span">The source range.</param>
 public sealed record BoundConstant(long Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>The compiler-owned no-owner HWND value; valid only in its catalogued native argument slot.</summary>
+public sealed record BoundNativeNoOwner(TextSpan Span)
+    : BoundExpression(PrimitiveType.NativeWindowHandle, Span);
 
 /// <summary>An explicitly absent optional managed handle.</summary>
 public sealed record BoundNull(PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);

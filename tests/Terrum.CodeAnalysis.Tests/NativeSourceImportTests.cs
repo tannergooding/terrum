@@ -20,6 +20,7 @@ public sealed class NativeSourceImportTests
     private const string SignedFixtureKey = "test.application.native-import-abi.NativeFfiSigned";
     private const string UnsignedFixtureKey = "test.application.native-import-abi.NativeFfiUnsigned";
     private const string Utf16ZFixtureKey = "test.application.native-import-abi.NativeFfiUtf16Z";
+    private const string MessageBoxFixtureKey = "test.application.native-import-abi.NativeFfiMessageBox";
 
     [Fact]
     public void SourceImportRequiresItsExactCatalogSignatureAndCompilerAttribute()
@@ -127,6 +128,142 @@ public sealed class NativeSourceImportTests
         Assert.True(NativeUtf16ZContract.IsValidLiteral("supplementary \U0001F642"));
         Assert.False(NativeUtf16ZContract.IsValidLiteral(new string('\uD83D', 1)));
         Assert.False(NativeUtf16ZContract.IsValidPool([maximum, "extra"]));
+    }
+
+    [Fact]
+    public void NativeHwndNoOwnerIsRestrictedToItsCataloguedArgument()
+    {
+        var catalog = NativeImportCatalog.CreateForTesting("test-native-hwnd-v1",
+            [CreateMessageBoxImportDefinition()]);
+        var external = $$"""
+            [Terrum.Interop.NativeImport("{{MessageBoxFixtureKey}}")]
+            [NoThrow]
+            extern int32 NativeFfiMessageBox(Terrum.Interop.Windows.HWND owner, ptr<char16> text,
+                ptr<char16> caption, uint32 flags);
+            """;
+        var invalidBodies = new[] {
+            $$"""
+                int32 Main() {
+                    return NativeFfiMessageBox(owner: 0, text: utf16z("text"),
+                        caption: utf16z("caption"), flags: 0);
+                }
+                """,
+            $$"""
+                int32 Main() {
+                    return NativeFfiMessageBox(owner: null, text: utf16z("text"),
+                        caption: utf16z("caption"), flags: 0);
+                }
+                """,
+            $$"""
+                int32 Main() {
+                    Terrum.Interop.Windows.HWND owner = Terrum.Interop.Windows.HWND.NoOwner;
+                    return NativeFfiMessageBox(owner: owner, text: utf16z("text"),
+                        caption: utf16z("caption"), flags: 0);
+                }
+                """,
+            $$"""
+                int32 Forward(Terrum.Interop.Windows.HWND owner) {
+                    return NativeFfiMessageBox(owner: owner, text: utf16z("text"),
+                        caption: utf16z("caption"), flags: 0);
+                }
+                int32 Main() {
+                    return Forward(Terrum.Interop.Windows.HWND.NoOwner);
+                }
+                """,
+            $$"""
+                int32 Main() {
+                    return NativeFfiMessageBox(
+                        owner: true ? Terrum.Interop.Windows.HWND.NoOwner
+                            : Terrum.Interop.Windows.HWND.NoOwner,
+                        text: utf16z("text"), caption: utf16z("caption"), flags: 0);
+                }
+                """,
+        };
+
+        foreach (var body in invalidBodies)
+        {
+            var compilation = Compilation.CreateWithNativeImports(
+                [SyntaxTree.Parse(external + Environment.NewLine + body)], catalog,
+                BoundRuntimePolicy.FailFast);
+            Assert.Null(compilation.Program);
+            Assert.NotEmpty(compilation.Diagnostics);
+        }
+
+        var spoofed = $$"""
+            namespace Terrum.Interop.Windows;
+            struct HWND { int32 Value; }
+            [Terrum.Interop.NativeImport("{{MessageBoxFixtureKey}}")]
+            [NoThrow]
+            extern int32 NativeFfiMessageBox(HWND owner, ptr<char16> text,
+                ptr<char16> caption, uint32 flags);
+            int32 Main() {
+                return NativeFfiMessageBox(owner: HWND.NoOwner, text: utf16z("text"),
+                    caption: utf16z("caption"), flags: 0);
+            }
+            """;
+        var spoofedCompilation = Compilation.CreateWithNativeImports(
+            [SyntaxTree.Parse(spoofed)], catalog, BoundRuntimePolicy.FailFast);
+        Assert.Null(spoofedCompilation.Program);
+        Assert.Contains(spoofedCompilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3003");
+
+        var validSource = $$"""
+            [Terrum.Interop.NativeImport("{{MessageBoxFixtureKey}}")]
+            [NoThrow]
+            extern int32 NativeFfiMessageBox(Terrum.Interop.Windows.HWND owner, ptr<char16> text,
+                ptr<char16> caption, uint32 flags);
+            int32 Main() {
+                return NativeFfiMessageBox(flags: 0, caption: utf16z("caption"),
+                    text: utf16z("text"), owner: Terrum.Interop.Windows.HWND.NoOwner);
+            }
+            """;
+        var validCompilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(validSource)], catalog,
+            BoundRuntimePolicy.FailFast);
+        Assert.False(validCompilation.HasErrors, string.Join(Environment.NewLine, validCompilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(validCompilation.Program);
+        var mainIndex = Array.FindIndex(program.Functions.ToArray(), static function => function.Name == "Main");
+        var main = program.Functions[mainIndex];
+        var boundReturn = Assert.IsType<BoundReturn>(main.Body.Statements[0]);
+        var call = Assert.IsType<BoundCall>(boundReturn.Value);
+        var ownerArgumentIndex = Enumerable.Range(0, call.Arguments.Length)
+            .Single(index => call.ParameterIndex(index) == 0);
+        Assert.IsType<BoundNativeNoOwner>(call.Arguments[ownerArgumentIndex]);
+
+        var forgedCall = call with {
+            Arguments = call.Arguments.SetItem(ownerArgumentIndex,
+                new BoundConstant(0, PrimitiveType.NativeWindowHandle,
+                    call.Arguments[ownerArgumentIndex].Span)),
+        };
+        var forgedMain = main with {
+            Body = main.Body with {
+                Statements = main.Body.Statements.SetItem(0, boundReturn with { Value = forgedCall }),
+            },
+        };
+        var forgedProgram = program with {
+            Functions = program.Functions.SetItem(mainIndex, forgedMain),
+        };
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitWithNativeImportsForTesting(
+            forgedProgram, NativeRuntimePolicy.FailFast));
+
+        var externalIndex = Array.FindIndex(program.Functions.ToArray(),
+            static function => function.IsExternal);
+        var strippedProgram = program with {
+            Functions = program.Functions.SetItem(externalIndex,
+                program.Functions[externalIndex] with { NativeImportKey = null }),
+            NativeImportCatalog = null,
+            NativeImportCatalogId = null,
+            NativeUtf16ZLiterals = [],
+        };
+        _ = Assert.Throws<NotSupportedException>(() =>
+            SemanticVerifier.RejectSourceNativeImports(strippedProgram, "JIT"));
+        _ = Assert.Throws<ArgumentException>(() =>
+            NativeEmitter.EmitCode(strippedProgram, NativeRuntimePolicy.FailFast));
+
+        var withoutNoOwner = new NativeImportDefinition(MessageBoxFixtureKey,
+            "native-import-abi-probe.dll", "NativeFfiMessageBox",
+            [PrimitiveType.NativeWindowHandle], PrimitiveType.Int32,
+            true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory);
+        _ = Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
+            "test-native-hwnd-without-contract-v1", [withoutNoOwner]));
     }
 
     [Fact]
@@ -277,6 +414,7 @@ public sealed class NativeSourceImportTests
                         PrimitiveType.UInt32],
                     PrimitiveType.UInt64, true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory),
                 CreateUtf16ZImportDefinition(),
+                CreateMessageBoxImportDefinition(),
             ]);
             var source = $$"""
                 [Terrum.Interop.NativeImport("{{SignedFixtureKey}}")]
@@ -294,6 +432,11 @@ public sealed class NativeSourceImportTests
                 extern int32 NativeFfiUtf16Z(ptr<char16> first, uint32 second, uint64 third,
                     ptr<char16> fourth, uint32 fifth, ptr<char16> sixth);
 
+                [Terrum.Interop.NativeImport("{{MessageBoxFixtureKey}}")]
+                [NoThrow]
+                extern int32 NativeFfiMessageBox(Terrum.Interop.Windows.HWND owner, ptr<char16> text,
+                    ptr<char16> caption, uint32 flags);
+
                 int32 Main() {
                     if (NativeFfiSigned(-7, 11, -13, 17, -19, 23) != -1234567890123) {
                         return 1;
@@ -301,9 +444,16 @@ public sealed class NativeSourceImportTests
                     if (NativeFfiUnsigned(2, 3, -5, 7, 11) != 18364758544493064720) {
                         return 2;
                     }
-                    return NativeFfiUtf16Z(sixth: utf16z(""), fifth: 610800471,
+                    if (NativeFfiUtf16Z(sixth: utf16z(""), fifth: 610800471,
                         fourth: utf16z("caption"), third: 81985529216486895,
-                        second: 324478056, first: utf16z("A\n\U0001F642"));
+                        second: 324478056, first: utf16z("A\n\U0001F642")) != 0) {
+                        return 3;
+                    }
+                    if (NativeFfiMessageBox(flags: 0, caption: utf16z("caption"),
+                        text: utf16z("A\n\U0001F642"), owner: Terrum.Interop.Windows.HWND.NoOwner) != 1) {
+                        return 4;
+                    }
+                    return 0;
                 }
                 """;
             var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
@@ -332,6 +482,59 @@ public sealed class NativeSourceImportTests
                 throw;
             }
             Assert.Equal(0, process.ExitCode);
+
+            var fakeUser32BuildDirectory = Path.Combine(directory, "fake-user32");
+            Directory.CreateDirectory(fakeUser32BuildDirectory);
+            var fakeUser32Path = Path.Combine(fakeUser32BuildDirectory, "user32.dll");
+            var currentDirectory = Path.Combine(directory, "current");
+            var pathDirectory = Path.Combine(directory, "path");
+            Directory.CreateDirectory(currentDirectory);
+            Directory.CreateDirectory(pathDirectory);
+            var fakeUser32Source = Path.Combine(repositoryRoot, "tests", "native",
+                "native-import-loader-fake.c");
+            var loaderProbeSource = Path.Combine(repositoryRoot, "tests", "native",
+                "native-import-loader-probe.c");
+            var buildFakeUser32 = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
+                ?? throw new InvalidOperationException("ComSpec is unset.")) {
+                Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /nologo /W4 /WX /O2 /MT /LD /TC /Fe\"{fakeUser32Path}\" \"{fakeUser32Source}\" /link /incremental:no\"",
+                WorkingDirectory = fakeUser32BuildDirectory,
+            };
+            _ = await RunAsync(buildFakeUser32, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+            File.Copy(fakeUser32Path, Path.Combine(directory, "user32.dll"));
+            File.Copy(fakeUser32Path, Path.Combine(currentDirectory, "user32.dll"));
+            File.Copy(fakeUser32Path, Path.Combine(pathDirectory, "user32.dll"));
+
+            var loaderProbePath = Path.Combine(directory, "native-import-loader-probe.exe");
+            var buildLoaderProbe = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
+                ?? throw new InvalidOperationException("ComSpec is unset.")) {
+                Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /nologo /W4 /WX /O2 /MT /TC /Fe\"{loaderProbePath}\" \"{loaderProbeSource}\" /link /incremental:no\"",
+                WorkingDirectory = directory,
+            };
+            _ = await RunAsync(buildLoaderProbe, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+
+            var loaderProbe = new ProcessStartInfo(loaderProbePath) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = currentDirectory,
+            };
+            loaderProbe.Environment["PATH"] = pathDirectory + ";"
+                + Environment.GetEnvironmentVariable("PATH");
+            using var loaderProcess = Process.Start(loaderProbe)
+                ?? throw new InvalidOperationException("Native DLL loader probe did not start.");
+            try
+            {
+                await loaderProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                if (!loaderProcess.HasExited)
+                {
+                    loaderProcess.Kill(entireProcessTree: true);
+                    await loaderProcess.WaitForExitAsync().ConfigureAwait(false);
+                }
+                throw;
+            }
+            Assert.Equal(0, loaderProcess.ExitCode);
         }
         finally
         {
@@ -364,6 +567,19 @@ public sealed class NativeSourceImportTests
                 NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
                 NativeImportParameterContract.Value,
                 NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
+            ],
+        };
+
+    private static NativeImportDefinition CreateMessageBoxImportDefinition() =>
+        new(MessageBoxFixtureKey, "native-import-abi-probe.dll", "NativeFfiMessageBox",
+            [PrimitiveType.NativeWindowHandle, PrimitiveType.NativeUtf16ZPointer,
+                PrimitiveType.NativeUtf16ZPointer, PrimitiveType.UInt32],
+            PrimitiveType.Int32, true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory) {
+            ParameterContracts = [
+                NativeImportParameterContract.NoOwnerWindowHandle,
+                NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
+                NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
+                NativeImportParameterContract.Value,
             ],
         };
 
