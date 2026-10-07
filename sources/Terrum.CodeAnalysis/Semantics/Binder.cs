@@ -3148,7 +3148,8 @@ internal sealed partial class Binder
         BoundCoalesce coalesce => ContainsAuthorizedExpressionScopeCall(coalesce.Optional)
             || ContainsAuthorizedExpressionScopeCall(coalesce.Fallback),
         BoundCast cast => ContainsAuthorizedExpressionScopeCall(cast.Operand),
-        BoundFieldRead field => ContainsAuthorizedExpressionScopeCall(field.Receiver),
+        BoundFieldRead field => field.IsUnsafeAuthorized
+            || ContainsAuthorizedExpressionScopeCall(field.Receiver),
         BoundFieldLoan loan => ContainsAuthorizedExpressionScopeCall(loan.Place),
         BoundMutableFieldLoan loan => ContainsAuthorizedExpressionScopeCall(loan.Place),
         BoundViewRead view => ContainsAuthorizedExpressionScopeCall(view.Index),
@@ -4612,6 +4613,8 @@ internal sealed partial class Binder
         {
             case SyntaxKind.ParenthesizedExpression:
                 return KnownType((SyntaxNode)node.Children[1]);
+            case SyntaxKind.UnsafeExpression:
+                return KnownType((SyntaxNode)node.Children[2]);
             case SyntaxKind.ConstExpression:
                 return KnownType((SyntaxNode)node.Children[1]);
             case SyntaxKind.VoidExpression:

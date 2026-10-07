@@ -89,7 +89,7 @@ public sealed class NativeManagedNodeModuleTests
     {
         var program = Compile(Sample(), NativeRuntimePolicy.FailFast);
         var contract = ModuleCompiler.CreateProducer(program, ["Leaf"]);
-        Assert.Equal(67,BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
+        Assert.Equal(68,BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
         Assert.Equal("native-18", ModuleCompiler.GetNativeProfileVersion(contract, false));
         var profile = (byte[])contract.Clone();
         var label = Encoding.UTF8.GetBytes("native-18");

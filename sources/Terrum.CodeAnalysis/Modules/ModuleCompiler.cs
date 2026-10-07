@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 67;
+    private const int Version = 68;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1418,11 +1418,16 @@ public static partial class ModuleCompiler
                 function.Body, program.Structures, valueTypes));
     }
 
-    private static void ValidateUnsafeExpressionScopes(BoundProgram program)
+    private static void ValidateUnsafeExpressionScopes(BoundProgram program, Module module)
     {
-        var valueTypes = new ModuleUnsafeValueTypeCache(program.Structures);
-        foreach (var function in program.Functions)
+        var callValueTypes = new ModuleUnsafeValueTypeCache(program.Structures);
+        var fieldValueTypes = new ModuleUnsafeValueTypeCache(module.Structures);
+        foreach (var item in module.Functions)
         {
+            if (item.Function is not BoundFunction function)
+            {
+                continue;
+            }
             _ = Calls(function.Body, visitExpression: expression => {
                 if (expression is not BoundUnsafeExpression unsafeExpression)
                 {
@@ -1435,7 +1440,7 @@ public static partial class ModuleCompiler
                             case BoundCall { IsUnsafeAuthorized: true } call
                                 when (uint)call.Function < (uint)program.Functions.Length:
                                 if (!IsSupportedModuleUnsafeExpressionCall(program.Functions[call.Function],
-                                    program.Structures, valueTypes))
+                                    program.Structures, callValueTypes))
                                 {
                                     throw new ModuleContractException(
                                         "Expression-scoped unsafe calls require a supported by-value callable.");
@@ -1446,15 +1451,50 @@ public static partial class ModuleCompiler
                             case BoundNominalUpdate { IsUnsafeAuthorized: true }:
                                 throw new ModuleContractException(
                                     "Expression-scoped unsafe operators are unsupported.");
-                            case BoundFieldRead field when ContainsCallerUnsafeField(field, program.Structures):
+                            case BoundFieldRead field when ContainsCallerUnsafeField(field, module.Structures):
+                                if (!IsSupportedModuleUnsafeExpressionFieldRead(
+                                    field, module.Structures, fieldValueTypes))
+                                {
+                                    throw new ModuleContractException(
+                                        "Expression-scoped unsafe fields require an eligible public Copy-value path.");
+                                }
+                                break;
+                            case BoundUpdate update when update.Place is BoundFieldRead updateField
+                                && ContainsCallerUnsafeField(updateField, module.Structures):
                                 throw new ModuleContractException(
-                                    "Expression-scoped unsafe fields are unsupported.");
+                                    "Expression-scoped unsafe field paths cannot be used as mutation places.");
+                            case BoundCompoundAssignment compound when compound.Place is BoundFieldRead compoundField
+                                && ContainsCallerUnsafeField(compoundField, module.Structures):
+                                throw new ModuleContractException(
+                                    "Expression-scoped unsafe field paths cannot be used as mutation places.");
+                            case BoundNominalUpdate nominalUpdate
+                                when nominalUpdate.Place is BoundFieldRead nominalField
+                                    && ContainsCallerUnsafeField(nominalField, module.Structures):
+                                throw new ModuleContractException(
+                                    "Expression-scoped unsafe field paths cannot be used as mutation places.");
                             case BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
                                 or BoundFieldLoan or BoundMutableFieldLoan:
                                 throw new ModuleContractException(
                                     "Expression-scoped reference and output loans are unsupported.");
                         }
                     });
+            });
+            _ = Calls(function.Body, visitExpression: expression => {
+                switch (expression)
+                {
+                    case BoundUpdate update when HasExpressionScopedUnsafeFieldPlace(
+                        update.Place, inUnsafeExpression: false, module.Structures):
+                        throw new ModuleContractException(
+                            "Expression-scoped unsafe field paths cannot be used as mutation places.");
+                    case BoundCompoundAssignment compound when HasExpressionScopedUnsafeFieldPlace(
+                        compound.Place, inUnsafeExpression: false, module.Structures):
+                        throw new ModuleContractException(
+                            "Expression-scoped unsafe field paths cannot be used as mutation places.");
+                    case BoundNominalUpdate nominalUpdate when HasExpressionScopedUnsafeFieldPlace(
+                        nominalUpdate.Place, inUnsafeExpression: false, module.Structures):
+                        throw new ModuleContractException(
+                            "Expression-scoped unsafe field paths cannot be used as mutation places.");
+                }
             });
         }
     }
@@ -1561,11 +1601,77 @@ public static partial class ModuleCompiler
     private static bool ContainsCallerUnsafeField(BoundFieldRead field,
         ImmutableArray<BoundStruct> structures)
     {
+        for (BoundFieldRead? current = field; current is not null;
+            current = GetProjectedFieldReceiver(current.Receiver))
+        {
+            if (RequiresCallerUnsafeField(current, structures))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool IsSupportedModuleUnsafeExpressionFieldRead(BoundFieldRead field,
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
+    {
+        var requiresUnsafeCaller = false;
+        for (BoundFieldRead? current = field; current is not null;
+            current = GetProjectedFieldReceiver(current.Receiver))
+        {
+            var ownerIndex = (int)current.Receiver.Type - 100;
+            if (ownerIndex < 0 || ownerIndex >= structures.Length
+                || current.Field < 0 || current.Field >= structures[ownerIndex].Fields.Length)
+            {
+                return false;
+            }
+            var declaration = structures[ownerIndex].Fields[current.Field];
+            if (declaration.Type != current.Type
+                || !valueTypes.IsSupported(current.Receiver.Type)
+                || !valueTypes.IsSupported(current.Type))
+            {
+                return false;
+            }
+            requiresUnsafeCaller |= declaration.RequiresUnsafeCaller;
+        }
+        return requiresUnsafeCaller;
+    }
+
+    private static bool RequiresCallerUnsafeField(BoundFieldRead field,
+        ImmutableArray<BoundStruct> structures)
+    {
         var ownerIndex = (int)field.Receiver.Type - 100;
-        return (ownerIndex >= 0 && ownerIndex < structures.Length
+        return ownerIndex >= 0 && ownerIndex < structures.Length
             && field.Field >= 0 && field.Field < structures[ownerIndex].Fields.Length
-            && structures[ownerIndex].Fields[field.Field].RequiresUnsafeCaller)
-            || field.Receiver is BoundFieldRead parent && ContainsCallerUnsafeField(parent, structures);
+            && structures[ownerIndex].Fields[field.Field].RequiresUnsafeCaller;
+    }
+
+    private static BoundFieldRead? GetProjectedFieldReceiver(BoundExpression expression)
+    {
+        while (expression is BoundUnsafeExpression unsafeExpression)
+        {
+            expression = unsafeExpression.Expression;
+        }
+        return expression as BoundFieldRead;
+    }
+
+    private static bool HasExpressionScopedUnsafeFieldPlace(BoundExpression place,
+        bool inUnsafeExpression, ImmutableArray<BoundStruct> structures) =>
+        place is BoundFieldRead field
+            && ContainsCallerUnsafeField(field, structures)
+            && (inUnsafeExpression || HasUnsafeExpressionInFieldPath(field));
+
+    private static bool HasUnsafeExpressionInFieldPath(BoundFieldRead field)
+    {
+        for (BoundFieldRead? current = field; current is not null;
+            current = GetProjectedFieldReceiver(current.Receiver))
+        {
+            if (current.Receiver is BoundUnsafeExpression)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static bool HasUnsupportedModuleCallerUnsafeContract(ModuleFunction function,
@@ -2558,7 +2664,7 @@ public static partial class ModuleCompiler
     private static byte[] Write(Module module, BoundProgram program)
     {
         RejectCompilationLocalSpans(program);
-        ValidateUnsafeExpressionScopes(program);
+        ValidateUnsafeExpressionScopes(program, module);
         if (module.InvocationProfileId is null
             ? !module.InvocationBuffers.IsEmpty
             : !module.RequiresSourceGrant
@@ -3880,13 +3986,25 @@ public static partial class ModuleCompiler
             BoundUnary unary => unary with {
                 Operand = ResolveExpression(unary.Operand, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
             },
+            BoundUpdate update when HasExpressionScopedUnsafeFieldPlace(
+                update.Place, inUnsafeExpression, structures) =>
+                throw new ModuleContractException(
+                    "Expression-scoped unsafe field paths cannot be used as mutation places."),
             BoundUpdate update => update with {
                 Place = ResolveExpression(update.Place, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
             },
+            BoundCompoundAssignment compound when HasExpressionScopedUnsafeFieldPlace(
+                compound.Place, inUnsafeExpression, structures) =>
+                throw new ModuleContractException(
+                    "Expression-scoped unsafe field paths cannot be used as mutation places."),
             BoundCompoundAssignment compound => compound with {
                 Place = ResolveExpression(compound.Place, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
                 Right = ResolveExpression(compound.Right, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
             },
+            SymbolicNominalUpdate update when HasExpressionScopedUnsafeFieldPlace(
+                update.Place, inUnsafeExpression, structures) =>
+                throw new ModuleContractException(
+                    "Expression-scoped unsafe field paths cannot be used as mutation places."),
             SymbolicNominalUpdate update when inUnsafeExpression
                 && names.TryGetValue(update.Name, out var unsafeMethod)
                 && functions[unsafeMethod].RequiresUnsafeCaller =>
@@ -3929,10 +4047,8 @@ public static partial class ModuleCompiler
             BoundIsVariablePattern pattern => pattern with {
                 Value = ResolveExpression(pattern.Value, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
             },
-            BoundFieldRead field => field with {
-                Receiver = ResolveExpression(field.Receiver, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
-                IsUnsafeAuthorized = inUnsafe,
-            },
+            BoundFieldRead field => ResolveFieldRead(
+                field, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
             BoundFieldLoan loan => loan with {
                 Place = (BoundFieldRead)ResolveExpression(loan.Place, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
             },
@@ -3947,6 +4063,25 @@ public static partial class ModuleCompiler
             },
             _ => expression,
         };
+
+    private static BoundFieldRead ResolveFieldRead(BoundFieldRead field,
+        IReadOnlyDictionary<string, int> names, IReadOnlyList<BoundFunction> functions,
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes,
+        bool inUnsafe, bool inUnsafeExpression)
+    {
+        var requiresUnsafeCaller = RequiresCallerUnsafeField(field, structures);
+        if (inUnsafeExpression && ContainsCallerUnsafeField(field, structures)
+            && !IsSupportedModuleUnsafeExpressionFieldRead(field, structures, valueTypes))
+        {
+            throw new ModuleContractException(
+                "Expression-scoped unsafe fields require an eligible public Copy-value path.");
+        }
+        return field with {
+            Receiver = ResolveExpression(field.Receiver, names, functions,
+                structures, valueTypes, inUnsafe, inUnsafeExpression),
+            IsUnsafeAuthorized = (inUnsafe || inUnsafeExpression) && requiresUnsafeCaller,
+        };
+    }
 
     private static PrimitiveType GetType(BinaryReader reader)
     {
