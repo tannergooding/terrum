@@ -1,0 +1,15 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryGetBodyTableRowExtent(int32 recordCount, int32 row,
+    init ref<int32> bodyStart, init ref<int32> bodyLength)
+{
+    if (!TryGetVariableTableRowExtent(recordCount, 1, 1, row,
+        init var rowStart, init var rowLength))
+    {
+        return false;
+    }
+
+    bodyStart = rowStart;
+    bodyLength = rowLength;
+    return true;
+}
