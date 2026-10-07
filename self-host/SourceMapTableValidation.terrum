@@ -1,0 +1,290 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateSourceMapTable(int32 recordCount,
+    int32 moduleCount, int32 stringCount, int32 moduleRefCount,
+    int32 typeDefCount, int32 methodDefCount, int32 sourceFileCount,
+    int32 featureCount, int32 fieldCount, int32 genericParamCount,
+    int32 layoutCount, int32 contractCount, int32 methodSigCount,
+    int32 bodyCount, int32 sourceFileRecordCount)
+{
+    if (recordCount <= 0 || recordCount > 0xFF_FFFF
+        || sourceFileRecordCount != sourceFileCount
+        || Host.SourceMaps.Length < 4
+        || !TryValidateMethodDefTable(methodDefCount, moduleCount, stringCount,
+            moduleRefCount, typeDefCount, methodDefCount, sourceFileCount,
+            featureCount, fieldCount, genericParamCount, layoutCount,
+            contractCount, methodSigCount, bodyCount)
+        || !TryValidateSourceFileTable(sourceFileRecordCount, moduleCount,
+            stringCount, moduleRefCount, typeDefCount, methodDefCount,
+            sourceFileCount, featureCount))
+    {
+        return false;
+    }
+
+    if (!TryReadSourceMapTableWord(0, init var slotCount)
+        || slotCount == 0
+        || slotCount > uint32((Host.SourceMaps.Length - 4) / 16))
+    {
+        return false;
+    }
+
+    int32 slotCountInt = int32(slotCount);
+    int32 rowStart = 4 + slotCountInt * 16;
+    int32 rowByteLength = Host.SourceMaps.Length - rowStart;
+    if (rowByteLength % 16 != 0 || recordCount != rowByteLength / 16)
+    {
+        return false;
+    }
+
+    for (mut int32 slot = 1; slot <= slotCountInt; slot = slot + 1)
+    {
+        if (!TryValidateSourceMapSlot(slot, sourceFileCount, methodDefCount,
+            typeDefCount, moduleCount, bodyCount))
+        {
+            return false;
+        }
+    }
+
+    mut uint32 previousInstructionSlot = 0;
+    mut int32 previousBodyRow = 0;
+    mut int32 previousBodyModule = 0;
+    mut int32 previousFileRow = 0;
+    mut int32 previousFileModule = 0;
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        int32 rowOffset = rowStart + (row - 1) * 16;
+        if (!TryReadSourceMapTableWord(rowOffset, init var instructionSlot)
+            || !TryReadSourceMapTableWord(rowOffset + 4, init var fileSlot)
+            || !TryReadSourceMapTableWord(rowOffset + 8, init var startUtf16)
+            || !TryReadSourceMapTableWord(rowOffset + 12, init var lengthUtf16)
+            || instructionSlot <= previousInstructionSlot
+            || instructionSlot > slotCount
+            || fileSlot == 0
+            || fileSlot > slotCount
+            || startUtf16 > 0xFFFF_FFFF - lengthUtf16)
+        {
+            return false;
+        }
+
+        int32 instructionOffset = 4 + (int32(instructionSlot) - 1) * 16;
+        int32 fileOffset = 4 + (int32(fileSlot) - 1) * 16;
+        if (!TryReadSourceMapTableHalfWord(instructionOffset, init var instructionKind)
+            || !TryReadSourceMapTableHalfWord(fileOffset, init var fileKind)
+            || instructionKind != 0x0020
+            || fileKind != 0x001F
+            || !TryReadSourceMapTableWord(instructionOffset + 4, init var bodyRow)
+            || !TryReadSourceMapTableWord(fileOffset + 4, init var fileRow))
+        {
+            return false;
+        }
+
+        int32 bodyRowInt = int32(bodyRow);
+        if (bodyRowInt != previousBodyRow)
+        {
+            if (!TryGetSourceMapBodyModule(bodyRowInt, moduleCount,
+                typeDefCount, methodDefCount, bodyCount, init var bodyModule))
+            {
+                return false;
+            }
+            previousBodyRow = bodyRowInt;
+            previousBodyModule = bodyModule;
+        }
+
+        int32 fileRowInt = int32(fileRow);
+        if (fileRowInt != previousFileRow)
+        {
+            if (!TryGetSourceMapFileModule(fileRowInt, moduleCount,
+                sourceFileCount, init var fileModule))
+            {
+                return false;
+            }
+            previousFileRow = fileRowInt;
+            previousFileModule = fileModule;
+        }
+
+        if (previousBodyModule != previousFileModule)
+        {
+            return false;
+        }
+
+        previousInstructionSlot = instructionSlot;
+    }
+
+    return true;
+}
+
+bool TryValidateSourceMapSlot(int32 slot, int32 sourceFileCount,
+    int32 methodDefCount, int32 typeDefCount, int32 moduleCount, int32 bodyCount)
+{
+    int32 slotOffset = 4 + (slot - 1) * 16;
+    if (!TryReadSourceMapTableHalfWord(slotOffset, init var kind)
+        || !TryReadSourceMapTableHalfWord(slotOffset + 2, init var selector)
+        || !TryReadSourceMapTableWord(slotOffset + 4, init var target)
+        || !TryReadSourceMapTableWord(slotOffset + 8, init var block)
+        || !TryReadSourceMapTableWord(slotOffset + 12, init var ordinal))
+    {
+        return false;
+    }
+
+    if (kind == 0x0020 && selector == 1)
+    {
+        if (target == 0 || target > uint32(bodyCount) || block == 0)
+        {
+            return false;
+        }
+        return TryGetSourceMapBodyModule(int32(target), moduleCount,
+            typeDefCount, methodDefCount, bodyCount, init var bodyModule);
+    }
+
+    if (kind == 0x001F && selector == 0)
+    {
+        if (block != 0 || ordinal != 0 || target == 0
+            || target > uint32(sourceFileCount))
+        {
+            return false;
+        }
+        return TryGetSourceMapFileModule(int32(target), moduleCount,
+            sourceFileCount, init var fileModule);
+    }
+
+    return false;
+}
+
+bool TryGetSourceMapBodyModule(int32 bodyRow, int32 moduleCount,
+    int32 typeDefCount, int32 methodDefCount, int32 bodyCount,
+    init ref<int32> ownerModule)
+{
+    if (bodyRow <= 0 || bodyRow > bodyCount
+        || bodyRow >= Host.BodyOwners.Length)
+    {
+        return false;
+    }
+
+    int32 methodRow = Host.BodyOwners[bodyRow];
+    if (methodRow <= 0 || methodRow > methodDefCount)
+    {
+        return false;
+    }
+
+    mut int32 low = 1;
+    mut int32 high = moduleCount;
+    while (low <= high)
+    {
+        int32 middle = low + (high - low) / 2;
+        if (!TryGetMethodDefModuleRanges(middle, moduleCount, typeDefCount,
+            methodDefCount, init var methodStart, init var methodEnd,
+            init var typeStart, init var typeEnd))
+        {
+            return false;
+        }
+
+        if (methodRow < methodStart)
+        {
+            high = middle - 1;
+        }
+        else if (methodRow >= methodEnd)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            ownerModule = middle;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool TryGetSourceMapFileModule(int32 fileRow, int32 moduleCount,
+    int32 sourceFileCount, init ref<int32> ownerModule)
+{
+    if (fileRow <= 0 || fileRow > sourceFileCount)
+    {
+        return false;
+    }
+
+    mut int32 low = 1;
+    mut int32 high = moduleCount;
+    while (low <= high)
+    {
+        int32 middle = low + (high - low) / 2;
+        int32 rowStart = (middle - 1) * 44;
+        if (!TryReadModuleTableWord(rowStart, 40, init var firstFile))
+        {
+            return false;
+        }
+
+        mut uint32 fileEnd = uint32(sourceFileCount + 1);
+        if (middle < moduleCount)
+        {
+            if (!TryReadModuleTableWord(middle * 44, 40, init var nextFileStart))
+            {
+                return false;
+            }
+            fileEnd = nextFileStart;
+        }
+
+        if (uint32(fileRow) < firstFile)
+        {
+            high = middle - 1;
+        }
+        else if (uint32(fileRow) >= fileEnd)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            ownerModule = middle;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool TryReadSourceMapTableWord(int32 offset, init ref<uint32> value)
+{
+    if (offset < 0 || offset > Host.SourceMaps.Length - 4
+        || !TryReadSourceMapTableByte(offset, init var first)
+        || !TryReadSourceMapTableByte(offset + 1, init var second)
+        || !TryReadSourceMapTableByte(offset + 2, init var third)
+        || !TryReadSourceMapTableByte(offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadSourceMapTableHalfWord(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset > Host.SourceMaps.Length - 2
+        || !TryReadSourceMapTableByte(offset, init var first)
+        || !TryReadSourceMapTableByte(offset + 1, init var second))
+    {
+        return false;
+    }
+
+    value = first | (second << 8);
+    return true;
+}
+
+bool TryReadSourceMapTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.SourceMaps.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.SourceMaps[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
