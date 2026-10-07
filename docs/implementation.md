@@ -129,9 +129,12 @@ checked floating-to-integer pairs; the implementation and linear/indexed
 coverage are present. Opcode `0x1E` is accepted for explicit `char16` to
 `float32`/`float64`, with unsigned code-unit semantics and total `NoThrow`
 behavior; its implementation and linear/indexed coverage are also present.
-These draft-only encodings do not change the approved IL specifications or
-promise post-release compatibility. Other source-free TRRM floating operations
-remain under unapproved proposals.
+Opcode `0x19` and `ConstBits` are accepted for same-format `float32`/`float64`
+comparisons and exact raw-bit constants; float TypeSpecs also use the existing
+type-directed signature, `Copy` and eager `Select` rules. These draft-only
+encodings do not change the approved IL specifications or promise post-release
+compatibility. Other source-free TRRM floating operations remain under
+unapproved proposals.
 
 ## Platform and validation
 

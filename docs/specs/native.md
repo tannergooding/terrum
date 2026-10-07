@@ -240,21 +240,31 @@ reconstructs exact target-format literal bits. It also projects conversions
 between the floating formats and from `int32`, `uint32`, `int64` and `uint64`
 to either format. V85 provisionally projects `char16`-to-floating and
 floating-to-integer conversions. The eight checked floating-to-integer pairs
-and explicit `char16`-to-floating eligibility are accepted. The
-unreleased source-free executable TRRM `(1, 0)` draft accepts opcode `0x1E`,
-`Char16ToFloat rNew, tDest, rSource`, for exactly `char16` to `float32` or
-`float64`. It interprets the source as an unsigned UTF-16 code unit, without
-decoding or validating surrogate pairs; conversion is total and valid in
-`NoThrow`. The draft also accepts opcode `0x1F`,
-`FloatToInteger rNew, tDest, rSource`, for exactly the eight checked pairs. It
-truncates toward zero before range checking; NaN, infinities and out-of-range
-results fail fast with overflow status `0xE0540001`. Native lowering preserves
-the caller's floating-point environment. This may-fail operation cannot satisfy
-`NoThrow`; checked-exception control flow and alternate conversion policies
-remain outside that operation. These are draft-only encoding decisions, not
-changes to the approved IL specifications or post-release compatibility
-promises. Other source-free TRRM floating operations remain provisional under
-their unapproved proposals.
+and explicit `char16`-to-floating eligibility are accepted. The unreleased
+source-free executable TRRM `(1, 0)` draft accepts `ConstBits` for `float32`
+and `float64` as exact-width IEEE bit patterns, with minimally encoded
+unsigned payloads that zero-extend on load and preserve every bit. It accepts
+opcode `0x19`, `FloatCompare rNew, kind, rLeft, rRight`, for same-format,
+unqualified floating operands and a `bool` result. Kinds 1 through 6 are
+equality, inequality, less-than, less-than-or-equal, greater-than and
+greater-than-or-equal; NaNs are unordered, `==` is false and `!=` is true for
+NaN, and signed zeros compare equal. It does not extend integer `Binary` kinds.
+These floating TypeSpecs also participate in scalar signatures, `Copy` and
+eager `Select` under their existing type-directed contracts.
+
+The draft also accepts opcode `0x1E`, `Char16ToFloat rNew, tDest, rSource`,
+for exactly `char16` to `float32` or `float64`. It interprets the source as an
+unsigned UTF-16 code unit, without decoding or validating surrogate pairs;
+conversion is total and valid in `NoThrow`. Opcode `0x1F`,
+`FloatToInteger rNew, tDest, rSource`, is accepted for exactly the eight
+checked pairs. It truncates toward zero before range checking; NaN, infinities
+and out-of-range results fail fast with overflow status `0xE0540001`. Native
+lowering preserves the caller's floating-point environment. This may-fail
+operation cannot satisfy `NoThrow`; checked-exception control flow and
+alternate conversion policies remain outside that operation. These are
+draft-only encoding decisions, not changes to the approved IL specifications
+or post-release compatibility promises. Other source-free TRRM floating
+operations remain provisional under their unapproved proposals.
 Verification and emission continue through the hosted implementation; this
 adds no projection layout or native ABI change.
 
