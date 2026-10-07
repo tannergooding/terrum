@@ -103,6 +103,7 @@ public sealed class ScannerTests
     [InlineData("0i8 0i16 0i32 0i64 0i128 0u8 0u16 0u32 0u64 0u128 0f16 0f32 0f64 0f128")]
     [InlineData("1f8 2u128x 3i64\u200D 4f128\uD800 5E+6f32 7e+8 9e-0 10e\u00E9")]
     [InlineData("1e 2e+ 3E-; 4e. 5e_ 6e\uD800 7e+f64")]
+    [InlineData("\u0661 \uFF11 \U0001D7D9 1\u0661 1\uFF11 1\U0001D7D9")]
     [InlineData("0x_FF 0xFF_FF 0xFF_ 0b_1 0b1__0")]
     [InlineData("1_000 1__2 1.2_3 1.2__3 1e4_5 1e4__5")]
     [InlineData("\"\" \"\\u0041\" \"\\U0001F600\" \"\\\"\" \"\\\\\"")]
