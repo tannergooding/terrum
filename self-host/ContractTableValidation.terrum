@@ -1,0 +1,684 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateContractTable(int32 recordCount,
+    int32 typeDefCount, int32 methodDefCount, int32 signatureCount,
+    int32 paramCount, int32 typeSpecCount)
+{
+    if (recordCount < 0 || recordCount > 0xFF_FFFF
+        || !IsValidContractCount(typeDefCount)
+        || !IsValidContractCount(methodDefCount)
+        || signatureCount <= 0 || signatureCount > 0xFF_FFFF
+        || !IsValidContractCount(paramCount)
+        || typeSpecCount <= 0 || typeSpecCount > 0xFF_FFFF
+        || typeDefCount * 40 != Host.TypeDefs.Length
+        || methodDefCount * 28 != Host.Methods.Length
+        || signatureCount * 24 != Host.Signatures.Length
+        || paramCount * 16 != Host.Params.Length
+        || Host.ContractOwners.Length != recordCount + 1
+        || Host.SingletonKeys.Length != recordCount + 1
+        || Host.CleanupMethods.Length != recordCount + 1
+        || Host.NoThrowMethods.Length != methodDefCount + 1)
+    {
+        return false;
+    }
+
+    for (mut int32 slot = 0; slot <= recordCount; slot = slot + 1)
+    {
+        Host.ContractOwners[slot] = 0;
+        Host.SingletonKeys[slot] = 0;
+        Host.CleanupMethods[slot] = 0;
+    }
+    for (mut int32 method = 0; method <= methodDefCount; method = method + 1)
+    {
+        Host.NoThrowMethods[method] = 0;
+    }
+
+    if (recordCount == 0)
+    {
+        if (Host.Contracts.Length != 0)
+        {
+            return false;
+        }
+    }
+    else if (!TryValidateContractRowIndex(recordCount))
+    {
+        return false;
+    }
+
+    if (!TryValidateContractTypeSpecIndex(typeSpecCount))
+    {
+        return false;
+    }
+
+    for (mut int32 type = 1; type <= typeDefCount; type = type + 1)
+    {
+        int32 rowStart = (type - 1) * 40;
+        if (!TryReadContractTypeDefWord(rowStart, 32, init var first)
+            || !TryReadContractTypeDefWord(rowStart, 36, init var count)
+            || !TryAssignContractOwnerRange(first, count, 0x13, type, recordCount))
+        {
+            return false;
+        }
+    }
+
+    for (mut int32 method = 1; method <= methodDefCount; method = method + 1)
+    {
+        int32 rowStart = (method - 1) * 28;
+        if (!TryReadContractMethodWord(rowStart, 16, init var first)
+            || !TryReadContractMethodWord(rowStart, 20, init var count)
+            || !TryAssignContractOwnerRange(first, count, 0x16, method, recordCount))
+        {
+            return false;
+        }
+    }
+
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        if (Host.ContractOwners[row] == 0)
+        {
+            return false;
+        }
+    }
+
+    mut int32 singletonCount = 0;
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        if (!TryGetContractRowExtent(recordCount, row,
+            init var rowStart, init var rowLength)
+            || !TryValidateContractRowBytes(rowStart, rowLength)
+            || !TryReadContractWord(rowStart, rowLength, 0, init var owner)
+            || int32(owner) != Host.ContractOwners[row]
+            || !TryReadContractHalfWord(rowStart, rowLength, 4, init var kind)
+            || !TryReadContractHalfWord(rowStart, rowLength, 6, init var flags)
+            || flags != 0)
+        {
+            return false;
+        }
+
+        if (kind == 1 || kind == 5)
+        {
+            singletonCount = singletonCount + 1;
+            int32 tableKey = (owner >> 24) == 0x16 ? 1 : 0;
+            int32 kindKey = kind == 5 ? 1 : 0;
+            Host.SingletonKeys[singletonCount] =
+                (tableKey << 25) | (int32(owner & 0xFF_FFFF) << 1) | kindKey;
+        }
+
+        if (kind == 1)
+        {
+            if (rowLength != 12
+                || !TryReadContractWord(rowStart, rowLength, 8, init var effects)
+                || effects > 7)
+            {
+                return false;
+            }
+
+            if ((owner >> 24) == 0x16 && (effects & 1) != 0)
+            {
+                Host.NoThrowMethods[int32(owner & 0xFF_FFFF)] = 1;
+            }
+        }
+        else if (kind == 2)
+        {
+            if (rowLength != 16
+                || (owner >> 24) != 0x16
+                || !TryReadContractWord(rowStart, rowLength, 8, init var ordinal)
+                || !TryReadContractByte(rowStart, rowLength, 12, init var onTrue)
+                || !TryReadContractByte(rowStart, rowLength, 13, init var onFalse)
+                || !TryReadContractByte(rowStart, rowLength, 14, init var onExceptional)
+                || !TryReadContractByte(rowStart, rowLength, 15, init var reserved)
+                || onTrue > 1 || onFalse > 1 || onExceptional > 1 || reserved != 0
+                || !TryIsBooleanContractResult(owner, methodDefCount,
+                    signatureCount, typeSpecCount)
+                || !TryGetContractParameterMode(owner, ordinal,
+                    methodDefCount, signatureCount, paramCount, init var mode)
+                || (mode != 1 && mode != 2))
+            {
+                return false;
+            }
+        }
+        else if (kind == 3)
+        {
+            if (rowLength != 16
+                || !TryReadContractHalfWord(rowStart, rowLength, 14, init var reserved))
+            {
+                return false;
+            }
+            if (reserved != 0)
+            {
+                return false;
+            }
+        }
+        else if (kind == 4)
+        {
+            if (rowLength != 20)
+            {
+                return false;
+            }
+        }
+        else if (kind == 5)
+        {
+            if (rowLength != 12
+                || (owner >> 24) != 0x13
+                || !TryReadContractWord(rowStart, rowLength, 8, init var cleanupMethod)
+                || cleanupMethod == 0 || cleanupMethod > uint32(methodDefCount)
+                || !TryReadContractMethodWord((int32(cleanupMethod) - 1) * 28, 0,
+                    init var cleanupOwner)
+                || cleanupOwner != (owner & 0xFF_FFFF))
+            {
+                return false;
+            }
+
+            Host.CleanupMethods[row] = int32(cleanupMethod);
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+    if (!TrySortAndCheckContractSingletons(singletonCount))
+    {
+        return false;
+    }
+
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        int32 cleanupMethod = Host.CleanupMethods[row];
+        if (cleanupMethod != 0 && Host.NoThrowMethods[cleanupMethod] == 0)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryAssignContractOwnerRange(uint32 first, uint32 count,
+    uint32 table, int32 ownerRow, int32 recordCount)
+{
+    if (count == 0)
+    {
+        return first == 0;
+    }
+    if (first == 0 || first > uint32(recordCount)
+        || count > uint32(recordCount) - first + 1)
+    {
+        return false;
+    }
+
+    uint32 owner = (table << 24) | uint32(ownerRow);
+    for (mut int32 row = int32(first); row < int32(first + count); row = row + 1)
+    {
+        if (Host.ContractOwners[row] != 0)
+        {
+            return false;
+        }
+        Host.ContractOwners[row] = int32(owner);
+    }
+
+    return true;
+}
+
+bool TryValidateContractRowIndex(int32 recordCount)
+{
+    if (recordCount <= 0 || recordCount > 0xFF_FFFF
+        || recordCount > Host.Contracts.Length / 4 - 1)
+    {
+        return false;
+    }
+
+    int32 indexByteLength = (recordCount + 1) * 4;
+    int32 dataByteLength = Host.Contracts.Length - indexByteLength;
+    if (dataByteLength < 8
+        || !TryReadContractTableOffset(0, init var firstOffset)
+        || firstOffset != 0)
+    {
+        return false;
+    }
+
+    mut uint32 previous = firstOffset;
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        if (!TryReadContractTableOffset(row, init var nextOffset)
+            || nextOffset > uint32(dataByteLength)
+            || previous > uint32(dataByteLength - 8)
+            || nextOffset < previous + 8)
+        {
+            return false;
+        }
+        previous = nextOffset;
+    }
+
+    return previous == uint32(dataByteLength);
+}
+
+bool TryGetContractRowExtent(int32 recordCount, int32 row,
+    init ref<int32> rowStart, init ref<int32> rowLength)
+{
+    if (row <= 0 || row > recordCount
+        || !TryReadContractTableOffset(row - 1, init var startOffset)
+        || !TryReadContractTableOffset(row, init var endOffset)
+        || startOffset > endOffset)
+    {
+        return false;
+    }
+
+    rowStart = (recordCount + 1) * 4 + int32(startOffset);
+    rowLength = int32(endOffset - startOffset);
+    return true;
+}
+
+bool TryValidateContractRowBytes(int32 rowStart, int32 rowLength)
+{
+    if (rowStart < 0 || rowLength < 8
+        || rowStart > Host.Contracts.Length - rowLength)
+    {
+        return false;
+    }
+
+    for (mut int32 offset = 0; offset < rowLength; offset = offset + 1)
+    {
+        if (!TryReadContractByte(rowStart, rowLength, offset, init var unusedByte))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryIsBooleanContractResult(uint32 owner, int32 methodDefCount,
+    int32 signatureCount, int32 typeSpecCount)
+{
+    uint32 method = owner & 0xFF_FFFF;
+    if (method == 0 || method > uint32(methodDefCount)
+        || !TryReadContractMethodWord((int32(method) - 1) * 28, 8,
+            init var signature)
+        || signature == 0 || signature > uint32(signatureCount)
+        || !TryReadContractSignatureWord((int32(signature) - 1) * 24, 0,
+            init var resultTypeSpec)
+        || resultTypeSpec == 0 || resultTypeSpec > uint32(typeSpecCount)
+        || !TryGetContractTypeSpecExtent(typeSpecCount, int32(resultTypeSpec),
+            init var resultStart, init var resultLength))
+    {
+        return false;
+    }
+
+    return resultLength == 3
+        && TryReadContractTypeSpecByte(resultStart, resultLength, 0, init var form)
+        && form == 1
+        && TryReadContractTypeSpecByte(resultStart, resultLength, 1, init var qualifiers)
+        && qualifiers == 0
+        && TryReadContractTypeSpecByte(resultStart, resultLength, 2, init var code)
+        && code == 1;
+}
+
+bool TryGetContractParameterMode(uint32 owner, uint32 ordinal,
+    int32 methodDefCount, int32 signatureCount, int32 paramCount,
+    init ref<int32> mode)
+{
+    uint32 method = owner & 0xFF_FFFF;
+    if (method == 0 || method > uint32(methodDefCount)
+        || !TryReadContractMethodWord((int32(method) - 1) * 28, 8,
+            init var signature)
+        || signature == 0 || signature > uint32(signatureCount)
+        || !TryReadContractSignatureWord((int32(signature) - 1) * 24, 8,
+            init var first)
+        || !TryReadContractSignatureWord((int32(signature) - 1) * 24, 12,
+            init var count)
+        || ordinal >= count || first == 0
+        || first > uint32(paramCount)
+        || count > uint32(paramCount) - first + 1)
+    {
+        return false;
+    }
+
+    uint32 paramRow = first + ordinal;
+    return paramRow > 0 && paramRow <= uint32(paramCount)
+        && TryReadContractParamByte((int32(paramRow) - 1) * 16 + 12, init mode);
+}
+
+bool TryValidateContractTypeSpecIndex(int32 typeSpecCount)
+{
+    if (typeSpecCount <= 0 || typeSpecCount > 0xFF_FFFF
+        || typeSpecCount > Host.TypeSpecs.Length / 4 - 1)
+    {
+        return false;
+    }
+
+    int32 indexByteLength = (typeSpecCount + 1) * 4;
+    int32 dataByteLength = Host.TypeSpecs.Length - indexByteLength;
+    if (dataByteLength < 3
+        || !TryReadContractTypeSpecOffset(0, init var firstOffset)
+        || firstOffset != 0)
+    {
+        return false;
+    }
+
+    mut uint32 previous = firstOffset;
+    for (mut int32 row = 1; row <= typeSpecCount; row = row + 1)
+    {
+        if (!TryReadContractTypeSpecOffset(row, init var nextOffset)
+            || nextOffset > uint32(dataByteLength)
+            || previous > uint32(dataByteLength - 3)
+            || nextOffset < previous + 3)
+        {
+            return false;
+        }
+        previous = nextOffset;
+    }
+
+    return previous == uint32(dataByteLength);
+}
+
+bool TryGetContractTypeSpecExtent(int32 typeSpecCount, int32 row,
+    init ref<int32> rowStart, init ref<int32> rowLength)
+{
+    if (row <= 0 || row > typeSpecCount
+        || !TryReadContractTypeSpecOffset(row - 1, init var startOffset)
+        || !TryReadContractTypeSpecOffset(row, init var endOffset)
+        || startOffset > endOffset)
+    {
+        return false;
+    }
+
+    rowStart = (typeSpecCount + 1) * 4 + int32(startOffset);
+    rowLength = int32(endOffset - startOffset);
+    return true;
+}
+
+bool TrySortAndCheckContractSingletons(int32 singletonCount)
+{
+    mut int32 root = singletonCount / 2;
+    while (root > 0)
+    {
+        SiftContractSingletonHeap(root, singletonCount);
+        root = root - 1;
+    }
+
+    mut int32 heapEnd = singletonCount;
+    while (heapEnd > 1)
+    {
+        SwapContractSingletons(1, heapEnd);
+        heapEnd = heapEnd - 1;
+        SiftContractSingletonHeap(1, heapEnd);
+    }
+
+    for (mut int32 row = 2; row <= singletonCount; row = row + 1)
+    {
+        if (Host.SingletonKeys[row - 1] == Host.SingletonKeys[row])
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void SiftContractSingletonHeap(int32 root, int32 heapEnd)
+{
+    mut int32 current = root;
+    while (current <= heapEnd / 2)
+    {
+        mut int32 child = current * 2;
+        if (child < heapEnd
+            && Host.SingletonKeys[child] < Host.SingletonKeys[child + 1])
+        {
+            child = child + 1;
+        }
+        if (Host.SingletonKeys[current] >= Host.SingletonKeys[child])
+        {
+            break;
+        }
+
+        SwapContractSingletons(current, child);
+        current = child;
+    }
+}
+
+void SwapContractSingletons(int32 first, int32 second)
+{
+    int32 value = Host.SingletonKeys[first];
+    Host.SingletonKeys[first] = Host.SingletonKeys[second];
+    Host.SingletonKeys[second] = value;
+}
+
+bool TryReadContractTableOffset(int32 offsetIndex, init ref<uint32> offset)
+{
+    if (offsetIndex < 0 || offsetIndex >= Host.Contracts.Length / 4)
+    {
+        return false;
+    }
+
+    int32 at = offsetIndex * 4;
+    mut uint32 value = 0;
+    for (mut int32 byteIndex = 0; byteIndex < 4; byteIndex = byteIndex + 1)
+    {
+        int32 part = Host.Contracts[at + byteIndex];
+        if (part < 0 || part > 255)
+        {
+            return false;
+        }
+        value = value | (uint32(part) << (byteIndex * 8));
+    }
+
+    offset = value;
+    return true;
+}
+
+bool TryReadContractTypeSpecOffset(int32 offsetIndex, init ref<uint32> offset)
+{
+    if (offsetIndex < 0 || offsetIndex >= Host.TypeSpecs.Length / 4)
+    {
+        return false;
+    }
+
+    int32 at = offsetIndex * 4;
+    mut uint32 value = 0;
+    for (mut int32 byteIndex = 0; byteIndex < 4; byteIndex = byteIndex + 1)
+    {
+        int32 part = Host.TypeSpecs[at + byteIndex];
+        if (part < 0 || part > 255)
+        {
+            return false;
+        }
+        value = value | (uint32(part) << (byteIndex * 8));
+    }
+
+    offset = value;
+    return true;
+}
+
+bool TryReadContractWord(int32 rowStart, int32 rowLength, int32 offset,
+    init ref<uint32> value)
+{
+    if (offset < 0 || offset > rowLength - 4
+        || !TryReadContractByte(rowStart, rowLength, offset, init var first)
+        || !TryReadContractByte(rowStart, rowLength, offset + 1, init var second)
+        || !TryReadContractByte(rowStart, rowLength, offset + 2, init var third)
+        || !TryReadContractByte(rowStart, rowLength, offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadContractHalfWord(int32 rowStart, int32 rowLength, int32 offset,
+    init ref<uint32> value)
+{
+    if (offset < 0 || offset > rowLength - 2
+        || !TryReadContractByte(rowStart, rowLength, offset, init var first)
+        || !TryReadContractByte(rowStart, rowLength, offset + 1, init var second))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8);
+    return true;
+}
+
+bool TryReadContractByte(int32 rowStart, int32 rowLength, int32 offset,
+    init ref<int32> value)
+{
+    if (rowStart < 0 || rowLength < 0 || offset < 0 || offset >= rowLength
+        || rowStart > Host.Contracts.Length - rowLength)
+    {
+        return false;
+    }
+
+    int32 part = Host.Contracts[rowStart + offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool TryReadContractTypeSpecByte(int32 rowStart, int32 rowLength, int32 offset,
+    init ref<int32> value)
+{
+    if (rowStart < 0 || rowLength < 0 || offset < 0 || offset >= rowLength
+        || rowStart > Host.TypeSpecs.Length - rowLength)
+    {
+        return false;
+    }
+
+    int32 part = Host.TypeSpecs[rowStart + offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool TryReadContractTypeDefWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.TypeDefs.Length - 40
+        || offset < 0 || offset > 36
+        || !TryReadContractTypeDefByte(rowStart + offset, init var first)
+        || !TryReadContractTypeDefByte(rowStart + offset + 1, init var second)
+        || !TryReadContractTypeDefByte(rowStart + offset + 2, init var third)
+        || !TryReadContractTypeDefByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadContractMethodWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Methods.Length - 28
+        || offset < 0 || offset > 24
+        || !TryReadContractMethodByte(rowStart + offset, init var first)
+        || !TryReadContractMethodByte(rowStart + offset + 1, init var second)
+        || !TryReadContractMethodByte(rowStart + offset + 2, init var third)
+        || !TryReadContractMethodByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadContractSignatureWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Signatures.Length - 24
+        || offset < 0 || offset > 20
+        || !TryReadContractSignatureByte(rowStart + offset, init var first)
+        || !TryReadContractSignatureByte(rowStart + offset + 1, init var second)
+        || !TryReadContractSignatureByte(rowStart + offset + 2, init var third)
+        || !TryReadContractSignatureByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadContractTypeDefByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.TypeDefs.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.TypeDefs[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool TryReadContractMethodByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Methods.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Methods[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool TryReadContractSignatureByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Signatures.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Signatures[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool TryReadContractParamByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Params.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Params[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool IsValidContractCount(int32 count)
+{
+    return count >= 0 && count <= 0xFF_FFFF;
+}
