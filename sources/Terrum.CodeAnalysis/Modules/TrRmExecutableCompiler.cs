@@ -473,7 +473,8 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 var outputBody = TrRmScalarInitOutputBodyReader.Read(bodies, row, modules,
-                    defs, sigs, parameters, types, contractBytes);
+                    defs, sigs, parameters, types, contractBytes,
+                    scalarInitOutputRuleRevision);
                 if (outputBody.Places.IsEmpty)
                 {
                     throw Invalid("The executable general Body profile requires places.");

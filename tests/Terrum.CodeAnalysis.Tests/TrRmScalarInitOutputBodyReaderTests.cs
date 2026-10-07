@@ -17,7 +17,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     private delegate object ReadBody(TrRmBodyTableReader bodies, int method,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader types, ReadOnlySpan<byte> contracts);
+        TrRmTypeSpecTableReader types, ReadOnlySpan<byte> contracts, uint ruleRevision);
 
     private static readonly ReadBody s_read = (typeof(TrRmBodyTableReader).Assembly
         .GetType("Terrum.CodeAnalysis.Modules.TrRmScalarInitOutputBodyReader", throwOnError: true)
@@ -632,7 +632,8 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     private static object Inspect(byte[] body, byte[] modes, bool voidResult = true,
         byte[]? targetModes = null, byte targetFlags = 0, byte targetLayout = 0,
         byte? contractKind = null, int resultTypeSpecRow = 0,
-        byte[]? paramTypeSpecRows = null)
+        byte[]? paramTypeSpecRows = null,
+        uint ruleRevision = TrRmFeatureTableReader.ScalarInitOutputRuleRevision)
     {
         var methodCount = targetModes is null ? 1 : 2;
         var parameterCount = modes.Length + (targetModes?.Length ?? 0);
@@ -714,7 +715,8 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         var bodyBytes = TrRmVariableTableWriter.EncodeBlobs(
             targetModes is null ? [body] : [body, target]);
         var bodies = new TrRmBodyTableReader(bodyBytes, methodCount);
-        return s_read(bodies, 1, modules, methods, signatures, parameters, types, contractSection);
+        return s_read(bodies, 1, modules, methods, signatures, parameters, types,
+            contractSection, ruleRevision);
     }
 
     private static void Signature(byte[] bytes, int offset, uint result, int first, int count)

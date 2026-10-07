@@ -343,6 +343,73 @@ public sealed class TrRmExecutableCompilerTests
         Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
     }
 
+    [Theory]
+    [InlineData("char16", "char16(65)", "char16(65)")]
+    [InlineData("int32", "int32.MinValue", "int32.MinValue")]
+    [InlineData("uint32", "uint32.MaxValue", "uint32.MaxValue")]
+    [InlineData("int64", "int64.MinValue", "int64.MinValue")]
+    [InlineData("uint64", "uint64.MaxValue", "uint64.MaxValue")]
+    [InlineData("float32", "float32(1.5)", "float32(1.5)")]
+    [InlineData("float64", "float64(2.5)", "float64(2.5)")]
+    public void InitOutputCallsRoundTripWithNonBooleanScalarResults(
+        string type, string value, string expected)
+    {
+        var source = $$"""
+            {{type}} Fill(init ref<int32> result) {
+                result = 42;
+                return {{value}};
+            }
+            int32 Check({{type}} returned, int32 result) {
+                return result == 42 && returned == {{expected}} ? 42 : 0;
+            }
+            int32 Main() {
+                init int32 result;
+                {{type}} returned = Fill(init result);
+                return Check(returned, result);
+            }
+            """;
+        var original = Compile(source);
+        var artifact = TrRmExecutableCompiler.Emit(original, "scalar-output-result");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+
+        Assert.Equal(3u, ScalarInitOutputRevision(artifact));
+        Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+
+        foreach (var revision in new uint[] { 1, 2 })
+        {
+            var legacyArtifact = SetScalarInitOutputRuleRevision(artifact, revision);
+            if (type == "int32")
+            {
+                var legacy = TrRmExecutableCompiler.Load(legacyArtifact);
+                Assert.Equal(42, NativeJit.Execute(legacy, NativeRuntimePolicy.FailFast));
+            }
+            else
+            {
+                Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(legacyArtifact));
+            }
+        }
+    }
+
+    [Fact]
+    public void InitOutputCallsRejectBooleanResults()
+    {
+        var program = Compile("""
+            bool Fill(init ref<int32> result) {
+                result = 42;
+                return true;
+            }
+            int32 Main() {
+                init int32 result;
+                Fill(init result);
+                return 42;
+            }
+            """);
+
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.Emit(program, "boolean-output-result"));
+    }
+
     [Fact]
     public void InitOutputPlacesPreserveMixedTypesAndInterleavedArguments()
     {
@@ -2414,7 +2481,18 @@ public sealed class TrRmExecutableCompilerTests
             sections.Add(new TrRmSection(kind, flags, (uint)count,
                 kind == 0x0004 ? features : bytes.ToArray()));
         }
+
         return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static uint ScalarInitOutputRevision(byte[] artifact)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(4, out var featureBytes, out var featureCount));
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount);
+        Assert.True(features.TryGetFeature(TrRmFeatureTableReader.ScalarInitOutputFeatureId,
+            out var feature));
+        return feature.MinimumRuleRevision;
     }
 
     private static byte[] ReplaceParameterMode(byte[] artifact, byte mode)

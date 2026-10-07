@@ -121,13 +121,15 @@ verification remains in force. The one-block control-flow boundary is
 unchanged. These value, comparison, bitwise, unary, arithmetic and conversion
 paths are implemented support only, not approval of the proposed executable
 contract.
-The current writer emits required feature rule revision 2 for output Bodies,
-which provisionally permits `bool`, `char16`, `int32`, `uint32`, `int64`,
-`uint64`, `float32` and `float64` referents and scalar initialized locals.
-Rule revision 1 remains loadable with `int32` referents only; unsupported
-revisions reject. Exact type identity is retained through place descriptors,
-handles, loads, initialization values and call arguments, while output-bearing
-results remain `void` or `int32`.
+The current writer emits required feature rule revision 3 for output Bodies.
+Rule revision 2 provisionally permits `bool`, `char16`, `int32`, `uint32`,
+`int64`, `uint64`, `float32` and `float64` referents and scalar initialized
+locals; rule revision 1 remains loadable with `int32` referents only. Rule
+revision 3 additionally permits non-Boolean scalar output-bearing results.
+Exact type identity is retained through place descriptors, handles, loads,
+initialization values, call arguments and results. Revisions 1 and 2 retain
+their `void`/`int32` output-bearing result restriction; unsupported revisions
+reject.
 
 ## Additional open question: scalar output referent set
 
@@ -156,6 +158,25 @@ exceptional publication, and general reference/loan contracts remain outside
 this provisional slice. This proposal does not approve a general
 `out`-to-`init ref<T>` migration, scalar-frontend verification/emission, or
 any public ABI change.
+
+## Additional open question: output-bearing scalar results
+
+**Summary:** Rule revisions 1 and 2 restrict output-bearing results to `void`
+or `int32`. The output Body and native call paths can preserve other
+non-Boolean scalar results while requiring every output place to be initialized
+on every normal return. Boolean results are different: hosted Boolean
+`init ref<T>` calls publish only on `true`, so admitting them here without a
+separate unconditional-publication contract would conflate distinct semantics.
+
+**Recommendation:** Keep this extension provisional in rule revision 3.
+Permit output-bearing functions to return `char16`, `uint32`, `int64`, `uint64`,
+`float32` or `float64` in addition to the existing `void`/`int32`; preserve
+exact result typing and mandatory normal-return initialization. Keep Boolean
+results, public output targets, non-output place-bodied result widening, and
+all other excluded output behaviors unchanged. Continue loading revisions 1
+and 2 with their existing result restrictions and reject future revisions.
+This recommendation does not approve the executable contract or change hosted
+Boolean `init ref<T>` behavior.
 
 ## Additional open question: entry-use ordinals for places
 

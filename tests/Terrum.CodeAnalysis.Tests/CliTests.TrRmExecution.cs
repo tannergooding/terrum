@@ -120,7 +120,7 @@ public sealed partial class CliTests
     public async Task PersistedInitOutputSupportsMixedScalarReferentsAsync()
     {
         const string source = """
-            void Fill(bool enabled, init ref<bool> enabledResult,
+            uint32 Fill(bool enabled, init ref<bool> enabledResult,
                 char16 character, init ref<char16> characterResult,
                 uint64 count, init ref<uint64> countResult,
                 float64 amount, init ref<float64> amountResult) {
@@ -128,19 +128,21 @@ public sealed partial class CliTests
                 characterResult = character;
                 countResult = count;
                 amountResult = amount;
+                return uint32.MaxValue;
             }
-            int32 Check(bool enabled, char16 character, uint64 count, float64 amount) {
+            int32 Check(bool enabled, char16 character, uint64 count, float64 amount,
+                uint32 returned) {
                 return enabled && character == char16(65) && count == uint64.MaxValue
-                    && amount == float64(2.5) ? 42 : 0;
+                    && amount == float64(2.5) && returned == uint32.MaxValue ? 42 : 0;
             }
             int32 Main() {
                 init bool enabled;
                 init char16 character;
                 init uint64 count;
                 init float64 amount;
-                Fill(true, init enabled, char16(65), init character,
+                uint32 returned = Fill(true, init enabled, char16(65), init character,
                     uint64.MaxValue, init count, float64(2.5), init amount);
-                return Check(enabled, character, count, amount);
+                return Check(enabled, character, count, amount, returned);
             }
             """;
         var prefix = Path.Combine(Directory.GetCurrentDirectory(),

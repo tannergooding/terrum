@@ -37,7 +37,8 @@ internal static class TrRmScalarInitOutputBodyReader
     internal static Body Read(TrRmBodyTableReader bodies, int methodRow,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader types, ReadOnlySpan<byte> contractSection = default)
+        TrRmTypeSpecTableReader types, ReadOnlySpan<byte> contractSection,
+        uint ruleRevision)
     {
         if (modules.Count != 1 || modules.ModuleRefCount != 0
             || modules.GetRequirements(1).RuntimePolicy != 0)
@@ -53,16 +54,17 @@ internal static class TrRmScalarInitOutputBodyReader
         var contracts = methods.ContractCount == 0 ? default
             : new TrRmVariableTableIndex(contractSection, methods.ContractCount, 8, 1);
         var signature = ValidateMethod(methodRow, bodies, methods, signatures, parameters,
-            types, contracts, out var effects);
+            types, contracts, ruleRevision, out var effects);
         var parser = new Parser(bodies.GetRow(methods.GetBodyRow(methodRow)), types,
-            bodies, methods, signatures, parameters, contracts);
+            bodies, methods, signatures, parameters, contracts, ruleRevision);
         return parser.Read(signature, effects);
     }
 
     private static int ValidateMethod(int method, TrRmBodyTableReader bodies,
         TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader types, TrRmVariableTableIndex contracts, out uint effects)
+        TrRmTypeSpecTableReader types, TrRmVariableTableIndex contracts,
+        uint ruleRevision, out uint effects)
     {
         if (methods.GetOwnerModule(method) != 1 || methods.GetOwnerType(method) != 0
             || methods.GetBodyRow(method) == 0)
@@ -119,9 +121,11 @@ internal static class TrRmScalarInitOutputBodyReader
         var body = bodies.GetRow(methods.GetBodyRow(method));
         var hasGeneralPlaceBody = !body.IsEmpty && body[0] <= 2;
         var resultType = ResultType(types, signatures.GetResultTypeSpec(signature));
-        if ((hasGeneralPlaceBody && resultType is not (0 or 8))
+        var widenedOutputResult = hasOutput && ruleRevision >= 3
+            && NonBooleanScalar(resultType);
+        if ((hasGeneralPlaceBody && resultType is not (0 or 8) && !widenedOutputResult)
             || (hasOutput && (methods.GetFlags(method) == 2 || !hasGeneralPlaceBody
-                || resultType is not (0 or 8))))
+                || resultType is not (0 or 8) && !widenedOutputResult)))
         {
             throw InvalidBody();
         }
@@ -145,6 +149,7 @@ internal static class TrRmScalarInitOutputBodyReader
         private readonly TrRmMethodSigTableReader _signatures;
         private readonly TrRmParamTableReader _parameters;
         private readonly TrRmVariableTableIndex _contracts;
+        private readonly uint _ruleRevision;
         private int _position;
         private int _width;
         private int _maximumStructural;
@@ -170,7 +175,7 @@ internal static class TrRmScalarInitOutputBodyReader
         internal Parser(ReadOnlySpan<byte> body, TrRmTypeSpecTableReader types,
             TrRmBodyTableReader bodies, TrRmMethodDefTableReader methods,
             TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-            TrRmVariableTableIndex contracts)
+            TrRmVariableTableIndex contracts, uint ruleRevision)
         {
             _body = body;
             _types = types;
@@ -179,6 +184,7 @@ internal static class TrRmScalarInitOutputBodyReader
             _signatures = signatures;
             _parameters = parameters;
             _contracts = contracts;
+            _ruleRevision = ruleRevision;
             _position = 0;
             _width = 1;
             _maximumStructural = 0;
@@ -538,7 +544,7 @@ internal static class TrRmScalarInitOutputBodyReader
 
                 methodRow = localMethod;
                 var signature = ValidateMethod(methodRow, _bodies, _methods, _signatures,
-                    _parameters, _types, _contracts, out _);
+                    _parameters, _types, _contracts, _ruleRevision, out _);
                 resultType = ResultType(_types, _signatures.GetResultTypeSpec(signature));
                 if ((result == 0) != (resultType == 0))
                 {
@@ -969,6 +975,7 @@ internal static class TrRmScalarInitOutputBodyReader
     private static bool Float(ushort type) => type is 0x14 or 0x15;
     private static bool Scalar(ushort type)
         => type is 1 or 3 or 8 or 9 or 0x0D or 0x0E or 0x14 or 0x15;
+    private static bool NonBooleanScalar(ushort type) => Scalar(type) && type != 1;
 
     private static InvalidDataException InvalidBody()
         => new("Invalid or unsupported provisional TRRM ScalarInitOutput Body.");
