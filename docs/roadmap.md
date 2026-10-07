@@ -125,7 +125,9 @@ prerequisite has already been met.
 5. **General separate compilation — layouts.** Specify fixed public
    `Blittable` layouts, packing and over-alignment with target limits,
    metadata, access lowering and compatibility checks. Exact source spellings
-   and implementation are not settled by this plan.
+   and implementation are not settled by this plan; the
+   [first-profile proposal](proposals/public-fixed-layout-profile.md) records
+   one bounded recommendation without changing the accepted contract.
 6. **General separate compilation — binding contracts.** Complete overload
    and witness selection plus adapter, family and explicit-interface
    contracts. Keep unresolved declaration, lookup and compatibility choices

@@ -79,6 +79,9 @@ approved.
 - [Static initialization metadata and attribute schema](static-initialization-metadata.md)
   recommends how to persist the accepted static-storage contract without
   changing its initialization or failure semantics.
+- [First public fixed-layout profile](public-fixed-layout-profile.md)
+  recommends a bounded natural-alignment Windows x64 opt-in without changing
+  existing private Sequential or semantic-module layout contracts.
 - [Compare-exchange order pairs](atomic-cas-order-pairs.md) recommends a
   finite compile-time-valid table for CAS success/failure memory orders;
   it does not add atomic support or change the accepted bitwise-comparison rule.
