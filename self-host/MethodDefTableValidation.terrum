@@ -1,0 +1,273 @@
+namespace Terrum.CodeAnalysis;
+
+// MethodSig structure and Body contents are validated by their own readers.
+public static bool TryValidateMethodDefTable(int32 recordCount,
+    int32 moduleCount, int32 stringCount, int32 moduleRefCount,
+    int32 typeDefCount, int32 methodDefCount, int32 sourceFileCount, int32 featureCount,
+    int32 fieldCount, int32 genericParamCount, int32 layoutCount, int32 contractCount,
+    int32 methodSigCount, int32 bodyCount)
+{
+    if (recordCount < 0 || recordCount > 0xFF_FFFF
+        || recordCount != methodDefCount
+        || !IsValidMethodDefCount(contractCount)
+        || !IsValidMethodDefCount(bodyCount)
+        || methodSigCount <= 0 || methodSigCount > 0xFF_FFFF
+        || (recordCount == 0 && bodyCount != 0)
+        || recordCount * 28 != Host.Methods.Length
+        || methodSigCount * 24 != Host.Signatures.Length
+        || Host.BodyOwners.Length != bodyCount + 1
+        || Host.GenericSignatureOwners.Length != methodSigCount + 1
+        || !TryValidateTypeDefTable(typeDefCount, moduleCount, stringCount,
+            moduleRefCount, typeDefCount, methodDefCount, sourceFileCount,
+            featureCount, fieldCount, genericParamCount, layoutCount, contractCount))
+    {
+        return false;
+    }
+
+    for (mut int32 body = 0; body <= bodyCount; body = body + 1)
+    {
+        Host.BodyOwners[body] = 0;
+    }
+    for (mut int32 signature = 0; signature <= methodSigCount; signature = signature + 1)
+    {
+        Host.GenericSignatureOwners[signature] = 0;
+    }
+
+    int32 stringIndexByteLength = (stringCount + 1) * 4;
+    mut int32 module = 1;
+    mut int32 methodStart = 0;
+    mut int32 methodEnd = 0;
+    mut int32 typeStart = 0;
+    mut int32 typeEnd = 0;
+    if (recordCount != 0)
+    {
+        if (!TryGetMethodDefModuleRanges(module, moduleCount, typeDefCount,
+            methodDefCount, init var firstMethodStart, init var firstMethodEnd,
+            init var firstTypeStart, init var firstTypeEnd))
+        {
+            return false;
+        }
+
+        methodStart = firstMethodStart;
+        methodEnd = firstMethodEnd;
+        typeStart = firstTypeStart;
+        typeEnd = firstTypeEnd;
+    }
+
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        while (row >= methodEnd)
+        {
+            module = module + 1;
+            if (module > moduleCount)
+            {
+                return false;
+            }
+            if (!TryGetMethodDefModuleRanges(module, moduleCount, typeDefCount,
+                    methodDefCount, init var nextMethodStart, init var nextMethodEnd,
+                    init var nextTypeStart, init var nextTypeEnd))
+            {
+                return false;
+            }
+            methodStart = nextMethodStart;
+            methodEnd = nextMethodEnd;
+            typeStart = nextTypeStart;
+            typeEnd = nextTypeEnd;
+        }
+
+        if (row < methodStart
+            || !TryValidateMethodDefRow(row, stringCount, stringIndexByteLength,
+                typeDefCount, typeStart, typeEnd, methodSigCount,
+                contractCount, bodyCount))
+        {
+            return false;
+        }
+    }
+
+    for (mut int32 body = 1; body <= bodyCount; body = body + 1)
+    {
+        if (Host.BodyOwners[body] == 0)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryGetMethodDefModuleRanges(int32 module, int32 moduleCount,
+    int32 typeDefCount, int32 methodDefCount,
+    init ref<int32> methodStart, init ref<int32> methodEnd,
+    init ref<int32> typeStart, init ref<int32> typeEnd)
+{
+    int32 rowStart = (module - 1) * 44;
+    if (module <= 0 || module > moduleCount
+        || !TryReadModuleTableWord(rowStart, 32, init var firstType)
+        || !TryReadModuleTableWord(rowStart, 36, init var firstMethod))
+    {
+        return false;
+    }
+
+    mut int32 endType = typeDefCount + 1;
+    mut int32 endMethod = methodDefCount + 1;
+    if (module < moduleCount)
+    {
+        if (!TryReadModuleTableWord(module * 44, 32, init var nextType)
+            || !TryReadModuleTableWord(module * 44, 36, init var nextMethod))
+        {
+            return false;
+        }
+
+        endType = int32(nextType);
+        endMethod = int32(nextMethod);
+    }
+
+    methodStart = int32(firstMethod);
+    methodEnd = endMethod;
+    typeStart = int32(firstType);
+    typeEnd = endType;
+    return methodStart > 0 && methodEnd >= methodStart
+        && methodEnd <= methodDefCount + 1
+        && typeStart > 0 && typeEnd >= typeStart
+        && typeEnd <= typeDefCount + 1;
+}
+
+bool TryValidateMethodDefRow(int32 row, int32 stringCount,
+    int32 stringIndexByteLength, int32 typeDefCount, int32 typeStart, int32 typeEnd,
+    int32 methodSigCount, int32 contractCount, int32 bodyCount)
+{
+    int32 rowStart = (row - 1) * 28;
+    if (!TryReadMethodDefTableWord(rowStart, 0, init var owner)
+        || !TryReadMethodDefTableWord(rowStart, 4, init var name)
+        || !TryReadMethodDefTableWord(rowStart, 8, init var signature)
+        || !TryReadMethodDefTableWord(rowStart, 12, init var flags)
+        || !TryReadMethodDefTableWord(rowStart, 16, init var contractFirst)
+        || !TryReadMethodDefTableWord(rowStart, 20, init var contractRangeCount)
+        || !TryReadMethodDefTableWord(rowStart, 24, init var body)
+        || owner > uint32(typeDefCount)
+        || (owner != 0 && (owner < uint32(typeStart) || owner >= uint32(typeEnd)))
+        || name == 0 || name > 0xFF_FFFF || name > uint32(stringCount)
+        || signature == 0 || signature > uint32(methodSigCount)
+        || flags > 2
+        || !IsValidMethodDefRange(contractFirst, contractRangeCount, contractCount)
+        || body > uint32(bodyCount))
+    {
+        return false;
+    }
+
+    if (!TryGetVariableTableRowExtent(stringCount, 8, 4, int32(name),
+            init var nameOffset, init var nameLength)
+        || !TryGetStringNameScalarCount(stringIndexByteLength + int32(nameOffset),
+            nameLength, init var nameScalarCount)
+        || !TryReadMethodSignatureWord((int32(signature) - 1) * 24, 20,
+            init var genericCount))
+    {
+        return false;
+    }
+
+    if (owner == 0
+        && (!TryReadMethodSignatureWord((int32(signature) - 1) * 24, 4,
+                init var receiver)
+            || receiver != 0))
+    {
+        return false;
+    }
+
+    if (genericCount != 0)
+    {
+        if (Host.GenericSignatureOwners[int32(signature)] != 0)
+        {
+            return false;
+        }
+        Host.GenericSignatureOwners[int32(signature)] = row;
+    }
+
+    if (body != 0)
+    {
+        if (Host.BodyOwners[int32(body)] != 0)
+        {
+            return false;
+        }
+        Host.BodyOwners[int32(body)] = row;
+    }
+
+    return true;
+}
+
+bool TryReadMethodDefTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Methods.Length - 28
+        || offset < 0 || offset > 24
+        || !TryReadMethodDefTableByte(rowStart + offset, init var first)
+        || !TryReadMethodDefTableByte(rowStart + offset + 1, init var second)
+        || !TryReadMethodDefTableByte(rowStart + offset + 2, init var third)
+        || !TryReadMethodDefTableByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadMethodDefTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Methods.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Methods[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool TryReadMethodSignatureWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Signatures.Length - 24
+        || offset < 0 || offset > 20
+        || !TryReadMethodSignatureByte(rowStart + offset, init var first)
+        || !TryReadMethodSignatureByte(rowStart + offset + 1, init var second)
+        || !TryReadMethodSignatureByte(rowStart + offset + 2, init var third)
+        || !TryReadMethodSignatureByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadMethodSignatureByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Signatures.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Signatures[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool IsValidMethodDefRange(uint32 first, uint32 count, int32 tableCount)
+{
+    return count == 0 ? first == 0
+        : first != 0 && first <= uint32(tableCount)
+            && count <= uint32(tableCount) - first + 1;
+}
+
+bool IsValidMethodDefCount(int32 count)
+    => count >= 0 && count <= 0xFF_FFFF;
