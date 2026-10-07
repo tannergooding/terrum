@@ -40,6 +40,54 @@ public sealed class NativeSourceImportTests
     }
 
     [Fact]
+    public void SourceImportSleepMatchesExactFixedWidthSystemSignature()
+    {
+        const string sleepKey = "windows-x64.system32.kernel32.Sleep";
+        var source = $$"""
+            [Terrum.Interop.NativeImport("{{sleepKey}}")]
+            [NoThrow]
+            extern void Sleep(uint32 milliseconds);
+
+            int32 Main() {
+                Sleep(16);
+                return 0;
+            }
+            """;
+        var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var sleep = Assert.Single(program.Functions, static function => function.IsExternal);
+        Assert.Equal(sleepKey, sleep.NativeImportKey);
+        Assert.Equal(PrimitiveType.Void, sleep.ReturnType);
+        Assert.Equal(PrimitiveType.UInt32, Assert.Single(sleep.Variables).Type);
+        Assert.True(sleep.IsNoThrow);
+        Assert.False(sleep.RequiresUnsafeCaller);
+        Assert.False(sleep.DoesNotReturn);
+
+        var image = NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast);
+        Assert.True(image.AsSpan().IndexOf("KERNEL32.dll\0"u8) >= 0);
+        Assert.True(image.AsSpan().IndexOf("Sleep\0"u8) >= 0);
+
+        foreach (var declaration in new[] {
+            $"[NoThrow] extern void Sleep(int32 milliseconds);",
+            $"[NoThrow] extern uint32 Sleep(uint32 milliseconds);",
+            "extern void Sleep(uint32 milliseconds);",
+        })
+        {
+            var invalidSource = $$"""
+                [Terrum.Interop.NativeImport("{{sleepKey}}")]
+                {{declaration}}
+                int32 Main() { Sleep(16); return 0; }
+                """;
+            var invalidCompilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse(invalidSource));
+            Assert.Null(invalidCompilation.Program);
+            Assert.Contains(invalidCompilation.Diagnostics, static diagnostic =>
+                diagnostic.Code == "TRM3030" || diagnostic.Code == "TRM3001");
+        }
+    }
+
+    [Fact]
     public void SourceCannotShadowCompilerOwnedImportAttribute()
     {
         var source = $$"""

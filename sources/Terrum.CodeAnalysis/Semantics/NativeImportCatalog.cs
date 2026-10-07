@@ -13,7 +13,7 @@ public sealed class NativeImportCatalog
         new("Terrum.Interop.NativeImport", ArgumentCount: 1, RequiresStringLiteral: true, IsRepeatable: false);
 
     private static readonly NativeImportCatalog s_windowsX64 = new(
-        "windows-x64-native-imports-v2",
+        "windows-x64-native-imports-v3",
         [
             new NativeImportDefinition(
                 "windows-x64.system32.kernel32.GetCurrentThreadId",
@@ -21,6 +21,16 @@ public sealed class NativeImportCatalog
                 "GetCurrentThreadId",
                 [],
                 PrimitiveType.UInt32,
+                IsNoThrow: true,
+                RequiresUnsafeCaller: false,
+                DoesNotReturn: false,
+                DeploymentPolicy: NativeImportDeploymentPolicy.System32),
+            new NativeImportDefinition(
+                "windows-x64.system32.kernel32.Sleep",
+                "kernel32.dll",
+                "Sleep",
+                [PrimitiveType.UInt32],
+                PrimitiveType.Void,
                 IsNoThrow: true,
                 RequiresUnsafeCaller: false,
                 DoesNotReturn: false,

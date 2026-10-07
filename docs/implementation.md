@@ -49,7 +49,10 @@ bodyless top-level or static `extern` callables use the exact
 `Terrum.Interop.NativeImport` attribute and a key in the compiler-owned
 immutable catalog. Binding, mandatory verification and PE emission check the
 catalogued fixed-width integer/`void` signature and effects; the production
-catalog contains `GetCurrentThreadId` and the sample-specific `MessageBoxW`.
+catalog contains `GetCurrentThreadId`, `Sleep(uint32) -> void`, and the
+sample-specific `MessageBoxW`. `Sleep` covers the design sketch's exact
+`Sleep(16)` import only; the DX11 triangle remains a non-compiling design
+sketch and this does not establish support for its other native boundaries.
 Unsupported module/JIT/TRRM persistence paths reject these imports. This is
 not general foreign-function support and does not move scalar frontend
 verification or emission into Terrum. Test-only fixtures exercise the
