@@ -237,6 +237,15 @@ including encoded paths, empty/malformed text, reference and digest failures,
 row counts and section extents. Paths remain identifiers rather than file
 access, and the candidate validates rows without exposing the hosted reader's
 owner lookup API.
+The `TypeDefTableValidation` candidate composes Module validation, checks
+fixed TypeDef rows, strict selected namespace/name text, assigned flags and
+bounded field, generic, layout and contract ranges. Its exact-size writable
+`FieldOwners` scratch records one-based TypeDef owners and requires every
+FieldDef row to be owned exactly once, matching the hosted reader. AOT/JIT
+fixtures cover both runtime policies, including multi-module partitions,
+empty namespaces, flags, malformed names, range failures and field overlap or
+omission. Generic/contract ownership and Layout row ownership remain with
+their respective readers; this component is not a full type-system validator.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.

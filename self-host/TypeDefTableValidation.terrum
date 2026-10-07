@@ -1,0 +1,148 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateTypeDefTable(int32 recordCount, int32 moduleCount,
+    int32 stringCount, int32 moduleRefCount, int32 typeDefCount, int32 methodDefCount,
+    int32 sourceFileCount, int32 featureCount, int32 fieldCount, int32 genericParamCount,
+    int32 layoutCount, int32 contractCount)
+{
+    if (recordCount < 0 || recordCount > 0xFF_FFFF
+        || recordCount != typeDefCount
+        || recordCount * 40 != Host.TypeDefs.Length
+        || !IsValidTypeDefTableCount(fieldCount)
+        || !IsValidTypeDefTableCount(genericParamCount)
+        || !IsValidTypeDefTableCount(layoutCount)
+        || !IsValidTypeDefTableCount(contractCount)
+        || (recordCount == 0 && (fieldCount != 0 || layoutCount != 0))
+        || Host.FieldOwners.Length != fieldCount + 1
+        || !TryValidateModuleTable(moduleCount, stringCount, moduleRefCount,
+            typeDefCount, methodDefCount, sourceFileCount, featureCount))
+    {
+        return false;
+    }
+
+    int32 stringIndexByteLength = (stringCount + 1) * 4;
+    for (mut int32 field = 0; field <= fieldCount; field = field + 1)
+    {
+        Host.FieldOwners[field] = 0;
+    }
+
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        if (!TryValidateTypeDefRow(row, stringCount, stringIndexByteLength,
+            fieldCount, genericParamCount, layoutCount, contractCount))
+        {
+            return false;
+        }
+    }
+
+    for (mut int32 field = 1; field <= fieldCount; field = field + 1)
+    {
+        if (Host.FieldOwners[field] == 0)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryValidateTypeDefRow(int32 row, int32 stringCount, int32 stringIndexByteLength,
+    int32 fieldCount, int32 genericParamCount, int32 layoutCount, int32 contractCount)
+{
+    int32 rowStart = (row - 1) * 40;
+    if (!TryReadTypeDefTableWord(rowStart, 0, init var namespaceRow)
+        || !TryReadTypeDefTableWord(rowStart, 4, init var nameRow)
+        || !TryReadTypeDefTableWord(rowStart, 8, init var flags)
+        || !TryReadTypeDefTableWord(rowStart, 12, init var fieldFirst)
+        || !TryReadTypeDefTableWord(rowStart, 16, init var fieldRangeCount)
+        || !TryReadTypeDefTableWord(rowStart, 20, init var genericFirst)
+        || !TryReadTypeDefTableWord(rowStart, 24, init var genericRangeCount)
+        || !TryReadTypeDefTableWord(rowStart, 28, init var layoutRow)
+        || !TryReadTypeDefTableWord(rowStart, 32, init var contractFirst)
+        || !TryReadTypeDefTableWord(rowStart, 36, init var contractRangeCount)
+        || namespaceRow == 0 || namespaceRow > 0xFF_FFFF
+        || namespaceRow > uint32(stringCount)
+        || nameRow == 0 || nameRow > 0xFF_FFFF || nameRow > uint32(stringCount)
+        || flags > 0x3F || (flags & 3) == 3 || ((flags >> 2) & 3) == 0
+        || !IsValidTypeDefTableRange(fieldFirst, fieldRangeCount, fieldCount)
+        || !IsValidTypeDefTableRange(genericFirst, genericRangeCount, genericParamCount)
+        || !IsValidTypeDefTableRange(contractFirst, contractRangeCount, contractCount)
+        || layoutRow > uint32(layoutCount)
+        || ((flags & 0x33) == 0 && layoutRow != 0))
+    {
+        return false;
+    }
+
+    if (!TryGetValidatedModuleIdentityExtent(stringCount, stringIndexByteLength,
+            int32(namespaceRow), init var namespaceStart, init var namespaceLength,
+            init var namespaceEncoding, init var namespaceContentLength)
+        || !TryGetValidatedModuleIdentityExtent(stringCount, stringIndexByteLength,
+            int32(nameRow), init var nameStart, init var nameLength,
+            init var nameEncoding, init var nameContentLength)
+        || !TryGetStringNamespaceScalarCount(namespaceStart, namespaceLength,
+            init var namespaceScalarCount)
+        || !TryValidateModuleIdentityText(nameStart, nameContentLength, nameEncoding))
+    {
+        return false;
+    }
+
+    for (mut uint32 field = fieldFirst; field < fieldFirst + fieldRangeCount; field = field + 1)
+    {
+        if (Host.FieldOwners[int32(field)] != 0)
+        {
+            return false;
+        }
+
+        Host.FieldOwners[int32(field)] = row;
+    }
+
+    return true;
+}
+
+bool IsValidTypeDefTableRange(uint32 first, uint32 count, int32 total)
+{
+    if (count == 0)
+    {
+        return first == 0;
+    }
+
+    return first != 0 && first <= uint32(total)
+        && count <= uint32(total) - first + 1;
+}
+
+bool IsValidTypeDefTableCount(int32 count)
+    => count >= 0 && count <= 0xFF_FFFF;
+
+bool TryReadTypeDefTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.TypeDefs.Length - 40
+        || offset < 0 || offset > 36
+        || !TryReadTypeDefTableByte(rowStart + offset, init var first)
+        || !TryReadTypeDefTableByte(rowStart + offset + 1, init var second)
+        || !TryReadTypeDefTableByte(rowStart + offset + 2, init var third)
+        || !TryReadTypeDefTableByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadTypeDefTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.TypeDefs.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.TypeDefs[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
