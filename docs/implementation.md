@@ -14,7 +14,9 @@ operations, compact values and unique owners, conditional outputs, bounded
 generics, managed roots/classes, and deterministic cleanup. Hosted calls also
 support non-unique, handle-free `Copy`-struct `out` values on non-Boolean and
 `void` functions across semantic modules, native libraries and native graphs;
-this does not add generic Copy outputs or executable TRRM support. The native
+compilation-local `[Copy]` templates support the bounded generic `out T`
+profile with fixed non-Boolean or `void` results. Generic `init ref<T>`, public
+generic exports and executable TRRM support remain separate. The native
 backend emits Terrum-owned code; CIL is neither a dependency nor the default.
 
 Current profile markers are syntax language version 45, semantic body features

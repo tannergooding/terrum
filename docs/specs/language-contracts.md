@@ -272,6 +272,19 @@ conditional `out` or `init ref<T>`. Custom conditional postcondition-driven
 `Copy` outputs are outside this profile; explicit postconditions remain
 governed by the general outcome rules above.
 
+Compilation-local `[Copy]` templates also admit ordinary `out T` with a fixed
+supported non-Boolean scalar result or `void`, provided the concrete `T`
+satisfies the existing non-Boolean `out` shape. The result is not a success
+discriminator; every normal return fully initializes the output, and
+exceptional departure publishes none. This profile covers closed private
+specializations only; compatible semantic-module and native-module
+replacements preserve those closed bodies without exposing the generic
+template or changing the output ABI. Formal-valued results, generic
+`init ref<T>` outputs, fixed-valued output side parameters, public generic
+exports or witnesses, source-free TRRM, and custom conditional
+postcondition-driven generic `Copy` outputs remain outside it; Boolean
+publication rules are unchanged.
+
 ### 2.3 Checking and consuming the contract
 
 The body must prove that every promised output is completely initialized on

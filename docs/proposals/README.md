@@ -25,14 +25,6 @@ approved.
 - [Reference-call metadata](reference-call-metadata.md) has an accepted,
   bounded indexed-Body unsafe-region contract; its dependency-relation profile,
   general output-call migration and other extensions remain unapproved.
-- [Copy outputs for non-Boolean calls](non-boolean-copy-out.md) accepts
-  unconditional, non-unique handle-free `Copy`-struct outputs for
-  non-Boolean/`void` calls; generic, managed, unique and executable TRRM
-  outputs remain separate.
-- [Generic Copy outputs for non-Boolean calls](generic-copy-out-publication.md)
-  recommends extending that publication rule to compilation-local Copy
-  specializations without widening the generic type domain or changing the
-  private ABI.
 - [Generic Copy initialization outputs for non-Boolean calls](generic-init-output-publication.md)
   recommends carrying ordinary `init ref<T>` normal-return publication through
   compilation-local Copy specializations while preserving Boolean vacancy.
