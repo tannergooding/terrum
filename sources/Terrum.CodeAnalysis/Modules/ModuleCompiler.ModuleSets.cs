@@ -131,6 +131,7 @@ public static partial class ModuleCompiler
         bool allowManagedParticipant = false)
     {
         ArgumentNullException.ThrowIfNull(program);
+        SemanticVerifier.RejectSourceNativeImports(program, "semantic module sets");
         if (reference.RequiresSourceGrant)
         {
             throw new ModuleContractException("Native module sets do not support Host.Source requirements.");

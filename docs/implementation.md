@@ -43,6 +43,17 @@ source-free ABI or establish general source-dependent DLL, graph, module-set,
 or persisted-AOT support. The [proposal index](proposals/README.md) records
 those boundaries and pending promotion decisions.
 
+The first Windows x64 source-native-import slice is also implemented
+provisionally under the unapproved [Windows native FFI proposal](proposals/windows-native-ffi.md):
+bodyless top-level or static `extern` callables use the exact
+`Terrum.Interop.NativeImport` attribute and a key in the compiler-owned
+immutable catalog. Binding, mandatory verification and PE emission check the
+catalogued fixed-width integer/`void` signature and effects; the production
+catalog currently contains only `GetCurrentThreadId`. Unsupported
+module/JIT/TRRM persistence paths reject these imports. This is not general
+foreign-function support and does not move scalar frontend verification or
+emission into Terrum.
+
 ## Syntax and CLI
 
 The public C# syntax APIs are experimental. Syntax trees preserve source text

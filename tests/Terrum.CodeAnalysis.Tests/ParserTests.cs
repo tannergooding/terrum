@@ -49,6 +49,31 @@ public sealed class ParserTests
         AssertLossless(nested);
     }
 
+    [Fact]
+    public void ParsesQualifiedNativeImportAttributesAndBodylessCallables()
+    {
+        const string Source = """
+            [Terrum.Interop.NativeImport("windows-x64.system32.kernel32.GetCurrentThreadId")]
+            extern uint32 CurrentThreadId();
+            public static void Main() {}
+            """;
+        var tree = SyntaxTree.Parse(Source);
+        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        var declaration = Assert.Single(tree.Root.DescendantNodes()
+            .Where(static node => node.Kind == SyntaxKind.FunctionDeclaration)
+            .Where(static node => node.Children.OfType<SyntaxNode>()
+                .Any(static child => child.Kind == SyntaxKind.ExternalBody)));
+        Assert.Contains(declaration.Children, static child => child is SyntaxNode {
+            Kind: SyntaxKind.ExternalBody,
+        });
+        var attribute = Assert.Single(tree.Root.DescendantNodes(),
+            static node => node.Kind == SyntaxKind.Attribute);
+        Assert.Contains(attribute.Children, static child => child is SyntaxTokenElement {
+            Token.Kind: TokenKind.StringLiteral,
+        });
+        AssertLossless(tree);
+    }
+
     [Theory]
     [InlineData("mut class Leaf { public mut int32 Value; public Leaf(int32 value) { Value = value; } public mut void Set(int32 value) { Value = value; } }")]
     [InlineData("bool Create(out write ManagedNode node) { return ManagedNode.TryCreate(42, out node); }")]
@@ -401,7 +426,6 @@ public sealed class ParserTests
     }
 
     [Theory]
-    [InlineData("void F(); public static void G() {}")]
     [InlineData("void F() { return; public static void G() {}")]
     [InlineData("void F() { static require true; public static void G() {}")]
     public void MissingBlockDoesNotConsumeFollowingDeclaration(string text)
@@ -409,6 +433,17 @@ public sealed class ParserTests
         var tree = SyntaxTree.Parse(text);
         Assert.True(tree.HasErrors);
         Assert.Equal(2, tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.FunctionDeclaration));
+        AssertLossless(tree);
+    }
+
+    [Fact]
+    public void BodylessCallableDoesNotConsumeFollowingDeclaration()
+    {
+        var tree = SyntaxTree.Parse("void F(); public static void G() {}");
+        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.Equal(2, tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.FunctionDeclaration));
+        Assert.Equal(SyntaxKind.ExternalBody, Assert.Single(tree.Root.DescendantNodes(),
+            node => node.Kind == SyntaxKind.ExternalBody).Kind);
         AssertLossless(tree);
     }
 

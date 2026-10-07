@@ -481,6 +481,28 @@ public sealed class Compilation
     public static Compilation Create(SyntaxTree tree, BoundRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
         CreateCore([tree], [], isLibrary: false, cancellationToken, runtimePolicy: runtimePolicy);
 
+    /// <summary>Binds source against the compiler-supplied Windows x64 native import catalog.</summary>
+    public static Compilation CreateWithNativeImports(SyntaxTree tree,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(tree);
+        return CreateWithNativeImports([tree], NativeImportCatalog.WindowsX64, runtimePolicy, cancellationToken);
+    }
+
+    /// <summary>Binds source snapshots against the compiler-supplied Windows x64 native import catalog.</summary>
+    public static Compilation CreateWithNativeImports(IEnumerable<SyntaxTree> trees,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, CancellationToken cancellationToken = default) =>
+        CreateWithNativeImports(trees, NativeImportCatalog.WindowsX64, runtimePolicy, cancellationToken);
+
+    internal static Compilation CreateWithNativeImports(IEnumerable<SyntaxTree> trees,
+        NativeImportCatalog catalog, BoundRuntimePolicy runtimePolicy,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        return CreateCore(trees, [], isLibrary: false, cancellationToken, runtimePolicy: runtimePolicy,
+            nativeImportCatalog: catalog);
+    }
+
     /// <summary>Binds a library snapshot under an explicit checked-failure runtime policy.</summary>
     public static Compilation CreateLibrary(SyntaxTree tree, BoundRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
         CreateCore([tree], [], isLibrary: true, cancellationToken, runtimePolicy: runtimePolicy);
@@ -648,7 +670,8 @@ public sealed class Compilation
     }
     private static Compilation CreateCore(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, bool isLibrary,
         CancellationToken cancellationToken, CompilationReference? reference = null,
-        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false)
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false,
+        NativeImportCatalog? nativeImportCatalog = null)
     {
         ArgumentNullException.ThrowIfNull(trees);
         cancellationToken.ThrowIfCancellationRequested();
@@ -684,7 +707,7 @@ public sealed class Compilation
                 snapshotArray, sourceDiagnosticBuilder.ToImmutable());
         }
         var binder = new Binder(snapshotArray, buffers, cancellationToken, isLibrary, reference,
-            runtimePolicy, coreLibrary);
+            runtimePolicy, coreLibrary, nativeImportCatalog);
         var program = binder.Bind();
         if (binder.Diagnostics.Count != 0)
         {

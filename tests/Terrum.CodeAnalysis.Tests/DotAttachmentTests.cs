@@ -176,11 +176,23 @@ public sealed class DotAttachmentTests
         Assert.Equal(source, tree.Root.ToFullString());
     }
 
-    [Theory]
-    [InlineData("[N.Policy] int32 Main() { return 42; }")]
-    [InlineData("int32 Main() { return node?.Value; }")]
-    public void UnsupportedQualifiedAttributesAndOptionalAccessRemainUnsupported(string source)
+    [Fact]
+    public void QualifiedAttributesRemainSemanticallyUnsupported()
     {
+        const string source = "[N.Policy] int32 Main() { return 42; }";
+        var tree = SyntaxTree.Parse(source);
+        Assert.False(tree.HasErrors);
+        Assert.Equal(source, tree.Root.ToFullString());
+
+        var compilation = Compilation.Create(tree);
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void OptionalAccessRemainsUnsupported()
+    {
+        const string source = "int32 Main() { return node?.Value; }";
         var tree = SyntaxTree.Parse(source);
         Assert.True(tree.HasErrors);
         Assert.Equal(source, tree.Root.ToFullString());

@@ -219,4 +219,6 @@ public enum TokenKind
     DotDotCaret,
     /// <summary>Optional member access (<c>?.</c>).</summary>
     QuestionDot,
+    /// <summary>The <c>extern</c> linkage keyword.</summary>
+    ExternKeyword,
 }

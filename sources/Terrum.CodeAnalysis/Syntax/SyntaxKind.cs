@@ -153,4 +153,6 @@ public enum SyntaxKind
     IsInitializedExpression,
     /// <summary>A transparent namespace-level type alias declaration.</summary>
     AliasDeclaration,
+    /// <summary>A bodyless callable declaration terminated by a semicolon.</summary>
+    ExternalBody,
 }

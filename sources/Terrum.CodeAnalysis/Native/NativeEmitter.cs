@@ -33,11 +33,62 @@ public static class NativeEmitter
         NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
         EmitWithImportUsage(program, bindings, runtimePolicy, cancellationToken).Image;
 
+    /// <summary>Emits a native executable using only the selected compiler-owned native import catalog.</summary>
+    public static byte[] EmitWithNativeImports(BoundProgram program, NativeRuntimePolicy runtimePolicy,
+        CancellationToken cancellationToken = default) =>
+        EmitWithNativeImportsCore(program, runtimePolicy, allowApplicationDirectory: false, cancellationToken);
+
+    internal static byte[] EmitWithNativeImportsForTesting(BoundProgram program,
+        NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
+        EmitWithNativeImportsCore(program, runtimePolicy, allowApplicationDirectory: true, cancellationToken);
+
+    private static byte[] EmitWithNativeImportsCore(BoundProgram program, NativeRuntimePolicy runtimePolicy,
+        bool allowApplicationDirectory, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        var catalog = program.NativeImportCatalog;
+        if (catalog is null || program.NativeImportCatalogId != catalog.Identity)
+        {
+            throw new ArgumentException("The verified program does not retain its selected native import catalog.",
+                nameof(program));
+        }
+
+        var bindings = ImmutableArray.CreateBuilder<NativeImportBinding>();
+        foreach (var function in program.Functions)
+        {
+            if (!function.IsExternal)
+            {
+                continue;
+            }
+            if (function.NativeImportKey is not string key
+                || !catalog.TryGetImport(key, out var definition)
+                || definition is null || !catalog.MatchesFunction(function, definition)
+                || definition.DeploymentPolicy != NativeImportDeploymentPolicy.System32
+                    && !(allowApplicationDirectory
+                        && definition.DeploymentPolicy == NativeImportDeploymentPolicy.ApplicationDirectory))
+            {
+                throw new ArgumentException("Every source native import must match the selected trusted catalog.",
+                    nameof(program));
+            }
+            bindings.Add(new NativeImportBinding(function.Name, definition.DllName, definition.ExportName));
+        }
+
+        if (bindings.Count == 0)
+        {
+            throw new ArgumentException("The program selects a native import catalog but contains no imports.",
+                nameof(program));
+        }
+        return EmitWithImportUsage(program, bindings.ToImmutable(), runtimePolicy, cancellationToken,
+            allowNativeImports: true).Image;
+    }
+
     internal static (byte[] Image, ImmutableArray<NativeImportBinding> Imports)
         EmitWithImportUsage(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
-            NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
+            NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default,
+            bool allowNativeImports = false)
     {
-        var (code, selected) = CompileWithImports(program, bindings, runtimePolicy, cancellationToken);
+        var (code, selected) = CompileWithImports(program, bindings, runtimePolicy, cancellationToken,
+            allowNativeImports);
         return (PeImage.Build(code), UsedImports(code, selected));
     }
 
@@ -48,7 +99,8 @@ public static class NativeEmitter
 
     private static (NativeCode Code, Dictionary<int, NativeImportBinding> Selected)
         CompileWithImports(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
-            NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken)
+            NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken,
+            bool allowNativeImports = false)
     {
         if (runtimePolicy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
@@ -60,6 +112,10 @@ public static class NativeEmitter
         if (program.RequiresSourceGrant)
         {
             throw new NotSupportedException("Native modules do not support Host.Source requirements.");
+        }
+        if (program.NativeImportCatalogId is not null && !allowNativeImports)
+        {
+            throw new NotSupportedException("JIT and low-level import binding do not support source native imports.");
         }
         SemanticVerifier.VerifyReferences(program);
         if (program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
@@ -251,6 +307,7 @@ public static class NativeEmitter
         }
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(program);
+        SemanticVerifier.RejectSourceNativeImports(program, "PE library emission");
         if (program.RequiresSourceGrant && !program.IsInvocationSourceBound && sourceDependent is null)
         {
             throw new NotSupportedException("An invocation-scoped Host.Source grant must be bound through NativeJit.");
@@ -409,6 +466,10 @@ public static class NativeEmitter
         }
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(program);
+        if (program.NativeImportCatalogId is not null)
+        {
+            throw new NotSupportedException("Source native imports require the catalog-checked EmitWithNativeImports path.");
+        }
         if (program.RequiresSourceGrant && !program.IsInvocationSourceBound)
         {
             throw new NotSupportedException("An invocation-scoped Host.Source grant must be bound through NativeJit.");

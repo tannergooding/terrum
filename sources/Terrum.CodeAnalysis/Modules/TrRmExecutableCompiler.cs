@@ -38,6 +38,7 @@ public static partial class TrRmExecutableCompiler
     public static byte[] Emit(BoundProgram program, string moduleIdentity)
     {
         ArgumentNullException.ThrowIfNull(program);
+        SemanticVerifier.RejectSourceNativeImports(program, "TRRM");
         if (string.IsNullOrEmpty(moduleIdentity))
         {
             throw new ArgumentException("A module identity is required.", nameof(moduleIdentity));

@@ -30,76 +30,17 @@ prerequisite has already been met.
 | 3 | General separate compilation | Priorities 5–6 and 11 |
 | 4 | Rich libraries/self-hosting | Priorities 7–8 and 12 |
 
-1. **Full runtime/structured contracts — references and safety.** General
-   reference/access/loan metadata and caller-unsafe member contracts still
-   need definition before wider use across calls or imports. Structured
-   semantic-module revision 70 provisionally carries top-level caller-unsafe
-   obligations, narrow readonly-instance and static `Copy` method slices,
-   recursively exportable by-value Copy signatures, and readonly instance and
-   storage-free static getters with recursively exportable `Copy` results,
-   plus caller-unsafe public instance fields and existing mutable receiver
-   loans through eligible public `Copy` struct paths, all through explicit
-   unsafe-block scopes. Revision 67 added top-level and eligible static
-   scalar/`Copy` `unsafe(expr)` call scopes; revision 68 adds eligible
-   caller-unsafe field-value reads to those expression extents while
-   excluding updates and loans. Revision 69 also provisionally carries
-   caller-unsafe readonly instance and storage-free static getter calls in
-   `unsafe(expr)` for eligible public `Copy` owners, with recursively
-   exportable `Copy` results. It preserves canonical getter identity and
-   permits producer qualification only during linking; mutation, loans, TRRM
-   and scalar-frontend support remain excluded. Revision 70 also provisionally
-   persists eligible caller-unsafe readonly instance-method calls in
-   `unsafe(expr)`, validating the owner-relative language identifier under
-   Unicode-XID plus the underscore exception and
-   allowing the exact shared-owner producer qualification only during
-   linking. Revision 70 did not support mutable or loan receivers,
-   constructors, operators or reference/output modes. Revision 71 provisionally
-   carries a mutable field-receiver loan only as source/formal argument zero
-   for an ordinary synchronous mutable instance-method call wholly inside
-   `unsafe(expr)`. At least one caller-unsafe field edge, recursively public
-   non-unique `Copy` layouts and all existing access, initialization, place, ownership
-   and reservation checks remain mandatory; wrapped/reordered loans,
-   caller-unsafe mutable methods, escaping references, TRRM and scalar
-   frontend support remain excluded from revision 71. This uses existing
-   call/loan representations and does not approve the broader reference
-   metadata proposal. Revision 72 provisionally extends the expression scope
-   to caller-unsafe mutable receiver methods, using the same direct field-loan
-   shape and requiring the complete call to remain in `unsafe(expr)`. The
-   writer and reader validate the complete argument mapping and `MutReceiver`
-   body contract; mutable receiver imports and direct exports remain
-   unsupported. This bounded implementation adds no ABI or authorization bit
-   and does not approve the broader reference-call metadata proposal.
-   Revision 73 provisionally extends `unsafe(expr)` persistence to eligible
-   caller-unsafe static binary nominal operators on recursively exportable
-   public `Copy` owners. The full call must be enclosed, use two exact
-   by-value owner operands and canonical positional mapping, and satisfy the
-   existing owner-result or comparison-`bool` signature contract. Revision 74
-   provisionally adds recognized unary plus, negation, logical-not and
-   ones-complement calls with an exact by-value owner operand and an existing
-   unary-contract result. Revision 75 provisionally adds caller-unsafe
-   nominal prefix/postfix `++`/`--` updates through the same complete
-   expression-scope boundary; unsafe field mutation places remain excluded.
-   The update slice leaves existing unsafe-block behavior unchanged.
-   Revision 76 provisionally adds caller-unsafe constructors for eligible
-   public, non-unique `Copy` owners with recursively exportable layouts and
-   by-value explicit parameters. It preserves valid named-argument mappings
-   and supports both expression and unsafe-block scopes; managed-class
-   factories, unique owners and reference/output parameters remain excluded.
-   These slices add no ABI, TRRM or scalar-frontend support and do not approve
-   the broader proposal.
-   Revision 64 also provisionally
-   persists identity for supported static operators on public `Copy` structs,
-   preserving unsafe effects and nominal-update target checks. These bounded
-   implementations do not settle the general schema or approve the
-   [reference-call metadata proposal](proposals/reference-call-metadata.md),
-   which recommends a narrow first dependency registry and reuse of the
-   assigned caller-unsafe effect bit. The proposal recommends a structurally
-   validated indexed-Body region for explicit caller-unsafe scopes. A bounded
-   kind-`0x06` implementation now admits indexed calls provisionally, while
-   compact-linear calls and calls without validated unsafe scope remain
-   unsupported; the broader proposal remains unapproved. The `unsafe(expr)`
-   getter slice is implemented provisionally but remains unapproved along
-   with the broader metadata proposal.
+1. **Full runtime/structured contracts — references and safety.** Complete
+   callable access, caller-unsafe obligations, reference/loan parameter
+   metadata, and producer-owned transfer/share capabilities before widening
+   their use across calls and imports. Define how these contracts persist and
+   are checked across separately compiled modules, including canonical target
+   identity and complete argument mapping. Preserve existing access,
+   initialization, place, ownership and reservation checks; do not infer
+   lifetime or memory-safety guarantees from `unsafe`. The
+   [reference-call metadata proposal](proposals/reference-call-metadata.md)
+   records one unapproved schema recommendation. Implemented bounded slices
+   are tracked in the [implementation reference](implementation.md).
 2. **Full runtime/structured contracts — initialization and outputs.** Complete
    general `out`/`init ref<T>` declaration and call migration with definite
    initialization, cleanup and publication rules. Preserve their distinct

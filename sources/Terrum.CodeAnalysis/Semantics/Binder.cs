@@ -59,8 +59,10 @@ internal sealed partial class Binder
     private readonly Dictionary<string, string> _primitiveBackingFields = new(StringComparer.Ordinal);
     private readonly CompilationReference? _reference;
     private readonly BoundRuntimePolicy _runtimePolicy;
+    private readonly NativeImportCatalog? _nativeImportCatalog;
     private bool _usesNativeBuffer;
     private bool _usesManagedNode;
+    private bool _hasNativeImports;
 
     private sealed class LoopBinding
     {
@@ -100,11 +102,13 @@ internal sealed partial class Binder
 
     internal Binder(ImmutableArray<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, CancellationToken cancellationToken,
         bool isLibrary = false, CompilationReference? reference = null,
-        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false)
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false,
+        NativeImportCatalog? nativeImportCatalog = null)
     {
-        if (coreLibrary && (!isLibrary || reference is not null))
+        if (coreLibrary && (!isLibrary || reference is not null)
+            || nativeImportCatalog is not null && (isLibrary || reference is not null || coreLibrary))
         {
-            throw new ArgumentException("Core declarations require an independent library compilation.");
+            throw new ArgumentException("Core declarations and source native imports require their respective compilation modes.");
         }
         _tree = trees[0];
         _trees = trees;
@@ -114,6 +118,7 @@ internal sealed partial class Binder
         _coreLibrary = coreLibrary;
         _reference = reference;
         _runtimePolicy = runtimePolicy;
+        _nativeImportCatalog = nativeImportCatalog;
     }
 
     internal IReadOnlyList<Diagnostic> Diagnostics => _diagnostics is not null
@@ -273,7 +278,8 @@ internal sealed partial class Binder
                         }
                         continue;
                     }
-                    if (name == "Span" || qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
+                    if (qualified == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
+                        || name == "Span" || qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
                         or "MutableInt32BufferView"
                         || name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
                     {
@@ -598,6 +604,8 @@ internal sealed partial class Binder
                 || _reference?.RequiresSourceGrant == true,
             InvocationProfileId = _buffers.FirstOrDefault(static buffer => buffer.InvocationProfileId is not null)
                 ?.InvocationProfileId ?? _reference?.InvocationProfileId,
+            NativeImportCatalogId = _hasNativeImports ? _nativeImportCatalog?.Identity : null,
+            NativeImportCatalog = _hasNativeImports ? _nativeImportCatalog : null,
             RuntimePolicy = _runtimePolicy,
         };
         if (!SemanticVerifier.TryVerifySource(program, out var functionIndex, out var span, out var exceededWorkLimit, out var invalidEffect))
@@ -613,6 +621,7 @@ internal sealed partial class Binder
                 "UnsafeRecovery" => ("TRM3021", "Checked failure recovery requires an unsafe block."),
                 "CheckedPolicy" => ("TRM3022", "Recovery requires the checked-exceptions runtime policy."),
                 "Ownership" => ("TRM3023", "A unique value must be moved from a live named owner; copies, vacant reads, and escaping receiver loans are not allowed."),
+                "NativeImport" => ("TRM3030", "The source native import does not match its selected compiler-owned catalog."),
                 _ => ("TRM3016", exceededWorkLimit
                     ? "Source exceeds the semantic verification work limit."
                     : "Source violates definite assignment, initialization, or executable type rules."),
@@ -642,6 +651,67 @@ internal sealed partial class Binder
         }
         return builder.ToString();
     }
+
+    private static string AttributeName(SyntaxNode attribute)
+    {
+        var builder = new StringBuilder();
+        var start = attribute.Children is [
+            SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
+            SyntaxTokenElement { Token.Kind: TokenKind.ReturnKeyword },
+            SyntaxTokenElement { Token.Kind: TokenKind.Colon },
+            ..
+        ] ? 3 : 1;
+        for (var index = start; index < attribute.Children.Length; index++)
+        {
+            if (attribute.Children[index] is not SyntaxTokenElement token)
+            {
+                break;
+            }
+            if (token.Token.Kind == TokenKind.Identifier)
+            {
+                _ = builder.Append(token.Token.Name);
+            }
+            else if (token.Token.Kind == TokenKind.Dot)
+            {
+                _ = builder.Append('.');
+            }
+            else
+            {
+                break;
+            }
+        }
+        return builder.ToString();
+    }
+
+    private static bool TryDecodeNativeImportAttribute(SyntaxNode attribute,
+        NativeImportAttributeDefinition definition, out string key)
+    {
+        key = "";
+        var children = attribute.Children;
+        if (definition.ArgumentCount != 1 || !definition.RequiresStringLiteral
+            || children.Length != 10
+            || children[0] is not SyntaxTokenElement open || open.Token.Kind != TokenKind.OpenBracket
+            || children[1] is not SyntaxTokenElement namespaceName || namespaceName.Token.Kind != TokenKind.Identifier
+            || namespaceName.Token.Name != "Terrum"
+            || children[2] is not SyntaxTokenElement firstDot || firstDot.Token.Kind != TokenKind.Dot
+            || children[3] is not SyntaxTokenElement typeNamespace || typeNamespace.Token.Kind != TokenKind.Identifier
+            || typeNamespace.Token.Name != "Interop"
+            || children[4] is not SyntaxTokenElement secondDot || secondDot.Token.Kind != TokenKind.Dot
+            || children[5] is not SyntaxTokenElement typeName || typeName.Token.Kind != TokenKind.Identifier
+            || typeName.Token.Name != "NativeImport"
+            || children[6] is not SyntaxTokenElement openParen || openParen.Token.Kind != TokenKind.OpenParen
+            || children[7] is not SyntaxTokenElement argument || argument.Token.Kind != TokenKind.StringLiteral
+            || children[8] is not SyntaxTokenElement closeParen || closeParen.Token.Kind != TokenKind.CloseParen
+            || children[9] is not SyntaxTokenElement closeBracket || closeBracket.Token.Kind != TokenKind.CloseBracket)
+        {
+            return false;
+        }
+
+        return StringLiteralDecoder.TryDecode(argument.Token.Text.AsSpan(), out key);
+    }
+
+    private static bool IsNativeImportInteger(PrimitiveType type) =>
+        type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
 
     internal static bool TryPrimitiveType(string name, out PrimitiveType type)
     {
@@ -676,7 +746,8 @@ internal sealed partial class Binder
                     || NameText((SyntaxNode)field.Children[^3]) != name
                     || field.Children.OfType<SyntaxTokenElement>().Any(static item =>
                         item.Token.Kind is TokenKind.StaticKeyword or TokenKind.PublicKeyword
-                            or TokenKind.InternalKeyword or TokenKind.MutKeyword or TokenKind.UnsafeKeyword))
+                            or TokenKind.InternalKeyword or TokenKind.MutKeyword or TokenKind.UnsafeKeyword
+                            or TokenKind.ExternKeyword))
                 {
                     Report("TRM3005", $"The Core primitive '{name}' needs a private, uninitialized backing field of its own type.",
                         field.Span);
@@ -748,7 +819,7 @@ internal sealed partial class Binder
                 isUnique |= modifier.Token.Kind == TokenKind.UniqueKeyword;
                 visibilityCount += modifier.Token.Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword ? 1 : 0;
                 if (modifier.Token.Kind is TokenKind.PrivateKeyword or TokenKind.StaticKeyword
-                    or TokenKind.MutKeyword or TokenKind.UnsafeKeyword)
+                    or TokenKind.MutKeyword or TokenKind.UnsafeKeyword or TokenKind.ExternKeyword)
                 {
                     Report("TRM3001", "Top-level structs support only public or internal visibility.", modifier.Span);
                 }
@@ -827,6 +898,11 @@ internal sealed partial class Binder
                     if (modifier.Token.Kind == TokenKind.StaticKeyword)
                     {
                         Report("TRM3001", "Static struct fields are not supported.", modifier.Span);
+                    }
+                    else if (modifier.Token.Kind == TokenKind.ExternKeyword)
+                    {
+                        Report("TRM3030", "Extern storage fields are outside the scalar callable import profile.",
+                            modifier.Span);
                     }
                     else if (modifier.Token.Kind == TokenKind.UnsafeKeyword)
                     {
@@ -951,7 +1027,7 @@ internal sealed partial class Binder
                             hasPrivateVisibility |= token.Kind == TokenKind.PrivateKeyword;
                         }
                         hasInvalidModifier |= token.Kind is TokenKind.StaticKeyword or TokenKind.MutKeyword
-                            or TokenKind.UniqueKeyword or TokenKind.UnsafeKeyword;
+                            or TokenKind.UniqueKeyword or TokenKind.UnsafeKeyword or TokenKind.ExternKeyword;
                     }
                     else if (child is SyntaxNode node)
                     {
@@ -1013,6 +1089,7 @@ internal sealed partial class Binder
                 }
                 var qualifiedName = Qualify(name.Name);
                 if (TryPrimitiveType(name.Name, out _)
+                    || qualifiedName == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
                     || qualifiedName is NativeBufferIntrinsics.TypeName
                         or "ReadonlyInt32BufferView" or "MutableInt32BufferView"
                     || name.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
@@ -1292,11 +1369,14 @@ internal sealed partial class Binder
         var isPrivate = false;
         var isInternal = false;
         var isStatic = false;
+        var isExternal = false;
         var isNoThrow = false;
         var requiresUnsafeCaller = false;
         var isCleanup = false;
         var isConstEval = false;
         var doesNotReturn = false;
+        SyntaxNode? nativeImportAttribute = null;
+        string? nativeImportKey = null;
         SyntaxNode? captures = null;
         SyntaxNode? resultDependencies = null;
         var accessModifiers = 0;
@@ -1307,8 +1387,30 @@ internal sealed partial class Binder
                 var returnTarget = attribute.Children.Length > 2
                     && attribute.Children[1] is SyntaxTokenElement { Token.Kind: TokenKind.ReturnKeyword }
                     && attribute.Children[2] is SyntaxTokenElement { Token.Kind: TokenKind.Colon };
-                var attributeName = attribute.Children.OfType<SyntaxTokenElement>()
-                    .FirstOrDefault(static token => token.Token.Kind == TokenKind.Identifier)?.Token.Text;
+                var attributeName = AttributeName(attribute);
+                if (attributeName.Contains('.')
+                    && attributeName != NativeImportCatalog.AttributeDefinition.FullyQualifiedName)
+                {
+                    Report("TRM3001", "Only the compiler-owned NativeImport qualified attribute is supported.",
+                        attribute.Span);
+                    continue;
+                }
+                if (attributeName == NativeImportCatalog.AttributeDefinition.FullyQualifiedName)
+                {
+                    if (nativeImportAttribute is not null)
+                    {
+                        Report("TRM3030", "NativeImport is a nonrepeatable compiler-owned attribute.", attribute.Span);
+                    }
+                    else if (!TryDecodeNativeImportAttribute(attribute,
+                        NativeImportCatalog.AttributeDefinition, out nativeImportKey))
+                    {
+                        Report("TRM3030",
+                            "NativeImport requires exactly one string-literal key in its compiler-owned schema.",
+                            attribute.Span);
+                    }
+                    nativeImportAttribute = attribute;
+                    continue;
+                }
                 if (property)
                 {
                     Report("TRM3001", "Getter effects belong on the get accessor.", attribute.Span);
@@ -1367,6 +1469,16 @@ internal sealed partial class Binder
                 isMutable = true;
                 continue;
             }
+            if (declaration.Children[index] is SyntaxTokenElement external
+                && external.Token.Kind == TokenKind.ExternKeyword)
+            {
+                if (isExternal)
+                {
+                    Report("TRM3030", "A callable can declare only one extern modifier.", external.Span);
+                }
+                isExternal = true;
+                continue;
+            }
             if (declaration.Children[index] is SyntaxTokenElement unsafeModifier
                 && unsafeModifier.Token.Kind == TokenKind.UnsafeKeyword)
             {
@@ -1416,6 +1528,41 @@ internal sealed partial class Binder
         var getter = property && !directGetter ? (SyntaxNode)declaration.Children[^2] : null;
         var body = getter is SyntaxNode accessor ? (SyntaxNode)accessor.Children[^1]
             : (SyntaxNode)declaration.Children[^1];
+        var hasExternalBody = body.Kind == SyntaxKind.ExternalBody;
+        if (isExternal != hasExternalBody)
+        {
+            Report("TRM3030", "Only an extern callable may omit its body, and extern callables must end with ';'.",
+                declaration.Span);
+        }
+        if (nativeImportAttribute is not null && !isExternal)
+        {
+            Report("TRM3030", "NativeImport may appear only on an extern callable.", nativeImportAttribute.Span);
+        }
+        if (isExternal)
+        {
+            if (nativeImportAttribute is null)
+            {
+                Report("TRM3030", "An extern callable requires the compiler-owned NativeImport attribute.",
+                    declaration.Span);
+            }
+            if (_nativeImportCatalog is null)
+            {
+                Report("TRM3030", "Source native imports require an explicitly selected compiler import catalog.",
+                    declaration.Span);
+            }
+            if (constructor || property || operatorDeclaration || (containingType is not null && !isStatic)
+                || declaration.Children.OfType<SyntaxNode>().Any(static child =>
+                    child.Kind is SyntaxKind.TypeParameterList or SyntaxKind.ConstraintClause))
+            {
+                Report("TRM3030", "The scalar native-import profile supports only top-level or static non-generic functions.",
+                    declaration.Span);
+            }
+            if (isMutable)
+            {
+                Report("TRM3030", "The scalar native-import profile does not support mutable receiver contracts.",
+                    declaration.Span);
+            }
+        }
         if (property)
         {
             if (getter is not null)
@@ -1591,6 +1738,58 @@ internal sealed partial class Binder
         var qualifiedName = (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".")
             + (containingType is null ? "" : containingType + ".")
             + (constructor ? "#ctor" : property ? "#get:" + nameText : nameText);
+        NativeImportDefinition? importDefinition = null;
+        if (isExternal && nativeImportKey is string importKey)
+        {
+            if (_nativeImportCatalog is null
+                || !_nativeImportCatalog.TryGetImport(importKey, out importDefinition))
+            {
+                Report("TRM3030", $"Native import key '{importKey}' is not present in the selected catalog.",
+                    nativeImportAttribute?.Span ?? declaration.Span);
+            }
+        }
+        BoundFunction? externalFunction = null;
+        if (hasExternalBody)
+        {
+            var boundParameters = declared.ToImmutable();
+            var declaringType = containingType is null ? null
+                : (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".") + containingType;
+            externalFunction = new BoundFunction(qualifiedName, classConstructor ? PrimitiveType.Void : returnType,
+                [.. boundParameters.Select(static parameter => new BoundVariable(
+                    parameter.Name, parameter.Type, false, parameter.Span) {
+                    IsOut = parameter.IsOut,
+                    IsInit = parameter.IsInit,
+                })], boundParameters.Length, new BoundBlock([], declaration.Span), declaration.Span) {
+                IsExternal = true,
+                IsPrivate = isPrivate,
+                IsInternal = isInternal,
+                IsStatic = isStatic,
+                IsOperator = operatorDeclaration,
+                IsNoThrow = isNoThrow,
+                RequiresUnsafeCaller = requiresUnsafeCaller,
+                DoesNotReturn = doesNotReturn,
+                IsConstructor = constructor,
+                IsClassConstructor = classConstructor,
+                IsCleanup = isCleanup,
+                DeclaringStruct = declaringType,
+                NativeImportKey = nativeImportKey,
+            };
+
+            if (isExternal && importDefinition is not null && externalFunction is not null
+                && (returnType == PrimitiveType.Void || IsNativeImportInteger(returnType))
+                && boundParameters.All(static parameter => !parameter.IsOut && !parameter.IsInit
+                    && IsNativeImportInteger(parameter.Type))
+                && _nativeImportCatalog is not null
+                && _nativeImportCatalog.MatchesFunction(externalFunction, importDefinition))
+            {
+                _hasNativeImports = true;
+            }
+            else if (isExternal && importDefinition is not null)
+            {
+                Report("TRM3030", "The extern declaration's complete scalar signature and effects must exactly match its catalog entry.",
+                    declaration.Span);
+            }
+        }
         ImmutableArray<int> resultDependencyParameters = [];
         if (resultDependencies is not null)
         {
@@ -1647,7 +1846,7 @@ internal sealed partial class Binder
         _signatures.Add(new Signature(qualifiedName, classConstructor ? PrimitiveType.Void : returnType,
             declared.ToImmutable(), body, declaration, _tree,
             containingType, constructor && !classConstructor, isPrivate, isInternal, isMutable, isStatic,
-            isNoThrow, doesNotReturn) {
+            isNoThrow, doesNotReturn, externalFunction) {
             IsCleanup = isCleanup,
             IsOperator = operatorDeclaration,
             IsClassConstructor = classConstructor,

@@ -751,6 +751,7 @@ public sealed class Lexer
         "internal" => TokenKind.InternalKeyword,
         "private" => TokenKind.PrivateKeyword,
         "static" => TokenKind.StaticKeyword,
+        "extern" => TokenKind.ExternKeyword,
         "operator" => TokenKind.OperatorKeyword,
         "where" => TokenKind.WhereKeyword,
         "void" => TokenKind.VoidKeyword,

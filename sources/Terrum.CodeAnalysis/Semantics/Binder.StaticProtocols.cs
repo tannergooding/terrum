@@ -354,7 +354,7 @@ internal sealed partial class Binder
                         nameToken ??= tokenElement.Token.Kind == TokenKind.Identifier ? tokenElement.Token : null;
                         hasInvalidInterfaceModifier |= tokenElement.Token.Kind is TokenKind.PublicKeyword
                             or TokenKind.PrivateKeyword or TokenKind.StaticKeyword or TokenKind.MutKeyword
-                            or TokenKind.UniqueKeyword;
+                            or TokenKind.UniqueKeyword or TokenKind.ExternKeyword;
                     }
                     else if (child is SyntaxNode childNode)
                     {
@@ -471,7 +471,8 @@ internal sealed partial class Binder
                             staticModifierCount++;
                         }
                         hasInvalidModifier |= tokenKind is TokenKind.PrivateKeyword or TokenKind.PublicKeyword
-                            or TokenKind.InternalKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword;
+                            or TokenKind.InternalKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword
+                            or TokenKind.ExternKeyword;
                     }
                     else if (child is SyntaxNode { Kind: SyntaxKind.Attribute } attribute)
                     {
@@ -536,7 +537,8 @@ internal sealed partial class Binder
                     Report("TRM3001", "Static operator protocol signatures must match their operand and result formals and end in ';'.", member.Span);
                     continue;
                 }
-                if (!_protocols.TryAdd(qualified, new StaticProtocol(qualified,
+                if (qualified == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
+                    || !_protocols.TryAdd(qualified, new StaticProtocol(qualified,
                     new StaticOperatorKey(operation, arity), noThrow, unsafeModifierCount != 0,
                     hasSelf, node, tree)))
                 {
@@ -710,7 +712,8 @@ internal sealed partial class Binder
                 unsafeModifierCount++;
             }
             hasInvalidModifier |= tokenKind is TokenKind.PublicKeyword or TokenKind.PrivateKeyword
-                or TokenKind.StaticKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword;
+                or TokenKind.StaticKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword
+                or TokenKind.ExternKeyword;
         }
         var qualified = Qualify(nameToken?.Name ?? throw new InvalidOperationException());
         var arguments = parameters?.Children.OfType<SyntaxNode>().ToArray() ?? [];

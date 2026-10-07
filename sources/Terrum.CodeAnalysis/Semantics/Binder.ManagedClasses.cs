@@ -28,7 +28,8 @@ internal sealed partial class Binder
             return;
         }
         var qualified = Qualify(name.Name);
-        if (_classes.Count >= SemanticVerifier.MaximumVariables
+        if (qualified == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
+            || _classes.Count >= SemanticVerifier.MaximumVariables
             || !_classNames.TryAdd(qualified, (PrimitiveType)(ManagedClassTypes.First + _classes.Count))
             || _structNames.ContainsKey(qualified)
             || qualified is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
@@ -47,6 +48,10 @@ internal sealed partial class Binder
             }
             isMutable |= token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.MutKeyword;
             isPublic |= token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.PublicKeyword;
+            if (token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.ExternKeyword)
+            {
+                Report("TRM3030", "Extern is only valid on a supported callable declaration.", token.Token.Span);
+            }
         }
         _classes.Add(new BoundClass(qualified, [], 0) {
             IsInternal = !isPublic,

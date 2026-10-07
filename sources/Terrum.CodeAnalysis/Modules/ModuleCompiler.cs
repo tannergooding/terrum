@@ -612,6 +612,7 @@ public static partial class ModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(exports);
         ArgumentNullException.ThrowIfNull(program);
+        SemanticVerifier.RejectSourceNativeImports(program, "semantic modules");
         RejectCompilationLocalSpans(program);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
         {
@@ -785,6 +786,7 @@ public static partial class ModuleCompiler
     public static byte[] CreateConsumer(BoundProgram program, byte[] referenceProducer)
     {
         ArgumentNullException.ThrowIfNull(program);
+        SemanticVerifier.RejectSourceNativeImports(program, "semantic modules");
         RejectCompilationLocalSpans(program);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
         {

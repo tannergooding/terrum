@@ -1,0 +1,279 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
+using Xunit;
+
+namespace Terrum.CodeAnalysis.Tests;
+
+public sealed class NativeSourceImportTests
+{
+    private const string ImportKey = "windows-x64.system32.kernel32.GetCurrentThreadId";
+    private const string SignedFixtureKey = "test.application.native-import-abi.NativeFfiSigned";
+    private const string UnsignedFixtureKey = "test.application.native-import-abi.NativeFfiUnsigned";
+
+    [Fact]
+    public void SourceImportRequiresItsExactCatalogSignatureAndCompilerAttribute()
+    {
+        foreach (var source in new[] {
+            $"[Terrum.Interop.NativeImport(\"{ImportKey}\")] [NoThrow] extern int32 CurrentThreadId(); void Main() {{}}",
+            "[Terrum.Interop.NativeImport(\"unknown\")] [NoThrow] extern uint32 CurrentThreadId(); void Main() {}",
+            $"[Terrum.Interop.NativeImport(\"{ImportKey}\")] [NoThrow] extern uint32 CurrentThreadId(uint32 value); void Main() {{}}",
+            $"[NativeImport(\"{ImportKey}\")] [NoThrow] extern uint32 CurrentThreadId(); void Main() {{}}",
+        })
+        {
+            var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse(source));
+            Assert.Null(compilation.Program);
+            Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3030"
+                || diagnostic.Code == "TRM3001");
+        }
+    }
+
+    [Fact]
+    public void SourceCannotShadowCompilerOwnedImportAttribute()
+    {
+        var source = $$"""
+            namespace Terrum.Interop;
+            struct NativeImport { int32 Value; }
+            [NoThrow]
+            [Terrum.Interop.NativeImport("{{ImportKey}}")]
+            extern uint32 CurrentThreadId();
+            void Main() {}
+            """;
+        var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse(source));
+        Assert.Null(compilation.Program);
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3003");
+    }
+
+    [Fact]
+    public void BodylessCallableRequiresExtern()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("uint32 CurrentThreadId(); void Main() {}"));
+        Assert.Null(compilation.Program);
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3030");
+    }
+
+    [Fact]
+    public async Task SourceImportCallsReviewedSystemFunctionAsync()
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var source = $$"""
+            [Terrum.Interop.NativeImport("{{ImportKey}}")]
+            [NoThrow]
+            extern uint32 CurrentThreadId();
+
+            int32 Main() {
+                if (CurrentThreadId() == 0) {
+                    return 1;
+                }
+                return 0;
+            }
+
+            int32 Helper() { return 7; }
+            """;
+        var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(NativeImportCatalog.WindowsX64.Identity, program.NativeImportCatalogId);
+        Assert.Single(program.Functions, static function => function.IsExternal);
+
+        var image = NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast);
+        _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitWithImports(program,
+            [new NativeImportBinding("CurrentThreadId", "kernel32.dll", "GetCurrentThreadId")],
+            NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitCode(program,
+            NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<NotSupportedException>(() => ModuleCompiler.CreateProducer(
+            program with { EntryPoint = -1 }, ["Helper"]));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(
+            program with { EntryPoint = -1 }, "native-import-test"));
+        _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithImports(
+            program with { EntryPoint = -1 }, ["Helper"],
+            [new NativeImportBinding("CurrentThreadId", "unreviewed.dll", "UnreviewedTarget")],
+            NativeRuntimePolicy.FailFast));
+
+        var directory = Directory.CreateTempSubdirectory("terrum-source-import-").FullName;
+        var executablePath = Path.Combine(directory, "source-import.exe");
+        try
+        {
+            await File.WriteAllBytesAsync(executablePath, image).ConfigureAwait(true);
+            using var process = Process.Start(new ProcessStartInfo(executablePath) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = directory,
+            }) ?? throw new InvalidOperationException("Native executable did not start.");
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(true);
+            }
+            catch (TimeoutException)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+                throw;
+            }
+            Assert.Equal(0, process.ExitCode);
+        }
+        finally
+        {
+            File.Delete(executablePath);
+            Directory.Delete(directory);
+        }
+    }
+
+    [Fact]
+    public async Task SourceImportsMatchIndependentCRegisterStackAndResultAbiAsync()
+    {
+        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var vswhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            "Microsoft Visual Studio", "Installer", "vswhere.exe");
+        Assert.True(File.Exists(vswhere), "Visual Studio discovery is required to build the C ABI fixture.");
+        var repositoryRoot = FindRepositoryRoot();
+        var discover = new ProcessStartInfo(vswhere);
+        discover.WorkingDirectory = repositoryRoot;
+        foreach (var argument in new[] {
+            "-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+            "-property", "installationPath",
+        })
+        {
+            discover.ArgumentList.Add(argument);
+        }
+        var installation = (await RunAsync(discover, TimeSpan.FromSeconds(10)).ConfigureAwait(false)).Trim();
+        var environment = Path.Combine(installation, "VC", "Auxiliary", "Build", "vcvars64.bat");
+        Assert.True(File.Exists(environment), "Visual Studio x64 C++ build tools are required for the C ABI fixture.");
+
+        var directory = Directory.CreateTempSubdirectory("terrum-native-import-abi-").FullName;
+        var libraryPath = Path.Combine(directory, "native-import-abi-probe.dll");
+        var objectPath = Path.Combine(directory, "native-import-abi-probe.obj");
+        var executablePath = Path.Combine(directory, "native-import-abi-probe.exe");
+        var sourcePath = Path.Combine(repositoryRoot, "tests", "native", "native-import-abi-probe.c");
+        try
+        {
+            var build = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
+                ?? throw new InvalidOperationException("ComSpec is unset.")) {
+                Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /nologo /W4 /WX /O2 /MT /LD /TC /Fo\"{objectPath}\" /Fe\"{libraryPath}\" \"{sourcePath}\" /link /incremental:no\"",
+                WorkingDirectory = repositoryRoot,
+            };
+            _ = await RunAsync(build, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+
+            var catalog = NativeImportCatalog.CreateForTesting("test-native-import-abi-v1", [
+                new NativeImportDefinition(SignedFixtureKey, "native-import-abi-probe.dll", "NativeFfiSigned",
+                    [PrimitiveType.Int32, PrimitiveType.UInt32, PrimitiveType.Int64, PrimitiveType.UInt64,
+                        PrimitiveType.Int32, PrimitiveType.UInt32],
+                    PrimitiveType.Int64, true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory),
+                new NativeImportDefinition(UnsignedFixtureKey, "native-import-abi-probe.dll", "NativeFfiUnsigned",
+                    [PrimitiveType.UInt64, PrimitiveType.UInt32, PrimitiveType.Int64, PrimitiveType.UInt64,
+                        PrimitiveType.UInt32],
+                    PrimitiveType.UInt64, true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory),
+            ]);
+            var source = $$"""
+                [Terrum.Interop.NativeImport("{{SignedFixtureKey}}")]
+                [NoThrow]
+                extern int64 NativeFfiSigned(int32 first, uint32 second, int64 third, uint64 fourth,
+                    int32 fifth, uint32 sixth);
+
+                [Terrum.Interop.NativeImport("{{UnsignedFixtureKey}}")]
+                [NoThrow]
+                extern uint64 NativeFfiUnsigned(uint64 first, uint32 second, int64 third, uint64 fourth,
+                    uint32 fifth);
+
+                int32 Main() {
+                    if (NativeFfiSigned(-7, 11, -13, 17, -19, 23) != -1234567890123) {
+                        return 1;
+                    }
+                    if (NativeFfiUnsigned(2, 3, -5, 7, 11) != 18364758544493064720) {
+                        return 2;
+                    }
+                    return 0;
+                }
+                """;
+            var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
+                BoundRuntimePolicy.FailFast);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = Assert.IsType<BoundProgram>(compilation.Program);
+            var image = NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast);
+            await File.WriteAllBytesAsync(executablePath, image).ConfigureAwait(false);
+
+            using var process = Process.Start(new ProcessStartInfo(executablePath) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = directory,
+            }) ?? throw new InvalidOperationException("Native ABI fixture executable did not start.");
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(false);
+                }
+                throw;
+            }
+            Assert.Equal(0, process.ExitCode);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null;
+            directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "tests", "native", "native-import-abi-probe.c")))
+            {
+                return directory.FullName;
+            }
+        }
+        throw new DirectoryNotFoundException("Could not locate the native-import ABI fixture.");
+    }
+
+    private static async Task<string> RunAsync(ProcessStartInfo start, TimeSpan timeout)
+    {
+        start.UseShellExecute = false;
+        start.CreateNoWindow = true;
+        start.RedirectStandardOutput = true;
+        start.RedirectStandardError = true;
+        using var process = Process.Start(start)
+            ?? throw new InvalidOperationException("Could not start native ABI fixture command.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await process.WaitForExitAsync().WaitAsync(timeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            await process.WaitForExitAsync().ConfigureAwait(false);
+            throw;
+        }
+
+        var stdout = await output.ConfigureAwait(false);
+        var stderr = await error.ConfigureAwait(false);
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"Native ABI fixture command failed ({process.ExitCode}):\n{stdout}\n{stderr}");
+        }
+        return stdout;
+    }
+}

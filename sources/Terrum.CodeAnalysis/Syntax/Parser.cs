@@ -293,11 +293,20 @@ internal sealed class Parser
                 attribute.Add(Take());
                 attribute.Add(Take());
             }
-            attribute.Add(Expect(TokenKind.Identifier));
+            var name = Expect(TokenKind.Identifier);
+            attribute.Add(name);
+            var attributeName = name.Token.Name;
+            while (Current.Kind == TokenKind.Dot)
+            {
+                attribute.Add(TakeDot(qualified: true));
+                var component = Expect(TokenKind.Identifier);
+                attribute.Add(component);
+                attributeName = string.Concat(attributeName, ".", component.Token.Name);
+            }
             if (Current.Kind == TokenKind.OpenParen)
             {
                 attribute.Add(ExpectAttached(TokenKind.OpenParen));
-                if (attribute[^2] is SyntaxTokenElement { Token.Text: "DependsOn" })
+                if (attributeName == "DependsOn")
                 {
                     while (Current.Kind != TokenKind.CloseParen && Current.Kind != TokenKind.EndOfFile)
                     {
@@ -315,6 +324,10 @@ internal sealed class Parser
                         }
                         attribute.Add(Take());
                     }
+                }
+                else if (Current.Kind == TokenKind.StringLiteral)
+                {
+                    attribute.Add(Take());
                 }
                 else
                 {
@@ -689,6 +702,11 @@ internal sealed class Parser
 
     private SyntaxNode ParseCallableBody()
     {
+        if (Current.Kind == TokenKind.Semicolon)
+        {
+            return Node(SyntaxKind.ExternalBody, [Take()]);
+        }
+
         if (Current.Kind != TokenKind.Arrow)
         {
             return ParseBlock();
@@ -1526,7 +1544,8 @@ internal sealed class Parser
 
     private static bool IsModifier(TokenKind kind)
         => kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword
-            or TokenKind.StaticKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword or TokenKind.UnsafeKeyword;
+            or TokenKind.StaticKeyword or TokenKind.ExternKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword
+            or TokenKind.UnsafeKeyword;
 
     private static bool IsTypeStart(TokenKind kind) => kind is TokenKind.Identifier or TokenKind.VoidKeyword
         or TokenKind.WriteKeyword;

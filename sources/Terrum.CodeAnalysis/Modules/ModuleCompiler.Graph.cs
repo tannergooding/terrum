@@ -145,6 +145,7 @@ public static partial class ModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(exports);
+        SemanticVerifier.RejectSourceNativeImports(program, "semantic modules");
         RejectCompilationLocalSpans(program);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
         {

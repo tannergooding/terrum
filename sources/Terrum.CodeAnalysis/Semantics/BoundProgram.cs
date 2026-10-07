@@ -235,6 +235,11 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     /// <summary>The named invocation profile required by this program, or null for the source-only profile.</summary>
     public string? InvocationProfileId { get; internal init; }
 
+    /// <summary>The selected native import catalog identity, when source FFI is present.</summary>
+    public string? NativeImportCatalogId { get; internal init; }
+
+    internal NativeImportCatalog? NativeImportCatalog { get; init; }
+
     internal bool IsInvocationSourceBound { get; init; }
 
     /// <summary>The runtime behavior verified for this program and its imports.</summary>
@@ -316,6 +321,9 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 
     /// <summary>Whether this is an imported declaration with no implementation. Native emission requires it to be resolved.</summary>
     public bool IsExternal { get; init; }
+
+    /// <summary>The explicit native import key selected by a source semantic attribute, if any.</summary>
+    internal string? NativeImportKey { get; init; }
 
     /// <summary>Whether this function initializes its receiver's fields and returns the value.</summary>
     public bool IsConstructor { get; init; }

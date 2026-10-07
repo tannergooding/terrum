@@ -107,10 +107,12 @@ public static partial class SemanticVerifier
                 }
             }
         }
+        VerifyNativeImportCatalog(program);
         if (program.Classes.IsDefault || program.Classes.Length > MaximumVariables)
         {
             throw Invalid();
         }
+
         var usesManagedNodes = !program.Classes.IsEmpty || usesManagedFunctionNodes;
         // Isolated definition-site proofs may use private managed declarations, but executable
         // and persisted programs must still enforce the public external-call boundary.
@@ -419,7 +421,8 @@ public static partial class SemanticVerifier
             if (function.IsExternal && (!allowExternal
                 || function.Body.Statements.IsDefault || !function.Body.Statements.IsEmpty
                 || function.Variables.Length != function.ParameterCount + (function.IsConstructor ? 1 : 0)
-                || (!allowGenericProofDependencies && (function.IsPrivate || function.IsInternal
+                || (!allowGenericProofDependencies && ((function.NativeImportKey is null
+                    && (function.IsPrivate || function.IsInternal))
                     || ManagedClassTypes.IsManaged(function.ReturnType)
                     || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type))))))
             {
@@ -1667,6 +1670,62 @@ public static partial class SemanticVerifier
             }
         }
         return order.ToImmutable();
+    }
+
+    private static void VerifyNativeImportCatalog(BoundProgram program)
+    {
+        var catalog = program.NativeImportCatalog;
+        if (catalog is null)
+        {
+            if (program.NativeImportCatalogId is not null
+                || program.Functions.Any(static function => function.NativeImportKey is not null))
+            {
+                throw InvalidEffect(default, "NativeImport");
+            }
+            return;
+        }
+
+        if (program.NativeImportCatalogId != catalog.Identity)
+        {
+            throw InvalidEffect(default, "NativeImport");
+        }
+
+        var externalCount = 0;
+        foreach (var function in program.Functions)
+        {
+            if (!function.IsExternal)
+            {
+                if (function.NativeImportKey is not null)
+                {
+                    throw InvalidEffect(function.Span, "NativeImport");
+                }
+                continue;
+            }
+
+            externalCount++;
+            if (function.NativeImportKey is not string key
+                || !catalog.TryGetImport(key, out var definition)
+                || definition is null || !catalog.MatchesFunction(function, definition))
+            {
+                throw InvalidEffect(function.Span, "NativeImport");
+            }
+        }
+
+        if (externalCount == 0)
+        {
+            throw InvalidEffect(default, "NativeImport");
+        }
+    }
+
+    internal static void RejectSourceNativeImports(BoundProgram program, string target)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentException.ThrowIfNullOrWhiteSpace(target);
+        if (program.NativeImportCatalog is not null || program.NativeImportCatalogId is not null
+            || program.Functions.Any(static function => function.NativeImportKey is not null))
+        {
+            throw new NotSupportedException($"Source native imports are not supported by {target}.");
+        }
     }
 
     internal static bool TryVerifySource(BoundProgram program, out int functionIndex, out TextSpan span, out bool exceededWorkLimit,
