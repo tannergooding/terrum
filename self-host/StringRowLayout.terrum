@@ -1,0 +1,63 @@
+namespace Terrum.CodeAnalysis;
+
+// Validates physical row framing only; encoding-specific text validity belongs to reference use sites.
+public static bool TryGetStringRowLayout(int32 start, int32 length,
+    init ref<int32> encoding, init ref<int32> contentByteLength)
+{
+    if (start < 0 || length < 8 || start > Host.Rows.Length
+        || length > Host.Rows.Length - start)
+    {
+        return false;
+    }
+
+    mut int32 index = 0;
+    while (index < length)
+    {
+        int32 value = Host.Rows[start + index];
+        if (value < 0 || value > 255)
+        {
+            return false;
+        }
+        index = index + 1;
+    }
+
+    int32 rowEncoding = Host.Rows[start];
+    if (rowEncoding > 3)
+    {
+        return false;
+    }
+
+    mut int32 unitWidth = 1;
+    if (rowEncoding == 2)
+    {
+        unitWidth = 2;
+    }
+    else if (rowEncoding == 3)
+    {
+        unitWidth = 4;
+    }
+
+    int32 units = Host.Rows[start + 1]
+        | (Host.Rows[start + 2] << 8) | (Host.Rows[start + 3] << 16);
+    int32 contentLength = units * unitWidth;
+    int32 terminatorEnd = 4 + contentLength + unitWidth;
+    int32 paddedLength = terminatorEnd + ((4 - (terminatorEnd & 3)) & 3);
+    if (paddedLength != length)
+    {
+        return false;
+    }
+
+    index = 4 + contentLength;
+    while (index < length)
+    {
+        if (Host.Rows[start + index] != 0)
+        {
+            return false;
+        }
+        index = index + 1;
+    }
+
+    encoding = rowEncoding;
+    contentByteLength = contentLength;
+    return true;
+}

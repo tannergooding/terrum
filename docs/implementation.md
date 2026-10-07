@@ -144,6 +144,11 @@ row; both builders match the hosted writer with exact capacity and leave output
 vacant on one-byte-short refusal under both runtime policies and AOT/JIT. The
 name builder also succeeds for that maximum source grant through the persisted
 semantic-module JIT, including the UTF-8 byte-count header and terminator.
+The `StringRowLayout` candidate validates physical row framing over caller-
+supplied byte words and returns the encoding and content byte length. It checks
+byte range, assigned flags, row extent, zero terminator and alignment padding,
+but deliberately leaves UTF-8/16/32 scalar validity, ASCII content, name
+emptiness and embedded-zero policy to reference-use decoding.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.
