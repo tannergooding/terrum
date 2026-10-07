@@ -1401,8 +1401,9 @@ metadata or makes the frontend standalone.
 Projection v85 encodes the source-argument-to-formal-position map in each
 direct scalar call node while retaining argument children in source order.
 The independent reader rechecks each label against the callee declaration and
-the complete map before lowering. It applies to by-value calls only; named
-`out`/`init ref` arguments and overload selection remain unsupported.
+the complete map before lowering. It applies to the existing supported
+by-value and scalar `out`/`init ref` call arguments; overload selection remains
+unsupported.
 Single-function v85 applies the same contract to self-calls; complete-program
 v85 applies it to direct self/global calls.
 
