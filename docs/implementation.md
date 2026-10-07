@@ -205,6 +205,19 @@ Generic ranges retain the hosted reader's bounds-only behavior; ownership,
 arity, constraints and execution remain separate. The reader entry point
 requires a nonempty MethodSig table and allows an empty Param table when its
 declared count is zero.
+The `ModuleTableValidation` candidate checks fixed-row fields, Feature bounds,
+nondecreasing table cursors, entry-method ownership and unique decoded
+identities against the hosted `TrRmModuleTableReader`. It uses
+`IdentitySlots` as caller-provided writable scratch of exactly
+`recordCount + 1` words (slot zero is unused; contents are not preserved) and
+deterministic in-place heapsort, comparing strict Unicode-scalar sequences so
+equal names across String encodings are rejected without a collision-dependent
+hash path. Its AOT/JIT fixtures cover both
+runtime policies, cursor/Feature boundaries, duplicate and equal-prefix names,
+malformed referenced identities, and malformed unreferenced String rows.
+Like the hosted Module reader, it validates the complete String offset index
+but decodes only referenced identity rows; this structural candidate does not
+replace the hosted reader or establish module linking or execution support.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.

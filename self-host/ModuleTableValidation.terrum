@@ -1,0 +1,407 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateModuleTable(int32 recordCount, int32 stringCount,
+    int32 moduleRefCount, int32 typeDefCount, int32 methodDefCount,
+    int32 sourceFileCount, int32 featureCount)
+{
+    if (recordCount <= 0 || recordCount > 0xFF_FFFF
+        || !IsValidModuleTableCount(moduleRefCount)
+        || !IsValidModuleTableCount(typeDefCount)
+        || !IsValidModuleTableCount(methodDefCount)
+        || !IsValidModuleTableCount(sourceFileCount)
+        || featureCount < -1 || featureCount > 0xFF_FFFF
+        || recordCount * 44 != Host.Modules.Length
+        || Host.IdentitySlots.Length != recordCount + 1
+        || !TryGetVariableTableRowExtent(stringCount, 8, 4, 1,
+            init var firstStringStart, init var firstStringLength))
+    {
+        return false;
+    }
+
+    int32 stringIndexByteLength = (stringCount + 1) * 4;
+    for (mut int32 slot = 0; slot <= recordCount; slot = slot + 1)
+    {
+        Host.IdentitySlots[slot] = 0;
+    }
+
+    mut uint32 previousModuleRefStart = 0;
+    mut uint32 previousTypeDefStart = 0;
+    mut uint32 previousMethodDefStart = 0;
+    mut uint32 previousSourceFileStart = 0;
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        if (!TryValidateModuleRow(row, recordCount, stringCount, moduleRefCount,
+            typeDefCount, methodDefCount, sourceFileCount, featureCount,
+            stringIndexByteLength, previousModuleRefStart, previousTypeDefStart,
+            previousMethodDefStart, previousSourceFileStart,
+            init var moduleRefStart, init var typeDefStart,
+            init var methodDefStart, init var sourceFileStart))
+        {
+            return false;
+        }
+
+        previousModuleRefStart = moduleRefStart;
+        previousTypeDefStart = typeDefStart;
+        previousMethodDefStart = methodDefStart;
+        previousSourceFileStart = sourceFileStart;
+    }
+
+    return TrySortAndCheckModuleIdentities(recordCount, stringCount, stringIndexByteLength);
+}
+
+bool TryValidateModuleRow(int32 row, int32 recordCount, int32 stringCount,
+    int32 moduleRefCount, int32 typeDefCount, int32 methodDefCount,
+    int32 sourceFileCount, int32 featureCount, int32 stringIndexByteLength,
+    uint32 previousModuleRefStart, uint32 previousTypeDefStart,
+    uint32 previousMethodDefStart, uint32 previousSourceFileStart,
+    init ref<uint32> moduleRefStartResult, init ref<uint32> typeDefStartResult,
+    init ref<uint32> methodDefStartResult, init ref<uint32> sourceFileStartResult)
+{
+    int32 rowStart = (row - 1) * 44;
+    if (!TryReadModuleTableWord(rowStart, 0, init var identity)
+        || !TryReadModuleTableWord(rowStart, 4, init var targetRequirement)
+        || !TryReadModuleTableWord(rowStart, 8, init var runtimePolicy)
+        || !TryReadModuleTableWord(rowStart, 12, init var entryMethod)
+        || !TryReadModuleTableWord(rowStart, 16, init var featureFirst)
+        || !TryReadModuleTableWord(rowStart, 20, init var featureRangeCount)
+        || !TryReadModuleTableWord(rowStart, 24, init var moduleFlags)
+        || !TryReadModuleTableWord(rowStart, 28, init var moduleRefStart)
+        || !TryReadModuleTableWord(rowStart, 32, init var typeDefStart)
+        || !TryReadModuleTableWord(rowStart, 36, init var methodDefStart)
+        || !TryReadModuleTableWord(rowStart, 40, init var sourceFileStart))
+    {
+        return false;
+    }
+
+    if (identity == 0 || identity > 0xFF_FFFF || identity > uint32(stringCount)
+        || targetRequirement > 1 || runtimePolicy > 1
+        || !IsValidModuleFeatureRange(featureFirst, featureRangeCount, featureCount)
+        || moduleFlags != 0
+        || !IsValidModuleCursor(moduleRefStart, moduleRefCount)
+        || !IsValidModuleCursor(typeDefStart, typeDefCount)
+        || !IsValidModuleCursor(methodDefStart, methodDefCount)
+        || !IsValidModuleCursor(sourceFileStart, sourceFileCount))
+    {
+        return false;
+    }
+
+    if (row == 1)
+    {
+        if (moduleRefStart != 1 || typeDefStart != 1
+            || methodDefStart != 1 || sourceFileStart != 1)
+        {
+            return false;
+        }
+    }
+    else if (moduleRefStart < previousModuleRefStart
+        || typeDefStart < previousTypeDefStart
+        || methodDefStart < previousMethodDefStart
+        || sourceFileStart < previousSourceFileStart)
+    {
+        return false;
+    }
+
+    mut uint32 methodEnd = uint32(methodDefCount + 1);
+    if (row < recordCount)
+    {
+        if (!TryReadModuleTableWord(row * 44, 36, init var nextMethodStart))
+        {
+            return false;
+        }
+        methodEnd = nextMethodStart;
+    }
+    if (entryMethod != 0 && (entryMethod < methodDefStart || entryMethod >= methodEnd))
+    {
+        return false;
+    }
+
+    if (!TryGetValidatedModuleIdentityExtent(stringCount, stringIndexByteLength,
+            int32(identity), init var identityStart, init var identityLength,
+            init var identityEncoding, init var identityContentLength)
+        || !TryValidateModuleIdentityText(identityStart, identityContentLength, identityEncoding))
+    {
+        return false;
+    }
+
+    Host.IdentitySlots[row] = int32(identity);
+    moduleRefStartResult = moduleRefStart;
+    typeDefStartResult = typeDefStart;
+    methodDefStartResult = methodDefStart;
+    sourceFileStartResult = sourceFileStart;
+    return true;
+}
+
+bool TrySortAndCheckModuleIdentities(int32 recordCount, int32 stringCount,
+    int32 stringIndexByteLength)
+{
+    mut int32 root = recordCount / 2;
+    while (root > 0)
+    {
+        if (!TrySiftModuleIdentityHeap(root, recordCount, stringCount, stringIndexByteLength))
+        {
+            return false;
+        }
+        root = root - 1;
+    }
+
+    mut int32 heapEnd = recordCount;
+    while (heapEnd > 1)
+    {
+        mut int32 value = Host.IdentitySlots[1];
+        Host.IdentitySlots[1] = Host.IdentitySlots[heapEnd];
+        Host.IdentitySlots[heapEnd] = value;
+        heapEnd = heapEnd - 1;
+        if (!TrySiftModuleIdentityHeap(1, heapEnd, stringCount, stringIndexByteLength))
+        {
+            return false;
+        }
+    }
+
+    for (mut int32 row = 2; row <= recordCount; row = row + 1)
+    {
+        if (!TryCompareModuleIdentityRows(stringCount, stringIndexByteLength,
+            Host.IdentitySlots[row - 1], Host.IdentitySlots[row], init var comparison)
+            || comparison == 0)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TrySiftModuleIdentityHeap(int32 root, int32 heapEnd,
+    int32 stringCount, int32 stringIndexByteLength)
+{
+    mut int32 current = root;
+    while (current <= heapEnd / 2)
+    {
+        mut int32 child = current * 2;
+        if (child < heapEnd)
+        {
+            if (!TryCompareModuleIdentityRows(stringCount, stringIndexByteLength,
+                Host.IdentitySlots[child], Host.IdentitySlots[child + 1], init var childComparison))
+            {
+                return false;
+            }
+            if (childComparison < 0)
+            {
+                child = child + 1;
+            }
+        }
+
+        if (!TryCompareModuleIdentityRows(stringCount, stringIndexByteLength,
+            Host.IdentitySlots[current], Host.IdentitySlots[child], init var parentComparison))
+        {
+            return false;
+        }
+        if (parentComparison >= 0)
+        {
+            break;
+        }
+
+        mut int32 value = Host.IdentitySlots[current];
+        Host.IdentitySlots[current] = Host.IdentitySlots[child];
+        Host.IdentitySlots[child] = value;
+        current = child;
+    }
+
+    return true;
+}
+
+bool TryCompareModuleIdentityRows(int32 stringCount, int32 stringIndexByteLength,
+    int32 firstRow, int32 secondRow, init ref<int32> comparison)
+{
+    if (firstRow == secondRow)
+    {
+        comparison = 0;
+        return true;
+    }
+    if (!TryGetModuleIdentityDecodeInfo(stringCount, stringIndexByteLength, firstRow,
+            init var firstStart, init var firstEncoding, init var firstContentLength)
+        || !TryGetModuleIdentityDecodeInfo(stringCount, stringIndexByteLength, secondRow,
+            init var secondStart, init var secondEncoding, init var secondContentLength))
+    {
+        return false;
+    }
+
+    mut int32 firstPosition = 0;
+    mut int32 secondPosition = 0;
+    while (true)
+    {
+        if (firstPosition == firstContentLength || secondPosition == secondContentLength)
+        {
+            if (firstPosition == firstContentLength && secondPosition == secondContentLength)
+            {
+                comparison = 0;
+            }
+            else if (firstPosition == firstContentLength)
+            {
+                comparison = -1;
+            }
+            else
+            {
+                comparison = 1;
+            }
+            return true;
+        }
+
+        if (!TryDecodeStringRowScalar(firstStart, firstPosition, firstContentLength, firstEncoding,
+                init var firstScalar, init var firstBytesRead)
+            || !TryDecodeStringRowScalar(secondStart, secondPosition, secondContentLength, secondEncoding,
+                init var secondScalar, init var secondBytesRead))
+        {
+            return false;
+        }
+        if (firstScalar != secondScalar)
+        {
+            comparison = firstScalar < secondScalar ? -1 : 1;
+            return true;
+        }
+
+        firstPosition = firstPosition + firstBytesRead;
+        secondPosition = secondPosition + secondBytesRead;
+    }
+}
+
+// The outer pass validates the complete index and each referenced row before comparisons.
+bool TryGetModuleIdentityDecodeInfo(int32 stringCount, int32 stringIndexByteLength,
+    int32 row, init ref<int32> rowStart, init ref<int32> encoding,
+    init ref<int32> contentByteLength)
+{
+    if (row < 1 || row > stringCount
+        || !TryReadVariableTableOffset(row - 1, init var startOffset)
+        || !TryReadVariableTableOffset(row, init var endOffset))
+    {
+        return false;
+    }
+
+    int32 start = stringIndexByteLength + int32(startOffset);
+    int32 length = int32(endOffset - startOffset);
+    if (length < 8 || start < 0 || start > Host.Rows.Length - length)
+    {
+        return false;
+    }
+
+    int32 rowEncoding = Host.Rows[start];
+    if (rowEncoding < 0 || rowEncoding > 3)
+    {
+        return false;
+    }
+
+    mut int32 width = 1;
+    if (rowEncoding == 2) { width = 2; }
+    else if (rowEncoding == 3) { width = 4; }
+    int32 units = Host.Rows[start + 1]
+        | (Host.Rows[start + 2] << 8) | (Host.Rows[start + 3] << 16);
+    rowStart = start;
+    encoding = rowEncoding;
+    contentByteLength = units * width;
+    return true;
+}
+
+bool TryValidateModuleIdentityText(int32 rowStart, int32 contentByteLength, int32 encoding)
+{
+    mut int32 position = 0;
+    mut int32 scalarCount = 0;
+    while (position < contentByteLength)
+    {
+        if (!TryDecodeStringRowScalar(rowStart, position, contentByteLength, encoding,
+            init var scalar, init var bytesRead))
+        {
+            return false;
+        }
+
+        scalarCount = scalarCount + 1;
+        position = position + bytesRead;
+    }
+
+    return scalarCount > 0;
+}
+
+bool TryGetValidatedModuleIdentityExtent(int32 stringCount, int32 stringIndexByteLength,
+    int32 row, init ref<int32> rowStart, init ref<int32> rowLength,
+    init ref<int32> encoding, init ref<int32> contentByteLength)
+{
+    if (row < 1 || row > stringCount
+        || !TryReadVariableTableOffset(row - 1, init var startOffset)
+        || !TryReadVariableTableOffset(row, init var endOffset))
+    {
+        return false;
+    }
+
+    int32 start = stringIndexByteLength + int32(startOffset);
+    int32 length = int32(endOffset - startOffset);
+    if (!TryGetStringRowLayout(start, length,
+        init var rowEncoding, init var rowContentLength))
+    {
+        return false;
+    }
+
+    rowStart = start;
+    rowLength = length;
+    encoding = rowEncoding;
+    contentByteLength = rowContentLength;
+    return true;
+}
+
+bool TryReadModuleTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Modules.Length - 44 || offset < 0 || offset > 40
+        || !TryReadModuleTableByte(rowStart + offset, init var first)
+        || !TryReadModuleTableByte(rowStart + offset + 1, init var second)
+        || !TryReadModuleTableByte(rowStart + offset + 2, init var third)
+        || !TryReadModuleTableByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadModuleTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Modules.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Modules[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool IsValidModuleFeatureRange(uint32 first, uint32 count, int32 featureCount)
+{
+    if (first == 0 && count == 0)
+    {
+        return true;
+    }
+    if (first == 0 || count == 0
+        || first > 0xFF_FFFF || count > 0xFF_FFFF
+        || count - 1 > 0xFF_FFFF - first)
+    {
+        return false;
+    }
+
+    return featureCount < 0
+        || (first <= uint32(featureCount + 1)
+            && count <= uint32(featureCount + 1) - first);
+}
+
+bool IsValidModuleCursor(uint32 start, int32 tableCount)
+{
+    return start != 0 && start <= uint32(tableCount + 1);
+}
+
+bool IsValidModuleTableCount(int32 count)
+{
+    return count >= 0 && count <= 0xFF_FFFF;
+}
