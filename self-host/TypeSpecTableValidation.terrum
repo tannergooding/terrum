@@ -150,6 +150,25 @@ bool TryGetTypeSpecForm(int32 indexByteLength, int32 row,
     return TryReadTypeSpecByte(rowStart, rowLength, 0, init form);
 }
 
+bool TryGetTypeSpecConstructedArgumentRange(int32 typeSpecCount, int32 indexByteLength,
+    int32 row, init ref<uint32> first, init ref<uint32> count)
+{
+    if (row < 1 || row > typeSpecCount
+        || !TryReadVariableTableOffset(row - 1, init var startOffset)
+        || !TryReadVariableTableOffset(row, init var endOffset))
+    {
+        return false;
+    }
+
+    int32 rowStart = indexByteLength + int32(startOffset);
+    int32 rowLength = int32(endOffset - startOffset);
+    return rowLength == 14
+        && TryReadTypeSpecByte(rowStart, rowLength, 0, init var form)
+        && form == 5
+        && TryReadTypeSpecWord(rowStart, rowLength, 6, init first)
+        && TryReadTypeSpecWord(rowStart, rowLength, 10, init count);
+}
+
 bool IsNoncanonicalInlineTypeSpec(int32 indexByteLength, uint32 reference)
 {
     if (!TryGetTypeSpecForm(indexByteLength, int32(reference), init var form))

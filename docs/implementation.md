@@ -186,6 +186,14 @@ validate TypeArg ownership, generic arity or constraints, execute generic
 bodies, or replace the hosted reader. In particular, accepting structural code
 `0x89` does not settle its provisional meaning or establish executable
 `simdmask<T>` support.
+The `TypeArgTableValidation` candidate composes that TypeSpec validation with
+the hosted TypeArg table's fixed 12-byte row extent, constructed-owner
+requirement, contiguous range/ordinal agreement, earlier TypeSpec argument
+references and complete partitioning of the argument table by declared ranges.
+Its AOT/JIT fixtures compare malformed and valid ownership/range tables with
+the hosted reader under both runtime policies. Empty TypeArg tables remain
+outside this reader entry point, as in the hosted reader; ownership validation
+does not establish generic arity, constraints or execution support.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.

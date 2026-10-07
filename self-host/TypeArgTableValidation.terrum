@@ -1,0 +1,86 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateTypeArgTable(int32 recordCount, int32 typeSpecCount,
+    int32 typeDefCount, int32 importCount, int32 genericParamCount, int32 typeArgCount)
+{
+    if (recordCount <= 0 || recordCount > 0xFF_FFFF || recordCount != typeArgCount
+        || recordCount * 12 != Host.Args.Length
+        || !TryValidateTypeSpecTable(typeSpecCount, typeDefCount,
+            importCount, genericParamCount, typeArgCount))
+    {
+        return false;
+    }
+
+    int32 indexByteLength = (typeSpecCount + 1) * 4;
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        int32 argumentRowStart = (row - 1) * 12;
+        if (!TryReadTypeArgWord(argumentRowStart, 0, init var owner)
+            || owner == 0 || owner > uint32(typeSpecCount)
+            || !TryGetTypeSpecConstructedArgumentRange(typeSpecCount, indexByteLength,
+                int32(owner), init var first, init var count)
+            || !TryReadTypeArgWord(argumentRowStart, 4, init var ordinal)
+            || !TryReadTypeArgWord(argumentRowStart, 8, init var argument)
+            || uint32(row) < first || uint32(row) >= first + count
+            || ordinal != uint32(row) - first
+            || argument == 0 || argument >= owner)
+        {
+            return false;
+        }
+    }
+
+    mut int32 declaredCount = 0;
+    for (mut int32 row = 1; row <= typeSpecCount; row = row + 1)
+    {
+        if (!TryGetTypeSpecForm(indexByteLength, row, init var form))
+        {
+            return false;
+        }
+        if (form == 5)
+        {
+            if (!TryGetTypeSpecConstructedArgumentRange(typeSpecCount, indexByteLength,
+                    row, init var first, init var count)
+                || count > uint32(recordCount - declaredCount))
+            {
+                return false;
+            }
+
+            declaredCount = declaredCount + int32(count);
+        }
+    }
+
+    return declaredCount == recordCount;
+}
+
+bool TryReadTypeArgWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Args.Length - 12 || offset < 0 || offset > 8
+        || !TryReadTypeArgByte(rowStart + offset, init var first)
+        || !TryReadTypeArgByte(rowStart + offset + 1, init var second)
+        || !TryReadTypeArgByte(rowStart + offset + 2, init var third)
+        || !TryReadTypeArgByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadTypeArgByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Args.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Args[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
