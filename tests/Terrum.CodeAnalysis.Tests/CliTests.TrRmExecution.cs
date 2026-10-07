@@ -59,14 +59,15 @@ public sealed partial class CliTests
     public async Task PersistedInitOutputCallsRunAndBuildWithoutProducerSourceAsync()
     {
         const string source = """
-            int32 Fill(int32 prefix, init ref<int32> result, int32 suffix) {
-                result = prefix + suffix;
-                return suffix;
+            void Fill(bool enabled, float64 scale, init ref<int32> result) {
+                result = 42;
             }
+            bool Enabled() { return true; }
+            float64 Scale() { return float64(2.5); }
             int32 Main() {
                 init int32 result;
-                int32 status = Fill(20, init result, 2);
-                return result + status;
+                Fill(Enabled(), Scale(), init result);
+                return result;
             }
             """;
         var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-init-output-{Guid.NewGuid():N}");
@@ -82,7 +83,7 @@ public sealed partial class CliTests
 
             var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
                 "--runtime", "fail-fast", "--json");
-            Assert.Equal(24, ran);
+            Assert.Equal(42, ran);
             Assert.Empty(runOutput);
             Assert.Empty(runError);
 
@@ -90,7 +91,7 @@ public sealed partial class CliTests
                 "-o", executable, "--runtime", "fail-fast", "--json");
             Assert.True(built == 0, $"{buildOutput}{Environment.NewLine}{buildError}");
             Assert.Empty(buildError);
-            Assert.Equal(24, await ExecuteTrRmImageAsync(executable));
+            Assert.Equal(42, await ExecuteTrRmImageAsync(executable));
         }
         finally
         {

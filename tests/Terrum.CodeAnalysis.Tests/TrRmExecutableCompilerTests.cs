@@ -67,6 +67,25 @@ public sealed class TrRmExecutableCompilerTests
             return first + second;
         }
         """, 42)]
+    [InlineData("""
+        void Store(bool flag, char16 character, uint32 unsigned32, int64 signed64,
+            uint64 unsigned64, float32 single, float64 wide, init ref<int32> result) {
+            result = 42;
+        }
+        bool GetFlag() { return true; }
+        char16 GetCharacter() { return char16(65); }
+        uint32 GetUnsigned32() { return uint32(3); }
+        int64 GetSigned64() { return int64(4); }
+        uint64 GetUnsigned64() { return uint64(5); }
+        float32 GetSingle() { return float32(1.5); }
+        float64 GetWide() { return float64(2.5); }
+        int32 Main() {
+            init int32 result;
+            Store(GetFlag(), GetCharacter(), GetUnsigned32(), GetSigned64(),
+                GetUnsigned64(), GetSingle(), GetWide(), init result);
+            return result;
+        }
+        """, 42)]
     public void InitOutputCallsRoundTripWithFeatureAndPublishOnNormalReturn(string source, int expected)
     {
         var original = Compile(source);

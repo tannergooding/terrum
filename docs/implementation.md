@@ -565,7 +565,11 @@ artifact.
 
 Executable TRRM also has a provisional, unapproved `ScalarInitOutput` profile
 for non-exported module-local `init ref<int32>` functions and local output
-calls. It uses required Feature section kind `0x0004` and a separately audited
+calls. Output Bodies preserve by-value `bool`, `char16`, `int32`, `uint32`,
+`int64`, `uint64`, `float32` and `float64` formals, including values produced
+by local scalar-returning calls; output places and initialized value locals
+remain `int32`, and output-bearing functions return only `void` or `int32`.
+It uses required Feature section kind `0x0004` and a separately audited
 one-block general Body path, reconstructs bound nodes, and still runs the
 mandatory semantic verifier. Only the profile's bounded output shapes are
 admitted; legacy value-only artifacts remain valid, while `out`, exports and

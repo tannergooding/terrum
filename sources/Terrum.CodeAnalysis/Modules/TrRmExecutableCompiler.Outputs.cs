@@ -1,5 +1,4 @@
 using System;
-using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -124,9 +123,9 @@ public static partial class TrRmExecutableCompiler
         {
             var value = body.Values[index];
             var type = OutputType(body, types, value.TypeId);
-            if (type != PrimitiveType.Int32)
+            if (!IsOutputScalarType(type))
             {
-                throw Invalid("The executable place profile currently requires int32 values.");
+                throw Invalid("The executable place profile requires scalar values.");
             }
 
             if (value.Kind != 0)
@@ -251,7 +250,7 @@ public static partial class TrRmExecutableCompiler
                         throw Invalid("Call target is outside the module.");
                     }
                     var target = functions[operation.MethodRow - 1];
-                    if (target.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32)
+                    if (!IsOutputCallResultType(target.ReturnType)
                         || operation.Operands.Length != target.ParameterCount)
                     {
                         throw Invalid("Call target is outside the executable place profile.");
@@ -353,6 +352,14 @@ public static partial class TrRmExecutableCompiler
         return BodyTypeFromRow(types, body.Types[typeId - 1].TypeSpecRow);
     }
 
+    private static bool IsOutputScalarType(PrimitiveType type)
+        => type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
+            or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.Float32 or PrimitiveType.Float64;
+
+    private static bool IsOutputCallResultType(PrimitiveType type)
+        => type == PrimitiveType.Void || IsOutputScalarType(type);
+
     private sealed class OutputBodyWriter
     {
         private readonly BoundFunction _function;
@@ -363,6 +370,8 @@ public static partial class TrRmExecutableCompiler
         private readonly List<bool> _placeInitialized = [false];
         private readonly List<bool> _placeDeclared = [false];
         private readonly List<int> _placeHandles = [0];
+        private readonly List<int> _bodyTypeRows = [];
+        private readonly Dictionary<int, int> _bodyTypeIds = [];
         private readonly List<int> _valueTypes = [];
         private readonly List<byte> _valueKinds = [];
         private readonly List<uint> _definitionOffsets = [];
@@ -399,11 +408,11 @@ public static partial class TrRmExecutableCompiler
                 }
                 else
                 {
-                    if (parameter.Type != PrimitiveType.Int32)
+                    if (!IsOutputScalarType(parameter.Type))
                     {
-                        throw Unsupported("The output Body profile currently supports only int32 by-value parameters.");
+                        throw Unsupported("The output Body profile requires scalar by-value parameters.");
                     }
-                    _currentValues[variable] = AddValue(PrimitiveType.Int32, 0, uint.MaxValue);
+                    _currentValues[variable] = AddValue(parameter.Type, 0, uint.MaxValue);
                     _parameterValues.Add(_currentValues[variable]);
                 }
             }
@@ -469,12 +478,16 @@ public static partial class TrRmExecutableCompiler
 
         private int AddValue(PrimitiveType type, byte kind, uint definitionOffset)
         {
-            if (type != PrimitiveType.Int32 || _valueTypes.Count >= SemanticVerifier.MaximumVariables)
+            if (!IsOutputScalarType(type) || kind > 1
+                || kind == 1 && type != PrimitiveType.Int32
+                || _valueTypes.Count >= SemanticVerifier.MaximumVariables)
             {
-                throw Unsupported("The output Body profile currently supports int32 values within the verifier limit.");
+                throw Unsupported("The output Body profile supports scalar values within the verifier limit.");
             }
 
-            _valueTypes.Add(TypeRow(type));
+            var typeRow = TypeRow(type);
+            _ = BodyTypeId(typeRow);
+            _valueTypes.Add(typeRow);
             _valueKinds.Add(kind);
             _definitionOffsets.Add(definitionOffset);
             return _valueTypes.Count;
@@ -612,20 +625,21 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     var current = _currentValues[read.Variable];
-                    if (current == 0)
+                    if (current == 0 || _valueTypes[current - 1] != TypeRow(read.Type))
                     {
-                        throw Unsupported("Read of an uninitialized int32 local.");
+                        throw Unsupported("Read of an uninitialized or mismatched scalar value.");
                     }
                     return current;
                 case BoundConstant constant when constant.Type == PrimitiveType.Int32:
                     var constResult = _valueTypes.Count + 1;
                     var bits = unchecked((uint)constant.Value);
                     var dataWidth = Width(bits);
-                    var referenceWidth = Width((ulong)Math.Max(constResult, 1));
+                    var int32TypeId = BodyTypeId(TypeRow(PrimitiveType.Int32));
+                    var referenceWidth = Width((ulong)Math.Max(constResult, int32TypeId));
                     var constOffset = _operations.Count;
                     WriteInstruction(_operations, 0x01, referenceWidth, dataWidth);
                     Write(_operations, (ulong)constResult, referenceWidth);
-                    Write(_operations, 1, referenceWidth);
+                    Write(_operations, (ulong)int32TypeId, referenceWidth);
                     Write(_operations, bits, dataWidth);
                     _ = AddValue(PrimitiveType.Int32, 0, (uint)constOffset);
                     _operationCount++;
@@ -677,7 +691,7 @@ public static partial class TrRmExecutableCompiler
                 || target.Intrinsic != BoundIntrinsic.None
                 || target.ParameterCount != call.Arguments.Length
                 || target.ReturnType != call.Type
-                || target.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32))
+                || !IsOutputCallResultType(target.ReturnType))
             {
                 throw Unsupported("Output calls require a local scalar function with an exact signature.");
             }
@@ -727,9 +741,9 @@ public static partial class TrRmExecutableCompiler
                 }
                 else
                 {
-                    if (value is BoundOutArgument || parameter.Type != PrimitiveType.Int32)
+                    if (value is BoundOutArgument || !IsOutputScalarType(parameter.Type))
                     {
-                        throw Unsupported("By-value output-profile arguments must be int32 values.");
+                        throw Unsupported("By-value output-profile arguments must be scalar values.");
                     }
                     arguments[argument] = EmitValue(value);
                     if (_valueTypes[arguments[argument] - 1] != TypeRow(parameter.Type))
@@ -771,7 +785,7 @@ public static partial class TrRmExecutableCompiler
             }
             if (result != 0)
             {
-                _ = AddValue(PrimitiveType.Int32, 0, (uint)offset);
+                _ = AddValue(call.Type, 0, (uint)offset);
             }
             _operationCount++;
             foreach (var place in outputPlaces)
@@ -821,6 +835,7 @@ public static partial class TrRmExecutableCompiler
 
         private byte[] BuildBody()
         {
+            var int32TypeId = BodyTypeId(TypeRow(PrimitiveType.Int32));
             var localWidth = Width((ulong)Math.Max(
                 Math.Max(_valueTypes.Count, _places.Count - 1),
                 Math.Max(_operationCount, _parameterValues.Count)));
@@ -872,8 +887,6 @@ public static partial class TrRmExecutableCompiler
             WriteInstruction(block, 0x83, returnWidth, 0);
             Write(block, (ulong)_returnValue, returnWidth);
 
-            var typeMap = new byte[4];
-            BinaryPrimitives.WriteUInt32LittleEndian(typeMap, (uint)TypeRow(PrimitiveType.Int32));
             var body = new List<byte>
             {
                 (byte)WidthCode(localWidth),
@@ -882,18 +895,21 @@ public static partial class TrRmExecutableCompiler
             Write(body, (ulong)_valueTypes.Count, localWidth);
             Write(body, (ulong)(_places.Count - 1), localWidth);
             Write(body, 0, localWidth); // region count
-            Write(body, 1, localWidth); // type count
-            body.AddRange(typeMap);
+            Write(body, (ulong)_bodyTypeRows.Count, localWidth); // type count
+            foreach (var row in _bodyTypeRows)
+            {
+                Write(body, (uint)row, 4);
+            }
             for (var place = 1; place < _places.Count; place++)
             {
-                Write(body, 1, localWidth); // int32 local type
+                Write(body, (ulong)int32TypeId, localWidth);
                 Write(body, 0, localWidth); // function-root region
                 body.Add(0x04); // initially vacant, non-unique, non-rebindable
                 Write(body, 1, localWidth); // one block uses the place
             }
             for (var value = 0; value < _valueTypes.Count; value++)
             {
-                Write(body, 1, localWidth); // int32 local type
+                Write(body, (ulong)_bodyTypeIds[_valueTypes[value]], localWidth);
                 body.Add(_valueKinds[value]);
                 Write(body, (ulong)(_valueLastUses.ContainsKey(value + 1) ? 1 : 0), localWidth);
             }
@@ -913,6 +929,19 @@ public static partial class TrRmExecutableCompiler
             Write(body, (ulong)terminatorOffset, 4);
             body.AddRange(block);
             return body.ToArray();
+        }
+
+        private int BodyTypeId(int typeRow)
+        {
+            if (_bodyTypeIds.TryGetValue(typeRow, out var typeId))
+            {
+                return typeId;
+            }
+
+            typeId = _bodyTypeRows.Count + 1;
+            _bodyTypeRows.Add(typeRow);
+            _bodyTypeIds.Add(typeRow, typeId);
+            return typeId;
         }
 
         private void UseValue(int value, int ordinal)

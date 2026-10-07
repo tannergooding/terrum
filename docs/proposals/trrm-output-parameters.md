@@ -79,6 +79,18 @@ and semantic-verification path; it does not promote those changes into an
 accepted contract. Any promotion must retain the legacy compact-body rule that
 rejects non-value modes and place operands.
 
+## Provisional implementation status
+
+The current provisional writer and loader preserve by-value `bool`, `char16`,
+`int32`, `uint32`, `int64`, `uint64`, `float32` and `float64` formals in
+output-bearing general Bodies. Their values may be forwarded from local
+scalar-returning calls into a local call; this does not widen output places,
+which remain `int32`, output-bearing function results, which remain `void` or
+`int32`, or the int32-only constants, initialized locals, assignment and
+arithmetic operations. The one-block control-flow boundary is unchanged. The
+type-preserving value path is implemented support only, not approval of the
+proposed executable contract.
+
 The broader proposal remains unresolved. In particular, Boolean status facts
 are call-specific and require correlation with their particular destinations;
 `out`, fields, aliases, imports, forwarding, cleanup, checked exceptions,
