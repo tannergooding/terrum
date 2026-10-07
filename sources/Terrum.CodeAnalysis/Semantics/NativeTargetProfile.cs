@@ -12,7 +12,7 @@ internal static class NativeTargetProfile
     // This is the compilation target, not the process hosting the compiler.
     internal static int PointerSize => CoffMachine switch {
         Machine.Amd64 => 8,
-        _ => throw new NotSupportedException("The compilation-local token span requires the Windows x64 target."),
+        _ => throw new NotSupportedException("Native pointers require the Windows x64 target."),
     };
 
     internal static PrimitiveType UnsignedIndexCarrier => PointerSize switch {

@@ -49,6 +49,8 @@ public enum PrimitiveType
     Float64,
     /// <summary>A compilation-local readonly descriptor of validated Copy token records, not a public ABI type.</summary>
     TokenSpan,
+    /// <summary>A compiler-owned UTF-16-NUL image address, restricted to reviewed no-escape imports.</summary>
+    NativeUtf16ZPointer,
 }
 
 /// <summary>Disjoint source-class type identifiers start above the complete inline-struct range.</summary>
@@ -228,6 +230,9 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 
     /// <summary>Compiler-supplied, bounded buffers; never represented as source values or raw addresses.</summary>
     public ImmutableArray<HostBuffer> Buffers { get; init; } = [];
+
+    /// <summary>Validated UTF-16-NUL literals whose addresses may only be passed to reviewed imports.</summary>
+    public ImmutableArray<string> NativeUtf16ZLiterals { get; init; } = [];
 
     /// <summary>Whether execution requires an invocation-scoped immutable <c>Host.Source</c> grant.</summary>
     public bool RequiresSourceGrant { get; internal init; }
@@ -536,7 +541,7 @@ public sealed record BoundReturn(BoundExpression? Value, TextSpan Span) : BoundS
 public abstract record BoundExpression(PrimitiveType Type, TextSpan Span);
 
 /// <summary>A scalar constant represented by its canonical or raw-bit payload.</summary>
-/// <param name="Value">The 64-bit payload; uint64 uses its unchecked bit pattern, float32/float64 use IEEE-754 bits, int32/uint32 retain their signed 32-bit bit-pattern payload, char16 uses 0..65535, and booleans use zero or one.</param>
+/// <param name="Value">The 64-bit payload; uint64 uses its unchecked bit pattern, float32/float64 use IEEE-754 bits, int32/uint32 retain their signed 32-bit bit-pattern payload, char16 uses 0..65535, booleans use zero or one, and NativeUtf16ZPointer uses a compiler-owned literal index.</param>
 /// <param name="Type">The constant type.</param>
 /// <param name="Span">The source range.</param>
 public sealed record BoundConstant(long Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);

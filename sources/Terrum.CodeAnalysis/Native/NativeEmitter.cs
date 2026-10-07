@@ -519,6 +519,7 @@ internal sealed partial class PeCompiler
     private readonly List<NativeImportFixup> _nativeImportFixups = [];
     private readonly List<NativeDataFixup> _dataFixups = [];
     private readonly int[] _bufferOffsets;
+    private readonly int[] _nativeUtf16ZOffsets;
     private readonly bool[]? _sourceDependent;
     private readonly int[] _sourceSlots;
     private readonly byte[] _data;
@@ -592,22 +593,40 @@ internal sealed partial class PeCompiler
         _bufferOffsets = sourceDependent is null ? new int[program.Buffers.Length] : [];
         if (sourceDependent is not null)
         {
+            if (!program.NativeUtf16ZLiterals.IsEmpty)
+            {
+                throw new NotSupportedException("UTF-16-NUL image literals require AOT native-import emission.");
+            }
             // Invocation storage has no image data, address fixups, or retained runtime state.
             _data = [];
+            _nativeUtf16ZOffsets = [];
             _managedRuntimeOffset = -1;
             return;
         }
-        var readOnlyBytes = 0;
+        if (!NativeUtf16ZContract.IsValidPool(program.NativeUtf16ZLiterals))
+        {
+            throw new InvalidOperationException("The verified UTF-16-NUL literal pool is invalid.");
+        }
+        var literalBytes = 0;
+        _nativeUtf16ZOffsets = new int[program.NativeUtf16ZLiterals.Length];
+        for (var index = 0; index < program.NativeUtf16ZLiterals.Length; index++)
+        {
+            _nativeUtf16ZOffsets[index] = literalBytes;
+            literalBytes = checked(literalBytes
+                + ((program.NativeUtf16ZLiterals[index].Length + 1) * sizeof(char)));
+        }
+        var literalPrefixBytes = checked((literalBytes + 3) & ~3);
+        var readOnlyBufferBytes = 0;
         foreach (var buffer in program.Buffers)
         {
             if (!buffer.IsWritable)
             {
-                readOnlyBytes = checked(readOnlyBytes + (buffer.Values.Length * 4));
+                readOnlyBufferBytes = checked(readOnlyBufferBytes + (buffer.Values.Length * 4));
             }
         }
-        _readOnlyDataLength = readOnlyBytes;
-        var readOnlyAt = 0;
-        var writableAt = readOnlyBytes;
+        _readOnlyDataLength = checked(literalPrefixBytes + readOnlyBufferBytes);
+        var readOnlyAt = literalPrefixBytes;
+        var writableAt = _readOnlyDataLength;
         for (var index = 0; index < program.Buffers.Length; index++)
         {
             var buffer = program.Buffers[index];
@@ -621,10 +640,23 @@ internal sealed partial class PeCompiler
                 readOnlyAt = checked(readOnlyAt + (buffer.Values.Length * 4));
             }
         }
-        _hostDataLength = writableAt;
+        _hostDataLength = checked(writableAt - literalPrefixBytes);
         _managedNodes = managedNodes;
         _managedRuntimeOffset = _managedNodes ? (writableAt + 7) & ~7 : -1;
         _data = new byte[_managedNodes ? _managedRuntimeOffset + 24 : writableAt];
+        for (var index = 0; index < program.NativeUtf16ZLiterals.Length; index++)
+        {
+            var literal = program.NativeUtf16ZLiterals[index];
+            for (var codeUnit = 0; codeUnit < literal.Length; codeUnit++)
+            {
+                var offset = _nativeUtf16ZOffsets[index] + (codeUnit * sizeof(char));
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(
+                    _data.AsSpan(offset, sizeof(char)), literal[codeUnit]);
+            }
+            var terminatorOffset = _nativeUtf16ZOffsets[index] + (literal.Length * sizeof(char));
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(
+                _data.AsSpan(terminatorOffset, sizeof(char)), 0);
+        }
         for (var index = 0; index < program.Buffers.Length; index++)
         {
             var buffer = program.Buffers[index];
@@ -1664,7 +1696,7 @@ internal sealed partial class PeCompiler
             || target is PrimitiveType.Float32 or PrimitiveType.Float64;
     private static bool IsWide(PrimitiveType type) =>
         type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.OwnedInt32Buffer
-            or PrimitiveType.TokenSpan
+            or PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer
             || ManagedClassTypes.IsManaged(type);
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
     private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
@@ -3069,7 +3101,17 @@ internal sealed partial class PeCompiler
         switch (expression)
         {
             case BoundConstant constant:
-                if (IsWide(constant.Type))
+                if (constant.Type == PrimitiveType.NativeUtf16ZPointer)
+                {
+                    if (constant.Value < 0 || constant.Value >= _nativeUtf16ZOffsets.Length)
+                    {
+                        throw new InvalidOperationException("The verified UTF-16-NUL literal index is invalid.");
+                    }
+                    _dataFixups.Add(new NativeDataFixup(_code.DataAddress(),
+                        _nativeUtf16ZOffsets[checked((int)constant.Value)]));
+                    _code.Bytes(0x48, 0x89, 0xD0); // mov rax,rdx
+                }
+                else if (IsWide(constant.Type))
                 {
                     _code.Bytes(0x48, 0xB8);
                     _code.Int64(constant.Value);

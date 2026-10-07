@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stddef.h>
 
 __declspec(dllexport) int64_t __cdecl NativeFfiSigned(
     int32_t first, uint32_t second, int64_t third, uint64_t fourth,
@@ -21,4 +22,60 @@ __declspec(dllexport) uint64_t __cdecl NativeFfiUnsigned(
         return 0;
     }
     return UINT64_C(0xFEDCBA9876543210);
+}
+
+__declspec(dllexport) int32_t __cdecl NativeFfiUtf16Z(
+    const uint16_t* first, uint32_t second, uint64_t third,
+    const uint16_t* fourth, uint32_t fifth, const uint16_t* sixth)
+{
+    static const uint16_t expectedFirst[] = { 0x0041, 0x000A, 0xD83D, 0xDE42, 0x0000 };
+    static const uint16_t expectedFourth[] = {
+        0x0063, 0x0061, 0x0070, 0x0074, 0x0069, 0x006F, 0x006E, 0x0000
+    };
+    static const uint16_t expectedSixth[] = { 0x0000 };
+    if (first == NULL)
+    {
+        return 1;
+    }
+    if (fourth == NULL)
+    {
+        return 2;
+    }
+    if (sixth == NULL)
+    {
+        return 3;
+    }
+    if (((uintptr_t)first & 1) != 0 || ((uintptr_t)fourth & 1) != 0
+        || ((uintptr_t)sixth & 1) != 0)
+    {
+        return 4;
+    }
+    if (second != UINT32_C(324478056) || third != UINT64_C(81985529216486895)
+        || fifth != UINT32_C(610800471))
+    {
+        return 5;
+    }
+    for (size_t index = 0; index < sizeof(expectedFirst) / sizeof(expectedFirst[0]); index++)
+    {
+        if (first[index] != expectedFirst[index])
+        {
+            return 6;
+        }
+    }
+    for (size_t index = 0; index < sizeof(expectedFourth) / sizeof(expectedFourth[0]); index++)
+    {
+        if (fourth[index] != expectedFourth[index])
+        {
+            return 7;
+        }
+    }
+    if (sixth[0] != expectedSixth[0])
+    {
+        return 8;
+    }
+    if (first == fourth || first == sixth || fourth == sixth)
+    {
+        return 9;
+    }
+    return 0;
 }

@@ -29,6 +29,30 @@ public sealed class NativeImportCatalog
 
     private readonly ImmutableDictionary<string, NativeImportDefinition> _imports;
 
+    private static bool ValidParameterContracts(NativeImportDefinition import)
+    {
+        var hasUtf16Z = import.ParameterTypes.Contains(PrimitiveType.NativeUtf16ZPointer);
+        if (!hasUtf16Z)
+        {
+            return import.ParameterContracts.IsDefaultOrEmpty;
+        }
+        if (import.ParameterContracts.IsDefault || import.ParameterContracts.Length != import.ParameterTypes.Length)
+        {
+            return false;
+        }
+        for (var index = 0; index < import.ParameterTypes.Length; index++)
+        {
+            var expected = import.ParameterTypes[index] == PrimitiveType.NativeUtf16ZPointer
+                ? NativeImportParameterContract.ReadonlyUtf16ZNoEscape
+                : NativeImportParameterContract.Value;
+            if (import.ParameterContracts[index] != expected)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     internal NativeImportCatalog(string identity, ImmutableArray<NativeImportDefinition> imports)
     {
         if (string.IsNullOrWhiteSpace(identity) || imports.IsDefaultOrEmpty)
@@ -46,7 +70,9 @@ public sealed class NativeImportCatalog
                 || import.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32
                     or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
                 || import.ParameterTypes.Any(static type => type is not (PrimitiveType.Int32
-                    or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64))
+                    or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                    or PrimitiveType.NativeUtf16ZPointer))
+                || !ValidParameterContracts(import)
                 || import.DeploymentPolicy is not (NativeImportDeploymentPolicy.System32
                     or NativeImportDeploymentPolicy.ApplicationDirectory)
                 || builder.ContainsKey(import.Key))
@@ -93,7 +119,10 @@ public sealed class NativeImportCatalog
         {
             if (function.Variables[parameter].Type != definition.ParameterTypes[parameter]
                 || function.Variables[parameter].IsOut || function.Variables[parameter].IsInit
-                || function.Variables[parameter].IsMutable)
+                || function.Variables[parameter].IsMutable
+                || (definition.ParameterTypes[parameter] == PrimitiveType.NativeUtf16ZPointer
+                    && definition.ParameterContracts[parameter]
+                        != NativeImportParameterContract.ReadonlyUtf16ZNoEscape))
             {
                 return false;
             }
@@ -111,7 +140,67 @@ internal sealed record NativeImportAttributeDefinition(string FullyQualifiedName
 
 internal sealed record NativeImportDefinition(string Key, string DllName, string ExportName,
     ImmutableArray<PrimitiveType> ParameterTypes, PrimitiveType ReturnType, bool IsNoThrow,
-    bool RequiresUnsafeCaller, bool DoesNotReturn, NativeImportDeploymentPolicy DeploymentPolicy);
+    bool RequiresUnsafeCaller, bool DoesNotReturn, NativeImportDeploymentPolicy DeploymentPolicy)
+{
+    internal ImmutableArray<NativeImportParameterContract> ParameterContracts { get; init; } = [];
+}
+
+internal enum NativeImportParameterContract
+{
+    Value,
+    ReadonlyUtf16ZNoEscape,
+}
+
+internal static class NativeUtf16ZContract
+{
+    internal const int MaximumStorageBytes = 8 * 1024 * 1024;
+
+    internal static bool IsValidLiteral(string value)
+    {
+        if (value.Contains('\0') || ((long)value.Length + 1) * sizeof(char) > MaximumStorageBytes)
+        {
+            return false;
+        }
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (char.IsHighSurrogate(value[index]))
+            {
+                if (index + 1 >= value.Length || !char.IsLowSurrogate(value[index + 1]))
+                {
+                    return false;
+                }
+                index++;
+            }
+            else if (char.IsLowSurrogate(value[index]))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    internal static bool IsValidPool(ImmutableArray<string> literals)
+    {
+        if (literals.IsDefault)
+        {
+            return false;
+        }
+        long byteCount = 0;
+        foreach (var literal in literals)
+        {
+            if (literal is null || !IsValidLiteral(literal))
+            {
+                return false;
+            }
+            byteCount += ((long)literal.Length + 1) * sizeof(char);
+            if (byteCount > MaximumStorageBytes)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+}
 
 internal enum NativeImportDeploymentPolicy
 {

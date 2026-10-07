@@ -52,7 +52,11 @@ catalogued fixed-width integer/`void` signature and effects; the production
 catalog currently contains only `GetCurrentThreadId`. Unsupported
 module/JIT/TRRM persistence paths reject these imports. This is not general
 foreign-function support and does not move scalar frontend verification or
-emission into Terrum.
+emission into Terrum. The tests also exercise a proposed static UTF-16-NUL
+literal pointer subgate using read-only image storage and catalogued
+readonly/no-escape parameters against an independent C reader. That fixture
+does not add a pointer import to the production catalog or establish general
+pointer or handle support; `MessageBoxW` remains unimplemented.
 
 ## Syntax and CLI
 

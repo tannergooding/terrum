@@ -39,6 +39,7 @@ internal sealed partial class Binder
     private readonly HashSet<string> _usings = new(StringComparer.Ordinal);
     private string _namespace = "";
     private readonly List<BoundVariable> _variables = [];
+    private readonly List<string> _nativeUtf16ZLiterals = [];
     private readonly HashSet<int> _unresolvedVacantLocals = [];
     private readonly HashSet<int> _constLocals = [];
     private readonly Dictionary<int, int> _constInt32Values = [];
@@ -606,6 +607,7 @@ internal sealed partial class Binder
                 ?.InvocationProfileId ?? _reference?.InvocationProfileId,
             NativeImportCatalogId = _hasNativeImports ? _nativeImportCatalog?.Identity : null,
             NativeImportCatalog = _hasNativeImports ? _nativeImportCatalog : null,
+            NativeUtf16ZLiterals = [.. _nativeUtf16ZLiterals],
             RuntimePolicy = _runtimePolicy,
         };
         if (!SemanticVerifier.TryVerifySource(program, out var functionIndex, out var span, out var exceededWorkLimit, out var invalidEffect))
@@ -712,6 +714,9 @@ internal sealed partial class Binder
 
     private static bool IsNativeImportInteger(PrimitiveType type) =>
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
+
+    private static bool IsNativeImportParameterType(PrimitiveType type) =>
+        IsNativeImportInteger(type) || type == PrimitiveType.NativeUtf16ZPointer;
 
     internal static bool TryPrimitiveType(string name, out PrimitiveType type)
     {
@@ -1778,7 +1783,7 @@ internal sealed partial class Binder
             if (isExternal && importDefinition is not null && externalFunction is not null
                 && (returnType == PrimitiveType.Void || IsNativeImportInteger(returnType))
                 && boundParameters.All(static parameter => !parameter.IsOut && !parameter.IsInit
-                    && IsNativeImportInteger(parameter.Type))
+                        && IsNativeImportParameterType(parameter.Type))
                 && _nativeImportCatalog is not null
                 && _nativeImportCatalog.MatchesFunction(externalFunction, importDefinition))
             {
@@ -1786,7 +1791,7 @@ internal sealed partial class Binder
             }
             else if (isExternal && importDefinition is not null)
             {
-                Report("TRM3030", "The extern declaration's complete scalar signature and effects must exactly match its catalog entry.",
+                Report("TRM3030", "The extern declaration's complete signature and effects must exactly match its catalog entry.",
                     declaration.Span);
             }
         }
@@ -1939,6 +1944,21 @@ internal sealed partial class Binder
         var writable = node.Children[0] is SyntaxTokenElement { Token.Kind: TokenKind.WriteKeyword };
         var optional = node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.Question };
         var typeArgumentNodes = node.Children.OfType<SyntaxNode>().ToArray();
+        if (name == "ptr")
+        {
+            if (typeArgumentNodes.Length != 1 || writable || optional
+                || node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
+            {
+                Report("TRM3005", "This FFI profile supports only readonly ptr<char16> parameters.", node.Span);
+                return PrimitiveType.Int32;
+            }
+            if (BindType(typeArgumentNodes[0], allowVoid: false) != PrimitiveType.Char16)
+            {
+                Report("TRM3005", "This FFI profile supports only ptr<char16> parameters.", node.Span);
+                return PrimitiveType.Int32;
+            }
+            return PrimitiveType.NativeUtf16ZPointer;
+        }
         if (name is "Span" or "Terrum.Span")
         {
             if (typeArgumentNodes.Length != 1 || writable || optional
@@ -4122,6 +4142,10 @@ internal sealed partial class Binder
             }
             else if (!TryFindFunction(name.Name, out function))
             {
+                if (name.Name == "utf16z")
+                {
+                    return BindNativeUtf16ZLiteral(node, expected);
+                }
                 if (FindGenericTemplate(name.Name) is not null)
                 {
                     function = InstantiateGeneric(callee, (SyntaxNode)node.Children[1], expected);
@@ -4251,6 +4275,36 @@ internal sealed partial class Binder
             Report("TRM3011", "Only direct calls to named functions are supported.", callee.Span);
         }
         return BindArguments(node, (SyntaxNode)node.Children[1], function, receiver);
+    }
+
+    private BoundExpression BindNativeUtf16ZLiteral(SyntaxNode node, PrimitiveType? expected)
+    {
+        if (expected != PrimitiveType.NativeUtf16ZPointer
+            || TryGetSingleSyntaxArgument((SyntaxNode)node.Children[1]) is not {
+                Kind: SyntaxKind.Argument,
+                Children: [SyntaxNode literal],
+            }
+            || literal.Kind != SyntaxKind.LiteralExpression
+            || literal.Children is not [SyntaxTokenElement { Token.Kind: TokenKind.StringLiteral } token]
+            || !StringLiteralDecoder.TryDecode(token.Token.Text.AsSpan(), out var value))
+        {
+            Report("TRM3007", "utf16z requires one string literal in a catalogued ptr<char16> argument position.",
+                node.Span);
+            return ErrorExpression(node.Span);
+        }
+        if (!NativeUtf16ZContract.IsValidLiteral(value))
+        {
+            Report("TRM3013", "utf16z rejects embedded NUL and literals exceeding the native text-data limit.",
+                node.Span);
+            return ErrorExpression(node.Span);
+        }
+        var literalIndex = _nativeUtf16ZLiterals.IndexOf(value);
+        if (literalIndex < 0)
+        {
+            literalIndex = _nativeUtf16ZLiterals.Count;
+            _nativeUtf16ZLiterals.Add(value);
+        }
+        return new BoundConstant(literalIndex, PrimitiveType.NativeUtf16ZPointer, node.Span);
     }
 
     private bool TryConversionTarget(SyntaxNode callee, out PrimitiveType target)
@@ -5196,6 +5250,7 @@ internal sealed partial class Binder
         PrimitiveType.ReadonlyInt32BufferView => "ReadonlyInt32BufferView",
         PrimitiveType.MutableInt32BufferView => "MutableInt32BufferView",
         PrimitiveType.TokenSpan => "Span<Token>",
+        PrimitiveType.NativeUtf16ZPointer => "ptr<char16>",
         PrimitiveType.ManagedNode => "ManagedNode",
         PrimitiveType.WriteManagedNode => "write ManagedNode",
         PrimitiveType.OptionalManagedNode => "ManagedNode?",

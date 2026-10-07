@@ -115,6 +115,45 @@ authorize a proven lifetime escape.
    add automatic fallback. This gate does not establish support for other
    SDKs or targets.
 
+### Proposed first pointer-call subgate (unapproved)
+
+**Summary:** The first pointer-call slice should expose only readonly
+`ptr<char16>` values produced from compiler-validated UTF-16-NUL string
+literals in immutable executable-image storage. The producer proves encoding,
+initialized extent, the final terminator and image lifetime; it does not grant
+ownership, pinning, rooting or general pointer formation. General pointer
+storage, arithmetic, dereference, managed-storage addresses and propagation
+remain unsupported.
+
+**Recommendation:** Use an explicit compiler-owned literal form, with
+`utf16z("...")` as the candidate spelling, accepted only for a catalogued
+readonly `ptr<char16>` parameter and a single string literal. Bound the
+aggregate encoded UTF-16 data, including terminators, to 8 MiB and reject
+embedded NUL rather than silently truncating text. Keep this identity, bound
+and catalogued no-retention parameter contract provisional under this
+proposal. First validate the static-storage/type/import path with an
+independently compiled C reader fixture; then add the `MessageBoxW` observable
+gate with a closed opaque `HWND` carrier and a named no-owner sentinel mapped
+to native zero. Do not treat a raw pointer type, `unsafe`, or `[NoThrow]` as
+proof that a foreign callee will not retain a pointer.
+
+The general relationship among `HWND`, optional handles, `null` and
+`ptr<void>` remains unsettled and is not a prerequisite for the static-literal
+fixture. The proposed `HWND` carrier is sample-specific; its no-owner
+sentinel does not establish general handle nullability or zero-initialization.
+For production system imports, a catalog's `System32` policy is a reviewed
+deployment assertion, not a PE-enforced search path. Each DLL entry must have
+an explicit trusted-loader basis; do not claim the policy enum alone prevents
+application-directory or other loader redirection.
+
+**Progress:** A test-only native ABI fixture now exercises the static-literal
+pointer path with an independently compiled C reader, including UTF-16 code
+units, terminators, alignment, register and stack argument positions, and
+scalar arguments. This implements test coverage for the proposed subgate; it
+does not promote the proposal or add a pointer import to the production
+catalog. `MessageBoxW` and its sample-specific handle representation remain
+the next observable gate.
+
 Start AOT-only and explicitly reject this surface in unsupported persistence
 and JIT paths rather than dropping its contracts. At every gate, source
 grammar, semantic verification, binding metadata, emitter imports and runtime
