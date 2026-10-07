@@ -462,6 +462,28 @@ registered string-target binding
 Keep source-grant ABI promotion, the source-free DLL, classifier boundaries,
 and hosted frontend verification/emission unchanged.
 
+### Provisional scalar UTF-8 string-namespace-row length export
+
+**Question:** Should the maintained companion measure the existing UTF-8
+`StringNamespaceRow` representation without exporting or allocating a row?
+
+**Summary:** The self-hosted namespace-row contract permits empty text but
+rejects embedded zero, and uses the same four-byte header, terminator and
+four-byte alignment as the name row. Its scalar size query can reuse the
+validated literal and strict UTF-8 measurement path without exporting an
+aggregate, workspace or encoded buffer.
+
+**Recommendation:** Keep
+`GetStringNamespaceRowByteLengthOrMinusOne(int32 start, int32 length) -> int32`
+as provisional measurement support. Return `-1` for invalid spelling,
+embedded zero or content exceeding the row's 24-bit byte count; otherwise
+return the complete framed size. Unlike the name-row query, empty text is
+valid and measures eight bytes. Compare with the hosted namespace-row sizing
+and framing contracts, including empty/NUL cases, malformed literals, exact
+slices and maximum grants. This does not emit or allocate a row and does not
+implement registered target binding. Keep the source-free DLL, classifier
+boundaries and hosted frontend verification/emission unchanged.
+
 ### Provisional scalar source-offset export
 
 **Question:** Should the maintained companion expose the hosted line/character

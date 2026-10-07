@@ -2179,6 +2179,10 @@ exact slices, malformed literals and maximum grants. This is measurement
 support only: it neither allocates nor emits a row and does not implement
 registered string-target binding or move frontend verification/emission out
 of the hosted compiler.
+`GetStringNamespaceRowByteLengthOrMinusOne(start, length)` measures the
+corresponding UTF-8 namespace row with the same framing, but permits empty
+text (eight bytes) while rejecting embedded NUL. It is a separate provisional
+scalar export; it likewise does not allocate or emit the row.
 `GetHexFloat32LiteralBitsOrMinusOne(start, length)` and
 `GetHexFloat64LiteralBitsOrMinusOne(start, length)` provisionally convert one
 caller-delimited, grammar-shaped hexadecimal-float slice directly to positive

@@ -12,7 +12,17 @@ public static int32 GetStringLiteralEncodedLengthOrMinusOne(int32 start, int32 l
 
 public static int32 GetStringNameRowByteLengthOrMinusOne(int32 start, int32 length)
 {
-    int32 contentBytes = GetStringLiteralEncodedLengthCore(start, length, 2, true, true);
+    return GetStringTextRowByteLengthOrMinusOne(start, length, true);
+}
+
+public static int32 GetStringNamespaceRowByteLengthOrMinusOne(int32 start, int32 length)
+{
+    return GetStringTextRowByteLengthOrMinusOne(start, length, false);
+}
+
+int32 GetStringTextRowByteLengthOrMinusOne(int32 start, int32 length, bool rejectEmpty)
+{
+    int32 contentBytes = GetStringLiteralEncodedLengthCore(start, length, 2, rejectEmpty, true);
     if (contentBytes < 0 || contentBytes > 16777215)
     {
         return -1;
