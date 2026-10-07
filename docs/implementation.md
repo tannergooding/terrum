@@ -194,6 +194,17 @@ Its AOT/JIT fixtures compare malformed and valid ownership/range tables with
 the hosted reader under both runtime policies. Empty TypeArg tables remain
 outside this reader entry point, as in the hosted reader; ownership validation
 does not establish generic arity, constraints or execution support.
+The `MethodSigParamTableValidation` candidate composes structural MethodSig
+and Param checks with TypeSpec validation: it verifies fixed row extents,
+type references, parameter and generic-range bounds, and Param owner, ordinal,
+mode, flags and reserved bytes. Each Param row must lie in its declared
+signature range; together with the equal total range length this proves an
+exact Param partition without an owner map. AOT/JIT fixtures compare valid
+and malformed tables with both hosted readers under both runtime policies.
+Generic ranges retain the hosted reader's bounds-only behavior; ownership,
+arity, constraints and execution remain separate. The reader entry point
+requires a nonempty MethodSig table and allows an empty Param table when its
+declared count is zero.
 `Utf16Scalar` persisted-JIT coverage checks scalar values and code-unit widths
 across fresh grants, including valid surrogate pairs and unpaired-surrogate
 rejection under both runtime policies.

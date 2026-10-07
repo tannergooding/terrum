@@ -1,0 +1,154 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool TryValidateMethodSigParamTables(int32 recordCount,
+    int32 paramCount, int32 genericParamCount, int32 typeSpecCount,
+    int32 typeDefCount, int32 importCount, int32 typeArgCount)
+{
+    if (recordCount <= 0 || recordCount > 0xFF_FFFF
+        || !IsValidMethodTableCount(paramCount)
+        || !IsValidMethodTableCount(genericParamCount)
+        || recordCount * 24 != Host.Signatures.Length
+        || paramCount * 16 != Host.Params.Length
+        || !TryValidateTypeSpecTable(typeSpecCount, typeDefCount,
+            importCount, genericParamCount, typeArgCount))
+    {
+        return false;
+    }
+
+    mut int32 declaredParamCount = 0;
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        int32 rowStart = (row - 1) * 24;
+        if (!TryReadMethodSignatureWord(rowStart, 0, init var result)
+            || result == 0 || result > uint32(typeSpecCount)
+            || !TryReadMethodSignatureWord(rowStart, 4, init var receiver)
+            || receiver > uint32(typeSpecCount)
+            || !TryReadMethodSignatureWord(rowStart, 8, init var first)
+            || !TryReadMethodSignatureWord(rowStart, 12, init var count)
+            || !IsValidMethodTableRange(first, count, paramCount)
+            || !TryReadMethodSignatureWord(rowStart, 16, init var genericFirst)
+            || !TryReadMethodSignatureWord(rowStart, 20, init var genericCount)
+            || !IsValidMethodTableRange(genericFirst, genericCount, genericParamCount)
+            || count > uint32(paramCount - declaredParamCount))
+        {
+            return false;
+        }
+
+        declaredParamCount = declaredParamCount + int32(count);
+    }
+    if (declaredParamCount != paramCount)
+    {
+        return false;
+    }
+
+    for (mut int32 row = 1; row <= paramCount; row = row + 1)
+    {
+        int32 rowStart = (row - 1) * 16;
+        if (!TryReadParameterWord(rowStart, 0, init var owner)
+            || owner == 0 || owner > uint32(recordCount))
+        {
+            return false;
+        }
+
+        int32 signatureStart = (int32(owner) - 1) * 24;
+        if (!TryReadMethodSignatureWord(signatureStart, 8, init var first)
+            || !TryReadMethodSignatureWord(signatureStart, 12, init var count)
+            || uint32(row) < first || uint32(row) >= first + count
+            || !TryReadParameterWord(rowStart, 4, init var ordinal)
+            || ordinal != uint32(row) - first
+            || !TryReadParameterWord(rowStart, 8, init var type)
+            || type == 0 || type > uint32(typeSpecCount)
+            || !TryReadParameterByte(rowStart + 12, init var mode)
+            || mode > 4
+            || !TryReadParameterByte(rowStart + 13, init var flags)
+            || flags != 0
+            || !TryReadParameterByte(rowStart + 14, init var reservedFirst)
+            || reservedFirst != 0
+            || !TryReadParameterByte(rowStart + 15, init var reservedSecond)
+            || reservedSecond != 0)
+        {
+            return false;
+        }
+    }
+
+    // Row ownership plus the equal range total proves Param ranges partition the table.
+    return true;
+}
+
+bool TryReadMethodSignatureWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Signatures.Length - 24 || offset < 0 || offset > 20
+        || !TryReadMethodSignatureByte(rowStart + offset, init var first)
+        || !TryReadMethodSignatureByte(rowStart + offset + 1, init var second)
+        || !TryReadMethodSignatureByte(rowStart + offset + 2, init var third)
+        || !TryReadMethodSignatureByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadMethodSignatureByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Signatures.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Signatures[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool TryReadParameterWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.Params.Length - 16 || offset < 0 || offset > 8
+        || !TryReadParameterByte(rowStart + offset, init var first)
+        || !TryReadParameterByte(rowStart + offset + 1, init var second)
+        || !TryReadParameterByte(rowStart + offset + 2, init var third)
+        || !TryReadParameterByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadParameterByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.Params.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.Params[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool IsValidMethodTableRange(uint32 first, uint32 count, int32 tableCount)
+{
+    return count == 0 ? first == 0
+        : first != 0 && first <= uint32(tableCount)
+            && count <= uint32(tableCount) - first + 1;
+}
+
+bool IsValidMethodTableCount(int32 count)
+{
+    return count >= 0 && count <= 0xFF_FFFF;
+}
