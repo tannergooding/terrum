@@ -37,6 +37,14 @@ public sealed class StringRowModuleTests
         }
 
         OwnedInt32Buffer Encode(StringLiteral literal, int32 kind, int32 encoding, OwnedInt32Buffer workspace) {
+            if (encoding == 1) {
+                if (kind == 0) {
+                    require TryBuildStringNameRowUtf8(literal, move workspace, init var row);
+                    return move row;
+                }
+                require TryBuildStringNamespaceRowUtf8(literal, move workspace, init var row);
+                return move row;
+            }
             if (kind == 0) { return EncodeStringNameRow(literal, encoding, move workspace); }
             return EncodeStringNamespaceRow(literal, encoding, move workspace);
         }
