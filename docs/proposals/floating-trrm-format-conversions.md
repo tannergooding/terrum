@@ -50,5 +50,5 @@ destinations, and malformed type rows. Keep existing integer Body bytes
 unchanged.
 
 This proposal does not resolve floating arithmetic NaN encodings,
-float-to-integer eligibility, `char16`-to-floating eligibility, or
+`char16`-to-floating eligibility, floating-to-integer TRRM encoding, or
 integer-to-floating TRRM conversion.

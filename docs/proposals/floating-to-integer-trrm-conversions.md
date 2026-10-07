@@ -6,14 +6,15 @@
 
 The hosted compiler and source-free executable TRRM provisionally implement
 explicit checked conversions from `float32` and `float64` to `int32`,
-`uint32`, `int64` and `uint64`. Eligibility remains unapproved in the separate
-[pair-matrix proposal](checked-float-to-integer-eligibility.md); this proposal
-does not approve either that pair matrix or a stable TRRM encoding.
+`uint32`, `int64` and `uint64`. Eligibility for these eight language
+conversions is accepted; this proposal remains unapproved and does not approve
+a stable TRRM encoding.
 
 ## Question
 
-Should the unreleased executable `(1, 0)` draft encode those eight provisional
-pairs as a fail-fast operation, without changing TRRM's fail-fast-only policy?
+Should the unreleased executable `(1, 0)` draft encode those eight accepted
+language pairs as a fail-fast operation, without changing TRRM's fail-fast-only
+policy?
 
 ## Recommendation
 

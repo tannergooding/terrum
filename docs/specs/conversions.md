@@ -69,11 +69,14 @@ The decimal, hexadecimal, binary, and checked integer type-call examples above
 illustrate the selected semantics. Target-typed floating literals,
 `float32`/`float64` conversions, and conversions from `int32`, `uint32`,
 `int64`, and `uint64` to either floating format are implemented. Conversions
-from either floating format to an integer type are implemented provisionally
-per an unapproved eligibility proposal. The hosted implementation also
-provisionally converts `char16` to either floating format as its unsigned
-code-unit value; this is not Unicode scalar decoding and its exact eligibility
-remains unapproved in the
+from either floating format to each current integer primitive—`int32`,
+`uint32`, `int64`, and `uint64`—are accepted as checked conversions. The
+hosted implementation and v85 scalar-frontend projections remain provisional;
+verification and emission remain hosted. Direct conversion to `char16` is not
+included: it is a code-unit type, not an integer primitive. A separate hosted
+implementation provisionally converts `char16` to either floating format as
+its unsigned code-unit value; this is not Unicode scalar decoding and its
+exact eligibility remains unapproved in the
 [eligibility proposal](../proposals/char16-floating-conversion-eligibility.md).
 Current executable coverage is documented in
 [implementation](../implementation.md). A value-based
@@ -212,16 +215,16 @@ failure. Numeric conversion is distinct from bit reinterpretation.
 | Integer to integer, checked | Preserve the value or throw when it is outside the destination range. |
 | Integer to integer, unchecked | Reduce modulo 2^N for an N-bit destination (retain the low N bits), then interpret the result in two's complement for signed destinations. This applies across width and signedness changes, including widening conversions; it is not checked conversion. |
 | Integer to integer, saturating | An explicitly selected API clamps to the destination range; saturation is not implicit. |
-| Floating to integer, checked | Truncate toward zero, then range-check; throw if the truncated result is out of range. NaN has no integer representation and throws; infinities are out of range. |
+| Floating to integer, checked | For either floating source and each of `int32`, `uint32`, `int64` and `uint64`, truncate toward zero, then range-check; throw if the truncated result is out of range. NaN has no integer representation and throws; infinities are out of range. `char16` is excluded as a code-unit destination. |
 | Floating to integer, unchecked or explicitly saturating | Truncate toward zero, then saturate out-of-range results to the destination endpoints, including infinities. NaN converts to zero. This is **not** modulo narrowing. |
 | Integer/floating to floating | Follow IEEE-754 target-format conversion with default round-to-nearest, ties-to-even. Inexact results, finite overflow to infinity, and underflow to subnormal/zero do not fail; NaN and infinities are ordinary floating values. No floating-point exception traps are enabled. Other rounding modes require explicit APIs/adapters; there is no global floating-point control-word API. |
 | Bit reinterpretation | `FromBits`/`ToBits` preserve the specified representation, including payload bits; this is not numeric conversion. Width, validity and representation must match the declared operation. |
 
 Floating-to-floating numeric conversion does not promise fixed NaN payload
 preservation or cross-format exactness; bit-preserving `FromBits`/`ToBits`
-operations remain distinct. These policies do not grant arbitrary user-defined
-conversions or choose witness lookup rules. Exact conversion eligibility and
-other per-pair APIs remain specification work.
+operations remain distinct. These policies do not grant arbitrary user-defined conversions or choose
+witness lookup rules. The checked floating-to-integer matrix is limited to the
+eight pairs above; other per-pair APIs remain specification work.
 
 Granular `ICheckedConversion<TSelf, TSource>`,
 `ISaturatingConversion<...>` and `ITruncatingConversion<...>` sketches in

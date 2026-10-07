@@ -73,9 +73,6 @@ approved.
 - [Compare-exchange order pairs](atomic-cas-order-pairs.md) recommends a
   finite compile-time-valid table for CAS success/failure memory orders;
   it does not add atomic support or change the accepted bitwise-comparison rule.
-- [Checked float-to-integer eligibility](checked-float-to-integer-eligibility.md)
-  recommends a bounded pair matrix for the accepted checked value policy;
-  exact conversion eligibility remains unapproved.
 - [Char16-to-floating eligibility](char16-floating-conversion-eligibility.md)
   recommends treating `char16` as an unsigned code-unit value for explicit
   floating conversion; exact pair eligibility remains unapproved.
@@ -99,8 +96,8 @@ approved.
   recommends a distinct unsigned code-unit conversion operation without
   widening integer conversions.
 - [Floating-to-integer conversions in executable TRRM](floating-to-integer-trrm-conversions.md)
-  recommends a distinct fail-fast operation for the eight provisional
-  floating-to-fixed-width-integer pairs.
+  recommends a distinct fail-fast operation for the eight accepted
+  floating-to-fixed-width-integer pairs; the TRRM encoding remains unapproved.
 
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,

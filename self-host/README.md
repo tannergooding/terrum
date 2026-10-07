@@ -227,8 +227,8 @@ payloads. It also projects conversions between the floating formats and from
 conversion is also provisionally projected through v85 under its
 still-unapproved eligibility proposal;
 verification and emission remain hosted. Float-to-integer conversions are
-provisionally projected through v85 under the still-unapproved pair-matrix
-proposal; verification and emission remain hosted. Source-free TRRM
+provisionally projected through v85 for the eight accepted checked pairs;
+verification and emission remain hosted. Source-free TRRM
 same-format comparisons and exact-bit constants are provisionally implemented
 under the unapproved
 [TRRM floating-comparison proposal](../docs/proposals/floating-trrm-comparisons.md);
@@ -256,8 +256,8 @@ Float-to-integer conversion is separately provisional under the unapproved
 Remainder and mixed-format arithmetic remain unsupported there.
 The standalone `FloatingIntegerConversion` helper implements raw-bit
 float-to-integer conversion internally and is checked against hosted conversion
-behavior; it does not approve the pair-matrix proposal or add frontend, DLL or
-TRRM support.
+behavior; it is an internal helper, not a public conversion API or a TRRM
+encoding.
 `char16`-to-floating conversion is provisionally encoded
 under the unapproved
 [TRRM char16 conversion proposal](../docs/proposals/char16-to-floating-trrm-conversions.md),
@@ -471,7 +471,7 @@ native emitter or compiler self-build.
 | [FloatingArithmetic](FloatingArithmetic.terrum) | Internal raw-bit `float32`/`float64` addition, subtraction, multiplication and division with nearest/ties-to-even rounding, gradual underflow and provisional canonical arithmetic NaNs | Semantic-module JIT compares boundary pairs and deterministic raw-bit inputs against the controlled hosted emitter under both policies; the independent `ComponentTestRunner` covers precision ties, subnormal transitions, infinities, NaNs and signed zeros under AOT/JIT and both policies; the Windows x64 internal DLL directly checks all eight raw-bit exports against a controlled hosted-emitter oracle, comparing finite results exactly and NaNs by classification only; arithmetic and NaN-encoding proposals remain unapproved, with no scalar-frontend or TRRM support implied |
 | [FloatingFormatConversion](FloatingFormatConversion.terrum) | Internal raw-bit widening and narrowing between `float32` and `float64`; finite narrowing rounds once to nearest/ties-even with gradual underflow and overflow to infinity | Semantic-module JIT compares finite results with hosted conversions under both policies, including all float32 subnormal leading-bit positions, midpoint neighbors, underflow, overflow and NaN classification; the independent `ComponentTestRunner` exercises representative boundaries under AOT/JIT and both policies; the Windows x64 internal DLL compares finite conversions exactly and NaNs by classification only; exact NaN payload preservation is not promised, and no scalar-frontend or TRRM support is implied |
 | [FloatingNegation](FloatingNegation.terrum) | Internal raw-bit `float32`/`float64` negation by toggling only the sign bit | Semantic-module JIT compares exact bit results with the sign-bit oracle under both policies, including signed zeros, infinities, noncanonical NaNs and deterministic values; the independent `ComponentTestRunner` also executes representative cases under AOT/JIT and both policies; the Windows x64 internal DLL checks exact sign-bit toggling and involution through integer carriers; the TRRM proposal remains unapproved and no frontend or TRRM support is implied |
-| [FloatingIntegerConversion](FloatingIntegerConversion.terrum) | Internal checked conversion from raw `float32`/`float64` bits to signed/unsigned 32-/64-bit integers, truncating toward zero before range checks | Semantic-module JIT compares all eight conversions with hosted behavior under both policies, including boundaries, non-finite values and negative fractions; the independent `ComponentTestRunner` exercises representative boundaries under AOT/JIT and both policies; the Windows x64 internal DLL directly checks all eight status-plus-output exports against checked casts, preserving failed outputs and adjacent canaries; the pair-matrix proposal remains unapproved and no scalar-frontend or TRRM support is implied |
+| [FloatingIntegerConversion](FloatingIntegerConversion.terrum) | Internal checked conversion from raw `float32`/`float64` bits to signed/unsigned 32-/64-bit integers, truncating toward zero before range checks | Semantic-module JIT compares all eight conversions with hosted behavior under both policies, including boundaries, non-finite values and negative fractions; the independent `ComponentTestRunner` exercises representative boundaries under AOT/JIT and both policies; the Windows x64 internal DLL directly checks all eight status-plus-output exports against checked casts, preserving failed outputs and adjacent canaries; the eight-pair language eligibility is accepted, but this helper does not define a public conversion API or TRRM opcode |
 | [CopyAlgorithms](CopyAlgorithms.terrum) | NoThrow selection and conditional `init ref<T>` publication of complete Copy values, with an explicit forwarding `out` adapter and no operator witnesses | Composed AOT/JIT calls select scalars, nested tokens and ranges under both policies; invalid indices publish no value; existing `out` calls remain valid; revision-56 semantic-module JIT also executes the private generic specializations through an exported verifier under both policies; the Windows x64 fail-fast compiler-primitives DLL exercises all three operations through test-only wrappers over concrete Token specializations and also checks `SelectCopy` with the eight-byte SourceRange ABI, including selected fields, success/failure publication and adjacent output canaries; the Terrum `ComponentTestRunner` selects scalar and Token values through producer-local tests; sentinel-filled output storage is only for native write observation and does not relax source vacancy rules; this does not add a public generic ABI; no primitive operator conformance, borrowed views or generic runtime dispatch |
 | [IntegerFacts](IntegerFacts.terrum) | Internal `[ConstEval]` eligibility predicates for checked `int32`, `uint32`, `int64` and `uint64` arithmetic, including signed negation and absolute value | Boundary predicates are proven in required static expressions and executed under both native policies; native executables compare all 24 predicates with independent `BigInteger` range, divisor and signed-minimum expectations under both policies; revision-55 persisted semantic-module JIT also compares 362 signed/unsigned boundary pairs with independent `BigInteger` expectations under both policies; the Windows x64 fail-fast compiler-primitives DLL exercises all 24 predicates through test-only exports against `BigInteger` boundary oracles; 32-bit signed checks widen safely, 64-bit checks rearrange bounds without overflowing, zero divisors reject, and signed-minimum remainder by `-1` remains valid; no public arithmetic API or compiler bootstrap |
 | [WideIntegerFacts](WideIntegerFacts.terrum) | Checked signed and unsigned 64-bit addition, subtraction, multiplication, division and remainder, signed negation and absolute value with conditional `init ref` publication, total unsigned signed-magnitude extraction, plus bounded decimal/radix-2..36 accumulation through the full unsigned range | Executed as separately compiled modules with vacancy-only `init ref` outputs and accumulation under both policies; revision-56 persisted semantic-module JIT checks all ten binary helpers, both signed unary helpers and `MagnitudeInt64` against `BigInteger` across 935 boundary cases under both policies, and also checks decimal/all-radix accumulators against an independent arithmetic oracle across the unsigned range limits under both policies; Windows x64 fail-fast compiler-primitives DLL directly invokes all twelve checked arithmetic helpers, `MagnitudeInt64` and both accumulator functions against BigInteger boundary expectations; division by zero, signed-minimum quotient overflow, negation and absolute value do not publish; invalid accumulation leaves outputs unpublished; magnitude includes the signed minimum |
@@ -860,16 +860,18 @@ are reported as beyond the decoder's range, not lexical errors. The compiled
 scanner preserves decimal and valid hexadecimal floating tokens without
 publishing integer magnitudes; the hosted binder constructs target-typed
 `float32`/`float64` values and performs the supported numeric conversions,
-including provisional checked conversions to fixed-width integers. Same-format
+including checked floating-to-integer conversions for the accepted eight
+pairs. Same-format
 floating arithmetic/comparisons are projected by the Terrum-authored scalar
 frontend for typed values, as are target-typed decimal/hexadecimal floating
 literals and based integer literals directly targeting those formats. The
 Terrum-authored conversion helpers populate positive raw-bit literal leaves;
 the hosted reader validates their token spans and bits independently against
 the hosted parser. Conversion projection covers the two floating formats and the four
-fixed-width integer types. `char16`-to-floating, floating-to-integer and
-custom literal parser support remain outside this subset; those authored
-components still rely on the hosted verifier/emitter. Bounded scalar
+fixed-width integer types. The floating-to-integer v85 projection remains
+provisional, and those authored components still rely on the hosted
+verifier/emitter. `char16`-to-floating and custom literal parser support remain
+outside this subset. Bounded scalar
 `[ConstEval]` is implemented separately from literal registration.
 Contextual integer literal typing/range checks
 and parser routines remain hosted, while

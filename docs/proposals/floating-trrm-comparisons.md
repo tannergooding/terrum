@@ -52,6 +52,6 @@ constant widths and unsupported floating arithmetic/conversion opcodes.
 Compare source-compiled and source-free JIT/native results, and verify that
 existing integer Body bytes and execution remain unchanged.
 
-This proposal does not resolve floating arithmetic NaN encodings, checked
-float-to-integer eligibility, `char16`-to-floating eligibility, or general
-TRRM floating arithmetic.
+This proposal does not resolve floating arithmetic NaN encodings,
+`char16`-to-floating eligibility, floating-to-integer TRRM encoding, or
+general TRRM floating arithmetic.
