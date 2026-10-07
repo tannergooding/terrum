@@ -70,6 +70,9 @@ approved.
 - [Persisted scanner invocation profile](scanner-invocation-profile.md)
   considers a named, scanner-specific invocation profile and copied result
   publication without generalizing source grants to arbitrary buffers.
+- [Registered UTF-8 string-literal target](registered-string-target-binding.md)
+  recommends one bounded `StringLiteral` to `StringNameRowUtf8` registration
+  without defining general builder/handler semantics.
 - [Checked-exception TRRM](checked-exception-trrm.md) records the unapproved
   exceptional-control-flow contract needed before source-free checked-exception
   Bodies can be considered.
