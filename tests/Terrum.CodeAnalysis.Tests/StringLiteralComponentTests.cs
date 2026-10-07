@@ -402,6 +402,8 @@ public sealed class StringLiteralComponentTests
             ("\"\U0001F600\"", 12, [1, 4, 0, 0, 240, 159, 152, 128, 0, 0, 0, 0]),
             ("\"\"", 8, namespaceRow ? [1, 0, 0, 0, 0, 0, 0, 0] : null),
             ("\"A\\0B\"", 12, null),
+            ("\"A\\q\"", 8, null),
+            ("A", 8, null),
             ("\"A\"", 7, [1, 1, 0, 0, 65, 0, 0, 0]),
         ];
 
@@ -419,23 +421,22 @@ public sealed class StringLiteralComponentTests
                     {{checks.Replace("row.", "completed.")}}
                     """;
             var resultCheck = expected is null
-                ? $"if ({builder}(literal, move workspace, init var row)) {{ return 1; }}"
+                ? $"if ({builder}(spelling, move workspace, init var row)) {{ return 1; }}"
                 : capacity < expectedLength
                     ? $$"""
-                        if ({{builder}}(literal, move workspace, init var row)) { return 1; }
+                        if ({{builder}}(spelling, move workspace, init var row)) { return 1; }
                         require OwnedInt32Buffer.TryCreate({{expectedLength}}, out var retryWorkspace);
-                        if (!{{builder}}(literal, move retryWorkspace, init row)) { return 2; }
+                        if (!{{builder}}(spelling, move retryWorkspace, init row)) { return 2; }
                         {{verifyRow}}
                         """
                     : $$"""
-                        if (!{{builder}}(literal, move workspace, init var row)) { return 1; }
+                        if (!{{builder}}(spelling, move workspace, init var row)) { return 1; }
                         {{verifyRow}}
                         """;
             var entry = SyntaxTree.Parse($$"""
                 namespace Terrum.CodeAnalysis;
                 int32 Main() {
                     require SourceRange.TryCreate(0, Host.Source.Length, init var spelling);
-                    require StringLiteral.TryCreate(spelling, init var literal);
                     require OwnedInt32Buffer.TryCreate({{capacity}}, out var workspace);
                     {{resultCheck}}
                     return 0;
