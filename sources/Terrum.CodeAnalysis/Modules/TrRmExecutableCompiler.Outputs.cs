@@ -331,6 +331,34 @@ public static partial class TrRmExecutableCompiler
                         new BoundUnary(token, operand, operand.Type, default));
                     break;
                 }
+                case 0x1D:
+                {
+                    if (operation.Operands.Length != 2)
+                    {
+                        throw Invalid("Floating binary operation requires two values.");
+                    }
+
+                    var floatingLeftValue = ReadValue(operation.Operands[0]);
+                    var floatingRightValue = ReadValue(operation.Operands[1]);
+                    if (floatingLeftValue.Type != floatingRightValue.Type
+                        || !IsFloat(floatingLeftValue.Type)
+                        || operation.Kind is < 1 or > 4)
+                    {
+                        throw Invalid("Floating binary operation is outside the executable place profile.");
+                    }
+
+                    var token = operation.Kind switch
+                    {
+                        1 => TokenKind.Plus,
+                        2 => TokenKind.Minus,
+                        3 => TokenKind.Star,
+                        _ => TokenKind.Slash,
+                    };
+                    DefineValue(operation.Result,
+                        new BoundBinary(token, floatingLeftValue, floatingRightValue,
+                            floatingLeftValue.Type, default));
+                    break;
+                }
                 case 5:
                 case 0x19:
                 {
@@ -725,6 +753,35 @@ public static partial class TrRmExecutableCompiler
                     _ = AddValue(PrimitiveType.Int32, 0, (uint)constOffset);
                     _operationCount++;
                     return constResult;
+                case BoundBinary binary when binary.Type == binary.Left.Type
+                    && binary.Left.Type == binary.Right.Type && IsFloat(binary.Left.Type)
+                    && binary.Operator is TokenKind.Plus or TokenKind.Minus
+                        or TokenKind.Star or TokenKind.Slash:
+                {
+                    var floatingLeft = EmitValue(binary.Left);
+                    var floatingRight = EmitValue(binary.Right);
+                    var floatingResult = _valueTypes.Count + 1;
+                    var floatingKind = binary.Operator switch
+                    {
+                        TokenKind.Plus => 1,
+                        TokenKind.Minus => 2,
+                        TokenKind.Star => 3,
+                        _ => 4,
+                    };
+                    var floatingWidth = Width((ulong)Math.Max(floatingResult,
+                        Math.Max(floatingLeft, floatingRight)));
+                    var floatingOffset = _operations.Count;
+                    WriteInstruction(_operations, 0x1D, floatingWidth, 0);
+                    Write(_operations, (ulong)floatingResult, floatingWidth);
+                    _operations.Add((byte)floatingKind);
+                    Write(_operations, (ulong)floatingLeft, floatingWidth);
+                    Write(_operations, (ulong)floatingRight, floatingWidth);
+                    _ = AddValue(binary.Type, 0, (uint)floatingOffset);
+                    UseValue(floatingLeft, _operationCount);
+                    UseValue(floatingRight, _operationCount);
+                    _operationCount++;
+                    return floatingResult;
+                }
                 case BoundUnary unary when unary.Type == unary.Operand.Type
                     && (unary.Operator switch
                     {

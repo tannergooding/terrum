@@ -148,6 +148,14 @@ public sealed class TrRmExecutableCompilerTests
     [InlineData("(~Unsigned64One()) == Unsigned64ComplementOne()", 42)]
     [InlineData("(-SingleOne()) == NegativeSingleOne()", 42)]
     [InlineData("(-WideOne()) == NegativeWideOne()", 42)]
+    [InlineData("(SingleOne() + SingleTwo()) == SingleThree()", 42)]
+    [InlineData("(SingleTwo() - SingleOne()) == SingleOne()", 42)]
+    [InlineData("(SingleOne() * SingleTwo()) == SingleTwo()", 42)]
+    [InlineData("(SingleThree() / SingleTwo()) == SingleOneAndHalf()", 42)]
+    [InlineData("(WideOne() + WideTwo()) == WideThree()", 42)]
+    [InlineData("(WideTwo() - WideOne()) == WideOne()", 42)]
+    [InlineData("(WideOne() * WideTwo()) == WideTwo()", 42)]
+    [InlineData("(WideThree() / WideTwo()) == WideOneAndHalf()", 42)]
     [InlineData("SingleOne() == SingleOne()", 42)]
     [InlineData("SingleOne() != SingleTwo()", 42)]
     [InlineData("SingleOne() < SingleTwo()", 42)]
@@ -187,9 +195,13 @@ public sealed class TrRmExecutableCompilerTests
             uint64 Unsigned64ComplementOne() { return ~uint64(1); }
             float32 SingleOne() { return float32(1.0); }
             float32 SingleTwo() { return float32(2.0); }
+            float32 SingleThree() { return float32(3.0); }
+            float32 SingleOneAndHalf() { return float32(1.5); }
             float32 NegativeSingleOne() { return float32(-1.0); }
             float64 WideOne() { return float64(1.0); }
             float64 WideTwo() { return float64(2.0); }
+            float64 WideThree() { return float64(3.0); }
+            float64 WideOneAndHalf() { return float64(1.5); }
             float64 NegativeWideOne() { return float64(-1.0); }
             int32 Main() {
                 init int32 result;
