@@ -117,8 +117,11 @@ internal static class TrRmScalarInitOutputBodyReader
         // Public MethodDefs are the only legal Export targets. Rejecting public output
         // declarations also prevents a later Export row from exposing this private slice.
         var body = bodies.GetRow(methods.GetBodyRow(method));
-        if (hasOutput && (methods.GetFlags(method) == 2 || body.IsEmpty || body[0] > 2
-            || ResultType(types, signatures.GetResultTypeSpec(signature)) is not (0 or 8)))
+        var hasGeneralPlaceBody = !body.IsEmpty && body[0] <= 2;
+        var resultType = ResultType(types, signatures.GetResultTypeSpec(signature));
+        if ((hasGeneralPlaceBody && resultType is not (0 or 8))
+            || (hasOutput && (methods.GetFlags(method) == 2 || !hasGeneralPlaceBody
+                || resultType is not (0 or 8))))
         {
             throw InvalidBody();
         }

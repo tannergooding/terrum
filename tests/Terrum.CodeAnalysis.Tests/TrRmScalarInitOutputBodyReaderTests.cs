@@ -446,6 +446,17 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             voidResult: false));
     }
 
+    [Fact]
+    public void GeneralPlaceBodyWithoutOutputFormalsStillRequiresVoidOrInt32Result()
+    {
+        var fixture = Encode([[0x0B, 2, 1]], [0, 1], [1, -1], [1],
+            entry: [1], terminator: [0x83, 1], valueTypeIds: [2, 1],
+            typeMapRows: [1, 3]);
+
+        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [0],
+            resultTypeSpecRow: 3, paramTypeSpecRows: [3]));
+    }
+
     private sealed record Fixture(byte[] Bytes, int OperationStart, int PlaceFlags,
         int PlaceRegion, int PlaceUses, int ValueKind, int ValueUses, int ValueLastUse,
         int PlaceLastUse, int Definition, int TerminatorOffset);
@@ -456,10 +467,14 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
 
     private static Fixture Encode(byte[][] operations, byte[] kinds, int[] valueLastUses,
         int[] placeLastUses, byte[] terminator, int[]? entry = null, int[]? ending = null,
-        int width = 1)
+        int width = 1, int[]? valueTypeIds = null, int[]? placeTypeIds = null,
+        int[]? typeMapRows = null)
     {
         entry ??= [];
         ending ??= Enumerable.Range(1, placeLastUses.Length).ToArray();
+        valueTypeIds ??= Enumerable.Repeat(1, kinds.Length).ToArray();
+        placeTypeIds ??= Enumerable.Repeat(1, placeLastUses.Length).ToArray();
+        typeMapRows ??= [1];
         using var blockStream = new MemoryStream();
         using var block = new BinaryWriter(blockStream);
         Local(block, 0, width);
@@ -503,28 +518,31 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
         writer.Write((byte)(width == 1 ? 0 : width == 2 ? 1 : 2));
-        foreach (var count in new[] { 1, kinds.Length, placeLastUses.Length, 0, 1 })
+        foreach (var count in new[] { 1, kinds.Length, placeLastUses.Length, 0, typeMapRows.Length })
         {
             Local(writer, count, width);
         }
 
-        writer.Write(1u);
+        foreach (var row in typeMapRows)
+        {
+            writer.Write((uint)row);
+        }
         var placeRegion = (int)stream.Position + width;
         var placeFlags = (int)stream.Position + 2 * width;
         var placeUses = (int)stream.Position + 2 * width + 1;
-        foreach (var use in placeLastUses)
+        for (var place = 0; place < placeLastUses.Length; place++)
         {
-            Local(writer, 1, width);
+            Local(writer, placeTypeIds[place], width);
             Local(writer, 0, width);
             writer.Write((byte)4);
-            Local(writer, use < 0 ? 0 : 1, width);
+            Local(writer, placeLastUses[place] < 0 ? 0 : 1, width);
         }
 
         var valueKind = (int)stream.Position + width;
         var valueUses = (int)stream.Position + width + 1;
         for (var value = 0; value < kinds.Length; value++)
         {
-            Local(writer, 1, width);
+            Local(writer, valueTypeIds[value], width);
             writer.Write(kinds[value]);
             Local(writer, valueLastUses[value] < 0 ? 0 : 1, width);
         }
@@ -591,7 +609,8 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
 
     private static object Inspect(byte[] body, byte[] modes, bool voidResult = true,
         byte[]? targetModes = null, byte targetFlags = 0, byte targetLayout = 0,
-        byte? contractKind = null)
+        byte? contractKind = null, int resultTypeSpecRow = 0,
+        byte[]? paramTypeSpecRows = null)
     {
         var methodCount = targetModes is null ? 1 : 2;
         var parameterCount = modes.Length + (targetModes?.Length ?? 0);
@@ -608,10 +627,13 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         var typeDefinitions = new TrRmTypeDefTableReader([], 0, names, modules,
             0, 0, 0, contractKind is null ? 0 : 1);
         var types = new TrRmTypeSpecTableReader(
-            TrRmVariableTableWriter.EncodeBlobs([new byte[] { 1, 0, 8 }, new byte[] { 1, 0, 0 }]),
-            2, 0, 0, 0, 0);
+            TrRmVariableTableWriter.EncodeBlobs([
+                new byte[] { 1, 0, 8 }, new byte[] { 1, 0, 0 }, new byte[] { 1, 0, 1 },
+            ]), 3, 0, 0, 0, 0);
         var signatureBytes = new byte[methodCount * 24];
-        Signature(signatureBytes, 0, voidResult ? 2u : 1u, modes.Length == 0 ? 0 : 1, modes.Length);
+        Signature(signatureBytes, 0,
+            (uint)(resultTypeSpecRow != 0 ? resultTypeSpecRow : voidResult ? 2 : 1),
+            modes.Length == 0 ? 0 : 1, modes.Length);
         if (targetModes is not null)
         {
             Signature(signatureBytes, 24, 2, targetModes.Length == 0 ? 0 : modes.Length + 1,
@@ -621,7 +643,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         var signatures = new TrRmMethodSigTableReader(signatureBytes, methodCount, types,
             parameterCount, 0);
         var parameterBytes = new byte[parameterCount * 16];
-        Params(parameterBytes, 0, 1, modes);
+        Params(parameterBytes, 0, 1, modes, paramTypeSpecRows);
         if (targetModes is not null)
         {
             Params(parameterBytes, modes.Length, 2, targetModes);
@@ -680,14 +702,15 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Write(bytes, offset + 12, (uint)count);
     }
 
-    private static void Params(byte[] bytes, int first, int owner, byte[] modes)
+    private static void Params(byte[] bytes, int first, int owner, byte[] modes,
+        byte[]? typeSpecRows = null)
     {
         for (var index = 0; index < modes.Length; index++)
         {
             var offset = (first + index) * 16;
             Write(bytes, offset, (uint)owner);
             Write(bytes, offset + 4, (uint)index);
-            Write(bytes, offset + 8, 1);
+            Write(bytes, offset + 8, typeSpecRows is null ? 1u : typeSpecRows[index]);
             bytes[offset + 12] = modes[index];
         }
     }
