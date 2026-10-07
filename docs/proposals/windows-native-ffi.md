@@ -90,7 +90,164 @@ authorize a proven lifetime escape.
    Keep Terrum `bool`, Win32 `BOOL`, HRESULTs, handles and managed references
    distinct.
 
-### DX11 SDK layout reference (provisional)
+### Proposed Stage 2 storage and pointer-call profile (unapproved)
+
+**Boundary:** The accepted [layout](../specs/data-layout-and-abi.md) and
+[lifetime/access](../specs/lifetimes.md) contracts remain prerequisites:
+`Sequential` does not grant public fields or `Blittable`; initialized storage,
+stable backing and actual authority are required for address formation;
+`mut` on a pointer slot does not grant `write` through it; copying a descriptor
+preserves its dependencies. `unsafe` cannot erase a proven escape, and there
+is no universal `default(T)`. These are settled contracts, not Stage 2 choices.
+
+The fixed-width imports and sample-specific static UTF-16/`HWND.NoOwner`
+gates are provisional implementation, not approval or general handle/
+pointer support. The SDK probe is foreign ABI evidence only. The following
+choices propose the next AOT-only slice; they are not implemented support or
+a public stable-ABI guarantee. A supported port may change the sketch's helper
+spellings without changing these contracts.
+
+#### Carrier and storage admission
+
+**Summary:** The sample needs native-addressable values beyond the compact
+16-byte subset, but not arbitrary user-defined Windows layouts.
+
+**Recommendation:** Admit closed, catalog-owned identities for the SDK
+carriers
+`DXGI_SWAP_CHAIN_DESC`, its `DXGI_MODE_DESC`/`DXGI_SAMPLE_DESC`/
+`DXGI_RATIONAL` members, `D3D11_BUFFER_DESC`, `D3D11_SUBRESOURCE_DATA`,
+`D3D11_INPUT_ELEMENT_DESC`, `D3D11_VIEWPORT`, `RECT`, `WNDCLASSEXW`, and
+`MSG` with its `POINT` member. Separately admit the sample-authored `Vertex`
+only when its nominal declaration has exactly three `float32` fields in
+`X`/`Y`/`Z` order, with offsets 0/4/8, size/alignment 12/4; this is a
+sample-specific catalog rule, not a catalog-owned SDK type or general
+`Blittable` guarantee.
+Use aligned inline local storage, materialized before its address is taken
+and non-relocating while any dependent loan is live; no hidden allocation or
+pinning. Keep representations compilation-local, with private fields and
+checked helpers, rather than adopting the sketch's public fields or widening
+the separate public fixed-layout proposal. Permit only their reviewed scalar,
+nested-carrier, nominal handle and qualified-pointer fields. Windows x64
+`nint`/`nuint` carriers are signed/unsigned eight-byte values; `float32`
+storage is four-byte IEEE binary32. SDK enums/flags, Win32 `BOOL` and HRESULT
+use their reviewed 32-bit carriers without becoming Terrum `bool` or
+interchangeable nominal values. Opaque handles carry no ownership merely from
+being stored or copied. This does not widen the existing `HWND.NoOwner` gate.
+Pass descriptor aggregates only by address, never by aggregate value; scalar
+and handle values use their exact reviewed native parameter forms. Ordinary
+checked local copies retain all embedded dependencies.
+
+#### Initialization and zero templates
+
+**Summary:** The sketch initializes most descriptors with `*.Zero`, then
+sets selected fields. Zero representation is not necessarily an API-ready
+descriptor or a valid value of an arbitrary Terrum type.
+
+**Recommendation:** Make `*.Zero` a reviewed constructor only for the closed
+native carriers whose every field admits its documented zero/reset value,
+including explicitly nullable pointer/handle slots. Check that eligibility
+transitively; a required non-null pointer, owner, managed reference or other
+nonzero invariant excludes the carrier. SDK enum/flag reset bits need an
+explicit carrier-validity rule, not an invented ordinary enum case. Initialize
+all fields, including untouched nested/reserved fields, before publication.
+Ordinary padding remains outside source value semantics; any reserved or
+padding bytes a native operation observes need an explicit boundary
+initialization contract, not inferred permission to read object bytes.
+Required call inputs such as `cbSize`, sample count and buffer size still
+need their API-specific checks. `&place` requires an already initialized
+destination: use `.Zero` or complete construction before a writable native
+call, not a pointer to vacant storage. Do not conflate this with `init ref<T>`
+publication. Record each writable import's validity and write guarantees on
+success and failure; do not infer complete initialization from a return code,
+silently fabricate an output, or promise rollback of native writes.
+
+#### Field access and update
+
+**Summary:** Nested updates such as `swapDescription.BufferDesc.Width = width`
+must affect the original descriptor, not a temporary copy from an accessor.
+
+**Recommendation:** Lower the closed carriers' checked field helpers to typed
+place paths with catalogued offsets, evaluating receivers/indices once and
+preserving containing-place authority. Reads require initialized fields;
+updates require writable containing storage and respect member restrictions.
+Nested updates preserve other fields. Replacing a pointer field checks its
+complete access, extent and backing dependencies; it neither transfers the
+referent's ownership nor upgrades readonly access. Readonly descriptor access
+does not imply deep immutability or erase a stored pointer's qualification.
+
+#### Fixed inline-array storage
+
+**Summary:** The sketch needs one feature level, three vertices and four
+clear-color components, not a general collection or generic array library.
+
+**Recommendation:** Initially admit only
+`InlineArray<D3D_FEATURE_LEVEL, 1>`, `InlineArray<Vertex, 3>` and
+`InlineArray<float32, 4>`. Require a positive compile-time extent, checked
+target-representable storage size, and an initializer supplying every element
+in source order before publication; no implicit default-filled tail. Elements
+occupy contiguous receiver-owned inline storage with the element's validated
+alignment and padded size as stride: expected sizes are 4, 36 and 16 bytes.
+Checked indexing forms an element place; `&array[0]` retains the array backing
+and readable/writable element count, not an unbounded pointer. Reject invalid
+indices before address calculation. Copies retain embedded dependencies and
+may occur only under ordinary Copy/loan rules; no move or replacement may
+invalidate outstanding element loans. Do not add resizing, managed-array
+addresses, general array decay or pointer arithmetic.
+
+#### Synchronous pointer loans and embedded pointers
+
+**Summary:** `initialData.pSysMem = &vertices[0]` stores a stack address before
+`CreateBuffer`; checking only a direct pointer argument would miss that
+dependency. Descriptor pointers and literal fields likewise need more than
+the numerical address or a raw `ptr<T>` signature.
+
+**Recommendation:** Extend the immutable binding catalog with exact reviewed
+parameter types, read/write authority, byte/element extents, count/size
+relationships, nullability and synchronous no-retention contracts. Binding
+and mandatory verification must preserve these facts through lowering and
+check nested pointer fields as well as direct arguments. Permit
+`&local`, eligible field/element addresses, and bounded pointer storage in
+these local descriptors only when the backing stays initialized, aligned,
+stable and live through every use, including failure/unwind. Read inputs use
+`ptr<T>`; writable initialized destinations require `write ptr<T>` and actual
+writable backing. Reject conflicting overlapping loans, premature lifetime
+ending, disposal, relocation or replacement. Writable access to a pointer
+cell does not grant write access to its referent.
+
+Allow only the reviewed readonly `Vertex`-data-to-`ptr<void>` erasure for
+`pSysMem`, preserving provenance, access and the 36-byte backing extent;
+`ByteWidth` must not exceed that readable extent. A descriptor copy retains
+that dependency, and the loan lasts until the last dependent use, not merely
+the end of the assignment or a single call. No return, longer-lived storage,
+closure capture, suspension or foreign retention is allowed. Forwarding through
+sample-local synchronous helpers must preserve the same checked dependencies
+and no-escape contract; uncontracted forwarding rejects. The eventual exact
+`CreateBuffer` binding must copy any consumed data before returning and retain
+no caller address on any outcome; Stage 4 still owns the COM call.
+No-escape covers addresses, not the API's independently specified resource
+retention. A foreign provider's promise is reviewed trust, not inferred from
+`unsafe`, `[NoThrow]`, a const C parameter or a successful fixture.
+
+#### Stable literal pointer fields
+
+**Summary:** The sample passes UTF-8 entry-point/target literals directly to
+`D3DCompileFromFile` and stores a UTF-8 semantic-name literal in an input
+descriptor field. The provisional UTF-16 gate covers neither UTF-8 use.
+
+**Recommendation:** Admit readonly ASCII-compatible UTF-8-NUL literals only at the exact
+`D3DCompileFromFile` entry-point/target argument positions and the
+`D3D11_INPUT_ELEMENT_DESC.SemanticName` field used by this sample. Validate
+encoding, extent, final terminator and absence of embedded NUL, retaining the
+existing 8 MiB aggregate encoded-data budget and immutable executable-image
+storage. Keep direct-argument validation distinct from the checked
+field-store/dependency path; neither gate implies general UTF-8 string
+marshalling. Non-ASCII narrow literals remain outside this sample-specific
+slice. No writable projection or dynamic string marshalling is implied.
+`WNDCLASSEXW` callback-address creation/registration and `MSG` callback dispatch
+remain Stage 3; COM receivers, pointer outputs and ownership remain Stage 4.
+Their layout admission or zero slots authorize neither calls nor callbacks.
+
+#### DX11 SDK layout evidence and implementation gate
 
 **Summary:** The sample's native descriptor and message structures now have
 an x64 C layout probe compiled against the Windows SDK selected by the test
@@ -102,11 +259,21 @@ offsets for `DXGI_MODE_DESC` (28/4), `DXGI_SAMPLE_DESC` (8/4),
 (48/8). The probe passed against Windows SDK 10.0.28000.0 on the current
 host.
 
-**Recommendation:** Retain this probe as the sample-specific ABI oracle when
-implementing descriptor storage. Matching SDK layout is necessary but does
-not define Terrum initialization, zero-initialization eligibility, pointer
-loans, ownership or general `Blittable` support; those remain separate
-contracts under this unapproved proposal.
+**Recommendation:** Retain
+[`dx11-sdk-layout-probe.c`](../../tests/native/dx11-sdk-layout-probe.c) as the
+sample-specific ABI oracle, recording target and SDK version. Before admitting
+each carrier, compare independently computed Terrum size/alignment, nested
+offsets and array stride with SDK/C evidence; extend evidence for
+`DXGI_RATIONAL`, `POINT`, `Vertex` and fields not asserted by the current
+probe rather than assuming coverage. Reject mismatches and unsupported
+layouts before emission. Then gate Terrum-produced initialized descriptors,
+nested updates, arrays and readonly/writable pointer calls against independent
+C readers/writers with extent canaries, including register/stack positions and
+failure outcomes. Add negative checks for invalid zero eligibility, vacant
+reads/addresses, extent violations, authority upgrades and direct/embedded
+escapes, including descriptor copies. Keep unsupported persistence and JIT
+paths rejecting the slice. Matching SDK layout alone establishes none of
+these Terrum behaviors, general `Blittable` support or proposal approval.
 
 3. **One static window callback.** Support the sample's exact noncapturing
    `WNDPROC` signature, calling convention and native-entry address formation,
