@@ -136,10 +136,11 @@ prerequisite has already been met.
    safety; see the unapproved
    [Windows native FFI proposal](proposals/windows-native-ffi.md). It does not
    remove the exclusion of wholesale interop or claim current sample support.
-   The proposal recommends checked Windows x64 scalar imports first, with ABI
-   identity and effects carried through verification and PE emission, followed
-   by only the sample's native storage/pointer, callback and closed COM
-   requirements before attempting the integration gate. These remain
+   The proposal recommends checked Windows x64 scalar imports first, resolved
+   by a registered semantic-attribute identity and immutable trusted binding
+   catalog, with ABI identity and effects enforced through verification and
+   PE emission. It then limits native storage/pointers, callback and closed COM
+   support to the sample before attempting the integration gate. These remain
    unapproved proposals, not implementation claims.
 7. **Rich libraries — builders and handlers.** Specify registered builders and
    handlers with checked eager capture before draining, ownership, refusal,

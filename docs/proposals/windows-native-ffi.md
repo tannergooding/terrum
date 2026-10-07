@@ -44,13 +44,30 @@ authorize a proven lifetime escape.
 1. **Checked scalar imports.** Implement an AOT-only source profile for
    bodyless top-level and static `extern` declarations using one registered
    Windows x64 binding profile, initially limited to fixed-width integer
-   arguments/results and `void`. Resolve declarations through reviewed,
-   trusted native identities and an explicit dependency/deployment policy;
-   a DLL basename alone does not establish trusted loading or prove that a
-   foreign provider implements the declared signature. Carry foreign ABI
-   identity from binding through IR and target lowering to PE emission, and
-   enforce declared effects in mandatory verification before emission. Reuse
-   the existing PE import path only behind these checks; Terrum package
+   arguments/results and `void`. Use one nonrepeatable `NativeImport` semantic
+   attribute with one required string-literal key, valid only on those
+   declarations. Its sole first-gate identity is the fully qualified,
+   compiler-supplied `Terrum.Interop.NativeImport` declaration. Treat that
+   name as lookup only: resolve it to a compiler-owned semantic declaration
+   record linked to the selected schema, and reject conflicting or ambiguous
+   source declarations. Check the decoded string constant's type and encoding
+   through the ordinary constant rules. The key selects a registry entry; it
+   is not a DLL/export name or path, and neither its token spelling nor the
+   attribute name grants import authority. An
+   immutable, selected binding catalog maps each key to one reviewed exact
+   scalar signature, ABI identity, declared effects, DLL/export and trusted
+   dependency/deployment policy. The source declares the callable signature
+   and ordinary effect/access/unsafe modifiers, which must match the catalog
+   record; the key cannot override that contract or provide DLL/export names.
+   Reject unknown keys and any signature/effect mismatch. A DLL
+   basename alone does not establish trusted loading or prove that a foreign
+   provider implements the declared signature. Keep the initial catalog
+   compiler-supplied and immutable, with only the reviewed system import and a
+   test-only fixture entry; do not add plugin discovery, arbitrary caller
+   catalogs or source-selected DLLs. Carry the catalog identity from binding
+   through IR and target lowering to PE emission, and enforce
+   declared effects in mandatory verification before emission. Reuse the
+   existing PE import path only behind these checks; Terrum package
    compatibility is not foreign-provider proof. Do not infer symbols from
    source names or accept a caller-supplied DLL path. Gate with a Terrum AOT
    caller importing a selected system function such as `GetCurrentThreadId`
