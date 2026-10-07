@@ -801,7 +801,10 @@ trivia, diagnostic or integer-value records or constitutes a parser.
 `TryScanManagedCursor` publishes a reader only after the complete scan and
 cursor allocation succeed; its cursor retains the underlying chain after
 the scanner wrapper returns. It is a bounded sequential consumer, not a
-replacement for the host parser or a public token-stream wire contract.
+replacement for the host parser or a public token-stream wire contract. Failed
+indexed and exhausted sequential reads leave their `init ref<Token>`
+destinations vacant; tests cover negative, out-of-range and `int32.MaxValue`
+indices without advancing sequential state under both runtime policies.
 
 `StringLiteral.TryCreate` validates a complete quoted source range before
 publishing its spelling and scalar count. `TryReadScalar` reports a Unicode

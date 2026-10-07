@@ -105,7 +105,9 @@ public sealed class TokenCursorTests
                 index = index + 1;
             }
             require index == owner.GetCount();
-            require !cursor.TryRead(init var exhausted);
+            init Token exhausted;
+            require !cursor.TryRead(init exhausted);
+            require !(exhausted is init);
             cursor = _;
             tokens = _;
             owner = _;
@@ -523,12 +525,19 @@ public sealed class TokenCursorTests
                     || first.Range.Start != repeated.Range.Start
                     || first.Range.Length != repeated.Range.Length) { return 1; }
                 if (!cursor.TryGet(count - 1, init var last) || last.Kind != 0) { return 2; }
-                if (cursor.TryGet(-1, init var negative)
-                    || cursor.TryGet(count, init var beyond)) { return 3; }
+                init Token negative;
+                if (cursor.TryGet(-1, init negative) || negative is init) { return 3; }
+                init Token beyond;
+                if (cursor.TryGet(count, init beyond) || beyond is init) { return 4; }
+                init Token tooLarge;
+                if (cursor.TryGet(int32.MaxValue, init tooLarge) || tooLarge is init) { return 5; }
                 if (!cursor.TryRead(init var next)
                     || next.Kind != first.Kind
                     || next.Range.Start != first.Range.Start
-                    || next.Range.Length != first.Range.Length) { return 4; }
+                    || next.Range.Length != first.Range.Length) { return 6; }
+                while (cursor.TryRead(init var remaining)) { }
+                init Token exhausted;
+                if (cursor.TryRead(init exhausted) || exhausted is init) { return 7; }
                 cursor = _;
                 owner = _;
                 return 42;
