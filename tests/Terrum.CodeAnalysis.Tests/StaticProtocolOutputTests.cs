@@ -296,6 +296,68 @@ public sealed class StaticProtocolOutputTests
     }
 
     [Theory]
+    [InlineData("bool", false)]
+    [InlineData("bool", true)]
+    [InlineData("char16", false)]
+    [InlineData("char16", true)]
+    [InlineData("int32", false)]
+    [InlineData("int32", true)]
+    [InlineData("uint32", false)]
+    [InlineData("uint32", true)]
+    [InlineData("int64", false)]
+    [InlineData("int64", true)]
+    [InlineData("uint64", false)]
+    [InlineData("uint64", true)]
+    [InlineData("float32", false)]
+    [InlineData("float32", true)]
+    [InlineData("float64", false)]
+    [InlineData("float64", true)]
+    public void GenericFixedScalarOutputTypesRetainTheirMode(string outputType, bool isInit)
+    {
+        var parameter = isInit ? $"init ref<{outputType}> side" : $"out {outputType} side";
+        var argument = isInit ? "init var side" : "out var side";
+        var (assignment, predicate) = outputType switch {
+            "bool" => ("true", "side"),
+            "char16" => ("char16(7)", "side == char16(7)"),
+            "int32" or "uint32" or "int64" or "uint64" => ("7", "side == 7"),
+            "float32" => ("float32(7.5)", "side == float32(7.5)"),
+            "float64" => ("float64(7.5)", "side == float64(7.5)"),
+            _ => throw new InvalidOperationException($"Unexpected output type '{outputType}'."),
+        };
+        var source = Value + $$"""
+            int32 Fill<T>(T value, out T result, {{parameter}}) where T : [Copy] {
+                result = value;
+                side = {{assignment}};
+                return 7;
+            }
+            int32 Main() {
+                int32 status = Fill(new Value(40), out var copied, {{argument}});
+                require status == 7 && copied.First == 40 && {{predicate}};
+                return 42;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value>");
+        Assert.True(fill.Variables[1].IsOut);
+        Assert.False(fill.Variables[1].IsInit);
+        Assert.True(fill.Variables[2].IsOut);
+        Assert.Equal(isInit, fill.Variables[2].IsInit);
+        var expectedType = outputType switch {
+            "bool" => PrimitiveType.Bool,
+            "char16" => PrimitiveType.Char16,
+            "int32" => PrimitiveType.Int32,
+            "uint32" => PrimitiveType.UInt32,
+            "int64" => PrimitiveType.Int64,
+            "uint64" => PrimitiveType.UInt64,
+            "float32" => PrimitiveType.Float32,
+            _ => PrimitiveType.Float64,
+        };
+        Assert.Equal(expectedType, fill.Variables[2].Type);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void GenericMixedOutputsCanShareOneTypeParameter(bool explicitType)
@@ -354,32 +416,56 @@ public sealed class StaticProtocolOutputTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void GenericFixedScalarOutputsCanAccompanyGenericOutputs(bool explicitType)
+    [InlineData("int32", false)]
+    [InlineData("int32", true)]
+    [InlineData("uint32", false)]
+    [InlineData("uint32", true)]
+    [InlineData("int64", false)]
+    [InlineData("int64", true)]
+    [InlineData("uint64", false)]
+    [InlineData("uint64", true)]
+    [InlineData("char16", false)]
+    [InlineData("char16", true)]
+    [InlineData("void", false)]
+    [InlineData("void", true)]
+    public void GenericFixedScalarOutputsCanAccompanyGenericOutputs(string resultType, bool explicitType)
     {
         var call = explicitType
             ? "Fill<Value>(new Value(40), out copied, out var count, init var score)"
             : "Fill(new Value(40), out copied, out var count, init var score)";
+        var returnValue = resultType == "char16" ? "char16(7)" : "7";
+        var outputs = "result = value; count = 2; score = float64(3.5);";
+        var body = resultType == "void" ? outputs : outputs + " return " + returnValue + ";";
+        var completion = resultType == "void"
+            ? "CALL; require copied.First == 40 && count == 2 && score == float64(3.5); return 42;"
+            : "var status = CALL; require status == " + returnValue
+                + " && copied.First == 40 && count == 2 && score == float64(3.5); return 42;";
         var source = Value + """
-            int32 Fill<T>(T value, out T result, out int32 count, init ref<float64> score)
+            RESULT Fill<T>(T value, out T result, out int32 count, init ref<float64> score)
                 where T : [Copy] {
-                result = value;
-                count = 2;
-                score = float64(3.5);
-                return 7;
+                BODY
             }
             int32 Main() {
                 mut Value copied = new Value(0);
-                int32 status = CALL;
-                require status == 7 && copied.First == 40 && count == 2 && score == float64(3.5);
-                return 42;
+                COMPLETION
             }
-            """.Replace("CALL", call, StringComparison.Ordinal);
+            """.Replace("RESULT", resultType, StringComparison.Ordinal)
+            .Replace("BODY", body, StringComparison.Ordinal)
+            .Replace("COMPLETION", completion, StringComparison.Ordinal)
+            .Replace("CALL", call, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value>");
+        var expectedReturn = resultType switch {
+            "int32" => PrimitiveType.Int32,
+            "uint32" => PrimitiveType.UInt32,
+            "int64" => PrimitiveType.Int64,
+            "uint64" => PrimitiveType.UInt64,
+            "char16" => PrimitiveType.Char16,
+            _ => PrimitiveType.Void,
+        };
+        Assert.Equal(expectedReturn, fill.ReturnType);
         Assert.True(fill.Variables[1].IsOut);
         Assert.False(fill.Variables[1].IsInit);
         Assert.True(fill.Variables[2].IsOut);
@@ -430,6 +516,25 @@ public sealed class StaticProtocolOutputTests
             }
             """));
         Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void GenericFixedOutputsRequireAGenericTypedOutput()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Fill<T>(T value, out int32 count, init ref<float64> score)
+                where T : [Copy] {
+                count = 2;
+                score = float64(3.5);
+                return 7;
+            }
+            int32 Main() {
+                int32 status = Fill(int32(40), out var count, init var score);
+                return status + count + int32(score);
+            }
+            """));
+        Assert.True(compilation.HasErrors);
         Assert.Null(compilation.Program);
     }
 

@@ -4,11 +4,14 @@
 
 ## Summary
 
-Compilation-local `[Copy]` generic output templates provisionally support
-fixed `float32` and `float64` results only when a generic-typed output anchors
-the specialization. Consider retaining that bounded hosted extension,
-including fixed scalar side outputs, without changing generic output modes or
-symbolic floating capabilities.
+Compilation-local `[Copy]` templates have an accepted bounded profile for
+fixed scalar side outputs with `int32`, `uint32`, `int64`, `uint64`, `char16`,
+or `void` results when a generic-typed output anchors the specialization and
+all generic outputs use one mode. This proposal remains unapproved and
+considers fixed `float32` and `float64` results, including their interaction
+with mixed generic outputs and fixed side outputs, without changing symbolic
+floating capabilities. Those wider result and mode combinations remain
+unapproved.
 
 ## Recommendation
 
@@ -22,6 +25,11 @@ do not correlate with whether an output is initialized. Checked exceptional
 departure publishes no output; `init` destinations remain vacant, while
 ordinary `out` destinations retain their existing lack of
 rollback/readability guarantees.
+
+The accepted fixed-side profile is narrower: it covers only fixed
+`int32`/`uint32`/`int64`/`uint64`/`char16`/`void` results and templates whose
+generic-typed outputs use one mode. Floating results and fixed side outputs
+combined with generic mixed modes remain unapproved.
 
 Use a result-specific eligibility gate rather than widening shared generic
 scalar/type parsing. This does not admit fixed floating by-value parameters,

@@ -273,9 +273,9 @@ conditional `out` or `init ref<T>`. Custom conditional postcondition-driven
 governed by the general outcome rules above.
 
 Compilation-local `[Copy]` templates also admit ordinary `out T` with a fixed
-supported non-Boolean scalar result or `void`, provided the concrete `T`
-satisfies the existing non-Boolean `out` shape. The result is not a success
-discriminator; every normal return fully initializes the output, and
+`int32`, `uint32`, `int64`, `uint64`, `char16`, or `void` result, provided the
+concrete `T` satisfies the existing non-Boolean `out` shape. The result is not
+a success discriminator; every normal return fully initializes the output, and
 exceptional departure publishes none. This standalone profile covers closed
 private specializations only; compatible semantic-module and native-module
 replacements preserve those closed bodies without exposing the generic
@@ -322,6 +322,24 @@ side parameters, unique or owning values, formal-valued results, public generic
 exports or witnesses, source-free TRRM, scalar-frontend verification or
 emission, and floating concrete argument eligibility remain outside this
 profile.
+
+A compilation-local `[Copy]` template may also add fixed scalar output
+parameters alongside at least one generic-typed output when its result is a
+fixed `int32`, `uint32`, `int64`, `uint64`, `char16`, or `void`. Fixed output
+types are limited to `bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`,
+`float32`, and `float64`; they do not infer generic type arguments, provide a
+generic output anchor, or add managed-handle or unique-value support. Every
+output must be fully initialized on every normal return, including implicit
+`void` fallthrough, under its mode-specific proof. On exceptional departure,
+`init` destinations remain vacant, while `out` destinations have no rollback
+guarantee and cannot be read in catch paths.
+Compatible semantic-module and native-graph replacements preserve closed
+private specializations and output-mode metadata without ABI or wire-format
+changes. The generic-typed outputs in this profile must all use one mode:
+fixed side outputs do not combine with a template that mixes generic `out` and
+generic `init`. Boolean-result behavior is unchanged; floating results,
+formal-valued results, and templates without a generic-typed output remain
+outside this profile.
 
 ### 2.3 Checking and consuming the contract
 

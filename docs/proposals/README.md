@@ -25,9 +25,6 @@ approved.
 - [Reference-call metadata](reference-call-metadata.md) has an accepted,
   bounded indexed-Body unsafe-region contract; its dependency-relation profile,
   general output-call migration and other extensions remain unapproved.
-- [Fixed scalar outputs in generic Copy templates](generic-fixed-output-parameters.md)
-  recommends adding scalar fixed-type output side parameters alongside at
-  least one generic output without changing publication rules.
 - [Floating results from generic Copy output templates](generic-floating-output-results.md)
   recommends allowing fixed floating result types without adding symbolic
   floating generic operations or conditional output semantics.
