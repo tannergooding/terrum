@@ -41,6 +41,35 @@ bool MatchesSourceMagnitude(int32 tokenIndex, int32 status, int32 low, int32 hig
         && high == EncodeWord(uint32(magnitude >> 32));
 }
 
+bool TryGetIntegerRecordCount(int32 tokenCount, init ref<int32> count)
+{
+    if (Host.Diagnostics[0] != 0 || tokenCount < 1
+        || tokenCount > Host.Tokens.Length / 3
+        || Host.IntegerValues.Length < 1)
+    {
+        return false;
+    }
+
+    int32 found = Host.IntegerValues[0];
+    if (found < 0 || found >= tokenCount
+        || found > (Host.IntegerValues.Length - 1) / 5
+        || found > int32.MaxValue / 4)
+    {
+        return false;
+    }
+
+    count = found;
+    return true;
+}
+
+bool IsValidIntegerRecord(int32 tokenIndex, int32 recordedIndex, int32 status,
+    int32 low, int32 high, int32 tag)
+{
+    return recordedIndex == tokenIndex && status >= 0 && status <= 1 && tag == 0
+        && (status != 1 || low == 0 && high == 0)
+        && MatchesSourceMagnitude(tokenIndex, status, low, high);
+}
+
 // Magnitudes retain the scanner's raw low/high uint32 bit patterns as int32 words.
 public unique struct TokenIntegerSnapshot
 {
@@ -104,19 +133,42 @@ public unique struct TokenIntegerSnapshot
         return true;
     }
 
-    public static bool TryBuild(int32 tokenCount, init ref<TokenIntegerSnapshot> result)
+    public static bool TryValidate(int32 tokenCount)
     {
-        if (Host.Diagnostics[0] != 0 || tokenCount < 1
-            || tokenCount > Host.Tokens.Length / 3
-            || Host.IntegerValues.Length < 1)
+        if (!TryGetIntegerRecordCount(tokenCount, init var count))
         {
             return false;
         }
 
-        int32 count = Host.IntegerValues[0];
-        if (count < 0 || count >= tokenCount
-            || count > (Host.IntegerValues.Length - 1) / 5
-            || count > int32.MaxValue / 4
+        mut int32 recordIndex = 0;
+        for (mut int32 tokenIndex = 0; tokenIndex < tokenCount - 1; tokenIndex = tokenIndex + 1)
+        {
+            if (Host.Tokens[tokenIndex * 3] != 3)
+            {
+                continue;
+            }
+
+            if (recordIndex >= count)
+            {
+                return false;
+            }
+
+            int32 offset = recordIndex * 5 + 1;
+            if (!IsValidIntegerRecord(tokenIndex, Host.IntegerValues[offset],
+                Host.IntegerValues[offset + 1], Host.IntegerValues[offset + 2],
+                Host.IntegerValues[offset + 3], Host.IntegerValues[offset + 4]))
+            {
+                return false;
+            }
+            recordIndex = recordIndex + 1;
+        }
+
+        return recordIndex == count;
+    }
+
+    public static bool TryBuild(int32 tokenCount, init ref<TokenIntegerSnapshot> result)
+    {
+        if (!TryGetIntegerRecordCount(tokenCount, init var count)
             || !OwnedInt32Buffer.TryCreate(count * 4, out var created))
         {
             return false;
@@ -142,9 +194,7 @@ public unique struct TokenIntegerSnapshot
             int32 low = Host.IntegerValues[offset + 2];
             int32 high = Host.IntegerValues[offset + 3];
             int32 tag = Host.IntegerValues[offset + 4];
-            if (recordedIndex != tokenIndex || status < 0 || status > 1 || tag != 0
-                || (status == 1 && (low != 0 || high != 0))
-                || !MatchesSourceMagnitude(tokenIndex, status, low, high))
+            if (!IsValidIntegerRecord(tokenIndex, recordedIndex, status, low, high, tag))
             {
                 return false;
             }

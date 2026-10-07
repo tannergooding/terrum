@@ -34,8 +34,7 @@ bool TryPublishScalarFrontend()
     if (handled) { return true; }
     if (Host.Frontend.Length != 392
         || count < 1
-        || Host.IntegerValues[0] != 0
-            && !TokenIntegerSnapshot.TryBuild(count, init var integers)
+        || !TokenIntegerSnapshot.TryValidate(count)
         || !TryParseScalarFrontendWindow(tokenView, 0, count, false, init var result))
     {
         return false;

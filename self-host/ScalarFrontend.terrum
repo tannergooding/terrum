@@ -4464,8 +4464,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, init ref<ScalarFrontendResult>
     {
         return false;
     }
-    if (Host.IntegerValues[0] != 0
-        && !TokenIntegerSnapshot.TryBuild(count, init var integers))
+    if (!TokenIntegerSnapshot.TryValidate(count))
     {
         return false;
     }

@@ -430,8 +430,7 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
             return ScalarProgramError(4, name, init handled);
         }
     }
-    if (Host.IntegerValues[0] != 0
-        && !TokenIntegerSnapshot.TryBuild(count, init var integers))
+    if (!TokenIntegerSnapshot.TryValidate(count))
     {
         return false;
     }

@@ -686,7 +686,9 @@ adapters validate source-owned records without re-lexing native tokens. The
 self-hosted `TokenIntegerSnapshot` separately reparses each integer source
 slice through `IntegerParsing`, requires one ordered record for every integer
 token, and checks the full magnitude and overflow status against the scanner
-record; general binding remains hosted.
+record. Scalar frontend entry points use its allocation-free `TryValidate`
+path before consuming scanner records; callers that need an owned snapshot
+use `TryBuild`. General binding remains hosted.
 
 The current scanner is version 8/schema 8; it appends diagnostic kinds 11/12
 for invalid/unsupported maximal punctuation runs to the prior diagnostic
