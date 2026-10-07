@@ -247,9 +247,11 @@ authorization only from retained unsafe-scope structure; add no authorization
 bit or wrapper payload. Require an exact owner-relative name with one ordinary
 member identifier and preserve the full name, declaring owner and signature in
 import-contract comparisons; do not normalize or suffix-match identities.
-Validate the stored identifier using the existing Unicode XID rules, retaining
-ordinal spelling, excluding malformed scalar sequences and the `_` discard,
-and neither requiring nor preserving the source `@` keyword escape. During
+Validate the stored identifier using the existing Unicode XID rules and the
+lexer’s underscore exception: `_` may start or continue a member name, but
+standalone `_` remains the discard. Retain ordinal spelling, reject malformed
+scalar sequences, and neither require nor preserve the source `@` keyword
+escape. During
 linking only, also admit the exact shared-owner transformation
 `Owner.$producer.Method`. For a non-shared owner, the existing
 `$producer.Owner.Method` qualification remains owner-relative to its remapped
@@ -274,6 +276,23 @@ qualification (including rejection of malformed/repeated qualification),
 stripped wrappers, replacement directionality, type remapping, excluded
 receiver and parameter modes, and semantic links plus native graphs/module
 sets under both runtime policies.
+
+**Implemented provisionally:** Semantic-module revision 70 retains eligible
+caller-unsafe readonly instance-method calls in `unsafe(expr)` using the
+existing `BoundCall` representation. Writer and reader enforce one by-value
+receiver, scalar or recursively exportable public `Copy` parameters/results,
+and an exact owner-relative Unicode-XID member name; only linking accepts the
+single shared-owner `$producer` qualification. Regression coverage includes
+source-ordered named arguments, one receiver slot and one serialized slot per
+source argument, aggregate parameters/results, safe forwarding and replacement,
+malformed identities, wrapper stripping, and native graphs/module sets under
+both runtime policies. Existing call semantics evaluate the receiver and each
+source argument once; the implementation reuses `BoundCall` and adds no
+evaluation steps. Observable side-effect probes are intentionally absent
+because this extension excludes mutable/reference/output loans from the
+expression scope. The extension preserves receiver and method effects
+without adding a loan or purity promise. It remains a provisional persistence
+experiment and does not approve the broader metadata proposal.
 
 ### Provisional extension: caller-unsafe readonly getters
 

@@ -18,7 +18,7 @@ public static partial class ModuleCompiler
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 69;
+    private const int Version = 70;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1092,11 +1092,22 @@ public static partial class ModuleCompiler
             }
         }
         var resolvedFunctions = functions.ToImmutable();
+        var resolutionFunctions = resolvedFunctions.Select(function => {
+            if (function.DeclaringStruct is not string ownerName || !sharedTypes.Contains(ownerName))
+            {
+                return function;
+            }
+
+            var prefix = ownerName + ".$producer.";
+            return function.Name.StartsWith(prefix, StringComparison.Ordinal)
+                ? function with { Name = ownerName + "." + function.Name[prefix.Length..] }
+                : function;
+        }).ToImmutableArray();
         var valueTypes = new ModuleUnsafeValueTypeCache(allStructures);
         foreach (var owner in consumerOwned)
         {
             functions[owner] = functions[owner] with {
-                Body = (BoundBlock)ResolveStatement(functions[owner].Body, names, resolvedFunctions, allStructures,
+                Body = (BoundBlock)ResolveStatement(functions[owner].Body, names, resolutionFunctions, allStructures,
                     valueTypes),
             };
         }
@@ -1109,7 +1120,7 @@ public static partial class ModuleCompiler
                 function = function with { ClassConstructor = producerNames[constructor] };
             }
             functions[owner] = function with {
-                Body = (BoundBlock)ResolveStatement(function.Body, producerNames, resolvedFunctions, allStructures,
+                Body = (BoundBlock)ResolveStatement(function.Body, producerNames, resolutionFunctions, allStructures,
                     valueTypes),
             };
         }
@@ -1500,8 +1511,7 @@ public static partial class ModuleCompiler
     }
 
     private static bool IsSupportedModuleUnsafeExpressionCall(BoundFunction function,
-        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes,
-        bool allowProducerQualifiedGetterName = false)
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
     {
         if (!function.RequiresUnsafeCaller)
         {
@@ -1511,15 +1521,47 @@ public static partial class ModuleCompiler
         {
             return IsSupportedModuleUnsafeTopLevelCall(function, valueTypes);
         }
-        if (function.PropertyName is not null)
-        {
-            return !function.IsOperator && IsSupportedModuleUnsafeMethod(
-                function, structures, valueTypes, allowProducerQualifiedGetterName);
-        }
-        if (!function.IsStatic || function.IsOperator
-            || !IsSupportedModuleUnsafeMethod(function, structures, valueTypes))
+        return !function.IsOperator && IsSupportedModuleUnsafeMethod(function, structures, valueTypes);
+    }
+
+    private static bool IsSupportedModuleUnsafeMethodName(string name, string ownerName)
+    {
+        var prefix = ownerName + ".";
+        if (!name.StartsWith(prefix, StringComparison.Ordinal))
         {
             return false;
+        }
+
+        var memberName = name.AsSpan(prefix.Length);
+        if (memberName.IsEmpty || memberName.SequenceEqual("_"))
+        {
+            return false;
+        }
+
+        var isStart = true;
+        for (var index = 0; index < memberName.Length; index++)
+        {
+            var scalar = (int)memberName[index];
+            if (char.IsHighSurrogate(memberName[index]))
+            {
+                if (index + 1 >= memberName.Length || !char.IsLowSurrogate(memberName[index + 1]))
+                {
+                    return false;
+                }
+                scalar = char.ConvertToUtf32(memberName[index], memberName[++index]);
+            }
+            else if (char.IsLowSurrogate(memberName[index]))
+            {
+                return false;
+            }
+
+            if (isStart
+                ? scalar != '_' && !UnicodeXid.IsStart(scalar)
+                : scalar != '_' && !UnicodeXid.IsContinue(scalar))
+            {
+                return false;
+            }
+            isStart = false;
         }
         return true;
     }
@@ -1698,17 +1740,17 @@ public static partial class ModuleCompiler
     }
 
     private static bool IsSupportedModuleUnsafeMethod(BoundFunction function,
-        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes,
-        bool allowProducerQualifiedGetterName = false)
+        ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
     {
         if (function.DeclaringStruct is not string ownerName || function.IsConstructor
             || function.IsClassConstructor || function.IsCleanup
             || function.Intrinsic != BoundIntrinsic.None
             || function.ParameterCount > function.Variables.Length
             || (function.PropertyName is null
-                ? !valueTypes.IsSupported(function.ReturnType)
+                ? !IsSupportedModuleUnsafeMethodName(function.Name, ownerName)
+                    || !valueTypes.IsSupported(function.ReturnType)
                 : !IsSupportedModuleUnsafeGetter(
-                    function, ownerName, valueTypes, allowProducerQualifiedGetterName)))
+                    function, ownerName, valueTypes)))
         {
             return false;
         }
@@ -1753,7 +1795,7 @@ public static partial class ModuleCompiler
     }
 
     private static bool IsSupportedModuleUnsafeGetter(BoundFunction function, string ownerName,
-        ModuleUnsafeValueTypeCache valueTypes, bool allowProducerQualifiedName = false)
+        ModuleUnsafeValueTypeCache valueTypes)
     {
         if (function.ParameterCount != (function.IsStatic ? 0 : 1)
             || !valueTypes.IsSupported(function.ReturnType)
@@ -1761,9 +1803,7 @@ public static partial class ModuleCompiler
         {
             return false;
         }
-        return function.Name == ownerName + ".#get:" + propertyName
-            || (allowProducerQualifiedName
-                && function.Name == ownerName + ".$producer.#get:" + propertyName);
+        return function.Name == ownerName + ".#get:" + propertyName;
     }
 
     private static bool HasOperatorContractMarker(string contract) =>
@@ -1867,7 +1907,8 @@ public static partial class ModuleCompiler
             || (hasGetterIdentity && (parameterCount != (isStatic ? 0 : 1)
                 || !valueTypes.IsSupported(parts[1].AsSpan())
                 || propertyName.IsEmpty
-                || parts[0] != parts[5] + ".#get:" + propertyName.ToString())))
+                || parts[0] != parts[5] + ".#get:" + propertyName.ToString()))
+            || (!hasGetterIdentity && !IsSupportedModuleUnsafeMethodName(parts[0], parts[5])))
         {
             return false;
         }
@@ -3976,8 +4017,7 @@ public static partial class ModuleCompiler
         ModuleUnsafeValueTypeCache valueTypes, bool inUnsafe, bool inUnsafeExpression = false) => expression switch {
             SymbolicCall call when names.TryGetValue(call.Name, out var index)
                 && (!inUnsafeExpression || !functions[index].RequiresUnsafeCaller
-                    || IsSupportedModuleUnsafeExpressionCall(
-                        functions[index], structures, valueTypes, allowProducerQualifiedGetterName: true)) =>
+                    || IsSupportedModuleUnsafeExpressionCall(functions[index], structures, valueTypes)) =>
                 new BoundCall(index, [.. call.Arguments.Select(argument =>
                 ResolveExpression(argument, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression))],
                     call.Type, call.Span) {

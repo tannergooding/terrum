@@ -33,7 +33,7 @@ prerequisite has already been met.
 1. **Full runtime/structured contracts — references and safety.** General
    reference/access/loan metadata and caller-unsafe member contracts still
    need definition before wider use across calls or imports. Structured
-   semantic-module revision 69 provisionally carries top-level caller-unsafe
+   semantic-module revision 70 provisionally carries top-level caller-unsafe
    obligations, narrow readonly-instance and static `Copy` method slices,
    recursively exportable by-value Copy signatures, and readonly instance and
    storage-free static getters with recursively exportable `Copy` results,
@@ -47,9 +47,13 @@ prerequisite has already been met.
    `unsafe(expr)` for eligible public `Copy` owners, with recursively
    exportable `Copy` results. It preserves canonical getter identity and
    permits producer qualification only during linking; mutation, loans, TRRM
-   and scalar-frontend support remain excluded. Caller-unsafe instance methods
-   remain excluded from expression scopes; their extension is only a
-   recommendation in the unapproved proposal. Revision 64 also provisionally
+   and scalar-frontend support remain excluded. Revision 70 also provisionally
+   persists eligible caller-unsafe readonly instance-method calls in
+   `unsafe(expr)`, validating the owner-relative language identifier under
+   Unicode-XID plus the underscore exception and
+   allowing the exact shared-owner producer qualification only during
+   linking. Mutable or loan receivers, constructors, operators and
+   reference/output modes remain excluded. Revision 64 also provisionally
    persists identity for supported static operators on public `Copy` structs,
    preserving unsafe effects and nominal-update target checks. These bounded
    implementations do not settle the general schema or approve the

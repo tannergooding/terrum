@@ -46,7 +46,7 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 69. Writers emit only revision 69 and
+The current semantic-module revision is 70. Writers emit only revision 70 and
 readers reject every other revision; older artifacts must be recreated from
 source. The current format preserves verified, typed, source-mapped structured
 IR and the supported declaration, layout, initialization, cleanup, and runtime
@@ -62,7 +62,13 @@ additionally persists getter-only and mixed caller-unsafe getter calls inside
 exportable `Copy` results. Getter identity remains canonical in serialized
 modules; linking permits only its established producer qualification. These
 expression scopes do not add getter mutation, loans, TRRM, or scalar-frontend
-verification/emission support. The broader
+verification/emission support. Revision 70 additionally persists eligible
+caller-unsafe readonly instance methods inside `unsafe(expr)`, with a single
+by-value receiver and recursively exportable by-value parameters/results. It
+validates an owner-relative method identifier and admits producer
+qualification only during linking. Mutable or loan receivers, constructors,
+operators, reference/output modes, TRRM, and scalar-frontend
+verification/emission remain excluded. The broader
 [reference-call metadata proposal](proposals/reference-call-metadata.md)
 remains unapproved.
 
