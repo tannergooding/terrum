@@ -723,6 +723,46 @@ needs one; reject missing, incompatible or unknown relations instead of
 inferring them from implementation bodies. This is a proposed first slice,
 not an approved restriction on the accepted source contract.
 
+**Candidate registry and validation boundary (unapproved):** Fit the proposal
+within the assigned Dependency payload rather than adding bytes: use candidate
+`sourceKind = 0x01` for a parameter source, zero-based in declaration order
+after name binding, and candidate `resultOrdinal = 0` for the single whole
+result. Candidate `resultKind` values are `0x01` for borrowing selected source
+storage or eligible substorage, `0x02` for forwarding backing already carried
+by the selected source, and `0x03` for permitting either relationship when
+exactly one eligible source exists. These are recommendations for a future
+registry, not assignments in the approved metadata schema.
+
+`0x01` preserves the selected source's access and every backing, root, lease
+and lifetime obligation entailed by that storage; it cannot borrow a callee's
+by-value parameter copy as though it were caller storage. `0x02` forwards
+existing backing, roots and leases without borrowing the descriptor place,
+acquiring a lease or transferring ownership. `0x03` permits either relation:
+callers retain the union of applicable obligations, while a producer need only
+satisfy one permitted relation, not both. Limit this broad default to a
+singleton source set. Multiple eligible sources require an explicit permitted
+set; every listed source constrains the caller. `DependsOn` selects sources,
+not a relationship refinement. Reject unknown kinds, nonzero flags, duplicate
+or invalid ordinals, and unsupported combinations.
+
+Resolve the eligible source set under the accepted declaration rules before
+applying the one-source default; an excluded receiver does not become a
+parameter source merely because it is the only remaining ordinal. Formal
+ordinals are not argument evaluation positions, local slots, table row
+indexes, implicit receivers or hidden ABI arguments. “Synchronous” limits
+declared retention, not the spelling of an `async` modifier. Whole borrowed
+results may include admitted dependency-bearing value descriptors without
+changing their by-value semantics into a borrow of the descriptor's storage.
+
+At a replaceable boundary, compare the complete result/formal type, mode and
+authority contracts, profile and canonical relation/source set. Producers
+must verify that their result satisfies the declared relation; consumers
+preserve it through copies, joins and reborrows. Reject an incompatible
+replacement before lowering or execution. This proposal does not change the
+separate compilation-local `Span<Token>` analysis: its dependency ordinals
+remain unpersisted, and current semantic-module/TRRM rejection remains in
+force.
+
 ### 2. How should caller-unsafe declarations cross an import boundary?
 
 **Summary:** The grammar gives `unsafe` on a callable declaration a caller
