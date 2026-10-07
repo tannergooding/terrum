@@ -25,10 +25,6 @@ approved.
 - [Reference-call metadata](reference-call-metadata.md) has an accepted,
   bounded indexed-Body unsafe-region contract; its dependency-relation profile,
   general output-call migration and other extensions remain unapproved.
-- [Mixed generic Copy outputs for non-Boolean calls](generic-mixed-output-publication.md)
-  recommends combining generic `out` and `init ref` formals while preserving
-  each mode's distinct destination and publication contract; fixed-valued
-  output side parameters remain outside that slice.
 - [Fixed scalar outputs in generic Copy templates](generic-fixed-output-parameters.md)
   recommends adding scalar fixed-type output side parameters alongside at
   least one generic output without changing publication rules.

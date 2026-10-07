@@ -276,14 +276,15 @@ Compilation-local `[Copy]` templates also admit ordinary `out T` with a fixed
 supported non-Boolean scalar result or `void`, provided the concrete `T`
 satisfies the existing non-Boolean `out` shape. The result is not a success
 discriminator; every normal return fully initializes the output, and
-exceptional departure publishes none. This profile covers closed private
-specializations only; compatible semantic-module and native-module
+exceptional departure publishes none. This standalone profile covers closed
+private specializations only; compatible semantic-module and native-module
 replacements preserve those closed bodies without exposing the generic
 template or changing the output ABI. Formal-valued results, generic
 `init ref<T>` outputs, fixed-valued output side parameters, public generic
 exports or witnesses, source-free TRRM, and custom conditional
-postcondition-driven generic `Copy` outputs remain outside it; Boolean
-publication rules are unchanged.
+postcondition-driven generic `Copy` outputs remain outside this profile;
+Boolean publication rules are unchanged. Mixed generic `out`/`init` calls are
+governed separately below.
 
 Compilation-local `[Copy]` templates also admit `init ref<T>` outputs with a
 fixed `int32`, `uint32`, `int64`, `uint64`, `char16`, or `void` result. Every
@@ -298,9 +299,29 @@ compilation-private managed-handle specializations and their rooting and
 cleanup. Closed private specializations survive compatible semantic-module and
 native-graph producer replacements without changing output-mode metadata or
 wire formats. Floating concrete argument eligibility remains separate. Unique
-or owning values, fixed-valued output side parameters, mixed `out`/`init`
-modes, public generic exports or witnesses, source-free TRRM, and
-scalar-frontend verification or emission remain outside this profile.
+or owning values, fixed-valued output side parameters, public generic exports
+or witnesses, source-free TRRM, and scalar-frontend verification or emission
+remain outside this standalone profile; mixed modes are governed separately
+below.
+
+A compilation-local `[Copy]` template may combine generic `out T` and
+`init ref<U>` output formals when its result is fixed `int32`, `uint32`,
+`int64`, `uint64`, `char16`, or `void`. Every output must be fully initialized
+on every normal return, including implicit `void` fallthrough. Each formal
+retains its own mode and eligibility: `out` uses its accepted writable
+destination and non-unique, handle-free `Copy` shape, while `init` requires
+vacant storage and retains compilation-private managed-handle support. When a
+type parameter is used by both modes, its concrete type must satisfy both
+eligibility rules. On checked exceptional departure, an `init` destination
+remains vacant; an existing `out` destination has no rollback guarantee and
+cannot be read in a catch path. Closed private specializations preserve the
+`IsOut`/`IsInit` metadata and survive compatible semantic-module and
+native-graph producer replacements without changing the module ABI or wire
+formats. Boolean-result mixed-mode behavior is unchanged. Fixed-valued output
+side parameters, unique or owning values, formal-valued results, public generic
+exports or witnesses, source-free TRRM, scalar-frontend verification or
+emission, and floating concrete argument eligibility remain outside this
+profile.
 
 ### 2.3 Checking and consuming the contract
 
