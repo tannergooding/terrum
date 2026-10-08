@@ -61,9 +61,9 @@ approved.
   staged Windows x64 direction using the DX11 sketch as a target. Its
   import/catalog, storage/pointer, callback and closed-COM contracts remain
   unapproved; this does not establish general interop.
-- [Persisted scanner invocation profile](scanner-invocation-profile.md)
-  considers a named, scanner-specific invocation profile and copied result
-  publication without generalizing source grants to arbitrary buffers.
+- [Persisted scanner invocation profile](scanner-invocation-profile.md) is
+  deferred until an integrated compiler path needs it and its full-file
+  size/resource policy is defined; revision-76 support remains provisional.
 - [Registered UTF-8 string-literal target](registered-string-target-binding.md)
   recommends one bounded `StringLiteral` to `StringNameRowUtf8` registration
   without defining general builder/handler semantics.

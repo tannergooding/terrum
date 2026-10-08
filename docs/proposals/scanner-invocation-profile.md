@@ -1,11 +1,9 @@
 # Persisted scanner invocation profile proposal
 
-**Status: unapproved proposal.** Semantic-module revision 76 carries the
-provisional implementation of the bounded `scanner-10` invocation profile,
-introduced in revision 56.
-That implementation does not approve this proposal, expand the target
-contract, or make the scanner/scalar frontend independent of hosted
-verification and emission.
+**Status: Deferred until an integrated compiler path needs persisted scanner
+execution and its full-file size/resource policy is defined. Semantic-module
+revision 76 carries provisional `scanner-10` implementation support only; its
+16,384-code-unit source ceiling is not an accepted limit.**
 
 ## Summary
 
@@ -26,16 +24,15 @@ graphs, module sets or persisted AOT.
 Should persisted semantic-module JIT support a named scanner invocation
 profile, in addition to the existing source-only profile?
 
-## Recommendation
+## Deferred decision
 
-Yes, consider a scanner-specific profile tied to the existing
-`ScannerHost.SchemaVersion` and `ScannerHost.ComponentName`, rather than
-generalizing source grants to arbitrary caller-defined buffers. Reuse the
-existing `ScannerHost.CreateBuffers`, record readers and hosted verifier/JIT
-path. Bind fresh storage for every invocation and copy all result buffers to
-host-owned results before releasing native memory. If the implementation
-cannot preserve that fixed profile and result publication boundary, defer
-persisted scanner execution.
+Do not accept the scanner-specific profile until a real compiler path needs
+persisted scanner execution and the full-file size/resource policy is defined.
+Keep any future profile tied to `ScannerHost.SchemaVersion` and
+`ScannerHost.ComponentName`, rather than generalizing source grants to
+arbitrary caller-defined buffers. The current implementation and tests are
+evidence only; they do not establish that this execution path is required or
+that the 16,384-code-unit source ceiling is appropriate.
 
 ## Existing boundary and profile shape
 

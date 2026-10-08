@@ -138,11 +138,12 @@ factories, unique owners, unsupported parameter modes and non-exportable
 layouts remain outside this slice. This adds no ABI, TRRM or scalar-frontend
 verification/emission support and does not approve the broader proposal.
 
-The invocation-scoped source grant and `scanner-10` profile remain provisional
-semantic-module JIT implementation capabilities under their respective
-proposals. The source grant is deferred and does not amend the accepted,
-source-independent semantic-module execution contract. These capabilities do
-not imply graph, module-set, native DLL, or persisted AOT support.
+The invocation-scoped source grant and `scanner-10` profile have provisional
+semantic-module JIT implementation support, but both proposals are deferred
+and neither amends the accepted, source-independent semantic-module execution
+contract. The scanner profile is not integrated into a compiler path, and its
+16,384-code-unit source ceiling remains provisional. These capabilities do not
+imply graph, module-set, native DLL, or persisted AOT support.
 
 ## Current artifact and loading rules
 
