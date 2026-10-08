@@ -84,13 +84,12 @@ approved.
   slice. Static fields have a distinct logical identity; multiplicity,
   record/operation encoding and runtime ABI remain open.
 - [First public fixed-layout implementation slice](public-fixed-layout-profile.md)
-  proposes bounded Windows x64 support for the existing target-specific
-  `Blittable` plus `Sequential` contract with native ABI passing and no
-  separate profile identity or 16-byte cap; core primitives are `Blittable`
-  and field eligibility follows existing target-specific `Blittable` and
-  `Copy` rules. The explicit metadata requirement and source-version migration
-  boundary are accepted; their encoding/version selector and the support
-  slice remain open.
+  records the accepted bounded Windows x64 implementation direction for the
+  existing target-specific `Blittable` plus `Sequential` contract, with
+  native ABI passing and no separate profile identity or 16-byte cap. Core
+  primitives and transitively eligible `Copy` fields are accepted; explicit
+  metadata and a source-version migration boundary are required. Implementation
+  support, schemas, metadata encoding and the version selector remain open.
 - [Compare-exchange order pairs](atomic-cas-order-pairs.md) records the
   accepted finite compile-time-valid table for CAS success/failure memory
   orders; source spelling, diagnostics and support remain open. It does not

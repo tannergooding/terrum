@@ -45,6 +45,9 @@ v43-v49, semantic-module revision 76, and native profiles native-10 through
 native-20. These markers describe supported implementations, not approval of
 the remaining language contracts. The exact source, layout, metadata, ABI,
 and runtime contracts are in the [specification index](specs/README.md).
+Public fixed-layout support is not implemented; its accepted bounded Windows
+x64 direction does not add source attributes, metadata encoding, or runtime
+support.
 The [sample catalog](samples.md) distinguishes runnable programs from design
 sketches.
 

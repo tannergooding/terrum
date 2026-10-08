@@ -63,12 +63,13 @@ prerequisite has already been met.
    only after representation, lifetime, cleanup, failure and publication
    rules are defined. General stored views, partial field moves, arbitrary
    owning graphs, allocators and relocation remain pending.
-5. **General separate compilation — layouts.** Specify fixed public
-   `Blittable` layouts, packing and over-alignment with target limits,
-   metadata, access lowering and compatibility checks. Exact source spellings
-   and implementation are not settled by this plan; the
+5. **General separate compilation — layouts.** Implement the accepted bounded
+   public Windows x64 `Blittable` plus `Sequential` direction after settling
+   attribute schemas, source-version selection, metadata encoding, access
+   lowering and compatibility checks. Packing and over-alignment remain
+   broader layout work. The
    [first-profile proposal](proposals/public-fixed-layout-profile.md) records
-   one bounded recommendation without changing the accepted contract.
+   accepted semantics separately from implementation support.
 6. **General separate compilation — binding contracts.** Complete overload
    and witness selection plus adapter, family and explicit-interface
    contracts. Keep unresolved declaration, lookup and compatibility choices

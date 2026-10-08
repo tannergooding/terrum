@@ -1,13 +1,11 @@
 # First public fixed-layout implementation slice
 
-**Status: no separate profile identity (accepted); the proposed support
-slice and compatibility encoding remain unapproved. Core primitives are
-`Blittable` by their type contract; field eligibility uses existing
-target-specific `Blittable` and ordinary `Copy`/value-validity requirements,
-with `Sequential` also required for nested structs. Explicit `Blittable`
-metadata and validation of existing layout/field facts are accepted; their
-encoding remains open. Source migration activates at a language-version
-boundary; its exact version and tooling selector remain open. Natural
+**Status: the bounded Windows x64 implementation direction, no separate
+profile identity, transitive field eligibility, explicit `Blittable` metadata
+requirement, and source-language-version migration boundary are accepted.
+Implementation support is not established. Attribute schemas, metadata
+encoding, source-version value/tooling selector, and legacy-reader behavior
+remain open. Core primitives are `Blittable` by their type contract; natural
 alignment remains target-specific. Windows x64 native ABI classification is
 required for interop; by-value aggregates classified as indirect use a shadow
 copy, with no proposal-specific 16-byte size limit.**
@@ -25,25 +23,11 @@ does not establish a public ABI. Existing semantic-module layout contracts
 and native test carriers are independently scoped and do not imply a
 `Blittable` commitment.
 
-## Question
+## Accepted implementation direction
 
-Should an initial support slice implement the existing target-specific
-`Blittable` plus `Sequential` contract for public Windows x64 compact `Copy`
-structs, while preserving existing artifact contracts?
-
-### Summary
-
-The accepted representation model is defined, but there is no target-specific
-source schema or implementation contract for independently replaceable
-public layouts. Choosing eligible fields, target limits and compatibility
-behavior is required before these layouts can cross a public
-separate-compilation boundary.
-
-### Recommendation
-
-Treat the following as a provisional implementation slice for the existing
-Windows x64 `Blittable` plus `Sequential` contract, not as a new layout
-profile or semantic commitment:
+Implement the existing Windows x64 `Blittable` plus `Sequential` contract
+for public compact `Copy` structs as an implementation slice, not as a new
+layout profile or semantic commitment. The accepted boundaries are:
 
 - Require both an explicit `Blittable` commitment and `Sequential` layout;
   resolve them through registered semantic-attribute identities and schemas,
@@ -84,11 +68,11 @@ profile or semantic commitment:
   acceptance, and retained artifacts are not retroactively rejected. The
   version value and tooling selector remain open.
 
-This narrow implementation slice reuses the existing natural-layout rule
-without claiming that it is a universal representation. It has no
-proposal-specific struct-size bound.
+This narrow implementation direction reuses the existing natural-layout rule
+without claiming that it is a universal representation or implemented
+support. It has no proposal-specific struct-size bound.
 
-## Proposed layout and compatibility contract
+## Accepted layout and compatibility boundaries
 
 Representative Windows x64 storage entries are:
 
@@ -119,7 +103,7 @@ missing semantic fact is the explicit `Blittable` commitment. Its concrete
 encoding and any new feature/revision values remain unassigned until the
 metadata review.
 
-| Producer / consumer case | Recommended behavior |
+| Producer / consumer case | Accepted compatibility requirement |
 |---|---|
 | Existing artifact without this commitment | Load only under its existing profile and compatibility checks; do not infer or synthesize `Blittable`. |
 | New consumer requiring this target-specific commitment, but producer lacks it | Reject before execution. |
@@ -129,17 +113,17 @@ metadata review.
 | Existing source is compiled under an earlier language version | Preserve current source acceptance; do not infer `Blittable` or activate new diagnostics solely by recompilation. |
 | Source is compiled under a version that activates the migration | Diagnose public instance fields that lack a fixed-representation commitment; the exact version value and tooling selector remain open. |
 
-This proposal does not change private Sequential behavior or bless existing
-unannotated artifacts as public fixed-layout values.
+The support direction does not change private Sequential behavior or bless
+existing unannotated artifacts as public fixed-layout values.
 
 ## Scope and validation
 
-Before source adoption, review the proposed schemas and select the exact
+Before implementation, define the proposed schemas and select the exact
 source-language version and tooling selector for the migration against the
 selected core-library identity and existing compiler diagnostic/versioning
 mechanisms. Keep wire identifiers unassigned. Windows x64 procedure-call
-classification follows the system ABI; the storage-layout
-fixture below does not establish its call-lowering conformance.
+classification follows the system ABI; the storage-layout fixture below does
+not establish its call-lowering conformance.
 
 Validate natural alignment, interior and tail padding, nested and larger
 layouts, malformed or mismatched layout metadata, and compatible versus
