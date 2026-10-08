@@ -1,6 +1,7 @@
 # Built-in numeric selection members
 
-**Status: pending numeric-type inventory and generic-interface proposal.**
+**Status: pending exact numeric-type inventory, signatures and generic-interface
+design.**
 
 ## Scope and decision boundary
 
@@ -91,15 +92,15 @@ The exact inventory of built-in numeric types, same-type parameter/result
 signatures, and any per-type representation details remain open; the
 applicability of these four members to every built-in numeric type is not.
 
-Generic-math hierarchy and membership are **UNAPPROVED**. The minimal
-`IScalarNumber<TSelf>` composite sketched in the
+The layered generic-math approach is accepted: fine-grained operation/function
+interfaces compose into higher-level numeric and specialized integer,
+floating-point, classification or format-specific interfaces. The exact
+interface names, shape, membership, required members and constraints remain
+**UNAPPROVED**. The minimal `IScalarNumber<TSelf>` composite sketched in the
 [core-library proposal](core-library-reference.md#existing-sampled-declarations)
-is one candidate sketch, not the selected hierarchy or a required conformance
-for numeric types. Evaluate a more .NET-like layered interface family:
-granular operation-focused contracts composed into a small number of
-higher-level numeric contracts, with separate layers for integer,
-floating-point, classification and format-specific operations where
-appropriate. Microsoft's [.NET generic math design](https://learn.microsoft.com/en-us/dotnet/standard/generics/math)
+is only a candidate sketch, not the selected hierarchy or a required
+conformance for numeric types. Microsoft's
+[.NET generic math design](https://learn.microsoft.com/en-us/dotnet/standard/generics/math)
 is useful prior art for this layering; it does not establish Terrum's names,
 member grouping, constraints or semantics.
 

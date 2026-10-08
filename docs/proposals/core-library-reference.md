@@ -2366,11 +2366,12 @@ Conditional publication, concrete failure transport and effect metadata
 remain **OPEN**; neither a `Try` name nor an exact widened product grants a
 NoThrow declaration.
 
-The shared numeric selection semantics and primitive-member placement are
-accepted directions, recorded alongside other accepted behavior in the
+The shared numeric selection semantics, primitive-member placement and
+layered generic-math approach are accepted directions, recorded alongside
+other accepted behavior in the
 [library specification](../specs/libraries.md). The exact generic-math
-interface hierarchy, signatures, witness mapping and implementation support
-remain **OPEN** in the
+interface names, shape, member mapping, signatures, witness mapping and
+implementation support remain **OPEN** in the
 [combined numeric-selection proposal](numeric-selection-members.md); the general
 library specification is not approved as a whole.
 `Sqrt`/`Pow`/`Exp`/`Log`/`Sin`/`Cos`/`RoundToIntegral` separately need

@@ -165,9 +165,10 @@ Floating `==` follows IEEE (NaN unequal, signed zero equal). A **separate numeri
 
 The accepted API direction exposes `Abs`, `Min`, `Max` and `Clamp` as static
 members directly on each built-in numeric type, not standalone `*Math` service
-types. Generic numeric interfaces make those members available to constrained
-algorithms. Exact interface hierarchy and membership, conformance metadata,
-signatures and implementation support remain open in the
+types. A layered generic-math design makes those members available to
+constrained algorithms through fine-grained operation/function interfaces and
+higher-level numeric interfaces. Exact interface names, shape, membership,
+conformance metadata, signatures and implementation support remain open in the
 [numeric-selection proposal](../proposals/numeric-selection-members.md).
 
 The accepted `Abs`, `Min`, `Max` and `Clamp` selection behavior applies across

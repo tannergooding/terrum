@@ -13,7 +13,7 @@ approved.
   declarations, dependency layers and unresolved API contracts.
 - [Built-in numeric selection members](numeric-selection-members.md) records
   accepted universal selection semantics and primitive-member placement while
-  leaving signatures and .NET-like generic-interface contracts under review.
+  leaving signatures and exact generic-interface contracts under review.
 - [Static-proof and constant-evaluation proposal](static-proof-and-constant-evaluation.md)
   collects candidate minimum proof rules, effects and evaluator budgets;
   the portable-floor policy itself is accepted.
