@@ -25,8 +25,9 @@ approved.
   allocation of kind `0xFE` is deferred pending compatibility and performance
   evidence.
 - [Executable TRRM operation-encoding families](trrm-operation-encoding-families.md)
-  explores future opcode families for growing scalar type sets without
-  reinterpreting accepted draft opcodes.
+  is deferred until a concrete new operation/type set needs the decision;
+  accepted draft opcode meanings remain unchanged and no future bytes are
+  assigned.
 - [Self-host frontend verification budget](self-host-frontend-verification-budget.md)
   records a deferred, unapproved architecture option if memoization no longer
   suffices to grow the authored scalar frontend within its shared limit.

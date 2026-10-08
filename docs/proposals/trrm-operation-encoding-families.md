@@ -1,6 +1,6 @@
 # Executable TRRM operation-encoding families
 
-**Status: Unapproved**
+**Status: Deferred; no family direction accepted**
 
 ## Scope and rationale
 
@@ -17,6 +17,11 @@ and payload. Also preserve accepted draft `0x19` comparisons, `0x1A` format
 conversion, `0x1B` integer-to-floating conversion, `0x1C` sign-bit negation,
 `0x1E` code-unit conversion and `0x1F` checked floating-to-integer conversion.
 None becomes a generic-family alias or gains additional types here.
+
+**Decision recorded:** defer the general family-encoding policy until a
+concrete new operation/type set needs it. Preserve the accepted `0x19`–`0x1F`
+draft meanings; this proposal assigns no bytes, kinds, features or executable
+type support.
 
 The metadata atomic registry already names signed/unsigned 8/16/32/64/128-bit
 integers, native integers, binary floating formats, decimal32/64/128, `bool`,
