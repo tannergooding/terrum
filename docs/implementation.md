@@ -20,13 +20,13 @@ compilation-local `[Copy]` templates support the bounded generic `out T` and
 Single-mode generic outputs also support fixed `float32` and `float64` results
 without fixed side outputs. Generic initialization outputs retain
 compilation-private managed-handle support. Fixed scalar side outputs are
-supported with the non-floating result set and one generic output mode;
-floating results combined with mixed generic modes or fixed side outputs
-remain provisional. Compilation-local `[Copy]` templates also accept concrete
-`float32` and `float64` generic arguments, forwarding and publishing their
-substituted values under existing rules. This grants no symbolic floating
-operations. Generic proofs hydrate floating leaves only for reached
-non-unique `Copy`-struct descriptors and concrete non-class callable
+supported with the non-floating result set and one generic output mode. The
+accepted bounded floating-result profile also combines mixed generic output
+modes with fixed scalar side outputs. Compilation-local `[Copy]` templates
+also accept concrete `float32` and `float64` generic arguments, forwarding and
+publishing their substituted values under existing rules. This grants no
+symbolic floating operations. Generic proofs hydrate floating leaves only for
+reached non-unique `Copy`-struct descriptors and concrete non-class callable
 signatures; managed-class dependency closures remain separate. Public generic
 exports and executable TRRM support remain separate. The native backend emits
 Terrum-owned code; CIL is neither a dependency nor the default.

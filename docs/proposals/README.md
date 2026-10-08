@@ -38,9 +38,9 @@ approved.
   output-call migration is deferred pending place, alias and publication
   rules; other extensions remain unapproved.
 - [Floating results from generic Copy output templates](generic-floating-output-results.md)
-  has accepted fixed floating results for single-mode generic outputs without
-  fixed side parameters; mixed-mode and fixed-side combinations remain
-  unapproved.
+  has accepted fixed floating results with single-mode outputs and the bounded
+  mixed-mode/fixed-side combination; broader generic and floating capabilities
+  remain excluded.
 - [Span-backed token cursor](span-backed-token-cursor.md) records the open
   backing, capture, indexing and construction contracts needed for the
   existing zero-copy self-host cursor candidate.

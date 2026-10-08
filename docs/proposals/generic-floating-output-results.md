@@ -1,6 +1,6 @@
 # Floating results from generic Copy output templates
 
-**Status: Partially accepted**
+**Status: Accepted bounded profile**
 
 ## Summary
 
@@ -9,26 +9,27 @@ Fixed `float32` and `float64` results are accepted for compilation-local
 outputs use one mode and there are no fixed-valued output side parameters.
 Fixed scalar side outputs are separately accepted with `int32`, `uint32`,
 `int64`, `uint64`, `char16`, or `void` results when generic outputs use one
-mode. This proposal remains for the unapproved combinations of floating
-results with mixed generic output modes and/or fixed scalar side outputs; it
-does not change symbolic floating capabilities.
+mode. A bounded extension also accepts fixed floating results with mixed
+generic output modes and fixed scalar output side parameters, retaining the
+same private-specialization boundary and mode-specific publication rules.
+None of these profiles changes symbolic floating capabilities.
 
-## Remaining recommendation
+## Accepted combined profile
 
-Extend the accepted fixed-floating result profile to templates whose
-generic-typed outputs combine `out` and `init ref<T>` modes, and permit fixed
-scalar outputs as side outputs. Fixed scalar outputs cannot be the template's
-only outputs; output-free templates remain outside this extension. Keep the
-existing every-normal-return publication proof: floating results are
-non-Boolean and do not correlate with whether an output is initialized.
-Checked exceptional departure follows each output mode's existing rules:
-`init` destinations remain vacant, while ordinary `out` destinations retain
-their lack of rollback and catch-path readability guarantees.
+The combined profile permits fixed `float32`/`float64` results with mixed
+generic `out T`/`init ref<U>` outputs and fixed scalar output side parameters,
+provided at least one generic-typed output is present. Fixed result and side
+types do not infer generic substitutions. Every output must be fully
+initialized on every normal return; the floating result is not a success
+discriminator. On checked exceptional departure, `init` destinations remain
+vacant, while ordinary `out` destinations retain their lack of rollback and
+catch-path readability guarantees.
 
-The accepted fixed-floating profile covers only single-mode generic outputs
-without fixed side outputs. The accepted fixed-side profile covers only
-`int32`/`uint32`/`int64`/`uint64`/`char16`/`void` results and single-mode
-generic outputs. The interactions above remain unapproved.
+The base fixed-floating profile still covers single-mode generic outputs
+without fixed side outputs. The fixed-side profile with non-floating results
+still requires single-mode generic outputs. This extension adds only the
+bounded interaction between floating results, mixed generic modes and fixed
+scalar side outputs.
 
 Use a result-specific eligibility gate rather than widening shared generic
 scalar/type parsing. This does not admit fixed floating by-value parameters,
@@ -44,8 +45,7 @@ declarations/witnesses. Boolean-result conditional publication is unchanged.
 Reuse existing fixed floating result transport and private semantic/native
 module formats and ABI.
 
-The remaining combinations are a hosted implementation experiment, not an
-accepted contract. They do not extend source-free TRRM or the Terrum-authored
+The accepted extension does not extend source-free TRRM or the Terrum-authored
 scalar frontend beyond hosted verification/emission.
 
 ## Required evidence
@@ -62,19 +62,19 @@ subnormal/infinite results without introducing a new NaN-payload or arithmetic
 contract. Under checked exceptions, cover a write followed by failure; verify
 init vacancy, reject catch-path reads independently for each output, and retry
 the same init destination. Retain the existing generic `finally` no-throw
-restriction; do not add throwing-cleanup support in this slice. Exercise direct
-native execution and private semantic/native producer replacement behind
-unchanged consumers under both runtime policies, retaining exact result width
-and per-parameter mode metadata. Floating result checks must use the existing
-hosted floating semantics and avoid equality as a proxy for signed-zero bit
-identity.
+restriction; do not add throwing-cleanup support in this slice. Exercise
+direct native execution and private semantic/native producer replacement
+behind unchanged consumers under both runtime policies, retaining exact result
+width and per-parameter mode metadata. Floating result checks must use the
+existing hosted floating semantics and avoid equality as a proxy for
+signed-zero bit identity.
 
-**Progress:** The hosted implementation provisionally supports fixed
-`float32`/`float64` results for compilation-local `[Copy]` templates with
-generic outputs. Direct execution and module replacement already cover generic
-`out T` and `init ref<T>` results, signed zero, subnormals and checked-failure
-publication. An isolated replacement test now combines both floating result
-widths with mixed generic `out T`/`init ref<T>` modes and fixed `out int32` and
+**Progress:** The hosted implementation supports fixed `float32`/`float64`
+results for compilation-local `[Copy]` templates with generic outputs. Direct
+execution and module replacement cover generic `out T` and `init ref<T>`
+results, signed zero, subnormals and checked-failure publication. An isolated
+replacement test combines both floating result widths with mixed generic
+`out T`/`init ref<T>` modes and fixed `out int32` and
 `init ref<float32/float64>` side outputs, explicit and inferred generic
 substitutions, exact mode/type metadata, unchanged consumers, semantic-module
 JIT/AOT and native graph AOT/JIT under both runtime policies; the checked paths
@@ -84,9 +84,5 @@ midpoints for each result width without adding a NaN-payload guarantee.
 Boundary tests reject fixed-floating by-value parameters with an otherwise
 valid generic payload, templates with fixed outputs only, and substitution
 inference from a typed floating result context. The single-mode,
-no-fixed-side floating-result profile is accepted and specified in the
-language contracts. The combined-mode and fixed-side extensions remain
-provisional evidence and unapproved.
-
-This proposal remains partially accepted; its broader recommended
-combinations are not approved.
+no-fixed-side floating-result profile and the bounded combined-mode/fixed-side
+extension are accepted and specified in the language contracts.

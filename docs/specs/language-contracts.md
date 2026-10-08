@@ -341,7 +341,7 @@ floating by-value parameters, formal-valued results, output-free templates,
 floating protocol results, symbolic floating operations, or source-free TRRM.
 It defines no new arithmetic or NaN-payload contract. Generic mixed-output and
 fixed-side-output combinations with floating results remain outside this
-profile.
+single-mode, no-side profile.
 
 A compilation-local `[Copy]` template may combine generic `out T` and
 `init ref<U>` output formals when its result is fixed `int32`, `uint32`,
@@ -378,6 +378,26 @@ fixed side outputs do not combine with a template that mixes generic `out` and
 generic `init`. Boolean-result behavior is unchanged; floating results,
 formal-valued results, and templates without a generic-typed output remain
 outside this profile.
+
+A compilation-local `[Copy]` template may combine a fixed `float32` or
+`float64` result with generic outputs using mixed `out` and `init ref<T>` modes
+and fixed scalar output parameters, provided at least one generic-typed output
+is present. For example, a template may combine `out T` with `init ref<U>`.
+Fixed side output types use the existing scalar set:
+`bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`, `float32`, and
+`float64`. Fixed results and side outputs do not infer generic type arguments.
+Each output retains its mode-specific eligibility; a type parameter used in
+both generic modes must satisfy both. Every output must be fully initialized
+on every normal return, and the floating result is not a success discriminator.
+On checked exceptional departure, `init` destinations remain vacant and
+unreadable, while `out` destinations have no rollback guarantee and cannot be
+read in a catch path. Closed private specializations preserve their output-mode
+metadata across compatible replacements without changing ABI or wire formats.
+This profile does not add floating arithmetic or NaN-payload guarantees, and
+does not admit public generic exports or witnesses, output-free templates,
+fixed floating by-value parameters, formal-valued results, floating protocol
+results, symbolic floating operations, source-free TRRM, or scalar-frontend
+verification or emission.
 
 ### 2.3 Checking and consuming the contract
 
