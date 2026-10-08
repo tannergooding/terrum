@@ -67,13 +67,14 @@ reference-word contract.
 ## Compact-profile selection and follow-up
 
 The two compact tags and their bytes in the approved instruction design
-are settled for the bounded subset. No canonical writer policy or
-measured performance claim is established. The following are future
-design and implementation decisions:
+are settled for the bounded subset. The accepted size-oriented direction is
+recorded in the [instruction-set specification](../specs/il-instruction-set.md#compact-body-forms);
+exact writer selection and additional representations remain open. The
+following are future design and implementation decisions:
 
 | Decision | Candidate and evidence still needed |
 |---|---|
-| Shape partition | Compare one-block linear, 2–3-block boundary-only, indexed small CFG and general forms on representative body distributions; choose by total bytes, cold import, allocations and selective-inlining time under trusted and audited loading, not a hard block-count cutoff. |
+| Shape partition | Choose or add compact forms by the information common method shapes require, omitting only derivable/default data; a section-presence bitvector is one candidate. The general form remains necessary when compact forms cannot represent required semantics. Exact forms and writer order remain open. |
 | Offset width | Compare a separate compact-index width against the current coupled local width at 255/65535-byte boundaries, including wider IDs with short blocks. Validate exact fallback to the general form. |
 | Logical roots and effects | Define mandatory method/block effects and indexed safepoint root/owner/interior dependencies including cleanup/exceptional continuations. Decide inline versus required sparse sidecar by actual density; no executable managed compact form until a reader verifies these facts. |
 | Cross-method sharing | A future ownership revision would need to validate exact Body-row sharing within one module against every referencing MethodDef's signature and contracts. Compare remaining independent short rows with a typed, bounded shared-shape table and substitutions; preserve source identity and measure binding and rewrite/remap costs as well as byte savings. |

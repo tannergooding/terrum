@@ -20,8 +20,10 @@ approved.
   under review.
 - [Semantic IL extensions](il-extensions.md) collect the unapproved inline
   built-in type word and compact-profile follow-up, separate from the
-  approved `(1, 0)` designs; allocation of kind `0xFE` is deferred pending
-  compatibility and performance evidence.
+  approved `(1, 0)` designs. Their size-oriented compact-encoding direction
+  is accepted, while exact writer selection and additional forms remain open;
+  allocation of kind `0xFE` is deferred pending compatibility and performance
+  evidence.
 - [Executable TRRM operation-encoding families](trrm-operation-encoding-families.md)
   explores future opcode families for growing scalar type sets without
   reinterpreting accepted draft opcodes.

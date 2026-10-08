@@ -335,41 +335,40 @@ representable. The common one-block target includes such methods when
 their selected calls, access paths, roots and effects have a complete
 compact contract, not by dropping any of those facts.
 
-These two approved encodings are alternatives, not a mandatory or
-measured canonical writer choice. Prefer compact linear as the initial
-space-saving choice for eligible one-block bodies: their absent state
-is implied and their value facts are derived on the single import
-scan. A writer may choose general form if direct indexes are worth its
-extra bytes; this recommendation must be tested against cold import
-and repeated/selective-import costs before fixing a canonical policy.
-For two or three
-small blocks, compare compact indexed against an unassigned
-**boundary-only** candidate: direct block/terminator extents and typed
-edge parameters, with value definitions, use inventories and boundary
-liveness rebuilt on a bounded scan. The latter is smaller only if its
-saved index bytes outweigh repeated scanning or lost selective-import
-opportunities; no bytes or decoder are assigned for it yet. Four-plus
-blocks may still favor compact indexed (the four-block fixture does),
-but a few large blocks may favor full indexes even when one-block
-linear is smaller. Compare instruction volume, direct-seek usefulness,
-region complexity and real bytes rather than imposing a block-count
-cutoff. Widening compact-indexed offsets past 255 bytes currently
-widens **all** its local fields; independently sized offsets may be
-considered in a future revision if measurements justify them. All forms
-use minimal field widths where selected; a reader can accept a valid
-general form for a compact-eligible body. Measure bytes, cold import, allocation,
-selective inlining and interpreter/tool overhead, with trusted and
-audited inputs separately, before prescribing canonical form selection.
-Declaration pre/postconditions can eliminate authored guard blocks
-from a method Body, but their checks and failure/effect facts still
-belong to the declaration's contract execution and import cost; this
-does not claim pre/postcondition encoding is already executable or free.
+These two approved encodings are alternatives; no exact canonical writer
+policy is selected. **Accepted direction:** compact representations should
+match the information a method needs and common method shapes, with persisted
+byte reduction as a design goal. Omit information only when it is derivable
+from the body or fixed by a defined default; required semantics such as
+effects, lifetimes, ownership, cleanup, roots and exceptions must remain
+represented. The representation set may grow, including forms that explicitly
+encode section presence or defaults instead of deriving them by scanning.
+This direction does not choose an encoding order or claim that decoding is
+cheaper. Compact-linear's scan-derived facts are one encoding mechanism, not
+the reason to select it.
 
-| Method shape | Candidate importer tradeoff | Present status |
+An unassigned **boundary-only** candidate for small CFGs would encode direct
+block/terminator extents and typed edge parameters, while omitting definition,
+use and liveness indexes only if consumers can reconstruct or otherwise obtain
+the required information. Other encodings, such as a presence bitvector for
+omitted/defaulted sections, are also possible. Neither the boundary-only form
+nor a bitvector layout is assigned. Selection should follow the method's
+required information rather than a block-count cutoff. Widening
+compact-indexed offsets past 255 bytes currently widens **all** its local
+fields; independently sized offsets remain a future format option. All forms
+use minimal field widths where selected, and a reader can accept a valid
+general form for a compact-eligible body. The size-oriented direction does
+not require a decoder-cost benchmark; specific performance claims remain
+separate. Declaration pre/postconditions can eliminate authored guard blocks
+from a method Body, but their checks and failure/effect facts still belong to
+the declaration's contract execution and import cost; this does not claim
+pre/postcondition encoding is already executable or free.
+
+| Method shape | Representation characteristics | Present status |
 |---|---|---|
-| Root-free one block, no normal edges | Compact linear has the least metadata; decode instructions to derive uses and definitions once per uncached consumer | Assigned bytes: checked add 31, `return 42` 21, `return x` 17 section bytes |
-| Small root-free normal CFG | Compare future boundary-only scanning with compact indexed's direct definition/use and terminator seeks; 2 or 3 blocks alone do not determine the winner | Compact indexed is assigned; lighter alternative and import measurements open |
-| More blocks, loops or many uses | Indexed summaries may avoid reconstructing CFG/use data and allow selective import, but local-width offset cliffs and large inventories can change the result | Four-block indexed merge 100 versus general 165 section bytes; no general performance claim |
+| Root-free one block, no normal edges | Compact linear omits flowgraph state absent from this shape; value facts are derivable from its operations | Assigned bytes: checked add 31, `return 42` 21, `return x` 17 section bytes |
+| Small root-free normal CFG | Compact indexed retains direct definition/use and terminator indexes; alternate omission/default encoding is unassigned | Compact indexed is assigned; lighter alternative remains open |
+| More blocks, loops or many uses | Required direct indexes depend on the method information consumers need; local-width offsets and index inventories affect encoded size | Four-block indexed merge 100 versus general 165 section bytes; no general performance claim |
 | Places, owners, handlers, roots | Required state, effects, cleanup and safepoint facts dominate; choose sparse sidecars or compact headers by actual density without changing meaning | General structural form for current decode shapes; executable root/exception contract unassigned |
 
 Accelerator sidecars (for example, precomputed definitions or last uses)
