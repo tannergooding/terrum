@@ -42,6 +42,9 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { { int32 int32 = 1; } { return int32(uint64(42)); } }")]
     [InlineData("int32 Main() { { uint64 x = 18446744073709551615; return x == 18446744073709551615 ? 42 : 0; } }")]
     [InlineData("int32 Main() { { int64 x = -9223372036854775808; return x == -9223372036854775808 ? 42 : 0; } }")]
+    [InlineData("int32 Main() { ; ; { ; ; int32 x = 42; ; return x; ; } ; }")]
+    [InlineData("int32 Main() { mut int32 n = 0; ; if (true) { ; ; n = 42; ; } else { ; n = 1; ; } ; return n; ; }")]
+    [InlineData("int32 Main() { mut int32 n = 0; do { ; ; n++; ; } while (n < 2); ; for (; ; n++) { ; ; if (n == 42) { ; break; ; } ; } ; return n; ; }")]
     public async Task StandaloneBlocksMatchHostedScannerExecutableAndJitAsync(string source)
     {
         Assert.True(Lexer.Lex(SourceText.From(source)).Tokens.Length <= 64);
