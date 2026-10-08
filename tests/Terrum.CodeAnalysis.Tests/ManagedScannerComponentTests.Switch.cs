@@ -31,6 +31,11 @@ public sealed partial class ManagedScannerComponentTests
             Assert.Contains(function.Statements, static statement => statement.Kind == 38);
             Assert.Contains(function.Statements, static statement => statement.Kind == 39);
             Assert.Single(function.Locals, static local => local.IsSwitchSelector);
+            const string switchText = "switch (value) { 1 => { return 11; }, _ => { return 33; } }";
+            var switchStatement = Assert.Single(function.Statements,
+                static statement => statement.Kind == 38);
+            Assert.Equal(new TextSpan(text.IndexOf(switchText, StringComparison.Ordinal),
+                switchText.Length), switchStatement.Span);
 
             var functionIndex = Array.FindIndex(read.Projection.Functions.ToArray(),
                 static projected => projected.Statements.Any(statement => statement.Kind == 38));

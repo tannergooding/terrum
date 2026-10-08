@@ -90,11 +90,21 @@ public static partial class ScalarFrontendHost
         }
 
         var name = Span(9);
-        if (context is null && SyntaxTree.Parse(source).HasErrors)
+        ScalarAliasEnvironment aliases;
+        if (context is null)
         {
-            throw InvalidResult();
+            var lexical = Lexer.Lex(source);
+            if (!lexical.Diagnostics.IsEmpty || lexical.Tokens.Length > 64
+                || SyntaxTree.Parse(lexical).HasErrors)
+            {
+                throw InvalidResult();
+            }
+            aliases = InventoryScalarAliases(lexical.Tokens);
         }
-        var aliases = context?.Aliases ?? InventoryScalarAliases(source);
+        else
+        {
+            aliases = context.Aliases;
+        }
         var firstName = Span(11);
         var secondName = Span(13);
         var thirdName = Span(35);

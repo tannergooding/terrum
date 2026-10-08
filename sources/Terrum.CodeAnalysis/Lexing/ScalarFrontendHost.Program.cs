@@ -266,7 +266,7 @@ public static partial class ScalarFrontendHost
         }
         // The project parser does not recognize this switch form. ReadProgram audits each
         // frame first, then parses the full source with only audited switch spans masked.
-        if (!hasSwitch && SyntaxTree.Parse(source).HasErrors)
+        if (!hasSwitch && SyntaxTree.Parse(lexical).HasErrors)
         {
             throw InvalidResult();
         }
@@ -452,17 +452,6 @@ public static partial class ScalarFrontendHost
         }
         at++;
         return true;
-    }
-
-    private static ScalarAliasEnvironment InventoryScalarAliases(SourceText source)
-    {
-        var lexical = Lexer.Lex(source);
-        if (!lexical.Diagnostics.IsEmpty || lexical.Tokens.Length > 64
-            || SyntaxTree.Parse(source).HasErrors)
-        {
-            throw InvalidResult();
-        }
-        return InventoryScalarAliases(lexical.Tokens);
     }
 
     private static ScalarAliasEnvironment InventoryScalarAliases(ImmutableArray<SyntaxToken> tokens)
