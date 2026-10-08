@@ -8,9 +8,11 @@
 > distinguishing ordinary completion demand from validated group-scoped
 > initialization authority. The first implementation gate is accepted as a
 > restricted, fail-fast, single-module profile; it is not the source contract
-> or the complete TRRM 1.0 GA profile. Attribute multiplicity, record/opcode
-> layouts, runtime ABI and implementation support remain open. These decisions
-> do not change the source execution, failure or lifecycle rules in the
+> or the complete TRRM 1.0 GA profile. Static fields have a distinct logical
+> identity from instance fields; physical table/section mapping remains open.
+> Attribute multiplicity, record/opcode layouts, runtime ABI and implementation
+> support remain open. These decisions do not change the source execution,
+> failure or lifecycle rules in the
 > [static initialization contract](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage).
 
 ## Summary
@@ -173,8 +175,8 @@ the proposed metadata can prove.
 records and Body-operation forms to the first slice, without assigning wire
 IDs, opcode numbers or native handles. Use a new required schema/profile
 instead of overloading the current metadata flags or `(1, 0)` Body profile.
-The candidate static-field identity is distinct from the existing instance
-`FieldDef`; a static field must not be inserted into an instance-layout range.
+The static-field identity is accepted as distinct from instance `FieldDef`;
+the `StaticField` record below is only a candidate physical representation.
 
 | Logical form | Required identity and invariant |
 |---|---|

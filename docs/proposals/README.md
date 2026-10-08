@@ -81,7 +81,8 @@ approved.
   records the accepted typed-enum `StaticInitializer` argument and
   zero-argument `LazyInitialization` marker, plus the explicit typed
   owning-group access obligation and restricted implementation-only first
-  slice; multiplicity, record/operation encoding and runtime ABI remain open.
+  slice. Static fields have a distinct logical identity; multiplicity,
+  record/operation encoding and runtime ABI remain open.
 - [First public fixed-layout profile](public-fixed-layout-profile.md)
   recommends a bounded natural-alignment Windows x64 opt-in without changing
   existing private Sequential or semantic-module layout contracts.

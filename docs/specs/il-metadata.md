@@ -136,6 +136,9 @@ requires semantic records beyond the current `(1, 0)` design. Existing
 FieldDef, MethodDef and PropertyDef flags do not encode static storage,
 initialization units, constructor trigger policy or lazy state. Source
 approval assigns no additional bits, table kinds, operation tags or revision.
+A static field has a distinct logical definition identity from an instance
+`FieldDef`; it is not a member of instance layout. Its physical table or
+section mapping remains open.
 
 A future encoding must identify owning closed types and load scopes, ordinary
 group members and separately lazy fields, ordered initializer operations, the
