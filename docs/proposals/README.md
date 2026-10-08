@@ -89,9 +89,10 @@ approved.
   separate profile identity or 16-byte cap; core primitives are `Blittable`,
   while non-primitive eligibility, source migration and metadata details
   remain open.
-- [Compare-exchange order pairs](atomic-cas-order-pairs.md) recommends a
-  finite compile-time-valid table for CAS success/failure memory orders;
-  it does not add atomic support or change the accepted bitwise-comparison rule.
+- [Compare-exchange order pairs](atomic-cas-order-pairs.md) records the
+  accepted finite compile-time-valid table for CAS success/failure memory
+  orders; source spelling, diagnostics and support remain open. It does not
+  add atomic support or change the accepted bitwise-comparison rule.
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,
 cleanup and proof contracts are in [language contracts](../specs/language-contracts.md);

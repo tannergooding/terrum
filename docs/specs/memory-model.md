@@ -420,7 +420,18 @@ or acquire-release. The API must specify both success and failure ordering and
 whether spurious failure is possible. The selected default is non-spurious
 strong CAS, with SC and full ordering on failure as well as success. Failure
 ordering and spurious failure are distinct properties; explicit weak variants
-and the complete valid order-pair table remain to specify.
+remain to specify. The accepted valid success/failure order pairs are:
+
+| Success order | Valid failure orders |
+|---|---|
+| `Relaxed` | `Relaxed` |
+| `Acquire` | `Relaxed`, `Acquire` |
+| `Release` | `Relaxed` |
+| `AcquireRelease` | `Relaxed`, `Acquire` |
+| `Sequential` | `Relaxed`, `Acquire`, `Sequential` |
+
+These are the semantic order names, not a commitment to source enum spelling.
+The pair must be compile-time known; reject every pair not listed above.
 
 CAS compares bits, not user-defined equality. An eligible value needs a
 defined bitwise comparison representation: `+0` and `-0`, and distinct NaN
@@ -971,8 +982,9 @@ read/write orders. Compare-exchange instead has success and failure orders
 because these are different outcomes. The default is non-spurious strong CAS,
 with an SC read and full before/after ordering on failure. Failure does not
 release a value that was not stored; release-only or acquire-release failure
-orders are invalid. Explicit weak variants and the complete legal order-pair
-table need specification.
+orders are invalid. Explicit weak variants remain to specify. The valid
+success/failure pairs are the accepted table above; the pair must be
+compile-time known.
 
 SC participation and full ordering of covered accesses are separate
 obligations, both required by strong RMWs and the default fence. This does not

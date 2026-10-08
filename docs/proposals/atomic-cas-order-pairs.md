@@ -1,16 +1,19 @@
 # Compare-exchange order-pair proposal
 
-**Status: unapproved.**
+**Status: accepted contract: the nine success/failure order pairs below are
+the complete valid table, and the pair must be compile-time known. Diagnostic
+identity, source enum/argument spelling, target capability details and
+implementation strategy remain open.**
 
 ## Summary
 
 The accepted memory model treats a failed compare-exchange as a read, not a
 release, and requires both success and failure orderings. Failure ordering
 cannot be `Release` or `AcquireRelease`. The complete legal order-pair table
-remains open in the [memory model](../specs/memory-model.md) and
-[core-library proposal](core-library-reference.md).
+is accepted in the [memory model](../specs/memory-model.md) and applies to the
+proposed [core-library API](core-library-reference.md).
 
-## Recommendation
+## Accepted contract
 
 Require a compile-time-known success/failure pair from the finite table below.
 The failure order must be a load order and no stronger than the success order:
@@ -34,14 +37,17 @@ outcomes, the defined-bitwise comparison rule, and the rule that failed CAS
 does not publish a value it did not store. Do not add runtime order dispatch,
 managed-reference eligibility, or a target-specific fallback here.
 
-## Required validation if adopted
+## Required conformance validation
 
-Test every success/failure pair, accepting exactly the nine listed pairs.
+When implemented, test every success/failure pair, accepting exactly the nine
+listed pairs.
+
 For accepted pairs, verify the success and failure outcomes retain their
 respective read/write effects and that failure cannot create a release
 communication edge. Include selected litmus cases for acquire failure and
 sequential failure. Keep the strong-CAS outcome and defined-representation
 checks separate from order-pair validation.
 
-The diagnostic identity for a nonconstant or invalid pair, source argument
-spelling, target capability table, and implementation strategy remain open.
+The diagnostic identity for a nonconstant or invalid pair, source enum and
+argument spelling, target capability details, and implementation strategy
+remain open.
