@@ -1,41 +1,52 @@
 # Checked-exception TRRM proposal
 
-**Status: unapproved design question.** This records a boundary for future
-source-free checked-exception execution; it does not change the TRRM format,
-runtime policy, or language semantics.
+**Status: accepted 1.0 GA requirement; serialization and conformance details
+remain open. The current beta executable subset is fail-fast-only and is not
+the final TRRM 1.0 contract.**
 
 ## Current boundary
 
-TRRM (1, 0) is fail-fast only. The `terrumc` TRRM commands reject
-`checked-exceptions` because executable Bodies have no exceptional-edge
-contract. The hosted compiler can bind, verify and emit its bounded checked
-`try`/`catch` subset, and the Terrum-authored scalar frontend now projects a
-bounded bare catch with optional `finally`. Neither fact establishes that a
-source-free TRRM artifact preserves that behavior.
+The current TRRM (1, 0) beta executable subset is fail-fast only. The
+`terrumc` TRRM commands reject `checked-exceptions` because executable Bodies
+do not yet have an exceptional-edge contract. This is an incomplete beta
+implementation, not a final compatibility boundary: core language exception
+semantics must be representable and executable in TRRM 1.0 before GA. The
+hosted compiler's bounded checked `try`/`catch` subset and the scalar
+frontend's bounded bare catch with optional `finally` are implementation
+evidence, not a complete source-free contract.
 
-## Decision
+## Accepted requirement and remaining design
 
-Should a new, explicitly identified TRRM profile admit checked-exception
-Bodies, and what serialized contract establishes their exceptional control
-flow, state and cleanup?
+TRRM 1.0 must support the core checked-exception semantics required by the
+language before GA. This is not an optional post-1.0 feature; whether beta
+artifacts use a new required-feature marker or another explicit identification
+mechanism remains open, but no such marker may make core support optional at
+GA. The serialized contract must establish exceptional control flow, state
+and cleanup without relying on producer source.
 
 **Summary:** The accepted source semantics include handler selection after
 inner cleanup, normal and exceptional `finally` composition, propagation of
 unhandled failures, and preservation of pending failure/cause state. Hosted
-binding, verification and native emission support a bounded subset, but TRRM
-(1, 0) admits only fail-fast execution. Its Effect metadata and the scalar
-frontend's hosted projection do not encode or validate exceptional Body edges.
+binding, verification and native emission support a bounded subset, but the
+current TRRM beta executable subset supports only fail-fast execution. Its
+Effect metadata and the scalar frontend's hosted projection do not encode or
+validate exceptional Body edges.
 
-**Recommendation:** Keep TRRM (1, 0) fail-fast and keep current rejection of
-`checked-exceptions`; a runtime-policy flag alone is insufficient. Before
-implementation, assign a separate required feature/profile and specify its
-exceptional-edge contract, including failure-reason transport, handler input
-state, cleanup ordering and the NoThrow cleanup restriction. Prefer serialized
-exception regions with audited operation-site exceptional-state mappings over
-synthetic normal CFG successors, unless an alternative is shown to preserve
-the hosted rules and can be independently verified without producer source.
+**Recommendation:** Treat checked-exception TRRM support as required 1.0 GA
+work, not as a reason to preserve the current beta rejection. A runtime-policy
+flag alone is insufficient. Specify failure-reason transport, handler input
+state, cleanup ordering and the `NoThrow` cleanup restriction before claiming
+support. Prefer serialized exception regions with audited operation-site
+exceptional-state mappings over synthetic normal CFG successors unless an
+alternative preserves hosted semantics and is independently verifiable
+without producer source.
 
 ### Recommended first profile (unapproved)
+
+This is a possible implementation gate, not the complete GA contract. Its
+exclusions must be checked against the core 1.0 language feature set; no core
+exception semantics may remain unsupported at GA merely because they are
+outside this initial profile.
 
 Admit only root-free scalar values, module-local direct calls, nested bare
 catches and a `finally` body that is NoThrow and normally completing. Keep
@@ -74,5 +85,6 @@ verifier/emitter boundary.
 - Uncalled Bodies and inactive paths receive the same audit as executed code;
   late invalid Bodies leave existing artifacts unchanged.
 - Policy and required-feature mismatches reject before execution. The current
-  TRRM (1, 0) rejection path remains unchanged, and no command falls back to
-  success-shaped behavior after unsupported input.
+  beta rejection may remain until the beta format and implementation are
+  updated; GA TRRM 1.0 must not reject core checked-exception programs or fall
+  back to success-shaped behavior after unsupported input.

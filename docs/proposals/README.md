@@ -67,9 +67,9 @@ approved.
 - [Registered UTF-8 string-literal target](registered-string-target-binding.md)
   is deferred; its source-reading semantic-module-JIT route is not the
   intended compile-time literal model and does not define general handlers.
-- [Checked-exception TRRM](checked-exception-trrm.md) records the unapproved
-  exceptional-control-flow contract needed before source-free checked-exception
-  Bodies can be considered.
+- [Checked-exception TRRM](checked-exception-trrm.md) records the accepted
+  requirement that TRRM 1.0 support core checked-exception semantics by GA;
+  exceptional-edge encoding and conformance details remain open.
 - [Output parameters in executable TRRM](trrm-output-parameters.md) records
   the unapproved place, publication and exceptional-state contract required
   before `out` or `init ref<T>` modes can execute from source-free artifacts.

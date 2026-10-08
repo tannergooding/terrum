@@ -2131,10 +2131,14 @@ an integer divisor and use the selected module fail-fast policy on failure;
 `CheckedConvert` accepts the assigned integer types and `char16` as a
 non-arithmetic 16-bit code unit with range `0..65535`; it preserves
 the mathematical value when in range. `Fail` terminates
-under that policy. Only `runtimePolicy=0` is executable in this subset:
-checked-exception dispatch requires a specified exceptional edge, payload
-and cleanup protocol. All live values in this subset are Copy values, so a
-failure cannot strand a unique cleanup obligation.
+under that policy. Only `runtimePolicy=0` is executable in the current beta
+subset: checked-exception dispatch requires a specified exceptional edge,
+payload and cleanup protocol. This is not the final TRRM 1.0 contract; core
+checked-exception semantics are required for TRRM 1.0 GA. Their serialized
+representation and conformance rules remain open in the
+[checked-exception proposal](../proposals/checked-exception-trrm.md). All
+live values in this subset are Copy values, so a failure cannot strand a
+unique cleanup obligation.
 
 Executable `Call` (`12`) selects a locally authored, module-level MethodDef
 using nonzero `m`, with no receiver or generic parameters. Its parameters are
