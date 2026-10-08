@@ -274,6 +274,15 @@ The draft also accepts opcode `0x1C`,
 other bit, including NaN payloads. This total operation does not perform
 floating arithmetic or depend on an arithmetic-NaN encoding.
 
+The draft also accepts opcode `0x1D`,
+`FloatBinary rNew, kind, rLeft, rRight`, for two operands and a result with
+the same exact unqualified `float32` or `float64` type. Kinds 1 through 4 mean
+addition, subtraction, multiplication and division. The operation is total and
+uses target-format arithmetic without implicit FMA or reassociation. A NaN
+result remains a NaN, but its sign and payload are unspecified; implementations
+should propagate and quiet an input NaN when practical. This operation does not
+add floating remainder.
+
 The draft also accepts opcode `0x1E`, `Char16ToFloat rNew, tDest, rSource`,
 for exactly `char16` to `float32` or `float64`. It interprets the source as an
 unsigned UTF-16 code unit, without decoding or validating surrogate pairs;

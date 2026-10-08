@@ -141,8 +141,11 @@ linear/indexed coverage are present. Opcode `0x1C` is accepted for total
 same-format `float32`/`float64` negation by sign-bit toggling, preserving all
 other bits; its implementation and linear/indexed coverage are present. These
 draft-only encodings do not change the approved IL specifications or promise
-post-release compatibility. Remaining source-free TRRM floating operations
-remain under unapproved proposals.
+post-release compatibility. Opcode `0x1D` is accepted for same-format
+`float32`/`float64` addition, subtraction, multiplication and division under
+the working profile's NaN-result-class contract; implementation and
+linear/indexed coverage are present. Remaining source-free TRRM floating
+operations remain under unapproved proposals.
 
 ## Platform and validation
 

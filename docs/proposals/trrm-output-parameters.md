@@ -129,9 +129,11 @@ toward zero before range checking, preserves the existing overflow status, and
 is incompatible with `NoThrow`. Control flow remains one-block except for the
 single direct-call split under revisions 5 and 6 described below. These other
 value, bitwise, unary, arithmetic and conversion paths are implemented support
-only, not approval of their proposed executable contracts. Comparison opcode
-`0x19` and exact-width floating `ConstBits` are separately accepted for the
-unreleased draft.
+only and do not approve other proposed executable contracts. Comparison opcode
+`0x19` and exact-width floating `ConstBits` are accepted for the unreleased
+draft, as is opcode `0x1D` for same-format `float32`/`float64` addition,
+subtraction, multiplication and division. Arithmetic NaN results retain only
+the NaN-class guarantee; sign and payload are unspecified.
 The current writer emits required feature rule revision 6 for output Bodies.
 Rule revision 2 provisionally permits `bool`, `char16`, `int32`, `uint32`,
 `int64`, `uint64`, `float32` and `float64` referents and scalar initialized

@@ -1850,6 +1850,16 @@ public sealed class TrRmExecutableCompilerTests
         }
     }
 
+    [Fact]
+    public void FloatBinaryRejectsIntegerOperands()
+    {
+        const string source = "public int32 Add(int32 left, int32 right) { return left + right; }";
+        var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-integer-float-binary");
+        var malformed = ReplaceBodyOperationByte(artifact, 1, 4, 0, 0x1D);
+
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(5)]
