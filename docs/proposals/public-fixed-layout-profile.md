@@ -4,11 +4,13 @@
 slice and compatibility encoding remain unapproved. Core primitives are
 `Blittable` by their type contract; field eligibility uses existing
 target-specific `Blittable` and ordinary `Copy`/value-validity requirements,
-with `Sequential` also required for nested structs. Source migration activates
-at a language-version boundary; its exact version and tooling selector remain
-open. Natural alignment remains target-specific. Windows x64 native ABI
-classification is required for interop; by-value aggregates classified as
-indirect use a shadow copy, with no proposal-specific 16-byte size limit.**
+with `Sequential` also required for nested structs. Explicit `Blittable`
+metadata and validation of existing layout/field facts are accepted; their
+encoding remains open. Source migration activates at a language-version
+boundary; its exact version and tooling selector remain open. Natural
+alignment remains target-specific. Windows x64 native ABI classification is
+required for interop; by-value aggregates classified as indirect use a shadow
+copy, with no proposal-specific 16-byte size limit.**
 
 ## Current boundary
 
@@ -111,10 +113,11 @@ The logical structure metadata must retain enough information to compare the
 same promise across producers and consumers: explicit `Blittable` and
 `Sequential` commitments, target requirement, size, aggregate alignment, and
 each field's order, type, access/mutation contract, and offset. Existing
-metadata already carries most field shape; persisting the `Blittable`
-commitment and aggregate alignment is the missing semantic distinction. The
-concrete encoding and any new feature/revision values remain unassigned until
-the metadata review.
+`Layout` rows already carry target requirement, size and alignment, while
+`FieldDef` rows carry field order, type, access/mutability and offsets. The
+missing semantic fact is the explicit `Blittable` commitment. Its concrete
+encoding and any new feature/revision values remain unassigned until the
+metadata review.
 
 | Producer / consumer case | Recommended behavior |
 |---|---|

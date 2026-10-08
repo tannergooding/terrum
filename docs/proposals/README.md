@@ -88,8 +88,9 @@ approved.
   `Blittable` plus `Sequential` contract with native ABI passing and no
   separate profile identity or 16-byte cap; core primitives are `Blittable`
   and field eligibility follows existing target-specific `Blittable` and
-  `Copy` rules. Source-version migration activation is accepted; its exact
-  version/tooling selector and compatibility metadata remain open.
+  `Copy` rules. The explicit metadata requirement and source-version migration
+  boundary are accepted; their encoding/version selector and the support
+  slice remain open.
 - [Compare-exchange order pairs](atomic-cas-order-pairs.md) records the
   accepted finite compile-time-valid table for CAS success/failure memory
   orders; source spelling, diagnostics and support remain open. It does not

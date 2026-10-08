@@ -866,6 +866,16 @@ overlap, field offsets and ABI classification against its target requirement;
 `Transparent` retains nominal identity while using its one carrier's direct
 call classification. Equal layout is not implicit conversion.
 
+Public fixed-layout consumers also require an explicit `Blittable`
+commitment; they must not infer it from visibility, `Sequential`, or matching
+layout values. The existing `Layout` and `FieldDef` facts carry the target
+requirement, size, alignment, field order, type, access/mutability and offsets.
+Consumers recompute and validate those facts against the target before
+lowering or execution, rejecting missing or incompatible commitments. The
+`(1, 0)` schema assigns no `Blittable` marker; its encoding and any required
+feature or revision remain unassigned, and reserved fields must not be
+reinterpreted to carry it.
+
 Param modes are `0x00` by-value, `0x01` `out`, `0x02` `init ref`,
 `0x03` readonly `ref`, `0x04` writable `ref`. The
 [coded instruction set](il-instruction-set.md) has local place
@@ -1157,7 +1167,7 @@ following byte-level contracts:
 | Surface | Not yet specified |
 |---|---|
 | Encoding and revisions | Future version/feature policy and reader compatibility rules. The approved current `(1, 0)` design accepts only its registered semantic forms but is not a released schema. |
-| Declarations | Resource references, generic/witness exportability, further type/field/layout flags, richer qualifier/contract clauses and their validation. Module identity and export-key equality are specified; assigning a stable key to a source declaration is a writer policy. |
+| Declarations | Encoding the accepted explicit `Blittable` commitment, resource references, generic/witness exportability, further type/field/layout flags, richer qualifier/contract clauses and their validation. Module identity and export-key equality are specified; assigning a stable key to a source declaration is a writer policy. |
 | Static storage | Loaded closed-type groups/lazy units, ordered initialization, constructor policy/primary ownership, initialization effects, sharing/phase authority, failure/recovery and cleanup/unload records. No current `(1, 0)` row or flag supplies this encoding. |
 | Patterns and handlers | Runtime captured-type evidence/constraints/code availability, qualified reference matching, live candidate/filter scopes, pending failure/causal replacement and post-inner-cleanup handler selection. |
 | Executable bodies | Beyond the [narrow executable subset and other assigned decode shapes](il-instruction-set.md#executable-subset-versus-assigned-decode-shapes): output places, exceptional handlers/cleanup, loans, roots, witness bindings and their precise verifier rules. |
