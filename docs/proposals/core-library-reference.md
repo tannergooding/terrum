@@ -152,7 +152,8 @@ table. The proposed `Option<T>` alias is separately described in
 | Sampled numeric witnesses | `IAdditionOperators`, `IMultiplyOperators`, `IAdditiveIdentity`, `IScalarNumber`, `IScalarIeee754` | [Sampled declarations](#existing-sampled-declarations) |
 | Selected conversion pairs | `ICheckedConversion`, `ISaturatingConversion`, `ITruncatingConversion` | [Conversion witnesses](#existing-sampled-declarations) |
 | Sampled primitives | `int32`, `float32`, `decimal32`; `uint32`, `int8` | [Initial samples](#existing-sampled-declarations), [width-family samples](#candidate-primitive-member-families) |
-| Closed scalar services | `BitOperations`, `Int32Math`, `Int64Math`, `Float32Math`, candidate `Float64Math` | [Scalar services](#numeric-conversion-and-scalar-service-signatures), [Float64 selection candidate](float64-math-selection.md) |
+| Scalar services | `BitOperations`, `Int32Math`, `Int64Math` | [Scalar services](#numeric-conversion-and-scalar-service-signatures) |
+| Floating-point math | Primitive `float32`/`float64` selection and future format candidates | [Combined floating-point math proposal](floating-math-selection.md) |
 | Fixed SIMD | `simd128`, `simd128mask`, `Simd128Conversions`, `Simd128Reductions` | [Fixed SIMD](#fixed-width-simd) |
 | Tensor metadata and views | `TensorShape`, `TensorSpan`, `TensorViews` | [Tensor views](#tensor-shapes-and-views) |
 | Tensor kernels | `TensorPrimitives` | [Tensor operations](#tensor-operations) |
@@ -2317,21 +2318,13 @@ public struct Int64Math
     public static (int64 Quotient, int64 Remainder) DivRem(int64 dividend, int64 divisor);
     public static uint64 GreatestCommonDivisor(int64 left, int64 right);
 }
-public struct Float32Math
-{
-    public static float32 Abs(float32 value);
-    public static float32 Min(float32 left, float32 right);
-    public static float32 Max(float32 left, float32 right);
-    public static float32 Clamp(float32 value, float32 minimum, float32 maximum);
-    public static float32 Sqrt(float32 value);
-    public static float32 Pow(float32 value, float32 exponent);
-    public static float32 Exp(float32 value);
-    public static float32 Log(float32 value);
-    public static float32 Sin(float32 value);
-    public static float32 Cos(float32 value);
-    public static float32 RoundToIntegral(float32 value);
-}
 ```
+
+The accepted `float32`/`float64` selection behavior is recorded in the
+[library specification](../specs/libraries.md). No standalone `*Math`
+service type is part of the floating-point API proposal; primitive member
+placement, declaration/lookup mechanics and coverage of other formats remain
+pending in the [combined floating-point math proposal](floating-math-selection.md).
 
 `BitOperations` candidates operate on actual bits of the indicated unsigned
 width; a parallel `uint8/16/128` or `nuint` overload requires its own
@@ -2392,44 +2385,16 @@ Conditional publication, concrete failure transport and effect metadata
 remain **OPEN**; neither a `Try` name nor an exact widened product grants a
 NoThrow declaration.
 
-**OPEN next to floating math candidates:**
-The following gives a concrete **PROPOSED candidate for review**, not an
-accepted policy, for the existing `Float32Math` selection members. It
-separates numeric selection from total key ordering and makes validation
-order observable:
-
-| Member | Proposed candidate special-value contract |
-|---|---|
-| `Abs` | Return the exact nonnegative magnitude of a finite value; either zero becomes positive zero and either infinity becomes positive infinity. NaN produces NaN; payload, signaling behavior and status flags remain OPEN. |
-| `Min` | Propagate NaN if either operand is NaN; otherwise select the numerically lesser value. If the inputs are both zeros, return negative zero when either is negative zero. |
-| `Max` | Propagate NaN if either operand is NaN; otherwise select the numerically greater value. If the inputs are both zeros, return positive zero when either is positive zero. |
-| `Clamp` | First reject a NaN bound or numerically reversed bounds as a checked argument failure. After valid bounds, NaN input produces NaN; otherwise return the lower bound only for a strictly smaller input, the upper bound only for a strictly greater input, and the original input when inside the interval. Infinite bounds are permitted. |
-
-Under this candidate, `Min(+0.0, -0.0)` selects `-0.0`, and
-`Max(-0.0, +0.0)` selects `+0.0`; these examples use the `float32` parameter
-context, not a default literal type. `Clamp(-0.0, +0.0, 1.0)` preserves the
-input's negative zero because the two zero signs are numerically equal.
-`Clamp` is consequently not specified by composing these `Min`/`Max`
-operations: that composition could change an in-range zero's sign.
-Valid numerically equal bounds accept an equal input unchanged, including
-its zero sign; a nonzero out-of-range input selects the corresponding bound.
-
-Bounds validation precedes input-NaN handling, so a NaN input does not conceal
-an invalid bound pair. No bound swapping, NaN-to-zero conversion, numeric-key
-ordering or hardware-instruction-specific NaN selection is implied.
-NaN propagation specifies the NaN result class only; which operand's
-payload/sign is retained, signaling-NaN quieting and floating status effects
-remain **OPEN**. These proposed library policies neither change ordinary
-IEEE comparisons nor approve a floating total-order witness, primitive
-intrinsic or NoThrow declaration.
-
-The candidate selection policies remain **OPEN pending review**;
+**Floating-point selection behavior is accepted** for `float32` and `float64`;
+the canonical semantics are in the [library specification](../specs/libraries.md).
+API placement and other type-family coverage remain **OPEN** in the
+[combined floating-point math proposal](floating-math-selection.md).
 `Sqrt`/`Pow`/`Exp`/`Log`/`Sin`/`Cos`/`RoundToIntegral` separately need
 special-value, domain, precision and rounding-mode contracts. Strict target-format
 `float32` arithmetic neither reassociates nor contracts implicitly.
 Native/approximate variants and reproducible reductions need separate names
 and contracts. Decimal transcendental availability, cohorts and rounding
-must be separately determined, not cloned from `Float32Math`.
+must be separately determined.
 
 ## 7. Fixed SIMD, scalable vectors and tensors
 

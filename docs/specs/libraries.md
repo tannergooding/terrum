@@ -162,6 +162,22 @@ for the original type.
 
 Floating `==` follows IEEE (NaN unequal, signed zero equal). A **separate numeric-key comparer** makes all NaNs mutually key-equal, zeros equal and hashes consistent. Decimal key hashing must normalize numerically equal *cohorts* (`1.0`/`1.00`), not hash its raw encoding; signed zero and NaN also need canonical key hashes. A bitwise-identity comparer is different again. Maps/sets accept a paired equality/hash policy (`IKeyComparer<T>` in the [algorithm inventory](../../library/algorithms.api.terrum)); `IndexOf` under ordinary operator equality must not silently adopt numeric-key semantics. Ordering and `Min` variants explicitly select NaN propagation and signed-zero policies. The runtime's distinct decimal `operator ==`, `Equals`, and cohort-normalizing hash illustrate why one implicit universal equality is insufficient ([source notes](references.md)).
 
+For `float32` and `float64`, the accepted numeric-selection behavior is:
+`Abs` returns the nonnegative magnitude, mapping either zero to positive zero
+and either infinity to positive infinity; a NaN input produces NaN. `Min` and
+`Max` produce NaN if either input is NaN; otherwise they select the numeric
+extreme. For a zero pair, `Min` returns negative zero if either operand is
+negative zero (otherwise positive zero); `Max` returns positive zero if either
+operand is positive zero (otherwise negative zero). `Clamp` first rejects NaN
+bounds or numerically reversed bounds as a checked argument failure. With
+valid bounds, a NaN input produces NaN; otherwise only a strictly out-of-range
+input selects a bound, and an in-range input is returned unchanged, preserving
+its zero sign. Infinite bounds are valid. For all these operations, NaN
+payload/sign selection, signaling behavior and floating status effects are
+unspecified; failure transport and effect metadata are also open. This
+behavioral contract does not establish a particular API owner or imply
+primitive intrinsics, `NoThrow`, or contracts for other math functions.
+
 ## SIMD as a family of shapes
 
 Explicit `simd64/128/256/512<T>` are fixed ABI shapes where supported; `simd<T>` denotes a **genuine target-scalable** type, not a preferred-width fixed vector. The [SIMD contract inventory](../../library/simd.api.terrum) uses locally labeled family pseudocode: "any fixed vector of float32" preserves the actual concrete type/width and its associated mask for checking/codegen, unlike runtime-erased text. Two operands and their result must retain required same-instantiation relationships. Membership and common operations are checked declarations, not matching names. Vector addition returns that same vector type; lane comparisons return its mask; reductions may return the element type; whole-vector equality returns `bool`. A mask represents **boolean lane predicates**, not a numeric data vector of all-one bit patterns. `CompareEqual` produces a mask; `Any`/`All` reduce it to `bool`; `Select` consumes it. Mask shape and granularity must match element shape. Bit reinterpretation, numeric conversion, splatting, and rebinding families are distinct operations. Family participation requires explicit opt-in with declared checked projections and constraints; exact family/associated-member grammar and eligible projections remain specification work. No universal `Type<T>`-to-`Type<void>` erasure or inferred covariance follows; see [type families](type-families.md).
