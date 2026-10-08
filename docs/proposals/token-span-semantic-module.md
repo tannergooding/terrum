@@ -1,6 +1,8 @@
 # Persisted internal `Span<Token>` forwarding
 
-**Status: Unapproved**
+**Status: Deferred until a concrete private provider/consumer corpus and
+supported invocation profile justify persistence. No persisted `Span<Token>`
+contract or metadata is approved.**
 
 ## Summary
 
@@ -13,7 +15,7 @@ leave the body unverifiable and could erase backing obligations during
 linking. The current self-host corpus has not established a concrete persisted
 provider/consumer path that needs this extension.
 
-## Recommendation
+## Deferred decision
 
 Defer implementation until a concrete persisted provider, consumer and
 invocation path demonstrates value under an existing invocation profile. The

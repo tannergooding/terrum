@@ -49,8 +49,8 @@ approved.
   is deferred until a concrete same-compilation provider/consumer path needs
   returned views; its proposed `DependsOn` contract remains unapproved.
 - [Persisted internal `Span<Token>` forwarding](token-span-semantic-module.md)
-  recommends deferring persistence until a concrete private provider/consumer
-  corpus and supported invocation profile justify its full IR/linking work.
+  is deferred until a concrete private provider/consumer corpus and supported
+  invocation profile justify its full IR/linking work.
 - [Invocation-scoped source grant](invocation-scoped-source-grant.md)
   recommends a narrow persisted-module dependency for source-aware compiler
   components without enabling arbitrary host-buffer capture.
