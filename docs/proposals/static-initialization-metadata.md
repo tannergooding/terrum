@@ -4,10 +4,12 @@
 > dedicated, closed enum with a case for each accepted trigger choice. Its
 > registered enum identity and case spellings remain open. `[LazyInitialization]`
 > takes no arguments and targets an ordinary, non-`extern` static field.
-> Attribute multiplicity and persisted metadata, Body-access and runtime
-> profiles remain unapproved and do not claim compiler support. The accepted
-> [static initialization contract](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage)
-> is unchanged.
+> Source-free accesses require an explicit typed owning-group obligation,
+> distinguishing ordinary completion demand from validated group-scoped
+> initialization authority. Attribute multiplicity, record/opcode layouts,
+> runtime profiles and support remain unapproved. These schema decisions do
+> not change the source execution, failure or lifecycle rules in the
+> [static initialization contract](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage).
 
 ## Summary
 
@@ -32,10 +34,16 @@ enum identity and source case spellings are not selected here.
 ordinary, non-`extern` static field. It does not configure a trigger or other
 initialization policy.
 
-Per-attribute multiplicity, the required metadata records, access obligations,
-runtime profile and encoding that carry the accepted contract remain open.
-These choices must preserve the accepted execution, failure, publication,
-sharing and unload rules.
+**Accepted:** Each source-free runtime static access carries an explicit,
+typed obligation identifying its owning group and access kind. It distinguishes
+ordinary completion demand from validated, group-scoped initialization-phase
+authority, exposes the applicable trigger effect, and is never inferred from
+names or row order.
+
+Per-attribute multiplicity, the metadata records and Body forms that carry
+this obligation, runtime profile and wire encoding remain open. These choices
+must preserve the accepted execution, failure, publication, sharing and unload
+rules.
 
 ### Attribute schemas
 
@@ -280,7 +288,6 @@ or execution is authorized.
 
 | Question | Summary | Recommendation |
 |---|---|---|
-| What is the logical access obligation before assigning its encoding? | The accepted source contract distinguishes ordinary demand from initialization authority, but does not assign artifact access records or operations. | Review the candidate forms above: bind each runtime access to its selected local member and owning group, distinguish `None`/`Complete` demand from validated group-scoped authority, publish the trigger effect, and reject missing or mismatched obligations. |
 | Which required metadata kinds and executable access forms carry these records? | Current TRRM and semantic-module revision 76 assign no static-storage records or access operations; existing instance `FieldDef` rows do not identify static cells. | Use the candidate `StaticInitProfile`, `StaticField`, `EagerGroup`, `EagerInitializer`, method-role/demand clauses and typed Body access forms above. Keep wire IDs, opcode numbers and native handles unassigned until this proposal is reviewed; do not emit in current profiles or overload existing flags. |
 | How are semantic clauses validated? | The slice assigns reader validation of clause shape/placement separately from source-body proof, but exact clause identities, payloads and proof obligations remain open. | Define each typed required clause and its compiler proof, reader shape/consistency checks, linker compatibility checks and runtime enforcement. Keep body re-proof governed by the artifact trust policy; reject unknown required or unsupported clauses. |
 | What runtime identity and lifecycle ABI implements the accepted behavior? | The candidate names load-instance identity and state transitions, but no runtime handle or unload protocol is assigned. | Assign a load-scoped group key and phase-authority transport. The first profile needs no waiter or retained-failure ABI; later checked-sharing or defined-unwinding profiles must specify their own waiting, failure, cleanup and retirement machinery. Do not inherit host static-constructor behavior. |
@@ -291,9 +298,10 @@ or execution is authorized.
 ## Implementation boundary
 
 This proposal does not authorize changes to the accepted trigger, initialization,
-sharing, failure/recovery, cleanup or unload semantics. The candidate logical
-records and operations above remain unapproved and do not make the current
-`(1, 0)` metadata flags or semantic-module revision 76 carry
+sharing, failure/recovery, cleanup or unload semantics. The accepted logical
+access-obligation requirement assigns no record layout, opcode or runtime ABI;
+candidate records and operations above remain unapproved and do not make the
+current `(1, 0)` metadata flags or semantic-module revision 76 carry
 static-initialization policy. They do not establish hosted or native compiler
 support. Emission and execution are not authorized under current profiles.
 Implementation remains blocked on proposal approval, assigned wire schemas

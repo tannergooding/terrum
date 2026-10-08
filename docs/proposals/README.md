@@ -79,8 +79,9 @@ approved.
   source types, call signatures and native ABI support remain out of scope.
 - [Static initialization metadata and attribute schema](static-initialization-metadata.md)
   records the accepted typed-enum `StaticInitializer` argument and
-  zero-argument `LazyInitialization` marker; multiplicity, metadata,
-  access-obligation and runtime-profile details remain unapproved.
+  zero-argument `LazyInitialization` marker, plus the explicit typed
+  owning-group access obligation; multiplicity, record/operation encoding and
+  runtime-profile details remain unapproved.
 - [First public fixed-layout profile](public-fixed-layout-profile.md)
   recommends a bounded natural-alignment Windows x64 opt-in without changing
   existing private Sequential or semantic-module layout contracts.

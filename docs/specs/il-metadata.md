@@ -143,6 +143,12 @@ sole authored constructor policy/contract and its implementation. It preserves
 compiler-input/source execution order rather than reconstructing it from
 packed row numbers, filename sorting or primary-part priority. Linking and
 generic substitution preserve exact owning identities and dependencies.
+Every source-free runtime static access must also carry an explicit typed
+obligation identifying its owning group and access kind. The obligation
+distinguishes an ordinary completion demand from validated, group-scoped
+initialization-phase authority and exposes the applicable trigger effect.
+Consumers must not infer the obligation from names, row order or ordinary
+member effects.
 
 Published records also carry explicit sharing/access and initialization-phase
 authority, trigger effects, completion guarantees, failure/recovery policy,
