@@ -1,10 +1,15 @@
 # Self-host frontend verification-budget proposal
 
-**Status: unapproved, deferred architecture option.** The scalar frontend
-composes the current single-function and complete-program projections under
-the unchanged shared 100,000-visit verification limit. This proposal does not
-change language semantics, the accepted source grammar, native ABI, or
-verification budget.
+**Status: deferred by decision; unapproved architecture option.**
+The scalar frontend composes the current single-function and complete-program
+projections under the unchanged shared 100,000-visit verification limit. This
+proposal does not change language semantics, the accepted source grammar,
+native ABI, or verification budget.
+
+**Decision recorded:** keep a frontend split or phase handoff deferred.
+Prefer further caching and hot-spot analysis on real workloads; reconsider a
+verification boundary only if representative growth again reaches `TRM3016`
+after behavior-preserving repeated-work reductions.
 
 ## Evidence
 

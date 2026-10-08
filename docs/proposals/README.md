@@ -29,8 +29,9 @@ approved.
   accepted draft opcode meanings remain unchanged and no future bytes are
   assigned.
 - [Self-host frontend verification budget](self-host-frontend-verification-budget.md)
-  records a deferred, unapproved architecture option if memoization no longer
-  suffices to grow the authored scalar frontend within its shared limit.
+  records the deferred, unapproved split/phase-handoff option; reconsider it
+  only if representative growth again reaches `TRM3016` after profiling and
+  behavior-preserving caching/hot-path reductions.
 - [Reference-call metadata](reference-call-metadata.md) has an accepted,
   bounded indexed-Body unsafe-region contract; its dependency-relation profile,
   general output-call migration and other extensions remain unapproved.
