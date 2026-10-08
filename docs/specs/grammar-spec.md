@@ -1198,15 +1198,17 @@ Missing initialization diagnoses; no caller can read vacant storage to
 determine its state.
 
 `[LazyInitialization]` is a compiler-recognized semantic attribute selecting
-an individually demand-initialized ordinary static field, outside the ordinary
-group initializer sequence. Its initializer remains subject to the ordinary
-type, effect, access and completion checks. An external access completes the
-type group before initializing the requested lazy field. Other lazy fields
-remain untouched unless actually accessed. Initializers and checked helpers
-may access already-initialized fields within their unpublished initialization
-authority; this is not permission for ordinary reentrant callers to observe
-partial group state. A cyclic demand for an unfinished unit's completion
-fails rather than waiting indefinitely or exposing an invented default.
+an individually demand-initialized ordinary, non-`extern` static field,
+outside the ordinary group initializer sequence. It takes no arguments and
+does not configure a trigger or other initialization policy. Its initializer
+remains subject to the ordinary type, effect, access and completion checks.
+An external access completes the type group before initializing the requested
+lazy field. Other lazy fields remain untouched unless actually accessed.
+Initializers and checked helpers may access already-initialized fields within
+their unpublished initialization authority; this is not permission for
+ordinary reentrant callers to observe partial group state. A cyclic demand for
+an unfinished unit's completion fails rather than waiting indefinitely or
+exposing an invented default.
 
 The default initialization execution protocol permits one execution flow to
 initialize a unit while competing permitted callers wait for its outcome.

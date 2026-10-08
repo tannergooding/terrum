@@ -2,8 +2,9 @@
 
 > **Status: partially accepted.** `[StaticInitializer]` takes one value of a
 > dedicated, closed enum with a case for each accepted trigger choice. Its
-> registered enum identity and case spellings remain open. The proposed
-> `LazyInitialization` schema and persisted metadata, Body-access and runtime
+> registered enum identity and case spellings remain open. `[LazyInitialization]`
+> takes no arguments and targets an ordinary, non-`extern` static field.
+> Attribute multiplicity and persisted metadata, Body-access and runtime
 > profiles remain unapproved and do not claim compiler support. The accepted
 > [static initialization contract](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage)
 > is unchanged.
@@ -20,17 +21,21 @@ binding, persistence and runtime adoption cannot proceed safely by treating
 these attributes as ordinary names or by inheriting host static-constructor
 behavior.
 
-## Accepted source schema and remaining decisions
+## Accepted source schemas and remaining decisions
 
 **Accepted:** `StaticInitializer` takes exactly one positional compile-time
 value of a dedicated, closed enum, with one case for each accepted trigger
 choice. The compiler normalizes that case to the trigger tag. The registered
 enum identity and source case spellings are not selected here.
 
-The `LazyInitialization` schema and the required metadata records, access
-obligations, runtime profile and encoding that carry the accepted contract
-remain open. These choices must preserve the accepted execution, failure,
-publication, sharing and unload rules.
+**Accepted:** `LazyInitialization` takes no arguments and applies to an
+ordinary, non-`extern` static field. It does not configure a trigger or other
+initialization policy.
+
+Per-attribute multiplicity, the required metadata records, access obligations,
+runtime profile and encoding that carry the accepted contract remain open.
+These choices must preserve the accepted execution, failure, publication,
+sharing and unload rules.
 
 ### Attribute schemas
 
@@ -44,7 +49,8 @@ publication, sharing and unload rules.
   non-`extern` static field. It does not apply to constants or property
   backing storage; its resolved attribute identity and zero-argument schema
   are fixed by registration.
-- Neither attribute permits repetition. Partial declarations retain the
+- The proposal recommends that neither attribute permit repetition; this
+  multiplicity choice remains unapproved. Partial declarations retain the
   accepted primary-only policy authorship; a secondary static-constructor
   implementation cannot restate or change the trigger.
 - Both schemas use the ordinary checked constant evaluator and exact resolved
