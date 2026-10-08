@@ -1,10 +1,12 @@
 # First public fixed-layout implementation slice
 
 **Status: no separate profile identity (accepted); the proposed support
-slice, field eligibility, compatibility encoding and source migration remain
-unapproved. Windows x64 native ABI classification is required for interop;
-by-value aggregates classified as indirect use a shadow copy, with no
-proposal-specific 16-byte size limit.**
+slice, non-primitive field eligibility, compatibility encoding and source
+migration remain unapproved. All storable core primitives are `Blittable` by
+their type contract; natural alignment remains target-specific. Windows x64
+native ABI classification is required for interop; by-value aggregates
+classified as indirect use a shadow copy, with no proposal-specific
+16-byte size limit.**
 
 ## Current boundary
 
@@ -51,11 +53,10 @@ profile or semantic commitment:
   registration remains a prerequisite; this proposal assigns no new library
   or metadata identity.
 - Admit public, non-unique compact `Copy` structs without a proposal-specific
-  size limit.
-  Permit only `int32`, `uint32`, `int64`, `uint64`, `char16`, and
-  nested structs that independently satisfy this same implementation slice.
-  Reject recursive value containment, `bool`, floating types, references,
-  pointers, arrays, unique or managed values, and unions.
+  size limit. Core primitive fields retain their fixed storage widths and
+  `Blittable` contracts; use target natural alignment. Nested structs must
+  independently satisfy the existing `Blittable` and `Sequential` contracts.
+  Non-primitive field eligibility remains open.
 - Use natural field alignment only. Do not enable custom packing or
   aggregate over-alignment in this slice; `Transparent` remains unchanged.
 - Use the existing Windows x64 target requirement (`1`). `Sequential` follows
@@ -85,7 +86,7 @@ proposal-specific struct-size bound.
 
 ## Proposed layout and compatibility contract
 
-The selected Windows x64 storage entries for this implementation slice are:
+Representative Windows x64 storage entries are:
 
 | Field type | Size | Natural alignment | Representation |
 |---|---:|---:|---|
