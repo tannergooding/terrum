@@ -1,6 +1,9 @@
 # Forwarded `Span<Token>` results
 
-**Status: Unapproved**
+**Status: Deferred until a concrete same-compilation producer/consumer path
+requires returned `Span<Token>` views. The proposed `DependsOn` result
+contract remains unapproved; existing tests are implementation evidence, not
+contract approval.**
 
 ## Summary
 
@@ -12,11 +15,26 @@ without borrowing a parameter's descriptor storage. Consider a narrow
 same-compilation experiment that uses the declared parameter dependencies
 while leaving the general relationship model open.
 
-## Recommendation
+## Deferred decision
 
-Provisionally allow synchronous, non-generic, non-external top-level functions
-to return one readonly `Span<Token>` descriptor when one return-target
-`DependsOn` annotation declares a nonempty closed dependency set:
+Keep this profile as a candidate, but do not accept or broaden it until a real
+same-compilation producer/consumer path needs a function to return a
+`Span<Token>`. The current cursor and parser path do not require returned
+views. Existing tests help preserve the behavior if the need arises; they do
+not establish that the proposed annotation or contract is needed.
+
+If reconsidered, review the closed dependency-set semantics, conservative
+propagation across branches, calls, copies and joins, and exact source
+annotation before acceptance. This deferral does not approve general
+`Dependency` metadata, public or persisted signatures, or the separately
+deferred semantic-module follow-on.
+
+## Candidate profile (unapproved)
+
+The candidate would allow synchronous, non-generic, non-external top-level
+functions to return one readonly `Span<Token>` descriptor when one
+return-target `DependsOn` annotation declares a nonempty closed dependency
+set:
 
 ```terrum
 [return: DependsOn(nameof(tokens))]

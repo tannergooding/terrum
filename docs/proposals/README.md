@@ -46,8 +46,8 @@ approved.
   `Span<T>` support, source-level `nuint`, writable/ref-returning access and
   persisted capture metadata remain unapproved.
 - [Forwarded `Span<Token>` results](token-span-result-forwarding.md)
-  recommends a same-compilation hosted experiment for forwarding declared
-  backing dependencies through bounded top-level functions.
+  is deferred until a concrete same-compilation provider/consumer path needs
+  returned views; its proposed `DependsOn` contract remains unapproved.
 - [Persisted internal `Span<Token>` forwarding](token-span-semantic-module.md)
   recommends deferring persistence until a concrete private provider/consumer
   corpus and supported invocation profile justify its full IR/linking work.
