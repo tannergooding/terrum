@@ -19,6 +19,9 @@ approved.
 - [Semantic IL extensions](il-extensions.md) collect the unapproved inline
   built-in type word and compact-profile follow-up, separate from the
   approved `(1, 0)` designs.
+- [Executable TRRM operation-encoding families](trrm-operation-encoding-families.md)
+  explores future opcode families for growing scalar type sets without
+  reinterpreting accepted draft opcodes.
 - [Self-host frontend verification budget](self-host-frontend-verification-budget.md)
   records a deferred, unapproved architecture option if memoization no longer
   suffices to grow the authored scalar frontend within its shared limit.
