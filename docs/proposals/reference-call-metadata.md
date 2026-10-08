@@ -3,9 +3,10 @@
 **Status: partially accepted.** Section 3's bounded indexed-Body unsafe-region
 contract is accepted and specified in the
 [instruction set](../specs/il-instruction-set.md). The dependency-relation
-profile, general output-call migration, and all other extensions in this
-proposal remain unapproved. Provisional implementation notes are evidence of
-support only and do not settle those decisions.
+profile is deferred until a concrete persisted provider/consumer path needs
+it. General output-call migration and all other extensions remain unapproved.
+Provisional implementation notes are evidence of support only and do not
+settle those decisions.
 
 ## Current boundary
 
@@ -690,6 +691,11 @@ and calls outside validated regions remain rejected. This bounded contract
 does not approve the proposal's other extensions.
 
 ### 1. Which dependency relations belong in the first callable profile?
+
+**Decision recorded:** defer the general dependency-relation registry until a
+concrete persisted provider/consumer path needs it. Keep the current metadata
+relation kinds unassigned and persistence rejection unchanged; this does not
+change source-level lifetime rules or provisional same-compilation support.
 
 **Summary:** The accepted lifetime rules distinguish borrowing a selected
 source's storage from forwarding backing obligations already carried by that

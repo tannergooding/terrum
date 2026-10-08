@@ -33,8 +33,9 @@ approved.
   only if representative growth again reaches `TRM3016` after profiling and
   behavior-preserving caching/hot-path reductions.
 - [Reference-call metadata](reference-call-metadata.md) has an accepted,
-  bounded indexed-Body unsafe-region contract; its dependency-relation profile,
-  general output-call migration and other extensions remain unapproved.
+  bounded indexed-Body unsafe-region contract; its dependency-relation
+  profile is deferred until a concrete persisted use case, while general
+  output-call migration and other extensions remain unapproved.
 - [Floating results from generic Copy output templates](generic-floating-output-results.md)
   has accepted fixed floating results for single-mode generic outputs without
   fixed side parameters; mixed-mode and fixed-side combinations remain
