@@ -6,9 +6,11 @@
 > takes no arguments and targets an ordinary, non-`extern` static field.
 > Source-free accesses require an explicit typed owning-group obligation,
 > distinguishing ordinary completion demand from validated group-scoped
-> initialization authority. Attribute multiplicity, record/opcode layouts,
-> runtime profiles and support remain unapproved. These schema decisions do
-> not change the source execution, failure or lifecycle rules in the
+> initialization authority. The first implementation gate is accepted as a
+> restricted, fail-fast, single-module profile; it is not the source contract
+> or the complete TRRM 1.0 GA profile. Attribute multiplicity, record/opcode
+> layouts, runtime ABI and implementation support remain open. These decisions
+> do not change the source execution, failure or lifecycle rules in the
 > [static initialization contract](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage).
 
 ## Summary
@@ -118,9 +120,9 @@ the implementation should maintain one current writer and reader rather than
 add historical-revision support; a version boundary for a shipped preview
 remains a release decision.
 
-### Candidate first-slice profile
+### Accepted first implementation slice
 
-**Recommendation, still unapproved:** make the first implementation slice a
+**Accepted implementation-only gate:** the first implementation slice is a
 self-contained single-module profile for non-generic, non-partial nominal
 types with ordinary eager scalar static fields. Permit an authored static
 constructor only with one of the two explicit trigger choices above. Admit
@@ -133,6 +135,11 @@ language contracts for those forms do not change. A module may contain
 unrelated imports, but an imported or packed definition cannot participate in
 a static initializer, initialization helper, triggerable member or cleanup
 dependency. Reject rather than infer a foreign initialization dependency.
+
+This is a staged implementation admission boundary, not a source-language
+restriction, an artifact encoding decision, or a sufficient TRRM 1.0 GA
+profile. Core initialization, failure, publication, sharing and unload
+semantics remain unchanged.
 
 Within this profile, use these proposed access obligations:
 
@@ -304,8 +311,8 @@ candidate records and operations above remain unapproved and do not make the
 current `(1, 0)` metadata flags or semantic-module revision 76 carry
 static-initialization policy. They do not establish hosted or native compiler
 support. Emission and execution are not authorized under current profiles.
-Implementation remains blocked on proposal approval, assigned wire schemas
-and Body opcodes, exact semantic-clause and verifier rules, and a runtime
+Implementation remains blocked on assigned wire schemas and Body opcodes,
+exact semantic-clause and verifier rules, and a runtime
 protocol implementing load-scoped identity, nonconcurrent admission,
 publication, failure, cleanup and unload. Cross-module initialization remains
 excluded until field identity and dependency obligations are defined. These

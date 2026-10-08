@@ -139,6 +139,11 @@ Optional floating types remain rejected, and optional `char16` is limited to
 its assigned optional operations and equality. This does not add optional
 source types, optional call signatures or native ABI support. This path does
 not move source verification or emission into Terrum-authored components.
+Static initialization is not encoded or executed by the current TRRM path. Its
+accepted first implementation gate is the restricted fail-fast, single-module
+profile in the [static-initialization proposal](proposals/static-initialization-metadata.md);
+that gate does not narrow source semantics or satisfy the complete TRRM 1.0
+GA contract.
 The unreleased `(1, 0)` draft also accepts opcode `0x1F` for the eight accepted
 checked floating-to-integer pairs; the implementation and linear/indexed
 coverage are present. Opcode `0x1E` is accepted for explicit `char16` to
