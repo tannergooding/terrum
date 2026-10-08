@@ -50,6 +50,12 @@ alias. This avoids the TypeSpec dereference, not the map lookup.
 Adoption needs a format revision and updated readers/writers; current
 readers must reject these candidate words.
 
+**Decision recorded:** defer allocating kind `0xFE` to this extension until
+the format revision, negotiation and downgrade rules are specified and
+compatibility and performance evidence is available. The candidate remains
+rejected by the approved `(1, 0)` schema; this decision does not change its
+reference-word contract.
+
 ### Decisions before adoption
 
 | Open decision | Evidence required |
