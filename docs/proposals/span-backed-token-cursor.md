@@ -1,8 +1,9 @@
 # Span-backed token cursor proposal
 
-**Status: the bounded compilation-local `TokenCursor` and indexed scalar-parser
-integration are implemented. General `Span<T>` support and source-level
-native-sized integers remain unapproved.**
+**Status: accepted contract: the bounded compilation-local `TokenCursor` and
+indexed scalar-parser path below. Implemented support covers this bounded
+contract only. General `Span<T>` support, source-level `nuint`, writable or
+ref-returning access, and persisted capture metadata remain unapproved.**
 This proposal identifies the smallest runtime and source-binding contracts
 needed to execute the existing [`TokenCursor`](../../self-host/TokenCursor.terrum)
 candidate without copying its `Span<Token>` backing or claiming ownership of
@@ -25,7 +26,7 @@ than storing runtime roots or leases. The bounded `TokenCursor` path below
 supplies indexing, stored backing dependencies, capture checking and
 constructor initialization. Other `Span<T>` uses remain unsupported.
 
-## Accepted initial slice
+## Accepted bounded cursor slice
 
 For the first `TokenCursor` implementation, use a fixed-size runtime descriptor
 containing the data address and element count. Keep backing and guard

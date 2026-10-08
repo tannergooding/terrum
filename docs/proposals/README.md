@@ -41,9 +41,10 @@ approved.
   has accepted fixed floating results with single-mode outputs and the bounded
   mixed-mode/fixed-side combination; broader generic and floating capabilities
   remain excluded.
-- [Span-backed token cursor](span-backed-token-cursor.md) records the open
-  backing, capture, indexing and construction contracts needed for the
-  existing zero-copy self-host cursor candidate.
+- [Span-backed token cursor](span-backed-token-cursor.md) accepts the bounded
+  compilation-local `TokenCursor` and indexed scalar-parser contract; general
+  `Span<T>` support, source-level `nuint`, writable/ref-returning access and
+  persisted capture metadata remain unapproved.
 - [Forwarded `Span<Token>` results](token-span-result-forwarding.md)
   recommends a same-compilation hosted experiment for forwarding declared
   backing dependencies through bounded top-level functions.

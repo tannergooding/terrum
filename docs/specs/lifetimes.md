@@ -239,7 +239,25 @@ tracked managed interior may move with GC; native allocations containing
 managed elements additionally need scanning/barriers. Aliased managed interiors
 cannot claim exclusive-loan optimizer facts. The exact anchor layout, source
 selector and calling convention are open and must not be guessed by a hosted
-lowering.
+lowering outside the accepted bounded cursor case below.
+
+**Accepted bounded cursor case:** On the current Windows x64 profile, a
+compiler-owned readonly `Span<Token>` may be projected only from a validated
+`TokenSnapshot`, stored in the unique `TokenCursor`, and used by the bounded
+scalar-parser path. Its descriptor is 16 bytes (data address and element
+count); checked indexing returns `Copy` elements by value using unsigned
+native-width bounds checks (`uint64` on x64), without adding source-level
+`nuint`. `[Captures(nameof(tokens))]` forwards the complete backing and guard
+dependency set to the cursor field as compiler-checked facts; it does not own
+or extend those dependencies, and construction cannot publish unless they
+outlive every use. The cursor stores the remaining descriptor in one mutable
+view field and its cursor-only `AdvanceOne` rebinds that descriptor without
+dropping dependencies. The parser receives the borrowed view synchronously
+through calls rather than storing it in managed parser state; the existing
+64-token limit and parser-window behavior remain unchanged. This exception
+does not approve general view construction, slicing, writable or ref-returning
+access, arbitrary storage or escape, persisted capture metadata, or a new ABI.
+All other `Span<T>` representation, construction and escape rules remain open.
 
 ### Receiver-scoped versus receiver-unscoped
 
