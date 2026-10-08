@@ -2,7 +2,9 @@
 
 **Status: no separate profile identity (accepted); the proposed support
 slice, field eligibility, compatibility encoding and source migration remain
-unapproved.**
+unapproved. Windows x64 native ABI classification is required for interop;
+by-value aggregates classified as indirect use a shadow copy, with no
+proposal-specific 16-byte size limit.**
 
 ## Current boundary
 
@@ -48,16 +50,21 @@ profile or semantic commitment:
   selected core library, not unqualified token spellings. Attribute identity
   registration remains a prerequisite; this proposal assigns no new library
   or metadata identity.
-- Admit public, non-unique compact `Copy` structs up to 16 bytes after final
-  tail padding. Permit only `int32`, `uint32`, `int64`, `uint64`, `char16`, and
-  nested structs that independently satisfy this same profile. Reject
-  recursive value containment, `bool`, floating types, references, pointers,
-  arrays, unique or managed values, and unions.
+- Admit public, non-unique compact `Copy` structs without a proposal-specific
+  size limit.
+  Permit only `int32`, `uint32`, `int64`, `uint64`, `char16`, and
+  nested structs that independently satisfy this same implementation slice.
+  Reject recursive value containment, `bool`, floating types, references,
+  pointers, arrays, unique or managed values, and unions.
 - Use natural field alignment only. Do not enable custom packing or
   aggregate over-alignment in this slice; `Transparent` remains unchanged.
 - Use the existing Windows x64 target requirement (`1`). `Sequential` follows
   that target's layout requirements, and `Blittable` commits the representation
   for that target. Do not introduce a separate profile name or identity.
+- Match the Windows x64 system ABI's procedure-call classification. A by-value
+  aggregate classified as indirect is passed through a caller-created shadow
+  copy, not the caller's actual storage and not a source-level
+  `implicit ref<T>`.
 - Persist and validate the explicit `Blittable` commitment, target requirement,
   final size, aggregate alignment, and ordered field type/access/offset
   records wherever an independently replaceable consumer relies on the
@@ -73,8 +80,8 @@ profile or semantic commitment:
   not be retroactively rejected.
 
 This narrow implementation slice reuses the existing natural-layout rule
-without claiming that it is a universal representation. The 16-byte bound is
-an initial implementation limit, not a language-wide maximum.
+without claiming that it is a universal representation. It has no
+proposal-specific struct-size bound.
 
 ## Proposed layout and compatibility contract
 
@@ -91,11 +98,11 @@ The selected Windows x64 storage entries for this implementation slice are:
 Align each field start to that field's target natural alignment and place
 fields in declaration order. The aggregate alignment is the maximum field
 alignment; round the final size up to that alignment. A nested field
-contributes its already-validated size and alignment. The 16-byte bound
-applies only to final padded size, not to alignment. Padding remains
-uninitialized and this commitment does not authorize raw byte copying,
-validate arbitrary bit patterns, add atomicity, or define procedure-call
-classification.
+contributes its already-validated size and alignment. There is no
+proposal-specific maximum final size. Padding remains uninitialized and this
+commitment does not authorize raw byte copying, validate arbitrary bit
+patterns, or add atomicity. Procedure-call classification follows the target
+system ABI as specified above.
 
 The logical structure metadata must retain enough information to compare the
 same promise across producers and consumers: explicit `Blittable` and
@@ -123,11 +130,12 @@ unannotated artifacts as public fixed-layout values.
 
 Before source adoption, review the proposed schemas and source-migration
 activation against the selected core-library identity and existing compiler
-diagnostic/versioning mechanisms. Keep wire identifiers and native
-procedure-call classifications unassigned until those contracts are reviewed.
+diagnostic/versioning mechanisms. Keep wire identifiers unassigned. Windows
+x64 procedure-call classification follows the system ABI; the storage-layout
+fixture below does not establish its call-lowering conformance.
 
-Validate natural alignment, interior and tail padding, nested layouts, the
-size bound, malformed or mismatched layout metadata, and compatible versus
+Validate natural alignment, interior and tail padding, nested and larger
+layouts, malformed or mismatched layout metadata, and compatible versus
 incompatible module replacement. Compare independently compiled producer and
 consumer storage layouts with an independent Windows x64 C fixture;
 Terrum-to-Terrum round trips alone do not establish layout conformance.
@@ -145,13 +153,15 @@ metadata, or the native emitter. It independently recomputes natural field
 offsets, aggregate alignment and padded size, checks transitive candidate
 membership, and compares declarations compiled with different structure
 indexes by nominal name. The cases cover compatible body-only replacement,
-primitive and nested storage, padding, the 16-byte limit, unsupported types,
-forged offsets/widths/sizes/alignment claims, cycles and excessive nesting,
-plus incompatible commitment, target, nominal, field, access, mutation and unsafe
-contracts.
+primitive and nested storage, padding, unsupported types, forged
+offsets/widths/sizes/alignment claims, cycles and excessive nesting, plus
+incompatible commitment, target, nominal, field, access, mutation and unsafe
+contracts. The test-only prototype's 16-byte admission cutoff is not a
+contract; native call tests must verify shadow-copy passing for aggregates
+classified as indirect by Windows x64.
 
 A separate Windows x64 C fixture verifies the selected scalar storage and the
-same nested, padded and over-limit shapes using `sizeof`, `__alignof` and
+same nested, padded and larger shapes using `sizeof`, `__alignof` and
 `offsetof`. This is evidence for the proposed storage calculation only; it
-does not activate a public layout commitment, approve the proposal, or define
-procedure-call classification or raw-copy behavior.
+does not activate a public layout commitment, approve the remaining proposal,
+test procedure-call classification or raw-copy behavior.

@@ -322,6 +322,12 @@ reference or SIMD wire format is selected.
 
 For an already selected target contract, record primitive size, alignment,
 representation, access guarantees and procedure-call classification separately.
+Native interop must match the selected system ABI's argument and result
+classification. On Windows x64, a by-value struct argument classified for
+indirect passing uses a caller-created shadow copy; it does not pass the
+address of the caller's actual storage or acquire source-level
+`implicit ref<T>` semantics. The target ABI determines direct versus indirect
+passing; this classification does not impose a maximum struct storage size.
 Specify both packing and aggregate-alignment controls, their profile limits and
 the safe-access rules for any under-aligned members. Specify source spellings,
 target limits, metadata, transitive `Blittable` field eligibility, and boundary
