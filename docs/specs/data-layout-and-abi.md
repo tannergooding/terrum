@@ -37,9 +37,10 @@ the accepted core provisional.
 A `Blittable` or `Transparent` commitment is a compatibility promise: changes
 that violate it are breaking, but neither promise a universal byte encoding
 or freeze layout kinds that were not committed. Any future checked source
-enforcement of these commitments needs an explicit compatibility migration;
-it does not retroactively reject ordinary declarations or revoke existing
-source/artifact contracts.
+enforcement of these commitments needs an explicit compatibility migration
+activated at a source-language-version boundary. Earlier-version source and
+retained artifacts keep their existing contracts; the exact version and
+tooling selector remain separate decisions.
 
 ## Contract layers
 

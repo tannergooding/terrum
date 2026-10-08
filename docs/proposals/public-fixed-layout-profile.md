@@ -1,13 +1,14 @@
 # First public fixed-layout implementation slice
 
 **Status: no separate profile identity (accepted); the proposed support
-slice, compatibility encoding and source migration remain unapproved. Core
-primitives are `Blittable` by their type contract, and field eligibility uses
-the existing target-specific `Blittable` and ordinary `Copy`/value-validity
-requirements, with `Sequential` also required for nested structs. Natural
-alignment remains target-specific. Windows x64 native ABI classification is
-required for interop; by-value aggregates classified as indirect use a shadow
-copy, with no proposal-specific 16-byte size limit.**
+slice and compatibility encoding remain unapproved. Core primitives are
+`Blittable` by their type contract; field eligibility uses existing
+target-specific `Blittable` and ordinary `Copy`/value-validity requirements,
+with `Sequential` also required for nested structs. Source migration activates
+at a language-version boundary; its exact version and tooling selector remain
+open. Natural alignment remains target-specific. Windows x64 native ABI
+classification is required for interop; by-value aggregates classified as
+indirect use a shadow copy, with no proposal-specific 16-byte size limit.**
 
 ## Current boundary
 
@@ -76,11 +77,10 @@ profile or semantic commitment:
   producer replacements before execution.
 - Keep existing unannotated module artifacts under their existing
   compatibility rules; never infer that they made this `Blittable`
-  commitment. New source declarations that expose public instance fields
-  follow the accepted fixed-representation rule after an explicit,
-  reviewed source-compatibility migration is activated. Recompiling existing
-  source alone must not activate new diagnostics, and retained artifacts must
-  not be retroactively rejected.
+  commitment. Activate the new source checks only at an explicit
+  source-language-version boundary; earlier-version source retains existing
+  acceptance, and retained artifacts are not retroactively rejected. The
+  version value and tooling selector remain open.
 
 This narrow implementation slice reuses the existing natural-layout rule
 without claiming that it is a universal representation. It has no
@@ -123,18 +123,19 @@ the metadata review.
 | Producer and consumer both declare the same target-specific `Blittable` and `Sequential` commitments with identical field contracts | Accept after validating the recorded layout. |
 | Target, commitment, size, alignment, field order/type/access, or offset differs | Reject as incompatible before execution. |
 | Legacy consumer with a new producer | Preserve the existing contract where its format permits; otherwise reject the unsupported revision before execution. Never synthesize `Blittable`; the exact legacy-reader behavior depends on metadata review. |
-| Existing source is recompiled before migration activation | Preserve current source acceptance; do not infer `Blittable` or activate new diagnostics solely by recompilation. |
-| Source is compiled after an explicit migration activates the accepted rule | Diagnose public instance fields that lack a fixed-representation commitment; the activation mechanism must be specified before enforcement. |
+| Existing source is compiled under an earlier language version | Preserve current source acceptance; do not infer `Blittable` or activate new diagnostics solely by recompilation. |
+| Source is compiled under a version that activates the migration | Diagnose public instance fields that lack a fixed-representation commitment; the exact version value and tooling selector remain open. |
 
 This proposal does not change private Sequential behavior or bless existing
 unannotated artifacts as public fixed-layout values.
 
 ## Scope and validation
 
-Before source adoption, review the proposed schemas and source-migration
-activation against the selected core-library identity and existing compiler
-diagnostic/versioning mechanisms. Keep wire identifiers unassigned. Windows
-x64 procedure-call classification follows the system ABI; the storage-layout
+Before source adoption, review the proposed schemas and select the exact
+source-language version and tooling selector for the migration against the
+selected core-library identity and existing compiler diagnostic/versioning
+mechanisms. Keep wire identifiers unassigned. Windows x64 procedure-call
+classification follows the system ABI; the storage-layout
 fixture below does not establish its call-lowering conformance.
 
 Validate natural alignment, interior and tail padding, nested and larger
