@@ -1,10 +1,10 @@
 # Optional scalar TRRM execution boundary
 
-**Status: implementation authorized; no language-design change.** The bounded
-Body-local execution scope below is being implemented under the existing
-approved Body contract. Implemented support is recorded separately in
-`docs/implementation.md`; this proposal does not add source-language scalar
-optional support or change optional semantics.
+**Status: implementation-only boundary recorded; no language-design change.**
+The bounded Body-local execution scope below is implemented under the
+existing approved Body contract. This does not add source-language scalar
+optional support, optional call signatures, or native ABI support, and does
+not change optional semantics.
 
 ## Current boundary
 

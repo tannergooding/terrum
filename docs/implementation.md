@@ -132,7 +132,12 @@ Bodies for a bounded source-free, fail-fast scalar subset, separately from
 development semantic-module encoding. Consumers load artifact bytes, validate
 metadata and Bodies, reconstruct typed inputs, and invoke the shared mandatory
 verifier and backend; there is no producer-trust bypass. General imported-call
-linking and checked-exception Body support are not implemented. This path does
+linking and checked-exception Body support are not implemented. Body-local
+optional scalar values use independent presence and payload state, with the
+assigned optional operations covered by linear/indexed JIT and AOT tests.
+Optional floating types remain rejected, and optional `char16` is limited to
+its assigned optional operations and equality. This does not add optional
+source types, optional call signatures or native ABI support. This path does
 not move source verification or emission into Terrum-authored components.
 The unreleased `(1, 0)` draft also accepts opcode `0x1F` for the eight accepted
 checked floating-to-integer pairs; the implementation and linear/indexed

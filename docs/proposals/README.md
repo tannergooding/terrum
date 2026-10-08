@@ -75,8 +75,8 @@ approved.
   TRRM 1.0 by GA; its profile, encoding, place, publication and
   exceptional-state details remain unapproved.
 - [Optional scalar TRRM execution](optional-scalar-trrm-execution.md) records
-  a proposed internal execution boundary that does not imply source-language
-  or public native ABI support.
+  an implementation-only boundary under the approved Body contract; optional
+  source types, call signatures and native ABI support remain out of scope.
 - [Static initialization metadata and attribute schema](static-initialization-metadata.md)
   recommends how to persist the accepted static-storage contract without
   changing its initialization or failure semantics.
