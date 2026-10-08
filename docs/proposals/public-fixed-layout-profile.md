@@ -1,12 +1,13 @@
 # First public fixed-layout implementation slice
 
 **Status: no separate profile identity (accepted); the proposed support
-slice, non-primitive field eligibility, compatibility encoding and source
-migration remain unapproved. All storable core primitives are `Blittable` by
-their type contract; natural alignment remains target-specific. Windows x64
-native ABI classification is required for interop; by-value aggregates
-classified as indirect use a shadow copy, with no proposal-specific
-16-byte size limit.**
+slice, compatibility encoding and source migration remain unapproved. Core
+primitives are `Blittable` by their type contract, and field eligibility uses
+the existing target-specific `Blittable` and ordinary `Copy`/value-validity
+requirements, with `Sequential` also required for nested structs. Natural
+alignment remains target-specific. Windows x64 native ABI classification is
+required for interop; by-value aggregates classified as indirect use a shadow
+copy, with no proposal-specific 16-byte size limit.**
 
 ## Current boundary
 
@@ -54,9 +55,10 @@ profile or semantic commitment:
   or metadata identity.
 - Admit public, non-unique compact `Copy` structs without a proposal-specific
   size limit. Core primitive fields retain their fixed storage widths and
-  `Blittable` contracts; use target natural alignment. Nested structs must
-  independently satisfy the existing `Blittable` and `Sequential` contracts.
-  Non-primitive field eligibility remains open.
+  `Blittable` contracts; use target natural alignment. Admit a field only when
+  it satisfies the existing target-specific `Blittable` and ordinary `Copy`
+  and value-validity requirements; nested structs must also satisfy
+  `Sequential`. Do not add a slice-specific field-type whitelist.
 - Use natural field alignment only. Do not enable custom packing or
   aggregate over-alignment in this slice; `Transparent` remains unchanged.
 - Use the existing Windows x64 target requirement (`1`). `Sequential` follows

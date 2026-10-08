@@ -139,6 +139,13 @@ from its current shape. Ordinary `ref<T>` is excluded; `ptr<T>` may be
 eligible when its target representation is covered and its ordinary pointer
 validity, lifetime and access-safety rules are met.
 
+For the first public Windows x64 fixed-layout slice, field eligibility uses
+the existing target-specific `Blittable` requirements and ordinary `Copy` and
+value-validity rules, not a slice-specific type whitelist. A nested struct
+field must also satisfy that slice's `Sequential` requirement. This accepts
+the eligibility rule only; the proposed support slice, source migration and
+compatibility metadata remain separate decisions.
+
 Blittability/frozen representation does not initialize padding bytes, validate
 arbitrary bit patterns, imply `Copy` or sharing, grant atomic access, or
 authorize every raw operation.

@@ -86,9 +86,9 @@ approved.
 - [First public fixed-layout implementation slice](public-fixed-layout-profile.md)
   proposes bounded Windows x64 support for the existing target-specific
   `Blittable` plus `Sequential` contract with native ABI passing and no
-  separate profile identity or 16-byte cap; core primitives are `Blittable`,
-  while non-primitive eligibility, source migration and metadata details
-  remain open.
+  separate profile identity or 16-byte cap; core primitives are `Blittable`
+  and field eligibility follows existing target-specific `Blittable` and
+  `Copy` rules. Source migration and compatibility metadata remain open.
 - [Compare-exchange order pairs](atomic-cas-order-pairs.md) records the
   accepted finite compile-time-valid table for CAS success/failure memory
   orders; source spelling, diagnostics and support remain open. It does not
