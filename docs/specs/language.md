@@ -897,7 +897,12 @@ more complex proofs or offer larger budgets, accepting additional programs;
 acceptance beyond the floor need not be identical. If a required proof is
 disproved or not established, compilation fails with the distinction reported
 (including a complexity/analysis-limit reason where applicable), never a
-runtime fallback. Ordinary pre/postconditions remain runtime-checked unless
+runtime fallback. The accepted v1 scope covers local scalar, boolean, and
+initialization facts plus refinement for supported built-in branch predicates
+under target arithmetic. The exact predicate catalog, fact domain, transfer
+rules, conformance vectors, and guaranteed resource values remain to specify;
+loop induction, call summaries, and alias-sensitive facts are outside this
+initial floor. Ordinary pre/postconditions remain runtime-checked unless
 sound analysis proves a check redundant, and elimination must preserve required
 evaluation, effects and failures. Required constant evaluation is separate:
 successful results retain exact target semantics and never fall back to

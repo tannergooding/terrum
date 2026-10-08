@@ -31,6 +31,15 @@ signatures; managed-class dependency closures remain separate. Public generic
 exports and executable TRRM support remain separate. The native backend emits
 Terrum-owned code; CIL is neither a dependency nor the default.
 
+Required constants and static proofs currently use the hosted scalar evaluator:
+`bool`, `char16`, and fixed-width integers with eligible `[ConstEval]` bodies
+supporting scalar locals, assignments, branches, loops, returns, and calls to
+other `[ConstEval]` functions. Its implementation limits are 4,096 interpreted
+statement steps and a call-depth limit of 64; these are not portable
+guarantees. Static proof support does not yet implement a general built-in
+predicate-refinement catalog for runtime values, so it does not fulfill the
+accepted v1 proof-floor scope.
+
 Current profile markers are syntax language version 45, semantic body features
 v43-v49, semantic-module revision 76, and native profiles native-10 through
 native-20. These markers describe supported implementations, not approval of

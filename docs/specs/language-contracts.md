@@ -638,6 +638,15 @@ not established by that compiler's supported analysis is a compile error, not
 a runtime fallback. Diagnostics distinguish false from not established
 (including complexity or analysis-limit failure where appropriate).
 
+The accepted v1 floor covers local scalar, boolean, and initialization facts,
+plus branch refinement for supported built-in predicates under actual target
+arithmetic. The exact predicate catalog, fact domain, branch and join transfer
+rules, conformance vectors, and guaranteed resource values remain to specify.
+Loop induction or invariant reasoning, call summaries, and alias-sensitive
+facts are outside this initial floor; proofs depending on them are not
+guaranteed by the floor. Implementations may soundly establish additional
+proofs without changing the portable minimum.
+
 Comparisons must use actual language arithmetic. Rewriting an overflow-prone
 integer expression as an unbounded mathematical expression is not proof of
 its executable safety. Float predicates cannot borrow integer identities:

@@ -1,10 +1,11 @@
 # Static proof and constant-evaluation specification proposal
 
 > [!IMPORTANT]
-> Pending specification, not an approved rule catalog, resource budget or
-> implementation promise. The accepted distinction between executable
-> checks, required static proofs and required constant evaluation is in
-> [language contracts](../specs/language-contracts.md#4-a-reproducible-proof-and-evaluation-foundation).
+> Partially accepted direction, not an approved rule catalog, resource budget
+> or implementation promise. The accepted policy and initial proof-floor
+> scope are in [language contracts](../specs/language-contracts.md#4-a-reproducible-proof-and-evaluation-foundation);
+> current hosted support is tracked separately in the
+> [implementation reference](../implementation.md#hosted-compiler).
 
 ## Portable proof floor
 
@@ -12,29 +13,28 @@ The accepted policy requires a versioned minimum of proof rules, complexity
 and guaranteed resources independent of optimization level. Sound
 implementations may prove more, but a required proof not established by
 supported analysis fails compilation; disproved and not-established outcomes
-must be distinguished. The following rule areas are **candidates**, not the
-minimum floor:
+must be distinguished. The accepted v1 floor scope is summarized below; its
+exact transfer rules and conformance requirements remain open.
 
-| Component | Candidate transfer and checking rules |
-|---|---|
-| Values | Target-width scalar constants, immutable value identities, booleans, optional presence, initialization/vacancy and ownership state |
-| Numeric facts | Closed intervals, exact target operations on constants, and conservative interval transfer only where defined; retain failure edges |
-| Branches | Refine supported built-in comparisons on true/false edges; use interval hull and intersection of must-facts at joins |
-| Loops | Forget numeric/alias facts for values or storage a cyclic region may change, retain unaffected facts, and refine again on branch edges |
-| Calls | Use selected published pre/postconditions and an effect footprint, not a replaceable callee body |
-| Aliases | Invalidate facts for affected places before later loads, but retain independent captured values |
-| Unsupported reasoning | Diagnose not established, rather than assuming a predicate or relying on unstable analysis |
+| Area | Accepted v1 floor | Still open or outside this floor |
+|---|---|---|
+| Local state | Local scalar, boolean, and initialization facts | Exact fact representation and transfers; optional-presence and ownership facts are not accepted |
+| Branches | Refine supported built-in predicates under target arithmetic | Predicate catalog, fact domain, edge transfers, and join rules |
+| Loops | No loop induction or invariant reasoning is required | Any transfer through cycles and the treatment of loop-modified facts |
+| Calls and aliases | No call summaries or alias-sensitive reasoning are required | Effect/dependency footprints and facts that rely on callees or aliased storage |
+| Complexity and resources | A versioned minimum rule/complexity floor and guaranteed resources | Work units, numeric guarantees, and conformance vectors |
 
-A conservative initial floor need not use implicit induction, guessed
-invariants or machine-speed-dependent loop unrolling. Integer proofs must
+Implementations may soundly establish proofs outside this floor, but such
+proofs are not portable guarantees. Integer proofs must
 respect checked overflow; floats require target rounding, signed zero, NaN
 and no implicit reassociation/FMA. Exact constant floating evaluation is a
 candidate only once the target evaluator is specified. Required conformance
-vectors must cover arithmetic boundaries, branches, joins, cycles and
-resource limits. Select a machine-checkable transfer catalog and structural
-work accounting; a bounded tree depth such as **64 is illustrative only**.
-Define authoring escape routes only where an ordinary runtime check is legal.
-Versioning the floor does not select a wire encoding or proof certificate.
+vectors must cover arithmetic boundaries, branch edges, joins and resource
+limits; cycle behavior belongs to a separately specified extension. Select a
+machine-checkable transfer catalog and structural work accounting; a bounded
+tree depth such as **64 is illustrative only**. Define authoring escape routes
+only where an ordinary runtime check is legal. Versioning the floor does not
+select a wire encoding or proof certificate.
 
 ## Effect footprints and observations
 
@@ -61,6 +61,12 @@ Checked evaluator-owned local mutation is possible without ambient writes or
 escaping pointers. The initial serializable results should use defined
 target value encodings; managed graphs, native resources and identity-bearing
 host objects need separate representation contracts.
+
+The hosted implementation currently uses internal limits of 4,096
+interpreted statement steps and a call-depth limit of 64. These values are not
+the portable evaluation budget and do not approve or measure the candidates
+below; see the [implementation reference](../implementation.md#hosted-compiler)
+for the supported evaluator subset.
 
 | Resource | Candidate unit / ceiling, **not approved or measured** |
 |---|---|
