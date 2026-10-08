@@ -144,8 +144,11 @@ For the first public Windows x64 fixed-layout slice, field eligibility uses
 the existing target-specific `Blittable` requirements and ordinary `Copy` and
 value-validity rules, not a slice-specific type whitelist. A nested struct
 field must also satisfy that slice's `Sequential` requirement. This accepts
-the eligibility rule only; the proposed support slice, source migration and
-compatibility metadata remain separate decisions.
+the eligibility and bounded implementation directions; source schemas,
+metadata encoding and exact migration version/tooling remain open, and no
+implementation support is implied.
+The implementation direction reuses Windows x64 target requirement `1` and
+introduces no separate layout-profile identity.
 
 Blittability/frozen representation does not initialize padding bytes, validate
 arbitrary bit patterns, imply `Copy` or sharing, grant atomic access, or

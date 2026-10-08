@@ -6,43 +6,28 @@ the final TRRM 1.0 contract.**
 
 ## Current boundary
 
-The current TRRM (1, 0) beta executable subset is fail-fast only. The
-`terrumc` TRRM commands reject `checked-exceptions` because executable Bodies
-do not yet have an exceptional-edge contract. This is an incomplete beta
-implementation, not a final compatibility boundary: core language exception
-semantics must be representable and executable in TRRM 1.0 before GA. The
-hosted compiler's bounded checked `try`/`catch` subset and the scalar
-frontend's bounded bare catch with optional `finally` are implementation
-evidence, not a complete source-free contract. Core output-mode semantics are
-also required in executable TRRM by 1.0 GA. The initial profile below excludes
-output parameters and therefore cannot by itself satisfy the complete GA
-requirements.
+The current beta executable subset is fail-fast-only and rejects
+`checked-exceptions`; this implementation boundary is tracked in the
+[implementation reference](../implementation.md#executable-trrm-scalar-interchange).
+It is not the GA contract. The candidate profile below also excludes output
+parameters, so it cannot by itself satisfy both accepted TRRM 1.0 GA
+requirements for exceptions and output modes.
 
-## Accepted requirement and remaining design
+## Remaining design
 
-TRRM 1.0 must support the core checked-exception semantics required by the
-language before GA. This is not an optional post-1.0 feature; whether beta
-artifacts use a new required-feature marker or another explicit identification
-mechanism remains open, but no such marker may make core support optional at
-GA. The serialized contract must establish exceptional control flow, state
-and cleanup without relying on producer source.
+The accepted language semantics and TRRM 1.0 GA requirement are recorded in
+the [language contracts](../specs/language-contracts.md#33-normal-and-exceptional-exits)
+and [instruction-set specification](../specs/il-instruction-set.md#executable-subset-versus-assigned-decode-shapes).
+Still open are beta artifact identification (including whether a required
+feature marker is needed) and a serialized, source-independent contract for
+exceptional control flow, operation-site state, handler inputs and cleanup.
 
-**Summary:** The accepted source semantics include handler selection after
-inner cleanup, normal and exceptional `finally` composition, propagation of
-unhandled failures, and preservation of pending failure/cause state. Hosted
-binding, verification and native emission support a bounded subset, but the
-current TRRM beta executable subset supports only fail-fast execution. Its
-Effect metadata and the scalar frontend's hosted projection do not encode or
-validate exceptional Body edges.
-
-**Recommendation:** Treat checked-exception TRRM support as required 1.0 GA
-work, not as a reason to preserve the current beta rejection. A runtime-policy
-flag alone is insufficient. Specify failure-reason transport, handler input
-state, cleanup ordering and the `NoThrow` cleanup restriction before claiming
-support. Prefer serialized exception regions with audited operation-site
-exceptional-state mappings over synthetic normal CFG successors unless an
-alternative preserves hosted semantics and is independently verifiable
-without producer source.
+**Recommendation:** A runtime-policy flag alone is insufficient. Specify
+failure-reason transport, handler input state, cleanup ordering and the
+`NoThrow` cleanup restriction before claiming support. Prefer serialized
+exception regions with audited operation-site exceptional-state mappings over
+synthetic normal CFG successors unless an alternative preserves hosted
+semantics and is independently verifiable without producer source.
 
 ### Recommended first profile (unapproved)
 
@@ -54,13 +39,9 @@ outside this initial profile.
 Admit only root-free scalar values, module-local direct calls, nested bare
 catches and a `finally` body that is NoThrow and normally completing. Keep
 this cleanup restriction as an implementation-profile boundary, not a change
-to the accepted `finally` contract. A failed operation has no result on its
-exceptional edge; completed preceding effects remain. Inner cleanup completes
-before handler entry. An attached `finally` runs exactly once on normal exits
-and escaping failures, and a return value is evaluated before cleanup.
-`DoesNotReturn` removes normal continuation only; it does not erase exceptional
-propagation. Catching and recovery retain their accepted explicit-`unsafe`
-authorization requirement; `finally` cleanup does not acquire it.
+to the accepted source contract. See the [language contracts](../specs/language-contracts.md#33-normal-and-exceptional-exits)
+for cleanup ordering, failure propagation, `DoesNotReturn`, and unsafe
+authorization semantics.
 
 The profile must explicitly identify which checked failure reasons can be
 transported and caught. It must not treat arbitrary Windows faults as Terrum

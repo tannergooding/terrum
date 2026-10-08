@@ -1,149 +1,62 @@
 # Static initialization metadata and attribute schema
 
-> **Status: partially accepted.** `[StaticInitializer]` takes one value of a
-> dedicated, closed enum with a case for each accepted trigger choice. Its
-> registered enum identity and case spellings remain open. `[LazyInitialization]`
-> takes no arguments and targets an ordinary, non-`extern` static field.
-> Source-free accesses require an explicit typed owning-group obligation,
-> distinguishing ordinary completion demand from validated group-scoped
-> initialization authority. The first implementation gate is accepted as a
-> restricted, fail-fast, single-module profile; it is not the source contract
-> or the complete TRRM 1.0 GA profile. Static fields have a distinct logical
-> identity from instance fields; physical table/section mapping remains open.
-> Attribute multiplicity, record/opcode layouts, runtime ABI and implementation
-> support remain open. These decisions do not change the source execution,
-> failure or lifecycle rules in the
-> [static initialization contract](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage).
+> **Status: partially accepted.** Source semantics are in the
+> [grammar specification](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage);
+> the distinct static-field identity and explicit typed access-obligation
+> requirements are in the [metadata specification](../specs/il-metadata.md).
+> The accepted first implementation gate is tracked in the
+> [implementation reference](../implementation.md). This proposal retains
+> unresolved attribute registration, metadata/Body encoding, runtime ABI and
+> implementation work; no implementation support is established.
 
-## Summary
+## Remaining schema work
 
-The accepted source contract defines type-wide initialization groups,
-explicit static-constructor triggers, individually lazy fields, ordered
-initializers, completion publication, failure behavior and load-scoped
-cleanup. The approved `(1, 0)` metadata design does not encode static storage,
-initialization groups, trigger policy or lazy state. The source grammar also
-leaves the concrete semantic-attribute schemas open. Consequently, compiler
-binding, persistence and runtime adoption cannot proceed safely by treating
-these attributes as ordinary names or by inheriting host static-constructor
-behavior.
+The `(1, 0)` metadata design has no static-storage records or initialization
+operations. The accepted source forms and access obligations are specified
+canonically; do not repeat or weaken them here. Resolve their compiler
+registration through the selected core library rather than attribute names.
 
-## Accepted source schemas and remaining decisions
-
-**Accepted:** `StaticInitializer` takes exactly one positional compile-time
-value of a dedicated, closed enum, with one case for each accepted trigger
-choice. The compiler normalizes that case to the trigger tag. The registered
-enum identity and source case spellings are not selected here.
-
-**Accepted:** `LazyInitialization` takes no arguments and applies to an
-ordinary, non-`extern` static field. It does not configure a trigger or other
-initialization policy.
-
-**Accepted:** Each source-free runtime static access carries an explicit,
-typed obligation identifying its owning group and access kind. It distinguishes
-ordinary completion demand from validated, group-scoped initialization-phase
-authority, exposes the applicable trigger effect, and is never inferred from
-names or row order.
-
-Per-attribute multiplicity, the metadata records and Body forms that carry
-this obligation, runtime profile and wire encoding remain open. These choices
-must preserve the accepted execution, failure, publication, sharing and unload
-rules.
-
-### Attribute schemas
-
-- `StaticInitializer` requires exactly one positional compile-time value of
-  the registered dedicated trigger enum, with a case for each accepted trigger
-  choice. It has no default and applies only to the primary authored static
-  constructor. The resolved attribute and enum identities, not their
-  spellings alone, select this schema; the resolved constructor and argument
-  name, type, and position are fixed by registration.
-- `LazyInitialization` takes no arguments and applies only to an ordinary,
-  non-`extern` static field. It does not apply to constants or property
-  backing storage; its resolved attribute identity and zero-argument schema
-  are fixed by registration.
-- The proposal recommends that neither attribute permit repetition; this
-  multiplicity choice remains unapproved. Partial declarations retain the
-  accepted primary-only policy authorship; a secondary static-constructor
-  implementation cannot restate or change the trigger.
-- Both schemas use the ordinary checked constant evaluator and exact resolved
-  identity rules. An arbitrary same-named user attribute cannot select these
-  compiler behaviors.
-
-The typed enum makes invalid trigger spellings unrepresentable and reuses the
-ordinary checked enum-constant rules. The compiler normalizes the selected
-case to a closed trigger tag; the enum's underlying bits are not runtime
-policy.
+The enum and case identities for `StaticInitializer`, the resolved attribute
+identities, argument binding, and per-attribute multiplicity remain open.
+The recommendation is to make both attributes non-repeatable and reject
+ambiguous registrations or unknown arguments. The accepted primary-only
+authorship and argument-shape rules remain in the
+[grammar specification](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage).
 
 ### Required logical records
 
-These are proposed record meanings and invariants, **not assigned TRRM table
-kinds, tags, flags or byte layouts**. Use existing typed definition references
-where available; every reference must be validated against its owning module,
-definition kind and resolved generic substitution.
+The following logical record inventory is **unapproved** and assigns no TRRM
+table kinds, tags, flags or byte layouts. The accepted source and access
+semantics are in the [grammar](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage)
+and [metadata specifications](../specs/il-metadata.md); the remaining design
+work is how to persist, validate and execute those contracts.
 
-| Required record | Proposed contents and invariants |
+| Candidate record | Unresolved representation decision |
 |---|---|
-| Schema requirement | A closed schema identity/revision and required runtime profile, present whenever the artifact has static storage semantics. Readers reject unknown requirements; absence cannot make static storage appear to be instance storage. |
-| Storage classification | Exhaustively classify storage as instance, grouped static, lazy static, constant or foreign. A grouped or lazy field has exactly one owning unit; constants and foreign storage have neither. Property backing storage is explicitly associated with its property. |
-| Group recipe | Owning nominal type definition, normalized trigger, constructor-policy reference, ordered-initializer range, completion contract and lifecycle contract. Exactly one recipe exists for each type requiring grouped initialization, including a type with an authored constructor but no field initializer. Lazy-only types retain the required group prerequisite rather than bypassing group completion. |
-| Ordered initializer | Group, unique contiguous ordinal, destination field, initializer method/body reference and checked initialization contract. The sequence preserves compiler-input order followed by source order; property backing initializers retain their declaration positions. These are authored initializer-expression steps, not implicit default writes. |
-| Constructor policy | Group, authored constructor method, normalized trigger, primary policy contract and implementation method. The constructor is initialization-only with no receiver, parameters or result; it is not an ordinary callable static method. One policy and one implementation are required when authored. |
-| Lazy unit | Designated field, prerequisite group, initializer method/body, completion contract and lifecycle contract. There is one unit per eligible field, separate from the group initializer range; external demand completes the prerequisite group first. |
-| Access obligation | Selected member, access kind, owning closed-type substitution, applicable group or lazy unit, and trigger/effect contract. The obligation must be visible to binding and executable consumers rather than hidden behind the member's ordinary effects. Binding and inspection alone do not create runtime demand. |
-| Contract clauses | Typed, required references for initialization-phase authority, completion guarantees, sharing/access, trigger effects, failure policy, ownership, roots, cleanup targets and unload dependencies. References name supported clauses; opaque blobs, optional attributes, or assertions that grant initialized-state facts are insufficient. |
+| Schema requirement | Choose schema/profile identity and revision, plus how readers discover and reject unsupported requirements. |
+| Static-field record | Choose a physical record for the accepted logical identity distinct from instance `FieldDef`; define owner, type, mutability and group references. |
+| Group recipe | Encode the owner, normalized trigger, initializer range and constructor association; specify generic-substitution binding and cardinality. |
+| Ordered initializer | Map source/compiler order to stable initializer references and represent destination initialization contracts. |
+| Constructor policy | Encode the resolved trigger and primary policy without making the initializer an ordinary callable method; specify identity and cardinality. |
+| Lazy unit | Link an eligible field to its prerequisite group and initializer without merging it into the eager initializer sequence. |
+| Access obligation | Persist selected member/group identity, access kind and authority so binding and executable consumers can validate the accepted obligation. |
+| Contract clauses | Define typed references, payloads and validation for effects, initialization authority, failure, ownership, cleanup and unload dependencies. |
 
-The nominal definition identifies the persisted recipe; runtime state is keyed
-by the **loaded nominal definition plus its complete resolved generic
-substitution**. The loader supplies load-instance identity, which is not an
-artifact row number. Distinct substitutions and independent loads have
-distinct groups, while aliases resolving to the same loaded closed type do
-not create duplicates. Generic substitution applies to initializer bodies,
-storage types and contracts as well as the group key.
+References must be validated against their owning module, definition kind and
+resolved substitution. The writer and linker must preserve source order and
+identity across partial composition and packing; exact reference remapping and
+rejection rules remain open. Runtime state, cycle detection, synchronization,
+failure transport and unload execution are not facts that metadata alone can
+prove. Follow the pre-release format evolution policy in the
+[metadata specification](../specs/il-metadata.md); no historical-reader
+support is required for the current unreleased schema.
 
-The logical schema must let readers reject missing or conflicting storage
-assignments, wrong owners or substitutions, duplicate constructor policies,
-invalid signatures or ordinary constructor calls, malformed initializer
-order, lazy fields included in grouped order, and unsupported access kinds,
-contracts or runtime requirements. Runtime waiting state, cycle detection,
-publication synchronization, retained failure outcomes and unload execution
-are runtime machinery, not facts that structural metadata alone proves.
+### Candidate access-obligation mapping (unapproved)
 
-No artifact-wide partial-declaration ordering is introduced: partial
-composition is within one module. Linking and packing preserve each selected
-type's ordered sequence and identity; they do not concatenate unrelated
-groups, sort filenames, prioritize a primary part, or derive execution order
-from remapped row numbers. Cross-module initialization follows actual
-dependencies and accesses, not startup order.
-
-The exact row layouts, definition kinds, access-operation forms, contract
-clauses and revision policy remain for metadata design to assign before
-implementation. Terrum is pre-1.0 with no external artifact consumers, so
-the implementation should maintain one current writer and reader rather than
-add historical-revision support; a version boundary for a shipped preview
-remains a release decision.
-
-### Accepted first implementation slice
-
-**Accepted implementation-only gate:** the first implementation slice is a
-self-contained single-module profile for non-generic, non-partial nominal
-types with ordinary eager scalar static fields. Permit an authored static
-constructor only with one of the two explicit trigger choices above. Admit
-execution only in a runtime profile that establishes nonconcurrent access and
-uses fail-fast termination; neither condition follows from a source shape or
-from `static`. Exclude lazy fields, static-property backing storage, foreign
-storage, generic substitutions, partial type/constructor composition and
-managed or cleanup-bearing static values from this slice; the accepted
-language contracts for those forms do not change. A module may contain
-unrelated imports, but an imported or packed definition cannot participate in
-a static initializer, initialization helper, triggerable member or cleanup
-dependency. Reject rather than infer a foreign initialization dependency.
-
-This is a staged implementation admission boundary, not a source-language
-restriction, an artifact encoding decision, or a sufficient TRRM 1.0 GA
-profile. Core initialization, failure, publication, sharing and unload
-semantics remain unchanged.
-
-Within this profile, use these proposed access obligations:
+The accepted implementation gate is documented in the
+[implementation reference](../implementation.md); it is not a source-language
+restriction or complete TRRM 1.0 GA profile. The following mapping is a
+metadata/runtime recommendation, not part of that accepted gate:
 
 | Context or operation | Proposed obligation |
 |---|---|
@@ -153,21 +66,9 @@ Within this profile, use these proposed access obligations:
 | Type-name resolution, member binding or metadata inspection without runtime access | Create no initialization demand. |
 | Imported or packed access participating in initialization | Reject in this slice; do not bind by name or omit the initialization effect. |
 
-The runtime profile must prevent concurrent entry to every operation that can
-touch the loaded module, including ordinary reads after `Complete`. The
-candidate is a single-threaded, non-reentrant load profile with no concurrent
-host entry or callbacks into that module; it does not infer safety from source
-shape, visibility or absence of an observed race. A runtime that cannot enforce
-this admission rule rejects the profile.
-
-The triggering operation carries the accepted initialization effect and
-failure behavior in its published contract. Successful group completion
-publishes all required initialized and completion facts. Under this fail-fast
-profile, failure terminates execution and never publishes the group; no
-recoverable failure replay or retry API is exposed. The profile does not
-weaken cycle detection, memory publication, ownership, cleanup or load-scoped
-unload requirements. These are required runtime obligations, not facts that
-the proposed metadata can prove.
+The trigger/effect and failure semantics are canonical in the
+[source specification](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage);
+the remaining decision is how the proposed records expose them to consumers.
 
 ### Candidate access-obligation artifact contract
 
@@ -175,8 +76,9 @@ the proposed metadata can prove.
 records and Body-operation forms to the first slice, without assigning wire
 IDs, opcode numbers or native handles. Use a new required schema/profile
 instead of overloading the current metadata flags or `(1, 0)` Body profile.
-The static-field identity is accepted as distinct from instance `FieldDef`;
-the `StaticField` record below is only a candidate physical representation.
+The accepted static-field identity is in the
+[metadata specification](../specs/il-metadata.md); `StaticField` below is only
+a candidate physical representation.
 
 | Logical form | Required identity and invariant |
 |---|---|
@@ -189,41 +91,14 @@ the `StaticField` record below is only a candidate physical representation.
 | `Access` | Typed static-field/member identity, owning group, access kind and either ordinary `None`/`Complete` demand or group-scoped initialization-phase authority. Names and row order never establish identity. |
 
 The proposed Body forms are direct, by-value operations: `StaticRead`,
-`StaticInitialize`, `StaticAssign` and `StaticCall`. Every form carries a
-validated `Access`; `StaticInitialize` is legal only for vacant storage under
-the owning group's phase authority, while ordinary assignment follows the
-field's mutability contract. `StaticCall` uses `None` demand for an ordinary
-static-member call under the grouped-field trigger and `Complete` under the
-runtime-static-member trigger. Field reads and writes demand completion under
-the grouped-field trigger. A separate `InitHelperCall` may forward phase
-authority only to a helper checked for that same group; ordinary source
-operands cannot manufacture authority. No operation returns a reference,
-creates a view or exposes unfinished storage.
-
-Each obligation identifies the selected local member, its owning group recipe,
-the access kind and one of two authorities:
-
-| Authority | Required meaning |
-|---|---|
-| Ordinary demand | A runtime operation selected by the trigger policy requires its owning group to complete before the operation proceeds. The operation's published contract exposes this initialization effect; ordinary method effects cannot hide it. |
-| Initialization-phase authority | A source-compiler-validated initializer, static constructor or checked helper participates in its owning group's unpublished initialization flow. The authority is scoped to that group and flow, is not an ordinary reentrant demand, and permits reads only after the particular field has been initialized. |
-
-For an ordinary demand, the referenced group and access kind must agree with
-the normalized constructor trigger, or with the synthesized grouped-field
-trigger when no constructor is authored. Normal completion guarantees the
-required group completion before the operation continues. An unfinished group
-is never exposed to ordinary callers; failure behavior is the selected runtime
-policy, not an access-specific fallback. Compile-time binding and inspection
-carry no demand.
-
-Initialization dependencies in this slice resolve only to definitions in the
-same module. The selected operation, member and group recipe use typed
-definition references and must agree on their owning type; names, row order
-and linker remapping do not establish identity. Imported or packed
-initialization dependencies reject. This logical contract is not an encoding
-or runtime protocol, does not assign table kinds, opcode numbers, byte layouts
-or the runtime handle ABI, and does not authorize implementation. The
-nonconcurrent/fail-fast admission choice remains subject to approval.
+`StaticInitialize`, `StaticAssign` and `StaticCall`, with an optional
+`InitHelperCall`. Their exact operand and `Access` encodings are unapproved.
+The accepted demand/authority semantics and trigger effects are in the
+[grammar](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage)
+and [metadata specifications](../specs/il-metadata.md). This candidate slice
+uses typed same-module definition references and rejects imported or packed
+initialization dependencies; cross-module linking remains open. It assigns no
+table kinds, opcode numbers, byte layouts or runtime handles.
 
 Proposed validation ownership for this slice:
 
@@ -234,64 +109,28 @@ Proposed validation ownership for this slice:
 | Linker or consumer | Preserve the selected definitions, obligations and trigger effects without deriving them from names or remapped row order. | Reject imported/packed initialization dependencies and incompatible group or trigger contracts before lowering. |
 | Runtime | For the first profile, enforce nonconcurrent access for the load instance, detect same-flow cycles, publish completion once, fail fast without publishing on failure, and quiesce before unload. Later checked-sharing profiles additionally require waiters, retained failure and cleanup transport. | Reject admission unless the runtime can enforce the selected sharing, failure, publication and lifecycle obligations; never expose unfinished state. |
 
-This proposed slice is a scope boundary for staged implementation, not a new
-language restriction. Later slices must add generic closed-type identity,
-partial composition, lazy units, property backing storage and validated
-cross-module dependencies without changing the accepted initialization
-contract.
+This proposed slice is an implementation scope, not a new language
+restriction. Later slices may add generic closed-type identity, partial
+composition, lazy units, property backing storage and validated cross-module
+dependencies without changing the accepted source contract.
 
 ### Candidate eager-group runtime protocol refinement
 
-**Recommendation, still unapproved:** represent each eager group in one module
-load by a runtime-owned state entry keyed by the loaded nominal definition and
-its resolved closed substitution. The candidate first slice excludes generic
-types, so its key is the load-instance identity plus the loaded definition;
-artifact row numbers, type names and process-global type identities are not
-substitutes for that key.
+**Recommendation, still unapproved:** give each eager group a load-scoped
+runtime state entry keyed by loaded nominal definition and resolved generic
+substitution, not by artifact row number, type name or process-global type
+identity. A candidate state machine is `Unstarted`, `Initializing(owner)`,
+`Complete`, and `Failed(outcome)`.
 
-The general entry has four externally meaningful states: `Unstarted`,
-`Initializing(owner)`, `Complete`, and `Failed(outcome)`. Exactly one
-permitted execution flow claims `Unstarted` and runs the ordered initializer
-sequence followed by the authored constructor. Under later checked-sharing
-profiles, competing permitted callers wait for that execution's outcome. The
-first nonconcurrent profile admits no competing access and needs no waiter
-mechanism. In either profile, an ordinary demand that cycles back to the
-unfinished group fails rather than observing partial state or waiting
-indefinitely. Validated initialization-phase authority is distinct from an
-ordinary demand: it permits the initializer or checked helper to participate
-in the unpublished group, but does not permit reading a field before its
-required initialization.
-
-On normal completion, required field and constructor guarantees are
-established before the runtime publishes `Complete` to ordinary callers and,
-for checked-sharing profiles, waiters. Under the first profile, fail-fast
-termination promises no cleanup and no caller survives to observe or retry a
-failed entry; `Failed(outcome)` replay belongs to a later defined-unwinding
-profile. Defined-unwinding profiles clean acquired partial state without
-publishing a live group or rolling back external effects; the runtime records
-`Failed` and retains the failure outcome. Later ordinary demands surface that
-outcome and do not retry. The first slice excludes unsafe recovery and
-suppression APIs.
-
-Checked unload first prevents new demands and waits for quiescence: active
-calls, loans, roots, pins and ownership dependencies must be discharged.
-Applicable cleanup retires acquired values while their cleanup code remains
-available; only then may the runtime invalidate the group storage and code.
-The state entry is load-scoped and must not itself keep an unloaded image
-alive.
-
-This protocol is an implementation recommendation derived from the accepted
-contract, not a new language rule or assigned runtime ABI. The recommended
-first profile uses an explicitly validated proof of nonconcurrent access and
-fail-fast termination; it does not infer either from `static`, member
-visibility or the absence of an observed race. Later profiles may add a
-checked initialization gate and defined-unwinding failure transport only
-after their sharing and cleanup contracts are assigned and implemented.
-Reject runtime profiles for which neither the required sharing proof nor a
-checked gate is available. The exact state-entry handle, wait/notification
-mechanism, recursive-owner identity, failure transport and cleanup
-registration still require a typed runtime/metadata contract before emission
-or execution is authorized.
+The accepted first-profile admission and failure boundary is in the
+[implementation reference](../implementation.md). Proposed extensions beyond
+that gate are checked-sharing waiters and retained failure outcomes for
+defined-unwinding profiles. The runtime state must remain load-scoped and
+unload only after required quiescence; exact owner identity, handles,
+wait/notification, failure transport and cleanup registration remain open.
+The accepted source lifecycle rules remain in the
+[grammar specification](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage);
+this candidate protocol assigns no runtime ABI.
 
 ### Decisions still open
 
@@ -299,10 +138,9 @@ or execution is authorized.
 |---|---|---|
 | Which required metadata kinds and executable access forms carry these records? | Current TRRM and semantic-module revision 76 assign no static-storage records or access operations; existing instance `FieldDef` rows do not identify static cells. | Use the candidate `StaticInitProfile`, `StaticField`, `EagerGroup`, `EagerInitializer`, method-role/demand clauses and typed Body access forms above. Keep wire IDs, opcode numbers and native handles unassigned until this proposal is reviewed; do not emit in current profiles or overload existing flags. |
 | How are semantic clauses validated? | The slice assigns reader validation of clause shape/placement separately from source-body proof, but exact clause identities, payloads and proof obligations remain open. | Define each typed required clause and its compiler proof, reader shape/consistency checks, linker compatibility checks and runtime enforcement. Keep body re-proof governed by the artifact trust policy; reject unknown required or unsupported clauses. |
-| What runtime identity and lifecycle ABI implements the accepted behavior? | The candidate names load-instance identity and state transitions, but no runtime handle or unload protocol is assigned. | Assign a load-scoped group key and phase-authority transport. The first profile needs no waiter or retained-failure ABI; later checked-sharing or defined-unwinding profiles must specify their own waiting, failure, cleanup and retirement machinery. Do not inherit host static-constructor behavior. |
-| Which sharing and runtime-policy combinations are admissible in the first slice? | The accepted contract permits checked sharing or proved nonconcurrency, and distinguishes fail-fast termination from defined unwinding; current compiler profiles enforce neither. | Start with single-module, non-generic, non-partial eager scalar storage under a single-threaded, non-reentrant load profile and fail-fast termination. Test both trigger choices, initializer order, one-time completion, cycle failure in a subprocess, load separation and quiescent unload. Keep checked sharing, defined-unwinding failure transport and non-scalar cleanup for later profiles; reject unsupported admission rather than infer permission. |
+| What runtime identity and lifecycle ABI implements the accepted behavior? | The metadata proposal names a load-scoped state entry, but no owner identity, runtime handle, waiter or unload protocol is assigned. | Specify the state-entry key and lifecycle ABI; keep waiters and retained-failure transport outside the accepted first gate unless a later profile defines them. |
+| Which sharing and runtime-policy combinations follow the first gate? | The accepted nonconcurrent/fail-fast admission boundary is documented in the [implementation reference](../implementation.md); the runtime does not implement it yet. | Implement and validate that gate first. Define checked-sharing, defined-unwinding and non-scalar cleanup as later profiles rather than silently admitting them. |
 | How do imported field references participate? | The current module schema does not bind static-field imports; the candidate slice avoids cross-module initialization dependencies. | Keep imported/packed initialization edges rejected in the first slice; define validated field identity, trigger effects and dependency edges before a later cross-module slice. |
-| What artifact revision boundary applies? | Terrum remains pre-1.0 and has no external artifact consumers. | Keep one current writer and reader during development; make any shipped-preview boundary an explicit release decision. |
 
 ## Implementation boundary
 

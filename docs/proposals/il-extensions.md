@@ -66,17 +66,15 @@ reference-word contract.
 
 ## Compact-profile selection and follow-up
 
-The two compact tags and their bytes in the approved instruction design
-are settled for the bounded subset. The accepted size-oriented direction is
-recorded in the [instruction-set specification](../specs/il-instruction-set.md#compact-body-forms);
-exact writer selection and additional representations remain open. The
-following are future design and implementation decisions:
+The assigned compact layouts and accepted size-oriented direction are recorded
+in the [instruction-set specification](../specs/il-instruction-set.md#compact-body-forms).
+Exact writer selection and any additional representations remain open. The
+remaining decisions are:
 
-| Area | Accepted boundary and remaining decision |
+| Area | Pending decision |
 |---|---|
-| Shape partition | Accepted direction: choose or add compact forms by the information common method shapes require, omitting only derivable/default data. A section-presence bitvector is one candidate; exact forms, eligibility and writer order remain open. General form remains necessary when compact forms cannot represent required semantics. |
-| Offset width | The current compact-indexed form couples local-field widths. A separate compact-index width and its 255/65535-byte boundary behavior remain unapproved future-format work. |
-| Logical roots and effects | Any method/block effects, roots, owners, interior dependencies, cleanup or exceptional continuations required by a feature must remain represented. Exact contracts and encoding remain open; no managed/exceptional compact execution until readers validate them. |
-| Cross-method sharing | Sharing Body rows needs a future ownership revision that validates every referencing MethodDef's signature and contracts. Defer until that ownership model and a concrete need are established. |
-| Trusted selective import | Accepted boundary: executable readers validate structural bounds, metadata binding and opcode membership in every block, including unvisited blocks. Feature negotiation for future extensions remains unspecified. |
-| Declaration contracts | Accepted invariant: removing authored guard blocks does not remove separately required contract checks, their effects or failure order. The exact Body/contract model for inlining remains open. |
+| Writer selection and additional forms | Exact eligibility, canonical writer order and layouts remain unassigned; a section-presence bitvector is one candidate. |
+| Offset width | The compact-indexed form couples local-field widths. Independent compact-index widths and their 255/65535-byte boundary behavior remain unapproved future-format work. |
+| Logical roots and effects | Define the method/block effects, roots, owners, interior dependencies, cleanup and exceptional continuations needed by executable features, and encode them so readers can validate them. |
+| Cross-method sharing | A future ownership revision must validate every referencing MethodDef's signature and contracts. Defer until that model and a concrete need are established. |
+| Inlining contracts | The exact Body/contract model remains open; see the [instruction-set specification](../specs/il-instruction-set.md#compact-body-forms) for the accepted declaration-contract boundary. |

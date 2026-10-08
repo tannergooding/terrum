@@ -12,10 +12,10 @@ approved.
 - [Core-library proposal](core-library-reference.md) records candidate
   declarations, dependency layers and unresolved API contracts.
 - [Built-in numeric selection members](numeric-selection-members.md) records
-  accepted universal selection semantics and primitive-member placement while
-  leaving signatures and exact generic-interface contracts under review.
+  open per-type and signature questions; accepted universal selection
+  semantics and primitive-member placement are specified canonically.
 - [Static-proof and constant-evaluation proposal](static-proof-and-constant-evaluation.md)
-  records the accepted portable-floor policy and initial proof scope while
+  links the accepted portable proof-floor policy and semantic boundaries;
   exact rules, effects, evaluator budgets and result representation remain
   under review.
 - [Semantic IL extensions](il-extensions.md) collect the unapproved inline
@@ -32,17 +32,14 @@ approved.
   records the deferred, unapproved split/phase-handoff option; reconsider it
   only if representative growth again reaches `TRM3016` after profiling and
   behavior-preserving caching/hot-path reductions.
-- [Reference-call metadata](reference-call-metadata.md) has an accepted,
+- [Reference-call metadata](reference-call-metadata.md) links the accepted
   bounded indexed-Body unsafe-region contract; its dependency-relation
   profile is deferred until a concrete persisted use case, while general
   output-call migration is deferred pending place, alias and publication
   rules; other extensions remain unapproved.
-- [Floating results from generic Copy output templates](generic-floating-output-results.md)
-  has accepted fixed floating results with single-mode outputs and the bounded
-  mixed-mode/fixed-side combination; broader generic and floating capabilities
-  remain excluded.
-- [Span-backed token cursor](span-backed-token-cursor.md) accepts the bounded
-  compilation-local `TokenCursor` and indexed scalar-parser contract; general
+- [Span-backed token cursor](span-backed-token-cursor.md) links the accepted
+  bounded compilation-local `TokenCursor` and indexed scalar-parser
+  contract; implementation coverage is tracked separately. General
   `Span<T>` support, source-level `nuint`, writable/ref-returning access and
   persisted capture metadata remain unapproved.
 - [Forwarded `Span<Token>` results](token-span-result-forwarding.md)
@@ -68,32 +65,32 @@ approved.
   is deferred; its source-reading semantic-module-JIT route is not the
   intended compile-time literal model and does not define general handlers.
 - [Checked-exception TRRM](checked-exception-trrm.md) records the accepted
-  requirement that TRRM 1.0 support core checked-exception semantics by GA;
+  TRRM 1.0 GA requirement for core checked-exception semantics;
   exceptional-edge encoding and conformance details remain open.
 - [Output parameters in executable TRRM](trrm-output-parameters.md) records
-  the accepted requirement that core output-mode semantics be executable in
-  TRRM 1.0 by GA; its profile, encoding, place, publication and
-  exceptional-state details remain unapproved.
+  the accepted TRRM 1.0 GA requirement for executable core output-mode
+  semantics; its profile, encoding, place, publication and exceptional-state
+  details remain unapproved.
 - [Optional scalar TRRM execution](optional-scalar-trrm-execution.md) records
   an implementation-only boundary under the approved Body contract; optional
   source types, call signatures and native ABI support remain out of scope.
 - [Static initialization metadata and attribute schema](static-initialization-metadata.md)
-  records the accepted typed-enum `StaticInitializer` argument and
-  zero-argument `LazyInitialization` marker, plus the explicit typed
-  owning-group access obligation and restricted implementation-only first
-  slice. Static fields have a distinct logical identity; multiplicity,
-  record/operation encoding and runtime ABI remain open.
+  links the accepted trigger and typed owning-group access requirements and
+  restricted implementation-only first gate. Static fields have a distinct
+  logical identity; attribute registration/multiplicity, record/operation
+  encoding and runtime ABI remain open.
 - [First public fixed-layout implementation slice](public-fixed-layout-profile.md)
-  records the accepted bounded Windows x64 implementation direction for the
+  links the accepted bounded Windows x64 implementation direction for the
   existing target-specific `Blittable` plus `Sequential` contract, with
   native ABI passing and no separate profile identity or 16-byte cap. Core
-  primitives and transitively eligible `Copy` fields are accepted; explicit
-  metadata and a source-version migration boundary are required. Implementation
-  support, schemas, metadata encoding and the version selector remain open.
+  primitives and transitively eligible `Copy` fields are accepted;
+  implementation support, schemas, metadata encoding and the source-version
+  selector remain open.
 - [Compare-exchange order pairs](atomic-cas-order-pairs.md) records the
   accepted finite compile-time-valid table for CAS success/failure memory
-  orders; source spelling, diagnostics and support remain open. It does not
-  add atomic support or change the accepted bitwise-comparison rule.
+  orders in the memory model; source spelling, diagnostics and support remain
+  open. It does not add atomic support or change the accepted
+  bitwise-comparison rule.
 Use these proposals for candidate APIs, source choices and format extensions,
 not as a second policy or implementation checklist. Settled call, output,
 cleanup and proof contracts are in [language contracts](../specs/language-contracts.md);

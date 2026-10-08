@@ -1,13 +1,13 @@
 # Reference-call metadata proposal
 
-**Status: partially accepted.** Section 3's bounded indexed-Body unsafe-region
-contract is accepted and specified in the
-[instruction set](../specs/il-instruction-set.md). The dependency-relation
-profile is deferred until a concrete persisted provider/consumer path needs
-it. General output-call migration is deferred pending explicit place, alias
-and publication rules; all other extensions remain unapproved.
-Provisional implementation notes are evidence of support only and do not
-settle those decisions.
+**Status: partially accepted.** The bounded indexed-Body unsafe-region
+contract is canonical in
+[Body record, direct block index and regions](../specs/il-instruction-set.md#body-record-direct-block-index-and-regions).
+The dependency-relation profile is deferred until a concrete persisted
+provider/consumer path needs it. General output-call migration is deferred
+pending explicit place, alias and publication rules; all other extensions
+remain unapproved. Provisional implementation notes are evidence of support
+only and do not settle those decisions.
 
 ## Current boundary
 
@@ -17,14 +17,10 @@ ownership. The source grammar separately defines caller-unsafe declarations
 and explicit unsafe scopes. Their cross-call metadata and general executable
 support remain incomplete.
 
-The approved metadata design already assigns:
-
-- Contract clause `0x0001` Effects, including bit `0x04` for an unsafe-caller
-  requirement.
-- Contract clause `0x0002` OutputState for result-correlated `out` and
-  `init ref` publication.
-- Contract clause `0x0004` Dependency, whose payload identifies a result and
-  source ordinal, but whose kind and flag registry remains unassigned.
+The metadata design assigns Effects (including bit `0x04` for an unsafe-caller
+requirement), OutputState and Dependency clauses; Dependency relation kinds
+and flags remain unassigned. See the
+[canonical metadata contracts](../specs/il-metadata.md#semantic-contracts-and-stable-binding).
 
 The bounded scalar frontend's `out` and `init ref` projections do not fill
 this gap: they cover scalar call modes and still rely on the hosted verifier
@@ -795,12 +791,11 @@ requires the separately validated indexed unsafe-region structure.
 **Recommendation:** Map the source declaration to that assigned Effects bit
 and propagate the obligation at each call site. Only an explicit unsafe
 caller scope discharges it; an implementation's internal unsafe block or
-body analysis must not silently change the published contract. Before
-executable support admits such calls, assign and validate a Body representation
-for explicit unsafe scopes. The provisional indexed-body implementation in
-section 3 admits calls only when that region structure validates; do not treat
-the callee's Effects bit or hosted source verification as proof that an
-individual call was authorized.
+body analysis must not silently change the published contract. Executable
+call authorization follows the accepted indexed-Body region contract in the
+[instruction set](../specs/il-instruction-set.md#body-record-direct-block-index-and-regions);
+the callee's Effects bit or hosted source verification alone does not
+authorize an individual call.
 
 ### 3. How should executable Bodies validate caller-unsafe scope?
 
@@ -811,41 +806,12 @@ Executable TRRM round-trips caller-unsafe declarations and supports calls only
 inside validated indexed Body unsafe scopes. Compact-linear Bodies still
 cannot prove explicit unsafe-block enclosure.
 
-**Accepted contract:** Define the bounded executable slice for indexed,
-fail-fast Bodies with root-free Copy-scalar shapes only, using assigned region
-kind `0x06` as a structurally validated lexical unsafe region.
-Do not change `bodyLayout`: bits 2–3 select the existing Body form, `0x0C` is
-the invalid fourth form, and bits 4–7 remain reserved. Compact-linear Bodies
-stay scope-free. Split blocks at unsafe-scope boundaries and derive
-authorization only from validated enclosing-region membership.
-
-For kind `0x06`, require a preceding parent region ID, an entry block inside
-the region, an exit block outside its subtree but within its parent, and a zero
-cleanup block. Every incoming control-flow edge from outside the region must
-target its entry; every normal edge leaving the region must target its
-designated exit. Nested regions are permitted, but loop backedges must stay
-inside their loop region. Returns and fail-fast terminators may end a path
-inside an unsafe region; transfers that leave it must obey the designated-exit
-rule. The region grants no cleanup, exception-unwind or lifetime authority;
-reject Bodies that require those behaviors. Limit the slice to top-level
-caller-unsafe declarations and local calls; keep `unsafe(expr)`, imports,
-unsafe fields, accessors and operators rejected.
-
-Writers and readers audit every call and every Body, including uncalled
-functions, and reject malformed, stripped, bypassed or leaking scope
-structures. This validates Body structure under the existing producer-trust
-model; it does not authenticate original source authorship. Region kind
-`0x06` itself gates this support; no `bodyLayout` feature bit is added.
-
-**Implemented:** Indexed fail-fast Bodies use kind-`0x06`
-regions to represent explicit `BoundUnsafe` scopes without changing
-`bodyLayout`. The writer lowers scopes into nested lexical regions and rejects
-unsafe calls without one; the reader validates region ancestry, entry/exit
-edges, loop backedges and the zero cleanup field before reconstructing call
-authorization from region membership. Returns and fail-fast terminators may
-end paths inside a region. Transfers that leave an unsafe region,
-compact-linear unsafe calls, `unsafe(expr)`, unsafe members, cleanup, unwind
-and lifetime authority remain unsupported.
+**Accepted boundary:** Indexed fail-fast Bodies use region kind `0x06` for
+lexical unsafe scopes, and call authorization derives from validated
+enclosing-region membership. The assigned Effects bit records the caller
+obligation but does not authorize a call by itself. The canonical section
+above defines the complete encoding, validation rules and unsupported
+behaviors.
 
 **Decision:** Accepted for adoption in the instruction set. This decision is
 limited to section 3: it does not approve the dependency-relation profile in

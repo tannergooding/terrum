@@ -1,17 +1,18 @@
 # Output parameters in executable TRRM
 
-**Status: Accepted direction: core source-level output-mode semantics must be
-supported by TRRM 1.0 GA. The executable profile, encoding and conformance
-rules remain unapproved.**
+**Status: The TRRM 1.0 GA requirement is accepted; executable profile,
+encoding and conformance remain open. See the [canonical output-mode
+requirement](../specs/il-instruction-set.md#executable-subset-versus-assigned-decode-shapes)
+and [source contracts](../specs/language-contracts.md#22-declared-outcome-relationships).
+The current beta support boundary is in the
+[implementation reference](../implementation.md#executable-trrm-scalar-interchange).**
 
 ## Summary
 
-The current beta executable TRRM subset still admits only by-value parameters.
-Core source-level output-mode semantics are required in executable TRRM by
-1.0 GA, but the provisional `ScalarInitOutput` implementation profile does not
-define the complete contract. Structural parameter modes, Boolean-correlated
-`OutputState` rows, and the place shapes alone do not specify executable
-output behavior.
+The provisional `ScalarInitOutput` profile is implementation support, not the
+accepted executable contract. Its `OutputState` use, Feature ID, rule
+revisions, and profile semantics remain unapproved as wire and language
+contracts.
 
 ## Question
 
@@ -21,14 +22,12 @@ contract?
 
 ## Recommendation
 
-Preserve the existing `(1, 0)` by-value executable subset while developing
-the bounded `ScalarInitOutput` profile below as provisional implementation
-support. Do not accept its Feature ID, rule revisions, place rules or
-publication behavior as the complete executable contract. Before TRRM 1.0 GA,
-specify the core output modes in source-free artifacts, including their
-failure, cleanup and checked-exception interactions. This accepted direction
-does not select an encoding or imply that current implementation support meets
-it.
+Keep the bounded `ScalarInitOutput` profile below provisional. Its Feature ID,
+rule revisions, place rules and publication behavior are not the complete
+executable contract. Before GA, define source-free output behavior and its
+failure, cleanup and checked-exception interactions. This proposal does not
+select an encoding or establish that implementation support meets the
+accepted requirement.
 
 For the provisional implementation profile only, keep the following
 candidate boundaries explicit:
@@ -86,12 +85,13 @@ candidate boundaries explicit:
   rollback. Exclude cleanup, authored exception handling, checked-exception
   policy, postconditions, and exceptional output publication.
 
-The assigned Body shapes already describe these operations, but the accepted
-executable profile does not execute them. The provisional implementation adds
-a separately audited general-place Body path and changes to the writer, loader
-and semantic-verification path; it does not promote those changes into an
-accepted contract. Any promotion must retain the legacy compact-body rule that
-rejects non-value modes and place operands.
+The [assigned Body shapes](../specs/il-instruction-set.md#executable-subset-versus-assigned-decode-shapes)
+describe the relevant operations, but the current beta executable profile
+rejects them. The provisional implementation adds a separately audited
+general-place Body path and changes to the writer, loader and semantic
+verification path; this does not promote those changes into an accepted
+contract. Any future profile must retain the compact-body rule that rejects
+non-value modes and place operands.
 
 ## Provisional implementation status
 

@@ -2,69 +2,50 @@
 
 > [!IMPORTANT]
 > Partially accepted direction, not an approved rule catalog, resource budget
-> or implementation promise. The accepted policy and initial proof-floor
-> scope are in [language contracts](../specs/language-contracts.md#4-a-reproducible-proof-and-evaluation-foundation);
+> or implementation promise. The accepted policy and semantic boundaries are
+> in [language contracts](../specs/language-contracts.md#4-a-reproducible-proof-and-evaluation-foundation);
 > current hosted support is tracked separately in the
 > [implementation reference](../implementation.md#hosted-compiler).
 
 ## Portable proof floor
 
-The accepted policy requires a versioned minimum of proof rules, complexity
-and guaranteed resources independent of optimization level. Sound
-implementations may prove more, but a required proof not established by
-supported analysis fails compilation; disproved and not-established outcomes
-must be distinguished. The accepted v1 floor scope is summarized below; its
-exact transfer rules and conformance requirements remain open.
-
-| Area | Accepted v1 floor | Still open or outside this floor |
-|---|---|---|
-| Local state | Local scalar, boolean, and initialization facts | Exact fact representation and transfers; optional-presence and ownership facts are not accepted |
-| Branches | Refine supported built-in predicates under target arithmetic | Predicate catalog, fact domain, edge transfers, and join rules |
-| Loops | No loop induction or invariant reasoning is required | Any transfer through cycles and the treatment of loop-modified facts |
-| Calls and aliases | No call summaries or alias-sensitive reasoning are required | Effect/dependency footprints and facts that rely on callees or aliased storage |
-| Complexity and resources | A versioned minimum rule/complexity floor and guaranteed resources | Work units, numeric guarantees, and conformance vectors |
-
-Implementations may soundly establish proofs outside this floor, but such
-proofs are not portable guarantees. Integer proofs must
-respect checked overflow; floats require target rounding, signed zero, NaN
-and no implicit reassociation/FMA. Exact constant floating evaluation is a
-candidate only once the target evaluator is specified. Required conformance
-vectors must cover arithmetic boundaries, branch edges, joins and resource
-limits; cycle behavior belongs to a separately specified extension. Select a
-machine-checkable transfer catalog and structural work accounting; a bounded
-tree depth such as **64 is illustrative only**. Define authoring escape routes
-only where an ordinary runtime check is legal. Versioning the floor does not
-select a wire encoding or proof certificate.
+The accepted proof obligations, v1 floor and arithmetic boundaries are in the
+[canonical proof-floor specification](../specs/language-contracts.md#42-versioned-portable-proof-floor).
+The exact rule and transfer catalog, fact domain, supported predicate catalog,
+branch-edge and join transfers, structural work accounting, guaranteed
+resource values, and concrete conformance vectors remain open. Facts about
+optional presence and ownership are not part of the accepted v1 floor. Loop
+induction and invariant reasoning are outside that floor; cycle transfers and
+loop-modified facts for any extension remain unspecified. Call summaries and
+alias-sensitive facts are likewise not guaranteed by the floor, and any
+extension rules remain open. A bounded tree depth such as **64** is
+illustrative only, not an accepted limit. No proof-certificate or wire
+encoding is selected.
 
 ## Effect footprints and observations
 
-A declaration's checked dependency footprint would need to account for
-reads, writes, captures, allocation, failure, blocking, suspension,
-synchronization and lifetime/ownership changes; neither a `Pure` name nor a
-readonly receiver proves stability. An initial contract/proof subset could
-admit scalars and stable checked readonly observations while excluding I/O,
-ambient state, volatile/atomic observations, synchronization, suspension and
-user-visible mutation. Imported calls may publish checked facts without
-exposing their bodies; an unannotated call conservatively invalidates storage
-it may affect, not independent copied scalar values. Exact footprint spelling
-and admissible predicates are still to specify. If a predicate can fault, a
-compiler must retain that behavior unless its absence is also proved;
-eliminating a known-true check cannot drop argument evaluation, effectful
-getters, roots, loans, cleanup or possible failure.
+The accepted behavior for checked effects, stable observations, faulting
+predicates and check elimination is in
+[language contracts](../specs/language-contracts.md#43-effects-and-stable-observations).
+The exact checked-dependency footprint and effect annotation remain open; a
+candidate footprint accounts for reads, writes, captures, allocation, failure,
+blocking, suspension, synchronization and lifetime/ownership changes. A
+candidate initial predicate subset could admit scalars and stable checked
+readonly observations while excluding I/O, ambient state, volatile/atomic
+observations, synchronization, suspension and user-visible mutation. The
+admissible predicate set and its exact effect requirements remain to specify.
+A `Pure` name alone does not establish that an observation is stable.
+An unannotated call's invalidation boundary also remains open; a candidate
+rule invalidates storage it may affect, but not independent copied scalar
+values.
 
 ## Deterministic evaluator and proposed budgets
 
-Required constant evaluation must execute a specified unoptimized semantic
-instruction set with target types and arithmetic, not host overflow, `nint`,
-floating defaults, culture, filesystem, clock, address or process state.
-Checked evaluator-owned local mutation is possible without ambient writes or
-escaping pointers. The initial serializable results should use defined
-target value encodings; managed graphs, native resources and identity-bearing
-host objects need separate representation contracts.
-
+The accepted target-semantic evaluator contract and no-fallback behavior are
+in [language contracts](../specs/language-contracts.md#44-deterministic-constant-execution).
 The hosted implementation currently uses internal limits of 4,096
-interpreted statement steps and a call-depth limit of 64. These values are not
-the portable evaluation budget and do not approve or measure the candidates
+interpreted statement steps and a call-depth limit of 64. These are not the
+portable evaluation budget and do not approve or measure the candidates
 below; see the [implementation reference](../implementation.md#hosted-compiler)
 for the supported evaluator subset.
 
@@ -75,21 +56,20 @@ for the supported evaluator subset.
 | Temporary storage | 16 MiB of live abstract payload storage, independent of host allocator overhead |
 | Serialized result | 1 MiB in the target-defined value encoding |
 
-Validate candidate numbers against representative literal parsers before
-selecting any defaults. An explicitly requested supported budget becomes a
-recorded input. Bulk intrinsics need a defined expansion or exact cost
+Candidate values need validation against representative literal parsers before
+selecting defaults. Bulk intrinsics need a defined expansion or exact cost
 function; counting an arbitrary native helper as one step defeats the bound.
-Allocation accounting must use defined payload/state, not a host-GC artifact.
-Memoization may save physical work without changing the budget outcome or
-diagnostics. Wall-clock cancellation is a tool resource failure, not a
-different language proof result. Exhausting a required budget diagnoses
-without fallback or guessed value; optional optimization may decline.
+Allocation accounting needs to use defined payload/state, not a host-GC
+artifact. Memoization may save physical work without changing the budget
+outcome or diagnostics. Wall-clock cancellation is a tool resource failure,
+not a different language proof result. The required conformance vectors and
+expected outcomes remain to specify.
 
-Specify the evaluator operations, deterministic accounting and serialized
-results separately from sound beyond-floor proof extensions. Identify source
-profile, proof-floor version, target value semantics, declared contract and
-effect dependencies, and the required evaluation budget when reproducibility
-needs them. Whether or how those identifiers are stored in artifacts remains
-metadata work. A required proof against an imported declaration uses its
-published contract; constant evaluation of that declaration needs an
-available eligible body and its evaluated dependencies.
+Evaluator operations, deterministic accounting, and result serialization
+remain specification work distinct from sound beyond-floor proof extensions.
+Initial serializable results should use defined target value encodings; the
+eligible result forms and encoding details remain open. Managed graphs, native
+resources and identity-bearing host objects need separate representation
+contracts. Whether reproducibility identifiers and budgets are stored in
+artifacts, and how, remains a metadata decision; see
+[versioning and independent implementations](../specs/language-contracts.md#45-versioning-and-independent-implementations).

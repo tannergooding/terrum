@@ -197,12 +197,15 @@ encoding and target runtime integration remain specification work.
 `TRRM` is the format identifier, with ASCII signature bytes `54 52 52 4D`.
 This design targets format 1.0, encoded as major/minor `(1, 0)`; it is not
 a declaration of general availability or a compatibility promise for draft
-artifacts. Before release, the schema can change without incrementing this
-pair. Pre-release tools may exchange artifacts only when they share the exact
-schema; matching version bytes alone do not establish that. A reader of the
-specified schema accepts exactly `(1, 0)` and rejects other pairs. Post-release
-revision and feature-negotiation rules remain unspecified. Source revisions
-and target ABI/profile requirements are independent of the format pair.
+artifacts. During beta, the writer and reader need only support the current
+agreed schema; schema changes may invalidate older draft artifacts, and no
+historical reader or compatibility shim is required. Before release, the
+schema can change without incrementing this pair. Pre-release tools may
+exchange artifacts only when they share the exact schema; matching version
+bytes alone do not establish that. A reader of the specified schema accepts
+exactly `(1, 0)` and rejects other pairs. Post-release revision and
+feature-negotiation rules remain unspecified. Source revisions and target
+ABI/profile requirements are independent of the format pair.
 
 ## Physical framing and embedding
 

@@ -49,6 +49,9 @@ prerequisite has already been met.
    through separate metadata/schema work before compiler adoption: loaded
    closed-type groups and lazy units, explicit constructor triggers, checked
    sharing, failure/recovery, initialization effects and load-scope cleanup.
+   The accepted first implementation gate is the restricted fail-fast,
+   single-module profile in the [implementation reference](implementation.md);
+   complete its schemas, metadata and runtime dependencies before adoption.
    Do not infer sharing permission from `static` or adopt source forms without
    their state, lifetime and publication machinery.
    Preserve uniform generic/concrete reference matching and supply checked
