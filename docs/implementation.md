@@ -70,7 +70,8 @@ or persisted-AOT support. The [proposal index](proposals/README.md) records
 those boundaries and pending promotion decisions.
 
 The first Windows x64 source-native-import slice is also implemented
-provisionally under the unapproved [Windows native FFI proposal](proposals/windows-native-ffi.md):
+provisionally under the unapproved stage contracts of the
+[Windows native FFI proposal](proposals/windows-native-ffi.md):
 bodyless top-level or static `extern` callables use the exact
 `Terrum.Interop.NativeImport` attribute and a key in the compiler-owned
 immutable catalog. Binding, mandatory verification and PE emission check the

@@ -72,17 +72,15 @@ prerequisite has already been met.
 6. **General separate compilation — binding contracts.** Complete overload
    and witness selection plus adapter, family and explicit-interface
    contracts. Keep unresolved declaration, lookup and compatibility choices
-   pending rather than adopting convenient host behavior. A sample-driven,
-   Windows x64 native FFI sequence is proposed across this area and runtime
-   safety; see the unapproved
-   [Windows native FFI proposal](proposals/windows-native-ffi.md). It does not
-   remove the exclusion of wholesale interop or claim current sample support.
-   The proposal recommends checked Windows x64 scalar imports first, resolved
-   by a registered semantic-attribute identity and immutable trusted binding
-   catalog, with ABI identity and effects enforced through verification and
-   PE emission. It then limits native storage/pointers, callback and closed COM
-   support to the sample before attempting the integration gate. These remain
-   unapproved proposals, not implementation claims.
+   pending rather than adopting convenient host behavior. The staged,
+   Windows x64-only FFI direction using the DX11 sketch as a target is accepted
+   across this area and runtime safety; see the
+   [Windows native FFI proposal](proposals/windows-native-ffi.md). This accepts
+   only the bounded sequence, not wholesale interop or current sample support.
+   The proposed gates start with checked scalar imports, then sample-specific
+   storage/pointers, a static callback, closed COM/resources, and application
+   integration. Their import/catalog, ABI, layout, lifetime, callback, COM and
+   runtime contracts remain unapproved and are not implementation claims.
 7. **Rich libraries — builders and handlers.** Specify registered builders and
    handlers with checked eager capture before draining, ownership, refusal,
    cleanup, failure and publication behavior.

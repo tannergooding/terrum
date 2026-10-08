@@ -57,11 +57,10 @@ approved.
 - [Native source-grant library](native-source-grant-library.md) is deferred
   until a concrete native source-processing caller exists; no ABI or
   16,384-unit cap is accepted.
-- [Sample-driven Windows native FFI](windows-native-ffi.md) recommends checked
-  Windows x64 scalar imports through a trusted semantic-identity catalog
-  first, followed by only the storage, pointer, callback and closed-COM slices
-  needed by the Win32/DX11 design sample; it does not establish general
-  interop or change accepted contracts.
+- [Sample-driven Windows native FFI](windows-native-ffi.md) accepts only the
+  staged Windows x64 direction using the DX11 sketch as a target. Its
+  import/catalog, storage/pointer, callback and closed-COM contracts remain
+  unapproved; this does not establish general interop.
 - [Persisted scanner invocation profile](scanner-invocation-profile.md)
   considers a named, scanner-specific invocation profile and copied result
   publication without generalizing source grants to arbitrary buffers.

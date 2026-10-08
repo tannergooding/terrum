@@ -1,6 +1,8 @@
 # Sample-driven Windows native FFI
 
-**Status: Unapproved**
+**Status: Accepted direction only: a staged Windows x64 FFI using the DX11
+sketch as a target. Its import/catalog, storage/pointer, callback, COM and
+application contracts remain unapproved; the sketch is still non-compiling.**
 
 ## Summary
 
@@ -29,17 +31,19 @@ Should a bounded Windows x64 FFI milestone use the DX11 triangle as its
 motivating integration target, and implement only the native boundary features
 needed by that sample rather than general-purpose interop?
 
-## Recommendation
+## Accepted roadmap direction
 
-Adopt the sample as a staged target within the existing runtime/safety and
+Use the sample as a staged target within the existing runtime/safety and
 separate-compilation roadmap areas, without adding a fifth area or changing
-accepted language contracts. Keep the initial support Windows x64-only and
-advance one independently validated gate at a time. The accepted external
-callable identity, calling-convention and full-callable-contract requirements
-remain in force; ABI annotations cannot erase effects, access, ownership,
-rooting, loans or failure-containment obligations. In particular, `Sequential`
-alone does not establish a foreign representation, and `unsafe` does not
-authorize a proven lifetime escape.
+accepted language contracts. Keep the direction Windows x64-only and advance
+one independently validated gate at a time. This accepts the target and gate
+sequence only; each gate's source form, catalog, ABI, layout, lifetime and
+failure contracts require separate approval. The accepted external callable
+identity, calling-convention and full-callable-contract requirements remain
+in force; ABI annotations cannot erase effects, access, ownership, rooting,
+loans or failure-containment obligations. In particular, `Sequential` alone
+does not establish a foreign representation, and `unsafe` does not authorize
+a proven lifetime escape.
 
 1. **Checked scalar imports.** Implement an AOT-only source profile for
    bodyless top-level and static `extern` declarations using one registered
