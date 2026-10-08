@@ -1,6 +1,8 @@
-# First public fixed-layout profile
+# First public fixed-layout implementation slice
 
-**Status: unapproved**
+**Status: no separate profile identity (accepted); the proposed support
+slice, field eligibility, compatibility encoding and source migration remain
+unapproved.**
 
 ## Current boundary
 
@@ -17,21 +19,23 @@ and native test carriers are independently scoped and do not imply a
 
 ## Question
 
-Should the first public fixed-layout profile opt in Windows x64 compact
-`Copy` structs with natural-aligned sequential layout, while preserving
-existing artifact contracts?
+Should an initial support slice implement the existing target-specific
+`Blittable` plus `Sequential` contract for public Windows x64 compact `Copy`
+structs, while preserving existing artifact contracts?
 
 ### Summary
 
-The accepted representation model is defined, but there is no profile-specific
+The accepted representation model is defined, but there is no target-specific
 source schema or implementation contract for independently replaceable
-public layouts. Choosing source syntax, eligible fields, target limits and
-compatibility behavior is required before these layouts can cross a public
+public layouts. Choosing eligible fields, target limits and compatibility
+behavior is required before these layouts can cross a public
 separate-compilation boundary.
 
 ### Recommendation
 
-Adopt one explicit, opt-in Windows x64 profile as a provisional first slice:
+Treat the following as a provisional implementation slice for the existing
+Windows x64 `Blittable` plus `Sequential` contract, not as a new layout
+profile or semantic commitment:
 
 - Require both an explicit `Blittable` commitment and `Sequential` layout;
   resolve them through registered semantic-attribute identities and schemas,
@@ -51,10 +55,10 @@ Adopt one explicit, opt-in Windows x64 profile as a provisional first slice:
   arrays, unique or managed values, and unions.
 - Use natural field alignment only. Do not enable custom packing or
   aggregate over-alignment in this slice; `Transparent` remains unchanged.
-- Use the existing Windows x64 target requirement (`1`). Identify the logical
-  layout promise as `windows-x64-natural-sequential-v1`; this descriptive
-  profile name is not a new numeric target or wire identifier.
-- Persist and validate the explicit profile commitment, target requirement,
+- Use the existing Windows x64 target requirement (`1`). `Sequential` follows
+  that target's layout requirements, and `Blittable` commits the representation
+  for that target. Do not introduce a separate profile name or identity.
+- Persist and validate the explicit `Blittable` commitment, target requirement,
   final size, aggregate alignment, and ordered field type/access/offset
   records wherever an independently replaceable consumer relies on the
   representation. Recompute and check those values rather than trusting
@@ -68,13 +72,13 @@ Adopt one explicit, opt-in Windows x64 profile as a provisional first slice:
   source alone must not activate new diagnostics, and retained artifacts must
   not be retroactively rejected.
 
-This narrow profile reuses the existing natural-layout rule without claiming
-that it is a universal representation. The 16-byte bound is an initial
-implementation limit, not a language-wide maximum.
+This narrow implementation slice reuses the existing natural-layout rule
+without claiming that it is a universal representation. The 16-byte bound is
+an initial implementation limit, not a language-wide maximum.
 
 ## Proposed layout and compatibility contract
 
-The selected Windows x64 storage entries for this profile are:
+The selected Windows x64 storage entries for this implementation slice are:
 
 | Field type | Size | Natural alignment | Representation |
 |---|---:|---:|---|
@@ -94,19 +98,20 @@ validate arbitrary bit patterns, add atomicity, or define procedure-call
 classification.
 
 The logical structure metadata must retain enough information to compare the
-same promise across producers and consumers: profile name, target requirement,
-size, aggregate alignment, and each field's order, type, access/mutation
-contract, and offset. Existing metadata already carries most field shape;
-persisting the profile commitment and aggregate alignment is the missing
-semantic distinction. The concrete encoding and any new feature/revision
-values remain unassigned until the metadata review.
+same promise across producers and consumers: explicit `Blittable` and
+`Sequential` commitments, target requirement, size, aggregate alignment, and
+each field's order, type, access/mutation contract, and offset. Existing
+metadata already carries most field shape; persisting the `Blittable`
+commitment and aggregate alignment is the missing semantic distinction. The
+concrete encoding and any new feature/revision values remain unassigned until
+the metadata review.
 
 | Producer / consumer case | Recommended behavior |
 |---|---|
 | Existing artifact without this commitment | Load only under its existing profile and compatibility checks; do not infer or synthesize `Blittable`. |
-| New consumer requiring this profile, but producer lacks it | Reject before execution. |
-| Producer and consumer both declare this profile with identical target and field contract | Accept after validating the recorded layout. |
-| Target, profile, size, alignment, field order/type/access, or offset differs | Reject as incompatible before execution. |
+| New consumer requiring this target-specific commitment, but producer lacks it | Reject before execution. |
+| Producer and consumer both declare the same target-specific `Blittable` and `Sequential` commitments with identical field contracts | Accept after validating the recorded layout. |
+| Target, commitment, size, alignment, field order/type/access, or offset differs | Reject as incompatible before execution. |
 | Legacy consumer with a new producer | Preserve the existing contract where its format permits; otherwise reject the unsupported revision before execution. Never synthesize `Blittable`; the exact legacy-reader behavior depends on metadata review. |
 | Existing source is recompiled before migration activation | Preserve current source acceptance; do not infer `Blittable` or activate new diagnostics solely by recompilation. |
 | Source is compiled after an explicit migration activates the accepted rule | Diagnose public instance fields that lack a fixed-representation commitment; the activation mechanism must be specified before enforcement. |
@@ -122,7 +127,7 @@ diagnostic/versioning mechanisms. Keep wire identifiers and native
 procedure-call classifications unassigned until those contracts are reviewed.
 
 Validate natural alignment, interior and tail padding, nested layouts, the
-size bound, malformed or mismatched profile metadata, and compatible versus
+size bound, malformed or mismatched layout metadata, and compatible versus
 incompatible module replacement. Compare independently compiled producer and
 consumer storage layouts with an independent Windows x64 C fixture;
 Terrum-to-Terrum round trips alone do not establish layout conformance.
@@ -142,7 +147,7 @@ membership, and compares declarations compiled with different structure
 indexes by nominal name. The cases cover compatible body-only replacement,
 primitive and nested storage, padding, the 16-byte limit, unsupported types,
 forged offsets/widths/sizes/alignment claims, cycles and excessive nesting,
-plus incompatible profile, target, nominal, field, access, mutation and unsafe
+plus incompatible commitment, target, nominal, field, access, mutation and unsafe
 contracts.
 
 A separate Windows x64 C fixture verifies the selected scalar storage and the
