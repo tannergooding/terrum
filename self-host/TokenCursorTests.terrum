@@ -1,0 +1,61 @@
+using Terrum.CodeAnalysis;
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckTokenCursor()
+{
+    int32 tokenCount = Scan();
+    if (!TokenSnapshot.TryBuild(tokenCount, init var scanned))
+    {
+        return false;
+    }
+
+    mut TokenSnapshot owner = move scanned;
+    mut TokenCursor cursor = new TokenCursor(owner.AsSpan());
+    mut bool passed = true;
+
+    init Token negative;
+    if (cursor.TryGet(-1, init negative) || negative is init)
+    {
+        passed = false;
+    }
+
+    init Token outside;
+    if (cursor.TryGet(3, init outside) || outside is init)
+    {
+        passed = false;
+    }
+
+    if (!cursor.TryGet(1, init var indexed)
+        || indexed.Kind != 3 || indexed.Range.Start != 6 || indexed.Range.Length != 2)
+    {
+        passed = false;
+    }
+
+    if (!cursor.TryRead(init var first)
+        || first.Kind != 2 || first.Range.Start != 0 || first.Range.Length != 5)
+    {
+        passed = false;
+    }
+
+    if (!cursor.TryRead(init var second)
+        || second.Kind != 3 || second.Range.Start != 6 || second.Range.Length != 2)
+    {
+        passed = false;
+    }
+
+    if (!cursor.TryRead(init var eof)
+        || eof.Kind != 0 || eof.Range.Start != 8 || eof.Range.Length != 0)
+    {
+        passed = false;
+    }
+
+    init Token exhausted;
+    if (cursor.TryRead(init exhausted) || exhausted is init)
+    {
+        passed = false;
+    }
+
+    cursor = _;
+    owner = _;
+    return passed;
+}

@@ -1,0 +1,7 @@
+namespace Terrum.CodeAnalysis.Tests;
+
+int32 Main()
+{
+    require CheckTokenCursor();
+    return 42;
+}

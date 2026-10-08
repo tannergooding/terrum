@@ -108,6 +108,26 @@ public bool CheckManagedTokenChain()
         {
             return false;
         }
+        require cursorChain.TryAppend(11, 4, 1);
+        if (cursorChain.Count != 1 || cursorChain.Version != 6
+            || staleByClear.IsCurrent
+            || staleByClear.TryPeek(init var visibleAfterClear)
+            || staleByClear.TryRead(init var readableAfterClear))
+        {
+            return false;
+        }
+        require cursorChain.TryCreateCursor(out var freshAfterClear);
+        require freshAfterClear.TryRead(init var appendedAfterClear);
+        if (!freshAfterClear.IsCurrent || appendedAfterClear.Kind != 11
+            || appendedAfterClear.Range.Start != 4 || appendedAfterClear.Range.Length != 1)
+        {
+            return false;
+        }
+        require cursorChain.TryClear();
+        if (cursorChain.Count != 0 || cursorChain.Version != 7)
+        {
+            return false;
+        }
     }
 
     ManagedHeap.Collect();
@@ -117,7 +137,7 @@ public bool CheckManagedTokenChain()
     }
     require cursorChain.TryCreateCursor(out var fullCursor);
     if (cursorChain.TryAppend(64, 64, 1)
-        || cursorChain.Count != 64 || cursorChain.Version != 69
+        || cursorChain.Count != 64 || cursorChain.Version != 71
         || !fullCursor.IsCurrent)
     {
         return false;
@@ -134,7 +154,7 @@ public bool CheckManagedTokenChain()
         return false;
     }
     require cursorChain.TryClear();
-    if (cursorChain.Count != 0 || cursorChain.Version != 70
+    if (cursorChain.Count != 0 || cursorChain.Version != 72
         || fullCursor.IsCurrent || fullCursor.TryPeek(init var invalidated)
         || ManagedHeap.Collect() != 64)
     {

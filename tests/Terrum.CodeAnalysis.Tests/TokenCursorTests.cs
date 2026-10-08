@@ -131,6 +131,21 @@ public sealed class TokenCursorTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task TerrumComponentRunnerExecutesCursorCoverageWithoutPersistingSpanMetadataAsync(
+        BoundRuntimePolicy policy)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var runnerPath = Path.Combine(root, "self-host", "TokenCursorComponentTestRunner.terrum");
+        var runner = await File.ReadAllTextAsync(runnerPath).ConfigureAwait(true);
+        var compilation = await CompileAsync("alpha 42", runner, policy, includeTokenCursorTests: true)
+            .ConfigureAwait(true);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteAsync(Program(compilation), policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CursorTraversesMaximumScannerTokenSnapshotAsync(BoundRuntimePolicy policy)
     {
         var identifierCount = ScannerHost.MaximumSourceLength / 2;
@@ -1348,7 +1363,7 @@ public sealed class TokenCursorTests
     }
 
     private static async Task<Compilation> CompileAsync(string text, string entry, BoundRuntimePolicy policy,
-        Func<string, string, string>? rewrite = null, bool trace = false)
+        Func<string, string, string>? rewrite = null, bool trace = false, bool includeTokenCursorTests = false)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         string[] names = ["SourceRange", "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "CharacterLiteral", "StringEscape", "Token",
@@ -1360,6 +1375,11 @@ public sealed class TokenCursorTests
             var path = Path.Combine(root, "self-host", name + ".terrum");
             var source = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees.Add(SyntaxTree.Parse(rewrite is null ? source : rewrite(name, source), path));
+        }
+        if (includeTokenCursorTests)
+        {
+            var path = Path.Combine(root, "self-host", "TokenCursorTests.terrum");
+            trees.Add(SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path));
         }
         trees.Add(SyntaxTree.Parse(entry, "token-cursor-entry.terrum"));
         var buffers = ScannerHost.CreateBuffers(SourceText.From(text));

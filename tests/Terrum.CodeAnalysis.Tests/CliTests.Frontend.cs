@@ -547,6 +547,7 @@ public sealed partial class CliTests
     [InlineData("public uint64 Value(uint64 x, uint64 y, uint64 z) { return 0xFFFFFFFFFFFFFFFF ^ z; }")]
     [InlineData("public int32 Value(int32 x, int32 y, int32 z) { return z + -2147483648; }")]
     [InlineData("public bool Value(int64 x, int64 y, int64 z) { return z == -9223372036854775808; }")]
+    [InlineData("public int32 Value() { for (;;) { break; } return 42; }")]
     public async Task FrontendBuiltLibraryMatchesHostedNativeBytesAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
