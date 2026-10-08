@@ -78,8 +78,9 @@ approved.
   an implementation-only boundary under the approved Body contract; optional
   source types, call signatures and native ABI support remain out of scope.
 - [Static initialization metadata and attribute schema](static-initialization-metadata.md)
-  recommends how to persist the accepted static-storage contract without
-  changing its initialization or failure semantics.
+  records the accepted typed-enum argument shape for `StaticInitializer`;
+  lazy-attribute, metadata, access-obligation and runtime-profile details
+  remain unapproved.
 - [First public fixed-layout profile](public-fixed-layout-profile.md)
   recommends a bounded natural-alignment Windows x64 opt-in without changing
   existing private Sequential or semantic-module layout contracts.

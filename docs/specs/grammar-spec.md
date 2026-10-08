@@ -1168,8 +1168,12 @@ semantic attribute `[StaticInitializer(...)]` with an explicit trigger choice:
 grouped-static-field access or runtime static-member access. There is no
 default trigger inferred from the presence of its body. Type names, metadata
 inspection and compile-time member binding are not runtime access triggers.
-The concrete policy argument catalog and schema are separate attribute work;
-an arbitrary same-named attribute cannot select this behavior.
+The attribute takes exactly one positional compile-time value of a dedicated,
+closed enum with one case for each accepted trigger choice; it has no default.
+The compiler maps the selected case to the normalized trigger tag, not to a
+runtime policy derived from the enum's underlying bits. The registered enum
+identity and source case spellings remain attribute-catalog details. An
+arbitrary same-named attribute cannot select this behavior.
 With no authored static constructor, a synthesized group triggers on first
 runtime access to a grouped static field without requiring a source annotation.
 

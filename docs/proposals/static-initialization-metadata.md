@@ -1,9 +1,12 @@
 # Static initialization metadata and attribute schema
 
-> **Status: unapproved proposal.** This document records a recommended
-> encoding and source-attribute schema for the already accepted
-> [static initialization contract](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage).
-> It does not change that contract or claim compiler support.
+> **Status: partially accepted.** `[StaticInitializer]` takes one value of a
+> dedicated, closed enum with a case for each accepted trigger choice. Its
+> registered enum identity and case spellings remain open. The proposed
+> `LazyInitialization` schema and persisted metadata, Body-access and runtime
+> profiles remain unapproved and do not claim compiler support. The accepted
+> [static initialization contract](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage)
+> is unchanged.
 
 ## Summary
 
@@ -17,24 +20,26 @@ binding, persistence and runtime adoption cannot proceed safely by treating
 these attributes as ordinary names or by inheriting host static-constructor
 behavior.
 
-## Decision
+## Accepted source schema and remaining decisions
 
-Which resolved semantic-attribute schemas and required metadata records should
-carry the accepted static-initialization contract?
+**Accepted:** `StaticInitializer` takes exactly one positional compile-time
+value of a dedicated, closed enum, with one case for each accepted trigger
+choice. The compiler normalizes that case to the trigger tag. The registered
+enum identity and source case spellings are not selected here.
 
-**Recommendation:** define `StaticInitializer` and `LazyInitialization` as
-compiler-recognized attributes with closed schemas, then persist their
-normalized meaning in required static-initialization records. Keep the
-accepted execution, failure, publication, sharing and unload rules unchanged.
+The `LazyInitialization` schema and the required metadata records, access
+obligations, runtime profile and encoding that carry the accepted contract
+remain open. These choices must preserve the accepted execution, failure,
+publication, sharing and unload rules.
 
 ### Attribute schemas
 
-- `StaticInitializer` requires exactly one positional string constant
-  argument whose value is one of `"grouped-static-field-access"` or
-  `"runtime-static-member-access"`. It has no default and applies only to the
-  primary authored static constructor. The resolved attribute identity, not
-  its spelling alone, selects this schema; the resolved constructor and
-  argument name, type, and position are fixed by registration.
+- `StaticInitializer` requires exactly one positional compile-time value of
+  the registered dedicated trigger enum, with a case for each accepted trigger
+  choice. It has no default and applies only to the primary authored static
+  constructor. The resolved attribute and enum identities, not their
+  spellings alone, select this schema; the resolved constructor and argument
+  name, type, and position are fixed by registration.
 - `LazyInitialization` takes no arguments and applies only to an ordinary,
   non-`extern` static field. It does not apply to constants or property
   backing storage; its resolved attribute identity and zero-argument schema
@@ -46,9 +51,9 @@ accepted execution, failure, publication, sharing and unload rules unchanged.
   identity rules. An arbitrary same-named user attribute cannot select these
   compiler behaviors.
 
-The string values provide an explicit, readable closed choice without
-requiring enum support or attribute-specific expression syntax. The compiler
-normalizes them to a closed trigger tag; raw source strings are not runtime
+The typed enum makes invalid trigger spellings unrepresentable and reuses the
+ordinary checked enum-constant rules. The compiler normalizes the selected
+case to a closed trigger tag; the enum's underlying bits are not runtime
 policy.
 
 ### Required logical records
