@@ -1,0 +1,140 @@
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckSourceLineIndex()
+{
+    if (Host.Source.Length == 0)
+    {
+        return CheckEmptySourceLineIndex();
+    }
+    if (Host.Source.Length == 3)
+    {
+        return CheckBreakOnlySourceLineIndex();
+    }
+    if (Host.Source.Length != 7)
+    {
+        return false;
+    }
+
+    require SourceLineIndex.TryCreate(init var index);
+    if (index.GetLineCount() != 3)
+    {
+        return false;
+    }
+
+    require index.TryGetLineExtent(0, init var firstExtent);
+    require index.TryGetLineContentExtent(0, init var firstContent);
+    require index.TryGetLineExtent(1, init var secondExtent);
+    require index.TryGetLineContentExtent(1, init var secondContent);
+    require index.TryGetLineExtent(2, init var finalExtent);
+    require index.TryGetLineContentExtent(2, init var finalContent);
+    if (firstExtent.Start != 0 || firstExtent.Length != 5
+        || firstContent.Start != 0 || firstContent.Length != 3
+        || secondExtent.Start != 5 || secondExtent.Length != 2
+        || secondContent.Start != 5 || secondContent.Length != 1
+        || finalExtent.Start != 7 || finalExtent.Length != 0
+        || finalContent.Start != 7 || finalContent.Length != 0)
+    {
+        return false;
+    }
+
+    if (!index.TryGetPosition(6, init var lineSix, init var characterSix)
+        || lineSix != 1 || characterSix != 1
+        || !index.TryGetPosition(2, init var lineTwo, init var characterTwo)
+        || lineTwo != 0 || characterTwo != 2
+        || !index.TryGetPosition(4, init var lineFour, init var characterFour)
+        || lineFour != 0 || characterFour != 4
+        || !index.TryGetPosition(0, init var lineZero, init var characterZero)
+        || lineZero != 0 || characterZero != 0
+        || !index.TryGetPosition(7, init var finalLine, init var finalCharacter)
+        || finalLine != 2 || finalCharacter != 0)
+    {
+        return false;
+    }
+
+    if (!index.TryGetOffset(0, 2, init var offsetTwo) || offsetTwo != 2
+        || !index.TryGetOffset(0, 4, init var offsetFour) || offsetFour != 4
+        || !index.TryGetOffset(1, 1, init var offsetSix) || offsetSix != 6
+        || !index.TryGetOffset(2, 0, init var offsetSeven) || offsetSeven != 7)
+    {
+        return false;
+    }
+
+    if (index.TryGetPosition(-1, init var beforeLine, init var beforeCharacter)
+        || index.TryGetPosition(8, init var afterLine, init var afterCharacter)
+        || index.TryGetPosition(int32.MaxValue, init var maximumLine, init var maximumCharacter)
+        || index.TryGetOffset(-1, 0, init var beforeOffset)
+        || index.TryGetOffset(3, 0, init var afterOffset)
+        || index.TryGetOffset(0, -1, init var negativeCharacter)
+        || index.TryGetOffset(0, int32.MaxValue, init var excessiveCharacter)
+        || index.TryGetOffset(0, 5, init var nextLineStart)
+        || index.TryGetOffset(1, 2, init var afterSecondLine)
+        || index.TryGetOffset(2, 1, init var afterEnd)
+        || index.TryGetLineExtent(-1, init var beforeExtent)
+        || index.TryGetLineExtent(3, init var afterExtent)
+        || index.TryGetLineContentExtent(-1, init var beforeContent)
+        || index.TryGetLineContentExtent(3, init var afterContent))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool CheckEmptySourceLineIndex()
+{
+    require SourceLineIndex.TryCreate(init var index);
+    require index.TryGetLineExtent(0, init var extent);
+    require index.TryGetLineContentExtent(0, init var content);
+    return index.GetLineCount() == 1
+        && extent.Start == 0 && extent.Length == 0
+        && content.Start == 0 && content.Length == 0
+        && index.TryGetPosition(0, init var line, init var character)
+        && line == 0 && character == 0
+        && index.TryGetOffset(0, 0, init var offset) && offset == 0
+        && !index.TryGetPosition(-1, init var beforeLine, init var beforeCharacter)
+        && !index.TryGetPosition(1, init var afterLine, init var afterCharacter)
+        && !index.TryGetOffset(0, 1, init var afterOffset)
+        && !index.TryGetLineExtent(-1, init var beforeExtent)
+        && !index.TryGetLineExtent(1, init var afterExtent)
+        && !index.TryGetLineContentExtent(-1, init var beforeContent)
+        && !index.TryGetLineContentExtent(1, init var afterContent);
+}
+
+bool CheckBreakOnlySourceLineIndex()
+{
+    require SourceLineIndex.TryCreate(init var index);
+    require index.TryGetLineExtent(0, init var firstExtent);
+    require index.TryGetLineContentExtent(0, init var firstContent);
+    require index.TryGetLineExtent(1, init var secondExtent);
+    require index.TryGetLineContentExtent(1, init var secondContent);
+    require index.TryGetLineExtent(2, init var finalExtent);
+    require index.TryGetLineContentExtent(2, init var finalContent);
+    if (index.GetLineCount() != 3
+        || firstExtent.Start != 0 || firstExtent.Length != 2
+        || firstContent.Start != 0 || firstContent.Length != 0
+        || secondExtent.Start != 2 || secondExtent.Length != 1
+        || secondContent.Start != 2 || secondContent.Length != 0
+        || finalExtent.Start != 3 || finalExtent.Length != 0
+        || finalContent.Start != 3 || finalContent.Length != 0)
+    {
+        return false;
+    }
+
+    return index.TryGetPosition(0, init var firstLine, init var firstCharacter)
+        && firstLine == 0 && firstCharacter == 0
+        && index.TryGetPosition(1, init var crlfLine, init var crlfCharacter)
+        && crlfLine == 0 && crlfCharacter == 1
+        && index.TryGetPosition(2, init var secondLine, init var secondCharacter)
+        && secondLine == 1 && secondCharacter == 0
+        && index.TryGetPosition(3, init var finalLine, init var finalCharacter)
+        && finalLine == 2 && finalCharacter == 0
+        && index.TryGetOffset(0, 0, init var firstOffset) && firstOffset == 0
+        && index.TryGetOffset(0, 1, init var crlfOffset) && crlfOffset == 1
+        && !index.TryGetOffset(0, 2, init var nextLineStart)
+        && index.TryGetOffset(1, 0, init var secondOffset) && secondOffset == 2
+        && !index.TryGetOffset(1, 1, init var nextFinalLine)
+        && index.TryGetOffset(2, 0, init var finalOffset) && finalOffset == 3
+        && !index.TryGetOffset(2, 1, init var afterEnd)
+        && !index.TryGetPosition(-1, init var beforeLine, init var beforeCharacter)
+        && !index.TryGetPosition(4, init var afterLine, init var afterCharacter);
+}

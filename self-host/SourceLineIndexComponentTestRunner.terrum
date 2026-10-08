@@ -1,0 +1,8 @@
+using Terrum;
+namespace Terrum.CodeAnalysis.Tests;
+
+int32 Main()
+{
+    require CheckSourceLineIndex();
+    return 0;
+}

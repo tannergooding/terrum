@@ -1096,6 +1096,56 @@ public sealed class ModuleTests
     }
 
     [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task SelfHostSourceLineIndexComponentRunnerExecutesWithFreshSourceGrantAsync(
+        BoundRuntimePolicy policy)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var componentNames = new[] {
+            "SourceRange",
+            "CharacterFacts",
+            "SourceText",
+            "SourceLineIndex",
+            "SourceLineIndexTests",
+        };
+        var components = new SyntaxTree[componentNames.Length];
+        for (var index = 0; index < componentNames.Length; index++)
+        {
+            var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
+            components[index] = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
+            Assert.False(components[index].HasErrors,
+                string.Join(Environment.NewLine, components[index].Diagnostics));
+        }
+
+        const string sourceText = "A\U0001F600\r\nb\n";
+        var sourceGrant = new HostBuffer("Source", PrimitiveType.Char16,
+            [.. sourceText.Select(static codeUnit => (int)codeUnit)], false) {
+            IsInvocationScoped = true,
+        };
+        var library = Compilation.CreateLibrary(components, [sourceGrant], policy);
+        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program),
+            ["Terrum.CodeAnalysis.Tests.CheckSourceLineIndex"]);
+
+        var runnerPath = Path.Combine(root, "self-host", "SourceLineIndexComponentTestRunner.terrum");
+        var runner = SyntaxTree.Parse(await File.ReadAllTextAsync(runnerPath).ConfigureAwait(true), runnerPath);
+        var compilation = Compilation.Create(runner, ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.True(linked.RequiresSourceGrant);
+        foreach (var sourceFixture in new[] { sourceText, "", "\r\n\n" })
+        {
+            var grant = new HostBuffer("Source", PrimitiveType.Char16,
+                [.. sourceFixture.Select(static codeUnit => (int)codeUnit)], false) {
+                IsInvocationScoped = true,
+            };
+            Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(linked, [grant], (NativeRuntimePolicy)policy));
+        }
+    }
+
+    [Theory]
     [InlineData("range.Start")]
     [InlineData("range.End")]
     public async Task FailedRangeInitCannotPublishFieldsAsync(string read)

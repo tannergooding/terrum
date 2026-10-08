@@ -696,6 +696,11 @@ so one- and two-line sources need no second scan, and captures each other
 break's marker while filling starts. If every code unit ends a line, starts are
 filled directly from their ordinal positions. This is not a resizing collection,
 stored source view, managed line collection, or general allocator API.
+The dedicated multi-source `SourceLineIndexComponentTestRunner.terrum` also
+executes the index across fresh invocation-scoped grants containing a
+representative UTF-16 source, empty input, and consecutive CRLF/LF breaks under
+both runtime policies, checking extents, position/offset boundaries, invalid
+queries, and trailing-break EOF.
 
 `IntegerFormatting` consumes and returns a unique `int32`-word workspace.
 The decimal entry points require capacity for the actual output (at most
