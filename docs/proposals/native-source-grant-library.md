@@ -1,12 +1,16 @@
 # Native source-grant library proposal
 
-**Status: unapproved proposal.**
+**Status: Deferred. No native source-grant ABI or 16,384-code-unit maximum is
+accepted; the maintained companion is provisional implementation evidence
+only. Reconsider this proposal only for a concrete native source-processing
+caller.**
 
 ## Summary
 
-The invocation-scoped source-grant proposal permits bounded source-dependent
-semantic-module JIT execution. Ordinary native-library emission still rejects
-programs that require `Host.Source`; an explicit opt-in CLI path now emits a
+The invocation-scoped source-grant proposal has provisional semantic-module
+JIT implementation support but is deferred and is not an accepted execution
+contract. Ordinary native-library emission still rejects programs that
+require `Host.Source`; an explicit opt-in CLI path now emits a
 separate provisional Windows x64 companion for a checked scalar adapter and
 a scalar source-length, source-code-unit, source-offset, source-line-count
 and source-position queries, plus validated string-literal length queries
@@ -25,14 +29,14 @@ compiler-primitives DLL by binding a build-time sample. A native entry point
 needs an explicit per-call source ABI, with bounded length, read-only access,
 and no retained address.
 
-**Recommendation:** permit a narrowly scoped generated ABI for
-source-dependent exports. Prefix only those exported signatures with a
-`const char16*` source address and a `uint32` code-unit count; propagate the
-same pair through their internal source-dependent call graph. Keep
-source-independent exports unchanged. The caller must provide readable,
-two-byte-aligned storage and keep it immutable and alive until the synchronous
-call returns. This is an internal Windows x64 implementation ABI, not a
-language-level pointer or span feature, public API, or stable C ABI.
+**Deferred decision:** Do not promote a source-dependent native ABI without a
+concrete native source-processing caller. The opt-in companion and its
+source-aware exports are implementation evidence only; the source-free
+compiler-primitives DLL remains unchanged. The proposed 16,384-code-unit cap
+and packed result encodings are prototype constraints, not accepted limits for
+source-processing input. If a real caller emerges, define its input extent,
+range checks, resource policy and result representation from that use case;
+do not infer a public pointer/span feature or stable C ABI.
 
 ## Candidate first-slice boundary
 
@@ -86,12 +90,12 @@ source-free artifact unless the proposal is promoted.
 
 ## Implementation boundary
 
-This proposal remains unapproved and does not make the candidate ABI an
-accepted target contract. The bounded maintained-library companion described
-below is provisional implementation evidence, not promotion. Exact export
-naming, interaction with any future cross-DLL source dependency, and whether
-a general managed invocation API is needed remain open. No compiler bootstrap
-or public native ABI is supported.
+This proposal is deferred and does not make the candidate ABI an accepted
+target contract. The bounded maintained-library companion described below is
+provisional implementation evidence, not promotion. Exact export naming,
+interaction with any future cross-DLL source dependency, and whether a general
+managed invocation API is needed remain open. No compiler bootstrap or public
+native ABI is supported.
 
 ### Provisional maintained-library slice
 

@@ -54,9 +54,9 @@ approved.
 - [Invocation-scoped source grant](invocation-scoped-source-grant.md)
   is deferred; accepted semantic-module execution remains source-independent
   unless a concrete source-processing tooling API requires this boundary.
-- [Native source-grant library](native-source-grant-library.md) proposes a
-  bounded per-call source ABI for internal native-library exports; it does not
-  extend the semantic-module source-grant profile or establish DLL support.
+- [Native source-grant library](native-source-grant-library.md) is deferred
+  until a concrete native source-processing caller exists; no ABI or
+  16,384-unit cap is accepted.
 - [Sample-driven Windows native FFI](windows-native-ffi.md) recommends checked
   Windows x64 scalar imports through a trusted semantic-identity catalog
   first, followed by only the storage, pointer, callback and closed-COM slices
