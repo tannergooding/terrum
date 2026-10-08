@@ -665,6 +665,10 @@ only `F()`, while `const (F() + x)` requires the whole expression. Literal
 parsing always uses the registered compile-time parser, even in ordinary local
 initialization; there is no runtime fallback. Current evaluator support is
 documented in [implementation](../implementation.md).
+The intended compile-time model for evaluators and user-defined integer
+literals is pure, bounded computation based on compiler-known invariants and
+ordinals; it does not imply arbitrary source-reading JIT work. The exact
+eligibility rules, evaluator operations and resource guarantees remain open.
 The evaluator has no ambient I/O, preserves target semantics and recorded
 producer/rule/value-ABI dependencies, and permits only checked bounded
 evaluation. It does not change type checking, overload binding or optimizer

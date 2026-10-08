@@ -1,6 +1,7 @@
 # Registered UTF-8 string-literal target
 
-**Status: unapproved**
+**Status: Deferred. The proposed source-reading semantic-module-JIT route is
+not the intended compile-time literal model.**
 
 ## Current boundary
 
@@ -18,9 +19,8 @@ not define this registration's identity or lifecycle.
 This proposal does not change literal parsing, introduce a new encoding, or
 move verification or emission from the hosted compiler.
 
-**Review:** A focused implementation-contract review found no blocking
-conflict in the proposed source-dependent module route or same-invocation
-range validation. Registration remains unapproved and unimplemented.
+**Decision:** The source-dependent JIT route is deferred. This proposal does
+not establish a literal handler contract or source-grant requirement.
 
 ## Question
 
@@ -36,20 +36,23 @@ four-byte row alignment. Binding it requires a concrete registration and
 ownership/failure contract; the general builder/handler direction does not
 settle those per-target details.
 
-### Recommendation
+### Deferred decision
 
-Add exactly one closed target registration, `StringLiteral` to
-`StringNameRowUtf8`, backed by one explicit compiler-owned registration for
-the source-dependent `StringRow` component. Resolve its identity from the
-selected component and declaration, never from a same-named method alone.
-Execute it through the invocation-scoped semantic-module JIT, which already
-supports source-dependent row construction with an owned result. Do not route
-it through the maintained native source-grant DLL: that scalar-only ABI does
-not return owned buffers. Keep the registration specific to this signature
-and target; do not add a general flags parameter, registration attribute, or
-builder framework in this slice.
+Do not add this registration through a source-reading semantic-module JIT
+handler. The intended compile-time model for `ConstEval` and user-defined
+integer literals is pure, bounded computation based on compiler-known
+invariants and ordinals, not arbitrary source-dependent JIT work. This
+string-target registration and its ownership/refusal/output rules remain
+unapproved. Any future compile-time string target needs a separately defined
+pure input, work and size contract; this proposal does not imply a general
+builder/handler route.
 
-The recommended signature shape is:
+### Original candidate profile (unapproved)
+
+The deferred candidate was one compiler-owned registration from
+`StringLiteral` to `StringNameRowUtf8`, using the existing encoder's flag value
+`1`, nonempty-name rule, embedded-zero rejection, UTF-8 payload, terminator
+and four-byte alignment. Its proposed handler shape was:
 
 ```terrum
 bool TryBuildStringNameRowUtf8(
@@ -58,26 +61,12 @@ bool TryBuildStringNameRowUtf8(
     init ref<OwnedInt32Buffer> row)
 ```
 
-The contract is:
-
-- `spelling` identifies the exact literal token range in immutable invocation
-  `Host.Source`. The builder constructs a `StringLiteral` from that current
-  range with `StringLiteral.TryCreate` before measuring or encoding; it never
-  trusts a previously materialized literal descriptor. The handler retains
-  neither the source grant nor a source-backed view.
-- `workspace` is transferred to the handler on entry and consumed regardless
-  of the result. The handler may move it into the existing
-  `EncodeStringNameRow` implementation; it is not returned on refusal.
-- Preflight the existing `StringNameRow` constraints and required byte length
-  before publishing anything. The fixed registration uses flags `1`; it does
-  not expose flag selection to callers.
-- Return `false` for a target refusal, including an empty name, embedded
-  zero, or insufficient workspace. On refusal, release any partial workspace
-  state and leave `row` vacant. Workspace consumption is not rolled back.
-- Propagate runtime failures according to the ordinary checked/fail-fast
-  behavior; do not translate them into a successful row or a refusal result.
-- On success, publish the owned row exactly once through `init ref` only
-  after the UTF-8 payload, terminator, and four-byte padding are complete.
+The proposal would have revalidated the exact spelling against invocation
+`Host.Source`, consumed the owned workspace on entry even on refusal, left
+`row` vacant on refusal, and published the completed owned row exactly once
+on success. The handler would not retain the source grant. These registration,
+source-access, transfer, refusal, cleanup and publication semantics remain
+unapproved; the sketch is preserved only to identify what was deferred.
 
 The target restrictions and existing `StringRow` ownership operations are
 evidence-based. The compiler-owned registration identity, same-invocation

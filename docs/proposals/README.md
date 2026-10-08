@@ -65,8 +65,8 @@ approved.
   deferred until an integrated compiler path needs it and its full-file
   size/resource policy is defined; revision-76 support remains provisional.
 - [Registered UTF-8 string-literal target](registered-string-target-binding.md)
-  recommends one bounded `StringLiteral` to `StringNameRowUtf8` registration
-  without defining general builder/handler semantics.
+  is deferred; its source-reading semantic-module-JIT route is not the
+  intended compile-time literal model and does not define general handlers.
 - [Checked-exception TRRM](checked-exception-trrm.md) records the unapproved
   exceptional-control-flow contract needed before source-free checked-exception
   Bodies can be considered.
