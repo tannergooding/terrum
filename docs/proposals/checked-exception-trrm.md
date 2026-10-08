@@ -13,7 +13,10 @@ implementation, not a final compatibility boundary: core language exception
 semantics must be representable and executable in TRRM 1.0 before GA. The
 hosted compiler's bounded checked `try`/`catch` subset and the scalar
 frontend's bounded bare catch with optional `finally` are implementation
-evidence, not a complete source-free contract.
+evidence, not a complete source-free contract. Core output-mode semantics are
+also required in executable TRRM by 1.0 GA. The initial profile below excludes
+output parameters and therefore cannot by itself satisfy the complete GA
+requirements.
 
 ## Accepted requirement and remaining design
 

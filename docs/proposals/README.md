@@ -71,8 +71,9 @@ approved.
   requirement that TRRM 1.0 support core checked-exception semantics by GA;
   exceptional-edge encoding and conformance details remain open.
 - [Output parameters in executable TRRM](trrm-output-parameters.md) records
-  the unapproved place, publication and exceptional-state contract required
-  before `out` or `init ref<T>` modes can execute from source-free artifacts.
+  the accepted requirement that core output-mode semantics be executable in
+  TRRM 1.0 by GA; its profile, encoding, place, publication and
+  exceptional-state details remain unapproved.
 - [Optional scalar TRRM execution](optional-scalar-trrm-execution.md) records
   a proposed internal execution boundary that does not imply source-language
   or public native ABI support.

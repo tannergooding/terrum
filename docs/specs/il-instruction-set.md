@@ -2152,6 +2152,12 @@ calls may fail under the module's fail-fast policy. Forward and recursive
 references do not require declaration order or recursive inlining.
 Imported, packed cross-module (`m=0`), nominal/instance, generic/witness,
 non-value-mode and owning calls remain outside this executable subset.
+Core source-level output-mode semantics are nevertheless required in
+source-free TRRM artifacts by 1.0 GA. This requirement does not change the
+current beta subset or accept the provisional `ScalarInitOutput` feature ID,
+rule revisions or place/publication rules. The complete output profile must
+specify failure and cleanup behavior, including its interaction with checked
+exceptions; its encoding and conformance rules remain open.
 
 `0B..11`, `13..14`, `1A..1C`, `8A`, and nonzero place counts are **assigned
 decode shapes, not executable forms**; `19` is reserved and rejects.

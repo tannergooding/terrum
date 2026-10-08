@@ -1,26 +1,37 @@
 # Output parameters in executable TRRM
 
-**Status: Unapproved**
+**Status: Accepted direction: core source-level output-mode semantics must be
+supported by TRRM 1.0 GA. The executable profile, encoding and conformance
+rules remain unapproved.**
 
 ## Summary
 
-The accepted executable TRRM contract still admits only by-value parameters.
-The implementation provisionally executes a bounded `ScalarInitOutput` subset
-behind a required Feature assignment without changing that contract.
-Structural parameter modes, Boolean-correlated `OutputState` rows, and the
-place shapes alone do not specify executable output behavior.
+The current beta executable TRRM subset still admits only by-value parameters.
+Core source-level output-mode semantics are required in executable TRRM by
+1.0 GA, but the provisional `ScalarInitOutput` implementation profile does not
+define the complete contract. Structural parameter modes, Boolean-correlated
+`OutputState` rows, and the place shapes alone do not specify executable
+output behavior.
 
 ## Question
 
-Should the bounded `ScalarInitOutput` profile below become an accepted
-executable TRRM contract?
+Which output-mode forms, place and publication rules, exceptional-state
+behavior, and artifact profile should define the complete executable
+contract?
 
 ## Recommendation
 
-Implement this as a **provisional, unapproved** profile while preserving the
-existing `(1, 0)` by-value executable subset. This is an engineering
-recommendation, not acceptance of a language or interchange contract.
-Keep the following boundaries explicit:
+Preserve the existing `(1, 0)` by-value executable subset while developing
+the bounded `ScalarInitOutput` profile below as provisional implementation
+support. Do not accept its Feature ID, rule revisions, place rules or
+publication behavior as the complete executable contract. Before TRRM 1.0 GA,
+specify the core output modes in source-free artifacts, including their
+failure, cleanup and checked-exception interactions. This accepted direction
+does not select an encoding or imply that current implementation support meets
+it.
+
+For the provisional implementation profile only, keep the following
+candidate boundaries explicit:
 
 - Retain artifact version `(1, 0)`, which is still pre-release. Activate core
   Feature section kind `0x0004` with flags `0` and its assigned eight-byte row
@@ -172,11 +183,13 @@ revision-2 behavior when an artifact requires only revision 1. This is an
 implementation recommendation only and does not approve either revision as
 the executable TRRM contract.
 
-The broader proposal remains unresolved. In particular, Boolean status facts
-are call-specific and require correlation with their particular destinations;
-`out`, fields, aliases, imports, forwarding, cleanup, checked exceptions,
+The detailed executable contract remains unresolved. In particular, Boolean
+status facts are call-specific and require correlation with their particular
+destinations; `out`, fields, aliases, imports, forwarding, cleanup,
 exceptional publication, and general reference/loan contracts remain outside
-this provisional slice. This proposal does not approve a general
+this provisional slice. These exclusions do not waive the accepted TRRM 1.0
+GA requirement for core output-mode semantics or their composition with
+checked exceptions. This proposal does not approve a general
 `out`-to-`init ref<T>` migration, scalar-frontend verification/emission, or
 any public ABI change.
 
