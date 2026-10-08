@@ -35,7 +35,8 @@ approved.
 - [Reference-call metadata](reference-call-metadata.md) has an accepted,
   bounded indexed-Body unsafe-region contract; its dependency-relation
   profile is deferred until a concrete persisted use case, while general
-  output-call migration and other extensions remain unapproved.
+  output-call migration is deferred pending place, alias and publication
+  rules; other extensions remain unapproved.
 - [Floating results from generic Copy output templates](generic-floating-output-results.md)
   has accepted fixed floating results for single-mode generic outputs without
   fixed side parameters; mixed-mode and fixed-side combinations remain

@@ -4,7 +4,8 @@
 contract is accepted and specified in the
 [instruction set](../specs/il-instruction-set.md). The dependency-relation
 profile is deferred until a concrete persisted provider/consumer path needs
-it. General output-call migration and all other extensions remain unapproved.
+it. General output-call migration is deferred pending explicit place, alias
+and publication rules; all other extensions remain unapproved.
 Provisional implementation notes are evidence of support only and do not
 settle those decisions.
 
@@ -852,6 +853,11 @@ section 1, general output-call migration in section 4, or any other proposal
 extension.
 
 ### 4. Which source rules and metadata gate general output-call migration?
+
+**Decision recorded:** defer general output-call migration and keep the
+existing bounded `out`/`init ref` profiles unchanged until eligible
+destinations, formal mapping, aliasing and normal/exceptional publication
+rules are specified.
 
 **Summary:** Grammar §5.1 accepts the explicit `init` call-site spelling but
 leaves complete place matching, overload binding and conditional-output
