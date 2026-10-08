@@ -712,8 +712,24 @@ public static partial class ScalarFrontendHost
                 {
                     throw InvalidResult();
                 }
-                while (statementCursor < end)
+                void SkipEmptyStatements()
                 {
+                    if (clause != 0)
+                    {
+                        return;
+                    }
+                    while (at < tokens.Length && tokens[at].Kind == TokenKind.Semicolon)
+                    {
+                        at++;
+                    }
+                }
+                while (true)
+                {
+                    SkipEmptyStatements();
+                    if (statementCursor >= end)
+                    {
+                        break;
+                    }
                     var statementIndex = statementCursor++;
                     var entry = orderedStatements[statementIndex];
                     var kind = StatementKind(entry.Kind);

@@ -19,6 +19,7 @@ public sealed partial class CliTests
 
     [Theory]
     [InlineData("int32 Main() { return 42; }", 42)]
+    [InlineData("int32 Main() { ; return 42; }", 42)]
     [InlineData("int32 Main() { return -0xFFFFFFD6; }", 42)]
     [InlineData("int32 Main() { if (true) { return 42; } else { return 0; } }", 42)]
     [InlineData("int32 Main() { return ((42)); }", 42)]

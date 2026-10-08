@@ -2201,7 +2201,11 @@ mut class ScalarFrontendState
         mut Token next = first;
         while (next.Kind != 49 && _error == 0)
         {
-            if (next.Kind == 2 && TryGetToken(tokenView, _at + 1, init var colon)
+            if (next.Kind == 52)
+            {
+                _at = _at + 1;
+            }
+            else if (next.Kind == 2 && TryGetToken(tokenView, _at + 1, init var colon)
                 && colon.Kind == 55)
             {
                 if (!ParseTreeNamedLoop(depth, next, tokenView)) { return false; }
