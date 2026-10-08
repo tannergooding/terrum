@@ -1,6 +1,8 @@
 # Invocation-scoped source grant proposal
 
-**Status: unapproved proposal.**
+**Status: Deferred. Accepted semantic-module execution remains
+source-independent; revision-55 `Host.Source` JIT support is provisional
+implementation evidence only.**
 
 ## Summary
 
@@ -20,22 +22,20 @@ on hosted verification and emission.
 Should a persisted module be allowed to require an immutable source snapshot
 supplied by its caller for each invocation?
 
-## Recommendation
+## Deferred decision
 
-Yes, add a narrow `Host.Source` module dependency, distinct from arbitrary
-host buffers and from stored references. Persist only the dependency identity
-and its required read-only `char16` shape. The caller supplies the actual
-snapshot for each invocation; module artifacts must not contain source code
-units or retain a source address beyond that invocation. Existing checks for
-source ranges, malformed UTF-16 and line coordinates remain unchanged.
-
-This is the smallest direction that lets existing source-aware components
-participate in a persisted compiler library without inventing general buffer
-capture, reference or span semantics.
+Do not accept `Host.Source` as a semantic-module execution dependency. The
+current tests establish provisional implementation support, not a requirement
+for executing compiled modules. Source is needed while compiler or tooling
+components process an input file; keep that input in the host/source-processing
+layer unless a concrete persisted tooling API demonstrates a need for this
+module boundary. This deferral does not approve arbitrary buffers or change
+source decoding, UTF-16 coordinates, line-break behavior, scanner semantics,
+or the bounded frontend's reliance on hosted verification and emission.
 
 ## Provisional first implementation slice
 
-**Status: implemented provisionally; proposal remains unapproved.**
+**Status: implemented provisionally; contract deferred.**
 
 **Summary:** The broad recommendation does not define invocation extent,
 dependency propagation, source-length binding, or the initial execution
@@ -43,15 +43,16 @@ backend. The existing `SourceText` and `SourceLines` facades need only four
 read operations; the scanner and scalar frontend additionally depend on
 writable interchange buffers and other contracts outside this proposal.
 
-**Recommendation:** First persist only the four-operation source facade as one
-development semantic producer module, with `SourceRange` and
-`CharacterFacts` as host-neutral dependencies. Invoke it through an
-independently persisted consumer using an explicit source-binding JIT adapter.
-Keep source length and reads symbolic in the module; at each invocation bind
-the supplied snapshot into fresh execution-owned storage, lower those
-operations to the existing checked host-buffer representation, verify the
-linked program, then use the hosted JIT emitter. Reusing module bytes does not
-require reusing generated machine code.
+**Provisional implementation shape:** The prototype persists only the
+four-operation source facade as one development semantic producer module, with
+`SourceRange` and `CharacterFacts` as host-neutral dependencies. It invokes
+that facade through an independently persisted consumer using an explicit
+source-binding JIT adapter. Source length and reads stay symbolic in the
+module; each invocation binds the supplied snapshot into fresh
+execution-owned storage, lowers those operations to the existing checked
+host-buffer representation, verifies the linked program, then uses the hosted
+JIT emitter. Reusing module bytes does not require reusing generated machine
+code. This implementation shape is not an accepted execution contract.
 
 **Implemented provisionally:** Semantic-module revision 55 stores the
 requirement bit and symbolic length/read operations. References propagate the
@@ -174,11 +175,12 @@ General host-buffer dependencies and explicit span parameters are not proposed
 as substitutes: they would widen the module or reference ABI beyond this
 source-specific requirement.
 
-## Acceptance boundary
+## Reconsideration boundary
 
-If accepted, a future implementation should demonstrate that one persisted
-source-aware module can be invoked with different source snapshots without
-rebuilding or retaining either snapshot. Missing or incompatible source
-grants must fail validation before execution; modules without this dependency
-remain host-neutral, and arbitrary host buffers remain unsupported. AOT/JIT
-results should preserve the existing `SourceText` parity fixtures.
+If reconsidered, acceptance should require a concrete persisted
+source-processing consumer and demonstrate that it can be invoked with
+different source snapshots without rebuilding or retaining either snapshot.
+Missing or incompatible source grants must fail validation before execution;
+modules without this dependency remain host-neutral, and arbitrary host
+buffers remain unsupported. AOT/JIT results should preserve the existing
+`SourceText` parity fixtures.

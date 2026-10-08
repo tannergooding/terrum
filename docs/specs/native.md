@@ -88,9 +88,10 @@ Persisted semantic modules currently write and accept only revision 55. The
 semantic v24-v32 labels below are historical module revisions and implementation
 milestones, not reader-compatibility promises; those revisions are retired and
 rejected instead of normalized.
-Revision 55 can carry the provisional `Host.Source` requirement for the
-semantic-module JIT adapter only; it does not make source-dependent native DLL
-or persisted AOT images executable.
+The revision-55 implementation can carry the provisional `Host.Source`
+requirement for the semantic-module JIT adapter, but this is not an accepted
+module contract; accepted semantic-module execution remains source-independent.
+It does not make source-dependent native DLL or persisted AOT images executable.
 Semantic version 24 carries the validated class/`ManagedNode` access
 capability contract. Semantic version 25 adds the distinct `MutReceiver`
 contract for persisted, non-exported mutating methods on non-owning compact

@@ -52,8 +52,8 @@ approved.
   is deferred until a concrete private provider/consumer corpus and supported
   invocation profile justify its full IR/linking work.
 - [Invocation-scoped source grant](invocation-scoped-source-grant.md)
-  recommends a narrow persisted-module dependency for source-aware compiler
-  components without enabling arbitrary host-buffer capture.
+  is deferred; accepted semantic-module execution remains source-independent
+  unless a concrete source-processing tooling API requires this boundary.
 - [Native source-grant library](native-source-grant-library.md) proposes a
   bounded per-call source ABI for internal native-library exports; it does not
   extend the semantic-module source-grant profile or establish DLL support.

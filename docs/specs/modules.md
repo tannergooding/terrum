@@ -139,9 +139,10 @@ layouts remain outside this slice. This adds no ABI, TRRM or scalar-frontend
 verification/emission support and does not approve the broader proposal.
 
 The invocation-scoped source grant and `scanner-10` profile remain provisional
-semantic-module JIT capabilities under their respective proposals. They bind
-fresh invocation inputs and do not imply graph, module-set, native DLL, or
-persisted AOT support.
+semantic-module JIT implementation capabilities under their respective
+proposals. The source grant is deferred and does not amend the accepted,
+source-independent semantic-module execution contract. These capabilities do
+not imply graph, module-set, native DLL, or persisted AOT support.
 
 ## Current artifact and loading rules
 
