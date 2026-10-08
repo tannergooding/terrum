@@ -152,8 +152,8 @@ table. The proposed `Option<T>` alias is separately described in
 | Sampled numeric witnesses | `IAdditionOperators`, `IMultiplyOperators`, `IAdditiveIdentity`, `IScalarNumber`, `IScalarIeee754` | [Sampled declarations](#existing-sampled-declarations) |
 | Selected conversion pairs | `ICheckedConversion`, `ISaturatingConversion`, `ITruncatingConversion` | [Conversion witnesses](#existing-sampled-declarations) |
 | Sampled primitives | `int32`, `float32`, `decimal32`; `uint32`, `int8` | [Initial samples](#existing-sampled-declarations), [width-family samples](#candidate-primitive-member-families) |
-| Scalar services | `BitOperations`, `Int32Math`, `Int64Math` | [Scalar services](#numeric-conversion-and-scalar-service-signatures) |
-| Floating-point math | Primitive `float32`/`float64` selection and future format candidates | [Combined floating-point math proposal](floating-math-selection.md) |
+| Scalar services | `BitOperations` | [Scalar services](#numeric-conversion-and-scalar-operation-signatures) |
+| Built-in numeric operations | Per-type selection members and generic-interface access | [Numeric operation signatures](#numeric-conversion-and-scalar-operation-signatures), [combined numeric-selection proposal](numeric-selection-members.md) |
 | Fixed SIMD | `simd128`, `simd128mask`, `Simd128Conversions`, `Simd128Reductions` | [Fixed SIMD](#fixed-width-simd) |
 | Tensor metadata and views | `TensorShape`, `TensorSpan`, `TensorViews` | [Tensor views](#tensor-shapes-and-views) |
 | Tensor kernels | `TensorPrimitives` | [Tensor operations](#tensor-operations) |
@@ -2241,7 +2241,7 @@ contraction of separate operators. Matching-width binary `FromBits`/
 `bfloat16`; `decimal32` has no proposed `FromBits` until BID/DPD, cohorts,
 canonical encodings and validity are specified. Decimal is not CLR decimal.
 
-### Numeric conversion and scalar service signatures
+### Numeric conversion and scalar operation signatures
 
 The existing `ICheckedConversion<TDestination,TSource>`,
 `ISaturatingConversion<...>` and `ITruncatingConversion<...>` requirements
@@ -2269,9 +2269,10 @@ eligibility cannot be inferred from the sample pairs. No conversion protocol
 is a bit-reinterpretation protocol, and no declaration here promises
 NoThrow.
 
-Proposed closed service signatures make operand/result/count widths
-reviewable without pretending that every scalar has every mathematical
-function or that a generic service secretly converts operands:
+The shared `BitOperations` utility and the following per-type integer
+candidates make operand/result/count widths reviewable without pretending
+that every scalar has every mathematical function or that an operation
+secretly converts operands:
 
 ```terrum
 public struct BitOperations
@@ -2295,36 +2296,15 @@ public struct BitOperations
     public static bool IsPow2(uint64 value);
     public static bool TryRoundUpToPowerOfTwo(uint64 value, init ref<uint64> result);
 }
-public struct Int32Math
-{
-    public static int32 Abs(int32 value);
-    public static bool TryAbs(int32 value, init ref<int32> result);
-    public static int32 Sign(int32 value);
-    public static int32 Min(int32 left, int32 right);
-    public static int32 Max(int32 left, int32 right);
-    public static int32 Clamp(int32 value, int32 minimum, int32 maximum);
-    public static (int32 Quotient, int32 Remainder) DivRem(int32 dividend, int32 divisor);
-    public static int64 BigMultiply(int32 left, int32 right);
-    public static uint32 GreatestCommonDivisor(int32 left, int32 right);
-}
-public struct Int64Math
-{
-    public static int64 Abs(int64 value);
-    public static bool TryAbs(int64 value, init ref<int64> result);
-    public static int32 Sign(int64 value);
-    public static int64 Min(int64 left, int64 right);
-    public static int64 Max(int64 left, int64 right);
-    public static int64 Clamp(int64 value, int64 minimum, int64 maximum);
-    public static (int64 Quotient, int64 Remainder) DivRem(int64 dividend, int64 divisor);
-    public static uint64 GreatestCommonDivisor(int64 left, int64 right);
-}
 ```
 
-The accepted `float32`/`float64` selection behavior is recorded in the
-[library specification](../specs/libraries.md). No standalone `*Math`
-service type is part of the floating-point API proposal; primitive member
-placement, declaration/lookup mechanics and coverage of other formats remain
-pending in the [combined floating-point math proposal](floating-math-selection.md).
+Numeric math operations are static members on their built-in operand type,
+not separate `Int32Math`, `Int64Math`, or floating `*Math` service types.
+The shared `Abs`, `Min`, `Max`, and `Clamp` selection behavior is recorded in
+the [library specification](../specs/libraries.md). The integer-specific
+`TryAbs`, `Sign`, `DivRem`, `BigMultiply`, and `GreatestCommonDivisor`
+contracts remain proposed; their per-type signatures and generic-interface
+access are part of the [combined numeric-selection proposal](numeric-selection-members.md).
 
 `BitOperations` candidates operate on actual bits of the indicated unsigned
 width; a parallel `uint8/16/128` or `nuint` overload requires its own
@@ -2353,15 +2333,16 @@ requirement or NoThrow declaration is inferred from a service name.
 Native-size overloads and signed-bit handling remain **OPEN**. No hidden
 `uint64` conversion or unsafe bit-layout access is assumed.
 
-The integer-service additions are **PROPOSED** closed API contracts,
-not additional source operators or inferred primitive witnesses:
+The shared `Abs`, `Min`, `Max` and `Clamp` contracts are accepted in the
+[library specification](../specs/libraries.md). The following integer-specific
+additions remain **PROPOSED** primitive-member contracts; they are not
+additional source operators or inferred primitive witnesses:
 
-| Integer service | Proposed boundary contract |
+| Integer member | Proposed boundary contract |
 |---|---|
-| `Abs` / `TryAbs` | Exact same-width nonnegative magnitude. Signed minimum is not representable: `Abs` follows checked overflow; `TryAbs` returns false with the output vacant. All other inputs succeed, including zero. |
+| Signed-minimum `Abs` | A same-width magnitude that is not representable follows checked overflow; do not widen or wrap implicitly. This remains a candidate for the per-type contract. |
+| `TryAbs` | Publish the exact same-width nonnegative magnitude on success. Signed minimum is not representable and returns false with the output vacant; all other inputs succeed, including zero. |
 | `Sign` | Returns `int32` -1, 0 or 1 according to the operand's order relative to zero, including a signed-minimum operand. The three-valued result does not depend on the input width. |
-| `Min`, `Max` | Return the lesser/greater same-width integer value. No widened or unsigned reinterpretation participates. |
-| `Clamp` | Require `minimum <= maximum` before selection; reversed bounds are a checked argument failure, not silently swapped. Valid equal bounds produce that bound; otherwise select within the closed interval without subtraction or intermediate overflow. |
 | `DivRem` | Produce one tuple containing the truncation-toward-zero quotient and dividend-signed remainder. Zero divisor and signed minimum divided by -1 fail before publishing any result. |
 | `BigMultiply(int32, int32)` | Return the exact signed product in `int64`; every pair of `int32` operands is representable, including two signed minima. This is not a widened result chosen by overload inference. |
 | `GreatestCommonDivisor` | Return the nonnegative greatest common divisor in the corresponding unsigned width. Signs do not affect it; two zero operands return zero, and one zero operand returns the other's full magnitude. |
@@ -2379,16 +2360,19 @@ the analogous `0x8000000000000000` result at 64 bits. Implementations must
 not obtain that magnitude by checked same-width signed negation or by using
 the overflowing signed-minimum divided-by-minus-one case. This does not
 provide a total signed `Abs` or an unchecked conversion policy. A wider
-`BigMultiply` service would need its own explicitly available result/profile;
+`BigMultiply` operation would need an explicitly available result/profile;
 no `int128` primitive or allocation-backed big integer is implied here.
 Conditional publication, concrete failure transport and effect metadata
 remain **OPEN**; neither a `Try` name nor an exact widened product grants a
 NoThrow declaration.
 
-**Floating-point selection behavior is accepted** for `float32` and `float64`;
-the canonical semantics are in the [library specification](../specs/libraries.md).
-API placement and other type-family coverage remain **OPEN** in the
-[combined floating-point math proposal](floating-math-selection.md).
+The shared numeric selection semantics and primitive-member placement are
+accepted directions, recorded alongside other accepted behavior in the
+[library specification](../specs/libraries.md). The exact generic-math
+interface hierarchy, signatures, witness mapping and implementation support
+remain **OPEN** in the
+[combined numeric-selection proposal](numeric-selection-members.md); the general
+library specification is not approved as a whole.
 `Sqrt`/`Pow`/`Exp`/`Log`/`Sin`/`Cos`/`RoundToIntegral` separately need
 special-value, domain, precision and rounding-mode contracts. Strict target-format
 `float32` arithmetic neither reassociates nor contracts implicitly.

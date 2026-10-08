@@ -30,7 +30,8 @@ library or a claim about which signatures currently compile. Where a passage
 references a specific sample or self-hosted source file, that file
 illustrates the accepted contract; it is not evidence of general compiler
 support. Current compiler and runtime support is tracked in
-[implementation](../implementation.md).
+[implementation](../implementation.md). Individual accepted decisions do
+not approve this document as a whole or every candidate API it references.
 
 ## Dependency layers and package boundaries
 
@@ -162,21 +163,30 @@ for the original type.
 
 Floating `==` follows IEEE (NaN unequal, signed zero equal). A **separate numeric-key comparer** makes all NaNs mutually key-equal, zeros equal and hashes consistent. Decimal key hashing must normalize numerically equal *cohorts* (`1.0`/`1.00`), not hash its raw encoding; signed zero and NaN also need canonical key hashes. A bitwise-identity comparer is different again. Maps/sets accept a paired equality/hash policy (`IKeyComparer<T>` in the [algorithm inventory](../../library/algorithms.api.terrum)); `IndexOf` under ordinary operator equality must not silently adopt numeric-key semantics. Ordering and `Min` variants explicitly select NaN propagation and signed-zero policies. The runtime's distinct decimal `operator ==`, `Equals`, and cohort-normalizing hash illustrate why one implicit universal equality is insufficient ([source notes](references.md)).
 
-For `float32` and `float64`, the accepted numeric-selection behavior is:
-`Abs` returns the nonnegative magnitude, mapping either zero to positive zero
-and either infinity to positive infinity; a NaN input produces NaN. `Min` and
-`Max` produce NaN if either input is NaN; otherwise they select the numeric
-extreme. For a zero pair, `Min` returns negative zero if either operand is
-negative zero (otherwise positive zero); `Max` returns positive zero if either
-operand is positive zero (otherwise negative zero). `Clamp` first rejects NaN
-bounds or numerically reversed bounds as a checked argument failure. With
-valid bounds, a NaN input produces NaN; otherwise only a strictly out-of-range
-input selects a bound, and an in-range input is returned unchanged, preserving
-its zero sign. Infinite bounds are valid. For all these operations, NaN
-payload/sign selection, signaling behavior and floating status effects are
-unspecified; failure transport and effect metadata are also open. This
-behavioral contract does not establish a particular API owner or imply
-primitive intrinsics, `NoThrow`, or contracts for other math functions.
+The accepted API direction exposes `Abs`, `Min`, `Max` and `Clamp` as static
+members directly on each built-in numeric type, not standalone `*Math` service
+types. Generic numeric interfaces make those members available to constrained
+algorithms. Exact interface hierarchy and membership, conformance metadata,
+signatures and implementation support remain open in the
+[numeric-selection proposal](../proposals/numeric-selection-members.md).
+
+The accepted `Abs`, `Min`, `Max` and `Clamp` selection behavior applies across
+built-in numeric types. `Abs` returns the nonnegative magnitude; unsigned
+values are unchanged. The result or failure contract when a signed integral
+magnitude is not representable in its type remains per-type work. For
+floating formats, `Abs` maps either zero to positive zero and either infinity
+to positive infinity; a NaN input produces NaN. `Min` and `Max` select the numeric
+extreme, producing NaN if either operand is NaN where the format supports NaN.
+For a zero pair, `Min` returns negative zero if either operand is negative zero
+(otherwise positive zero); `Max` returns positive zero if either operand is
+positive zero (otherwise negative zero). `Clamp` first rejects NaN bounds or
+numerically reversed bounds as a checked argument failure. With valid bounds,
+a NaN input produces NaN where supported; otherwise only a strictly
+out-of-range input selects a bound, and an in-range input is returned
+unchanged. Infinite bounds are valid where supported. NaN payload/sign
+selection, signaling behavior and floating status effects are unspecified;
+failure transport and effect metadata are also open. No `NoThrow` contract,
+primitive intrinsic, or additional math operation follows from this direction.
 
 ## SIMD as a family of shapes
 

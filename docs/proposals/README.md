@@ -11,9 +11,9 @@ approved.
 
 - [Core-library proposal](core-library-reference.md) records candidate
   declarations, dependency layers and unresolved API contracts.
-- [Floating-point math selection](floating-math-selection.md) records accepted
-  `float32`/`float64` selection behavior and proposes primitive-member placement
-  and review of additional floating-point formats.
+- [Built-in numeric selection members](numeric-selection-members.md) records
+  accepted universal selection semantics and primitive-member placement while
+  leaving signatures and .NET-like generic-interface contracts under review.
 - [Static-proof and constant-evaluation proposal](static-proof-and-constant-evaluation.md)
   collects candidate minimum proof rules, effects and evaluator budgets;
   the portable-floor policy itself is accepted.
