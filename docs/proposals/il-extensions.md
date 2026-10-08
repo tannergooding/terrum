@@ -1,10 +1,10 @@
 # Semantic IL and metadata extensions
 
 > [!IMPORTANT]
-> Pending revisions and performance decisions only. The approved `(1, 0)`
-> [metadata](../specs/il-metadata.md) and [coded instructions](../specs/il-instruction-set.md)
-> do not use these extensions. Existing readers reject unassigned words and
-> unsupported executable forms.
+> The high-level size-oriented compact direction is accepted, but exact writer
+> policy and new compact layouts remain pending. The inline type word is not
+> part of approved `(1, 0)`; existing readers reject it and unsupported
+> executable forms.
 
 ## Inline built-in type reference
 
@@ -72,11 +72,11 @@ recorded in the [instruction-set specification](../specs/il-instruction-set.md#c
 exact writer selection and additional representations remain open. The
 following are future design and implementation decisions:
 
-| Decision | Candidate and evidence still needed |
+| Area | Accepted boundary and remaining decision |
 |---|---|
-| Shape partition | Choose or add compact forms by the information common method shapes require, omitting only derivable/default data; a section-presence bitvector is one candidate. The general form remains necessary when compact forms cannot represent required semantics. Exact forms and writer order remain open. |
-| Offset width | Compare a separate compact-index width against the current coupled local width at 255/65535-byte boundaries, including wider IDs with short blocks. Validate exact fallback to the general form. |
-| Logical roots and effects | Define mandatory method/block effects and indexed safepoint root/owner/interior dependencies including cleanup/exceptional continuations. Decide inline versus required sparse sidecar by actual density; no executable managed compact form until a reader verifies these facts. |
-| Cross-method sharing | A future ownership revision would need to validate exact Body-row sharing within one module against every referencing MethodDef's signature and contracts. Compare remaining independent short rows with a typed, bounded shared-shape table and substitutions; preserve source identity and measure binding and rewrite/remap costs as well as byte savings. |
-| Trusted selective import | Resolve unvisited-block unknown opcodes and feature negotiation before a reader relies on terminator/definition indexes without decoding that block; structural bounds and metadata binding never become optional. |
-| Declaration contracts | Model authored Body bytes and the separately executed pre/postcondition checks together for inlining/effect decisions. Their ability to remove explicit guard branches does not remove runtime work or failure order. |
+| Shape partition | Accepted direction: choose or add compact forms by the information common method shapes require, omitting only derivable/default data. A section-presence bitvector is one candidate; exact forms, eligibility and writer order remain open. General form remains necessary when compact forms cannot represent required semantics. |
+| Offset width | The current compact-indexed form couples local-field widths. A separate compact-index width and its 255/65535-byte boundary behavior remain unapproved future-format work. |
+| Logical roots and effects | Any method/block effects, roots, owners, interior dependencies, cleanup or exceptional continuations required by a feature must remain represented. Exact contracts and encoding remain open; no managed/exceptional compact execution until readers validate them. |
+| Cross-method sharing | Sharing Body rows needs a future ownership revision that validates every referencing MethodDef's signature and contracts. Defer until that ownership model and a concrete need are established. |
+| Trusted selective import | Accepted boundary: executable readers validate structural bounds, metadata binding and opcode membership in every block, including unvisited blocks. Feature negotiation for future extensions remains unspecified. |
+| Declaration contracts | Accepted invariant: removing authored guard blocks does not remove separately required contract checks, their effects or failure order. The exact Body/contract model for inlining remains open. |
