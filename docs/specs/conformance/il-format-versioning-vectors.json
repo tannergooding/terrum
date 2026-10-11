@@ -1,0 +1,41 @@
+{
+  "schema": "trrm/1-draft-unified-3",
+  "format_pair": [1, 0],
+  "rule": "trrm-format-versioning/1",
+  "scope": "Fixed current bytes and supplied-fact version selection; no released schema or extra draft decoder is assigned. Module bytes use the separately defined semantic manifest.",
+  "artifacts": [
+    {
+      "id": "empty-module",
+      "byte_length": 128,
+      "hex": [
+        "54 52 52 4D 01 00 00 00 20 00 00 00 02 00 00 00",
+        "80 00 00 00 20 00 00 00 00 00 00 00 00 00 00 00",
+        "01 00 00 00 01 00 00 00 40 00 00 00 30 00 00 00",
+        "02 00 00 00 01 00 00 00 70 00 00 00 10 00 00 00",
+        "01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00",
+        "00 00 00 00 08 00 00 00 00 01 00 00 41 00 00 00"
+      ],
+      "sections": [
+        {"kind": "0001", "records": 1, "offset": 64, "byte_length": 48},
+        {"kind": "0002", "records": 1, "offset": 112, "byte_length": 16}
+      ],
+      "module_words": [1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1],
+      "module_identity": "A",
+      "feature_rows": 0
+    }
+  ],
+  "selection_facts": {
+    "drafts": [
+      {"identity": "fixture.draft-A", "format_pair": [1, 0]},
+      {"identity": "fixture.draft-B", "format_pair": [1, 0]}
+    ],
+    "released_catalog": [
+      {"identity": "fixture.released-A", "format_pair": [1, 0]},
+      {"identity": "fixture.released-B", "format_pair": [2, 0]}
+    ],
+    "assigned_release_schemas": []
+  },
+  "document_only_cases": ["IFMT-15", "IFMT-16"]
+}

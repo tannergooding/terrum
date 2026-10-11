@@ -1,51 +1,76 @@
 # Built-in numeric selection members
 
-**Status: pending exact numeric-type inventory, signatures and generic-interface
-design.**
+**Status: Scalar Abs/Min/Max/Clamp signatures, checked magnitude and
+InvalidBoundsException and totalOrder numeric ties selected; floating
+representation/results and grouped generic capabilities also selected.**
 
 ## Scope and decision boundary
 
 The accepted member placement, generic-math access, universal applicability,
 and `Abs`, `Min`, `Max`, and `Clamp` semantics are specified in
 [scalar mathematics, keys and conversion](../specs/libraries.md#scalar-mathematics-keys-and-conversion).
+The canonical [absolute-value member contract](../specs/language/absolute-value.md)
+additionally selects the exact numeric Abs subjects, same-type signature
+and checked signed-minimum failure.
+The canonical [numeric selection contract](../specs/language/numeric-selection.md)
+selects the remaining same-type member signatures, ordinary call/state
+contract, totalOrder numeric representation ties and explicit
+InvalidBoundsException for Clamp's bound relationship.
 This proposal records unresolved details only. Those accepted directions do
 not approve the general library specification or unrelated candidate APIs.
+The [floating-environment contract](../specs/language/floating-environment.md)
+selects sign-only Abs/negation, quiet arithmetic/conversion/selection NaNs,
+canonical admitted constant processing results and no ambient status facility.
+[Numeric capabilities](../specs/language/numeric-capabilities.md) select the
+coherent Core group shapes and primitive membership, with Min/Max/Clamp together.
 
-Call spellings are illustrative, not a complete API. This proposal does not
-select declaration syntax, overload resolution, primitive-definition
-authority, intrinsics, or implementation support.
+All four members use their selected ordinary static call contracts.
+This proposal does not
+select primitive-definition registration, intrinsics or implementation support.
 
 ## Per-type inventory and generic math
 
-Candidate built-in numeric families include signed and unsigned integers,
-native-width integers, IEEE binary `float16`/`float32`/`float64`/`float128`,
-`bfloat16`, and IEEE decimal `decimal32`/`decimal64`/`decimal128`
-([language specification](../specs/language.md)). This candidate list does
-not select the exact built-in numeric inventory. Each built-in numeric type
-has the four accepted selection members; the remaining per-family questions
-are:
+The [mandatory scalar catalog](../specs/overview/conformance.md#mandatory-scalar-catalog)
+already selects the numeric identities: fixed/native signed and unsigned
+integers, five binary floating formats and three IEEE decimal formats.
+Each numeric type has the four accepted selection-member directions.
+All four exact same-type signatures are selected; remaining per-family
+questions are:
 
-| Candidate type family | Unresolved details |
+| Type family | Remaining details |
 |---|---|
-| Signed and unsigned integer types, including native-width integers | The result or failure contract for `Abs` of a signed minimum that is not representable in its type. |
-| IEEE binary floating types and `bfloat16` | Whether each format supports NaNs, infinities, and signed zero. |
-| IEEE decimal floating types | Representation, cohort, and special-value details where they affect results. |
+| Signed and unsigned integer types, including native-width integers | Actual complete effect/program and physical member/witness/publication support. Abs is checked at the signed minimum; invalid Clamp bounds use InvalidBoundsException; no unchecked variant is selected. |
+| IEEE binary floating types and `bfloat16` | Actual complete programs and physical support for the selected sign/quiet-NaN/constant contracts. No ambient status API is selected. |
+| IEEE decimal floating types | Actual complete programs and physical support. Abs preserves quantum, Min/Max same-sign ties follow totalOrder, and Clamp preserves its selected non-NaN input representation. |
 
-The exact inventory, same-type parameter/result signatures, and per-type
-representation details remain open. The checked failure transport and effect
-metadata for invalid `Clamp` bounds also remain open.
+The [scalar failure catalog](../specs/language/scalar-failures.md)
+selects exact Terrum.OverflowException for checked Abs overflow. Invalid
+Clamp bounds explicitly use exact Terrum.InvalidBoundsException under the
+ordinary requirement-construction contract. Actual helper/effect and
+physical program/transport support stay separate; this proposal cannot
+infer them from a CLR exception name.
+
+An explicitly selected wrapping magnitude could return a signed minimum
+unchanged, matching the width-limited magnitude bits. That considered
+alternative is not ordinary Abs's nonnegative-result contract. Its API name,
+policy case, generic witness and performance characteristics are unselected.
 
 The accepted layered generic-math direction is recorded in the canonical
 [scalar mathematics section](../specs/libraries.md#scalar-mathematics-keys-and-conversion).
-The exact interface names, shape, membership, required members, constraints,
-and mapping from primitive types to interface witnesses remain unapproved.
-The minimal `IScalarNumber<TSelf>` composite sketched in the
+The exact selected interface names, shapes, membership, required members,
+constraints and primitive witness matrix are in the
+[numeric capability chapter](../specs/language/numeric-capabilities.md).
+The older minimal `IScalarNumber<TSelf>` composite sketched in the
 [core-library proposal](core-library-reference.md#existing-sampled-declarations)
-is only a candidate, not the selected hierarchy or a required conformance.
+is an unadopted earlier alternative, not another definition of the selected
+Core composite.
 Microsoft's [.NET generic math design](https://learn.microsoft.com/en-us/dotnet/standard/generics/math)
 is prior art, not a selection of Terrum names, member grouping, constraints,
-or semantics. For numerically equal values with distinct representations,
-such as decimal cohorts, which encoding `Min` or `Max` returns is unspecified.
+or semantics. For numerically equal finite values with distinct representations
+within one decimal cohort, Min selects the representation earlier in IEEE
+754-2019 totalOrder and Max the later. NaN propagation and opposite-sign-zero
+preference precede that tie-break. The rule does not order distinct encodings
+that totalOrder does not distinguish or select a public total-order variant.
 
 ## Implementation and support boundary
 

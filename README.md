@@ -92,10 +92,14 @@ The C# compiler host does not imply managed output. The native backend emits
 Terrum-owned Windows x64 code for AOT and JIT; CIL is neither a dependency nor
 the default.
 Native execution tests require Windows x64, though emission does not invoke an
-installed platform toolchain. The [native profile](docs/specs/native.md) defines the
-runtime and ABI; [JIT](docs/specs/jit.md), [modules](docs/specs/modules.md),
-[module sets](docs/specs/module-sets.md) and [native graphs](docs/specs/native-graph.md)
-document bounded execution and replacement proofs, not a production runtime.
+installed platform toolchain. [Native boundaries](docs/specs/native.md) retain
+ABI and runtime obligations. The [development native profile](docs/implementation/native.md),
+[JIT](docs/implementation/jit.md), [module](docs/implementation/modules.md),
+[set](docs/implementation/module-sets.md) and [graph](docs/implementation/native-graph.md)
+guides document bounded execution and replacement proofs, not a production
+runtime or standard private serialization. Only
+[`.trrm`](docs/specs/representation/persistence.md) is normative serialized
+semantic interchange.
 The [compiled scanner](docs/scanner.md) documents its executable boundary.
 
 For machine protocols, use the built `terrumc.dll` rather than mixing
@@ -103,6 +107,9 @@ For machine protocols, use the built `terrumc.dll` rather than mixing
 0 on success, 1 for source/compile diagnostics, and 2 for usage or I/O errors.
 Execution workers return the program's status; component workers can terminate
 on native failure and must be supervised. `check` is syntax-only; `analyze`
-binds. The [CLI machine protocol](docs/specs/cli-protocol.md) documents
-coordinates, diagnostic versions, and output shapes; syntax edits are bound
-to the source content ID.
+binds. The [development CLI response reference](docs/implementation/cli-protocol.md)
+documents these worker coordinates, diagnostic versions and output shapes;
+syntax edits are bound to the source content ID. The selected
+[CLI supervisor protocol](docs/specs/cli-protocol.md) separately defines
+standard CLI outcomes, program return data and output destinations;
+experimental worker behavior is not a claim of conformance to it.

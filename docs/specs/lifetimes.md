@@ -1,7 +1,9 @@
 # Lifetime and access contracts
 
 This document specifies accepted contracts for loans, views and published
-members, using provisional notation where grammar remains open. It refines
+members. [Dependencies and views](language/dependencies-and-views.md) owns the
+whole-source schemas, retained destinations and checked witness refinements.
+This chapter refines
 [language](language.md); [libraries](libraries.md) illustrates span, text and
 collection protocols.
 
@@ -30,8 +32,9 @@ access, backing, roots, ownership and region dependencies.
 | Form | Access and expansion |
 |---|---|
 | `T` by value | Preserve the complete value's authority/dependencies; copy only when eligible, otherwise transfer through the declared ownership contract |
-| `ref T` parameter / `ref<T>` | Readonly alias to a `T` place, not a snapshot or exclusive loan |
-| `mut ref T` parameter / `write ref<T>` | Writable alias to a `T` place; permits slot updates, not arbitrary writes through values stored in that slot |
+| `ref<T>` | Readonly descriptor for a `T` place, not a snapshot or exclusive loan |
+| `mut ref<T>` binding or parameter | Locally rebindable readonly descriptor; does not write the referent or rebind the caller's descriptor |
+| `write ref<T>` | Descriptor permitting writes to a `T` place; slot updates do not grant arbitrary writes through values stored in that slot |
 | `implicit ref<T>` parameter | The same readonly reference contract, borrowing an eligible place or materializing the expression once in its ordinary enclosing scope |
 | `init ref<T>` parameter | Vacant destination initialized according to the published normal-outcome contract, not an arbitrary writable alias |
 | `pin ref<T>` | Explicitly acquired backing/root stability for its pin dependency; ordinary reference qualification does not acquire it |
@@ -49,6 +52,9 @@ exclusivity, deep immutability or stable reads.
 Reject an inapplicable qualifier combination rather than inventing a copy,
 pin, initialization route or stronger authority. `implicit` remains parameter-
 only; writable and initialization loans do not acquire implicit materialization.
+Descriptor assignment, explicit `ref place`, safe reference dereference, and
+`->` member access follow the canonical
+[reference chapter](language/references.md), including in generic code.
 
 The selected implicit `pin ref<T>` to matching `ptr<T>` conversion is a
 separate, narrowly defined built-in edge. It preserves access and all referent,
@@ -73,7 +79,8 @@ formation itself does not warn or require unsafe; dereference still does.
 These are accepted target contracts, not current executable pin support.
 
 Current executable ownership, view and managed-root boundaries are documented
-in [implementation](../implementation.md) and [native](native.md); staged work
+in [implementation](../implementation.md) and the
+[development native profile](../implementation/native.md); staged work
 is tracked in [roadmap](../roadmap.md). A slice does not thereby become the
 proposed generic `Span<T>`.
 
@@ -82,6 +89,17 @@ storage, retained roots and region dependencies. A readonly loan is not by
 itself permission for concurrent use. The [memory model](memory-model.md)
 defines checked sharing and trusted implementation boundaries; neither erases
 the lifetime obligations published by a safe interface.
+The [sharing and handoff chapter](runtime/sharing-and-handoff.md) additionally
+requires actual alias unavailability, return/publication endpoints and guard
+token bounds. Eligibility, a root or a cancellation/status observation does
+not restore reserved authority or end a retained loan.
+
+[Concurrent generation rules](runtime/concurrent-executions.md#8-initialization-retirement-and-reuse)
+require actual initialization/publication and quiescence before retirement.
+An ordinary update or descriptor rebinding is not a new storage generation;
+ending storage and reusing its bytes is. Slot coherence does not preserve a
+referent's lifetime, and equal addresses do not revive old aliases or tokens.
+These are logical obligations, not a selected physical tag or reclamation API.
 
 ## Three independent dependencies
 
@@ -103,11 +121,11 @@ access and alias relationship.
 Do not turn a large by-value result into a source borrow because of an
 incidental size threshold.
 
-No universal return keyword is implied. An associated iterator `Item<'a>` is
-a candidate when a selected sequence witness relates `next` to a borrowed
-item. That relation must preserve the complete qualified item type and its
-ownership, backing and lifetime dependencies. Exact selection rules and ABI
-remain open library design.
+No universal return keyword is implied. [Standard lending iteration](language/lending-iteration.md)
+uses separate readonly/writable reference-output roles and checked
+element/backing/invalidation relationships, not an associated lifetime formal.
+An associated iterator `Item<'a>` remains an unselected candidate; its syntax,
+selection and ABI cannot be inferred from those standard roles.
 
 ## Parameter-only implicit readonly loans
 
@@ -115,14 +133,15 @@ remain open library design.
 reference parameter, not `implicit T` or `in T`, a qualifier inside `T` or
 `ref<T>`, a `view<T>` type, or a representation attribute. The caller passes
 an ordinary expression and it is evaluated once. If it denotes an eligible
-place, the call borrows that place's slot; otherwise the compiler initializes
+place, the call borrows that place's slot; otherwise the compiler assigns
 a hidden local at that argument's original evaluation point in the current
 enclosing lexical scope. This is the same scope as an explicit local declared
-there, not a lifetime-only block and not a value hoisted to scope entry. A
-skipped conditional or short-circuit argument creates no initialized local or
-owner to clean up. The local follows ordinary initialization, ownership/root
-cleanup and unwind rules. Borrowing alone requires neither `[Copy]` nor
-ownership transfer.
+there, not a lifetime-only block and not a value hoisted to scope entry.
+A skipped conditional or short-circuit argument creates no new value. If
+this site has not previously initialized its local, that local remains
+vacant; otherwise skipping leaves its existing value unchanged. The local
+follows ordinary initialization, replacement, ownership/root cleanup and
+unwind rules. Borrowing alone requires neither `[Copy]` nor ownership transfer.
 
 ```terrum
 void Inspect(implicit ref<LargeRecord> record);
@@ -142,7 +161,7 @@ system for implicit arguments.
 An eligible local, parameter, field or indexed element is borrowed as an
 existing place. A reference-returning access supplies its declared place and
 dependencies; a value-returning call, property, operator or conversion instead
-initializes the hidden local exactly once. Source spelling resembling a field
+assigns the hidden local once per reached evaluation. Source spelling resembling a field
 does not turn a value-returning property into a loan of its backing storage.
 If borrowing the existing place conflicts with its access or owner contract,
 the call diagnoses rather than silently copying the value to evade the conflict.
@@ -151,6 +170,140 @@ retains any write authority, backing, roots, ownership and dependency contracts
 already carried by its value; a Copy descriptor copied out of the slot keeps
 those same contracts. A readonly outer loan is not deep immutability, purity
 or exclusivity.
+
+### Repeated evaluations and reusable locals
+
+Each source argument materialization site has one ordinary hidden mutable
+binding per activation of its supporting lexical scope. Its equivalent
+declaration is `init mut T tmp;`: storage starts vacant, and the first reached
+evaluation initializes it. Each later reached evaluation assigns the new
+value to that same binding under ordinary replacement and dependency rules.
+Re-entering the supporting block creates a new scope activation, not another
+instance accumulated in the previous activation.
+
+The vacant declaration may appear earlier in the source expansion, but
+neither constructs a default `T` nor evaluates the initializer. Evaluate and
+assign at the original argument point, before forming the readonly reference.
+Short-circuit or conditional non-evaluation leaves the binding's state
+unchanged. Distinct materialization sites have distinct bindings, even when
+they have the same complete `T`.
+
+For example, within an existing enclosing block:
+
+```terrum
+while (Remember(Borrow(CreateOwner())))
+{
+    Body();
+}
+AfterLoop();
+```
+
+has this ordinary source expansion. The braces below show the existing block,
+not an introduced lifetime-only scope. `tmp` is explanatory, not a name
+available to the program:
+
+```terrum
+{
+    init mut T tmp;
+    while (true)
+    {
+        tmp = CreateOwner();
+        if (!Remember(Borrow(ref tmp)))
+        {
+            break;
+        }
+        {
+            Body();
+        }
+    }
+
+    AfterLoop();
+    tmp = _;
+}
+```
+
+The original braced body remains a block with its original cleanup scope.
+The same construction preserves transfers targeting the original loop:
+`continue` returns to the assignment and condition, while `break` skips them.
+Nested-loop transfers keep their original targets. Moving the assignment to
+the original body's tail is not generally equivalent: `continue` can skip it,
+and body-local cleanup would occur after rather than before the next
+initializer. An `if`/`do` expansion is not a distinct lifetime policy and is
+valid only when it preserves these same evaluation and transfer rules.
+
+For a short-circuited source condition
+`while (Ready() && Remember(Borrow(CreateOwner())))`, the corresponding
+loop can instead be written:
+
+```terrum
+init mut T tmp;
+while (Ready())
+{
+    tmp = CreateOwner();
+    if (!Remember(Borrow(ref tmp)))
+    {
+        break;
+    }
+    {
+        Body();
+    }
+}
+```
+
+`Ready()` is not added to the first example; it is an operand of this second
+source condition. If initially false, the binding remains vacant. If false
+after a previous reached argument, that argument's value remains live until
+its ordinary lifetime end. Neither case calls `CreateOwner()`.
+
+Replacement constructs the new complete value before retiring the old one,
+as for an explicitly written mutable local. If construction fails, no new
+value is published: a vacant binding stays vacant, or the old value stays
+live until ordinary unwind or lifetime end. Partial construction cleans only
+its acquired state. A successful replacement ends the old value's obligations
+once and installs the new value; its value is not another scope-lived owner
+alongside all preceding results. A later argument or call failure uses ordinary
+cleanup of the already assigned local, not by-value argument ownership.
+
+A live dependency on an old owner or backing can forbid replacement.
+Materialization diagnoses the same conflict as the explicit assignment; it
+cannot retain an old owner in hidden storage to evade it. Conversely, an
+ordinary readonly reference to an aliasable Copy place can observe later
+assignments to that same place when ordinary rules permit them. Reuse is not
+a promise to preserve each earlier value as a snapshot. A forwarded dependency
+that does not need the replaced local remains governed by its actual published
+source contract.
+
+The [ordinary loop scopes](grammar-spec.md#33-statements-and-local-declarations)
+determine final retirement:
+
+| Materialization location | Supporting scope and cleanup point |
+|---|---|
+| `while` or `do` condition | Existing enclosing block; the last live value survives loop exit and retires at that block's exit |
+| `for` initializer, condition, or iterator | The `for` header scope; the last live value retires on leaving the loop |
+| Synchronous or async iteration sequence expression | The iteration header scope, retained through required iterator close |
+| Braced loop body | That execution of the original body block; its local retires on normal body exit, transfer, or unwind |
+| Declaration precondition or postcondition | The isolated scope shared by that phase's clauses; cleanup before the phase completes, not at body or invocation exit |
+
+The final false condition assigns a value if it reaches the argument.
+Ordinary scope exit cleans the last live value once; a never-initialized,
+moved, or explicitly ended binding has no live `T` cleanup. `tmp = _` in
+the first expansion exposes the normal exit point; checked unwind performs
+the same applicable obligations. Borrowers must end before invalidating their
+backing, and cannot escape beyond the supporting scope. This does not move
+observable cleanup to a borrower's last use.
+
+The number of materialized bindings is bounded by source sites, not iteration
+count. There is no implicit per-iteration `stackalloc`, retained-owner arena,
+boxing, or collection growth. Ordinary initializer, assignment, rooting, and
+cleanup effects still apply; this is not a general allocation-free promise.
+Physical lowering may coalesce or eliminate storage only while preserving
+the explicit source's place identity, observations, dependencies, effects,
+failures, and cleanup. [Conformance cases](conformance/source-materialization.md)
+give the required traces and diagnostics.
+Declaration phase scopes follow the
+[contract binding rules](language/initialization-and-flow.md#binding-pattern-declarations-and-scopes).
+
+### Parameter applicability and call timing
 
 The form is available for concrete/generic parameters and explicitly declared
 extension receivers, without changing ordinary instance-receiver defaults. It
@@ -232,32 +385,17 @@ unqualified form is readonly; `mut Span<T>` permits descriptor rebinding,
 `write Span<T>` grants writable slots, and a `write` element type grants a
 separate referent capability. A scoped data/length descriptor can keep its
 owner/guard live separately; a stored, returned or erased view needs a verified
-source relationship or a defined fixed-size representation with opaque
-anchors. Owner-dependent per-instance sizes, implicit per-slice allocations,
+source relationship and an admitted representation with all required
+root/relocation support. Owner-dependent per-instance sizes, implicit per-slice allocations,
 per-slice retains and a global pointer-to-owner registry are not defaults. A
 tracked managed interior may move with GC; native allocations containing
 managed elements additionally need scanning/barriers. Aliased managed interiors
-cannot claim exclusive-loan optimizer facts. The exact anchor layout, source
-selector and calling convention are open and must not be guessed by a hosted
-lowering outside the accepted bounded cursor case below.
-
-**Accepted bounded cursor case:** On the current Windows x64 profile, a
-compiler-owned readonly `Span<Token>` may be projected only from a validated
-`TokenSnapshot`, stored in the unique `TokenCursor`, and used by the bounded
-scalar-parser path. Its descriptor is 16 bytes (data address and element
-count); checked indexing returns `Copy` elements by value using unsigned
-native-width bounds checks (`uint64` on x64), without adding source-level
-`nuint`. `[Captures(nameof(tokens))]` forwards the complete backing and guard
-dependency set to the cursor field as compiler-checked facts; it does not own
-or extend those dependencies, and construction cannot publish unless they
-outlive every use. The cursor stores the remaining descriptor in one mutable
-view field and its cursor-only `AdvanceOne` rebinds that descriptor without
-dropping dependencies. The parser receives the borrowed view synchronously
-through calls rather than storing it in managed parser state; the existing
-64-token limit and parser-window behavior remain unchanged. This exception
-does not approve general view construction, slicing, writable or ref-returning
-access, arbitrary storage or escape, persisted capture metadata, or a new ABI.
-All other `Span<T>` representation, construction and escape rules remain open.
+cannot claim exclusive-loan optimizer facts. Whole-source selectors are
+specified by [the dependency schemas](language/dependencies-and-views.md#source-schemas-and-targets);
+the exact anchor layout and calling convention remain target-profile work.
+The bounded TokenCursor and compact-owner projections are informative
+[implementation inventories](../implementation/view-and-owner-profiles.md),
+not exceptions that restrict the general language contract.
 
 ### Receiver-scoped versus receiver-unscoped
 
@@ -272,9 +410,27 @@ The asymmetry is checked against the **declared implementation contract**, not i
 
 The confirmed [C# 13 ref-struct interface proposal](https://github.com/dotnet/csharplang/blob/main/proposals/csharp-13.0/ref-struct-interfaces.md) has the analogous `[UnscopedRef]` interface/member asymmetry: an interface member with it permits an implementing member without it; an implementing member with it cannot satisfy a requirement lacking it. It also admits constrained ref-struct interface use without boxing; ordinary interface conversion still cannot box a ref struct. That proposal is **prior art**, not Terrum syntax, and does not supply Terrum's forwarded-backing or allocation/disposal model. The generic caller must obey the interface's broad public source contract, not the chosen implementation's narrower private behavior.
 
-**Recommended extension:** a checked conditional *member-contract relationship*, published with the interface/witness, should express how an implementation's result may forward its receiver's existing backing while preserving the interface's broad source contract. This covers `Span<T>`'s explicit `IContiguousSequence<T>.AsSpan()` and generic `ReadUnits(ref sequence)` without inventing `IScopedSequence` or an owner generic argument. The broad interface relationship conservatively permits a result to borrow the source's own storage **or** forward its backing; a declared receiver-scoped refinement rules out the former without dropping backing/lease restrictions. An independently compiled generic caller must retain the broad source validity bound. A checked conditional contract exposed at the generic declaration can use a declared type/witness refinement where its condition is proven; otherwise even devirtualization or specialization cannot change the source's validity or assume a narrower escape relationship from today's body. Receiver-place scoping and backing forwarding require separate checks: “forwarded backing” metadata cannot smuggle a loan into dead receiver storage.
+The checked [whole-source member relationship](language/dependencies-and-views.md#published-witnesses-and-generic-refinements)
+publishes broad permissions and per-source ForwardsBacking refinements.
+Direct `this` selects the receiver; `nameof(parameter)` selects a formal.
+ForwardsBacking(this) is the receiver-scoped guarantee above, not a
+runtime receiver mode or a dropped guard dependency.
+`where T.via<IContiguousSequence<int32>>.AsSpan : [ForwardsBacking(this)]`
+can require that exact published member fact in a generic declaration.
+Without an exposed and established condition, generic callers retain the
+broad requirement; specialization, devirtualization and implementation pinning
+cannot supply a stronger source contract from today's body.
+`Span<T>` implements AsSpan explicitly; concrete `span.AsSpan()` remains
+intentionally unavailable. Text projection methods stay public.
 
-The final syntax for receiver modes, conditional relationships and source selectors is **open**. This recommendation is a front-end contract boundary, not permission to invent an annotation in the samples. `Span<T>` implements `AsSpan` explicitly; concrete `span.AsSpan()` remains intentionally unavailable. Text projection methods stay public.
+[Selected lending refinements](language/lending-iteration.md#output-dependencies-and-checked-refinements)
+separately define a fixed inherited init-reference-output relationship:
+cursor-bound by default, with checked published narrowing of element sources
+and affected-operation invalidation. They preserve the distinction between
+cursor/receiver storage, forwarded backing and owner/guard cleanup.
+The general source schemas compose with that exact init-output selector.
+ForwardsBacking alone does not establish surviving advance/close invalidation,
+MatchedAccess registration or a Span/List lending witness.
 
 ## Declaration defaults, exceptions and published compatibility
 
@@ -282,14 +438,44 @@ Public relationships come from declarations, language-versioned defaults and inh
 
 | Declaration shape | Public default |
 |---|---|
-| Synchronous borrowed input | No retention beyond call, except its explicitly declared result relationship |
+| Synchronous borrowed input | No retention beyond call, except its declared result or capture relationship |
 | View result with one eligible receiver/input | Broad source relationship: result may borrow that source's own storage **or** forward its backing/access dependencies; no unrelated capture |
 | Multiple eligible sources | Explicit permitted source set; conservatively bound by **every** listed source, not by which branch today's body selects |
 | Boolean-success `init ref<T>` without an explicit conditional postcondition | Destination starts vacant; `true` initializes it and `false` leaves it uninitialized |
 | Other result type with `init ref<T>` and no explicit conditional postcondition | Destination starts vacant and must be completely initialized on every normal return |
 | Explicit conditional postcondition for `init ref<T>` | The declared status/result relationship governs initialization; `ensure <expr>` uses an ordinary Boolean expression with [specified clause placement](grammar-spec.md#31-source-file-structure-and-declarations); correlated-output metadata remains to specify |
-| Declared `Task<TResult>` | May retain borrowed inputs/receiver until completion and required cleanup, whether or not the method is `async` |
+| Registered Core `Task<TResult>` result | Affine completion owner; may retain borrowed inputs/receiver through its checked completion/cleanup extent, whether or not the method is async; completed payload bounds remain separate |
 | Implemented interface/registered builder | Inherit the source, access, output and effect contract; no implementation-by-implementation repetition |
+| Registered generated producer | Synchronous creation captures staged inputs/receiver into one affine cursor; retain all declared backing/owner/guard/affinity bounds through release and required completion/close |
+| Selected lending reference output | Initialize an inner ref<T>/write ref<T> descriptor with cursor-bound element/source dependencies unless an available checked published refinement applies; no element ownership or output-slot borrowing |
+| Selected async cursor completion output | Reserve its vacant destination and mutable cursor access with the returned operation; observed true initializes, false/failure leaves vacancy after completion cleanup |
+
+The last row is the [explicit async-value-iteration relationship](language/async-iteration.md),
+not a changed default for arbitrary Task-returning functions. Pending caller
+storage cannot be tested for initialization, reused or retired through an alias.
+Retain destination/source/backing, roots, guards, affinity and a responsible
+completion owner until the operation's terminal relation is observed.
+Task status or cancellation request alone does not supply that relation.
+Forwarding preserves exact phase/formal/output and operation identities;
+an awaited Boolean refines only the corresponding output version.
+Actual completion cleanup can finish before caller observation, but no caller
+availability or discharge fact follows from unobserved private execution.
+After observation, ordinary output dependencies and guarded cleanup remain.
+
+Async lending applies that same reservation to its descriptor destination;
+the published element loan then retains its independently declared backing.
+Completion/task retirement does not end that loan, and a retained task does
+not preserve expired backing. Every copied/reborrowed loan constrains later
+advance/close according to the broad or available refined relationship.
+The ordinary value iterator can also publish reference-valued items without
+providing a lending witness or element-place binding.
+
+[Generated producers](language/generated-producers.md) separate their
+synchronous creation lifetime from retained lazy body state and each
+advance/item/close extent. Creation cleanup cannot strand a capture requiring
+pending async release. Yield retains entered scopes; close unwinds only those
+scopes and does not replay normal completion. Physical frame placement or
+default confinement does not repair an unavailable source/guard.
 
 For conditional outputs, initialization is a live-state fact: an initialized
 nullable value containing null is still a complete live `T`; an uninitialized
@@ -302,23 +488,34 @@ vacant storage to discover a false predicate. A successful value predicate
 establishes initialization. Callers may retain a checked relation between
 output state and its discriminator before testing it, but must not access or
 clean up a vacant arm or receive an undiscriminated maybe-live owner. Exact
-clause placement/grammar and metadata remain to be specified. The
+correlated-output metadata remains to be specified; clause placement follows
+the source grammar. [Structural flow](language/initialization-and-flow.md)
+defines state joins, saved outcomes, and guarded initialization/cleanup. The
 boolean-success and other-result defaults above are language-versioned, not
-inferred from method names. Legacy `bool`/`out` conditional publication is
-distinct from `init ref<T>`; current support for each is documented in
-[implementation](../implementation.md).
+inferred from method names. Historical implementation output modes are
+documented separately in [implementation](../implementation.md); they do not
+change these initialization contracts.
 
-The task handle alone does not discharge responsibility for a started
-operation. Its obligation remains with a structured owner that joins it, an
-explicitly transferred responsible owner, or a supervisor with error, lifetime
-and shutdown policy. Discarding a task does not cancel it or release its
-captures. Cancellation does not shorten a borrowed input's declared lifetime:
+Core [Task<T>](language/task-responsibility.md) is an affine completion owner,
+not a reusable observation handle. Ordinary await consumes it; a named owner
+requires `await move task`. Explicit transfer to a checked structured owner
+or supervisor preserves error, lifetime, output and shutdown obligations.
+An exit that could abandon work or unobserved failure rejects on normal and
+exceptional paths. Discarding a task neither inserts settlement nor cancels it
+or releases its captures. Cancellation does not shorten a borrowed input's declared lifetime:
 backing and guards remain live until the operation actually stops and performs
 required cleanup.
 
 A `require` expression or matching context lifts eligible destinations omitted
 from the call; explicitly supplied destinations are not lifted, and partial
-omission is permitted. With all destinations supplied, matching uses the
+omission is permitted. The explicit `init ref<T>` mode and its checked,
+published ordinary call-completion output contract establish eligibility;
+no additional registration is required. Hidden destinations must be valid
+ordinary initially vacant locals with the complete type and dependencies,
+not arbitrary storage or fabricated defaults. This does not lift required
+inputs or outputs published only at later task/producer completion.
+Ordinary calls and statement-form Boolean `require` still supply destinations.
+With all destinations supplied, matching uses the
 ordinary return value. The call evaluates once, and projections preserve
 per-output initialization/presence, status correlations and complete
 ownership/access/backing contracts. Matching may select initialized failure
@@ -329,42 +526,96 @@ requirement can select fewer outputs or require non-nullness. `_` does not
 read or require initialization of an ignored output, but cannot erase its live
 cleanup obligations. No vacant read, ordinary tuple construction from vacant
 slots, fabricated `default(T)` or mandatory `Option`/`Result` is introduced.
-Definition/import checking establishes the availability relations; output
-registration, richer-status spellings, metadata and exact reference extraction
-remain work. A selected exception applies to the false condition only and does
+Definition/import checking establishes the availability relations;
+richer-status encoding, later-completion lifting and physical metadata
+remain work. [Calls and inference](language/calls-and-inference.md#omitted-outputs-and-retained-observations)
+defines supported source extraction: Copy patterns do not consume unique
+outputs, and a bare lifted requirement transfers owning values only after
+all required initialization checks. An explicit destination and a body move
+provide selective unique extraction after matching/guards.
+A value-form requirement with no omitted outputs performs the ordinary
+Boolean check and yields unit; it does not extract explicitly supplied
+destinations or change their published state on a false check.
+A selected exception applies to the false condition only and does
 not catch an exception raised while evaluating the call. These are target
 contracts; current compiler support is documented in
 [implementation](../implementation.md).
 
+An omitted output site has one hidden initially vacant mutable local per
+activation of its original supporting scope. A condition in `if`, `while`
+or `do` uses the enclosing block; `for`/iteration expressions use their
+header. Reentered bodies and contract phases have their ordinary separate
+activations. The owner is not retired merely because an `if` finishes,
+the condition becomes false, or a copied view ends. Its complete backing,
+root, cleanup and independent obligations remain checked.
+
+For a reached repeated call, ordinary receiver/argument staging and
+invocation-only checks precede conditional, dependency-valid retirement
+of old hidden values. Initialization then starts in vacant storage.
+This is not implicit-reference materialization's build-before-drop
+replacement: explicit `init` never clears a live destination.
+Retained dependencies can prevent preparation; no private owner arena
+repairs it. A skipped call retains storage without presenting an old value
+as a new invocation's output. Final cleanup occurs at the supporting
+scope's ordinary boundary, subject to all stricter type/backing obligations.
+
 An eligible view source can provide backing/borrowed access; outputs and independent scalars do not automatically qualify. A numeric parser's result is independent; a parser returning a view of input text retains the input dependency. A parameterless projection generally uses its receiver. An independent freshly allocated result needs its own owner/root and cost contract. More than one eligible input is not resolved by inspecting current control flow. Returning a view does **not** authorize storing it in an unrelated receiver. Constructor capture, exported callback factories and registrations need a declared destination/boundary. Local closures carry actual capture relationships; consuming a unique owner retains its ordinary transfer/cleanup rules rather than becoming an invisible borrowed capture.
 
-The accepted parameter-directed result annotation is
+The accepted whole-source result annotation includes
 `[return: DependsOn(nameof(left), nameof(right))]`; `nameof` is preferred
 over literal parameter names. All possible declared input dependencies remain
 obligations at the caller, without extending their permitted lifetimes.
 See the [source contract](grammar-spec.md#result-dependency-declarations).
-Receiver-storage, forwarded-backing, stored-capture and suspension contracts
-are separate targeted relationships. The result annotation alone does not
-declare all of them. Unannotated defaults follow the language-versioned and
-inherited/registered declaration rules above, not a dependency-bearing example
-or today's implementation. Exact selector schemas and metadata encodings
-remain specification work.
-
-Working annotations `[ViewOf(From = nameof(source))]`,
-`[ViewOf(Access.Write)]` and `[Captures(nameof(value))]` express **exceptions
-to defaults**, not unchecked assertions, and their spelling is provisional.
+DependsOn names permitted whole sources; ForwardsBacking separately rules
+out their own-storage alternatives. Captures specifies retention in the
+constructed/existing receiver, named formal holder, result or admitted operation.
+These remain checked relationships, not access grants or assertions that
+backing lives long enough. Untargeted defaults, explicit destination/phase
+rules and conditional member requirements are specified in
+[dependencies and views](language/dependencies-and-views.md).
+The provisional ViewOf sketches do not establish any additional source,
+write, guard or retention protocol. Physical relationship codecs remain work.
 Conditional output initialization is normally stated in declaration
 postconditions, not a dedicated output attribute.
 Writable guard projections lend existing exclusive authority and block
-overlapping extraction; they do not upgrade a readonly guard. Conditional
-failure/exception cleanup leaves an initialization destination vacant; no
-`default(T)` is synthesized. A success-status local can carry an output fact to
-a later branch. Async initialization targets operation-owned or valid rooted
+overlapping extraction; they do not upgrade a readonly guard. A normal outcome
+leaves an initialization destination vacant only when its declared outcome
+contract requires vacancy. A declared false/error outcome may instead publish
+a complete live value, including initialized null, with its ordinary cleanup
+obligations. Failed partial initialization and checked exceptional departure
+under an `init` contract requiring vacancy clean the partial state and leave
+the destination vacant. An ordinary writable-reference destination has no exceptional
+rollback guarantee; postcondition failure does not make output publication a
+transaction or undo body effects. No `default(T)` is synthesized. A status
+local can carry the declared output relation to a later branch.
+Async initialization targets operation-owned or valid rooted
 caller storage through completion, never a borrowed startup stack address
 smuggled into a suspended task. Fault capture requires trusted containment.
-Legacy `bool`/`out` conditional publication is distinct from the `init ref<T>`
-target notation; declaration and call sites must migrate coherently rather than treating
-`init ref` as a spelling alias for arbitrary writable `ref<T>`.
+[Local failure payloads and catch inputs](language/local-failures.md)
+retain the same complete source/guard/owner generations. A catch ref<E>
+borrows the runtime-owned payload only through its live recovery extent;
+handler exit ends that borrow before event transfer/retirement. A Copy input
+retains its own actual backing dependencies, not an automatic deep snapshot
+or captured event. Neither annotation nor trapping a fault can keep an exited
+source frame valid.
+[Core captured-event ownership](language/captured-exceptions.md) transfers the
+same event from its source handler without extending those inputs or any
+payload/cause source lifetime. A valid independent holder may keep the event
+live through the original input extent; retirement must wait until its
+dependent borrows end under ordinary cleanup order. Returning/storing the
+owner retains all hidden sources, guards, generations, runtime/code and
+protocol obligations. A staged consuming throw ends relevant inputs before
+outward propagation; neither capture nor suspension inserts a pin, root,
+owner arena, wait or thread-transfer permission.
+[Requirement failure construction](language/requirement-failures.md) has
+the same obligations even with zero supplied arguments. A constructor can
+still have effects, acquire state or return a dependency-carrying payload;
+eligibility/default selection grants none of those dependencies lifetime.
+Its failure preserves initialized call outputs and ordinary supporting-scope
+hidden holders, with actual partial/unwind cleanup and no source restoration.
+Initialization publication is distinct from arbitrary writable `ref<T>`
+access. Historical implementation `out` modes do not add a normative
+parameter form or an exceptional rollback guarantee.
 
 Matched access follows the relevant source through wrappers, interface dispatch,
 generic calls, reflection and generated adapters. A structural readonly list may
@@ -374,15 +625,34 @@ list-owned slots, nodes or links. Deep graph-read is a future proposal, not the
 v1 access model; it could restrict references traversed from a root. A
 separate immutable-graph/freeze contract would need checked publication
 excluding all writable aliases. Purity and stable reads are separate
-contracts; a `[Pure]` call on mutable input is not automatically memoizable.
+questions under the [unified input-state contract](language/published-predicates-and-effects.md#aliasing-memory-state-and-sharing):
+reading mutable receiver/input state can be pure, but relevant writes change
+that logical input. Reuse needs unchanged read dependencies and surviving
+backing; readonly access and equal root addresses are insufficient.
+No separate `Stable` or receiver-read modifier is required.
+The [NoAlias parameter schema](language/published-predicates-and-effects.md#noalias-parameters)
+can require checked accessed-region separation for the whole invocation.
+It does not acquire exclusive access, erase nested backing or extend a
+returned loan; writes and retirement still invalidate their actual dependencies.
 
 An interface witness must satisfy the interface's published requirements.
+The [qualified-self rules](language/interface-witnesses.md#qualified-self-witness-projection)
+permit only checked source-equivalent forwarding from an existing witness.
+They preserve receiver capture, input transfer, result/backing relationships,
+roots and cleanup; projection is neither permission to strengthen a readonly
+result nor body-derived evidence of a stronger lifetime guarantee.
 
 Store both the **broad interface contract** and the **resolved published implementation/member refinement**, including conditional relationships, source selectors, capture destinations, root/disposal requirements, rule versions and ABI layouts. Source compilation checks a member's claimed refinement against its authored body. An independently compiled generic caller sees the broad interface contract; only an explicit checked conditional contract can expose a type/witness refinement when its condition is proven. Ordinary binary consumers rely on published dependency metadata rather than re-proving dependency bodies, while still checking references, contract compatibility and caller use. Devirtualization, specialization and implementation pinning cannot change source validity or substitute body inference for a published relationship. Tightening an interface from permission to borrow receiver storage to a no-borrow requirement rejects existing implementations that published that permission, even if today's bodies do not use it. Broadening a published scoped implementation to permit receiver-storage borrowing invalidates existing callers that relied on its no-borrow guarantee; it requires a breaking revision or explicit checked adapter. Dynamic binding and AOT/JIT replacement checks must reject added capture, weakened access, changed view source, new cleanup obligation or invalid refinement, not merely compare CLR-signature shapes. Compatible changes may be replaced contract-bound; stronger implementation-only facts are not implicitly upgraded in consumer metadata. ABI layout and roll-forward need explicit version-aware validation.
 
 ## Ownership transfer and cleanup
 
 ### Explicit local lifetime end
+
+The [value/execution rules](language/expressions-and-statements.md#using-results-and-explicit-discard)
+require explicit handling of every normally produced non-unit result.
+`_ = expression;` deliberately retires an unused result; `name = _;`
+instead ends that named local. Neither form erases active-operation or
+backing dependencies, fabricates a unit/default value, or grants authority.
 
 `name = _;` ends the current value's lifetime in a named local at that point,
 as if its value reached the end of an enclosing block. It does not end the
@@ -400,7 +670,9 @@ and does not force collection. No operation is invented for a value whose
 scope exit requires none. These examples describe the owning profile's
 contracts, not current compiler support for arbitrary guards, ARC or pins.
 
-The value must be definitely live. Outstanding loans, derived pointers,
+The value, or an eligible structural owner's retained partial state, must
+be definitely present. Ending partial state retires only its live fields;
+it does not read or transfer a complete aggregate. Outstanding loans, derived pointers,
 captures or other dependencies can prevent its early end, including releasing
 a supporting pin or owner. Ending a local reference ends that local loan; it
 does not write through the reference or end caller-owned storage. The selected
@@ -416,9 +688,11 @@ Ending the value grants no new write authority. An ordinary immutable `var`
 cannot be assigned again. An `init var` or `init T` local can be initialized
 again when vacant, by checked assignment or eligible initialization completion,
 without changing its established type; it cannot replace a live value merely
-because it supports initialization. Mutable bindings retain their existing
-write/initialization permissions. A new initialization starts a new value
-lifetime with its own cleanup obligations, not a revival of the old value.
+because it supports initialization. `init mut var` and `init mut T` separately
+grant ordinary binding mutation and replacement after initialization. Mutable
+bindings retain their existing write/initialization permissions. A new
+initialization starts a new value lifetime with its own cleanup obligations,
+not a revival of the old value.
 Reads, borrows and another lifetime-end operation require definite liveness
 along every incoming control-flow path.
 
@@ -426,54 +700,58 @@ See the [statement grammar](grammar-spec.md#33-statements-and-local-declarations
 This is accepted target direction; current vacant locals support checked
 initialization calls, not this early-end/assignment-reinitialization contract.
 
-### Existing owner transfer and cleanup contracts
+### Owner transfer and cleanup contracts
 
-A unique named owner has one live-or-vacant state along every control-flow
-path. By-value parameters transfer from an explicit named move or fresh
-result and are dropped by the callee on normal or checked exceptional exit
-unless moved again. Arguments are staged in evaluation order: an earlier
-completed owner is dropped if a later argument fails before invocation. A
-`bool`/`out` owner is published only on true; on false or exceptional exit its
-completed private output is dropped without manufacturing a readable caller
-value. Existing owners passed as output destinations are dropped only when
-the call begins, not while earlier arguments are being evaluated. A successful
-`out var` has a lexical cleanup scope. Initialization-loan output preserves
-these publication and cleanup rules without becoming a general writable
-reference.
-User-defined unique receiver loans are synchronous and cannot be stored,
-consumed or passed as values. Ordinary methods default to readonly loans.
-A `mut` method requires a fully initialized named mutable owner, a writable
-field path from it, or forwarding through its existing writable `this`;
-it may update mutable scalar and Copy fields, not replace owning fields. Its
-root is reserved before argument
-evaluation, so argument calls cannot move, replace or otherwise invalidate
-that owner. Mutation does not transfer ownership or change cleanup
-responsibility; updates before a checked failure remain visible.
-Unique child structs may be borrowed through writable paths only after the
-whole root is initialized; the borrowed child is neither moved nor separately
-destroyed, and eventual recursive cleanup sees its updated state. Partial
-construction permits only readonly loans of initialized children. A writable
-slice from a buffer field reserves its fully initialized root: range
-expressions run before activation and cannot invalidate it; while active, the
-view excludes other root access, including sibling fields. Normal scope exit
-and checked unwind end only the loan, leaving prior writes intact and
-recursive release to the owner. Such views cannot escape or be copied, passed,
-stored or returned.
-Cleanup is an explicit
-`[NoThrow] [Cleanup] public void Close()`-shaped contract on a unique
-instance method; the name itself has no special meaning. Compact owners can
-contain primitive, nested Copy and owning fields; partial construction cleans
-acquired fields in reverse acquisition order, and complete-value cleanup
-recurses through owning fields. Cleanup cannot invoke a potentially throwing
-operation. A statically constant
-index proven within an immutable host-buffer grant may be used in NoThrow
-cleanup; general indexing cannot. Managed roots preserve exact live values
-through lexical and temporary scopes but do not implement unique cleanup or
-general stored-view representation.
+A unique named owner has one responsible state along every control-flow
+path, retaining per-field facts when it is structurally partial. By-value
+parameters require a complete transferred value from an explicit named move or fresh
+result and retain their callee's checked retirement/transfer obligation on
+normal and exceptional exits. Protocol owners such as Task<T> may require
+explicit settlement first. Arguments are staged in evaluation order: an earlier
+completed owner retains that same obligation if a later argument fails before invocation.
+Initialization-loan destinations are vacant; passing one does not destroy an
+existing owner as an implicit output adaptation. Publication follows the
+declared normal outcome, including a declared live failure output. An outcome
+requiring vacancy cleans any privately constructed owner without manufacturing
+a caller-readable value. Checked exceptional initialization follows its
+vacancy and partial-cleanup contract. A newly declared `init var` destination
+has its ordinary lexical cleanup scope.
+Unique receiver and field loans use their actual access, live-state and
+owner/guard contracts. Borrowing neither moves the referred-to owner nor
+duplicates its cleanup; mutation does not transfer responsibility and updates
+before checked failure remain visible. A declared result or capture can retain
+a loan only with its full checked source and destination extent. There is no
+general ban on storing/passing/returning a view merely because its source is
+unique, and no general exclusion of sibling fields from write access alone.
+Separately selected exclusive loans retain their required root reservations.
+[Ownership and cleanup](language/ownership-and-cleanup.md) defines structural
+partial field moves under ordinary write/init authority, checked repair and
+replacement, and the complete-receiver boundary for authored Cleanup.
+Partial state retains live children and is not whole vacancy.
 
-Exact rules for partial owning-field moves, expression temporaries, result
-escapes, place disjointness, return anchors, interface refinement and dynamic
-dependency binding remain open. Current executable boundaries are documented
+Complete retirement runs the selected NoThrow/nonsuspending readonly Cleanup
+body once while the receiver is complete, then automatically retires fields
+in reverse declaration order. The Close name alone registers nothing.
+Without an authored body, cleanup is derived from the remaining live fields.
+Failed unpublished construction instead unwinds actual acquired values in
+reverse acquisition order without calling the incomplete parent's Cleanup.
+Borrowed children are not independently destroyed; roots and retained
+dependencies remain subject to their actual field retirement contracts.
+Managed roots do not release unique resources or keep disposed backing valid.
+The [hosted owner/view inventory](../implementation/view-and-owner-profiles.md)
+records narrower supported field/update/loan shapes and cleanup proofs.
+
+General source/capture/witness and logical owning-field transitions are
+specified. [Windows x64 native](targets/windows-x64-call-interface.md#6-complete-owners-and-retirement-entries)
+specifies complete fixed rootless owner transfer and call-extent stable borrow
+projections without choosing a stored reference/owner descriptor.
+Managed ownership, general return anchors, physical partial-state and dynamic
+dependency codecs remain separate work.
+Current executable boundaries are documented
 in [implementation](../implementation.md) and staged in [roadmap](../roadmap.md).
 An escape without a declared and checked contract diagnoses; it must not
 silently box, clone, register, retain or copy.
+Task-bearing owning state also retains the
+[task settlement contract](language/task-responsibility.md#every-exit-settlement-and-ordinary-destruction).
+Its generated destruction is not permission to block, suspend, cancel or
+silently supervise a pending child operation.

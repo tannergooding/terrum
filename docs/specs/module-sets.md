@@ -1,68 +1,39 @@
-# Native module sets
+# Native deployment sets
 
-## Definitions and scope
+A native deployment set selects one consumer image and multiple provider
+images. A flat leaf-only set is distinct from a
+[transitive native graph](native-graph.md). The selected deployment profile
+determines which topology, value modes, runtime domains and failure/cleanup
+transport it admits.
 
-A **module set** is one persisted consumer EXE plus two to sixteen selected
-provider DLL packages. A **provider** supplies public exports; the consumer
-imports only the selected exports. A **retained declaration** preserves a
-contract needed for validation or type/cleanup checking, while an **actual
-machine import** is an emitted call represented in the PE import table.
-Declaration retention does not by itself create a machine import.
+The selected [Windows x64 profile](targets/windows-x64-deployment.md#4-selected-closure-origin-and-replacement)
+preserves complete fixed rootless edge and allocator/cleanup-origin contracts;
+its scope is independent of the private development set's narrower examples.
 
-A module set is a flat, leaf-only native deployment contract. The broader
-compiler support boundary is in [implementation](../implementation.md); future
-formats and servicing work are tracked in [roadmap](../roadmap.md).
+Selection preserves each producer's identity, complete retained contract and
+the [binding relation](representation/binding-and-replacement.md). Provider
+argument order is not semantic identity or a compatibility preference.
+The [native identity contract](native.md#native-package-identity-and-filename-collisions)
+keeps case-sensitive ASCII package selection separate from target filename
+collision rejection before staging or launch.
+Retained declarations and type/cleanup dependencies are distinct from emitted
+machine imports: an obligation remains even when no call/IAT entry names it.
+Conversely, every actual import must have its required admitted provider.
 
-A native module set persists **one** Windows x64 consumer EXE and its checked
-semantic contract. Two to sixteen independently compiled leaf DLL packages
-provide distinct, unambiguous public exports. Identity selects the DLL, not
-the order of `--provider` arguments. The consumer imports only those named
-exports, and validation checks the selected packages, contracts, policy,
-profiles, and PE import ownership before any process starts. A compatible
-replacement changes the provider image without changing the consumer bytes.
+Before affected execution, establish the complete selected dependency,
+binding, target/runtime and image-admission obligations. Matching exports or
+successful platform loading alone is insufficient. Compatible provider
+replacement preserves the unchanged consumer's required contracts and
+[code/cleanup lifetime](native.md#runtime-and-code-lifetime); it does not
+automatically rewrite or recompile that consumer.
 
-From the repository root, after building `terrumc`:
+Private packaging does not generalize the development leaf-set value surface
+to unique owners, managed handles, references or views. Each crossing still
+needs a complete admitted profile. The topology itself grants no shared heap,
+root transfer or safe unloading.
 
-```powershell
-$c = "artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.exe"
-& $c compile-native producer samples\native\module-sets\first.terrum First --export Alpha -o first.trmn --runtime fail-fast
-& $c compile-native producer samples\native\module-sets\second.terrum Second --export Beta -o second.trmn --runtime fail-fast
-& $c compile-native-set samples\native\module-sets\consumer.terrum --provider second.trmn --provider first.trmn -o consumer.tnset --runtime fail-fast
-& $c validate-native-set consumer.tnset --provider first.trmn --provider second.trmn
-& $c run-native-set consumer.tnset --provider second.trmn --provider first.trmn --runtime fail-fast
-```
-
-The last process exits with status 42. Compile replacement producers with
-the same identities and exports using `first-replacement.terrum` or
-`second-replacement.terrum`, then rerun validation and execution with the
-unchanged `consumer.tnset`: each replacement gives status 43. Use `$LASTEXITCODE`
-to inspect the child status in PowerShell. Compilation never runs the consumer.
-`--json` is supported as the final argument on all three set commands.
-Output artifacts are atomically replaced only after successful compilation.
-
-The `TNSP` version 2 container records retained declaration ownership separately
-from actual machine imports; the reader accepts only version 2. Actual imports
-come from the same emission's fixups, including implicit recursive cleanup calls.
-They must belong to the selected provider's retained declarations, cover
-semantic calls, and exactly match the persisted PE's import table. Keeping a
-declaration for type or cleanup contracts does not itself create an IAT entry.
-
-The set is intentionally leaf-only: it does not model transitive graphs,
-cycles, arbitrary version roll-forward, hot servicing, resilient layouts,
-or the future general `TRRM` semantic-IL format. Semantic v32 permits a
-native-set consumer to retain private managed state, but image boundaries
-remain limited to scalar and
-public handle-free `Copy` value contracts, including existing conditional
-`bool`/`out` results. Handles, unique values, views, reference modes and
-mutating-receiver ABI do not cross the boundary; each persisted image has its
-own heap/root domain, while collection stays local. This uses the existing
-native profile and package versions and adds no physical ABI change. It does
-not add a dedicated native-set JIT API. Two providers cannot both claim the same public
-type or qualified export name; case-insensitive DLL identities also cannot collide.
-The selected dependencies must match exactly and each must supply a retained
-declaration; only emitted calls require machine imports.
-Implementation hashes are not pinned. These packages remain trusted native
-artifacts rather than an authenticated sandbox; validate before executing,
-and supervise the generated process with a deadline. Existing semantic JIT
-linking handles one producer; it does not replace an already emitted native
-consumer or claim multi-provider JIT execution.
+The `.tnset` container is [private persistence](representation/persistence.md).
+Its version, magic, numerical implementation limits, stored semantic data and
+CLI workflow are in the informative
+[native-set implementation guide](../implementation/module-sets.md).
+Those bytes are not a Terrum-standard independently produced deployment set.

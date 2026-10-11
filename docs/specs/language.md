@@ -38,6 +38,7 @@ value) and `own<T>` (native owning indirection).
 - Static extern fields bind foreign data symbols under explicit representation, access, validity, synchronization and lifetime contracts, without Terrum initializers. A non-mut import limits Terrum access but does not promise immutable foreign storage or stable loads.
 - Ordinary static storage or an authored static constructor forms one initialization group per loaded closed type, with separate generic-instantiation storage. Non-lazy initializers execute in compiler-input/source order before any authored `static T()` preconditions/body/postconditions and group publication. Static constructors have attributes, `static`, optional `partial`, no parameters/visibility/caller-unsafe modifier, and a mandatory explicit `[StaticInitializer(...)]` trigger policy. Without an authored body, the synthesized group is implicitly field-triggered. `[LazyInitialization]` selects a separate demand-initialized field whose external first access completes the group first. See [static initialization](grammar-spec.md#static-initialization-and-load-scoped-storage).
 - `static` is not a concurrency opt-in: runtime static fields require the normal explicit checked sharing/access protocol, including shared reads, or a proven nonconcurrent restriction. Initialization blocks competing permitted callers by default, but does not grant later sharing or mutation authority. Cyclic demands for unfinished completion fail. Existing exception policy applies; unsafe recovery can explicitly retry failed unpublished state under cleanup/lifetime constraints, and unsafe suppression alone grants no initialization facts. Static state has a checked load-scoped lifetime and unload obligations. AOT/JIT optimizations preserve effects, failures, identity, ownership, cleanup and the memory model, not just computed values.
+- [Standard failure categories](runtime/standard-failures.md) select InitializationCycleException at cyclic demand. An initializing flow receives the actual escaping event; waiting/later access to its failed unit creates a fresh InitializationFailedException, without sharing the original payload/event or retrying.
 - Named properties may be instance/static; `this[...]` indexers are instance-only. Accessors inherit visibility or explicitly narrow it, and independently declare receiver/caller-safety contracts. Static `init` accessors are available only within their owning group's unpublished initialization phase, not for ordinary post-completion assignments. Accessors are synchronous; awaitables may be returned as values, while async execution uses methods. A partial primary owns accessor shape and contracts without allocating backing storage; one matching secondary implements them. Extern properties/accessors require a separate concrete interop design.
 - Operators/conversions are static, with explicit operands and ordinary member accessibility. They may be caller-unsafe or partial under sole-primary ownership, but have no receiver `mut`, `async` or adopted extern form. Operator operands and conversion inputs may use `implicit ref<T>` under existing access, lifetime and overload rules, not size-based ABI adaptation. Conversions retain their logical source type; syntax never adds an implicit await or user-defined conversion chain.
 - Associated type/constant declarations and bindings use attributes and visibility before `type`/`const`, without callable/storage modifiers or member-level `partial`. A partial enclosing declaration may contribute a complete associated declaration/binding under existing access and conformance rules.
@@ -68,6 +69,11 @@ These are target directions. Current support for `unsafe` recovery is
 documented in [implementation](../implementation.md).
 
 ### Types and operations
+
+The [complete-type chapter](language/types-and-normalization.md) defines
+normalized identity, qualification positions, substitution, optional and
+requested-access managed-box normalization. This section gives their
+storage/operation context.
 
 Declarations are immutable by default. A bare local is fixed after initialization;
 `mut T value` permits rebinding that local. `public mut class C` and `public mut struct S`
@@ -108,19 +114,23 @@ that requirement.
 
 The canonical reference representation forms are `ref<T>`, `ptr<T>`,
 `box<T>`, and `val<T>`, with `own<T>` for a native owning indirection.
-As a parameter type, `mut ref<T>` permits rebinding the reference place while
-retaining readonly referent access; `write ref<T>` grants writable referent
-access where applicable. `write box<T>` can grant access
+[References and explicit indirection](language/references.md) defines the
+descriptor model: `mut ref<T>` permits local descriptor rebinding,
+`write ref<T>` permits immediate referent writes, safe `*r` dereferences a
+reference, and `r->Member` abbreviates `(*r).Member`. Ordinary class handles
+retain `c.Member` access. These rules do not change under generic substitution.
+`write box<T>` can grant access
 through a reference only within the payload's declared mutable-member
 contract. `write val<T>` is not a default permission; inline fields need
 writable containing storage or a writable loan/view. `own<val<C>>` is an
 explicit native owner of an inline payload, not the unqualified/legacy `own C`
-spelling. `init ref<T>` is an initialization loan to vacant storage: it cannot
-be read before complete initialization and publication. The accepted call-side
+spelling. `init ref<T>` is an initialization loan to vacant storage: its
+referent cannot be read before complete initialization, and publication follows
+the declared outcome contract. The accepted call-side
 form passes `init name` for vacant storage or declares a vacant local with
 `init var name`. Conditional publication is distinct from ordinary writable
 references and preserves the destination's complete type and cleanup
-contract. Parameter-only `ref T`, `T*` and `T&` are not alternate
+contract. Parameter-only `ref T`, `mut ref T`, `out T`, `T*` and `T&` are not alternate
 representations. `mut` is not valid as a generic type-argument qualifier;
 use `write` when the referent capability itself is part of the type. See
 [implementation](../implementation.md) for the supported output modes.
@@ -128,19 +138,23 @@ use `write` when the referent capability itself is part of the type. See
 The accepted call-side readonly-borrow form is the parameter-only modifier
 `implicit ref<T>`, not `implicit T`, `in T`, or a qualifier inside `T` or
 `ref<T>`. Callers pass ordinary expressions, evaluated once: an eligible
-existing place is borrowed, otherwise a hidden local is initialized at that
+existing place is borrowed, otherwise a hidden mutable local is assigned at that
 argument's original evaluation point in the current enclosing lexical scope.
 Its initialization is not hoisted to scope entry, and it is not wrapped in a
 shorter lifetime-only scope. It follows ordinary local initialization, ownership/root
-cleanup and unwind rules; if conditional or short-circuit evaluation skips the
-argument, no local is initialized and no owner is created to clean up. The
+cleanup and unwind rules; conditional or short-circuit non-evaluation creates
+no new value and leaves any previously initialized value unchanged. Each
+source materialization site reuses one initially vacant mutable binding per
+supporting-scope activation, rather than retaining a new owner every iteration.
+Ordinary replacement and loan checks apply. The
 introduced slot loan has the same semantics as an explicitly authored readonly
 `ref<T>`, including declared result and backing dependencies. A valid returned
 reference to a materialized local may be used by later statements in that same
 scope. `implicit` adds no special noescape or suspension restriction, does not
 widen an existing place's or backing value's lifetime, and grants no new
 capture, suspension or escape permission: ordinary declared dependencies still
-govern each use.
+govern each use. The [source-equivalent loop expansion](lifetimes.md#repeated-evaluations-and-reusable-locals)
+makes the scopes, initialization, replacement, and final cleanup explicit.
 
 Borrowing imposes no `[Copy]` requirement or ownership
 transfer just to borrow. The slot is readonly, but `T` keeps its complete
@@ -162,8 +176,10 @@ No adaptive result family or change to default receiver semantics is selected.
 Current support for this contract is documented in [implementation](../implementation.md).
 
 Constructor initialization does not imply later mutation permission. Loans are
-place- and flow-sensitive, ending after last use; overlapping read loans are
-allowed, conflicting write loans are not. Qualified generic `T` preserves its
+place- and flow-sensitive, ending after last use; ordinary readonly and writable
+references do not by themselves declare exclusion. Overlapping accesses reject
+when they conflict with a checked owner, guard, initialization, or exclusion
+contract. Qualified generic `T` preserves its
 complete caller-selected qualification: a concrete readonly default does not
 strip `write` from a substitution. A generic writable operation must state the
 required access contract; `write T` is not a universal make-mutable transform.
@@ -173,6 +189,13 @@ representation-aware mutation rules, and required protocol for writable
 generic operations remain open.
 
 An ordinary `struct` is inline and promises checked `[Copy]`; every field must support a code-free, allocation-free copy without duplicating a unique obligation. Adding a destructor or unique field must fail the declaration instead of silently removing that public capability. A `unique struct` or `unique struct union` is noncopyable even if its bytes look trivial. An ordinary `class` uses aliasable managed handles; copying a handle shares its object, not its payload. A `unique class` or `unique class union` has a unique owning handle, not necessarily a unique reachable graph or a prohibition on GC. `unique` restricts duplication; `move` explicitly transfers a named value (including a copyable value when invalidating its source is desired). By-value copy/consume is based on the **complete qualified form**, not merely the payload declaration. A moved handle need not relocate the payload; large `[Copy]` values are not assumed cheap.
+
+[Owning fields and cleanup](language/ownership-and-cleanup.md) permit
+structurally tracked partial field moves only under existing write/init
+authority, retaining every live child and prohibiting whole-value use until
+checked repair. Authored Cleanup requires a complete receiver: its body runs
+before automatic reverse-declaration field cleanup. Failed construction instead
+unwinds reverse acquisition without incomplete-parent Cleanup.
 
 Representation projections are separate: `val<T>` denotes an eligible inline
 payload, `box<T>` a reference form, `ref<T>` a bounded loan, `ptr<T>` an
@@ -189,7 +212,12 @@ lifetime, and cleanup rules remain constrained by the owning profile.
 Compatible `box<C>` is `C`, nested `box` normalizes, and `box<T?>` is
 `box<T>?`; normalization does not allocate or invent a clone. Explicit
 `AsBox` can reuse an existing reference or allocate for an eligible inline
-value while preserving qualifiers and absence. `val<box<S>>` names a payload
+value while preserving the requested access, retained inner qualifications,
+and absence. The outer box access controls a compatible collapsed layer:
+for `U = write box<S>`, `box<U>` is readonly `box<S>`, not another box
+or a writable result. `U` itself remains complete and writable; this is
+representation-preserving attenuation, not equality with `write box<S>`.
+`val<box<S>>` names a payload
 type without extracting it. `val<C>` remains conditional on explicit
 inline-payload, identity, copying and address-stability rules; class-handle
 aliasing cannot be silently inherited by inline storage. Scoped loans,
@@ -231,7 +259,8 @@ reference/pointer forms permitted by constraints. Generic type-pattern slots dis
 wildcard `_` from inferred `var`/`var?`: the latter filter non-nullable versus
 either argument type, not contained values. Named forms such as
 `List<var? T> list` capture the actual complete type as `T` and bind `list`
-separately as a value. `typeof(T)` permits type inspection; a recognized
+separately as a value. Reserved `typeof(T)` permits type inspection; `@typeof`
+uses ordinary identifier binding instead. A recognized
 exact identity test refines `T` on the proven path without a conversion.
 Each slot denotes one argument of the selected constructor, not a pack or
 higher-kinded application. Ordinary generic `_` inference remains distinct
@@ -263,7 +292,9 @@ Payload parameter names do not generate public getters or other members;
 pattern extraction remains separate. See the accepted
 [declaration grammar](grammar-spec.md#31-source-file-structure-and-declarations);
 current union implementation and exact metadata encoding remain absent.
-The layout-kind spellings below are illustrative, not compiler syntax. `Auto`
+The [registered layout schemas](targets/windows-x64-data-layout.md#4-registered-source-layout-schemas)
+use `[Layout(LayoutKind.Sequential)]` and the separate `[Blittable]` marker.
+They are source contracts, not compiler support claims. `Auto`
 is the default: instance fields are private and external access uses properties or
 methods; it grants no `Blittable`, packing or aggregate-alignment commitment.
 `Sequential` places fields in declaration order; `Union` places every field at
@@ -277,11 +308,12 @@ auto-freezing.
 
 `Blittable` is the accepted fixed, directly-interoperable representation
 contract per target profile, covering size, alignment, offsets and transitively
-compatible fields. `Blittable: true` is conceptual notation; exact attribute
-and schema spelling remain specification work.
+compatible fields. Its registered `[Blittable]` marker is no-argument and
+nonrepeatable; the logical commitment does not allocate its physical codec.
 Ordinary `ref<T>` is excluded; `ptr<T>` may qualify subject to ordinary pointer
-safety. The exact source spelling, target limits and metadata remain
-specification work. Unfrozen instance fields remain private; a frozen representation
+safety. [Windows x64](targets/windows-x64.md) specifies its target limits and
+call/validity rules; missing metadata remains independently gated.
+Unfrozen instance fields remain private; a frozen representation
 may expose them without changing ordinary readonly or `mut` access rules.
 `Blittable` does not imply `Copy`, atomicity, sharing, arbitrary-bit validity,
 or a universal cross-platform wire format. Public instance-field access requires the
@@ -298,9 +330,11 @@ labels alone do not decide whether such a boundary is coupled.
 
 Both a power-of-two member-packing limit and a separate power-of-two
 aggregate-alignment control are accepted and may be combined. Packing caps
-member and derived aggregate alignment; the other control over-aligns the
-aggregate, with tail padding preserving array stride. Exact argument spelling
-and target limits remain to specify. Transparent inherits its carrier and
+natural member and derived aggregate alignment, without weakening transitive
+explicit nested alignment; the other control over-aligns the aggregate,
+with tail padding preserving array stride. The combined Layout schema has
+named uint32 Packing/Alignment controls under the selected target limits.
+Transparent inherits its carrier and
 rejects either control. Initializing fields does not initialize padding; raw
 object-byte blits and unmediated raw foreign transfer are unsafe. A safe
 serializer must account for the initialization and representation of every
@@ -308,22 +342,17 @@ emitted byte, but may use verified or explicitly trusted raw copy. Details are
 in the [layout contract](data-layout-and-abi.md#fixed-directly-interoperable-representations).
 
 These are target design contracts, not blanket compiler support claims.
-Transparent and sequential layout support boundaries are documented in
-[implementation](../implementation.md).
-The provisional `[Layout(Sequential)]` spelling admits nonpublic compact
-Copy structs with private fields and eligible nested Copy fields, using the
-existing natural declaration-order layout (1–16 bytes). It does not publish
-fields, freeze representation, or permit independently replaceable layout
-boundaries; no semantic wire field or ABI migration is implied.
-`ValueLayout` remains limited to naturally aligned 1–16-byte aggregates.
-Existing non-transparent compact-value and module ABI contracts remain
-authoritative. Broader enforcement requires an explicit compatibility
-migration, not retroactive rejection or reinterpretation of existing artifacts.
+The provisional compact declaration spelling and private layout limits are
+[implementation observations](../implementation/layout-profiles.md#provisional-compact-source-layout),
+not restrictions on the complete [Windows target contract](targets/windows-x64.md).
+Draft source/schema changes need not preserve unpublished declarations or
+artifacts. Retained independently replaceable contracts still meet their
+[binding and replacement obligations](representation/binding-and-replacement.md).
 Language/module compatibility is distinct from foreign ABI and serialization:
 external wire or callback encodings are specified for concrete protocols, not
 as one global boolean, reference or SIMD format.
 Declared overlapping field storage is available only through an explicit
-`[Layout(Union)]` declaration with the fixed `Blittable: true` commitment; it
+`[Layout(LayoutKind.Union)]` declaration with `[Blittable]`; it
 is unsafe to access overlapping alternatives, with no active-member tracking
 or special safe subset. This does not prohibit unsafe pointer-based
 aliasing/reinterpretation or compiler-private overlapping representations. A
@@ -362,16 +391,37 @@ specialization cannot invent a missing source capability. A promised capability
 cannot silently disappear when an implementation changes. Capability stability,
 fixed layout and trivial-wrapper atomicity are separate contracts.
 
-An explicitly eligible one-field wrapper over an already eligible
-integer/Boolean carrier may be a constant-formal domain under its checked
-constant-construction, complete-initialization and
-canonical equality/value-encoding contract. Its nominal identity and validity
+[Core value-layout queries](language/registered-queries.md#value-layout-queries)
+use `RuntimeHelpers.SizeOf<T>()`/`AlignmentOf<T>()` with a by-value `nuint`
+result. They observe the complete normalized value/handle representation,
+not reachable storage or object payload. A declared `[Sized]` guarantee
+supports admitted runtime layout evidence, not an automatic numeric constant.
+Retained observations preserve their exact target and published fixed
+commitments or explicit layout-coupled rebuild/invalidation dependencies.
+No new keyword, mutable static query state or general reflection object is
+introduced.
+
+`where T : write` is a [direct access requirement](language/types-and-normalization.md#generic-write-requirements)
+on the complete normalized type argument, not an attribute or interface.
+It requires already-writable immediate access and preserves `T`; it cannot
+upgrade readonly arguments, substitute for member/witness contracts, or
+derive write access from `mut` bindings or writable inner handles.
+The declaration uses `<T>` and ordinary `:` requirements; `<write T>`
+formal shorthand and `where T is write` are not selected forms.
+
+An eligible one-field integer/Boolean wrapper derives
+[constant-formal participation](language/constant-generics.md)
+from its checked Transparent contract and existing constant-construction,
+complete-initialization, frozen Copy/Blittable and typed value-codec obligations.
+Canonical identity is the exact complete nominal type plus carrier value,
+not user equality or hashing. Its nominal identity and validity
 remain meaningful, including a nonnegative invariant. Equal representation,
 an adapter relationship or `Transparent`/`Blittable` alone does not supply
 that capability. Removing or incompatibly changing its published guarantees
 is breaking under the existing replacement contract; unpromised private
-implementation details remain replaceable. Exact opt-in/encoding and any
-separate attribute-encoded constructor recipe remain specification work.
+implementation details remain replaceable. No second attribute/protocol is
+added; physical encoding and any separate attribute-encoded constructor recipe
+remain specification work.
 
 No universal root is required to supply `Equals`, `GetHashCode`, or
 `ToString`, or to impose object-default boxing/allocation on every value; nor
@@ -455,8 +505,12 @@ that can bind older witnesses to a newly supplied default. Qualified member
 bindings, optional first `<this T>`, `.via<I>` witness selection and restricted
 current-receiver `default<I>.Member()` calls follow the
 [source grammar](grammar-spec.md#54-aliases-and-associated-types-declarations-and-open-binding).
-Complete inherited-witness resolution, metadata and ABI remain to specify; current bounded
-static operator requirement and self-binding support is documented in
+The [witness chapter](language/interface-witnesses.md) defines inherited
+identity/default resolution, associated checking, and source-equivalent
+qualified-self projection. `T = write C` remains a complete qualified type:
+an existing self witness may adapt only when every requested contract holds,
+not by erasing access or inventing a writable result. Witness metadata and
+dispatch ABI remain to specify; current bounded static operator support is documented in
 [implementation](../implementation.md).
 
 There is no `dyn` keyword or implicit stored interface handle. Bare `I` names
@@ -479,6 +533,8 @@ automatically the payload. Opening one erased value does not prove another
 value has the same hidden `Self`; dynamic-callability, associated bindings,
 borrow lifetimes, dispatch and ABI remain to be specified.
 
+[Calls and inference](language/calls-and-inference.md) owns ordinary source
+argument mapping, finite inference, applicability and ranking.
 Source overload resolution records the selected declaration and closed generic
 arguments. A linker or JIT validates and implements that binding rather than
 rerunning source resolution; runtime virtual/interface dispatch is separate.
@@ -488,16 +544,19 @@ conversions; permitted access/qualification weakening can affect match
 quality (for example, `write Span<T>` to a readonly `Span<T>` parameter), but
 does not infer a new or reversed family projection. Binding first determines
 applicability, then compares each argument's match quality independently:
-identity is better than permitted access/qualification weakening.
+identity, then permitted immediate-access attenuation, then other admitted
+single-step bindings.
 One explicit additional built-in edge is `pin ref<T>` to matching `ptr<T>`:
 it retains access and lifetime/pin/backing dependencies, and an identity match
-ranks ahead of it. This does not enable conversion-operator lookup, conversion
+ranks ahead of it, as does access attenuation over the same representation.
+This does not enable conversion-operator lookup, conversion
 chains, implicit numeric conversion or inferred future exceptions. One
 candidate is better only when it is no worse for every argument and better
-for at least one; crossed better/worse arguments are ambiguous rather than
-combined into a score. Declared specificity resolves otherwise tied
-applicable shapes, including by-value versus `implicit ref<T>` and the
-accepted `params` normal/expanded rules. A fixed-arity non-expanded candidate
+for at least one; crossed better/worse arguments leave the pair incomparable rather than
+combined into a score. After quality ties, binding priorities retain
+by-value over an otherwise equal implicit formation of `ref<T>` and the
+accepted `params` normal/expanded rules. Declared structural specificity
+then resolves remaining ties. A fixed-arity non-expanded candidate
 wins over an otherwise equal expanded `params` candidate. Constraints filter
 applicability but do not create overloads differing only by constraints or
 require arbitrary logical subsumption; return-only overloads are not
@@ -507,32 +566,41 @@ break ties. Applicable members beat extensions. Thus a sole
 ambiguous while an already compiled caller retains its `int32` binding.
 Removing the bound declaration remains a compatibility break.
 
-Generic inference is staged: explicit arguments pin positions, typed arguments
-establish types, expected-result context fills only unresolved positions, and
-then contextual literals/lambdas are checked. Context never retargets typed
-operands or established generic types. For example, `int64 x = 50000 * 50000`
+Generic inference is finite and staged: explicit arguments pin positions;
+typed values and constituent evidence in known tuple/collection shapes
+establish types; known callable inputs permit delayed typed result evidence;
+expected-result context fills only unresolved positions; declared defaults
+fill omitted unresolved positions; then full contextual expressions are
+checked. Context never retargets established inputs or generic types.
+New input types from expected-result/default fallback reenable typed
+evidence before further defaults; defaults follow declaration order.
+For example, `int64 x = 50000 * 50000`
 constructs `int64` operands, while `int32 a = 50000; int64 y = a * a` needs
-explicit conversion. Partial `_` holes are accepted direction (exact spelling
-is open): `Convert<_, int32>(typedValue)` may infer only the first argument,
+explicit conversion. Partial `_` holes use the selected spelling:
+`Convert<_, int32>(typedValue)` may infer only the first argument,
 and `int32 result = Convert(typedValue)` may infer a result-only type from its
 target. `func<_, int32> f = ToInt32` can fill a hole from one unique method
 signature. All holes resolve at local binding; exported fields, aliases, and
 parameters cannot retain them. There is no wildcard/existential/higher-kinded
 meaning, and non-injective projections are not inverted. Ambiguity diagnoses.
-The broad inference order above is target direction, not a claim that general
-inference is implemented. Typed arguments and explicit type arguments establish
-their positions before result context fills unresolved positions; contextual
-literals are checked only after their target type is known. An outer result
-context cannot retarget a typed argument, and a literal does not implicitly
-construct a struct or supply a default type. Definition-site constraints and
-effects remain authoritative for each independently inferred parameter; a
-caller cannot lend stronger constraints to a template. A `write C` argument
-fixes its parameter as `write C` before result-context fallback, and any
-permitted result weakening does not retarget that parameter. Generic
-signature lookup is distinct from type-argument inference. Constructor
-inference, partial holes, general overload inference and public generic ABI
-remain separate design work. The bounded inference profile and its exact
-limits are documented in [implementation](../implementation.md#bounded-generic-functions).
+These are specification contracts, not a claim of current compiler support.
+Typed by-value evidence over the same normalized stem chooses the strongest
+common permitted immediate access: all writable inputs retain write;
+mixed writable/readonly inputs infer readonly. Exact invariant storage
+evidence pins the complete type instead. Expected results and constraints
+cannot weaken it to repair applicability. Delayed lambda results fill
+unresolved positions without guessing inputs or representations.
+Typed collection elements/spreads can supply evidence only through an already
+selected family's published forward element contract; bare untyped literals
+still supply no default width.
+Literal-kind eligibility precedes unique signature selection, but value/range
+acceptance and registered parser execution follow it without overload fallback.
+Definition-site constraints/effects remain authoritative; a caller cannot
+lend stronger constraints to a template.
+Generic signature lookup remains distinct from type-argument inference.
+Physical generic ABI, unsupported families and registration schemas remain
+separate work; current support is documented in
+[implementation](../implementation.md#bounded-generic-functions).
 
 Operator protocols are explicitly declared and constrained; homogeneous
 operands require the applicable conformance. Operator spelling does not imply
@@ -551,7 +619,11 @@ protocols remain unsupported.
 
 `_` is reserved and never names an identifier. `_ = expression;` is the
 accepted standalone discard statement: evaluate the expression once, preserve
-its effects and failures, and apply ordinary ownership/cleanup. It is not an
+its effects and failures, and apply ordinary ownership/cleanup. Every normally
+produced non-`void` expression result must be used or explicitly discarded,
+including scalar calls, constructions, increments and awaits. Only genuine
+unit-valued expressions can stand alone without result discard.
+It is not an
 assignment and has no name-dependent fallback. Positional wildcard patterns
 and omitted lambda parameter names are separate nonbinding contexts; they do
 not drop the matched/argument value or alter parameter mode. Separately
@@ -562,12 +634,31 @@ its scope-exit obligations and leaving it vacant. It neither removes the
 declaration nor grants write authority: same-scope redeclaration remains invalid,
 an ordinary immutable `var` cannot be assigned again, and an `init var` local
 can be initialized again when vacant without changing its established type.
+`init mut var` and `init mut T` separately allow ordinary binding mutation
+and replacement after initialization; vacancy does not grant that permission.
 Ending a borrow releases that loan, not its referent; retiring a GC handle
 does not destroy a shared object. Dependent loans/pointers constrain early end.
 See [lifetime ending](lifetimes.md#explicit-local-lifetime-end). Both forms
 have bounded source-compilation support; local lifetime ending is not accepted
 in source-free executable TRRM. Wildcard patterns, lambda placeholders and
 generic type holes are separate features; see the [implementation boundary](../implementation.md).
+
+The [local declaration-space rules](language/local-declarations.md) prohibit
+shadowing an enclosing local or parameter but permit independent sibling
+scopes to reuse names. A local participates in its whole block's name lookup;
+using it before its declaration or before initialization still diagnoses,
+without falling back to an outer declaration.
+Generic formal names are also protected against nested formal, parameter,
+and local reuse under [names and binding](language/names-and-binding.md).
+
+Pattern bindings also occupy their supporting declaration space when a match
+fails. Ordinary value-binding patterns introduce initialization-capable fixed
+locals; explicit `mut` patterns permit ordinary live replacement.
+Failed/skipped matches preserve a previous successful value, including after
+loop exit. [Structural flow](language/initialization-and-flow.md) defines
+negative paths, state tests, joins, and captured-type availability.
+Declaration preconditions share one isolated scope and postconditions another;
+neither introduces implementation-body locals.
 
 Adding an interface member compatibly for existing implementations requires a
 default implementation that satisfies
@@ -614,19 +705,41 @@ proposal could attenuate references traversed from a root; a separate
 immutable-graph contract would need to exclude writes through all aliases for
 its defined extent. Frozen promotion cannot be implicit from readonly and must
 exclude writable aliases. Checked `[Pure]` additionally
-excludes observable writes, I/O, identity-producing allocation, ambient
-mutable state, volatile/atomic observation and synchronization. Repeated-call
-reuse needs stable observations, equivalent inputs and compatible code
-identity; mutable inputs can change between pure calls. Dynamic effects/read
-regions belong to interface and module contracts.
+authorizes a [pure evaluation form](language/published-predicates-and-effects.md)
+with no observable effects, including external mutation and escaping exception
+effects on its declared valid-input domain. State read through `this` or
+explicit inputs is part of the logical input; private mutation and immutable
+published data are permitted. Mutable ambient state, I/O, identity-producing
+allocation, volatile/atomic observation, synchronization and suspension are
+not. No `Stable` or read-scope modifier is required. Repeated-call reuse needs
+unchanged relevant input state and surviving code/form/backing dependencies;
+readonly and reference-address equality do not prove that.
+The optional [NoAlias parameter contract](language/published-predicates-and-effects.md#noalias-parameters)
+requires checked separation of accessed mutable regions from the receiver,
+other inputs and initialization destinations throughout the invocation.
+Proven immutable sharing is exempt. It is not an exclusive loan, a purity
+claim, an overload discriminator or additional write/lifetime authority.
 
-The working `IContiguousSequence<T>.AsSpan()` returns a read projection. `Span<T>` implements it **explicitly**, permitting constrained generic calls without a redundant concrete `span.AsSpan()` member. Known-code-unit `TextSpan<TCodeUnit>.AsSpan()` and `Text.AsSpan()` stay public because those change the view; erased `TextSpan<void>` has no `AsSpan()` or `IContiguousSequence<void>`. A stored or returned view must preserve its opaque backing dependency, even for empty/end slices. Detailed receiver and backing rules are in [lifetimes](lifetimes.md). `ISequence<T>` traversal and associated borrowing contracts remain to be specified. Working `Task<TResult = void>` makes `Task` precisely `Task<void>` after type-argument expansion, not an independent task protocol; type-default syntax follows the [source grammar](grammar-spec.md#32-types-parameters-and-arguments).
+The working `IContiguousSequence<T>.AsSpan()` returns a read projection. `Span<T>` implements it **explicitly**, permitting constrained generic calls without a redundant concrete `span.AsSpan()` member. Known-code-unit `TextSpan<TCodeUnit>.AsSpan()` and `Text.AsSpan()` stay public because those change the view; erased `TextSpan<void>` has no `AsSpan()` or `IContiguousSequence<void>`. A stored or returned view must preserve its opaque backing dependency, even for empty/end slices. Detailed receiver and backing rules are in [lifetimes](lifetimes.md). [Value iteration](language/iteration.md) selects `ISequence<T, TCursor>` factories and direct `ICursor<T>` sources; [lending iteration](language/lending-iteration.md) selects distinct reference-output roles, not an associated lifetime-generic item or automatic view witness. Working `Task<TResult = void>` makes `Task` precisely `Task<void>` after type-argument expansion, not an independent task protocol; type-default syntax follows the [source grammar](grammar-spec.md#32-types-parameters-and-arguments).
 
-Declared [type families](type-families.md) can expose checked common operations and conditional members/conformance. A static parameter meaning "any fixed vector of float32" preserves its actual type, width and associated mask, including same-instantiation relationships between operands/results; it does not require users to introduce a nominal `ISimdVector` solely to name the family. Runtime interchange that hides an encoding is different from preserving an unspecified static instantiation. Erased forms are explicit family contracts, never an automatic `Type<T>` to `Type<void>` rule; copy/move, tracing, cleanup, lifetime and ABI obligations survive. `Task<void>` still means no result, not permission to discard an arbitrary owning result.
+Declared [type families](type-families.md) can expose checked common operations and conditional members/conformance. A static parameter meaning "any fixed vector of float32" preserves its actual type, width and associated mask, including same-instantiation relationships between operands/results; it does not require users to introduce a nominal `ISimdVector` solely to name the family. Runtime interchange that hides an encoding is different from preserving an unspecified static instantiation. Erased forms are explicit family contracts, never an automatic `Type<T>` to `Type<void>` rule; copy/move, tracing, cleanup, lifetime and ABI obligations survive. `Task<void>` has a zero-data unit completion result, not permission to discard an arbitrary owning result.
 
 ### Primitives, strict arithmetic and text
 
-Width-explicit integers `int8` through `int128` and unsigned counterparts, distinct target-size `nint`/`nuint`, IEEE binary `float16/32/64/128`, `bfloat16`, IEEE decimal `decimal32/64/128`, raw `char8/16/32`, validated scalar `rune`, `bool` and `void` are the proposed families. `simd64/128/256/512<T>` are fixed ABI shapes; `simd<T>` is genuinely hardware-scalable and initially sizeless, not an unspecified preferred width. BID versus DPD decimal representation, native-integer names and precise vector-family syntax remain open; the decimal value semantics do not become CLR `System.Decimal`.
+The mandatory scalar catalog is `void`, `bool`, raw `char8`/`char16`/`char32`,
+validated scalar `rune`, signed `int8`/`int16`/`int32`/`int64`/`int128`,
+unsigned `uint8`/`uint16`/`uint32`/`uint64`/`uint128`, distinct target-size
+`nint`/`nuint`, IEEE binary `float16`/`float32`/`float64`/`float128`,
+`bfloat16`, and IEEE `decimal32`/`decimal64`/`decimal128`.
+These are the 26 reserved scalar identities of the
+[language conformance floor](overview/conformance.md#mandatory-scalar-catalog).
+An implementation may use a semantics-preserving software implementation
+when the target has no direct instruction for a format. The catalog does not
+require a managed heap, scheduler, or operating-system service.
+`simd64/128/256/512<T>` are separately admitted fixed ABI shapes; `simd<T>`
+is genuinely hardware-scalable and initially sizeless, not an unspecified
+preferred width. BID versus DPD decimal storage and precise vector-family
+syntax remain to be selected; decimal value semantics are not CLR `System.Decimal`.
 
 Numeric literals have **no fallback type**: an expected type or explicit
 target must disambiguate; `var x = 1` and unconstrained `F(1)` diagnose.
@@ -637,61 +750,95 @@ through a hidden `int32`/`float64`. `int32(1234)`, `uint64(0xFFFF_FFFF)` and
 is a checked explicit conversion. `new T(arguments)` remains nominal
 construction. Already-typed numbers never implicitly widen or narrow.
 Contextual decimal, hexadecimal and binary integer literals have no fallback
-type, and numeric type-call conversions are checked. Type/value-call binding
-preserves existing source-function and local shadowing/call precedence.
+type, and numeric type-call conversions are checked.
+[Type/value-call binding](language/names-and-binding.md#calls-conversions-and-recorded-binding)
+resolves the name before argument applicability; an invalid selected callable
+does not expose a hidden type conversion.
 Current executable coverage, including floating literals, is documented in
 [implementation](../implementation.md).
 
-Decimal integer literals keep numeric range semantics, including the direct
-negative signed-minimum case. Hexadecimal and binary literals instead
-construct the expected target width as a bit pattern: `int32(0x8000_0000)` is
+An attached leading ASCII `+`/`-` is part of a numeric token;
+`-(128)` is instead an ordinary operator expression. The
+[literal chapter](language/literal-construction.md) owns target selection,
+registration and exact input/results. Decimal integers have mathematical
+range semantics, including directly signed minima. Signless hexadecimal
+and binary integers construct integer-target bits: `int32(0x8000_0000)` is
 `int32.MinValue`, `int32(0xFFFF_FFFF)` is `-1`, and `int64(0xFFFF_FFFF)` is
 `4294967295`. Nonzero bits above the target width are rejected; leading zeroes
 and separators do not add significant bits. Once constructed, the value is
 typed normally and subsequent conversions remain checked:
 `int32(uint32(0xFFFF_FFFF))` fails, while
-`int64(int32(0xFFFF_FFFF))` yields `-1`. Unary minus on a based literal is
-ordinary checked arithmetic: with an `int32` context, `-0x8000_0000` fails and
-`-0xFFFF_FFFF` produces `1`; an `int64` context gives different initial bits
-and therefore different results. Binary literals use `0b`/`0B`; `_` runs may
+`int64(int32(0xFFFF_FFFF))` yields `-1`. Explicitly signed based tokens use
+numeric range instead: `int8(-0x80)` is -128, `int8(+0x80)` rejects +128,
+and `int8(-0xFF)` rejects -255. Typed/grouped-operand negation remains
+ordinary checked arithmetic: `-int8(0xFF)` produces 1, while
+`-int8(0x80)` fails. Floating targets interpret every based integer
+numerically, not as floating bits. Decimal spelling retains its preferred
+cohort within format bounds; all floating literals round directly to their
+target, including successful infinity/subnormal/signed-zero results.
+Binary literals use `0b`/`0B`; `_` runs may
 separate digits or follow a based prefix, but cannot trail a digit run or
 attach to a decimal point, exponent marker or sign.
 
-`[ConstEval]` marks declarations eligible for bounded deterministic
-compile-time execution; `const T a = F()`
+`[ConstEval]` opts declarations into bounded deterministic
+compile-time execution and implies checked pure-form support.
+`[Pure]` alone may authorize backend folding, not required Terrum interpreter
+admission. `RuntimeHelpers.IsPureEval` and `IsConstEval` report the selected
+form: ordinary false/false, pure true/false, constant true/true.
+These are explicit author-supported forms, not detection that optimization
+occurred. `const T a = F()`
 requires a constant declaration value, while `T b = const F()` requires only
 the expression. `const F() + x` requires
 only `F()`, while `const (F() + x)` requires the whole expression. Literal
 parsing always uses the registered compile-time parser, even in ordinary local
 initialization; there is no runtime fallback. Current evaluator support is
 documented in [implementation](../implementation.md).
-The intended compile-time model for evaluators and user-defined integer
-literals is pure, bounded computation based on compiler-known invariants and
-ordinals; it does not imply arbitrary source-reading JIT work. The exact
-eligibility rules, evaluator operations and resource guarantees remain open.
-The evaluator has no ambient I/O, preserves target semantics and recorded
-producer/rule/value-ABI dependencies, and permits only checked bounded
-evaluation. It does not change type checking, overload binding or optimizer
-freedom. A declaration with `operator +` needs a separate contract for
+The [canonical proof/evaluation floor](language/proof-and-constant-evaluation.md)
+defines local scalar facts, target-semantic actions, selected-path eligibility
+and guaranteed resource accounting. Private mutation and eligible inline values
+are permitted; emitted constants require Blittable/frozen Copy validity and an
+admitted target value recipe. The attribute does not promise ordinary-form
+`NoThrow`, totality or every-input constant success.
+There is no ambient I/O or arbitrary native/source-reading JIT execution.
+Unspecified arithmetic NaNs use a deterministic constant-only policy, without
+weakening copy/bit contracts or fixing runtime NaN payloads. Required requests
+preserve producer/rule/value-ABI dependencies and never fall back to runtime.
+Incompatible documented constant-result changes are breaking; purity alone
+does not preserve an old computed answer. Required evaluation does not change
+type checking, overload binding or waive transformation safety.
+A declaration with `operator +` needs a separate contract for
 `operator +=`; user compound assignment mutates its place once through
 `write ref<T>` without an implicit read/copy/write sequence. Wrapping and
 saturating operations remain explicit.
 
-Integer arithmetic and extent arithmetic are checked in every build. Division
+The [primitive operator chapter](language/primitive-operators.md) owns
+the complete mandatory scalar signatures, operand/count contexts,
+observations, and checked place/accessor updates. Small integers retain
+their own type; code units and `rune` supply equality/order, not implicit
+numeric arithmetic. Integer arithmetic and extent arithmetic are checked in every build. Division
 truncates toward zero; signed minimum divided by `-1` fails while its remainder
-is zero. Shift counts are checked; left shift is width-truncating bit
+is zero. Unsigned unary negation is same-type checked `0 - x`, so only zero
+succeeds. Typed shift counts can use any mandatory fixed/native integer;
+otherwise the built-in count slot supplies `int32` context. Counts must
+be nonnegative and below the data width, without masking or source numeric
+conversion. Left shift is width-truncating bit
 manipulation, not checked multiplication. Floating operations use target-format
 round-to-nearest ties-even without implicit FMA, reassociation, ambient rounding
-or flush dependence. An arithmetic result that is NaN is guaranteed to remain
-NaN, but its sign and payload are unspecified. Implementations should propagate
-and quiet an input NaN when practical; this does not promise a particular
-payload or propagation choice across implementations. Invalid operations that
-produce NaN without a NaN input may use any NaN encoding. Bitcasts and copies
+or flush dependence. Two-operand arithmetic that consumes or produces NaN returns
+a quiet NaN with unspecified runtime sign/payload. Admitted constant
+NaN-processing arithmetic/conversion/selection uses positive quiet zero-payload
+results. Unary negation toggles only sign; Abs clears only sign, preserving
+NaN payload/quiet-signaling state and decimal quantum even in constant execution.
+The [floating-environment contract](language/floating-environment.md) supplies
+no ambient language status flags and retains actual native control duties.
+Bitcasts and copies
 preserve bits under their representation contracts. Representation-level
 `FromBits`/`ToBits` operations have their own bit contracts.
 Floating-to-floating conversions follow IEEE-754:
 inexactness, finite overflow to infinity, underflow, NaN and infinity do not
 raise language failures, and no floating-point exception traps are enabled.
+Nonidentity numeric conversion returning NaN produces a quiet destination
+NaN, while same-format identity preserves its representation.
 Other rounding modes require explicit APIs/adapters; there is no global
 floating-point control-word API. Checked floating-to-integer conversions
 truncate toward zero then throw if out of range; unchecked conversions truncate
@@ -701,8 +848,18 @@ integer wrapping, nonfinite handling and bit reinterpretation; floating
 conversion does not promise cross-format NaN-payload preservation or exactness.
 Numeric-key comparer semantics (all NaNs equal, signed zeros equal, decimal
 cohorts normalized) are separate from IEEE operator equality.
+Floating `%` uses the exact truncating quotient, not nearest-integer IEEE
+remainder or a rounded floating division/product. Zero divisor or infinite
+dividend gives NaN without a language failure; zero remainder retains the
+dividend sign. Finite decimal remainder uses the smaller operand exponent
+for its cohort. Built-in scalar updates may use eligible value getters/
+setters without fabricating borrowable backing, and perform no final store
+when the primitive check fails.
 
-Source text is UTF-8; runtime text has **no default encoding**. The single `TextSpan<TCodeUnit = void>` family has immutable validated `char8`/`char16`/`char32` members and a family-declared encoding-erased `void` specialization: bare `TextSpan` is exactly `TextSpan<void>`. Here `void` does not mean zero-size units or a default encoding. Erasure needs no text copy/transcoding and retains actual encoding, backing, access and lifetime/lease dependencies. Checked typed projection rejects a mismatched representation rather than transcoding; only known-code-unit forms expose typed `AsSpan` and contiguous-sequence conformance. Common `IsEmpty`, ordinal and formatting operations work on either form. A raw `AsSpan()` can forget text validity but not immutable backing, access, lifetime or rooting. Raw slices can split scalars; text slices must preserve scalar boundaries. Editing copies into mutable raw storage or a builder, then validates and freezes before publication; transferring an exclusively held initial buffer may avoid a copy only by revoking all writes. Readonly aliasing or validation alone cannot establish immutable text. Registered string targets use ordinary calls such as `utf8z("Terrum")`, not lexer prefixes or suffix tokens; the target validates encoding, termination and embedded-zero rules without implying pointer lifetime. Final storage, string facade, adaptive/block/RLE representation and projection ABI require experiments.
+Source file text follows the [strict UTF-8 input contract](language/source-input.md):
+one leading signature is consumed, invalid bytes reject before lexing,
+and scalar/line-ending spelling is preserved in the immutable UTF-16 snapshot.
+Runtime text has **no default encoding**. The single `TextSpan<TCodeUnit = void>` family has immutable validated `char8`/`char16`/`char32` members and a family-declared encoding-erased `void` specialization: bare `TextSpan` is exactly `TextSpan<void>`. Here `void` does not mean zero-size units or a default encoding. Erasure needs no text copy/transcoding and retains actual encoding, backing, access and lifetime/lease dependencies. Checked typed projection rejects a mismatched representation rather than transcoding; only known-code-unit forms expose typed `AsSpan` and contiguous-sequence conformance. Common `IsEmpty`, ordinal and formatting operations work on either form. A raw `AsSpan()` can forget text validity but not immutable backing, access, lifetime or rooting. Raw slices can split scalars; text slices must preserve scalar boundaries. Editing copies into mutable raw storage or a builder, then validates and freezes before publication; transferring an exclusively held initial buffer may avoid a copy only by revoking all writes. Readonly aliasing or validation alone cannot establish immutable text. Registered string targets use ordinary calls such as `utf8z("Terrum")`, not lexer prefixes or suffix tokens; the target validates encoding, termination and embedded-zero rules without implying pointer lifetime. Final storage, string facade, adaptive/block/RLE representation and projection ABI require experiments.
 
 Character literals carry one scalar, target-typed to a representable code-unit/scalar type without a numeric or UTF-16 fallback. Registered text targets provide `rune` context and forward scalar fragments directly through the writer protocol. A raw `char8` is not automatically a valid standalone UTF-8 scalar. Precise representability rules are in [conversions](conversions.md#character-intent); compiler coverage remains in [implementation](../implementation.md).
 
@@ -782,13 +939,15 @@ expanded form gathers individual arguments into a new collection. Resolve
 overloads by ordinary match quality and specificity first; a fixed-arity,
 non-expanded candidate wins an otherwise equal match over expanded `params`,
 not regardless of conversion quality. Accepted ranking compares candidates
-by per-argument dominance: identity is better than permitted
-access/qualification weakening, and crossed better/worse arguments are
-ambiguous rather than summed into a score. Apply declared specificity and the
-by-value/`implicit ref<T>`/`params` priorities. Return type, declaration
+by per-argument dominance: identity outranks access attenuation, which
+outranks other admitted direct bindings, and crossed better/worse arguments
+leave the pair incomparable rather than being summed into a score. After
+quality ties, apply the by-value/`implicit ref<T>`/`params` priorities, then
+declared structural specificity. Return type, declaration
 order, literal numeric fit and conversion-chain search do not resolve a tie.
-Complete applicability, diagnostics and generic collection-expression inference remain
-specification work. Binding is fixed at source compilation; a backend does not
+The [canonical call algorithm](language/calls-and-inference.md) defines
+applicability, including typed collection-element evidence where a published
+forward contract is available. Binding is fixed at source compilation; a backend does not
 choose among overloads. For
 example, given `Log<T>(T item)` and `Log<T>(params List<T> items)`, a
 `List<int32>` argument selects the `List<T>` overload: both infer one `T` and
@@ -798,10 +957,11 @@ the `params` modifier; it is not a count of inferred parameters or solver work.
 An applicable nongeneric exact declaration wins a remaining tie with a generic
 declaration after argument quality and the existing binding priorities, not
 before them. Explicit generic arguments select eligible generic candidates.
-Constructors use the same explicit/typed-argument/expected-result/default
+Constructors use the same explicit/typed-evidence/expected-result/default
 inference stages; field capture, private bodies and arbitrary witness search
-do not infer otherwise unresolved formals. Complete constructor applicability
-and constructor-versus-conversion selection remain separate specification work.
+do not infer otherwise unresolved formals. Constructor applicability uses
+the call algorithm after type-name selection; constructor-versus-conversion
+classification follows [name binding](language/names-and-binding.md#calls-conversions-and-recorded-binding).
 
 The [source grammar](grammar-spec.md#32-types-parameters-and-arguments)
 specifies final `params` placement, eligible Copy parameter defaults,
@@ -810,8 +970,10 @@ Tuple indexing uses a constant `[index]`; labels do not change tuple
 identity. End-relative `^offset` indexing and half-open slice bounds retain
 their checked source rules. Target-directed lambdas and collection
 expressions do not infer a canonical callable representation or permit
-stronger hidden obligations on the caller. Checked witnesses and contextual
-lambda lowering remain open; user-defined type-pack expansion,
+stronger hidden obligations on the caller. The [checked witness](language/interface-witnesses.md)
+and finite [target-directed callable](language/calls-and-inference.md#delayed-callable-evidence)
+source rules are specified. General closure representations, erased callable
+dispatch and physical witness codecs remain separate work; user-defined type-pack expansion,
 pack indexing/folds, polymorphic callable erasure and implicit callback
 vectorization are outside this direction. Current compiler support is
 documented in [implementation](../implementation.md).
@@ -826,10 +988,11 @@ and contextual literals follow. `new DifferentRandom(new CounterRandom(0),
 0xA5A5_A5A5)` illustrates first-argument inference and declared `uint32`
 literal contexts; it does not infer field capture, change ownership, choose a
 type from constraints or invert optional/box normalization. General constructor
-inference remains separate target work; current inference support is documented
+inference follows [calls and inference](language/calls-and-inference.md);
+current inference support is documented
 in [implementation](../implementation.md).
 
-The target parser contract is `IParsable<TSelf>.TryParse(TextSpan, init ref<TSelf>)`, including user types. `init ref<T>` is a vacant initialization loan: its destination cannot be read before complete initialization and publication. The accepted call-site form is `TryParse(text, init result)`. Conditional initialization facts are normally authored as declaration postconditions using `ensure <expr>`, an ordinary Boolean expression that may compose patterns and short-circuit predicates. A legal value predicate such as `result > 0` implies initialization; source-body/path checking must prove reads are legal and may not inspect vacant storage to decide a predicate's result. A successful value predicate establishes initialization. These clauses correlate the output's live/uninitialized state with the declared status/result; they are not a separate conditional-assertion block language. An initialized nullable value (including null) is a live `T` value; an uninitialized outcome has no `T` lifetime, access or cleanup, even if physical storage remains. Callers cannot receive an undiscriminated maybe-live owner or access/clean up a vacant arm. Clause placement follows the [source grammar](grammar-spec.md#31-source-file-structure-and-declarations); correlated-output metadata remains to be specified, and equivalent routine output attributes are not a parallel authoring mechanism. Failure cleans partial initialization according to the declared contract and never fabricates `default(T)`; asynchronous publication occurs at operation completion. This contract is distinct from a general writable reference. Expected invalid input normally branches on `Try...`/status. Domain outcomes may use response types; there is no mandatory language-wide `Option`/`Result` wrapper or typed-throws failure-set machinery. Current output-mode support is documented in [implementation](../implementation.md).
+The target parser contract is `IParsable<TSelf>.TryParse(TextSpan, init ref<TSelf>)`, including user types. `init ref<T>` is a vacant initialization loan: its destination cannot be read before complete initialization and publication. The accepted call-site form is `TryParse(text, init result)`. Conditional initialization facts are normally authored as declaration postconditions using `ensure <expr>`, an ordinary Boolean expression that may compose patterns and short-circuit predicates. A legal value predicate over the projected destination, such as `*result > 0`, implies its initialization; `result is init` tests the descriptor instead. Source-body/path checking must prove reads are legal and may not inspect vacant storage to decide a predicate's result. A successful value predicate establishes initialization. These clauses correlate the output's live/uninitialized state with the declared status/result; they are not a separate conditional-assertion block language. An initialized nullable value (including null) is a live `T` value; an uninitialized outcome has no `T` lifetime, access or cleanup, even if physical storage remains. Callers cannot receive an undiscriminated maybe-live owner or access/clean up a vacant arm. Clause placement follows the [source grammar](grammar-spec.md#31-source-file-structure-and-declarations); correlated-output metadata remains to be specified, and equivalent routine output attributes are not a parallel authoring mechanism. Failure cleans partial initialization according to the declared contract and never fabricates `default(T)`. A selected [completion-output contract](language/async-iteration.md) reserves its destination until checked completion observation; Task shape alone does not change ordinary output defaults. This contract is distinct from a general writable reference. Expected invalid input normally branches on `Try...`/status. Domain outcomes may use response types; there is no mandatory language-wide `Option`/`Result` wrapper or typed-throws failure-set machinery. Current output-mode support is documented in [implementation](../implementation.md).
 
 The language-versioned boolean-success default initializes the output on
 `true` and leaves it uninitialized on `false`. For other result types, an
@@ -852,8 +1015,14 @@ on false **in every build**. It accepts general predicates (`require
 format.IsEmpty;`); for example, `require<FormatException>
 int32.TryParse(text)` selects an exception only for a false predicate, not for
 exceptions thrown while evaluating it. A declaration may provide a
-default failure type for brevity, while an explicit call-site selection wins;
-the annotation spelling and exception-construction contract remain open.
+primary-callable `[RequireException(typeof(E))]` default; an explicit
+`require<E>` wins, otherwise the exact Core RequirementException is used.
+[Requirement failures](language/requirement-failures.md) specify ordinary
+checked `new E()` with zero supplied arguments only on failure. E must satisfy
+Exception eligibility and actual construction/access/ownership support;
+the marker supplies no constructor. Constructor failure propagates its own
+failure without an invented E event or retry of another default. Defaults
+belong to the check's semantic source owner, not caller/type/module context.
 Common null/range conditions may receive recognized diagnostics, but checks do
 not infer meaning from arbitrary method names or reevaluate arguments,
 properties or user-defined comparisons. The implicit-destination expression
@@ -862,9 +1031,11 @@ statement and expression forms is documented in [implementation](../implementati
 
 The expression form lifts eligible output destinations omitted from a call:
 `int32 value = require int32.TryParse(text);`. The operation runs once; success
-publishes the complete value under that Boolean contract, while false cleans
-partial initialization and raises rather than exposing vacancy or manufacturing
-`default(T)`. More generally, bare lifted `require` demands initialization of
+publishes the complete value under that Boolean contract. A failed check
+constructs its selected failure without reading missing outputs or erasing
+already initialized ones; partial and scope cleanup follow their actual exits,
+not fabricated `default(T)` or a new rollback. More generally, bare lifted
+`require` demands initialization of
 every lifted output, with its full nullable/ownership type; supplied destinations
 remain ordinary arguments. An explicit pattern requirement can request
 selected outputs or non-nullness instead. This follows declared per-output
@@ -872,13 +1043,24 @@ availability, including richer statuses, not a `Try` naming convention,
 enum-zero guess or universal success group. Patterns and `init` argument forms are
 specified in the [source grammar](grammar-spec.md); lifting metadata remains open.
 
+Without omitted outputs, the expression form performs the ordinary Boolean
+check and yields `void`/`()` on true; false raises the selected requirement
+failure. Explicit destinations retain their actual published values and states,
+not an extracted result or rollback. A non-Boolean ordinary status needs an
+explicit predicate. An omitted initialized `bool` output, by contrast, remains
+its payload and can yield false. See
+[Boolean requirements and unit](language/calls-and-inference.md#boolean-requirements-and-logical-unit).
+
 Declaration placement determines contract visibility. A declaration
 precondition (`require`) and postcondition (`ensure`) are published promises;
 they are executable unless proven redundant, and strengthening preconditions
 or weakening postconditions breaks compatibility. Published clauses use a
 checked, side-effect-free contract language; body `require` retains general
 executable predicates and is an ordinary point check, not an inferred public
-precondition. Body-only `static
+precondition. A normally false runtime ensure selects fixed Core
+PostconditionException under the [standard category contract](runtime/standard-failures.md#2-runtime-postconditions);
+RequireException does not override it, and actual predicate failure retains
+its own event. Body-only `static
 require` proves a condition at that point and `static ensure` proves the outer
 function's postcondition on every normal return; neither is automatically
 published. Static forms are compile-time-only, side-effect-free proof checks
@@ -886,8 +1068,9 @@ in every build. False or unproven required proofs are errors, never runtime
 fallbacks or optimizer assumptions. They may use runtime values symbolically,
 unlike constant evaluation, which must produce a value. `return` in a result
 postcondition denotes the actual result contextually; it is not a new binder
-or lambda and does not reevaluate the return expression. A `void` function has
-no result-valued return. Static postconditions initially apply only to the
+or lambda and does not reevaluate the return expression. A `void` function's
+normal result is `()`, with no exposable payload address.
+Static postconditions initially apply only to the
 outer function body. Proofs respect mutation/alias invalidation.
 The exact supported proof forms and resource limits are documented in
 [implementation](../implementation.md). Static proofs do not execute or publish
@@ -988,8 +1171,12 @@ continues to later catches at that scope; if none matches, unwinding proceeds
 outward. The selected body is entered only after type/filter success. Pending
 failure state remains valid for filters, without retaining invalid inner-frame
 references or deferring cleanup effects until a match. This is not a
-transaction or a pre-unwind first-pass filter search. Exact transport and
-native unwind ABI remain specification work.
+transaction or a pre-unwind first-pass filter search. General local failure
+transport and native runtime integration remain specification work.
+The separately selected [contained foreign bridge](runtime/foreign-failure-bridge.md)
+returns an owned domain packet before resuming local propagation; it does
+not substitute foreign filter timing or supply other failure catalogs,
+the Core captured-event source contract or a physical handler codec.
 
 On checked unwinding, an authored `finally` runs before the pending failure
 continues to its next handler. If that `finally` faults, the new failure
@@ -1001,8 +1188,28 @@ An action's expression/body is evaluated at exit, with its referenced
 places kept valid through execution. Faulting cleanup is not implicitly
 `NoThrow` or automatically unsafe; catching a failure still requires unsafe
 recovery. A `defer` action that faults on an otherwise normal exit starts an
-ordinary checked failure. The concrete exception-object representation,
-unwind ABI and general source syntax remain to specify; bounded compiler
+ordinary checked failure. [Exception eligibility and catch inputs](language/local-failures.md)
+are specified separately. Runtime require construction/defaults have their
+[own selected contract](language/requirement-failures.md).
+[Core scalar failures](language/scalar-failures.md) select exact zero-data
+OverflowException, DivideByZeroException and ArgumentOutOfRangeException
+for the specified checked numeric/count domains. A requirement default cannot
+replace a failure evaluating its predicate, and floating IEEE results remain
+distinct from integer failures.
+[Numeric selection members](language/numeric-selection.md) separately define
+same-type Min/Max/Clamp signatures and reusable Core InvalidBoundsException.
+Clamp's explicit min <= max precondition rejects reversed or NaN bounds after
+ordinary argument staging; a value outside valid bounds is normal clamping,
+not ArgumentOutOfRangeException. Its failure retains the semantic precondition
+owner and ordinary construction/event contract.
+[Core CapturedException](language/captured-exceptions.md) separately selects
+one opaque affine owner and direct no-argument Capture in an active source
+handler body, not filters or separately called helpers. It transfers the
+existing event while preserving catch-input extents; named captured throw
+requires move and preserves origin/causes/dependencies. A transferred handler
+cannot reuse or retire that event. Other failure catalogs, shared/typed
+capture families and physical constructor/payload/handler/cause/unwind
+representations remain open; bounded compiler
 support is described in [implementation](../implementation.md).
 
 Ordinary boolean requirements and conditional outputs preserve their declared
@@ -1012,16 +1219,61 @@ Current support for declaration clauses, static proofs, typed failure
 selection, exception construction and output forms is documented in
 [implementation](../implementation.md).
 
-Formatting uses one `IFormattable` → `ITextWriter` protocol with typed fragments/values, no obligatory allocating formatter per type. Target-typed interpolation and collection expressions select registered handler types, such as `[TextBuilder(typeof(TextBuilder))]` or `[CollectionBuilder(typeof(ListBuilder<>))]`, not arbitrary similarly named methods. Holes evaluate once left-to-right into typed captures before segments drain; ownership, borrowing and refusal cleanup remain explicit. Named unique transfers require `move`. Nested formatting forwards the same writer so a Point and its scalar fields can reach a custom handler without temporary strings or boxing. Refusal stops future writes but cannot undo prior output or hole evaluation; no replay, rollback or transactional stream guarantee. Expression handlers may consume an explicitly supported typed operation graph, as in `Tensor.Apply(destination, i => x[i] * y[i] + z[i])`; this is not body-divined autovectorization of an ordinary callback. Unsupported expressions diagnose or require a separately declared fallback. Owning text publishes only after full validation/freeze and cleans partial storage. Collection spreads enumerate once in order; builders own accepted elements, clean rejected consumed elements and abandon partial state exactly once. Detailed standard-library APIs and resumable async formatting are specified separately. Synchronous formatter refusal is not a resumable continuation.
+Formatting uses one `IFormattable` → `ITextWriter` protocol with typed fragments/values, no obligatory allocating formatter per type. Target-typed interpolation and collection expressions select registered handler types, such as `[TextBuilder(typeof(TextBuilder))]` or `[CollectionBuilder(typeof(ListBuilder<T>))]` on `List<T>`, not arbitrary similarly named methods. The [constructed type recipe](language/construction-handlers.md) uses the target's declared formals, not an open-generic type value or use-site arity guessing. Construction is eager: holes and collection element/spread-source expressions evaluate once left-to-right into typed captures before that site's builder acquisition and drain; ownership, borrowing and refusal cleanup remain explicit. Named unique transfers require `move`. Nested formatting forwards the same writer so a Point and its scalar fields can reach a custom handler without temporary strings or boxing. Refusal stops future writes but cannot suppress prior capture effects or undo prior output; no replay, rollback or transactional stream guarantee. Expression handlers may consume an explicitly supported typed operation graph, as in `Tensor.Apply(destination, i => x[i] * y[i] + z[i])`; this is not body-divined autovectorization of an ordinary callback. Unsupported expressions diagnose or require a separately declared fallback. Owning text publishes only after full validation/freeze and cleans partial storage. Captured collection spreads enumerate once in drain order; eager source capture does not force an unreached spread or formatter. Builders own accepted elements, clean rejected consumed elements and abandon partial state exactly once. Concrete standard-library APIs require their own adoption; resumable async formatting remains unselected. Synchronous formatter refusal is not a resumable continuation, and no incremental construction-policy or deferred-content interface is adopted.
 
-Allocation, GC, rooted reads/writes, blocking, suspension, I/O, atomics, throwing/no-throw, normal/no-return, cleanup and retirement are independently expressible effect bounds, finer-grained than Core/Foundation/Application dependency layers. `void` is the single zero-data result type, with value `()`, usable as a zero-argument `func<void>` and `Task<void>`; `Option<void>` still represents two states. A checked `[DoesNotReturn]` on a `void` call removes its normal continuation but retains exception/cleanup edges; `[NoThrow]` is separate. A verified implementation cannot normally return, including by completing a task that terminates *later*. There is no public `unit` or `never` primitive; the compiler may use internal bottom flow. Removing an exported no-return guarantee breaks callers that rely on it.
+[TextTarget](language/construction-handlers.md#texttarget-parameter-schema)
+is a no-argument parameter contract. An eligible generic content input
+receives a checked formatter holding eager typed captures, not a deferred
+ITextContent program. Equal complete content shapes in one module share a
+generated type, not formatter values or backing. Ordinary values, repeated
+formatting and captured ownership/backing retain their own contracts;
+annotation adds no implicit boxing, lifetime extension or overload preference.
+
+[Plain value construction](language/construction-handlers.md#refusal-in-plain-value-construction)
+maps Boolean refusal to ordinary `require` failure without publishing a
+prefix/default target. Operation exceptions propagate normally; explicit
+Try/writer consumers keep their own declared status and partial-output
+contracts.
+
+[Source builder completion](language/construction-handlers.md#consuming-builder-completion)
+transfers the private builder into the selected Core IBuilder static
+requirement. Success initializes the complete result; refusal leaves it
+vacant, and checked failure cleans remaining owned state without restoring
+the builder. Explicit reusable APIs remain separate checked contracts.
+
+[Source acquisition](language/construction-handlers.md#parameterless-builder-acquisition)
+invokes the parameterless Core IBuilderFactory requirement after eager
+captures. It initializes valid builder output on true and leaves it vacant
+on refusal/exception. Runtime context is passed through ordinary explicit
+APIs; the language supplies no allocator, capacity hint or hidden caller capture.
+
+[Standard drain operations](language/construction-handlers.md#standard-text-operations)
+use exact Core IFormattable/ITextWriter identities and int32 alignment measured
+in Unicode scalars, with once-only formatting and checked staging.
+[ICollectionBuilder](language/construction-handlers.md#collection-acceptance-and-spreads)
+composes factory/completion with by-value item acceptance and the exact
+contextual result type. [Standard synchronous spreads](language/iteration.md#eager-collection-spreads)
+retain exact factory/direct-cursor, item and close relationships rather than
+implicitly moving from borrowed sequences. An already-captured direct cursor
+closes even when an earlier refusal prevents its drain; an unreached factory
+is not acquired. Neither path defers source capture or adds a count/replay pass.
+
+Allocation, GC, rooted reads/writes, blocking, suspension, I/O, atomics, throwing/no-throw, normal/no-return, cleanup and retirement are independently expressible effect bounds, finer-grained than Core/Foundation/Application dependency layers. `void` is the first-class zero-data Copy type, with value `()`, usable in ordinary value positions and as a zero-argument `func<void>` or `Task<void>` result; `Option<void>` still represents two states. It retains logical arity and initialization without payload bytes and is not an arbitrary result-discard conversion. [Values and statement execution](language/expressions-and-statements.md) distinguishes unit values from `_`, defines ordinary control flow, and requires explicit unused non-unit result discard.
+
+A checked [no-return contract](language/expressions-and-statements.md#no-return-contracts)
+applies to any declared result type and removes the actual call's normal
+continuation while retaining failure/cleanup edges. `[NoThrow]` is separate.
+Returning a task or cursor whose work terminates later is still a normal call
+completion. The result retains its ordinary type; no public `unit` or `never`
+primitive or implicit discard conversion is introduced. Removing a published
+no-return guarantee breaks callers that relied on it.
 
 Ownership transfer and cleanup are explicit: a moved owner becomes vacant,
 fresh results may transfer directly, and partial construction cleans acquired
 fields in reverse acquisition order. Receiver loans do not transfer ownership;
 mutation preserves the owner's cleanup obligation. Actual native-profile
 coverage and failure policies are documented in [implementation](../implementation.md)
-and [native](native.md).
+and the [development native profile](../implementation/native.md).
 
 ### Documentation comments
 
@@ -1081,6 +1333,14 @@ and packaging remain specification work in the
 
 Tracing GC handles aliased/cyclic application graphs; ownership handles deterministic native storage and resources. A unique owner may still refer to GC storage; a GC root does not keep a logically disposed native allocation valid. Distinguish storage acquisition, initialization, close, value destruction, storage release and eventual reclamation. Vacant/partially initialized/live/retired states, reverse-order partial cleanup, no-throw/non-suspending generated owner cleanup, direct destination construction and stable-address requirements must be checked. Authored `finally`/`defer` actions may fault under their ordinary checked contracts; they do not relax generated owner cleanup guarantees. Replacing a live value builds the replacement before dropping the old one; explicit reconstruct-in-place may leave vacancy on failure. Pool leases revoke access on return; deferred dead-storage retirement differs from deferred live-value cleanup, with one retirement owner after commitment and explicit completion endpoints.
 
+[Thread-capability declarations](runtime/sharing-and-handoff.md#explicit-source-opt-in-and-conditional-contracts)
+require explicit user-type opt-in. Ordinary where clauses following a capability
+attribute condition that capability only; clauses on the type header still
+constrain every instantiation. Missing eligibility never invalidates an
+otherwise valid confined type or turns its ordinary operations concurrent.
+The same chapter owns checked handoff, publication, guard and scalar-access
+composition under existing unsafe/producer-trust boundaries.
+
 Values are thread-confined by default, not bound to a fixed OS thread or
 executor. `[ThreadTransferable]` describes a complete form that may cross a
 thread boundary under its checked transfer contract; it does not imply
@@ -1110,6 +1370,18 @@ operation/runtime scheduling policy, without implicitly capturing the caller's
 executor or requiring a worker-pool hop.
 Async declaration postconditions are checked before successful task completion
 is published, not merely when a task handle is returned.
+[Async execution](language/async-execution.md) makes caller argument and
+failed-establishment propagation synchronous; after logical operation
+establishment, escaping precondition/body/cleanup/completion-check failures
+are failed completion even if no await suspends. Non-async task factories
+keep their ordinary invocation boundary.
+[Async cursor advancement](language/async-iteration.md) separately binds its
+exact init destination and mutable cursor access to the returned operation.
+While reserved, caller output cannot be read, state-tested, reused or retired;
+checked completion observation supplies true/live or false/failure/vacant
+after operation cleanup. An already-completed task follows the same rule.
+Task status or cancellation request alone does not release the reservation,
+and arbitrary Task-returning output defaults remain unchanged.
 The accepted terminology keeps three properties separate: asynchronous work
 can happen independently of the main program flow, and may or may not be
 concurrent; concurrency means a system can execute multiple flows of code, and
@@ -1123,11 +1395,15 @@ aliases, nontransferability, affinity or cleanup obligations. A function or
 callback with declared executor affinity retains its own placement across
 suspension, including cleanup and unwinding. An otherwise-unbound helper does
 not inherit UI affinity merely because it was called from UI code.
-Every started operation retains a responsible owner: a structured
-scope that joins it, an explicit transfer to another responsible owner, or a
-supervisor with error, lifetime and shutdown policy. Returning a task alone is
-not sufficient when no caller/owner remains responsible, and discarding a task
-does not cancel work or discharge completion/error obligations. Cancellation
+Every started operation retains a responsible owner.
+[Core Task<T>](language/task-responsibility.md) is affine: ordinary await
+consumes it and produces exact T; a named task requires `await move task`.
+Responsibility can instead transfer explicitly to a checked structured owner
+or supervisor with error, lifetime and shutdown policy. Every normal and
+exceptional exit must settle or preserve/transfer it.
+Returning a task transfers its responsibility to the actual caller; a task
+cannot be discarded when that would abandon completion/error obligations.
+Ordinary destruction never blocks, suspends, cancels or invents supervision. Cancellation
 is a request, not completion; it does not release borrowed backing before the
 operation actually stops and completes required cleanup. A task cannot
 legalize a loan escaping its backing's permitted lifetime. Entry conventions
@@ -1201,38 +1477,71 @@ rules. These do not authorize later mutation through `init`.
 `async` marks an implementation and `await` is a prefix expression. Ordinary
 async invocation starts eagerly; there is no `async void` form. Producers
 instead use a resolved `[Iterator]` attribute, `yield expression;` and
-`return;`, with lazy body start on first advance. `[Iterator] async` requires
-an async-producer result, not merely `Task<Sequence<T>>`. `await for` and
+`return;`, with lazy body start on first advance.
+[Generated producers](language/generated-producers.md) associate that callable
+with an owned `[IteratorCursor]` named mut unique struct and exact direct
+cursor role. Creation is synchronous with creator clauses/effects; cursor
+operations govern later items, completion and close. Factory/reusable sequences
+are explicit wrappers. `[Iterator] async` requires a named async cursor,
+not Task<Cursor> or a sequence factory. `await for` and
 ordinary iteration perform structured checked close, including awaited
-async close. Protocol identities, element loans, scheduling/cancellation
-APIs and representation remain open. Typed/captured failure transport and
+async close. [Standard value iteration](language/iteration.md) binds exact
+Core ISequence<T, TCursor>/ICursor<T> identities, TryMoveNext(init ref<T>)
+publication and mandatory synchronous Close, without universal Copy items or
+a Current getter. The loop owns/closes its cursor, not its source collection;
+named affine direct sources require move.
+[Async value iteration](language/async-iteration.md) selects synchronous
+GetAsyncEnumerator factory/direct-cursor acquisition, completion-published
+TryMoveNextAsync(init ref<T>) and awaited CloseAsync without overlapping
+pending operations. [Lending iteration](language/lending-iteration.md) separately
+selects readonly/writable sync/async roles, element-place aliases and an
+init-reference output with cursor-bound or available checked refined backing.
+Writable factories require mut receivers without new backing authority;
+retiring the alias/descriptor does not destroy the element or end surviving
+reborrows. Async lending composes the same pending completion reservation.
+The [general dependency schemas](language/dependencies-and-views.md) select
+whole receiver/formal sources, result/init-output and retained destinations,
+and per-source ForwardsBacking refinements. Exact member-contract constraints
+can require published witness facts without narrowing an unconstrained
+generic contract through body inspection. Copies, storage, erasure and joins
+retain source versions and complete backing/owner/guard/root/load bounds.
+These annotations supply no owner acquisition, sharing authority or view ABI.
+Nonstandard producer registration,
+scheduling/cancellation APIs and physical frame/phase representation remain
+separate work.
+Typed/captured failure transport and
 catch-filter source forms do not silently swallow filter failures; general
 exception transport and ABI remain separate work.
 
 The design examples use canonical `ref<T>`, `ptr<T>`, `box<T>`, `val<T>`,
 `own<T>`, `init ref<T>`, `mut`, and `write` forms, plus `move`, bracketed
-checked predicates, `[ViewOf]`, `[Captures]`, `[Pure]`,
+checked predicates, `[DependsOn(...)]`, `[ForwardsBacking(...)]`, `[Captures(...)]`, `[Pure]`, `[NoAlias]`,
 `[MatchedAccess]`, `[Layout(Transparent)]`, `require`, `[TextTarget]`,
 `[TextBuilder(typeof(...))]`, `[CollectionBuilder(typeof(...))]`,
 `[Literal(...)]`, `[ConstEval]`, `[Specialize(...)]`, `[NativeExport]`,
 `utf8z("...")`/`utf16z("...")` calls and generic trailing defaults as
-**illustrations**, not implementation promises. Attached width suffixes diagnose
-as `TRM0006`; prefix casts are not parsed. In particular, legacy `out` remains
-supported while a coherent general migration to initialization loans is
-planned. Current support for numeric conversions and initialization loans is
-documented in [implementation](../implementation.md).
-Complete generic constraint,
-associated-equality and extension-disambiguation syntax,
-closed-case metadata/full pattern grammar and compatibility-forwarder attributes/source
-visibility remain open. So do transparent-wrapper eligibility/ABI profiles,
-conditional copy capabilities, first-class
+**illustrations**, not implementation promises. Implementation-specific
+suffix diagnostics, historical output forms and current conversion/loan
+support are documented in the
+[development native profile](../implementation/native.md), not additional
+source productions or a required migration from legacy parameter modes.
+The three dependency schemas above use exact checked source/target rules,
+not arbitrary runtime attributes. Remaining ViewOf and MatchedAccess sketches
+do not establish a general lifetime, exclusivity or registration contract.
+Physical generic/witness serialization, unsupported family registration,
+closed-case metadata, generalized pattern forms and compatibility-forwarder
+source schemas remain open. Ordinary source visibility follows the
+[declaration rules](grammar-spec.md#31-source-file-structure-and-declarations). Beyond the derived constant-generic subset,
+transparent-wrapper eligibility/ABI profiles remain open, as do conditional
+copy capabilities, first-class
 stored-loan ABI, erased-interface dispatch ABI, span-anchor layout/calling
-convention, inline `val<C>`, native ownership transitions, structural unions,
-decimal encoding, text storage, wither omission/overloads,
-handling/registration, task lifecycle/cancellation APIs, generic dispatch
-selectors and exception ABI. Eager async invocation and ordinary-await
-continuation semantics are accepted; awaiter registration, executor and affinity
-contracts remain open.
+convention, inline `val<C>`, additional native ownership/managed-boundary profiles, structural unions,
+decimal interchange value codecs, text storage, wither omission/overloads,
+additional handler/registration profiles and serialization, broader task observation/supervision/cancellation APIs, generic dispatch
+selectors and additional exception/handler representations and ABI. Eager async invocation and ordinary-await
+continuation semantics, affine Core task ownership, consuming await and
+explicit every-exit settlement are accepted. General awaiter registration,
+executor and affinity contracts remain open.
 Syntax follows checked contracts; actual implementation boundaries are listed
 in [implementation](../implementation.md) and staged in [roadmap](../roadmap.md).
 
@@ -1240,7 +1549,8 @@ in [implementation](../implementation.md) and staged in [roadmap](../roadmap.md)
 
 Syntax-only acceptance does not establish semantic validity. Native builds
 must diagnose unsupported constructs rather than silently weaken their
-contracts. See [implementation](../implementation.md) and [native](native.md) for
+contracts. See [implementation](../implementation.md) and the
+[development native profile](../implementation/native.md) for
 actual support, [roadmap](../roadmap.md) for staging, and [samples](../samples.md)
 for runnable examples versus broader design sketches.
 

@@ -9,7 +9,7 @@ application contracts remain unapproved; the sketch is still non-compiling.**
 The Win32 + Direct3D 11 triangle is a design sketch, not a compiling program.
 Its current source produces parser diagnostics, and the implemented Windows x64
 compiler has no general source interop; see the current
-[native profile](../specs/native.md#semantic-and-target-boundaries). The
+[development native profile](../implementation/native.md#semantic-and-target-boundaries). The
 hosted native emitter already
 supports explicit DLL/export bindings for external declarations in a verified
 reference-bearing program; module packages validate Terrum declaration
@@ -17,10 +17,12 @@ contracts, but the low-level bindings themselves identify names only. This is
 not a source-level C prototype or proof of foreign ABI compatibility. The
 accepted grammar describes `extern` callables and raw `ptr<T>` values; see
 the [external-callable source contract](../specs/grammar-spec.md#512-modifiers-cleanup-and-finalization).
-Registered import identities, target ABI mappings and the implementation
-remain incomplete. The accepted
+Registered import identities, sample-specific gates and their implementation
+remain incomplete. The
 [Blittable contract](../specs/data-layout-and-abi.md#fixed-directly-interoperable-representations)
-does not define a completed Windows FFI profile.
+and [Windows x64 target profile](../specs/targets/windows-x64.md) now define
+the fixed rootless ABI boundary, not this proposal's import catalog,
+callbacks, COM, startup or sample support.
 
 The sample is a useful end-to-end target for a narrow native FFI milestone.
 Making it work requires more than a parser fix: checked scalar imports,

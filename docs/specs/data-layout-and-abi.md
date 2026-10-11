@@ -1,10 +1,12 @@
 # Data layout and ABI contracts
 
-> **Accepted core contracts; target profiles remain to be specified.** The
+> **Accepted core contracts and selected target profiles.** The
 > memory guarantees, opaque-layout direction and boundary-preservation rules
-> below are accepted. This is not a completed target ABI specification or a
-> universal Terrum managed ABI. Current support remains defined by
-> [implementation](../implementation.md) and the [native profile](native.md);
+> below are accepted. [Windows x64 native](targets/windows-x64.md) supplies
+> its fixed-layout/call/ownership boundary; other representations require
+> their own complete profiles. This is not a universal Terrum managed ABI.
+> Current support remains defined by
+> [implementation](../implementation.md) and the [development native profile](../implementation/native.md);
 > concurrency semantics are defined by the [memory model](memory-model.md).
 
 ## Definitions
@@ -21,11 +23,15 @@
 
 ## Scope
 
-Per-target size/alignment/representation tables, procedure-call classification
-and compiler conformance remain target-profile work; current compiler support
+Per-target size/alignment/representation tables and procedure-call classification
+belong to the [target partition](targets/README.md); current compiler support
 for any part of this contract is tracked in
-[implementation](../implementation.md) and the [native profile](native.md), not
+[implementation](../implementation.md) and the [development native profile](../implementation/native.md), not
 restated here.
+
+[Native execution boundaries](native.md) retain the existing bounded call
+and code-lifetime rules. [Private serialization](representation/persistence.md)
+does not make an independently replaceable public ABI implementation-private.
 
 Unimplemented does not mean unapproved. Completing a table from an already
 selected target contract does not reopen the language policy; choosing a new
@@ -36,13 +42,68 @@ the accepted core provisional.
 
 A `Blittable` or `Transparent` commitment is a compatibility promise: changes
 that violate it are breaking, but neither promise a universal byte encoding
-or freeze layout kinds that were not committed. Any future checked source
-enforcement of these commitments needs an explicit compatibility migration
-activated at a source-language-version boundary. Earlier-version source and
-retained artifacts keep their existing contracts; the exact version and
-tooling selector remain separate decisions.
+or freeze layout kinds that were not committed. This specification does not
+require compatibility with unpublished alpha source or artifact formats.
+Draft contracts may be corrected or replaced without legacy source modes,
+old-format readers, or migration shims. An artifact retained for use must still
+be admitted under its exact selected schema and published contracts; it must
+not be silently reinterpreted under an incompatible schema.
+
+An [emitted constant](language/proof-and-constant-evaluation.md#constant-execution-domain)
+requires the transitive per-target Blittable commitment in addition to frozen
+Copy validity and an admitted value codec. Internal evaluator storage and
+borrowed input views are not automatically emitted constants.
+Constant metadata preserves typed scalar/field/tag values and their promised
+representation observations; target materialization applies byte order,
+alignment, packing and layout. Host object blobs and uninitialized padding
+do not define that value, and layout alone does not register its codec.
+
+[General view relationships](language/dependencies-and-views.md) specify
+whole-source, capture and backing-only obligations without choosing a
+descriptor/anchor representation. Each admitted stored, returned, erased or
+crossing view still needs exact root/relocation, capability validity,
+transfer/cleanup and procedure-call support. One Span<T> has a profile-defined
+representation, not an owner-generic or owner-dependent instance size.
+No silent boxing, allocation, per-view retain or pointer-to-owner registry
+repairs an unsupported crossing. A source annotation is not a layout promise.
+
+[Affine task/wait ownership](language/task-responsibility.md) likewise requires
+an admitted task/frame/root and call profile for each crossing. Preserve the
+exact payload, owner/capture/output obligations, failure transport and
+cleanup/affinity; a pointer-sized handle or compiler-owned wait is not a
+representation promise. Logical consuming await selects no allocation, hidden
+boxing, blocking bridge or physical continuation codec.
+
+[Owning-field state and cleanup](language/ownership-and-cleanup.md) likewise
+need complete partial-storage, transfer, root, validity and cleanup support.
+A private live mask or acquisition journal is not an ABI commitment.
+Ordinary call/result crossings require complete values; no equal-sized
+carrier, pointer or hidden boxing transports unsupported partial T state.
+Layout order and the logical retirement order remain distinct contracts.
+
+[Boundary-contained failure interchange](runtime/foreign-failure-bridge.md)
+uses explicitly selected paired adapters and a domain-owned affine packet.
+The [Windows wire](targets/windows-x64-failure-bridge.md) fixes its rootless
+machine carrier without exporting a native exception-object or managed-root
+layout. Local capture/mapping/dispatch and actual domain backing/root/code
+support remain required. Ordinary calls gain no hidden failure argument,
+shared unwinder or automatic status translation.
 
 ## Contract layers
+
+[Thread eligibility and actual handoff](runtime/sharing-and-handoff.md)
+retain complete carrier, publication, authority/token, root and cleanup
+affinity contracts. Equal layouts do not transport unsupported reservations,
+guard-backed views or shared managed references. A target supplies admitted
+atomic widths and collector/progress support; source opt-in does not allocate
+a physical token, hidden retain or stronger access instruction.
+
+[Concurrent observations](runtime/concurrent-executions.md) use exact
+location/storage generations, compatible whole-value accesses, matched
+communication, coherence and SC/full boundaries. A target proves its actual
+ISA/helper accesses refine those rules, including read-only CAS/overflow
+failure and unused-result ordering. Logical event identity assigns no
+physical generation tag, atomic-object layout or collector representation.
 
 | Layer | Defines | Does not fix |
 |---|---|---|
@@ -57,6 +118,29 @@ chapter. Memory-access guarantees are nevertheless language obligations, not
 merely calling-convention conventions.
 
 ## Primitive storage and atomicity
+
+### Zero-data values and void
+
+The [unit value](language/expressions-and-statements.md#the-zero-data-void-value)
+has zero payload data. Logical locals, fields, tuple positions, parameters,
+and results still have their declared type and initialization state.
+Any bookkeeping needed to track vacancy/publication is not unit payload.
+A target must not invent a readable default from the absence of bytes or
+expose bookkeeping as a `void` data address.
+
+A logical `void` field contributes no payload bytes; aggregate size,
+alignment, addressability, and any other fields retain their target rules.
+Zero data does not erase a field/parameter from semantic identity or make
+different logical arities interchangeable.
+A procedure-call profile passes no payload carrier for a unit parameter/result,
+but retains the logical signature for binding, effects, and compatibility.
+An independently consumed artifact records those logical positions.
+Foreign signatures require the target's explicit mapping; a C `void`
+parameter-list marker is not a named Terrum unit parameter.
+
+No primitive payload load/store or tearing question arises for the unit value.
+Construction/publication, captured expressions, and initialization-state
+observations still obey their ordinary safety and memory contracts.
 
 For ordinary coherent memory, naturally aligned primitive loads and stores
 up to the machine pointer size are atomic. Eligible trivial wrappers retain
@@ -129,6 +213,15 @@ Atomic access, `Copy`, sharing, arbitrary bit-pattern validity and ordinary
 source conversion remain separate; this contract does not establish a
 universal cross-target encoding or bypass a wrapper invariant.
 
+Eligible one-field integer/Boolean types can derive
+[constant-generic participation](language/constant-generics.md#derived-transparent-wrapper-eligibility)
+from that checked Transparent relationship together with existing Copy,
+frozen validity, Blittable and typed value-codec obligations. No second
+marker or carrier-exposure protocol is required. Canonical generic identity
+retains the exact complete nominal type and carrier value; it is not a
+source conversion, user equality operation or extension to every Transparent
+carrier domain.
+
 ### Fixed directly interoperable representations
 
 **Blittable** denotes one bundled, fixed,
@@ -136,19 +229,19 @@ directly-interoperable representation promise per target profile. A conceptual
 `Blittable: true` commitment fixes size, alignment and field offsets and
 requires transitively compatible fields; it is not selected compiler syntax
 or a universal byte encoding. An ordinary struct does not acquire this promise
-from its current shape. Ordinary `ref<T>` is excluded; `ptr<T>` may be
+from its current shape. Fixed storage does not itself establish a formal
+foreign primitive mapping; [Windows x64 admission](targets/windows-x64-call-interface.md#1-foreign-primitive-admission)
+keeps those facts separate. Ordinary `ref<T>` is excluded; `ptr<T>` may be
 eligible when its target representation is covered and its ordinary pointer
 validity, lifetime and access-safety rules are met.
 
-For the first public Windows x64 fixed-layout slice, field eligibility uses
-the existing target-specific `Blittable` requirements and ordinary `Copy` and
-value-validity rules, not a slice-specific type whitelist. A nested struct
-field must also satisfy that slice's `Sequential` requirement. This accepts
-the eligibility and bounded implementation directions; source schemas,
-metadata encoding and exact migration version/tooling remain open, and no
-implementation support is implied.
-The implementation direction reuses Windows x64 target requirement `1` and
-introduces no separate layout-profile identity.
+The selected Windows x64 profile defines transitive fixed-layout field
+eligibility independently of a bounded compiler slice. The
+[registered source schemas](targets/windows-x64-data-layout.md#4-registered-source-layout-schemas)
+are specified; physical metadata encoding remains unassigned and no
+implementation support is implied. The
+[initial implementation direction](../implementation/layout-profiles.md#initial-public-fixed-layout-direction)
+does not add a standard target/Feature identity or narrow those target rules.
 
 Blittability/frozen representation does not initialize padding bytes, validate
 arbitrary bit patterns, imply `Copy` or sharing, grant atomic access, or
@@ -183,14 +276,17 @@ controls. Current compiler support for this annotation is tracked in
 
 Both a power-of-two member-packing limit and a separate power-of-two
 aggregate-alignment control are accepted; they may be combined, though most
-declarations need only one. Packing caps member alignment and the derived
-natural aggregate alignment; aggregate alignment may over-align the result,
+declarations need only one. Packing caps natural member alignment and the
+derived natural aggregate alignment, but cannot weaken a nested type's
+explicit alignment requirement. That requirement propagates through
+placement, parent alignment and stride. Aggregate alignment may over-align the result,
 with tail padding preserving aggregate alignment and array stride. The resolved
 library attribute schema defines argument names, types and defaults; its
 compiler-recognized registration must match the semantic metadata shape.
-No special layout argument grammar or universal positional overload is
-selected. Concrete schemas, target limits and encoding remain specification
-work. For a struct
+Named arguments use ordinary `name:` attribute/call spelling, not special
+layout grammar. [Windows x64](targets/windows-x64-data-layout.md#4-registered-source-layout-schemas)
+specifies the combined Layout schema, exact limits and default packing;
+its physical encoding remains independently gated. For a struct
 with `int8` followed by `int32`, assuming the profile naturally aligns `int32`
 to four bytes:
 
@@ -202,7 +298,9 @@ to four bytes:
 
 Transparent inherits its carrier ABI and does not permit custom packing or
 aggregate-alignment overrides. Safe access lowering for packed, under-aligned
-members remains to specify.
+members uses their actual alignment and authorized extent under the
+[selected target rules](targets/windows-x64-data-layout.md#6-access-padding-and-observations),
+without an aligned-reference or atomic-snapshot promise.
 
 ## What a target data-layout profile must record
 
@@ -219,16 +317,35 @@ members remains to specify.
 - Representation and coordination needed when code generated by different
   compilers or modules accesses the same storage.
 
-The target natural-alignment/representation table is still to be completed;
-this document does not choose a default serialization format, boolean
+The [Windows x64 table](targets/windows-x64-data-layout.md) is specified;
+other targets remain independently selected work.
+This document does not choose a default serialization format, boolean
 serialization encoding, reference encoding, or SIMD ABI. Register
 classification is not inferred from storage size alone. Explicit raw `Union`
 layout permits overlapping storage, not safe typed access to inactive
 alternatives, and requires the fixed `Blittable` commitment. Safe non-Blittable
 discriminated-union/sum types are a separate higher language feature. See the
 [accepted layout direction](language.md#types-and-operations).
-The currently implemented compact value/module layouts remain exact contracts,
-not an already implemented resilient-layout mechanism.
+
+## Value-layout observations
+
+[Core SizeOf/AlignmentOf](language/registered-queries.md#value-layout-queries)
+observe the complete normalized value representation under this selected
+target profile. Size includes its layout padding, not call-register slots,
+serialization or allocation overhead. Handle/descriptor subjects do not
+implicitly select object payload or backing storage; `void` has zero payload
+extent and an explicitly supplied target zero-data alignment rule.
+The target record must supply exact `nuint`-representable extent and positive
+alignment. Unsupported, malformed or missing layouts do not produce sentinels
+or host-derived values.
+
+`[Sized]` supplies an admitted runtime layout query, not an independently
+persistent constant guarantee. A retained observation needs the queried
+representation's published fixed commitment or complete layout-coupled
+rebuild/rebind/invalidation dependencies. A Blittable scalar result does not
+make a private queried layout Blittable. Querying a stable class handle
+likewise does not freeze unmeasured object payload. These rules add no
+universal reference encoding, object-size API or target layout table.
 
 ## Representation access is not numeric conversion
 
@@ -301,15 +418,9 @@ stronger guarantees are not automatically breaking. This language/module
 binary contract is distinct from both a foreign procedure-call ABI and a
 serialization or wire format.
 
-The current module paths illustrate the distinction:
-
-- A persisted semantic consumer selects a compatible producer and both are
-  lowered together. Its artifact retains checked source-level contracts;
-  `run-module` generates native code for that launch, and `link-module` emits
-  a fresh PE. This does not promise replacement of an already emitted static PE.
-- A persisted native consumer calls an independently compiled DLL. Compatible
-  replacement must preserve the physical crossing contract without rebuilding
-  the consumer image.
+The [bounded module examples](../implementation/layout-profiles.md#semantic-versus-precompiled-replacement)
+illustrate these distinct boundaries without defining a standard command or
+private package format.
 
 Terrum does not promise a published, frozen managed-machine ABI. Managed
 precompiled code is version-sensitive implementation material, not a durable
@@ -324,9 +435,10 @@ weaken published language contracts or required static and safety guarantees.
 
 Foreign exports are distinct: an explicitly declared FFI boundary is fixed by
 its target profile, and implementation changes behind it must preserve the
-caller's contract rather than reinterpret it. The current implementation does
-not support public managed-handle exports; no new export surface or stable
-managed ABI is implied here.
+caller's contract rather than reinterpret it. A public managed-handle export
+still requires its own complete admitted contract; current support is an
+[implementation inventory](../implementation/layout-profiles.md#managed-exports),
+not a new export surface or stable managed ABI.
 
 ## Unsupported extensions
 
@@ -342,21 +454,24 @@ reference or SIMD wire format is selected.
 
 For an already selected target contract, record primitive size, alignment,
 representation, access guarantees and procedure-call classification separately.
+The [Windows x64 profile](targets/windows-x64.md) now owns these rules,
+including registered schemas and non-unwinding default foreign calls;
+compiler/runtime conformance and the missing physical records remain work.
 Native interop must match the selected system ABI's argument and result
 classification. On Windows x64, a by-value struct argument classified for
 indirect passing uses a caller-created shadow copy; it does not pass the
 address of the caller's actual storage or acquire source-level
 `implicit ref<T>` semantics. The target ABI determines direct versus indirect
 passing; this classification does not impose a maximum struct storage size.
-Specify both packing and aggregate-alignment controls, their profile limits and
-the safe-access rules for any under-aligned members. Specify source spellings,
-target limits, metadata, transitive `Blittable` field eligibility, and boundary
+Other profiles must likewise specify both packing and aggregate-alignment
+controls, limits and safe under-aligned access. Preserve the selected source
+schemas, transitive `Blittable` field eligibility and boundary
 coupling/invalidation rules; then implement the corresponding layout, validity
-and metadata checks and conformance cases. Describe cross-module compatibility
-independently of private lowering, preserving existing artifact contracts and
-feature-version checks. Introduce any future checked opt-in enforcement through
-an explicit compatibility migration; do not retroactively reject ordinary
-declarations or reinterpret retained compact-value/module contracts. Specify
+and admitted metadata checks and conformance cases. Describe cross-module compatibility
+independently of private lowering, checking retained published contracts and
+feature requirements before use. Unpublished draft formats may be retired
+rather than preserved through a migration. Do not silently reinterpret an
+artifact that is admitted under a selected schema. Specify
 external protocol encodings only for concrete boundaries that need them; do
 not turn language-level binary compatibility into a universal wire format.
 For managed precompiled-code composition, specify dependency/runtime metadata

@@ -13,6 +13,11 @@ Canonical language and library contracts live in [language](../specs/language.md
 [libraries](../specs/libraries.md), [language contracts](../specs/language-contracts.md),
 [lifetimes](../specs/lifetimes.md), [type families](../specs/type-families.md),
 [conversions](../specs/conversions.md) and [memory model](../specs/memory-model.md).
+The [adopted inventory](../specs/libraries/adopted-inventory.md) identifies
+exact selected roles, incomplete families and unselected candidates; the
+[design scenarios](../specs/libraries/design-scenarios.md) exercise their
+actual contracts. Selection of a protocol does not adopt each candidate
+provider or member in this proposal.
 The design-only [`library/*.api.terrum`](../../library/) sketches are inventory
 inputs, not reference assemblies.
 
@@ -97,6 +102,28 @@ or per-API contract metadata. Here, a concrete-member `;` remains
 reference-signature notation, not an implementation or an additional source
 form; each inventory retains its own unresolved dependencies and decisions.
 
+## Selected Core value-layout queries
+
+**SELECTED CORE CONTRACT:** the
+[registered-query chapter](../specs/language/registered-queries.md) adopts
+these ordinary members on Core's `Terrum.RuntimeHelpers` identity.
+This does not approve the rest of this proposal or select a wire intrinsic ID:
+
+| Member | Declared subject and result |
+|---|---|
+| `SizeOf<T>() -> nuint` | `where T : [Sized]`; complete normalized value/handle byte extent |
+| `AlignmentOf<T>() -> nuint` | The same constraint; value representation's alignment in bytes |
+
+The exact intrinsic contracts are pure and required-constant-eligible,
+without constructing T, allocating a reflection object or initializing
+mutable static state. They are not object-payload queries.
+Runtime layout evidence does not imply a definition-time number; retained
+observations require published fixed target promises or explicit complete
+layout-coupling/invalidation records. The result's scalar codec does not
+freeze its queried type. Existing IsPureEval/IsConstEval properties keep their
+[evaluation-mode contracts](../specs/language/published-predicates-and-effects.md#evaluation-modes).
+Neither `sizeof`/`alignof` syntax nor general source query registration is added.
+
 ## Type and protocol reference index
 
 This index locates the concrete public type/protocol shapes below, including
@@ -125,10 +152,11 @@ table. The proposed `Option<T>` alias is separately described in
 | Native double-ended storage | `Deque`, `DequeSegments`, `DequeWriteAccess` | [Deque signatures](#proposed-owned-double-ended-storage) |
 | Borrowed arena and rentals | `ByteArena`, `MemoryPool`, `MemoryOwner` | [Arena/pool](#proposed-borrowed-arena-and-typed-rental-storage) |
 | Memory operations | `MemoryOrder`, `CompareExchangeObservation`, `MemoryPrimitives` | [Memory primitives](#memoryprimitives) |
+| Selected value-layout queries | `RuntimeHelpers` | [Core value-layout queries](#selected-core-value-layout-queries) |
 | Managed lists | `List`, `ListCursor`, `ListBuilder`, `ListWriteAccess`, `LinkedListNode`, `LinkedList`, `LinkedListBuilder`, `LinkedListCursor` | [Collections](#5-collections-iteration-and-eager-algorithms) |
 | Eager callbacks and algorithms | `IMapper`, `IPredicate`, `IZipper`, `IVisitor`, `SpanAlgorithms` | [Eager signatures](#5-collections-iteration-and-eager-algorithms) |
-| Copied-value iteration | `ICursor`, `ISequence<T, TCursor>`, `Int32RangeCursor`, `Int32RangeSequence`, `IAsyncCursor`, `IAsyncSequence`, `Int32AsyncCursor`, `Int32AsyncSequence` | [Sequence/cursor candidates](#proposed-sequence-and-cursor-protocol-candidates) |
-| Unapproved associated/lending/consuming alternatives | `ISequence<T>`, `ILendingCursor`, `IAsyncLendingCursor`, `IConsumingCursor`, `IAsyncConsumingCursor` | [Iteration alternatives](#proposed-sequence-and-cursor-protocol-candidates) |
+| Selected synchronous/async value iteration and proposed producer examples | `ICursor`, `ISequence<T, TCursor>`, `Int32RangeCursor`, `Int32RangeSequence`, `IAsyncCursor`, `IAsyncSequence`, `Int32AsyncCursor`, `Int32AsyncSequence` | [Sequence/cursor contracts](#sequence-and-cursor-protocol-contracts) |
+| Unapproved associated/lending alternatives | `ISequence<T>`, `ILendingCursor`, `IAsyncLendingCursor` | [Iteration alternatives](#sequence-and-cursor-protocol-contracts) |
 | Ordering and folding | `IOrderComparer`, `IFolder`, `OrderedSpanAlgorithms` | [Ordered signatures](#proposed-ordered-and-sequential-collection-declarations) |
 | Ordered/sequential storage | `SortedSet`, `SortedSetCursor`, `Queue`, `QueueCursor`, `Stack`, `StackCursor` | [Collection signatures](#proposed-ordered-and-sequential-collection-declarations) |
 | Independent numeric operations | `ISubtractionOperators`, `IDivisionOperators`, `IRemainderOperators`, `IUnaryPlusOperators`, `IUnaryNegationOperators`, `IEqualityOperators`, `IComparisonOperators`, `IBitwiseOperators`, `IShiftOperators`, `IMultiplicativeIdentity`, `IIntegerRelations`, `IFloatingClassification` | [Operation protocols](#independently-selectable-operation-protocols) |
@@ -211,8 +239,11 @@ fictional shared primitive base class.
 
 ## 2. Explicit equality, keying and formatting witnesses
 
-The declarations below are candidate opt-in witnesses, not approved
-primitive/root conformance. The accepted separation of value equality,
+The declarations below are opt-in witnesses, not approved primitive/root
+conformance. IFormattable's exact logical requirement is specified with the
+[standard text operations](../specs/language/construction-handlers.md#standard-text-operations);
+the equality/key/parser declarations here remain candidates.
+The accepted separation of value equality,
 identity, key equality/hash, and formatting is specified in
 [scalar mathematics and keys](../specs/libraries.md#scalar-mathematics-keys-and-conversion)
 and [interface contracts](../specs/language.md#interfaces-access-and-generic-properties).
@@ -344,18 +375,18 @@ public interface ITextWriter
 {
     mut bool TryWrite(TextSpan text);
     mut bool TryWriteScalar(rune value);
-    mut bool TryWriteFormatted<TValue>(ref<TValue> value, TextSpan format)
+    mut bool TryWriteFormatted<TValue>(ref<TValue> value, int32 alignment, TextSpan format)
         where TValue : IFormattable;
 }
 public mut unique struct SpanTextWriter<TCodeUnit> : ITextWriter
     where TCodeUnit : [TextCodeUnit]
 {
-    [Captures("destination")]
+    [Captures(nameof(destination))]
     public SpanTextWriter(write Span<TCodeUnit> destination);
     public nuint Written { get; }
     public mut bool TryWrite(TextSpan text);
     public mut bool TryWriteScalar(rune value);
-    public mut bool TryWriteFormatted<TValue>(ref<TValue> value, TextSpan format)
+    public mut bool TryWriteFormatted<TValue>(ref<TValue> value, int32 alignment, TextSpan format)
         where TValue : IFormattable;
 }
 public class Text : IFormattable
@@ -363,11 +394,21 @@ public class Text : IFormattable
     public TextSpan AsSpan();
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
-    [TextTarget("content")]
-    public static own<val<Text>> Create<TContent>(TContent content)
+    public static own<val<Text>> Create<TContent>([TextTarget] TContent content)
         where TContent : IFormattable;
 }
 ```
+
+Text/collection source evaluation follows the adopted
+[eager construction contract](../specs/language/construction-handlers.md#eager-capture-and-acquisition):
+capture operands before the affected builder acquisition or draining.
+The parameter-local TextTarget annotations follow the adopted
+[no-argument schema](../specs/language/construction-handlers.md#texttarget-parameter-schema)
+over typed eager IFormattable content. Core writer/value logical signatures
+follow the [standard operations](../specs/language/construction-handlers.md#standard-text-operations),
+including int32 Unicode-scalar alignment. Concrete consumer/builder APIs and
+physical capture representations remain candidates; no deferred hole
+execution, ITextContent protocol or construction-evaluation policy is added.
 
 | **OPEN** conditional family contract | Proposed member/relationship |
 |---|---|
@@ -435,6 +476,11 @@ The following concrete signatures in candidate `Terrum` expand the text
 inventory; they are reference-only declarations under the notation above. The proposed
 `TextBuilder<TCodeUnit>` is not automatically the registered text-literal
 handler; its registration and `Text.Create` forwarding remain **OPEN**.
+
+Its candidate instance TryBuild below is an explicit reusable API, not the
+adopted [consuming source completion](../specs/language/construction-handlers.md#consuming-builder-completion)
+requirement. A checked nominal adapter must own the supplied builder value,
+publish the complete result and clean residual state without assuming reset.
 
 ```terrum
 public mut unique class TextBuilder<TCodeUnit>
@@ -973,7 +1019,7 @@ remains a unique release owner.
 ```terrum
 public mut unique struct ByteArena
 {
-    [Captures("storage")]
+    [Captures(nameof(storage))]
     public ByteArena(write Span<uint8> storage);
     public nuint Capacity { get; }
     public nuint Used { get; }
@@ -1169,14 +1215,28 @@ can be met; a `Span<uint8>` is not an arbitrary typed allocation.
 ## 5. Collections, iteration and eager algorithms
 
 Initial managed collections from `collections.api.terrum` (design-only).
-The collection-builder attribute argument below is **UNAPPROVED CANDIDATE
-SPELLING**: `typeof(ListBuilder<>)` is outside the adopted expression and
-attribute-argument grammar, which specifies neither `typeof` nor open-generic
-type arguments.
+The collection-builder type argument below follows the adopted
+[constructed type-recipe schema](../specs/language/construction-handlers.md):
+`typeof(ListBuilder<T>)` binds the target's own formal and substitutes forward.
+The builder types and their complete operation/capture-representation/
+lifecycle protocols remain candidate APIs, not executable admission from
+this type reference. The adopted eager rule evaluates all element and
+spread-source expressions before builder acquisition; a captured spread
+is enumerated only when its drain position is reached.
+For a direct cursor, eager capture adopts its value/close obligation without
+advancing; abandonment closes it even if drain never reaches that spread.
+An unreached factory sequence is not acquired.
+Plain construction maps Boolean refusal to ordinary `require` failure;
+explicit builder/writer calls retain their declared status/output contracts.
+
+The instance TryBuild candidates below do not implement Core IBuilder's
+[consuming source completion](../specs/language/construction-handlers.md#consuming-builder-completion)
+by spelling. Source participation requires the selected static witness and
+checked result/cleanup relation, directly or through an explicit adapter.
 
 ```terrum
-[CollectionBuilder(typeof(ListBuilder<>))]
-public mut class List<T>
+[CollectionBuilder(typeof(ListBuilder<T>))]
+public mut class List<T> : ISequence<T, ListCursor<T>>
     where T : [ManagedStorable], [Copy], [Sized]
 {
     public List();
@@ -1195,11 +1255,10 @@ public mut class List<T>
     public mut bool TryGetWriteAccess(init ref<ListWriteAccess<T>> access);
     public ListCursor<T> GetEnumerator();
 }
-public mut unique struct ListCursor<T>
+public mut unique struct ListCursor<T> : ICursor<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
-    public mut bool MoveNext();
-    public T Current { get; }
+    public mut bool TryMoveNext(init ref<T> item);
     public mut void Close();
 }
 public mut unique struct ListBuilder<T>
@@ -1223,8 +1282,8 @@ public mut class LinkedListNode<T>
     [MatchedAccess] public LinkedListNode<T>? Previous { get; }
     [MatchedAccess] public LinkedListNode<T>? Next { get; }
 }
-[CollectionBuilder(typeof(LinkedListBuilder<>))]
-public mut class LinkedList<T>
+[CollectionBuilder(typeof(LinkedListBuilder<T>))]
+public mut class LinkedList<T> : ISequence<T, LinkedListCursor<T>>
     where T : [ManagedStorable], [Copy], [Sized]
 {
     public LinkedList();
@@ -1250,11 +1309,10 @@ public mut unique struct LinkedListBuilder<T>
     public mut bool TryAdd(T value);
     public mut bool TryBuild(init ref<write LinkedList<T>> value);
 }
-public mut unique struct LinkedListCursor<T>
+public mut unique struct LinkedListCursor<T> : ICursor<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
-    public mut bool MoveNext();
-    public T Current { get; }
+    public mut bool TryMoveNext(init ref<T> item);
     public mut void Close();
 }
 ```
@@ -1267,8 +1325,11 @@ These candidate signatures retain the initial
 reference/affine values. Private buffer/access fields and public ABI/layout
 remain unspecified.
 
-The constructors, capacity/insertion members, list cursor and explicit-close
-spellings remain **PROPOSED**. Their initialized-prefix, reserve and
+The constructors, capacity/insertion members and concrete cursor
+implementations remain **PROPOSED**. Their cursor signatures implement the
+[selected value-iteration requirements](../specs/language/iteration.md),
+including mandatory Close; concrete backing/guard representation is not
+supplied by a signature. Their initialized-prefix, reserve and
 mutation-preflight invariants follow the accepted
 [collection contract](../specs/libraries.md#collections-algorithms-and-application-services).
 For this candidate `List<T>` profile, `Reserve` never reduces capacity or
@@ -1277,18 +1338,20 @@ Expected allocation refusal preserves elements, count and capacity. These
 reservation guarantees remain proposed; constructor and allocation-failure
 transport remain **OPEN**.
 
-Accepted copied-current, structural-invalidation and slot-authority rules
+Accepted copied-value, structural-invalidation and slot-authority rules
 are in the [collection contract](../specs/libraries.md#collections-algorithms-and-application-services).
 These cursor candidates retain their source root/backing dependency and expose
-`Current` only after successful advancement and before the next advance/close.
-`Close` releases dependencies once; repeat-close and post-close behavior,
-concurrent access, and exact root/loan metadata remain **OPEN**.
+one copied item through each true TryMoveNext, with vacant output on false.
+Close releases its traversal obligations once under the selected standard
+contract. Additional closed-use/reset APIs, concurrent access and exact
+root/loan metadata remain **OPEN**.
 
 The accepted write-guard exclusion and lifetime rules are in
 [libraries](../specs/libraries.md#collections-algorithms-and-application-services)
 and [lifetimes](../specs/lifetimes.md#three-independent-dependencies).
-Whether explicit `Close` registers loop-close or no-throw cleanup, and the
-exact cursor/root and guard-loan metadata, remain **OPEN**.
+Synchronous cursor Close is the selected loop operation, not an implicit
+no-throw cleanup registration. The separate guard Close candidate and exact
+cursor/root and guard-loan metadata remain **OPEN**.
 
 Accepted detached-node, membership, and matched-access behavior is specified
 in the [managed collection contract](../specs/libraries.md#collections-algorithms-and-application-services).
@@ -1469,9 +1532,11 @@ an operation says otherwise.
 
 | Protocol / type | Proposed members and shape | Outcome / ownership |
 |---|---|---|
-| `ISequence<T, TCursor>` | `GetEnumerator() -> TCursor`; cursor is an explicit type argument | Proposed value/copy protocol below; no universal element-copy guarantee |
-| `ICursor<T>` | `MoveNext() -> bool`; `Current -> T` where `T:[Copy]`; candidate `Close()` | The concrete copied-value path does not define lending or consuming iteration |
-| `IAsyncSequence<T, TCursor>` / `IAsyncCursor<T>` | `GetAsyncEnumeratorAsync() -> Task<TCursor>`; `MoveNextAsync() -> Task<bool>`; `Current -> T` where `T:[Copy]`; candidate `CloseAsync() -> Task<void>` | Each task has a completion owner; borrowed variants remain blocked below |
+| `ISequence<T, TCursor>` | Selected readonly `GetEnumerator() -> TCursor`; exact ICursor<T> relationship | Factory source; no implicit source consumption or universal re-enumeration |
+| `ICursor<T>` | Selected `TryMoveNext(init ref<T> item) -> bool` and mandatory `Close()` | True/live, false/vacant; direct sources preserve ordinary copy/transfer/backing, without a universal Copy bound or Current |
+| `IAsyncSequence<T, TCursor>` / `IAsyncCursor<T>` | Selected synchronous `GetAsyncEnumerator() -> TCursor`; `TryMoveNextAsync(init ref<T>) -> Task<bool>`; required `CloseAsync() -> Task<void>` | Completion/output reservation and saved Boolean relationship; no universal Copy bound or Current; lending remains separate |
+| `ILendingSequence<T, TCursor>` / `ILendingCursor<T>` and writable counterparts | Selected `GetEnumerator() -> TCursor`, readonly/mut respectively; `TryMoveNext(init ref<ref<T>>)` or `init ref<write ref<T>>`; mandatory Close | Distinct reference-output roles; element-place aliases, cursor-bound loans and checked published backing refinements |
+| `IAsyncLendingSequence<T, TCursor>` / `IAsyncLendingCursor<T>` and writable counterparts | Selected synchronous readonly/mut GetAsyncEnumerator; reference-output TryMoveNextAsync and awaited CloseAsync | Same element dependencies plus explicit descriptor reservation and completion publication; no implicit Task<TCursor> factory |
 | `SpanAlgorithms` search and predicates | `Contains`, `TryIndexOf`, `TryLastIndexOf`, `TryFind`, `TryFindLast`, `TryFindIndex`, `TryFindLastIndex`, `All`, `CountWhere`, `Any` | Explicit equality witness or predicate; directional visits and vacant no-match outputs, no unknown-index sentinel |
 | `SpanAlgorithms` sequence comparison | `SequenceEqual`, `StartsWith`, `EndsWith` | Explicit element-equality witness; readonly overlap allowed, no identical-backing shortcut that skips effects or NaN comparisons |
 | `SpanAlgorithms` transform | `Select`, `Where`, `Zip`, `ForEach`, `Fill`, `Reverse`, `CopyTo`, `MoveWithin` | Mutable callbacks take `write ref<TCallback>`; destination/overlap contracts differ by operation |
@@ -1484,98 +1549,197 @@ an operation says otherwise.
 | `Deque<T>` / owned, **new** | Explicit-provider construction, count/capacity/index/peek, front/back push/pop, reservation, `GetSegments`, exclusive write guard, clear/disposal | Concrete Copy-profile declarations in §4; segment loans forbid structural mutation and never fabricate a contiguous span |
 | `Dictionary<TKey,TValue,TComparer>`, `HashSet<T,TComparer>` | Explicit-comparer constructors, `Count`, `Capacity`, comparer, `Reserve`, `TryGet`/`ContainsKey`/`Contains`, `TryAdd`, `Remove`, `Clear`, guarded cursor | Explicit key comparer; complete sample and failure contracts in §13 |
 
-#### Proposed sequence and cursor protocol candidates
+#### Sequence and cursor protocol contracts
 
-The following declarations are **PROPOSED** API shapes. The generic
-copy-value protocols and concrete `int32` examples describe only copied
-elements; they do not require every sequence or collection to store or copy
-its items. A cursor is acquired separately from traversal, and acquiring or
-constructing an `[Iterator]` producer does not eagerly run its body.
+**SELECTED CORE CONTRACT:** the [value-iteration chapter](../specs/language/iteration.md)
+owns Terrum.ICursor<T> and Terrum.ISequence<T, TCursor>.
+The standard synchronous operation combines advance and item publication;
+there is no separate Current state or universal item-Copy requirement.
+Copying from a borrowed collection and transfer from an owning cursor retain
+their actual published authority, output and backing contracts.
 
 ```terrum
 public interface ICursor<T>
-    where T : [Copy]
 {
-    public mut bool MoveNext();
-    public T Current { get; }
+    public mut bool TryMoveNext(init ref<T> item);
     public mut void Close();
 }
 public interface ISequence<T, TCursor>
-    where T : [Copy]
     where TCursor : ICursor<T>
 {
     public TCursor GetEnumerator();
 }
+```
+
+Both factory sequences and already-created direct cursors are valid sources.
+A named affine direct cursor requires move; adoption does not acquire/reset
+it, and required close does not dispose the source collection.
+Distinct eligible source relationships are ambiguous, not a name/body-based
+factory preference. An explicit nominal adapter can expose the intended role.
+These shapes do not select a physical frame/witness/output codec.
+
+**SELECTED GENERATION CONTRACT:** [generated producers](../specs/language/generated-producers.md)
+use owned named IteratorCursor shells and one same-module Iterator callable.
+The standard result is the direct affine cursor, not a sequence factory.
+Source creation clauses/effects are separate from generated advance/close
+contracts; frame/capture and required close remain checked.
+
+The following concrete range and producer signatures remain **PROPOSED
+INVENTORY FRAGMENTS**. The marked creator needs a real producer block; its
+bodyless signature here is not an executable declaration.
+Its int32 items are Copy values, not a constraint on all cursors.
+Producer creation and explicit factory acquisition do not run the body:
+
+```terrum
+[IteratorCursor]
 public mut unique struct Int32RangeCursor : ICursor<int32>
 {
-    public mut bool MoveNext();
-    public int32 Current { get; }
-    public mut void Close();
 }
 public struct Int32RangeSequence : ISequence<int32, Int32RangeCursor>
 {
     public Int32RangeCursor GetEnumerator();
 }
 [Iterator]
-public static Int32RangeSequence Range(int32 start, nuint count);
+public static Int32RangeCursor Range(int32 start, nuint count);
+```
 
+**SELECTED CORE CONTRACT:** the [async-value-iteration chapter](../specs/language/async-iteration.md)
+owns the separate async roles. Acquisition is synchronous and readonly;
+advance and close have checked completion contracts. TryMoveNextAsync reserves
+the exact item destination and cursor access until terminal completion/cleanup
+is observed. Its awaited Boolean supplies true/live or false/failure/vacant,
+not a relation inferred from Task<bool> alone. No universal Copy item bound
+or Current property is part of the standard protocol:
+
+```terrum
 public interface IAsyncCursor<T>
-    where T : [Copy]
 {
-    public mut Task<bool> MoveNextAsync();
-    public T Current { get; }
+    public mut Task<bool> TryMoveNextAsync(init ref<T> item);
     public mut Task<void> CloseAsync();
 }
 public interface IAsyncSequence<T, TCursor>
-    where T : [Copy]
     where TCursor : IAsyncCursor<T>
 {
-    public Task<TCursor> GetAsyncEnumeratorAsync();
+    public TCursor GetAsyncEnumerator();
 }
+```
+
+The following concrete async range and producer signatures remain **PROPOSED
+INVENTORY FRAGMENTS**, likewise requiring the marked producer's block body:
+
+```terrum
+[IteratorCursor]
 public mut unique struct Int32AsyncCursor : IAsyncCursor<int32>
 {
-    public mut Task<bool> MoveNextAsync();
-    public int32 Current { get; }
-    public mut Task<void> CloseAsync();
 }
 public struct Int32AsyncSequence : IAsyncSequence<int32, Int32AsyncCursor>
 {
-    public Task<Int32AsyncCursor> GetAsyncEnumeratorAsync();
+    public Int32AsyncCursor GetAsyncEnumerator();
 }
 [Iterator]
-public static async Int32AsyncSequence ValuesAsync(int32 start, nuint count);
+public static async Int32AsyncCursor ValuesAsync(int32 start, nuint count);
 ```
 
 `Range` and `ValuesAsync` are reference signatures for producer result
 contracts, not executable bodyless concrete members. Their implementations
 would use `yield expression;` and producer `return;`; the sync body starts on
 its first advancement, and the async body likewise starts on its first
-asynchronous advancement. `ValuesAsync` returns the proposed async-sequence
-type directly, **not** `Task<Int32AsyncSequence>`: async producer creation is
-lazy, unlike ordinary eager async invocation. The proposed async acquisition
-task completes with a cursor but must not start that producer body. Sequence
-state, cursor backing and representation are intentionally omitted and
-unselected; these signatures do not promise a storage strategy or Copy
-capability beyond the explicit `int32` examples and generic constraints.
+asynchronous advancement. `ValuesAsync` synchronously returns the proposed
+named async cursor, **not** `Task<Int32AsyncCursor>` or an async-sequence
+factory: its body is lazy, unlike ordinary eager async invocation.
+Int32RangeSequence/Int32AsyncSequence are separate explicit factory-wrapper
+inventory candidates and must satisfy actual recreation/capture contracts.
+Synchronous cursor acquisition
+does not start that producer body or introduce an acquisition task.
+Sequence state, cursor backing and physical representation are intentionally
+omitted; these fragments do not promise a storage strategy, legal affine
+capture duplication or an implemented concrete producer body.
 
-The `Current` value is available only after a successful advancement; a
-subsequent advancement changes the cursor's current position, but a copied
-`T` already read is independent of that cursor. `Close` and `CloseAsync` are
-candidate checked protocol operations, not `[NoThrow] [Cleanup]` destructors.
-Whether either name is registered as the loop-close operation is **OPEN**.
+Both selected output operations preserve complete item dependencies.
+Synchronous Close and async CloseAsync are the checked loop operations;
+async close is awaited after pending advancement and item retirement.
+Neither is automatically a `[NoThrow] [Cleanup]` destructor.
 The accepted close-on-exit and awaited-close behavior is specified by the
 [iteration grammar](../specs/grammar-spec.md#33-statements-and-local-declarations)
 and [producer contract](../specs/grammar-spec.md#512-modifiers-cleanup-and-finalization).
 Async loans and completion responsibility follow [language direction](../specs/language.md#storage-concurrency-entry-and-boundaries)
 and [lifetimes](../specs/lifetimes.md#declaration-defaults-exceptions-and-published-compatibility).
-Whether these candidate `Close` names are registered with the loop protocol,
-and the exact task/cursor metadata, remain open.
+Exact task/cursor/frame metadata remain open.
 
-Borrowed and consuming forms are deliberately distinct from those
-copy-value declarations. The following are **BLOCKED CANDIDATE FORMS**, not
-approved API contracts: their signatures alone do not establish an associated
-cursor mapping, item lifetime, access mode, invalidation rule, or dependency
-metadata.
+**SELECTED CORE CONTRACT:** [reference-output lending](../specs/language/lending-iteration.md)
+owns distinct readonly/writable synchronous/asynchronous source and cursor
+roles. These are not value iteration instantiated with a reference-valued
+item. The loop name aliases the existing element T place; descriptor retirement
+ends its loan rather than destroying T.
+
+Readonly factories have readonly receivers. Writable factories require mut
+receivers and actual writable element backing; descriptor mutability alone
+does not grant it. Async acquisition remains synchronous:
+
+```terrum
+public interface ILendingCursor<T>
+{
+    public mut bool TryMoveNext(init ref<ref<T>> item);
+    public mut void Close();
+}
+public interface ILendingSequence<T, TCursor>
+    where TCursor : ILendingCursor<T>
+{
+    public TCursor GetEnumerator();
+}
+public interface IWritableLendingCursor<T>
+{
+    public mut bool TryMoveNext(init ref<write ref<T>> item);
+    public mut void Close();
+}
+public interface IWritableLendingSequence<T, TCursor>
+    where TCursor : IWritableLendingCursor<T>
+{
+    public mut TCursor GetEnumerator();
+}
+public interface IAsyncLendingCursor<T>
+{
+    public mut Task<bool> TryMoveNextAsync(init ref<ref<T>> item);
+    public mut Task<void> CloseAsync();
+}
+public interface IAsyncLendingSequence<T, TCursor>
+    where TCursor : IAsyncLendingCursor<T>
+{
+    public TCursor GetAsyncEnumerator();
+}
+public interface IAsyncWritableLendingCursor<T>
+{
+    public mut Task<bool> TryMoveNextAsync(init ref<write ref<T>> item);
+    public mut Task<void> CloseAsync();
+}
+public interface IAsyncWritableLendingSequence<T, TCursor>
+    where TCursor : IAsyncWritableLendingCursor<T>
+{
+    public mut TCursor GetAsyncEnumerator();
+}
+```
+
+Each advance selects the initialized inner reference value of its exact init
+formal and publishes true/live, false/vacant or failure/vacant after required
+checks/cleanup. Async output additionally reserves its destination/cursor
+access with the operation until checked completion observation.
+The ordinary Boolean result or Task<bool> shape does not supply the element
+origin, access, backing or phase relationship.
+
+Loans have a conservative cursor-bound default. Checked published refinements
+can permit survival across specified later advance/close operations when their
+actual source/root/guard dependencies survive; generic callers need an exposed
+refinement and proven condition. Private bodies, equal addresses, rooting or
+Copy cannot narrow the public bound. Neither surviving validity nor write
+authority is an exclusive loan, stable contents or NoAlias.
+Exact logical output/source/refinement fields are selected by the chapter;
+the [general dependency schemas](../specs/language/dependencies-and-views.md)
+now supply source/target authoring, while physical codecs remain separate.
+ForwardsBacking alone does not establish advance/close survival.
+No Current, return annotation substituting for an init output, Item<'a>, MatchedAccess registration
+or automatic Span/List lending witness is part of these contracts.
+
+The following associated-cursor form remains a **BLOCKED CANDIDATE**:
 
 ```terrum
 public interface ISequence<T>
@@ -1583,55 +1747,30 @@ public interface ISequence<T>
     public type Cursor;
     public Cursor GetEnumerator();
 }
-public interface ILendingCursor<T>
-{
-    public mut bool MoveNext();
-    [return: DependsOn("this")]
-    public ref<T> Current { get; }
-    public mut void Close();
-}
-public interface IAsyncLendingCursor<T>
-{
-    public mut Task<bool> MoveNextAsync();
-    [return: DependsOn("this")]
-    public ref<T> Current { get; }
-    public mut Task<void> CloseAsync();
-}
-public interface IConsumingCursor<T>
-{
-    public mut bool TryMoveNext(init ref<T> value);
-    public mut void Close();
-}
-public interface IAsyncConsumingCursor<T>
-{
-    public mut Task<bool> TryMoveNextAsync(init ref<T> value);
-    public mut Task<void> CloseAsync();
-}
 ```
 
-`Cursor` uses the accepted associated-type declaration form, but its binding
-and selection contract is not adopted here
+`Cursor` uses the accepted associated-type declaration form, but that source's
+binding and selection contract is not adopted here
 ([grammar](../specs/grammar-spec.md#54-aliases-and-associated-types-declarations-and-open-binding)).
-Accepted parameter-directed result dependencies and the distinction between
+Accepted whole-source result/capture dependencies and the distinction between
 receiver storage and forwarded backing are in the
 [grammar contract](../specs/grammar-spec.md#result-dependency-declarations).
-The receiver selector `[return: DependsOn("this")]` remains an unapproved
-candidate spelling and does not settle which advancement invalidates the
-borrow. Accepted producer phases and suspension dependencies are in the
+Return-targeted DependsOn does not select an init output or declare receiver/
+suspension capture. Accepted producer phases and suspension dependencies are in the
 [grammar coverage index](../specs/grammar-spec.md#6-source-form-coverage-and-open-boundaries)
 and [lifetime contract](../specs/lifetimes.md#three-independent-dependencies).
-Which candidate `Current` borrows, its invalidation point, and exact producer
-protocol/phase identities remain open.
+The [named producer schema](../specs/language/generated-producers.md) separately
+selects generated cursor/capture/operation phases. Physical frame/phase and
+dependency representations/codecs remain open.
 
-`TryMoveNext(init ref<T>)` and its async counterpart are alternative
-consuming-advance candidates: a successful completion would transfer one
-element into the vacant output; false would leave it vacant. For the async
-form, publication would occur at task completion, not when the task is
-returned. Exact advancement, close registration and failure contracts are
-unresolved; no consuming or writable binding is implied by ordinary
-by-value iteration. Selection among by-value, borrowed and consuming element
-modes, including when advancement invalidates an item, remains open; the
-grammar's iteration entry records the corresponding source boundary in its
+The output operations are the standard by-value ICursor and IAsyncCursor
+requirements, not separate consuming protocols. They do not permit moving
+stored elements out of an ordinary borrowed collection.
+Async output publishes through its explicit completion relationship, not when
+returning the task. Ordinary Task output defaults remain unchanged.
+Lending/writable bindings use their separate selected reference-output roles;
+generated producer registration is its separate selected contract. The grammar records that
+boundary in its
 [coverage index](../specs/grammar-spec.md#6-source-form-coverage-and-open-boundaries).
 
 ### Proposed ordered and sequential collection declarations
@@ -1679,7 +1818,7 @@ public static class OrderedSpanAlgorithms
         TState seed, write ref<TFolder> folder)
         where TFolder : IFolder<T, TState>;
 }
-public mut class SortedSet<T, TOrder>
+public mut class SortedSet<T, TOrder> : ISequence<T, SortedSetCursor<T, TOrder>>
     where T : [ManagedStorable], [Copy], [Sized]
     where TOrder : IOrderComparer<T>, [ManagedStorable], [Copy], [Sized]
 {
@@ -1695,15 +1834,14 @@ public mut class SortedSet<T, TOrder>
     public mut void Clear();
     public SortedSetCursor<T, TOrder> GetEnumerator();
 }
-public mut unique struct SortedSetCursor<T, TOrder>
+public mut unique struct SortedSetCursor<T, TOrder> : ICursor<T>
     where T : [ManagedStorable], [Copy], [Sized]
     where TOrder : IOrderComparer<T>, [ManagedStorable], [Copy], [Sized]
 {
-    public mut bool MoveNext();
-    public T Current { get; }
+    public mut bool TryMoveNext(init ref<T> item);
     public mut void Close();
 }
-public mut class Queue<T>
+public mut class Queue<T> : ISequence<T, QueueCursor<T>>
     where T : [ManagedStorable], [Copy], [Sized]
 {
     public Queue();
@@ -1717,14 +1855,13 @@ public mut class Queue<T>
     public mut void Clear();
     public QueueCursor<T> GetEnumerator();
 }
-public mut unique struct QueueCursor<T>
+public mut unique struct QueueCursor<T> : ICursor<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
-    public mut bool MoveNext();
-    public T Current { get; }
+    public mut bool TryMoveNext(init ref<T> item);
     public mut void Close();
 }
-public mut class Stack<T>
+public mut class Stack<T> : ISequence<T, StackCursor<T>>
     where T : [ManagedStorable], [Copy], [Sized]
 {
     public Stack();
@@ -1738,11 +1875,10 @@ public mut class Stack<T>
     public mut void Clear();
     public StackCursor<T> GetEnumerator();
 }
-public mut unique struct StackCursor<T>
+public mut unique struct StackCursor<T> : ICursor<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
-    public mut bool MoveNext();
-    public T Current { get; }
+    public mut bool TryMoveNext(init ref<T> item);
     public mut void Close();
 }
 ```
@@ -1764,10 +1900,11 @@ oldest first, `Stack` newest first. Their insertion failures preserve contents;
 an empty `TryDequeue`, `TryPop` or `TryPeek` leaves the output vacant. Capacity
 constructors have the same unresolved checked construction-failure transport
 as the keyed collections in §13. A cursor may not be used across structural
-mutation; it never outlives its source, and a copied `Current` is available
-only after successful advancement. Conditional publication and cursor
-registration/close metadata remain **OPEN**; neither follows from these
-bodyless signatures.
+mutation; it never outlives its source. TryMoveNext copies one permitted
+item into its vacant destination on true and leaves it vacant on false.
+The [standard cursor contract](../specs/language/iteration.md) supplies required
+close and logical publication, not concrete guard/frame or physical metadata.
+Those representations remain **OPEN**; bodyless signatures do not implement them.
 
 The four bound/extremum members are **PROPOSED** additions to the existing
 eager Core service, not new language intrinsics or executable exports.
@@ -1836,19 +1973,18 @@ semantics; exact failure transport remains open.
 Accepted copied-value, structural-invalidation and lazy-producer rules are in
 [libraries](../specs/libraries.md#collections-algorithms-and-application-services)
 and the [iteration grammar](../specs/grammar-spec.md#33-statements-and-local-declarations).
-These concrete cursor candidates retain their source root, clear `Current` on
-exhaustion, and use the same idempotent explicit `Close` proposal as
-`ListCursor`; closing leaves the collection intact. Post-close access is a
-checked invalid-state failure. They add no associated-cursor selection,
-loop-close registration, implicit NoThrow cleanup or concurrent safety; their
-exact metadata remains **OPEN**.
+These concrete cursor candidates retain their source root, publish no item
+on false exhaustion and implement the selected TryMoveNext/Close roles.
+Closing leaves the collection intact. They do not add associated-cursor
+selection, implicit NoThrow cleanup or concurrent safety; extra closed-use/
+reset APIs and exact metadata remain **OPEN**.
 
 The accepted async advancement, suspension-dependency, and
 structured/awaited-close rules are in the [producer contract](../specs/grammar-spec.md#512-modifiers-cleanup-and-finalization)
 and [lifetimes](../specs/lifetimes.md#three-independent-dependencies);
-they do not approve these candidate member names. Exact close registration,
-associated-cursor selection, borrowed dependency annotations and
-representation remain **OPEN**. A deterministic snapshot requires an
+they do not approve associated-cursor selection, lending annotations or
+producer/frame representation. Those remain **OPEN** despite the selected
+by-value async protocol. A deterministic snapshot requires an
 explicit allocated result and policy. Collection-expression registration is
 checked per builder, not inferred from `TryAdd` spelling.
 
@@ -1887,6 +2023,12 @@ primitive operators; operator requirements below describe potential nominal
 witnesses for intrinsic operations, not additional primitive operator bodies.
 
 ### Independently selectable operation protocols
+
+The accepted [numeric capability groups](../specs/language/numeric-capabilities.md)
+now own the exact same-type Core groups, constraints and primitive witnesses.
+Min/Max/Clamp form one selection group. The heterogeneous/per-method and
+classification declarations below remain broader proposed alternatives,
+not additional adopted Core definitions or prerequisites.
 
 These are independently witnessed. A different `TOther` or `TResult` does
 not imply automatic promotion, and conformance to one protocol never grants
@@ -1966,8 +2108,9 @@ arithmetic/identity shapes; no composite here implies unlisted protocols.
 The accepted independent operation and built-in operator contracts are in
 [libraries](../specs/libraries.md#scalar-mathematics-keys-and-conversion)
 and [language](../specs/language.md#primitives-strict-arithmetic-and-text).
-**OPEN:** per-type operator/witness eligibility, eligible count types,
-heterogeneous operator eligibility and contracts for nominal implementations.
+**OPEN:** the additional heterogeneous/result/classification protocols and
+their nominal implementation contracts. The selected same-type groups and
+all integer data/count witnesses are no longer open.
 `IIntegerRelations` is an optional relation proposal; the `uint32` witness
 below uses the approved associated declaration form. Its particular
 relationships, eligible widths, diagnostics and metadata remain **OPEN**;
@@ -1976,6 +2119,10 @@ accepted associated-type binding and identity rules are in the
 and [type-family contract](../specs/type-families.md#nominal-witnesses-and-associated-relationships).
 
 ### Existing sampled declarations
+
+These are unadopted earlier sampled alternatives, including the three-member
+IScalarNumber candidate. A same-spelled proposed interface does not redefine
+the accepted Core group or its complete required witness.
 
 The numerics source is representative, not a complete primitive matrix.
 The candidate `IScalarIeee754` here composes the new independent
@@ -2673,16 +2820,13 @@ The following candidate declarations retain the proposed writer API:
 public enum TerminalOutput : int32 { Standard, Error }
 public static class Terminal
 {
-    [TextTarget("content")]
-    public static void Write<TContent>(TContent content,
+    public static void Write<TContent>([TextTarget] TContent content,
         TerminalOutput output = TerminalOutput.Standard)
         where TContent : IFormattable;
-    [TextTarget("content")]
-    public static void WriteLine<TContent>(TContent content,
+    public static void WriteLine<TContent>([TextTarget] TContent content,
         TerminalOutput output = TerminalOutput.Standard)
         where TContent : IFormattable;
-    [TextTarget("content")]
-    public static Task WriteLineAsync<TContent>(TContent content,
+    public static Task WriteLineAsync<TContent>([TextTarget] TContent content,
         TerminalOutput output = TerminalOutput.Standard)
         where TContent : IFormattable;
     public static write TextWriter Output { get; }
@@ -2692,16 +2836,13 @@ public mut class TextWriter : ITextWriter
 {
     public mut bool TryWrite(TextSpan text);
     public mut bool TryWriteScalar(rune value);
-    public mut bool TryWriteFormatted<TValue>(ref<TValue> value, TextSpan format)
+    public mut bool TryWriteFormatted<TValue>(ref<TValue> value, int32 alignment, TextSpan format)
         where TValue : IFormattable;
-    [TextTarget("content")]
-    public mut void Write<TContent>(TContent content)
+    public mut void Write<TContent>([TextTarget] TContent content)
         where TContent : IFormattable;
-    [TextTarget("content")]
-    public mut void WriteLine<TContent>(TContent content)
+    public mut void WriteLine<TContent>([TextTarget] TContent content)
         where TContent : IFormattable;
-    [TextTarget("content")]
-    public mut Task WriteLineAsync<TContent>(TContent content)
+    public mut Task WriteLineAsync<TContent>([TextTarget] TContent content)
         where TContent : IFormattable;
 }
 ```
@@ -2822,6 +2963,7 @@ public struct Error : IFormattable
 
 ```terrum
 public mut class Dictionary<TKey, TValue, TComparer>
+    : ISequence<DictionaryEntry<TKey, TValue>, DictionaryCursor<TKey, TValue, TComparer>>
     where TKey : [ManagedStorable], [Copy], [Sized]
     where TValue : [ManagedStorable], [Copy], [Sized]
     where TComparer : IKeyComparer<TKey>, [ManagedStorable], [Copy], [Sized]
@@ -2841,7 +2983,7 @@ public mut class Dictionary<TKey, TValue, TComparer>
     public DictionaryCursor<TKey, TValue, TComparer> GetEnumerator();
 }
 
-public mut class HashSet<T, TComparer>
+public mut class HashSet<T, TComparer> : ISequence<T, HashSetCursor<T, TComparer>>
     where T : [ManagedStorable], [Copy], [Sized]
     where TComparer : IKeyComparer<T>, [ManagedStorable], [Copy], [Sized]
 {
@@ -2867,20 +3009,19 @@ public struct DictionaryEntry<TKey, TValue>
     public TValue Value { get; }
 }
 public mut unique struct DictionaryCursor<TKey, TValue, TComparer>
+    : ICursor<DictionaryEntry<TKey, TValue>>
     where TKey : [ManagedStorable], [Copy], [Sized]
     where TValue : [ManagedStorable], [Copy], [Sized]
     where TComparer : IKeyComparer<TKey>, [ManagedStorable], [Copy], [Sized]
 {
-    public mut bool MoveNext();
-    public DictionaryEntry<TKey, TValue> Current { get; }
+    public mut bool TryMoveNext(init ref<DictionaryEntry<TKey, TValue>> item);
     public mut void Close();
 }
-public mut unique struct HashSetCursor<T, TComparer>
+public mut unique struct HashSetCursor<T, TComparer> : ICursor<T>
     where T : [ManagedStorable], [Copy], [Sized]
     where TComparer : IKeyComparer<T>, [ManagedStorable], [Copy], [Sized]
 {
-    public mut bool MoveNext();
-    public T Current { get; }
+    public mut bool TryMoveNext(init ref<T> item);
     public mut void Close();
 }
 ```
@@ -2916,24 +3057,33 @@ The **PROPOSED** concrete cursors complete the traversal surface without
 choosing a generic associated-cursor witness or erased iterator. Each cursor
 retains a loan on its collection until close and cannot outlive that backing.
 Traversal visits each entry once in an unspecified order; it is not an
-allocated snapshot or a promise of insertion/hash order. `Current` is valid
-only after `MoveNext` returns true and before the next advancement or close.
-False exhaustion has no current value. `Close` ends traversal and releases
-the loan; repeated close is harmless, but advancement or current access after
-close is an invalid-state failure, not an empty/default result.
+allocated snapshot or a promise of insertion/hash order. TryMoveNext publishes
+one complete item on true and leaves the destination vacant on false
+exhaustion. Close ends traversal and releases the loan under the selected
+standard contract; standard consumers invoke it once, without inferring an
+idempotent reset/restart or closed-use operation.
 
-Every successful `Current` access copies an explicitly Copy-constrained
-entry/value. A copied entry is independent of cursor position; it does not
+Every successful advance copies an explicitly Copy-constrained entry/value
+into its item output. A copied entry does not
 expose a writable dictionary slot, and its key/value copies retain their own
 ordinary backing dependencies. The initial traversal contract excludes
 collection mutation while a cursor is live, including `Set` replacing an
 existing value; it does not rely on eventual mutation detection or allow an
-aliased caller to invalidate storage behind a loan. Exact loan metadata and
-loop registration of `Close` remain **OPEN**, as for the sequence proposals
-in §5. There is no implied `[NoThrow]` cleanup registration, cross-thread
+aliased caller to invalidate storage behind a loan. Exact loan/frame metadata
+remain **OPEN**; the logical operation identities and close obligation follow
+the selected synchronous protocol in §5.
+There is no implied `[NoThrow]` cleanup registration, cross-thread
 safety, lending iteration or consuming transfer of stored elements.
 
 ### Tasks, await, cancellation and completion responsibility
+
+The [Core task responsibility contract](../specs/language/task-responsibility.md)
+selects affine Task<T>, readonly bool IsCompleted, consuming await with
+explicit named move, and every-exit settlement/transfer. The initial wait is
+compiler-owned; it does not use the candidate public GetAwaiter pattern below.
+The remaining methods, public task/awaiter nominal shapes, TaskStatus/
+TaskOutcome, scope, cancellation and executor APIs are proposals, not physical
+layouts or prerequisites inferred from that logical approval.
 
 ```terrum
 public enum TaskStatus : int32
@@ -2979,18 +3129,20 @@ public mut unique struct TaskScope
 
 | **OPEN** task/cancellation family | Proposed signatures and relationships |
 |---|---|
-| `TaskOutcome<T>` nominal sum | `Completed(T value)`, `Faulted(Error error)`, `Canceled`; union source grammar OPEN |
-| `Task<T>` | Complete representative signature above; method and capture contracts still proposed |
+| `TaskOutcome<T>` nominal sum | `Completed(T value)`, `Faulted(Error error)`, `Canceled`; exact representation/failure contract OPEN |
+| `Task<T>` | Affine owner and IsCompleted contract selected; other representative methods and nominal representation remain proposed |
 | conditional Copy-only observation | `Task<T>.GetOutcomeCopy() -> TaskOutcome<T>` only when **all** variant payloads are `[Copy]`; relationship syntax OPEN |
 | `TaskAwaiter<T>` | Complete representative signature above; continuation registration and error propagation OPEN |
 | `CancellationToken` / `CancellationSource` | Complete representative signatures above; token retains request-state dependency and source owns unique request authority |
-| `TaskScope` | Complete representative signature above; scope close waits for adopted completion and cleanup |
+| `TaskScope` | Representative signatures above; explicit join settles every adopted completion/cleanup, with exact error/shutdown policy still OPEN |
 | `IExecutor` / **new proposal** | `Schedule(func<void>)`, `Yield() -> Task<void>`, `ResumeOn(IExecutor) -> awaitable`; scheduler and continuation affinity remain separately checked contracts |
 
 The approved generic-default form makes bare `Task` exactly `Task<void>`,
 not a base type or result erasure ([type families](../specs/type-families.md#explicit-families)).
-If adopted, `Task<T>` is a unique completion owner, not a freely copied
-`[Copy]` value. `TaskScope.Adopt` accepts responsibility for an operation,
+The selected `Task<T>` is an affine completion owner, not a freely copied
+`[Copy]` value. Ordinary `await operation` rejects for a named owner;
+`await move operation` consumes it and supplies T or ordinary terminal failure.
+The candidate `TaskScope.Adopt` accepts responsibility for an operation,
 not a cold-task `Start`; a named unique task is passed as
 `scope.Adopt(move task)`, where `move` is a call expression, not a parameter
 modifier.
@@ -3020,11 +3172,18 @@ continuation or choosing the caller's continuation. `ResumeOn(executor)`
 selects the awaiting continuation without rescheduling the producer; `Yield`
 may request a scheduling boundary.
 
-`TaskScope`, adoption, capture, task-handle cleanup and outcome APIs remain
-separate library proposals, not an adopted lifecycle contract. Repeated
-observation, responsibility ownership, cancellation and retained dependencies
-need coherent exact contracts. Captures remain subject to the accepted
-transfer/share and lifetime rules; task handles do not gain implicit
+TaskScope, adoption, nonconsuming outcome accessors and cancellation APIs
+remain separate library proposals. Their exact methods and policies must
+satisfy the selected owner/observation/dependency contract. Ordinary task
+destruction never implicitly blocks, suspends, joins, cancels or supervises;
+normal and exceptional exits require explicit settlement or valid transfer.
+An adopted multi-task join must settle all accepted siblings before completing
+even when one fails; error combination and shutdown policy need explicit
+admission. The
+[checked source/capture schemas](../specs/language/dependencies-and-views.md)
+do not approve these task APIs or choose their responsible operation/
+payload destinations. Captures remain subject to the accepted transfer/share
+and lifetime rules; task handles do not gain implicit
 thread-sharing. The accepted rule that dropping a handle does not cancel work
 is in [language](../specs/language.md#storage-concurrency-entry-and-boundaries).
 `CancellationSource` uniquely controls a shared request; its token retains
@@ -3032,13 +3191,21 @@ the source dependency and may not be default-fabricated. This proposal makes
 cancellation requests idempotent, monotonic and cooperative; cross-thread
 request/observation guarantees remain a memory/runtime contract to specify.
 
-`GetAwaiter` and result observation signatures are **PROPOSED**; exact `await`
-integration, task-state synchronization, error aggregation in `JoinAsync`,
+GetAwaiter and result-observation signatures are **PROPOSED**, not the initial
+consuming-await lowering. Task-state synchronization, error aggregation in JoinAsync,
 executor selection and task result borrowing rules remain open. Captured
 borrow validity follows [lifetime contracts](../specs/lifetimes.md#three-independent-dependencies).
 The accepted no-implicit-caller-executor-capture direction does not settle how
 this draft's task/scope API realizes scheduling; a general executor contract
 and callback effects remain open.
+
+The [selected async cursor relationship](../specs/language/async-iteration.md)
+additionally requires operation-bound init-output reservation, terminal cleanup
+and Boolean/output observation. IsCompleted alone cannot release that reservation;
+an outcome take/borrow or ownership transfer would have to preserve its exact
+formal/destination/version and live-item cleanup obligations.
+This requirement does not approve the Task/TaskAwaiter/TaskScope signatures
+above or reinterpret ordinary Task-returning init outputs.
 
 ### Time values and clock capabilities
 
@@ -3527,7 +3694,9 @@ explicitly; the reader also selects a malformed-input policy. They borrow a
 specific stream, rather than owning/closing it or discovering one from an
 ambient terminal. The borrowed
 stream remains exclusively accessible to the adapter until that adapter is
-closed; actual constructor capture/lifetime metadata is still **OPEN**.
+closed. The whole-source constructor Captures schema is specified; this
+candidate's actual exclusion/release protocol and physical metadata remain
+**OPEN**.
 
 ```terrum
 public mut unique struct Utf8TextReader<TStream>

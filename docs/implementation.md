@@ -5,6 +5,21 @@ separately. The [specifications](specs/README.md) define intended behavior;
 the [roadmap](roadmap.md) lists pending contracts and dependencies; and
 [proposals](proposals/README.md) contain unapproved choices.
 
+The [library support inventory](implementation/libraries.md) keeps bounded
+examples and API sketches separate from the selected library/protocol
+inventory and its provider/consumer contracts.
+
+The [development JIT proof](implementation/jit.md) records the implemented
+process-start worker and private backend/memory behavior.
+[Bounded layout directions](implementation/layout-profiles.md) retain the
+initial public-layout slice and module/replacement observations without
+narrowing the selected target's transitive eligibility or assigning a
+standard target/Feature identity.
+
+The [bounded conversion inventory](implementation/conversion-profiles.md)
+keeps scalar-front-end projections and legacy output support outside the
+source literal/conversion rules.
+
 ## Hosted compiler
 
 The compiler host is written in C#. It exposes a Unicode-aware, lossless
@@ -48,15 +63,39 @@ and runtime contracts are in the [specification index](specs/README.md).
 Public fixed-layout support is not implemented; its accepted bounded Windows
 x64 direction does not add source attributes, metadata encoding, or runtime
 support.
+The detailed [hosted output profiles](implementation/output-profiles.md)
+are informative development inventories. Their historical `out` modes do not
+add parameter forms to the canonical reference model.
+The [hosted view and owner profiles](implementation/view-and-owner-profiles.md)
+record bounded TokenCursor storage, owner/field loans and cleanup projections;
+their restrictions do not limit the general source dependency contracts.
 The [sample catalog](samples.md) distinguishes runnable programs from design
 sketches.
+The [experimental CLI response reference](implementation/cli-protocol.md)
+preserves current schema-1/schema-2 and raw execution-worker behavior.
+It does not claim implementation of the independently selected
+[terrum.cli/1 supervisor protocol](specs/cli-protocol.md).
 
 ## Persistent and self-hosted components
+
+Only [`.trrm` semantic interchange](specs/representation/persistence.md) has
+Terrum-standard serialized producer/reader conformance. Current saved
+structured IR and native package/set/graph serializations are private.
+Their detailed [native profile](implementation/native.md),
+[module](implementation/modules.md), [set](implementation/module-sets.md)
+and [graph](implementation/native-graph.md) references preserve current
+revisions, reader limits and commands. The
+[native execution specification](specs/native.md) separately retains ABI,
+binding, ownership and code-lifetime obligations.
 
 The additive TRRM scalar path emits approved metadata and compact-linear or
 indexed Bodies for a bounded source-free, fail-fast scalar subset. It uses the
 shared hosted verifier and backend; general imported-call linking and checked
 exception Body support are not implemented.
+This inventory describes its development encoding, not verified support for
+the [unified registry](specs/representation/registry.md). The
+[encoding history](implementation/trrm-encoding-history.md) distinguishes
+retired floating/generic numbers from current normative assignments.
 
 Terrum-authored scanner and scalar-frontend components are bounded candidates,
 not a bootstrap compiler. The scalar frontend audits source projections before
@@ -119,7 +158,7 @@ functions and static operator protocols. Templates are checked against their
 declared constraints and produce closed specializations for supported concrete
 types. This does not establish generic classes or structs, public generic
 witnesses, runtime generic captures, or support for every accepted generic
-contract. The [native profile](specs/native.md) and
+contract. The [development native profile](implementation/native.md) and
 [source grammar](specs/grammar-spec.md) define the relevant boundaries.
 Bounded output combinations remain provisional only where they extend the
 accepted profiles: fixed sides alongside mixed generic modes, or floating

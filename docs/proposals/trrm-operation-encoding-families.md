@@ -1,27 +1,21 @@
 # Executable TRRM operation-encoding families
 
-**Status: Deferred; no family direction accepted**
+**Status: Unified allocation and bounded family direction adopted;
+additional operations/encodings remain unapproved**
 
 ## Scope and rationale
 
-Explore a future executable encoding that grows with scalar families without
-allocating an opcode for every operation/type pair. This proposal assigns no
-bytes, kinds, features, versions or executable type support. Every candidate
-schema and size below is illustrative, not accepted.
+The [unified TRRM registry](../specs/representation/registry.md) owns current
+allocations and coherent semantic-family capacity. It replaces overlapping
+generic/floating draft bytes, preserving their operation semantics rather
+than unpublished numbers. There are no legacy aliases. The
+[floating chapter](../specs/il-instruction-set.md#floating-operations) owns
+the selected binary32/binary64 contracts.
 
-Preserve the current unreleased `(1, 0)` draft, including the user-approved
-`0x1D` `FloatBinary rNew, kind, rLeft, rRight`: kinds 1 through 4 are
-same-format `float32`/`float64` add, subtract, multiply and divide. Preserve
-its total behavior and NaN-result-class contract, with unspecified NaN sign
-and payload. Also preserve accepted draft `0x19` comparisons, `0x1A` format
-conversion, `0x1B` integer-to-floating conversion, `0x1C` sign-bit negation,
-`0x1E` code-unit conversion and `0x1F` checked floating-to-integer conversion.
-None becomes a generic-family alias or gains additional types here.
-
-**Decision recorded:** defer the general family-encoding policy until a
-concrete new operation/type set needs it. Preserve the accepted `0x19`–`0x1F`
-draft meanings; this proposal assigns no bytes, kinds, features or executable
-type support.
+The alternatives below address additional operations and encodings, not a
+second current registry. Their candidate shapes and size comparisons remain
+illustrative. This proposal assigns no feature IDs, extended keys, short
+forms, new numeric witnesses or additional executable type support.
 
 The metadata atomic registry already names signed/unsigned 8/16/32/64/128-bit
 integers, native integers, binary floating formats, decimal32/64/128, `bool`,
@@ -42,8 +36,9 @@ primitive byte; `rNew` is a value definition, not a mutable register.
 | Bounded semantic families, inferred types | `NumericBinary rNew, kind, rLeft, rRight` | Keeps common same-type operations small; requires an explicit operation/type/effect matrix rather than universal numeric dispatch. |
 | Selected short forms | `Add rNew, rLeft, rRight`, expanding to one family kind | Can save a kind byte on hot operations; introduces duplicate encodings and a canonical-choice rule. Allocate only with workload evidence. |
 
-The operation range is currently `0x01..0x7F`, not all 256 byte values;
-terminators and the `F0` width prefix have separate ranges. Multiplying
+The operation range is `0x01..0x7F`, not all 256 byte values; `7F` is held
+for a possible future extended envelope and currently rejects.
+Terminators and the `F0` width prefix have separate ranges. Multiplying
 operations by types exhausts that budget quickly. Grouping hot operations
 into opcode ranges could simplify dispatch or provide short forms, but no
 bitfield partition or escape opcode is justified yet. A future escape would
@@ -126,10 +121,10 @@ dispatch/lowering cost. Compare identical semantics, not FMA against a
 different two-rounding operation. Existing size fixtures establish Body
 tradeoffs, not a performance result for these candidates.
 
-Any adoption needs an explicit schema decision. Pre-release `(1, 0)` can
-evolve only with exact-schema agreement; matching version bytes are
-insufficient. Keep accepted opcode meanings intact rather than silently
-reinterpreting them. Before any post-release evolution, choose version and
+Any additional adoption needs an explicit schema decision. Pre-release
+`(1, 0)` can evolve only with exact-schema agreement; matching version bytes
+are insufficient. Preserve semantic contracts, not overlapping unpublished
+byte assignments. Before any post-release evolution, choose version and
 required-feature negotiation, reader rejection and migration rules.
 Optional sections cannot carry executable semantics, and writing a Feature
 number alone does not activate an unsupported schema. This proposal promises
@@ -148,13 +143,13 @@ Repository evidence:
   [revision scope](../specs/il-metadata.md#format-identity-and-revision-scope) and
   [section rules](../specs/il-metadata.md#section-kinds-and-row-layouts)
   distinguish type assignment, schema agreement and required semantics.
-- [Native draft contracts](../specs/native.md) and
-  [implementation status](../implementation.md#executable-trrm-scalar-interchange)
-  record accepted floating operations, including the current `0x1D`
-  arithmetic decision; those contracts remain distinct from this unapproved
-  future-family design.
+- [Canonical floating contracts](../specs/il-instruction-set.md#floating-operations)
+  and the [unified registry](../specs/representation/registry.md) own selected
+  floating semantics and current allocations. The
+  [encoding history](../implementation/trrm-encoding-history.md) distinguishes
+  retired development numbers from those assignments.
 - [Linear reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmCompactLinearBodyReader.cs)
-  derives `0x1D` results from equal floating operands and rejects other kinds;
+  historically derives `0x1D` results from equal floating operands and rejects other kinds;
   [compiler tests](../../tests/Terrum.CodeAnalysis.Tests/TrRmExecutableCompilerTests.cs)
   cover floating arithmetic and malformed kinds/integer operands. Existing
   implementation and tests are evidence, not approval of future families.

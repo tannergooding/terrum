@@ -32,6 +32,11 @@ accepted requirement.
 For the provisional implementation profile only, keep the following
 candidate boundaries explicit:
 
+The historical field name `minimumRuleRevision` below is private/provisional,
+not the standard [exact capability manifest](../specs/representation/semantic-manifests.md).
+Its implementation number `1` remains unregistered; the bounded output profile
+does not supply a complete capability or an implicit numeric compatibility rule.
+
 - Retain artifact version `(1, 0)`, which is still pre-release. Activate core
   Feature section kind `0x0004` with flags `0` and its assigned eight-byte row
   `u32 featureId, u32 minimumRuleRevision`. Provisionally assign
@@ -94,6 +99,11 @@ contract. Any future profile must retain the compact-body rule that rejects
 non-value modes and place operands.
 
 ## Provisional implementation status
+
+Opcode numbers in this development inventory refer to the retired catalogs
+identified in the [encoding history](../implementation/trrm-encoding-history.md).
+They are not alternate assignments in the [unified registry](../specs/representation/registry.md),
+and this inventory does not establish migration of an implementation.
 
 The current provisional writer and loader preserve by-value `bool`, `char16`,
 `int32`, `uint32`, `int64`, `uint64`, `float32` and `float64` formals in

@@ -3,8 +3,9 @@
 **Status: the bounded Windows x64 implementation direction, no separate
 profile identity, transitive field eligibility, explicit `Blittable` metadata
 requirement, and source-language-version migration boundary are accepted.
-Implementation support is not established. Attribute schemas, metadata
-encoding, and source-version value/tooling selector remain open. Core
+Implementation support is not established. The registered source schemas are
+now specified by the Windows target contract; metadata encoding and
+source-version value/tooling selector remain open. Core
 primitives are `Blittable` by their type contract; natural alignment remains
 target-specific. Windows x64 native ABI classification is required for
 interop; by-value aggregates classified as indirect use a shadow copy, with
@@ -19,14 +20,15 @@ The accepted semantics and implementation boundary are recorded in the
 [implementation reference](../implementation.md). No profile identity,
 artifact encoding, or compiler support is created by this proposal document.
 
-## Remaining schema decisions
+## Source schema and remaining physical decisions
 
-The registered source schemas are not accepted yet. The recommendation is a
-parameterless `[Blittable]` marker and `[Layout]` with one required layout-kind
-enum argument, accepting only `Sequential` for this slice. Their resolved
-identities, selected-core-library registration, primary-declaration placement,
-multiplicity, and invalid/conflicting-argument diagnostics remain to be
-specified. No library or metadata identity is assigned here.
+The [registered source schemas](../specs/targets/windows-x64-data-layout.md#4-registered-source-layout-schemas)
+select parameterless `[Blittable]` and `[Layout]` with required LayoutKind and
+optional named uint32 Packing/Alignment. They define exact Core registration,
+primary-only/nonrepeatable placement and invalid/conflicting-argument
+diagnostics. This implementation slice still accepts only its bounded
+Sequential scope; the wider logical target rules do not establish its support.
+No library binary or metadata identity is assigned by this proposal.
 
 Metadata encoding and source-version/tooling selection also remain open.
 Preserve the accepted requirement that a consumer validate explicit
@@ -37,7 +39,7 @@ specification may evolve its reader and writer together.
 
 ## Scope and validation
 
-Before implementation, define the proposed schemas and select the exact
+Before implementation, use the specified schemas and select the exact
 source-language version and tooling selector for the migration against the
 selected core-library identity and existing compiler diagnostic/versioning
 mechanisms. Keep wire identifiers unassigned. The storage fixture below does

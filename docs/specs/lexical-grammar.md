@@ -16,6 +16,10 @@ diagnostics and token lengths are measured in UTF-16 code units.
 ## Source text and identifiers
 
 Lexing operates on an immutable UTF-16 string snapshot.
+[Source input](language/source-input.md) defines strict UTF-8 file decoding,
+one leading signature, preservation, byte-input diagnostics and origin
+coordinates. An invalid-byte file supplies no recovered lexical snapshot.
+The separate already-decoded API keeps the rules below:
 Valid surrogate pairs advance together during identifier recognition; unpaired
 surrogates remain in the snapshot and produce diagnostics, including within
 comments and strings. Lines end at CRLF
@@ -37,14 +41,19 @@ contextual or default-ignorable exclusion: such characters remain significant
 in ordinal spelling, even when visually invisible. A disallowed
 scalar is an error token, including Unicode digits at identifier start.
 Keywords are the lower-case ASCII reserved spellings designated by the
-source grammar; its context table identifies words recognized as keywords
-only in designated syntactic positions. Primitive type names remain identifiers.
+[source vocabulary](grammar-spec.md#source-vocabulary); its context table
+identifies words recognized as keywords only in designated syntactic positions. Primitive type names remain
+identifiers except the reserved `void` keyword.
 All other admissible spellings are identifiers. `_name` and `_123` remain identifiers.
 A contiguous `@` followed by an exact reserved or contextual keyword spelling
 forms an escaped identifier. Its name is the keyword spelling without `@`;
 the escape suppresses keyword recognition but does not normalize the name
 or grant primitive-definition authority. Thus `@await` is an identifier,
-while `@ordinaryName`, `@_` and `@ await` are not valid keyword escapes.
+as are `@typeof` and `@via`, while `@ordinaryName`, `@_` and `@ await` are
+not valid keyword escapes. Reserved `typeof` remains a keyword even where a
+declaration would require an identifier. Contextual `via` recognizes its
+post-dot type selector syntactically for witness/provider/conversion-owner
+use, not by testing the selected type's declaration or a library name.
 The `@` escape does not admit arbitrary-string identifiers.
 Future keyword reservations and contextual recognition must preserve the
 interpretation of valid source within its specified source-language version;
@@ -59,7 +68,8 @@ grant them discard semantics.
 
 ## Numeric tokens
 
-Numeric tokens begin with a decimal digit and are unsuffixed. The lexer
+Numeric tokens begin with a decimal digit or an immediately attached ASCII
+`+`/`-` followed by a decimal digit, and are unsuffixed. The lexer
 recognizes decimal and hexadecimal floating forms, decimal, hexadecimal and
 binary integer forms, and `_` separators in their digit runs; a type is selected later by context or an
 explicit type-call target. Decimal fractional/exponent forms have lexical
@@ -69,7 +79,8 @@ Width tags are not part of the target grammar, so spellings such as `10i32`
 are not typed numeric literals.
 
 ```text
-number          := decimalNumber | hexFloat | hexInteger | binaryInteger
+number          := ('+' | '-')? unsignedNumber
+unsignedNumber  := decimalNumber | hexFloat | hexInteger | binaryInteger
 decimalNumber   := decimalDigits ('.' decimalDigits)? (('e' | 'E') ('+' | '-')? decimalDigits)?
 hexFloat        := ('0x' | '0X') ('_'* hexDigits ('.' hexDigits?)? | '.' hexDigits) ('p' | 'P') ('+' | '-')? decimalDigits
 hexInteger      := ('0x' | '0X') basedHexDigits
@@ -83,8 +94,17 @@ hexDigit        := digit | 'a'..'f' | 'A'..'F'
 binaryDigit     := '0' | '1'
 ```
 
-A period starts a fraction only when followed by a digit. A sign is its own
-operator except within an exponent. An exponent without digits after a sign,
+A period starts a decimal fraction only when followed by a decimal digit.
+A hexadecimal floating token may have an empty fraction after the point when
+digits precede it and a valid `p`/`P` exponent follows: `0x1.p0` is valid,
+as are `0x.1p0` and `0x1.fp0`. `0x1.` is not a hexadecimal floating token.
+A single leading sign is part of the number token, as is an exponent sign.
+Thus `-128`, `+0x80` and `-0x1.p-2` are numbers. Grouping breaks that lexical
+formation: `-(128)` is a prefix operator and a grouped operand; `(-128)`
+groups one signed number. Trivia cannot split a signed token, and `- 128`
+also violates prefix attachment. Neither lexing nor target selection folds
+an operator through parentheses into a literal.
+An exponent without digits after a sign,
 or followed by a non-identifier character such as `;`, whitespace, or `.`
 without digits, is malformed; an `e` beginning another identifier (for
 example `1efoo` or `1else`) remains outside the numeric token. Numeric width is
@@ -109,12 +129,12 @@ fallback numeric type. Fractional/exponent value semantics, custom literal
 parsers, registered string targets and `[ConstEval]` are specified outside
 this lexical contract.
 
-Decimal integer literals have numeric range semantics, including the direct
-negative signed-minimum case. Hexadecimal and binary literals
-are target-width bit patterns: a signed target interprets the selected bits
-using its signed representation, while an unsigned target retains the
-unsigned value. Nonzero bits beyond the target width are rejected; leading
-zeroes and separators do not count as significant bits.
+[Literal construction](language/literal-construction.md) defines target
+interpretation. Decimal integer tokens have mathematical range semantics.
+In an integer target, signless hexadecimal/binary tokens are target-width
+bits, while explicitly signed tokens are signed mathematical magnitudes.
+For int8, `0x80` and `-0x80` both yield -128, but `+0x80` is out of range.
+Floating targets interpret based integer tokens numerically, never as bits.
 
 A hexadecimal float requires a `p`/`P` exponent with decimal digits and
 hexadecimal digits on at least one side of the optional point. `0x1f` is an
@@ -155,11 +175,14 @@ trivia afterward. Thus `name: value` and `name:value` are valid, while
 `name : value` rejects in those roles. Format colons retain their own grammar.
 Symbolic prefix operators attach directly to their following operand token;
 symbolic postfix operators attach directly to their preceding operand token.
-Member-access `.` and `?.` must adjoin the receiver's final token or the
+Member-access `.`, `?.`, and `->` must adjoin the receiver's final token or the
 following member's first token, or both. Whitespace, line breaks and comments
 provide separation and break attachment. Thus `x + y`, `x + ++y`, `-x`,
-`x++`, `x.y`, `x. y` and `x .y` are valid forms, while `x+y`, `- x`,
-`x ++` and `x . y` reject. Operator roles come from grammar before type
+`x++`, `x.y`, `x. y`, `x .y`, `r->Member`, `r-> Member`, and `r ->Member`
+are valid forms, while `x+y`, `- x`, `x ++`, `x . y`, and `r -> Member`
+reject. `->` is one assigned, indivisible member punctuator, not a binary
+minus followed by greater-than; it grants no unsafe authorization.
+Operator roles come from grammar before type
 checking, not from an operand's type or a spacing-driven reinterpretation.
 Calls and indexing are delimited postfix operators, distinct from grouping
 despite sharing delimiter characters. Call argument `(` and index `[`/`?[`
@@ -167,7 +190,8 @@ openers must directly adjoin the receiver's final token, including
 type/constructor calls and generic or
 parenthesized receivers. Thus `f(x)`, `f<T>(x)` and `items?[i]` satisfy
 attachment; `f (x)` and `items [i]` reject. Grouping/control-flow parentheses
-have no receiver and are not subject to call attachment. Interior trivia
+and the dedicated `typeof(Type)` query have no call receiver and are not
+subject to call attachment. Interior trivia
 in ordinary parentheses, brackets and braces is optional, including comments
 and line breaks around enclosed tokens. Multiline calls keep the opening
 `(` attached to the callee while permitting arguments and the closing `)`
@@ -201,8 +225,12 @@ comments and multiline arguments/closers. A constructed type remains a
 sequence of lexical tokens; generic delimiters are recognized by grammatical
 role, distinct from spaced binary comparisons.
 Direct constant generic arguments are literals or qualified constant names.
-Other constant expressions must be parenthesized, including negative
-arguments such as `(-1)` and compounds such as `(N >> 1)`. These syntax
+Other constant expressions must be parenthesized, including compounds such
+as `(N >> 1)` and grouped-operand negation `(-(N))`. Signed number tokens
+are direct literals, so `InlineArray<T, -1>` does not require grouping;
+the formal's value/domain constraints may still reject it. At a generic-list
+opener, the grammatical `<`/signed-number boundary permits `G<-1>` and
+`G<+1>` without treating `<-` or `<+` as expression operators. These syntax
 boundaries do not widen eligible constant domains or constrain ordinary
 default expressions.
 Designated keyword-introduced angle lists likewise attach their `<` to
@@ -233,6 +261,14 @@ take priority over operator-run validation. `$`, `@`, grouping/list
 delimiters and Unicode lookalikes are not operator glyphs. Other contextual
 splitting requires an explicit grammatical rule. Neither recovery nor a
 formatter may guess a different expression from an invalid run.
+
+An attached leading sign belongs to a number only at a number-token boundary.
+It does not split an otherwise maximal operator-glyph run: `--1` uses `--`,
+and unassigned runs such as `+-1` and `~-1` reject. Write `-(-1)` or
+`~(-1)` when those separate operations are intended. The generic-list
+boundary above is an explicit grammatical exception. Existing binary
+spacing is unchanged: `x - 1` is subtraction, whereas `x -1` and `x-1`
+are not alternate spellings of it.
 
 This is the approved lexical target rule. Adoption across the supported
 hosted, native, scanner and projection paths is in progress; see the
@@ -268,8 +304,9 @@ type must represent that scalar, with no fallback character type. The
 scalar/target-representability contract is in
 [conversions](conversions.md#character-intent); it does not choose UTF-16 as
 runtime text's default encoding. Checked numeric type-call conversions use
-`T(expression)`, not a numeric prefix-cast production. Source functions and
-local shadowing follow call precedence independent of literal tokenization.
+`T(expression)`, not a numeric prefix-cast production.
+[Name and type-call binding](language/names-and-binding.md#calls-conversions-and-recorded-binding)
+precedes argument applicability, independently of literal tokenization.
 Literal conversion remains distinct from raw tokenization.
 
 `$"..."` interpolates expression-aware `{...}` holes; doubled braces in

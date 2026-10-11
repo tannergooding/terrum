@@ -1,10 +1,12 @@
 # Span-backed token cursor proposal
 
 **Status: bounded contract accepted.** The compilation-local `TokenCursor` and
-indexed scalar-parser path are specified in the
-[lifetime contracts](../specs/lifetimes.md#erased-interface-storage-is-explicit).
-General `Span<T>` support, source-level `nuint`, writable or ref-returning
-access, and persisted capture metadata remain unapproved. Current
+indexed scalar-parser path are recorded in the
+[hosted view inventory](../implementation/view-and-owner-profiles.md#tokencursor-view).
+General Span source/dependency and native-width scalar contracts are
+independently specified; this bounded acceptance does not implement them.
+General view representations and persisted capture metadata remain separate.
+Current
 implementation coverage is tracked separately in the
 [self-host reference](../../self-host/README.md).
 
@@ -13,8 +15,9 @@ implementation coverage is tracked separately in the
 `Span<T>` remains one qualified view family with distinct read, write,
 descriptor-rebinding and referent capabilities. Forwarding a descriptor does
 not keep its backing dependencies valid. Outside the accepted bounded case,
-the general anchor representation, calling convention and source relationships
-remain open.
+the general anchor representation and calling convention remain open.
+[Whole-source relationships](../specs/language/dependencies-and-views.md)
+are now specified, without selecting an anchor or extending backing lifetime.
 
 ## Accepted bounded exception
 
@@ -23,13 +26,13 @@ from a validated `TokenSnapshot`, stored in the unique `TokenCursor`, and used
 by the bounded scalar parser on the current Windows x64 profile. It uses a
 16-byte descriptor, by-value `Copy` indexing with unsigned native-width bounds
 checks, and compiler-checked capture forwarding without ownership or lifetime
-extension. The canonical lifetime section above defines the full contract,
+extension. The implementation inventory above records the full bounded contract,
 including the synchronous borrowed parser path and unchanged 64-token bound.
 
 ## Unapproved general support
 
 The bounded exception does not approve general view construction or slicing,
 arbitrary storage or escape, writable access, ref-returning element loans,
-source-level `nuint`, persisted capture metadata, owner or guard retention, or
-a new public ABI. Those capabilities and the general representation and
-source-relationship rules remain open.
+persisted capture metadata, owner or guard retention, or a new public ABI.
+Those implementation and representation boundaries remain open; they do not
+restrict the independently accepted general source/dependency contracts.

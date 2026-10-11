@@ -1,6 +1,28 @@
 # Design sources and provenance
 
-Sources below were read from the local, read-only checkouts at the **exact revisions** given. Links pin that revision so subsequent upstream changes do not change the cited evidence. These are design inputs, not Terrum implementations or endorsements of identical language/ABI behavior. [Libraries](libraries.md) draws the library conclusions; [lifetimes](lifetimes.md) records receiver/storage and contract limits.
+Sources below identify their exact editions or source revisions. Repository
+sources were read from local, read-only checkouts; pinned links prevent
+subsequent upstream changes from changing that evidence. These are design
+inputs, not Terrum implementations or endorsements of identical language/ABI
+behavior. [Libraries](libraries.md) draws the library conclusions;
+[lifetimes](lifetimes.md) records receiver/storage and contract limits.
+
+## Language and framework-design prior art
+
+| Reference | Scope used |
+|---|---|
+| ECMA-335, sixth edition, June 2012 | Partitioned source/runtime/metadata/library responsibilities and explicit profiles; Terrum does not import the CLI object model, instruction assignments or library identities |
+| [C# standard draft-v14, revision 1bab4ce218cf9b4b800aeb63e4bc1a1e1cfe6b8b](https://github.com/dotnet/csharpstandard/tree/1bab4ce218cf9b4b800aeb63e4bc1a1e1cfe6b8b/standard) | Conventional grammar, checking/binding/evaluation organization and statement/expression contract presentation; not implementation-dependent Terrum semantics |
+| Framework Design Guidelines, third edition, full 626-page PDF edition | Scenario-driven design (2.2.1), low barrier to entry and layering (2.2.2/2.2.4), naming (chapter 3), parameters/Try/collections (5.8/7.5.2/8.3), async/scoped responsibility (9.2/9.4.3) and Try-write/partial progress (9.12.3-4) |
+
+The full third-edition framework text is the design reference. Its printed
+pages 16, 42, 282, 362, 387, 452 and 458 correspond to PDF pages
+61, 87, 327, 407, 432, 497 and 503 in that edition.
+[Library scenarios](libraries/design-scenarios.md) state deliberate departures
+from CLR conventions, including vacant Boolean init outputs, affine completion
+and cleanup, exact target layout, no mandatory text allocation/default encoding
+and explicitly optional substrate. This reference does not register candidate
+APIs or override the selected contracts.
 
 ## .NET Runtime
 
@@ -50,3 +72,31 @@ do not select Terrum APIs or implementations.
 
 - [Arm ACLE, “Sizeless types”](https://arm-software.github.io/acle/main/acle.html#sizeless-types): SVE vectors **and predicates** have sizeless types. ACLE permits automatic locals and function parameters/results but disallows array elements, `sizeof`, and ordinary struct members. Terrum's proposed scalable profile draws a boundary from these restrictions, without claiming its own ABI or suspension semantics follow automatically from C/C++ ACLE.
 - [Rust `std::simd::Mask` documentation](https://doc.rust-lang.org/std/simd/struct.Mask.html): a mask represents per-element boolean inclusion/exclusion, and its layout is expressly unspecified. This is a conceptual contrast with a numeric vector of all-one bits; neither Rust's API stability nor its ABI is a Terrum commitment.
+
+## Windows x64 platform and decimal evidence
+
+The [Windows target profile](targets/windows-x64.md#3-imported-platform-rules)
+identifies the exact Microsoft source revisions and portions it imports.
+Only that explicit import is normative; this provenance chapter adds no
+platform rule or foreign primitive alias.
+
+| Pinned source | Evidence |
+|---|---|
+| [LLVM 21.1.8 Windows classification](https://github.com/llvm/llvm-project/blob/llvmorg-21.1.8/clang/lib/CodeGen/Targets/X86.cpp) and [register rules](https://github.com/llvm/llvm-project/blob/llvmorg-21.1.8/llvm/lib/Target/X86/X86CallingConv.td) | Confirms positional Win64 carriers and documents indirect extended-scalar arguments with compiler-extension XMM0 results; that extension is not a formal Microsoft integer primitive mapping |
+| [GCC 15.2.0 x64 classification](https://github.com/gcc-mirror/gcc/blob/releases/gcc-15.2.0/gcc/config/i386/i386.cc) | Independent implementation contrast, not selection of a MinGW/System V or RDX:RAX Terrum convention |
+| [GCC 15.2.0 libbid extraction](https://github.com/gcc-mirror/gcc/blob/releases/gcc-15.2.0/libgcc/config/libbid/bid_internal.h) | Intel BID field extraction, special-value precedence and noncanonical coefficient/payload handling for decimal32/64/128 |
+| [.NET pinned BID encode/decode](https://github.com/dotnet/runtime/blob/bd6d336bfd95a333e8b3f22f26259bbb659974cf/src/libraries/System.Private.CoreLib/src/System/Number.DecimalIeee754.cs) | Independently confirms finite/cohort extraction and canonical production; ordinary .NET API, comparer/hash and arithmetic helper choices are not thereby Terrum contracts |
+
+IEEE 754-2019 sections 3.5.2 and 6.2 are the decimal interchange and special
+value reference. Terrum's [target field rules](targets/windows-x64-data-layout.md#3-ieee-decimal-bid)
+state the actual selected bit layout explicitly, without requiring a reader
+to infer it from an implementation or substitute CLR System.Decimal.
+
+IEEE 754-2019 section 5.5.1 distinguishes sign-only negate/abs from
+NaN-processing arithmetic; section 7.1 shows that non-stop handling can still
+raise status flags. The [floating-environment chapter](language/floating-environment.md)
+selects Terrum's representation/result contracts and no ambient status
+facility explicitly, rather than importing a full floating-environment API.
+Sections 5.10 and 9.6 supply the representation-order/selection latitude used
+by [numeric selection](language/numeric-selection.md), without adopting
+number-only or raw-bit-order variants.

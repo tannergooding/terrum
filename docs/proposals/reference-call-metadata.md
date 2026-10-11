@@ -697,19 +697,22 @@ change source-level lifetime rules or provisional same-compilation support.
 **Summary:** The accepted lifetime rules distinguish borrowing a selected
 source's storage from forwarding backing obligations already carried by that
 source. A direct source selector must not silently erase those inherited
-obligations. `DependsOn` names eligible parameters; every listed parameter
+obligations. DependsOn names whole receiver/formal sources; every listed source
 constrains the caller regardless of which branch the implementation selects.
 A result with one eligible source defaults to the broad
 source-storage-or-forwarded-backing relationship, while multiple sources
 require an explicit permitted set. Synchronous borrowed inputs are not
-retained except through the declared result relationship. Receiver selection
-is a distinct source kind; its syntax and encoding are still open.
+retained except through the declared result or capture relationship.
+[General source schemas](../specs/language/dependencies-and-views.md) now
+specify direct receiver `this`, formal nameof recipes, retained destinations
+and per-source ForwardsBacking member refinements. Their physical encoding
+remains open and is not activated by that logical approval.
 
 **Recommendation:** Define the first metadata profile for synchronous,
 non-generic callables with one whole borrowed result and an explicit closed
-set of parameter sources. Defer receiver-dependent results until receiver
-selection has its own unambiguous selector; do not encode a receiver as a
-parameter ordinal. Add a closed relationship tag that distinguishes borrowing
+set of parameter sources. This proposed physical slice can exclude receiver
+records even though source receiver selection is specified; do not encode
+a receiver as a parameter ordinal. Add a closed relationship tag that distinguishes borrowing
 source storage, forwarding existing backing, and the accepted one-source
 broad default. Preserve full access authority and inherited backing/root/lease
 obligations through forwarding, copies, joins and reborrows. Do not make

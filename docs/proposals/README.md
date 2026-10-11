@@ -25,9 +25,9 @@ approved.
   allocation of kind `0xFE` is deferred pending compatibility and performance
   evidence.
 - [Executable TRRM operation-encoding families](trrm-operation-encoding-families.md)
-  is deferred until a concrete new operation/type set needs the decision;
-  accepted draft opcode meanings remain unchanged and no future bytes are
-  assigned.
+  records alternatives beyond the adopted unified registry and bounded
+  semantic-family capacity. Short forms, generic numeric witnesses, new
+  ternary operations and extended envelopes remain unapproved.
 - [Self-host frontend verification budget](self-host-frontend-verification-budget.md)
   records the deferred, unapproved split/phase-handoff option; reconsider it
   only if representative growth again reaches `TRM3016` after profiling and

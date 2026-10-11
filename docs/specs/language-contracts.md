@@ -1,11 +1,12 @@
 # Language contracts: calls, outputs and checks
 
 This document records accepted execution and checking contracts that refine
-[language](language.md) and [lifetimes](lifetimes.md). It does not approve
-candidate syntax, a proof budget or a new semantic-IL representation.
-Approved source forms and remaining open choices are in the [source grammar](grammar-spec.md)
-and the remaining proof rules and budgets in the
-[proof proposal](../proposals/static-proof-and-constant-evaluation.md).
+[language](language.md) and [lifetimes](lifetimes.md). It does not assign
+candidate syntax or a new semantic-IL representation.
+Approved source forms are in the [source grammar](grammar-spec.md);
+the [proof/evaluation chapter](language/proof-and-constant-evaluation.md)
+owns the selected rule catalog and resource envelope. Remaining alternatives
+belong in the [proof proposal](../proposals/static-proof-and-constant-evaluation.md).
 [Implementation](../implementation.md) remains the executable support boundary;
 concurrency follows the separately [accepted memory model](memory-model.md).
 Implicit arguments expand to ordinary operations, conditional outputs carry
@@ -14,6 +15,12 @@ evaluation and cleanup. Convenience syntax does not create a second lifetime
 system or a second arithmetic system for the prover.
 
 ## 1. One call and reference model
+
+The canonical [reference chapter](language/references.md) defines descriptor
+values, safe reference dereference, explicit indirect member access, and
+parameter identity. This chapter owns call sequencing and output publication;
+neither implicit adaptation nor an output contract introduces transparent
+reference-value semantics.
 
 ### 1.1 Places, values, and materialization
 
@@ -24,10 +31,15 @@ semantic categories, not a new public type family.
 
 | Argument expression | Meaning for `implicit ref<T>` |
 |---|---|
+| Already compatible `ref<T>` descriptor | Pass the descriptor with its complete dependencies; do not borrow its descriptor slot |
 | Eligible local, parameter, field, or element place of the required type | Form an ordinary readonly reference to that place |
 | Reference-returning access | Use the returned place and its published dependencies, as for explicit reference passing |
 | Value-returning call, property, operator, or explicit conversion | Evaluate once into a local temporary, then form an ordinary readonly reference to that temporary |
 | Place whose ordinary reference use is invalid | Diagnose the same access/lifetime conflict; do not silently copy it to evade the conflict |
+
+These alternatives use complete types. When `T` is itself `ref<U>`, borrowing
+its descriptor slot creates `ref<ref<U>>`; generic substitution does not
+implicitly dereference an argument.
 
 The distinction is the declaration's result category, not whether its source
 looks like a field or an accessor. A value-returning property is not a reference
@@ -49,19 +61,26 @@ Inspect(existingPlace)
     -> Inspect(explicit readonly reference to existingPlace)
 
 Inspect(CreateValue())
-    -> at this argument's evaluation point in the current lexical scope:
-           initialize hidden local T temporary = CreateValue();
-           Inspect(explicit readonly reference to temporary);
-    -> temporary remains an ordinary local through the enclosing scope
+    -> one initially vacant mutable binding in the existing lexical scope:
+           init mut T temporary;
+       at this argument's evaluation point:
+           temporary = CreateValue();
+           Inspect(ref temporary);
+    -> reuse this binding on later evaluations; ordinary replacement applies
+    -> its last live value remains through the supporting scope
 ```
 
-The second expansion initializes a local at the original argument-evaluation
-point. A fresh owning result follows ordinary initialization; materialization
-does not require Copy. Merely borrowing an existing owner neither copies nor
-moves it. If control flow skips evaluating the argument, no local is
-initialized and there is no owner to clean up. Evaluation is never hoisted to
-scope entry. The local remains within the already existing enclosing lexical
+The second expansion assigns at the original argument-evaluation point.
+A fresh owning result follows ordinary initialization or replacement;
+materialization does not require Copy. Merely borrowing an existing owner
+neither copies nor moves it. A skipped evaluation creates no new value and
+leaves any previously initialized value unchanged. A never-initialized binding
+remains vacant, with no `T` cleanup. Evaluation is never hoisted to scope
+entry. The local remains within the already existing enclosing lexical
 scope, and block exit/unwind uses ordinary initialized/moved-state cleanup.
+The [reusable-local expansion](lifetimes.md#repeated-evaluations-and-reusable-locals)
+defines loop scopes, control transfers, old-value replacement, and final
+cleanup. It does not allocate a retained local for every iteration.
 For example, a reference returned from `Foo` may be used by `Baz` later in the
 same scope if its declared dependencies permit:
 
@@ -106,7 +125,25 @@ safety contract. Explicit and implicit readonly-reference forms still cannot
 distinguish overloads. The already accepted value-over-borrow preference for
 ordinary `F(value)` is unchanged.
 
+[Whole-source result and capture schemas](language/dependencies-and-views.md)
+publish exact receiver/formal sources, retained destinations and backing-only
+permissions. Binding occurs against the selected declaration and staged
+arguments, not names in a callee body. Surviving stored state can retain a
+capture after exceptional call completion; normal-output vacancy is not
+rollback of ordinary receiver/holder mutation. Each relationship preserves
+the existing invocation/completion/producer phase and cleanup ordering.
+
+The [Core task ownership contract](language/task-responsibility.md) carries
+these relationships through affine transfer and consuming await.
+Responsibility, terminal observation, payload ownership and published output
+cleanup are distinct; scope exit cannot silently abandon or join a task.
+
 ### 1.3 Evaluation and loan timing
+
+The [ordinary execution contract](language/expressions-and-statements.md)
+defines categories, unit values, explicit non-unit result discard, loop
+transfers, and return completion. Dropping a result requires its ordinary
+cleanup; neither `_` nor a `void` target permits ownership or effect erasure.
 
 Precedence and associativity determine the expression tree; evaluation order
 determines how that tree executes. For ordinary eager operators, evaluate the
@@ -156,9 +193,12 @@ Completed owning value arguments are staged in evaluation order. If a later
 argument fails before invocation, the caller cleans the staged owners on
 defined unwinding; a moved source does not become live again. Ownership transfers
 at the ordinary invocation boundary. Materialized borrowed temporaries remain
-caller-owned. Initialization destinations are prepared at the same boundary
-as explicit calls, not destructively cleared while earlier arguments are still
-being evaluated. These rules preserve the current bounded staging behavior.
+caller-owned. Explicit initialization destinations must already be vacant;
+forming their loan does not destroy a live value. Reached omitted-output
+adaptation [prepares its reusable hidden locals](language/calls-and-inference.md#hidden-destination-instances-and-retirement)
+at the invocation boundary after argument staging and required invocation-only
+receiver checks, not destructively during argument evaluation. Preparation
+must not invalidate staged arguments, loans or other dependencies.
 
 ## 2. Outcome, initialization, and nullability are separate
 
@@ -216,9 +256,12 @@ arm.
 Postconditions are the normal source-authoring route for these outcome facts.
 Their accepted expression form is `ensure <expr>`, where `<expr>` is an
 ordinary Boolean expression and may use ordinary patterns and short-circuit
-behavior. A value predicate such as `param > 0` itself requires and therefore
-establishes that `param` is initialized; no redundant `param is init` test is
-required. Source-body and path analysis must establish that every value read
+behavior. A predicate over an ordinary value such as `param > 0` requires
+and therefore establishes that value's initialization. For an
+initialization-reference parameter use `*param > 0`: `param is init` tests
+the descriptor, not its destination. No redundant `*param is init` is needed
+after a legally established referent-value predicate.
+Source-body and path analysis must establish that every value read
 by the predicate is legal, and must never read vacant storage to discover that
 the predicate is false. A successful value predicate implies initialization.
 Do not add a special `ensure-if` statement grammar or equivalent routine output
@@ -240,6 +283,24 @@ completed payload, not its task handle. Instance constructors use receiver
 initialization facts instead; static constructors use their owning group's
 initialization facts. Producer phase mapping remains open.
 
+The [selected async cursor contract](language/async-iteration.md) separately
+attaches its init destination to the returned advancement operation's
+completion Boolean. Invocation reserves caller storage; observing completed
+true/live or false/failure/vacant establishes its availability after cleanup.
+This inherited member relationship does not reinterpret an arbitrary
+Task<bool> signature, non-async `ensure`, or ordinary call-return default.
+Its pending state, exact operation/output correlation and forwarding
+obligations are explicit, not body-inferred publication.
+
+[Reference-output lending](language/lending-iteration.md) separately relates
+the initialized inner descriptor of an exact init formal to permitted existing
+element places, access, backing and advance/close invalidation. The ordinary
+Boolean/output initialization relation alone supplies none of those facts.
+Its cursor-bound default and checked published refinements retain actual
+source/root/guard obligations. Async lending composes that element relationship
+with the selected completion-output reservation, without changing arbitrary
+Task-returning outputs or adopting a return-targeted receiver annotation.
+
 Instance constructors publish a minimum set of guaranteed initialized properties
 with clauses such as `ensure P is init`. Callers initialize the remainder
 before publication. Declaration field/property initializers execute before
@@ -259,145 +320,10 @@ outputs must be initialized on every normal return unless a declaration
 postcondition explicitly states a conditional relationship. These defaults do
 not come from method names.
 
-The accepted non-Boolean/void `out` profile also admits ordinary non-unique,
-handle-free `Copy`-struct outputs. These outputs are unconditional: every
-normal return fully initializes them, and the return value is not treated as a
-success discriminator. Exceptional departure publishes no output, and the
-caller cannot read the destination on that exceptional path. `out var` infers
-the declared parameter type. Compatible public semantic-module and native
-module exports and native graphs preserve this contract. This profile does
-not include unique values, managed-handle-bearing values, buffers, views,
-cursors, generic outputs, or executable TRRM; it does not change Boolean
-conditional `out` or `init ref<T>`. Custom conditional postcondition-driven
-`Copy` outputs are outside this profile; explicit postconditions remain
-governed by the general outcome rules above.
-
-Compilation-local `[Copy]` templates also admit ordinary `out T` with a fixed
-`int32`, `uint32`, `int64`, `uint64`, `char16`, or `void` result, provided the
-concrete `T` satisfies the existing non-Boolean `out` shape. The result is not
-a success discriminator; every normal return fully initializes the output, and
-exceptional departure publishes none. This standalone profile covers closed
-private specializations only; compatible semantic-module and native-module
-replacements preserve those closed bodies without exposing the generic
-template or changing the output ABI. Formal-valued results, generic
-`init ref<T>` outputs, fixed-valued output side parameters, public generic
-exports or witnesses, source-free TRRM, and custom conditional
-postcondition-driven generic `Copy` outputs remain outside this profile;
-Boolean publication rules are unchanged. Mixed generic `out`/`init` calls are
-governed separately below.
-
-Compilation-local `[Copy]` templates admit `float32` and `float64` as concrete
-generic type arguments. Their substituted `T` values may be passed, returned,
-assigned, and published through the existing specialization and output-mode
-rules, including forwarding through nested `[Copy]` helpers. This does not
-grant symbolic `T` arithmetic, comparison, conversion, or other primitive
-operator rights, or widen shared `Copy` predicates. Floating fields in
-concrete dependencies reached while proving a generic body are governed by
-the separate proof-hydration profile below; admitting floating generic
-arguments does not itself widen that profile. Public generic exports or
-witnesses, source-free TRRM, and scalar-frontend verification or emission also
-remain outside this hosted profile.
-
-While proving a compilation-local `[Copy]` generic body, the compiler may
-hydrate reached `float32` and `float64` leaves only in non-unique `Copy`-struct
-descriptors and reached top-level or struct-owned concrete callable signatures.
-Hydration preserves descriptor identity, fields, layout, visibility,
-mutability, effects, caller-safety, output mode (`out` versus `init`),
-specialization limits, and existing persistence rules. These are concrete
-dependencies; this does not confer symbolic `T` capabilities. Floating fields
-or signatures in managed-class dependency closures remain outside this profile.
-It does not alter shared `Copy` predicates, primitive operator-witness
-eligibility or results, generic scalar parameter tables, `ConstEval`, scalar
-floating getters, public generic ABI, source-free TRRM, or scalar-frontend
-verification or emission.
-
-Compilation-local `[Copy]` templates also admit `init ref<T>` outputs with a
-fixed `int32`, `uint32`, `int64`, `uint64`, `char16`, or `void` result. Every
-normal return, including implicit `void` fallthrough, must fully initialize
-the destination; exceptional departure publishes none, leaving it vacant and
-unreadable. Boolean results keep their conditional rule: `true` publishes and
-`false` leaves the destination vacant. Calls must use `init` with vacant
-storage, and type inference remains unchanged: explicit type arguments, typed
-inputs, or an already typed vacant destination may establish `T`; `init var`
-alone cannot. The existing `[Copy]` eligibility includes
-compilation-private managed-handle specializations and their rooting and
-cleanup. Closed private specializations survive compatible semantic-module and
-native-graph producer replacements without changing output-mode metadata or
-wire formats. Unique or owning values and fixed-valued output side parameters
-remain outside this standalone profile, as do public generic exports or
-witnesses, source-free TRRM, and scalar-frontend verification or emission.
-Mixed modes are governed separately below.
-
-A separate fixed-floating result profile admits `float32` and `float64` as
-results for compilation-local `[Copy]` templates with at least one
-generic-typed output, provided all generic outputs use one mode and the
-template has no fixed-valued output side parameters. A floating result is not
-a success discriminator: every output must be fully initialized on every
-normal return. Exceptional departure follows the existing mode rules. Closed
-private specializations preserve their result width across compatible
-semantic-module and native-graph producer replacements without changing
-output-mode metadata or wire formats. This result profile does not admit fixed
-floating by-value parameters, formal-valued results, output-free templates,
-floating protocol results, symbolic floating operations, or source-free TRRM.
-It defines no new arithmetic or NaN-payload contract. Generic mixed-output and
-fixed-side-output combinations with floating results remain outside this
-single-mode, no-side profile.
-
-A compilation-local `[Copy]` template may combine generic `out T` and
-`init ref<U>` output formals when its result is fixed `int32`, `uint32`,
-`int64`, `uint64`, `char16`, or `void`. Every output must be fully initialized
-on every normal return, including implicit `void` fallthrough. Each formal
-retains its own mode and eligibility: `out` uses its accepted writable
-destination and non-unique, handle-free `Copy` shape, while `init` requires
-vacant storage and retains compilation-private managed-handle support. When a
-type parameter is used by both modes, its concrete type must satisfy both
-eligibility rules. On checked exceptional departure, an `init` destination
-remains vacant; an existing `out` destination has no rollback guarantee and
-cannot be read in a catch path. Closed private specializations preserve the
-`IsOut`/`IsInit` metadata and survive compatible semantic-module and
-native-graph producer replacements without changing the module ABI or wire
-formats. Boolean-result mixed-mode behavior is unchanged. Fixed-valued output
-side parameters, unique or owning values, formal-valued results, public generic
-exports or witnesses, source-free TRRM, scalar-frontend verification or
-emission remain outside this profile.
-
-A compilation-local `[Copy]` template may also add fixed scalar output
-parameters alongside at least one generic-typed output when its result is a
-fixed `int32`, `uint32`, `int64`, `uint64`, `char16`, or `void`. Fixed output
-types are limited to `bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`,
-`float32`, and `float64`; they do not infer generic type arguments, provide a
-generic output anchor, or add managed-handle or unique-value support. Every
-output must be fully initialized on every normal return, including implicit
-`void` fallthrough, under its mode-specific proof. On exceptional departure,
-`init` destinations remain vacant, while `out` destinations have no rollback
-guarantee and cannot be read in catch paths.
-Compatible semantic-module and native-graph replacements preserve closed
-private specializations and output-mode metadata without ABI or wire-format
-changes. The generic-typed outputs in this profile must all use one mode:
-fixed side outputs do not combine with a template that mixes generic `out` and
-generic `init`. Boolean-result behavior is unchanged; floating results,
-formal-valued results, and templates without a generic-typed output remain
-outside this profile.
-
-A compilation-local `[Copy]` template may combine a fixed `float32` or
-`float64` result with generic outputs using mixed `out` and `init ref<T>` modes
-and fixed scalar output parameters, provided at least one generic-typed output
-is present. For example, a template may combine `out T` with `init ref<U>`.
-Fixed side output types use the existing scalar set:
-`bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`, `float32`, and
-`float64`. Fixed results and side outputs do not infer generic type arguments.
-Each output retains its mode-specific eligibility; a type parameter used in
-both generic modes must satisfy both. Every output must be fully initialized
-on every normal return, and the floating result is not a success discriminator.
-On checked exceptional departure, `init` destinations remain vacant and
-unreadable, while `out` destinations have no rollback guarantee and cannot be
-read in a catch path. Closed private specializations preserve their output-mode
-metadata across compatible replacements without changing ABI or wire formats.
-This profile does not add floating arithmetic or NaN-payload guarantees, and
-does not admit public generic exports or witnesses, output-free templates,
-fixed floating by-value parameters, formal-valued results, floating protocol
-results, symbolic floating operations, source-free TRRM, or scalar-frontend
-verification or emission.
+Implementation restrictions and historical `out` profiles are
+[informative implementation inventories](../implementation/output-profiles.md).
+They do not narrow the canonical initialization-destination contract, remove
+eligible complete generic types, or introduce an additional parameter mode.
 
 ### 2.3 Checking and consuming the contract
 
@@ -415,19 +341,49 @@ storage. Initialization, alias access and ownership remain governed by their
 ordinary checked contracts.
 
 Caller flow keeps the correlation between a particular call's saved status and
-its outputs. Reassigning the status, overwriting the destination, moving its
+its outputs under the required
+[structural-flow rules](language/initialization-and-flow.md).
+Reassigning the status, overwriting the destination, moving its
 owner, or relevant aliasing effects invalidate the affected facts. Enum statuses
 use declared predicates, including explicitly declared sets of success statuses;
 neither enum zero nor member names supply a condition.
 
+[Calls and inference](language/calls-and-inference.md) defines candidate
+selection and source-equivalent execution of contextual outputs.
 Output omission selects lifting in matching and value-producing `require`
 contexts. Explicit destinations remain ordinary arguments; only omitted
 eligible outputs participate in the projection, in declaration order.
+For ordinary call-completion contracts, the explicit `init ref<T>` parameter
+mode establishes eligibility; no additional attribute, registration, or
+`Try` naming convention is required. Its complete `T`, declared normal-output
+relations, ownership and dependencies must be checked and publishable.
+The caller must be able to provide ordinary initially vacant local storage
+of that type under the selected profile. Omission does not make a sizeless,
+unsupported or otherwise ineligible destination storable.
+
+This rule does not omit readonly/writable reference-value parameters,
+required inputs, or destinations whose publication requires later task
+completion or producer advancement. Ordinary calls and statement-form
+Boolean `require` still supply their required destinations; only matching
+and value-producing `require` request this projection.
+Later-completion lifting needs its separate phase/ownership contract rather
+than treating invocation as completion or implicitly joining a task.
+
 Partial omission is permitted. With all destinations supplied, matching
 examines the ordinary return value. Required inputs remain required, and
 arm types do not select a channel or influence callable selection. This also
 disambiguates Boolean payloads from Boolean status without new arm qualifiers
 or a meaning change when a generic payload specializes to `bool`.
+
+In an omission-permitting context, an ordinary form and an eligible
+omitted-output form participate under the same supplied-argument ranking.
+Omitted destinations do not provide comparison arguments or an extra
+specificity advantage; neither form receives a preference merely for having
+or avoiding hidden outputs. If ordinary argument quality, binding priorities
+and declared specificity leave both tied, the call is ambiguous.
+Return types and pattern arms do not break that tie.
+Supplying a destination explicitly can select the output-taking declaration.
+Outside these contexts, omitted-output forms do not participate.
 
 Contextual structural patterns such as `(var x, _)`, `(_, var? y)` and
 `(var x, var y)` evaluate one call and establish the selected outputs'
@@ -447,9 +403,43 @@ as `require (Read() is (var value, _));`, can request narrower availability or
 non-nullness without requiring the ignored output to be initialized.
 No vacant read, fabricated default, ordinary tuple of vacant slots, mandatory
 library `Option`/`Result`, or general implicit conversion is introduced.
-Eligible-output registration, richer-status contract spelling, object-backed
+Eligibility follows the initialization-destination contract above.
+Hidden destinations and saved observations are reusable ordinary locals in
+the original supporting scope, not owners retired at full-expression or
+`if` completion. Repeated invocation conditionally retires prior live
+hidden values before passing vacant initialization destinations, preserving
+ordinary dependency and cleanup checks. Skips retain old storage but do not
+make it a newly evaluated output. Binding patterns remain Copy-only;
+bare lifted requirements transfer owning outputs only after all required
+initialization checks. Explicit destinations and body-level moves provide
+selective unique extraction without a new move-pattern form.
+With no omitted outputs, a value-form `require` instead checks its ordinary
+Boolean operand and yields `void`/`()` on true. False uses the selected
+requirement failure; the call's actual destination states are not rolled back.
+A non-Boolean status requires an explicit predicate. This does not reinterpret
+an initialized lifted Boolean payload as a status check.
+[Runtime requirement failures](language/requirement-failures.md) add only
+the failed-path selector/construction: explicit `require<E>`, the semantic
+callable's RequireException recipe, then exact Core RequirementException.
+Ordinary `new E()` uses zero supplied arguments only after failure. Constructor
+failure propagates its actual event, without clearing initialized destinations,
+replaying partial cleanup or retiring supporting-scope hidden owners early.
+No failure type supplies inference evidence for the operand or its outputs.
+[Core scalar failures](language/scalar-failures.md) select their own exact
+mapped payloads; RequireException is not an ambient replacement for operand
+overflow, zero division or invalid count. Failed result publication preserves
+actual argument/output states, not transaction rollback.
+[Clamp's published bound relationship](language/numeric-selection.md)
+explicitly uses require<InvalidBoundsException> min <= max after ordinary
+source-order staging. A caller default, outlined helper or physically moved
+check cannot change its selected payload, precondition origin or failure
+phase; valid clamping preserves the selected input's representation.
+Richer-status contract encoding, later-completion lifting, object-backed
 observation and concrete metadata remain separate work. Current executable
 call/output support is unchanged.
+
+[Call conformance cases](conformance/source-calls-and-inference.md) include
+inference, ranking, destination eligibility, supporting scopes and extraction.
 
 Changing a declared output-initialization relation can change caller
 obligations and compatibility. Compare the published conditional facts and
@@ -472,6 +462,31 @@ This is a semantic order, not a requirement for a particular stack-frame
 instruction sequence. Inlining, tail calls, AOT, and JIT must preserve it.
 The assembly epilogue cannot hide user-observable destruction or callbacks
 after a postcondition that callers are meant to rely on.
+
+All preconditions execute in one isolated lexical scope; all postconditions
+execute in another. Earlier clauses can establish pattern bindings for later
+clauses in their own phase. Those names do not become implementation locals,
+cross into the other phase, or become caller-visible declarations.
+Phase locals and implicit materializations follow ordinary scope cleanup
+before their phase completes. This is the effect of grouped source blocks
+without requiring additional braces around declaration clauses.
+Each runtime precondition can select E explicitly or use its originating
+primary callable's RequireException/Core default. Physically checking a
+clause in a caller, interface adapter or generated slot preserves that
+semantic owner, ordinary zero-input construction and actual failure channel.
+Runtime ensure uses fixed Core PostconditionException under the
+[standard category contract](runtime/standard-failures.md#2-runtime-postconditions).
+An actual predicate failure is not converted to that payload. Static proof
+failure remains a diagnostic, not runtime construction.
+The [binding/flow rules](language/initialization-and-flow.md#binding-pattern-declarations-and-scopes)
+keep name scope independent of value or captured-type availability.
+
+Phase cleanup cannot invalidate facts that the body or caller is entitled
+to rely on. Remaining clauses and cleanup participate in ordinary effect
+invalidation; published normal-return guarantees must hold after the complete
+postcondition phase. A guarantee must be reestablished or proved to survive
+those effects, otherwise the declaration diagnoses. Do not replay an
+effectful predicate or extend its local's scope to repair the guarantee.
 
 | Phase | Contract obligations |
 |---|---|
@@ -510,6 +525,11 @@ returned reference still observes its permitted backing and aliases. A finally
 that changes backing can therefore affect a subsequent postcondition through
 that reference without reevaluating the return expression.
 
+For `void`, the saved logical result is `()`, including a normal implicit
+fallthrough or `return;`. It remains a value for contract/result typing even
+without payload bytes. A non-unit return expression cannot be silently
+discarded to manufacture that result.
+
 **Accepted ownership endpoint:** semantic body completion includes
 initialization within the method body (including local and output values),
 authored execution, relevant `finally` blocks, local-scope cleanup, and cleanup
@@ -518,6 +538,17 @@ These complete before postconditions. Preconditions and postconditions are
 public declaration/signature contracts outside the authored method body. On a
 successful return, no user-observable ownership cleanup is deferred to the
 mechanical epilogue.
+
+[Owning-field cleanup](language/ownership-and-cleanup.md) preserves actual
+complete/partial state and the responsible holder through these phases.
+Complete authored Cleanup precedes reverse-declaration fields; failed
+construction unwinds reverse acquisition without incomplete-parent Cleanup.
+Postcondition failure does not replay field/body cleanup or restore a
+transferred child. A partial aggregate cannot supply a complete receiver/result.
+Normally false ensure establishes a fresh PostconditionException at the
+originating clause; a failed predicate retains its actual event/channel.
+Neither vacates already live explicit outputs or publishes successful
+completion.
 
 Postconditions can inspect surviving values and results retained for the
 declared contract. A moved or consumed parameter is unavailable through its
@@ -540,8 +571,8 @@ guarantees callers may rely on, not merely optimizer hints. For example, the
 following expresses contract intent, not settled source syntax:
 
 ```text
-ensure output is init;
-ensure output > 0;
+ensure *output is init; // output is an initialization-reference parameter.
+ensure *output > 0;
 ensure written <= capacity; // capacity is an unchanged value input
 ```
 
@@ -550,11 +581,11 @@ support and remain outside this initial model. Proving or folding a predicate
 may optimize enforcement only while preserving the published guarantee.
 
 Published clauses may mention only declarations visible at the method's
-effective accessibility and expressions permitted by the ordinary contract
-language. A public `Count` abstraction may be referenced if it is ordinarily
-accessible and evaluable there; a private representation invariant remains
-internal and cannot become a hidden caller precondition. This adds no getter-
-purity syntax. Caller facts come from published guarantees checked or proved
+effective accessibility and expressions in the
+[checked published subset](language/published-predicates-and-effects.md#published-predicate-subset).
+A public `Count` abstraction may be referenced through its accessible checked
+pure getter; a private representation invariant remains internal and cannot
+become a hidden caller precondition. Caller facts come from published guarantees checked or proved
 for the callee, never from private body inference; dependent facts are
 invalidated by relevant mutation, alias effects or lifetime changes. Init
 safety is static: never read vacant storage to decide whether it is initialized.
@@ -591,9 +622,35 @@ and completed cleanup is never replayed to restart selection. Committing to a
 handler is not a publication transaction for the exception or cleanup effects.
 Fail-fast policy remains separate and promises no cleanup.
 
-Postconditions are ordinary code in the postcondition phase. A false predicate
-fails there and follows ordinary failure/unwinding; predicate evaluation that
-throws propagates through ordinary failure handling. No transactional rollback
+[Local failure inputs](language/local-failures.md) use nominal Exception
+eligibility and exact complete subjects/witnesses. A reference catch borrows
+the active payload; a named value catch requires ordinary Copy and does not
+consume the propagation owner. Candidate bindings initialize before their
+filters and retire on false/failure as well as handler exit. Bare rethrow
+ends handler-scope borrows/locals before continuing the same responsible event;
+copying or freshly throwing a payload is not provenance-preserving capture.
+
+[Core CapturedException](language/captured-exceptions.md) instead owns that
+same event after successful lexical no-argument Capture in a source handler
+body. The source activation then has no responsibility for bare rethrow or
+normal retirement; surviving catch borrows still end at their ordinary extent.
+A named consuming `throw move captured;` stages the original event once and
+ends affected inputs/locals before further selection. Authored cleanup failure
+can replace that requested propagation while retaining its cause; it cannot
+duplicate a transferred event or replay cleanup. Ordinary captured-owner
+retirement is separately checked, synchronous and nonthrowing/nonsuspending.
+
+The [contained foreign bridge](runtime/foreign-failure-bridge.md) preserves
+this selection order by returning normally across each language boundary
+before the receiving runtime raises. Its packet/cause/mapping contracts
+do not equate foreign and Terrum exception objects or extend exited scopes.
+
+Postconditions execute the checked predicate at the postcondition phase.
+A false predicate fails there and follows ordinary failure/unwinding;
+partial-operation or invalid-call-domain failure follows ordinary handling.
+A selected pure call cannot escape an exception on its established valid
+domain, but this is not proof that every enclosing check succeeds.
+No transactional rollback
 of body effects occurs, and completed body `finally` blocks are not rerun.
 Any still-live values are handled by their ordinary ownership and failure
 contracts; this does not introduce a separate candidate-cleanup or output
@@ -604,10 +661,22 @@ It proves all such paths; it is not registered only on paths that execute its
 source location. A body `static require` remains a point obligation. Neither
 automatically becomes a published declaration guarantee.
 
-For an asynchronous declaration, the same normal-completion contract applies
-before successful completion is published; [asynchronous scheduling and
-lifetimes](language.md#storage-concurrency-entry-and-boundaries) retain their
-separate rules.
+### 3.4 Async execution and producer phases
+
+[Async execution](language/async-execution.md) establishes its responsible
+operation before user preconditions/body. Failure before establishment is
+synchronous; later escaping check/body/cleanup failure is failed completion,
+even with inline execution and no suspension. Normal postconditions precede
+successful completion publication. Scheduling and real capture lifetimes
+retain their separate rules.
+
+[Generated producers](language/generated-producers.md) instead create a named
+affine cursor synchronously without running its body. Source require/ensure
+and creation effects govern that invocation; contextual return is the cursor.
+Generated advance/close declarations govern their own results/output and
+completion phases. Yield retains entered body scopes and is not normal body
+completion; early close does not run normal body-completion ensures.
+No creation annotation implies pure/no-throw enumeration or later NoAlias.
 
 ## 4. A reproducible proof and evaluation foundation
 
@@ -647,96 +716,129 @@ current error as a warning.
 
 ### 4.2 Versioned portable proof floor
 
-**Accepted policy:** standardize a versioned portable floor of minimum
-supported proof rules/complexity and a minimum guaranteed resource budget.
-The floor promises that conforming compilers can establish its required
-proofs independent of optimization level; it does not require identical
-acceptance beyond the floor or impose a fixed maximum proof budget. An
-implementation may soundly prove more complex obligations, use larger
-budgets, and accept additional programs. A required proof that is disproved or
-not established by that compiler's supported analysis is a compile error, not
-a runtime fallback. Diagnostics distinguish false from not established
-(including complexity or analysis-limit failure where appropriate).
+The [canonical versioned floor](language/proof-and-constant-evaluation.md#scalar-proof-facts)
+defines exact scalar/Boolean facts, integer intervals and exclusions,
+predicate refinement, local/branch/loop transfer, and conservative
+invalidation. Its [work/state accounting](language/proof-and-constant-evaluation.md#proof-outcomes-and-accounting)
+and portable minimum are independent of optimization level.
+False, not established and exhausted remain distinct; required obligations
+never become runtime checks. Sound beyond-floor analysis and larger supported
+envelopes may accept more without changing source semantics.
 
-The accepted v1 floor covers local scalar, boolean, and initialization facts,
-plus branch refinement for supported built-in predicates under actual target
-arithmetic. The exact predicate catalog, fact domain, branch and join transfer
-rules, conformance vectors, and guaranteed resource values remain to specify.
-Loop induction or invariant reasoning, call summaries, and alias-sensitive
-facts are outside this initial floor; proofs depending on them are not
-guaranteed by the floor. Implementations may soundly establish additional
-proofs without changing the portable minimum.
+The required [structural initialization and pattern-flow system](language/initialization-and-flow.md)
+specifies local live/vacant joins, finite loop backedges, Boolean matching
+edges, saved output-state relations, and conservative invalidation. Those
+rules are ordinary source safety obligations, not optional numeric invariant
+proofs or license to infer facts from private imported bodies.
 
-Comparisons must use actual language arithmetic. Rewriting an overflow-prone
-integer expression as an unbounded mathematical expression is not proof of
-its executable safety. Float predicates cannot borrow integer identities:
-NaNs, signed zero, rounding, and the prohibition on implicit reassociation/FMA
-still apply. Start with exact constant floating evaluation only when its
-target evaluator is specified; otherwise classify such proof requests unknown.
-
-The minimum catalog and conformance vectors are still to specify; the
-[proof proposal](../proposals/static-proof-and-constant-evaluation.md#portable-proof-floor)
-collects candidates, not a required floor. Sound beyond-floor analysis does
-not change the versioned minimum or source semantics. No proof-certificate
-format, metadata carrier, ABI or solver is selected.
+Numeric induction, general relational solving, private-call inference and
+alias-sensitive advanced proofs are outside the minimum. Actual target
+arithmetic governs proofs: mathematical endpoint analysis is not permission
+to remove a possible overflow, use host floating precision, or invent fixed
+runtime NaN bits. A constant evaluator result is not a runtime call summary.
+No proof-certificate format, physical metadata carrier, ABI or solver is
+selected by these logical rules.
 
 ### 4.3 Effects and stable observations
 
-Published predicate evaluation needs checked effect and dependency contracts;
-readonly access alone does not prove an observation stable or repeatable.
-Opaque imports can publish checked facts without exposing bodies, but their
-constant execution requires an eligible body or separately specified trusted
-intrinsic. Exact effect footprints and the initial admissible predicate subset
-remain [proposed](../proposals/static-proof-and-constant-evaluation.md#effect-footprints-and-observations).
+The [published-predicate and effect chapter](language/published-predicates-and-effects.md)
+defines the checked subset, logical read/effect records, input-state purity
+and selected evaluation modes. `Pure` excludes observable effects, including
+external mutation and escaping exception effects on calls satisfying declared
+preconditions. Input values and state read through `this` or explicit inputs
+are logical inputs; mutable ambient state is not. Immutable published data
+is permitted with initialization, publication and lifetime dependencies.
+No `Stable` or read-scope modifier is required.
 
-If a predicate can fault, retain that failure behavior unless it too is proven
-absent. Eliminating a known-true check is not permission to remove argument
-evaluation, an effectful getter, a needed root/loan, temporary cleanup, or a
-possible exception. Ordinary body `require` continues to accept general
-executable boolean expressions; it is not restricted to the published subset.
+Readonly access alone does not supply a purity contract or establish that
+two observations have the same input state. Ordinary references are aliasable;
+relevant writes, captures, replacement and retirement invalidate dependencies.
+Disjointness is needed only when a proof actually relies on it and does not
+make writes to pre-existing caller state pure. Initialization destinations
+construct logical results, with their ordinary output-state, ownership and
+backing obligations.
+The optional [NoAlias parameter schema](language/published-predicates-and-effects.md#noalias-parameters)
+specifies a checked invocation-wide separation requirement over actual
+accessed mutable regions, with immutable sharing exempt. It does not make
+ordinary references exclusive or supply an escaping separation guarantee.
+
+Declaration predicates select checked pure-expression evaluation. Ordinary
+body `require` remains general executable Boolean code.
+Consumers use published identities, forms and complete dependencies, not a
+method name or private imported body. The minimum numeric analysis retains
+its [conservative boundary](language/proof-and-constant-evaluation.md#joins-loops-and-effects);
+these contracts do not add general numeric call summaries.
+
+Retain partial-operation, precondition and requirement failures unless their
+absence is proved. Eliminating a known-true check is not permission to remove
+argument evaluation, a needed root/loan, temporary cleanup, static initialization
+or a possible failure. Purity does not prove termination or authorize
+unconditional motion, duplication or reuse.
 
 ### 4.4 Deterministic constant execution
 
-Execute a specified, unoptimized semantic instruction set with target types
-and arithmetic, not host-language overflow, host `nint`, host floating defaults,
-culture, filesystem, clock, addresses, or process state. The same source,
-declared dependencies, target profile, and evaluation budget must produce the
-same value or diagnostic regardless of AOT/JIT choice or optimization level.
+The [constant domain and semantic actions](language/proof-and-constant-evaluation.md#constant-execution-domain)
+use target arithmetic, inline eligible values, private state and ordinary
+references/cleanup, with admissibility on the executed path.
+`[ConstEval]` is explicit source-required-evaluation opt-in and implies
+checked pure-form support, not ordinary-form `NoThrow`, termination or
+all-input constant success. `[Pure]` alone can authorize safe backend folding,
+not source-required interpreter admission. Author-guarded ordinary effects
+can be omitted in a selected pure/constant form through
+[evaluation-mode queries](language/published-predicates-and-effects.md#evaluation-modes).
+Known runtime-only operations on unselected paths do not run; a reachable
+external effect cannot be excused from the pure-form guarantee.
+Unknown/malformed body schemas still reject before use.
+There is no ambient I/O, host-address or runtime-static initialization fallback.
 
-Private mutation of evaluator-owned temporary storage is compatible with
-determinism. It does not authorize ambient writes or escaping a pointer into
-the evaluator. General managed graphs, native resources, and
-identity-bearing host objects need separate representation contracts; none
-acquires an automatic constant-evaluation fallback.
+An emitted constant additionally requires its target-profile `Blittable`
+commitment, frozen Copy validity and admitted typed value recipe.
+Private evaluator state and borrowed inputs need not themselves be emitted.
+Typed scalar/field values, not host object bytes or padding, preserve the
+values and representation observations for target materialization.
 
-The exact work units and resource ceilings are not approved. The
-[evaluator proposal](../proposals/static-proof-and-constant-evaluation.md#deterministic-evaluator-and-proposed-budgets)
-records candidate budgets and accounting; no implementation may treat a
-candidate number as the language limit.
+The selected [resource envelope](language/proof-and-constant-evaluation.md#portable-resource-envelope)
+has deterministic semantic/copy/bulk charges and inclusive boundaries.
+The same bound inputs, executed dependencies, target/value ABI and actual
+envelope produce the same value or diagnostic independently of optimization,
+AOT/JIT, caching or host arithmetic.
 
-Budget exhaustion is unproven/unevaluated and diagnoses at the requesting static
-or constant context. It does not authorize runtime fallback, a guessed value,
-or discarding required checks. Optional compile-time optimization can instead
-decline to optimize because the source did not require it.
+[Constant arithmetic NaNs](language/proof-and-constant-evaluation.md#deterministic-nans-and-frozen-results)
+choose a positive quiet zero-payload value where source representation is
+unspecified. Copies and explicit bit-preserving operations retain their
+stronger contracts. This does not canonicalize runtime arithmetic or prove
+its payload bits. Required failure/exhaustion diagnoses without fallback;
+optional folding may instead decline.
 
 ### 4.5 Versioning and independent implementations
 
 Identify the source language profile, versioned proof floor, target value
 semantics, published contract/effect dependencies, and required evaluation
-budget when needed for reproducibility. Whether those identifiers/budgets are
-recorded in producer artifacts, and how they are encoded, is a separate
-metadata/wire decision not selected here. Caller-side required proofs use the
+budget when needed for reproducibility. The canonical
+[dependency contract](language/proof-and-constant-evaluation.md#dependencies-availability-and-admission)
+requires those logical inputs for new execution; their physical records and
+encodings are a separate metadata/wire decision. Caller-side required proofs use the
 callee's published contract and do not depend on an imported implementation
 body being present. Required constant evaluation that executes a declaration
 still requires its constant-evaluable body and evaluated dependencies to be
-available under that separate contract; the availability/persistence mechanism
-remains to specify.
+available under that separate contract. The exact required body/identity
+availability is specified logically; its persistent representation remains
+separately gated.
+
+Pure forms, evaluation modes, read/effect bounds and documented constant
+results are published compatibility promises. An incompatible result change
+can break consumers even when the replacement remains pure; arbitrary
+semantic equivalence is not generally checked automatically. Preserve
+declared latitude such as unspecified arithmetic NaN payloads rather than
+silently freezing it. New execution and reuse retain the actual code,
+value, target and initialization dependencies.
 
 AOT, JIT, specialization, interface witnesses and replacement validation use
 the same published contracts. Source compilation checks authored bodies
 against their declared state and effect guarantees. Ordinary binary consumers
-safely decode and structurally validate artifacts, resolve references, check
-binding/contract compatibility and validate caller use, then rely on published
+safely decode and check accessed structures/references, resolve retained
+dependencies, check binding/contract compatibility and exposed caller-use
+obligations, then rely on published
 metadata contracts for external dependencies rather than re-proving their
 implementations. A caller still proves its obligations from imported
 preconditions, access, ownership and effect contracts. Unsupported rule
@@ -745,6 +847,11 @@ this default does not treat malformed bytes as trusted or require dependency
 body inspection. Hand-authored IL that lies about an implementation is not
 excluded by mandatory whole-program proof. Optional deeper audit tooling may
 be considered later, with no v1 or all-behavior certification promise.
+The [reader-trust contract](representation/reader-trust.md) permits selective
+indexed reads without preliminary Body scans. Producers establish index,
+region and semantic truth; natural access/ABI/authorization checks still
+reject exposed invalidity. Table-specific references do not select their
+target table.
 Signing/provenance is a separate distribution concern; signer identity is not
 semantic proof. These target contracts do not change the current bounded
 reader/verifier behavior. Foreign declarations still enter through explicit
@@ -758,6 +865,12 @@ version or consumer contracts. Neither may silently reinterpret an unchanged
 consumer's publication, lifetime, or arithmetic contract.
 
 ## 5. Conformance coverage
+
+[Thread capabilities and protocol authority](runtime/sharing-and-handoff.md)
+are retained compatibility promises too. Preserve conditional caller domains,
+actual transfer/capture/release obligations, synchronization, reentrancy and
+cleanup affinity. A trusted implementation body cannot silently strengthen
+conditions or weaken those promises; unsupported required protocols reject.
 
 The minimum conformance corpus should cover:
 
@@ -781,6 +894,10 @@ The minimum conformance corpus should cover:
   value/diagnostic outcomes for the same target profile and specified budget,
   including budget-boundary cases; target-width/representation differences
   receive their own expected results.
+- Selected ordinary/pure/constant forms, guarded effects, aliased input reads,
+  pure initialization results, published predicates, immutable data and
+  compatible independent consumption follow the
+  [effect corpus](conformance/source-published-predicates-and-effects.md).
 
 ## References and comparison boundaries
 
