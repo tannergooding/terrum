@@ -89,16 +89,33 @@ public static partial class SemanticVerifier
                 throw Limit();
             }
             if (inspectFunctionManagedNodes && !usesManagedFunctionNodes
-                && (function.Intrinsic >= BoundIntrinsic.NodeTryCreate
+                && (function.Intrinsic is >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.ClassTryCreate
                     || ManagedClassTypes.IsManaged(function.ReturnType)))
             {
                 usesManagedFunctionNodes = true;
             }
-            foreach (var variable in function.Variables)
+            var firstParameter = function.IsConstructor ? 1 : 0;
+            for (var variableIndex = 0; variableIndex < function.Variables.Length; variableIndex++)
             {
+                var variable = function.Variables[variableIndex];
                 if (variable is null)
                 {
                     throw Invalid();
+                }
+                var isParameter = variableIndex >= firstParameter
+                    && variableIndex - firstParameter < function.ParameterCount;
+                if (variable.IsImplicitRef
+                    && (!isParameter || function.IsExternal || variable.IsOut || variable.IsInit
+                        || variable.IsInitializationLocal || !IsImplicitReferenceScalarType(variable.Type)))
+                {
+                    throw InvalidEffect(variable.Span, "Ownership");
+                }
+                if (variable.IsImplicitReferenceTemporary
+                    && (isParameter || function.IsExternal || variable.IsOut || variable.IsInit
+                        || variable.IsImplicitRef || variable.IsInitializationLocal || variable.IsMutable
+                        || !IsImplicitReferenceScalarType(variable.Type)))
+                {
+                    throw InvalidEffect(variable.Span, "Ownership");
                 }
                 if (inspectFunctionManagedNodes && !usesManagedFunctionNodes
                     && ManagedClassTypes.IsManaged(variable.Type))
@@ -1813,7 +1830,8 @@ public static partial class SemanticVerifier
                 if (local.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                     || local.Variable >= initialized.Length
                     || !declarations.Add(local.Variable) || initialized[local.Variable]
-                    || function.Variables[local.Variable].IsInitializationLocal)
+                    || function.Variables[local.Variable].IsInitializationLocal
+                    || function.Variables[local.Variable].IsImplicitReferenceTemporary)
                 {
                     throw Invalid();
                 }
@@ -3682,8 +3700,10 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                if (!call.ArgumentParameterIndices.IsDefault
-                    && call.ArgumentParameterIndices.Length != call.Arguments.Length)
+                if ((!call.ArgumentParameterIndices.IsDefault
+                        && call.ArgumentParameterIndices.Length != call.Arguments.Length)
+                    || (!call.ArgumentImplicitReferenceTemporaries.IsDefault
+                        && call.ArgumentImplicitReferenceTemporaries.Length != call.Arguments.Length))
                 {
                     throw Invalid();
                 }
@@ -3728,6 +3748,7 @@ public static partial class SemanticVerifier
                     }
                 }
                 var outTargets = new HashSet<int>();
+                var implicitReferenceTemporaries = new HashSet<int>();
                 var argumentParameters = call.ArgumentParameterIndices.IsDefault
                     ? null : new bool[call.Arguments.Length];
                 var loanRoot = -1;
@@ -3750,6 +3771,41 @@ public static partial class SemanticVerifier
                             argumentParameters[parameterIndex] = true;
                         }
                         var parameterSlot = parameterIndex + (target.IsConstructor ? 1 : 0);
+                        if ((uint)parameterSlot >= (uint)target.Variables.Length)
+                        {
+                            throw Invalid();
+                        }
+                        var implicitReferenceTemporary = call.ImplicitReferenceTemporary(i);
+                        if (implicitReferenceTemporary < -1)
+                        {
+                            throw Invalid();
+                        }
+                        if (target.Variables[parameterSlot].IsImplicitRef)
+                        {
+                            if (target.IsExternal
+                                || !IsImplicitReferenceScalarType(target.Variables[parameterSlot].Type)
+                                || (implicitReferenceTemporary < 0 && argument is not BoundRead))
+                            {
+                                throw InvalidEffect(argument.Span, "Ownership");
+                            }
+                            if (implicitReferenceTemporary >= 0)
+                            {
+                                var firstLocal = function.ParameterCount + (function.IsConstructor ? 1 : 0);
+                                if (implicitReferenceTemporary < firstLocal
+                                    || implicitReferenceTemporary >= function.Variables.Length
+                                    || !implicitReferenceTemporaries.Add(implicitReferenceTemporary)
+                                    || !function.Variables[implicitReferenceTemporary].IsImplicitReferenceTemporary
+                                    || function.Variables[implicitReferenceTemporary].Type
+                                        != target.Variables[parameterSlot].Type)
+                                {
+                                    throw InvalidEffect(argument.Span, "Ownership");
+                                }
+                            }
+                        }
+                        else if (implicitReferenceTemporary >= 0)
+                        {
+                            throw InvalidEffect(argument.Span, "Ownership");
+                        }
                         if (reservedReceiver >= 0 && InvalidatesReservedOwner(argument, reservedReceiver,
                             ref remaining, depth + 1))
                         {
@@ -3784,6 +3840,15 @@ public static partial class SemanticVerifier
                         }
                         else
                         {
+                            if (target.Variables[parameterSlot].IsImplicitRef
+                                && implicitReferenceTemporary < 0
+                                && (argument is not BoundRead reference
+                                    || reference.Variable < 0 || reference.Variable >= function.Variables.Length
+                                    || !IsImplicitReferenceScalarType(
+                                        function.Variables[reference.Variable].Type)))
+                            {
+                                throw InvalidEffect(argument.Span, "Ownership");
+                            }
                             if (target.Variables[parameterSlot].Type == PrimitiveType.NativeWindowHandle)
                             {
                                 if (argument is not BoundNativeNoOwner
@@ -3939,6 +4004,12 @@ public static partial class SemanticVerifier
                         {
                             throw Invalid();
                         }
+                        if (implicitReferenceTemporary >= 0)
+                        {
+                            _ = declarations.Add(implicitReferenceTemporary);
+                            initialized[implicitReferenceTemporary] = true;
+                            fieldMasks[implicitReferenceTemporary] = 0;
+                        }
                         if (initialized.Dependencies is BackingDependencies dependencies
                             && TokenSpanContract.IsDependent(argument.Type, program.Structures))
                         {
@@ -4026,6 +4097,10 @@ public static partial class SemanticVerifier
             }
         }
     }
+
+    private static bool IsImplicitReferenceScalarType(PrimitiveType type) =>
+        type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
+            or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
 
     private static bool ValidType(PrimitiveType type, bool allowVoid, BoundProgram program) =>
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64

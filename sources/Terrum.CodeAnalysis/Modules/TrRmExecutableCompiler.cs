@@ -68,6 +68,12 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported("Executable entry must return int32 and take no parameters.");
         }
+        if (program.Functions.Any(static function =>
+                function.Variables.Any(static variable =>
+                    variable.IsImplicitRef || variable.IsImplicitReferenceTemporary)))
+        {
+            throw Unsupported("Executable TRRM does not persist implicit reference parameter contracts.");
+        }
 
         var functionFeatures = new (bool HasFloatingTypes, bool HasIndexedFlow,
             bool HasNonScalarStorage)[program.Functions.Length];

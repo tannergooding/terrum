@@ -382,6 +382,12 @@ public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutab
     /// <summary>Whether this source parameter uses the vacant initialization loan mode.</summary>
     public bool IsInit { get; init; }
 
+    /// <summary>Whether this source parameter aliases an existing readonly scalar place.</summary>
+    internal bool IsImplicitRef { get; init; }
+
+    /// <summary>Whether this local is a hidden temporary backing an implicit-reference argument.</summary>
+    internal bool IsImplicitReferenceTemporary { get; init; }
+
     /// <summary>Whether a vacant local may initialize its storage without replacing a live value.</summary>
     public bool IsInitializationLocal { get; init; }
 }
@@ -670,8 +676,15 @@ public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arg
     /// <summary>Maps source-order arguments to formal argument positions when binding is non-positional.</summary>
     internal ImmutableArray<int> ArgumentParameterIndices { get; init; }
 
+    /// <summary>Per source-order argument, the backing temporary for implicit-reference materialization, or -1.</summary>
+    internal ImmutableArray<int> ArgumentImplicitReferenceTemporaries { get; init; }
+
     internal int ParameterIndex(int argumentIndex) =>
         ArgumentParameterIndices.IsDefault ? argumentIndex : ArgumentParameterIndices[argumentIndex];
+
+    internal int ImplicitReferenceTemporary(int argumentIndex) =>
+        ArgumentImplicitReferenceTemporaries.IsDefault
+            ? -1 : ArgumentImplicitReferenceTemporaries[argumentIndex];
 
     internal int ArgumentIndex(int parameterIndex)
     {

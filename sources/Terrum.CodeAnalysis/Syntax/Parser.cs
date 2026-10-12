@@ -639,6 +639,16 @@ internal sealed class Parser
                 parameter.Add(ParseType());
                 parameter.Add(ExpectTypeCloser(missing));
             }
+            else if (Current.Kind == TokenKind.Identifier && Current.Text == "implicit"
+                && Peek(1).Kind == TokenKind.RefKeyword)
+            {
+                var missing = _missingTokens;
+                parameter.Add(Take());
+                parameter.Add(Take());
+                parameter.Add(ExpectAttached(TokenKind.Less));
+                parameter.Add(ParseType());
+                parameter.Add(ExpectTypeCloser(missing));
+            }
             else
             {
                 ParsePassingMode(parameter);

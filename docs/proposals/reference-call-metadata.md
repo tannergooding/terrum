@@ -3,11 +3,12 @@
 **Status: partially accepted.** The bounded indexed-Body unsafe-region
 contract is canonical in
 [Body record, direct block index and regions](../specs/il-instruction-set.md#body-record-direct-block-index-and-regions).
-The dependency-relation profile is deferred until a concrete persisted
-provider/consumer path needs it. General output-call migration is deferred
-pending explicit place, alias and publication rules; all other extensions
-remain unapproved. Provisional implementation notes are evidence of support
-only and do not settle those decisions.
+The logical reference, dependency-source, call-mapping and output-publication
+contracts are selected by the specification audit. The physical
+dependency-relation profile remains deferred until a concrete persisted
+provider/consumer path needs it. General output-call migration still requires
+complete implementation and physical records; the private implementation
+profiles below do not settle those encodings or establish source conformance.
 
 ## Current boundary
 
@@ -25,6 +26,35 @@ and flags remain unassigned. See the
 The bounded scalar frontend's `out` and `init ref` projections do not fill
 this gap: they cover scalar call modes and still rely on the hosted verifier
 and emitter.
+
+### Unapproved implementation gate: same-compilation implicit references
+
+**Recommendation:** Start with a deliberately bounded hosted source slice:
+readonly `implicit ref<T>` parameters for the supported scalar set
+(`bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`, `float32`, and
+`float64`), borrowing initialized local or parameter places, materializing
+other matching scalar expressions at their ordinary left-to-right evaluation
+point, and forwarding an existing implicit-reference parameter. This lets
+later arguments change a borrowed place before the callee reads it without
+changing an earlier materialized value. Do not borrow fields/indexed
+elements, persist the mode in semantic modules or TRRM, or infer general
+dependency/noescape rules. This recommendation describes implementation
+sequencing only; it does not alter the accepted source contract in
+[lifetimes](../specs/lifetimes.md#parameter-only-implicit-readonly-loans) or
+approve a metadata schema.
+
+**Implemented provisionally:** The hosted binder and native backend support
+that scalar slice, including typed materialization, alias-preserving
+forwarding, and readonly enforcement. Regressions cover every supported scalar
+type under both runtime policies, a stack-passed materialized reference, a
+later output argument mutating an earlier borrowed place, and evaluation-once
+ordering when both the materialized expression and a later argument mutate
+shared state. An uninitialized local is also rejected with `TRM3016`. Other
+eligible places, aggregate and managed referents,
+generic/runtime evidence, persisted reference relationships and overload
+resolution remain outside the slice; module and TRRM writers refuse programs
+carrying the mode. This evidence is not approval of the recommendation or a
+change in proposal status.
 
 ## Questions for direction
 
@@ -821,45 +851,41 @@ limited to section 3: it does not approve the dependency-relation profile in
 section 1, general output-call migration in section 4, or any other proposal
 extension.
 
-### 4. Which source rules and metadata gate general output-call migration?
+### 4. Which implementation and metadata gates remain for output calls?
 
-**Decision recorded:** defer general output-call migration and keep the
-existing bounded `out`/`init ref` profiles unchanged until eligible
-destinations, formal mapping, aliasing and normal/exceptional publication
-rules are specified.
+The selected [reference forms](../specs/language/references.md#parameters-and-call-adaptation),
+[argument mapping and inference](../specs/language/calls-and-inference.md),
+[structural flow](../specs/language/initialization-and-flow.md) and
+[publication rules](../specs/language-contracts.md#22-declared-outcome-relationships)
+now own eligible places, exact complete types, source-order staging and
+normal/exceptional destination states. Legacy `out` is not a canonical
+reference parameter spelling. The former proposal to preserve it as a second
+source output mode is superseded, not an unresolved policy choice.
 
-**Summary:** Grammar §5.1 accepts the explicit `init` call-site spelling but
-leaves complete place matching, overload binding and conditional-output
-metadata open. The hosted scalar projections implement bounded existing
-`out`/`init ref<T>` cases; they do not determine general reference, aliasing or
-publication rules.
-The accepted ordinary and compilation-local generic non-Boolean/void `Copy`
-`out` profiles are separate bounded contracts; they do not resolve the general
-metadata and migration questions in this section. See the
-[language contract](../specs/language-contracts.md#22-declared-outcome-relationships).
+The existing hosted/scalar `out` and `init ref` profiles are informative
+implementation evidence in the
+[output inventory](../implementation/output-profiles.md). They do not supply
+the canonical descriptor semantics or general alias, ownership and publication
+machinery. In particular, the legacy recovery tests reserve a staged `out`
+destination in source-argument order and reject catch-path reads after a later
+argument fails; that legacy behavior is not a new source contract.
 
-**Recommendation:** Specify eligible destination places, exact selected-callee
-and argument mapping, and live/vacant/exceptional publication states before
-general migration. Preserve the distinct explicit `out` and `init` modes and
-do not infer either mode or publication from a body or method name. Reuse the
-assigned `OutputState` clause only for an explicitly declared Boolean result
-relationship; keep non-Boolean normal-return completion and exceptional
-non-publication distinct. Until those source and verifier contracts are
-settled, retain the existing bounded hosted/scalar cases without widening
-them.
+Before widening independent output calls, migrate the binder, mandatory
+verifier, IR and target lowering together, with checked place/version identity,
+alias reservations, cleanup and source-order argument mapping. The selected
+physical [Param and OutputState registries](../specs/il-metadata.md#semantic-contracts-and-stable-binding)
+use initialization mode `0x01` on an outer `ref<T>` TypeSpec and do not retain
+the compiler's old output/ref mode numbering. An inspectable Boolean
+OutputState row does not activate executable output support. Complete
+correlated-predicate, place, exceptional-publication, ownership and dependency
+records remain physical integration work.
 
-**Recommended first profile (unapproved):** Admit named local destinations
-and explicitly forwarded output parameters for supported scalar values and
-recursively exportable, handle-free `Copy` structs. Preserve the selected
-declaration, source-order evaluation and exact formal-parameter mapping;
-require exact type and mode matches, and reject duplicate output destinations.
-Keep field/indexed places, dependency-bearing views, public managed handles,
-unique or cleanup-bearing values, and inferred publication contracts outside
-this profile. Verify each mode's pre-call destination state, declared
-Boolean-result publication, required full publication on normal completion,
-exceptional non-publication and import/replacement compatibility before
-adopting it. The profile adds no source syntax or clause IDs. It remains gated
-on agreement about the exact forwarded-place set and aliasing rules.
+The first implementation slice may remain limited to supported scalar or
+handle-free Copy destinations, but its exclusions are implementation limits,
+not restrictions on the selected source contract. Field/indexed places,
+dependency-bearing views, managed handles and owning outputs require their
+actual admitted storage, root and cleanup closure. No profile or byte
+assignment is approved by this proposal.
 
 ## Constraints retained
 

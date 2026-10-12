@@ -1008,7 +1008,8 @@ internal sealed partial class PeCompiler
                 if (abiArgument < 4)
                 {
                     _code.StoreRegister(abiArgument, Slot(slot),
-                        IsStruct(type) || IsWide(type) || function.Variables[slot].IsOut);
+                        IsStruct(type) || IsWide(type) || function.Variables[slot].IsOut
+                            || function.Variables[slot].IsImplicitRef);
                 }
                 else
                 {
@@ -1022,12 +1023,14 @@ internal sealed partial class PeCompiler
                 var slot = argument + (function.IsConstructor ? 1 : 0);
                 var type = function.Variables[slot].Type;
                 if (IsIndirect(type) && !function.Variables[slot].IsOut
+                    && !function.Variables[slot].IsImplicitRef
                     && !(slot == 0 && IsBorrowedReceiver()))
                 {
                     _code.Load64(Slot(slot));
                     CopyToFrame(Slot(slot), Size(type));
                 }
-                if (!function.Variables[slot].IsOut && function.Variables[slot].Type is PrimitiveType.Bool or PrimitiveType.Char16)
+                if (!function.Variables[slot].IsOut && !function.Variables[slot].IsImplicitRef
+                    && function.Variables[slot].Type is PrimitiveType.Bool or PrimitiveType.Char16)
                 {
                     _code.Load(Slot(slot));
                     _code.Bytes(0x0F, function.Variables[slot].Type == PrimitiveType.Bool ? (byte)0xB6 : (byte)0xB7, 0xC0);
@@ -1631,6 +1634,40 @@ internal sealed partial class PeCompiler
         }
         return _outBase + (16 * ordinal);
     }
+
+    private bool IsImplicitReferenceArgument(BoundCall call, int argumentIndex)
+    {
+        var target = _program.Functions[call.Function];
+        var parameterSlot = call.ParameterIndex(argumentIndex) + (target.IsConstructor ? 1 : 0);
+        return (uint)parameterSlot < (uint)target.Variables.Length
+            && target.Variables[parameterSlot].IsImplicitRef;
+    }
+
+    private void EmitImplicitReferenceAddress(BoundCall call, int argumentIndex, int spill)
+    {
+        var temporary = call.ImplicitReferenceTemporary(argumentIndex);
+        if (temporary >= 0)
+        {
+            var argument = call.Arguments[argumentIndex];
+            Expression(argument, spill);
+            StoreValue(Slot(temporary), argument.Type);
+            _code.Address(Slot(temporary));
+            return;
+        }
+        if (call.Arguments[argumentIndex] is not BoundRead read)
+        {
+            throw new InvalidOperationException("An implicit reference argument must be an existing place or materialized value.");
+        }
+        if (_program.Functions[_currentFunction].Variables[read.Variable].IsImplicitRef)
+        {
+            _code.Load64(Slot(read.Variable));
+        }
+        else
+        {
+            _code.Address(OwnerPlace(read.Variable));
+        }
+    }
+
     private int OwnerPlace(int index) =>
         _program.Functions[_currentFunction].Variables[index].IsOut ? OutSlot(index) : Slot(index);
     private void SetInitializationFlag(int variable, bool initialized)
@@ -3204,7 +3241,13 @@ internal sealed partial class PeCompiler
                 EmitInitializationTest(initializationTest.Variable);
                 break;
             case BoundRead read:
-                if (read.Variable == 0 && IsBorrowedReceiver() && !IsUnique(read.Type))
+                var readVariable = _program.Functions[_currentFunction].Variables[read.Variable];
+                if (readVariable.IsImplicitRef)
+                {
+                    _code.Load64(Slot(read.Variable));
+                    _code.LoadPointerField(0, Size(read.Type));
+                }
+                else if (read.Variable == 0 && IsBorrowedReceiver() && !IsUnique(read.Type))
                 {
                     _code.Load64(Slot(0));
                     if (!IsIndirect(read.Type))
@@ -3700,8 +3743,17 @@ internal sealed partial class PeCompiler
                     }
                     else
                     {
-                        Expression(call.Arguments[i], argumentsBase + (call.Arguments.Length * 2));
-                        if (call.Arguments[i] is BoundReceiverLoan or BoundMutableReceiverLoan
+                        if (IsImplicitReferenceArgument(call, i))
+                        {
+                            EmitImplicitReferenceAddress(call, i,
+                                argumentsBase + (call.Arguments.Length * 2));
+                        }
+                        else
+                        {
+                            Expression(call.Arguments[i], argumentsBase + (call.Arguments.Length * 2));
+                        }
+                        if (IsImplicitReferenceArgument(call, i)
+                            || call.Arguments[i] is BoundReceiverLoan or BoundMutableReceiverLoan
                             or BoundFieldLoan or BoundMutableFieldLoan)
                         {
                             _code.Store64(Spill(argumentsBase + i));
@@ -3753,7 +3805,8 @@ internal sealed partial class PeCompiler
                 for (var i = Math.Max(0, 4 - hidden); i < call.Arguments.Length; i++)
                 {
                     var argumentIndex = call.ArgumentIndex(i);
-                    if (call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
+                    if (IsImplicitReferenceArgument(call, argumentIndex)
+                        || call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
                         or BoundFieldLoan or BoundMutableFieldLoan)
                     {
                         _code.Load64(Spill(argumentsBase + argumentIndex));
@@ -3767,7 +3820,8 @@ internal sealed partial class PeCompiler
                 for (var i = 0; i < Math.Min(4 - hidden, call.Arguments.Length); i++)
                 {
                     var argumentIndex = call.ArgumentIndex(i);
-                    if (call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
+                    if (IsImplicitReferenceArgument(call, argumentIndex)
+                        || call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
                         or BoundFieldLoan or BoundMutableFieldLoan)
                     {
                         _code.Load64(Spill(argumentsBase + argumentIndex));
@@ -3777,7 +3831,8 @@ internal sealed partial class PeCompiler
                         LoadValue(Spill(argumentsBase + argumentIndex), call.Arguments[argumentIndex].Type);
                     }
                     _code.MoveArgument(i + hidden,
-                        call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
+                        IsImplicitReferenceArgument(call, argumentIndex)
+                            || call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
                             or BoundFieldLoan or BoundMutableFieldLoan
                             || IsStruct(call.Arguments[argumentIndex].Type) || IsWide(call.Arguments[argumentIndex].Type));
                 }

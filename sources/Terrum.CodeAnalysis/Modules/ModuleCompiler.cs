@@ -3026,6 +3026,13 @@ public static partial class ModuleCompiler
 
     private static byte[] Write(Module module, BoundProgram program)
     {
+        if (program.Functions.Any(static function =>
+                function.Variables.Any(static variable =>
+                    variable.IsImplicitRef || variable.IsImplicitReferenceTemporary)))
+        {
+            throw new ModuleContractException(
+                "Semantic modules do not persist implicit reference parameter contracts.");
+        }
         RejectCompilationLocalSpans(program);
         ValidateUnsafeExpressionScopes(program, module);
         if (module.InvocationProfileId is null

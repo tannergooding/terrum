@@ -171,7 +171,7 @@ internal sealed partial class Binder
                 {
                     var parameter = function.Variables[index];
                     parameters.Add(new Parameter(parameter.Name, parameter.Type, default, parameter.IsOut,
-                        parameter.IsInit));
+                        parameter.IsInit, parameter.IsImplicitRef));
                 }
                 _signatures.Add(new Signature(function.Name, function.ReturnType, parameters.ToImmutable(),
                     null, null, _trees[0], function.DeclaringStruct, function.IsConstructor,
@@ -527,9 +527,13 @@ internal sealed partial class Binder
             foreach (var parameter in signature.Parameters)
             {
                 var slot = AddVariable(parameter.Name, parameter.Type, parameter.IsOut, parameter.Span);
-                if (parameter.IsOut)
+                if (parameter.IsOut || parameter.IsImplicitRef)
                 {
-                    _variables[slot] = _variables[slot] with { IsOut = true, IsInit = parameter.IsInit };
+                    _variables[slot] = _variables[slot] with {
+                        IsOut = parameter.IsOut,
+                        IsInit = parameter.IsInit,
+                        IsImplicitRef = parameter.IsImplicitRef,
+                    };
                 }
             }
 
@@ -1690,12 +1694,22 @@ internal sealed partial class Binder
                 SyntaxTokenElement { Token.Kind: TokenKind.RefKeyword },
                 SyntaxTokenElement { Token.Kind: TokenKind.Less }, SyntaxNode,
                 SyntaxTokenElement { Token.Kind: TokenKind.Greater }, SyntaxTokenElement];
+            var isImplicitRef = parameter.Children is [SyntaxTokenElement { Token.Text: "implicit" },
+                SyntaxTokenElement { Token.Kind: TokenKind.RefKeyword },
+                SyntaxTokenElement { Token.Kind: TokenKind.Less }, SyntaxNode,
+                SyntaxTokenElement { Token.Kind: TokenKind.Greater }, SyntaxTokenElement];
             var isOut = parameter.Children.Length == 3
                 && parameter.Children[0] is SyntaxTokenElement passing
                 && passing.Token.Kind == TokenKind.OutKeyword;
-            if (parameter.Children.Length != 2 && !isOut && !isInit)
+            if (parameter.Children.Length != 2 && !isOut && !isInit && !isImplicitRef)
             {
                 Report("TRM3001", "Passing modes are not supported.", parameter.Span);
+            }
+            if (isImplicitRef && (!IsScalarPrimitiveType(type) || isExternal || isConstEval))
+            {
+                Report("TRM3011",
+                    "The provisional implicit ref implementation requires a supported scalar source parameter.",
+                    parameter.Span);
             }
             if (isOut && returnType != PrimitiveType.Bool
                 && type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
@@ -1732,7 +1746,7 @@ internal sealed partial class Binder
                 Report("TRM3004", $"Duplicate parameter '{token.Text}'.", token.Span);
             }
 
-            declared.Add(new Parameter(token.Name, type, token.Span, isOut || isInit, isInit));
+            declared.Add(new Parameter(token.Name, type, token.Span, isOut || isInit, isInit, isImplicitRef));
         }
         if (operatorDeclaration && operatorKey.Arity == 1
             && (containingType is null || !TryResolveStruct(Qualify(containingType), out var ownerType)
@@ -1770,6 +1784,7 @@ internal sealed partial class Binder
                     parameter.Name, parameter.Type, false, parameter.Span) {
                     IsOut = parameter.IsOut,
                     IsInit = parameter.IsInit,
+                    IsImplicitRef = parameter.IsImplicitRef,
                 })], boundParameters.Length, new BoundBlock([], declaration.Span), declaration.Span) {
                 IsExternal = true,
                 IsPrivate = isPrivate,
@@ -4414,6 +4429,7 @@ internal sealed partial class Binder
         var bound = ImmutableArray.CreateBuilder<BoundExpression>();
         ImmutableArray<int>.Builder? argumentParameterIndices = hasNamedArguments
             ? ImmutableArray.CreateBuilder<int>() : null;
+        ImmutableArray<int>.Builder? implicitReferenceTemporaries = null;
         var receiverCount = 0;
         if (receiver is not null && signature is not null)
         {
@@ -4519,6 +4535,18 @@ internal sealed partial class Binder
             }
             var expectedParameter = signature is not null && position < signature.Parameters.Length
                 ? signature.Parameters[position] : null;
+            if (expectedParameter?.IsImplicitRef == true && implicitReferenceTemporaries is null)
+            {
+                implicitReferenceTemporaries = ImmutableArray.CreateBuilder<int>();
+                for (var previous = 0; previous < bound.Count; previous++)
+                {
+                    implicitReferenceTemporaries.Add(-1);
+                }
+            }
+            if (implicitReferenceTemporaries is not null)
+            {
+                implicitReferenceTemporaries.Add(-1);
+            }
             if (expectedParameter is not null && position >= 0 && assignedParameters is not null)
             {
                 if (assignedParameters[position] && argumentName is null)
@@ -4594,7 +4622,52 @@ internal sealed partial class Binder
             }
 
             var expected = expectedParameter?.Type;
-            bound.Add(BindExpression(value, expected));
+            if (expectedParameter?.IsImplicitRef == true)
+            {
+                var reference = BindExpression(value, expected);
+                if (!IsScalarPrimitiveType(reference.Type))
+                {
+                    Report("TRM3011",
+                        "The provisional implicit ref implementation requires a supported scalar place or value.",
+                        argument.Span);
+                    bound.Add(ErrorExpression(argument.Span));
+                }
+                else if (reference is BoundRead read)
+                {
+                    if (_constLocals.Contains(read.Variable))
+                    {
+                        Report("TRM3011",
+                            "The provisional implicit ref implementation cannot borrow compile-time constant storage.",
+                            argument.Span);
+                        bound.Add(ErrorExpression(argument.Span));
+                    }
+                    else
+                    {
+                        bound.Add(reference);
+                    }
+                }
+                else if (reference is BoundFieldRead or BoundBufferRead or BoundViewRead)
+                {
+                    Report("TRM3011",
+                        "The provisional implicit ref implementation cannot borrow field or indexed places.",
+                        argument.Span);
+                    bound.Add(ErrorExpression(argument.Span));
+                }
+                else
+                {
+                    var temporary = AddImplicitReferenceTemporary(reference.Type, argument.Span);
+                    bound.Add(reference);
+                    if (implicitReferenceTemporaries is null)
+                    {
+                        throw new InvalidOperationException("An implicit-reference argument requires call metadata.");
+                    }
+                    implicitReferenceTemporaries[^1] = temporary;
+                }
+            }
+            else
+            {
+                bound.Add(BindExpression(value, expected));
+            }
             argumentParameterIndices?.Add(position + receiverCount);
         }
 
@@ -4628,6 +4701,7 @@ internal sealed partial class Binder
             signature?.ReturnType ?? PrimitiveType.Int32, node.Span) {
             ArgumentParameterIndices = validNamedBinding && argumentParameterIndices is { } parameterIndices
                 ? parameterIndices.ToImmutable() : default,
+            ArgumentImplicitReferenceTemporaries = implicitReferenceTemporaries?.ToImmutable() ?? default,
             IsUnsafeAuthorized = signature is { RequiresUnsafeCaller: true } && _unsafeDepth != 0,
         };
     }
@@ -4732,12 +4806,12 @@ internal sealed partial class Binder
             && _signatures[getter].IsStatic && _signatures[getter].PropertyName == propertyName;
     }
 
-    private static bool IsScalarStaticGetterType(PrimitiveType type) =>
+    private static bool IsScalarPrimitiveType(PrimitiveType type) =>
         type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
 
     private bool IsSupportedStaticGetterType(PrimitiveType type) =>
-        IsScalarStaticGetterType(type) || (IsStruct(type) && !IsUnique(type));
+        IsScalarPrimitiveType(type) || (IsStruct(type) && !IsUnique(type));
 
     private BoundStructField GetField(PrimitiveType type, int field) => IsClass(type)
         ? _classes[ManagedClassTypes.ClassIndex(type)].Fields[field]
@@ -5173,6 +5247,15 @@ internal sealed partial class Binder
         return slot;
     }
 
+    private int AddImplicitReferenceTemporary(PrimitiveType type, TextSpan span)
+    {
+        var slot = _variables.Count;
+        _variables.Add(new BoundVariable($"<implicit-ref-temp-{slot}>", type, false, span) {
+            IsImplicitReferenceTemporary = true,
+        });
+        return slot;
+    }
+
     private bool TryFindVariable(string name, out int slot)
     {
         for (var index = _scopes.Count - 1; index >= 0; index--)
@@ -5292,7 +5375,8 @@ internal sealed partial class Binder
         (_sourceDiagnostics ??= []).Add(new SourceDiagnostic(tree, diagnostic));
     }
 
-    private sealed record Parameter(string Name, PrimitiveType Type, TextSpan Span, bool IsOut, bool IsInit = false);
+    private sealed record Parameter(string Name, PrimitiveType Type, TextSpan Span, bool IsOut, bool IsInit = false,
+        bool IsImplicitRef = false);
 
     private sealed record Signature(string Name, PrimitiveType ReturnType, ImmutableArray<Parameter> Parameters,
         SyntaxNode? Body, SyntaxNode? Declaration, SyntaxTree Tree, string? StructName, bool IsConstructor, bool IsPrivate,
