@@ -189,7 +189,7 @@ public sealed class WideCandidateTests
         }
         finally
         {
-            File.Delete(image);
+            await TestFileCleanup.DeleteWithRetryAsync(image).ConfigureAwait(true);
         }
     }
 

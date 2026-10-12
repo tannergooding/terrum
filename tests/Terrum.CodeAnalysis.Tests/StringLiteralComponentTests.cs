@@ -820,7 +820,7 @@ public sealed class StringLiteralComponentTests
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 
