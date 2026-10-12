@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Xunit;
@@ -56,6 +57,409 @@ public sealed class StaticProofTests
         var main = Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions);
         Assert.DoesNotContain(main.Body.Statements,
             statement => statement.GetType().Name.Contains("Static", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void StaticRequireUsesExactLocalPredicatesOnConditionalEdges()
+    {
+        const string Source = """
+            int32 Verify(int32 input) {
+                mut int32 value = input;
+                mut bool enabled = true;
+                if (value > 0) {
+                    static require value > 0;
+                } else {
+                    static require value <= 0;
+                }
+                if (value > 0) {
+                    static require value > 0;
+                } else if (value == 0) {
+                    static require value == 0;
+                } else if (value < 0) {
+                    static require value < 0;
+                }
+                if (0 < value) {
+                    static require value > 0;
+                }
+                if (value != 1) {
+                    static require value != 1;
+                } else {
+                    static require value == 1;
+                }
+                if (value > 0 && (value < 10 && enabled)) {
+                    static require value > 0;
+                    static require value < 10;
+                    static require enabled;
+                    static require value > 0 && (value < 10 && enabled);
+                }
+                if (value <= 0 || value >= 10) {
+                    int32 ignored = 0;
+                } else {
+                    static require value > 0;
+                    static require value < 10;
+                }
+                if (enabled) {
+                    static require enabled;
+                } else {
+                    static require !enabled;
+                }
+                return 42;
+            }
+            int32 Main() { return Verify(1); }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Fact]
+    public void StaticRequireUsesKnownOperandsToDisambiguateShortCircuitEdges()
+    {
+        const string Source = """
+            int32 LeftKnown(int32 input) {
+                mut int32 value = input;
+                mut bool enabled = false;
+                if (value > 0) {
+                    if (value > 0 && enabled) { } else {
+                        static require !enabled;
+                    }
+                }
+                return 42;
+            }
+            int32 RightKnown(int32 input) {
+                mut int32 value = input;
+                mut bool enabled = false;
+                if (enabled) {
+                    if (value > 0 && enabled) { } else {
+                        static require value <= 0;
+                    }
+                }
+                return 42;
+            }
+            int32 OrLeftKnown(int32 input) {
+                mut int32 value = input;
+                mut bool enabled = false;
+                if (enabled) {
+                    if (!enabled || value > 0) {
+                        static require value > 0;
+                    }
+                }
+                return 42;
+            }
+            int32 OrRightKnown(int32 input) {
+                mut int32 value = input;
+                mut bool enabled = false;
+                if (value <= 0) {
+                    if (enabled || value > 0) {
+                        static require enabled;
+                    }
+                }
+                return 42;
+            }
+            int32 Main() {
+                return LeftKnown(1) + RightKnown(1) + OrLeftKnown(1) + OrRightKnown(1);
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void StaticRequireRefinesRecursiveShortCircuitOperands(NativeRuntimePolicy policy)
+    {
+        const string Source = """
+            int32 AndCompoundLeft(int32 input) {
+                mut int32 value = input;
+                mut bool enabled = true;
+                if (value > 0 && enabled) {
+                    if ((value > 0 && enabled) && value < 10) { }
+                    else { static require value >= 10; }
+                }
+                return 42;
+            }
+            int32 AndCompoundRight(int32 input) {
+                mut int32 value = input;
+                mut bool enabled = true;
+                if (value > 0 && enabled) {
+                    if (value < 10 && (value > 0 && enabled)) { }
+                    else { static require value >= 10; }
+                }
+                return 42;
+            }
+            int32 OrCompoundLeft(int32 input) {
+                mut int32 value = input;
+                mut bool enabled = false;
+                if (value <= 0 && !enabled) {
+                    if ((value > 0 || enabled) || value < 10) {
+                        static require value < 10;
+                    }
+                }
+                return 42;
+            }
+            int32 OrCompoundRight(int32 input) {
+                mut int32 value = input;
+                mut bool enabled = false;
+                if (value <= 0 && !enabled) {
+                    if (value < 10 || (value > 0 || enabled)) {
+                        static require value < 10;
+                    }
+                }
+                return 42;
+            }
+            int32 NestedComparisons(int32 input) {
+                mut int32 value = input;
+                if (value > 0 && value < 10) {
+                    if ((value > 0 && value < 10) && value > 5) { }
+                    else { static require value <= 5; }
+                }
+                return 42;
+            }
+            int32 Main() {
+                return AndCompoundLeft(10) + AndCompoundRight(10)
+                    + OrCompoundLeft(-1) + OrCompoundRight(-1) + NestedComparisons(3);
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source), (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(210, NativeJit.Execute(program, policy));
+        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void StaticRequireUsesExactFloatingPredicatesWithoutOrderingComplements(NativeRuntimePolicy policy)
+    {
+        const string Source = """
+            int32 Verify32(float32 input) {
+                mut float32 value = input;
+                if (value == float32(0)) {
+                    static require value == float32(0);
+                } else {
+                    static require !(value == float32(0));
+                }
+                if (value != float32(0)) {
+                    static require value != float32(0);
+                } else {
+                    static require !(value != float32(0));
+                }
+                if (value < float32(0)) {
+                    static require value < float32(0);
+                } else {
+                    static require !(value < float32(0));
+                }
+                if (value <= float32(0)) {
+                    static require value <= float32(0);
+                } else {
+                    static require !(value <= float32(0));
+                }
+                if (value > float32(0)) {
+                    static require value > float32(0);
+                } else {
+                    static require !(value > float32(0));
+                }
+                if (value >= float32(0)) {
+                    static require value >= float32(0);
+                } else {
+                    static require !(value >= float32(0));
+                }
+                if (float32(0) < value) {
+                    static require value > float32(0);
+                } else {
+                    static require !(float32(0) < value);
+                }
+                return 42;
+            }
+            int32 Verify64(float64 input) {
+                mut float64 value = input;
+                if (value == float64(0)) {
+                    static require value == float64(0);
+                } else {
+                    static require !(value == float64(0));
+                }
+                if (value != float64(0)) {
+                    static require value != float64(0);
+                } else {
+                    static require !(value != float64(0));
+                }
+                if (value < float64(0)) {
+                    static require value < float64(0);
+                } else {
+                    static require !(value < float64(0));
+                }
+                if (value <= float64(0)) {
+                    static require value <= float64(0);
+                } else {
+                    static require !(value <= float64(0));
+                }
+                if (value > float64(0)) {
+                    static require value > float64(0);
+                } else {
+                    static require !(value > float64(0));
+                }
+                if (value >= float64(0)) {
+                    static require value >= float64(0);
+                } else {
+                    static require !(value >= float64(0));
+                }
+                if (float64(0) < value) {
+                    static require value > float64(0);
+                } else {
+                    static require !(float64(0) < value);
+                }
+                return 42;
+            }
+            int32 Main() {
+                return Verify32(float32(0) / float32(0))
+                    + Verify32(float32(0)) + Verify32(float32(1)) + Verify32(float32(-1))
+                    + Verify64(float64(0) / float64(0))
+                    + Verify64(float64(0)) + Verify64(float64(1)) + Verify64(float64(-1));
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source), (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(336, NativeJit.Execute(program, policy));
+        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+    }
+
+    [Fact]
+    public void StaticRequireDoesNotInferFloatOrderingComplements()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Verify(float32 input) {
+                mut float32 value = input;
+                if (value > float32(0)) { }
+                else { static require value <= float32(0); }
+                return 42;
+            }
+            int32 Main() { return Verify(float32(0) / float32(0)); }
+            """));
+
+        Assert.Contains(compilation.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3026"
+                && diagnostic.Message.Contains("not established", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void StaticRequireNormalizesReversedScalarComparisons()
+    {
+        const string Source = """
+            int32 Int32Cases(int32 input) {
+                mut int32 value = input;
+                if (1 < value) {
+                    static require value > 1;
+                } else {
+                    static require value <= 1;
+                }
+                if (1 <= value) {
+                    static require value >= 1;
+                } else {
+                    static require value < 1;
+                }
+                if (1 > value) {
+                    static require value < 1;
+                } else {
+                    static require value >= 1;
+                }
+                if (1 >= value) {
+                    static require value <= 1;
+                } else {
+                    static require value > 1;
+                }
+                return 0;
+            }
+            int32 Int64Cases(int64 input) {
+                mut int64 value = input;
+                if (1 < value) {
+                    static require value > 1;
+                } else {
+                    static require value <= 1;
+                }
+                return 0;
+            }
+            int32 UInt32Cases(uint32 input) {
+                mut uint32 value = input;
+                if (1 <= value) {
+                    static require value >= 1;
+                } else {
+                    static require value < 1;
+                }
+                return 0;
+            }
+            int32 UInt64Cases(uint64 input) {
+                mut uint64 value = input;
+                if (1 > value) {
+                    static require value < 1;
+                } else {
+                    static require value >= 1;
+                }
+                return 0;
+            }
+            int32 Char16Cases(char16 input) {
+                mut char16 value = input;
+                if (char16(1) >= value) {
+                    static require value <= char16(1);
+                } else {
+                    static require value > char16(1);
+                }
+                return 0;
+            }
+            int32 Main() { return 42; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Fact]
+    public void StaticRequireRejectsFloatingPointOrderingComplements()
+    {
+        const string Source = """
+            int32 Verify(float32 input) {
+                mut float32 value = input;
+                if (value > float32(0)) {
+                    static require value > float32(0);
+                } else {
+                    static require value <= float32(0);
+                }
+                return 0;
+            }
+            int32 Main() { return Verify(float32(0)); }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source));
+        Assert.Equal(1, compilation.Diagnostics.Length);
+        Assert.All(compilation.Diagnostics, diagnostic => Assert.Equal("TRM3026", diagnostic.Code));
+    }
+
+    [Theory]
+    [InlineData("if (value > 0) { static require value <= 0; }", "TRM3025")]
+    [InlineData("if (value > 0) {} static require value > 0;", "TRM3026")]
+    [InlineData("if (value > 0) { value = 0; static require value > 0; }", "TRM3026")]
+    [InlineData("if (input > 0) { static require input > 0; }", "TRM3026")]
+    [InlineData("Runtime(); if (value > 0) { static require value > 0; }", "TRM3026")]
+    [InlineData("if (value > 0) { Runtime(); static require value > 0; }", "TRM3026")]
+    [InlineData("if (NoThrowPredicate(value)) { static require value > 0; }", "TRM3026")]
+    [InlineData("if (value > 0 || value < 10) { static require value > 0; }", "TRM3026")]
+    [InlineData("if (value > 0 && value < 10) {} else { static require value <= 0; }", "TRM3026")]
+    [InlineData("if (value > 0 && value <= 0) { static require value > 0; }", "TRM3026")]
+    [InlineData("mut bool enabled = true; if (value > 0 && enabled) {} else { static require !enabled; }", "TRM3026")]
+    [InlineData("mut bool enabled = true; if (enabled || value > 0) { static require value > 0; }", "TRM3026")]
+    public void StaticRequireDoesNotUseContradictedOrUnstableFacts(string statements, string code)
+    {
+        var source = """
+            bool Runtime() { return true; }
+            [NoThrow] bool NoThrowPredicate(implicit ref<int32> value) { return value > 0; }
+            int32 Verify(int32 input) {
+                mut int32 value = input;
+                STATEMENTS
+                return 42;
+            }
+            int32 Main() { return Verify(1); }
+            """.Replace("STATEMENTS", statements, StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
     }
 
     [Theory]

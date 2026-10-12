@@ -23,6 +23,14 @@ internal sealed partial class Binder
     private sealed record BoundStaticProof(BoundExpression Condition, bool IsEnsure, TextSpan Span)
         : BoundStatement(Span);
 
+    private enum StaticProofPredicateKind {
+        Boolean, Equal, Less, LessEquals, FloatEqual, FloatNotEqual, FloatLess, FloatLessEquals,
+        FloatGreater, FloatGreaterEquals,
+    }
+
+    private readonly record struct StaticProofPredicate(StaticProofPredicateKind Kind, int Variable,
+        PrimitiveType ValueType, PrimitiveType ConstantType, long Constant);
+
     private static bool ConstEvalScalar(PrimitiveType type) =>
         type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Int64 or PrimitiveType.UInt64;
@@ -54,9 +62,11 @@ internal sealed partial class Binder
         {
             SetContext(_signatures[index].Tree);
             var locals = new Dictionary<int, BoundConstant>();
+            var canRefineLocalPredicates = true;
             functions[index] = functions[index] with {
                 Body = (BoundBlock)ResolveConstStatement(functions[index].Body, locals, functions,
-                    functions[index].Variables.Length),
+                    functions[index].Variables.Length, functions[index].ParameterCount, new(),
+                    ref canRefineLocalPredicates),
             };
         }
         return DiagnosticCount == 0;
@@ -149,7 +159,8 @@ internal sealed partial class Binder
     }
 
     private BoundStatement ResolveConstStatement(BoundStatement statement, Dictionary<int, BoundConstant> locals,
-        IReadOnlyList<BoundFunction> functions, int variableCount)
+        IReadOnlyList<BoundFunction> functions, int variableCount, int firstLocalVariable,
+        Dictionary<StaticProofPredicate, bool> facts, ref bool canRefineLocalPredicates)
     {
         switch (statement)
         {
@@ -158,7 +169,8 @@ internal sealed partial class Binder
                 var statements = ImmutableArray.CreateBuilder<BoundStatement>(block.Statements.Length);
                 foreach (var child in block.Statements)
                 {
-                    var resolved = ResolveConstStatement(child, locals, functions, variableCount);
+                    var resolved = ResolveConstStatement(child, locals, functions, variableCount,
+                        firstLocalVariable, facts, ref canRefineLocalPredicates);
                     if (child is not BoundStaticProof)
                     {
                         statements.Add(resolved);
@@ -171,7 +183,7 @@ internal sealed partial class Binder
                 var proofLocals = proof.IsEnsure ? new Dictionary<int, BoundConstant>() : locals;
                 var condition = ResolveConstExpression(proof.Condition, proofLocals, functions, variableCount);
                 var kind = proof.IsEnsure ? "Static ensure" : "Static require";
-                if (!CheckConstExpression(condition, out _))
+                if (!CheckConstExpression(condition, out _) && !IsStaticProofStableExpression(condition))
                 {
                     Report("TRM3027", $"{kind} cannot use unsupported effects or calls.", proof.Span);
                     return new BoundBlock([], proof.Span);
@@ -185,10 +197,29 @@ internal sealed partial class Binder
                     {
                         Report("TRM3025", $"{kind} evaluates to false.", proof.Span);
                     }
+                    else if (!proof.IsEnsure
+                        && canRefineLocalPredicates
+                        && TryGetStaticProofPredicate(condition, firstLocalVariable, out var predicate, out var truth))
+                    {
+                        facts[predicate] = truth;
+                    }
                 }
                 catch (ConstEvalFailure failure)
                 {
-                    Report("TRM3026", $"{kind} is not established: {failure.Message}", proof.Span);
+                    if (!proof.IsEnsure
+                        && canRefineLocalPredicates
+                        && IsStaticProofStableExpression(condition)
+                        && TryGetStaticProofTruth(condition, firstLocalVariable, facts, out var established))
+                    {
+                        if (!established)
+                        {
+                            Report("TRM3025", $"{kind} is proven false on this branch.", proof.Span);
+                        }
+                    }
+                    else
+                    {
+                        Report("TRM3026", $"{kind} is not established: {failure.Message}", proof.Span);
+                    }
                 }
                 return new BoundBlock([], proof.Span);
             }
@@ -197,6 +228,10 @@ internal sealed partial class Binder
                 var initializer = ResolveConstExpression(local.Initializer, locals, functions, variableCount);
                 if (!_constRequired.Contains(local))
                 {
+                    if (!IsStaticProofStableExpression(initializer))
+                    {
+                        InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
+                    }
                     return local with { Initializer = initializer };
                 }
                 try
@@ -213,77 +248,520 @@ internal sealed partial class Binder
                     return local;
                 }
             }
-            case BoundVacantLocal or BoundLifetimeEnd:
+            case BoundVacantLocal:
+                facts.Clear();
+                return statement;
+            case BoundLifetimeEnd:
+                InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
                 return statement;
             case BoundIf conditional:
-                return conditional with {
-                    Condition = ResolveConstExpression(conditional.Condition, locals, functions, variableCount),
-                    Then = ResolveConstStatement(conditional.Then, locals, functions, variableCount),
-                    Else = conditional.Else is null ? null
-                        : ResolveConstStatement(conditional.Else, locals, functions, variableCount),
-                };
+            {
+                var condition = ResolveConstExpression(conditional.Condition, locals, functions, variableCount);
+                if (!IsStaticProofStableExpression(condition))
+                {
+                    InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
+                }
+                var thenFacts = new Dictionary<StaticProofPredicate, bool>(facts);
+                var elseFacts = new Dictionary<StaticProofPredicate, bool>(facts);
+                var thenCanRefineLocalPredicates = canRefineLocalPredicates;
+                var elseCanRefineLocalPredicates = canRefineLocalPredicates;
+                if (thenCanRefineLocalPredicates)
+                {
+                    thenFacts = AddStaticProofBranchFacts(condition, true, firstLocalVariable, facts);
+                    elseFacts = AddStaticProofBranchFacts(condition, false, firstLocalVariable, facts);
+                }
+                var then = ResolveConstStatement(conditional.Then, locals, functions, variableCount,
+                    firstLocalVariable, thenFacts, ref thenCanRefineLocalPredicates);
+                var otherwise = conditional.Else is null ? null
+                    : ResolveConstStatement(conditional.Else, locals, functions, variableCount,
+                        firstLocalVariable, elseFacts, ref elseCanRefineLocalPredicates);
+                facts.Clear();
+                canRefineLocalPredicates = thenCanRefineLocalPredicates && elseCanRefineLocalPredicates;
+                if (canRefineLocalPredicates)
+                {
+                    foreach (var (factPredicate, established) in thenFacts)
+                    {
+                        if (elseFacts.TryGetValue(factPredicate, out var other) && other == established)
+                        {
+                            facts.Add(factPredicate, established);
+                        }
+                    }
+                }
+                return conditional with { Condition = condition, Then = then, Else = otherwise };
+            }
             case BoundWhile loop:
-                return loop with {
-                    Condition = ResolveConstExpression(loop.Condition, locals, functions, variableCount),
-                    Body = ResolveConstStatement(loop.Body, locals, functions, variableCount),
-                    Iterator = loop.Iterator is null ? null
-                        : ResolveConstStatement(loop.Iterator, locals, functions, variableCount),
-                };
+            {
+                facts.Clear();
+                var condition = ResolveConstExpression(loop.Condition, locals, functions, variableCount);
+                if (!IsStaticProofStableExpression(condition))
+                {
+                    InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
+                }
+                var body = ResolveConstStatement(loop.Body, locals, functions, variableCount,
+                    firstLocalVariable, new(), ref canRefineLocalPredicates);
+                var iterator = loop.Iterator is null ? null
+                    : ResolveConstStatement(loop.Iterator, locals, functions, variableCount,
+                        firstLocalVariable, new(), ref canRefineLocalPredicates);
+                facts.Clear();
+                return loop with { Condition = condition, Body = body, Iterator = iterator };
+            }
             case BoundTryFinally region:
-                return region with {
-                    Body = (BoundBlock)ResolveConstStatement(region.Body, locals, functions, variableCount),
-                    Finally = (BoundBlock)ResolveConstStatement(region.Finally, locals, functions, variableCount),
-                };
+            {
+                facts.Clear();
+                var body = (BoundBlock)ResolveConstStatement(region.Body, locals, functions, variableCount,
+                    firstLocalVariable, new(), ref canRefineLocalPredicates);
+                var finallyBlock = (BoundBlock)ResolveConstStatement(region.Finally, locals, functions,
+                    variableCount, firstLocalVariable, new(), ref canRefineLocalPredicates);
+                facts.Clear();
+                return region with { Body = body, Finally = finallyBlock };
+            }
             case BoundTryCatch region:
-                return region with {
-                    Body = (BoundBlock)ResolveConstStatement(region.Body, locals, functions, variableCount),
-                    Catch = (BoundBlock)ResolveConstStatement(region.Catch, locals, functions, variableCount),
-                    Finally = region.Finally is null ? null
-                        : (BoundBlock)ResolveConstStatement(region.Finally, locals, functions, variableCount),
-                };
+            {
+                facts.Clear();
+                var body = (BoundBlock)ResolveConstStatement(region.Body, locals, functions, variableCount,
+                    firstLocalVariable, new(), ref canRefineLocalPredicates);
+                var catchBlock = (BoundBlock)ResolveConstStatement(region.Catch, locals, functions,
+                    variableCount, firstLocalVariable, new(), ref canRefineLocalPredicates);
+                var finallyBlock = region.Finally is null ? null
+                    : (BoundBlock)ResolveConstStatement(region.Finally, locals, functions, variableCount,
+                        firstLocalVariable, new(), ref canRefineLocalPredicates);
+                facts.Clear();
+                return region with { Body = body, Catch = catchBlock, Finally = finallyBlock };
+            }
             case BoundUnsafe region:
-                return region with { Body = (BoundBlock)ResolveConstStatement(region.Body, locals, functions, variableCount) };
+            {
+                InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
+                var body = (BoundBlock)ResolveConstStatement(region.Body, locals, functions, variableCount,
+                    firstLocalVariable, new(), ref canRefineLocalPredicates);
+                facts.Clear();
+                return region with { Body = body };
+            }
             case BoundViewScope view:
-                return view with {
-                    Owner = ResolveConstExpression(view.Owner, locals, functions, variableCount),
-                    Start = ResolveConstExpression(view.Start, locals, functions, variableCount),
-                    Length = ResolveConstExpression(view.Length, locals, functions, variableCount),
-                    RangeEnd = view.RangeEnd is null ? null
-                        : ResolveConstExpression(view.RangeEnd, locals, functions, variableCount),
-                    Body = (BoundBlock)ResolveConstStatement(view.Body, locals, functions, variableCount),
-                };
+            {
+                var owner = ResolveConstExpression(view.Owner, locals, functions, variableCount);
+                var start = ResolveConstExpression(view.Start, locals, functions, variableCount);
+                var length = ResolveConstExpression(view.Length, locals, functions, variableCount);
+                var rangeEnd = view.RangeEnd is null ? null
+                    : ResolveConstExpression(view.RangeEnd, locals, functions, variableCount);
+                InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
+                var body = (BoundBlock)ResolveConstStatement(view.Body, locals, functions, variableCount,
+                    firstLocalVariable, new(), ref canRefineLocalPredicates);
+                facts.Clear();
+                return view with { Owner = owner, Start = start, Length = length, RangeEnd = rangeEnd, Body = body };
+            }
             case BoundAssignment assignment:
-                return assignment with { Value = ResolveConstExpression(assignment.Value, locals, functions, variableCount) };
+            {
+                facts.Clear();
+                var value = ResolveConstExpression(assignment.Value, locals, functions, variableCount);
+                if (!IsStaticProofStableExpression(value))
+                {
+                    InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
+                }
+                return assignment with { Value = value };
+            }
             case BoundOptionalAssignment optionalAssignment:
+                InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
                 return optionalAssignment with {
                     Place = ResolveConstExpression(optionalAssignment.Place, locals, functions, variableCount),
                     Value = ResolveConstExpression(optionalAssignment.Value, locals, functions, variableCount),
                 };
             case BoundFieldAssignment assignment:
+                InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
                 return assignment with { Value = ResolveConstExpression(assignment.Value, locals, functions, variableCount) };
             case BoundBufferAssignment assignment:
+                InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
                 return assignment with {
                     Index = ResolveConstExpression(assignment.Index, locals, functions, variableCount),
                     Value = ResolveConstExpression(assignment.Value, locals, functions, variableCount),
                 };
             case BoundViewSet set:
+                InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
                 return set with {
                     Index = ResolveConstExpression(set.Index, locals, functions, variableCount),
                     Value = ResolveConstExpression(set.Value, locals, functions, variableCount),
                 };
             case BoundExpressionStatement action:
-                return action with {
-                    Expression = ResolveConstExpression(action.Expression, locals, functions, variableCount),
-                };
+            {
+                var expression = ResolveConstExpression(action.Expression, locals, functions, variableCount);
+                if (!IsStaticProofStableExpression(expression))
+                {
+                    InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
+                }
+                return action with { Expression = expression };
+            }
             case BoundRequire requirement:
-                return requirement with {
-                    Condition = ResolveConstExpression(requirement.Condition, locals, functions, variableCount),
-                };
+            {
+                var condition = ResolveConstExpression(requirement.Condition, locals, functions, variableCount);
+                if (!IsStaticProofStableExpression(condition))
+                {
+                    InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
+                }
+                else
+                {
+                    facts.Clear();
+                }
+                return requirement with { Condition = condition };
+            }
             case BoundReturn { Value: BoundExpression value } result:
-                return result with { Value = ResolveConstExpression(value, locals, functions, variableCount) };
+            {
+                facts.Clear();
+                var resolved = ResolveConstExpression(value, locals, functions, variableCount);
+                if (!IsStaticProofStableExpression(resolved))
+                {
+                    InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
+                }
+                return result with { Value = resolved };
+            }
+            case BoundBreak or BoundContinue:
+                facts.Clear();
+                return statement;
             default:
+                InvalidateStaticProofFacts(facts, ref canRefineLocalPredicates);
                 return statement;
         }
+    }
+
+    private static void InvalidateStaticProofFacts(Dictionary<StaticProofPredicate, bool> facts,
+        ref bool canRefineLocalPredicates)
+    {
+        facts.Clear();
+        canRefineLocalPredicates = false;
+    }
+
+    private bool IsStaticProofStableExpression(BoundExpression expression)
+    {
+        if (!IsStaticProofScalar(expression.Type))
+        {
+            return false;
+        }
+        return expression switch {
+            BoundUnsafeExpression unsafeExpression => IsStaticProofStableExpression(unsafeExpression.Expression),
+            BoundRequiredConstant required => IsStaticProofStableExpression(required.Operand),
+            BoundConstant or BoundRead => true,
+            BoundUnary unary => IsStaticProofStableExpression(unary.Operand),
+            BoundBinary binary => IsStaticProofStableExpression(binary.Left)
+                && IsStaticProofStableExpression(binary.Right),
+            BoundConditional conditional => IsStaticProofStableExpression(conditional.Condition)
+                && IsStaticProofStableExpression(conditional.WhenTrue)
+                && IsStaticProofStableExpression(conditional.WhenFalse),
+            BoundCast cast => IsStaticProofStableExpression(cast.Operand),
+            BoundCall call when call.Function >= 0 && call.Function < _signatures.Count
+                && _signatures[call.Function].IsConstEval
+                => AreStaticProofStableArguments(call.Arguments),
+            _ => false,
+        };
+    }
+
+    private static bool IsStaticProofScalar(PrimitiveType type) =>
+        ConstEvalScalar(type) || type is PrimitiveType.Float32 or PrimitiveType.Float64;
+
+    private bool AreStaticProofStableArguments(ImmutableArray<BoundExpression> arguments)
+    {
+        foreach (var argument in arguments)
+        {
+            if (!IsStaticProofStableExpression(argument))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static Dictionary<StaticProofPredicate, bool> AddStaticProofBranchFacts(
+        BoundExpression expression, bool truth, int firstLocalVariable,
+        Dictionary<StaticProofPredicate, bool> inheritedFacts)
+    {
+        var additions = new Dictionary<StaticProofPredicate, bool>();
+        var knownFacts = new Dictionary<StaticProofPredicate, bool>(inheritedFacts);
+        if (!CollectStaticProofBranchFacts(
+                expression, truth, firstLocalVariable, additions, knownFacts))
+        {
+            return new Dictionary<StaticProofPredicate, bool>(inheritedFacts);
+        }
+        foreach (var (predicate, established) in additions)
+        {
+            if (inheritedFacts.TryGetValue(predicate, out var inherited) && inherited != established)
+            {
+                return new Dictionary<StaticProofPredicate, bool>(inheritedFacts);
+            }
+        }
+        var facts = new Dictionary<StaticProofPredicate, bool>(inheritedFacts);
+        foreach (var (predicate, established) in additions)
+        {
+            facts[predicate] = established;
+        }
+        return facts;
+    }
+
+    private static bool CollectStaticProofBranchFacts(BoundExpression expression, bool truth,
+        int firstLocalVariable, Dictionary<StaticProofPredicate, bool> facts,
+        Dictionary<StaticProofPredicate, bool> knownFacts)
+    {
+        if (expression is BoundUnsafeExpression unsafeExpression)
+        {
+            return CollectStaticProofBranchFacts(unsafeExpression.Expression, truth,
+                firstLocalVariable, facts, knownFacts);
+        }
+        if (expression is BoundUnary { Operator: TokenKind.Bang, Operand: var operand })
+        {
+            return CollectStaticProofBranchFacts(
+                operand, !truth, firstLocalVariable, facts, knownFacts);
+        }
+        if (expression is BoundBinary { Operator: TokenKind.AmpersandAmpersand } and && truth)
+        {
+            return CollectStaticProofBranchFacts(
+                    and.Left, true, firstLocalVariable, facts, knownFacts)
+                && CollectStaticProofBranchFacts(
+                    and.Right, true, firstLocalVariable, facts, knownFacts);
+        }
+        if (expression is BoundBinary { Operator: TokenKind.AmpersandAmpersand } andFalse)
+        {
+            var leftKnown = TryGetStaticProofTruth(
+                andFalse.Left, firstLocalVariable, knownFacts, out var leftTruth);
+            var rightKnown = TryGetStaticProofTruth(
+                andFalse.Right, firstLocalVariable, knownFacts, out var rightTruth);
+            if ((leftKnown && !leftTruth) || (rightKnown && !rightTruth))
+            {
+                return true;
+            }
+            if (leftKnown && rightKnown)
+            {
+                return false;
+            }
+            if (leftKnown)
+            {
+                return CollectStaticProofBranchFacts(
+                    andFalse.Right, false, firstLocalVariable, facts, knownFacts);
+            }
+            if (rightKnown)
+            {
+                return CollectStaticProofBranchFacts(
+                    andFalse.Left, false, firstLocalVariable, facts, knownFacts);
+            }
+        }
+        else if (expression is BoundBinary { Operator: TokenKind.PipePipe } or && !truth)
+        {
+            return CollectStaticProofBranchFacts(
+                    or.Left, false, firstLocalVariable, facts, knownFacts)
+                && CollectStaticProofBranchFacts(
+                    or.Right, false, firstLocalVariable, facts, knownFacts);
+        }
+        else if (expression is BoundBinary { Operator: TokenKind.PipePipe } orTrue)
+        {
+            var leftKnown = TryGetStaticProofTruth(
+                orTrue.Left, firstLocalVariable, knownFacts, out var leftTruth);
+            var rightKnown = TryGetStaticProofTruth(
+                orTrue.Right, firstLocalVariable, knownFacts, out var rightTruth);
+            if ((leftKnown && leftTruth) || (rightKnown && rightTruth))
+            {
+                return true;
+            }
+            if (leftKnown && rightKnown)
+            {
+                return false;
+            }
+            if (leftKnown)
+            {
+                return CollectStaticProofBranchFacts(
+                    orTrue.Right, true, firstLocalVariable, facts, knownFacts);
+            }
+            if (rightKnown)
+            {
+                return CollectStaticProofBranchFacts(
+                    orTrue.Left, true, firstLocalVariable, facts, knownFacts);
+            }
+        }
+        if (TryGetStaticProofPredicate(expression, firstLocalVariable, out var predicate, out var predicateTruth))
+        {
+            var established = truth ? predicateTruth : !predicateTruth;
+            if (knownFacts.TryGetValue(predicate, out var previous))
+            {
+                return previous == established;
+            }
+            facts.Add(predicate, established);
+            knownFacts.Add(predicate, established);
+        }
+        return true;
+    }
+
+    private static bool TryGetStaticProofTruth(BoundExpression expression, int firstLocalVariable,
+        Dictionary<StaticProofPredicate, bool> facts, out bool truth)
+    {
+        if (expression is BoundUnsafeExpression unsafeExpression)
+        {
+            return TryGetStaticProofTruth(unsafeExpression.Expression, firstLocalVariable, facts, out truth);
+        }
+        if (expression is BoundUnary { Operator: TokenKind.Bang, Operand: var operand })
+        {
+            if (TryGetStaticProofTruth(operand, firstLocalVariable, facts, out truth))
+            {
+                truth = !truth;
+                return true;
+            }
+        }
+        else if (expression is BoundBinary { Operator: TokenKind.AmpersandAmpersand } and)
+        {
+            var leftKnown = TryGetStaticProofTruth(and.Left, firstLocalVariable, facts, out var leftTruth);
+            var rightKnown = TryGetStaticProofTruth(and.Right, firstLocalVariable, facts, out var rightTruth);
+            if ((leftKnown && !leftTruth) || (rightKnown && !rightTruth))
+            {
+                truth = false;
+                return true;
+            }
+            if (leftKnown && rightKnown)
+            {
+                truth = true;
+                return true;
+            }
+        }
+        else if (expression is BoundBinary { Operator: TokenKind.PipePipe } or)
+        {
+            var leftKnown = TryGetStaticProofTruth(or.Left, firstLocalVariable, facts, out var leftTruth);
+            var rightKnown = TryGetStaticProofTruth(or.Right, firstLocalVariable, facts, out var rightTruth);
+            if ((leftKnown && leftTruth) || (rightKnown && rightTruth))
+            {
+                truth = true;
+                return true;
+            }
+            if (leftKnown && rightKnown)
+            {
+                truth = false;
+                return true;
+            }
+        }
+        else if (TryGetStaticProofPredicate(expression, firstLocalVariable,
+            out var predicate, out var predicateTruth)
+            && facts.TryGetValue(predicate, out var established))
+        {
+            truth = established == predicateTruth;
+            return true;
+        }
+        truth = false;
+        return false;
+    }
+
+    private static bool TryGetStaticProofPredicate(BoundExpression expression, int firstLocalVariable,
+        out StaticProofPredicate predicate, out bool truth)
+    {
+        if (expression is BoundUnsafeExpression unsafeExpression)
+        {
+            return TryGetStaticProofPredicate(unsafeExpression.Expression, firstLocalVariable,
+                out predicate, out truth);
+        }
+        if (expression is BoundUnary { Operator: TokenKind.Bang, Operand: var operand })
+        {
+            if (TryGetStaticProofPredicate(operand, firstLocalVariable, out predicate, out truth))
+            {
+                truth = !truth;
+                return true;
+            }
+        }
+        else if (expression is BoundRead { Type: PrimitiveType.Bool } booleanRead
+            && booleanRead.Variable >= firstLocalVariable)
+        {
+            predicate = new StaticProofPredicate(StaticProofPredicateKind.Boolean, booleanRead.Variable,
+                PrimitiveType.Bool, PrimitiveType.Bool, 0);
+            truth = true;
+            return true;
+        }
+        else if (expression is BoundBinary { Type: PrimitiveType.Bool } binary)
+        {
+            BoundRead read;
+            BoundConstant constant;
+            var operation = binary.Operator;
+            if (binary.Left is BoundRead leftRead && binary.Right is BoundConstant rightConstant)
+            {
+                read = leftRead;
+                constant = rightConstant;
+            }
+            else if (binary.Left is BoundConstant leftConstant && binary.Right is BoundRead rightRead)
+            {
+                read = rightRead;
+                constant = leftConstant;
+                if (operation == TokenKind.Less)
+                {
+                    operation = TokenKind.Greater;
+                }
+                else if (operation == TokenKind.LessEquals)
+                {
+                    operation = TokenKind.GreaterEquals;
+                }
+                else if (operation == TokenKind.Greater)
+                {
+                    operation = TokenKind.Less;
+                }
+                else if (operation == TokenKind.GreaterEquals)
+                {
+                    operation = TokenKind.LessEquals;
+                }
+            }
+            else
+            {
+                predicate = default;
+                truth = false;
+                return false;
+            }
+            if (read.Variable < firstLocalVariable || !IsStaticProofScalar(read.Type))
+            {
+                predicate = default;
+                truth = false;
+                return false;
+            }
+            if (read.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
+            {
+                if (constant.Type != read.Type)
+                {
+                    predicate = default;
+                    truth = false;
+                    return false;
+                }
+                StaticProofPredicateKind? floatingKind = operation switch {
+                    TokenKind.EqualsEquals => StaticProofPredicateKind.FloatEqual,
+                    TokenKind.BangEquals => StaticProofPredicateKind.FloatNotEqual,
+                    TokenKind.Less => StaticProofPredicateKind.FloatLess,
+                    TokenKind.LessEquals => StaticProofPredicateKind.FloatLessEquals,
+                    TokenKind.Greater => StaticProofPredicateKind.FloatGreater,
+                    TokenKind.GreaterEquals => StaticProofPredicateKind.FloatGreaterEquals,
+                    _ => null,
+                };
+                if (floatingKind is not { } floatingPredicateKind)
+                {
+                    predicate = default;
+                    truth = false;
+                    return false;
+                }
+                predicate = new StaticProofPredicate(floatingPredicateKind, read.Variable, read.Type,
+                    constant.Type, constant.Value);
+                truth = true;
+                return true;
+            }
+            StaticProofPredicateKind kind;
+            if (operation is TokenKind.EqualsEquals or TokenKind.BangEquals)
+            {
+                kind = StaticProofPredicateKind.Equal;
+            }
+            else if (operation is TokenKind.Less or TokenKind.GreaterEquals)
+            {
+                kind = StaticProofPredicateKind.Less;
+            }
+            else if (operation is TokenKind.LessEquals or TokenKind.Greater)
+            {
+                kind = StaticProofPredicateKind.LessEquals;
+            }
+            else
+            {
+                predicate = default;
+                truth = false;
+                return false;
+            }
+            predicate = new StaticProofPredicate(kind, read.Variable, read.Type,
+                constant.Type, constant.Value);
+            truth = operation is TokenKind.EqualsEquals or TokenKind.Less or TokenKind.LessEquals;
+            return true;
+        }
+        predicate = default;
+        truth = false;
+        return false;
     }
 
     private BoundExpression ResolveConstExpression(BoundExpression expression, Dictionary<int, BoundConstant> locals,

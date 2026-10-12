@@ -1,59 +1,42 @@
-# Static proof and constant-evaluation specification proposal
+# Static proof and constant-evaluation follow-up
 
-> [!IMPORTANT]
-> The v1 core is accepted and specified in
-> [proof and constant execution](../specs/language/proof-and-constant-evaluation.md).
-> Remaining extensions below are not additional admission or implementation promises.
-> Cross-cutting call/phase boundaries remain in
-> [language contracts](../specs/language-contracts.md#4-a-reproducible-proof-and-evaluation-foundation);
-> current hosted support is tracked separately in the
-> [implementation reference](../implementation.md#hosted-compiler).
+**Status: the portable proof floor, deterministic constant execution, effect
+boundaries and default resource envelopes are accepted. Remaining physical
+records, intrinsic registrations and beyond-floor extensions are not
+admission or implementation promises.**
 
-## Portable proof floor
+## Accepted contracts
 
-The accepted [fact and transfer catalog](../specs/language/proof-and-constant-evaluation.md#scalar-proof-facts)
-and [accounting](../specs/language/proof-and-constant-evaluation.md#proof-outcomes-and-accounting)
-cover local constants/Boolean relationships, integer bounds/exclusions,
-branches/joins, conservative loop reset and invalidation. Mandatory
-initialization/pattern flow is separate from optional numeric theorems.
+The canonical
+[proof and constant-execution chapter](../specs/language/proof-and-constant-evaluation.md)
+defines scalar facts, predicate transfer, joins, conservative loop handling,
+invalidation, evaluator eligibility, deterministic accounting and the portable
+resource envelopes. The
+[published-predicate and pure-evaluation chapter](../specs/language/published-predicates-and-effects.md)
+defines input-state reads/effects, Pure/ConstEval forms, mode queries, NoAlias
+and declared guarantees. Those decisions are no longer proposals.
+
+The [specified conformance cases](../specs/conformance/source-proof-and-constant-evaluation.md)
+are requirements, not evidence that the current compiler passes them.
+[Hosted support](../implementation.md#hosted-compiler) remains a bounded
+implementation: exact local branch predicates and short-circuit facts, selected
+floating predicates, and a scalar evaluator with private 4,096-step/64-frame
+limits. These limits and exclusions do not redefine the accepted floor.
+
+## Remaining integration and extension work
+
+Bulk intrinsic and literal-parser registrations still need their concrete
+identities, admitted input transformations and exact resource recipes.
+A native method name or one cheap helper step cannot supply that contract.
+Persistent constant programs, target constant-value codecs and independently
+consumed predicate/effect/dependency records require complete physical
+representations under the
+[logical record requirements](../specs/representation/logical-records.md).
+No wire identifier or codec is assigned here.
+
 General relational solving, induction, private-call inference and
-alias-sensitive numerical extensions are not guaranteed. Any such extension
-needs sound rules and must not weaken source semantics.
-No additional tree-depth value, proof certificate or wire encoding is adopted.
-
-## Effect footprints and observations
-
-The accepted logical rules are in
-[published predicates and pure evaluation](../specs/language/published-predicates-and-effects.md).
-They define finite input-state read/effect records, selected Pure/ConstEval
-forms and mode queries, initialization results, published predicate admission,
-alias invalidation and immutable-data obligations. No `Stable` or read-scope
-modifier is required. Pure-form support is not evidence that two input-state
-observations are unchanged, and valid-input no-escaping-failure guarantees do
-not eliminate precondition or enclosing requirement failures.
-The accepted [local scalar invalidation boundary](../specs/language/proof-and-constant-evaluation.md#joins-loops-and-effects)
-resets exposed/captured mutable locals that an opaque call may affect, but
-preserves independent non-exposed scalar copies.
-The accepted no-argument [NoAlias parameter schema](../specs/language/published-predicates-and-effects.md#noalias-parameters)
-supplies invocation-wide checked separation without exclusive loans.
-General numerical summaries, finer region proofs and physical
-predicate/effect/constant records remain separate extension/admission work.
-
-## Deterministic evaluator and proposed budgets
-
-The accepted [constant domain](../specs/language/proof-and-constant-evaluation.md#constant-execution-domain),
-[semantic actions](../specs/language/proof-and-constant-evaluation.md#semantic-actions-and-normalization)
-and [portable envelope](../specs/language/proof-and-constant-evaluation.md#portable-resource-envelope)
-now define the initial evaluator. Eligibility is on the executed path;
-arithmetic NaNs have a constant-only deterministic policy. Existing private
-implementation limits do not satisfy or redefine that source guarantee.
-
-Bulk intrinsic/registration records still need their concrete identities,
-input transformations and exact resource recipes; a native method name
-does not supply them. Persistent constant programs, admitted target codecs
-and independently consumed dependency records remain separate metadata/ABI
-work, not implicit allocations from this proposal.
-Managed graphs, native resources and identity-bearing values need separate
-constant features. Sound proof extensions do not make those execution domains
-eligible. Wall-clock cancellation remains a tool failure, never an alternative
-proof/value result.
+alias-sensitive numeric analysis are sound optional extensions, not minimum
+floor guarantees. Managed graphs, native resources and identity-bearing
+constant values require separately admitted execution and representation
+features. Wall-clock cancellation remains a tooling failure, never an
+alternative proof or constant result.
