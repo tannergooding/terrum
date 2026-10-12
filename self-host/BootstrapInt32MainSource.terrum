@@ -1,0 +1,2785 @@
+using Terrum.CodeAnalysis.Numerics64;
+
+namespace Terrum.CodeAnalysis;
+
+bool TryEmitBootstrapInt32MainSource()
+{
+    if (Host.BootstrapCodeLength.Length != 1)
+    {
+        return false;
+    }
+
+    Host.BootstrapCodeLength[0] = 0;
+    if (Host.BootstrapCodeBytes.Length < 16
+        || Host.Diagnostics.Length < 1)
+    {
+        return false;
+    }
+
+    mut int32 tokenCount = Scan();
+    if (tokenCount < 1 || tokenCount > Host.Tokens.Length / 3
+        || Host.Diagnostics[0] != 0)
+    {
+        return false;
+    }
+    if (!TryNormalizeBootstrapSourceFileScopedNamespace(
+            tokenCount, init var normalizedTokenCount))
+    {
+        return false;
+    }
+    tokenCount = normalizedTokenCount;
+    if (BootstrapSourceKind(0, 8, tokenCount))
+    {
+        if (TryEmitBootstrapInt32MainSourceCallChain(tokenCount))
+        {
+            return true;
+        }
+        return TryEmitBootstrapInt32MainSourceHelperCall(tokenCount);
+    }
+    if (TryEmitBootstrapInt32MainSourceSizedLeaf(tokenCount))
+    {
+        return true;
+    }
+
+    mut int32 token = 0;
+    if (!BootstrapSourceKind(token, 7, tokenCount)
+        || !BootstrapSourceTypeName(token + 1, tokenCount)
+        || !BootstrapSourceMainName(token + 2, tokenCount)
+        || !BootstrapSourceKind(token + 3, 46, tokenCount)
+        || !BootstrapSourceKind(token + 4, 47, tokenCount))
+    {
+        return false;
+    }
+    token = token + 5;
+
+    mut bool blockBody = false;
+    mut bool localBody = false;
+    mut int32 localName = -1;
+    mut int32 secondLocalName = -1;
+    mut int32 secondLocalValue = 0;
+    if (BootstrapSourceKind(token, 82, tokenCount))
+    {
+        token = token + 1;
+    }
+    else if (BootstrapSourceKind(token, 48, tokenCount))
+    {
+        blockBody = true;
+        token = token + 1;
+        if (BootstrapSourceTypeName(token, tokenCount))
+        {
+            localBody = true;
+            token = token + 1;
+            localName = token;
+            if (!BootstrapSourceKind(localName, 2, tokenCount)
+                || BootstrapSourceMainName(localName, tokenCount))
+            {
+                return false;
+            }
+            token = token + 1;
+            if (!BootstrapSourceKind(token, 64, tokenCount))
+            {
+                return false;
+            }
+            token = token + 1;
+        }
+        else if (BootstrapSourceKind(token, 19, tokenCount))
+        {
+            token = token + 1;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    else
+    {
+        return false;
+    }
+
+    int32 expressionStart = token;
+    mut int32 value = 0;
+    mut int32 operation = 0;
+    mut int32 right = 0;
+    mut int32 firstLocalValue = 0;
+    if (TryParseBootstrapSourceExpression(tokenCount, expressionStart, -1, 0, -1, 0,
+            init var expressionEnd, init var initialValue,
+            init var initialOperation, init var initialRight)
+        && !BootstrapSourceExpressionOverflows(
+            initialValue, initialOperation, initialRight))
+    {
+        token = expressionEnd;
+        value = initialValue;
+        operation = initialOperation;
+        right = initialRight;
+        if (localBody)
+        {
+            firstLocalValue = BootstrapSourceExpressionValue(
+                initialValue, initialOperation, initialRight);
+        }
+    }
+    else
+    {
+        if (!TryParseBootstrapSourceCallArgument(tokenCount, expressionStart, 0,
+                init var foldedExpressionEnd, init var foldedExpressionValue))
+        {
+            return false;
+        }
+        token = foldedExpressionEnd;
+        value = foldedExpressionValue;
+        if (localBody)
+        {
+            firstLocalValue = foldedExpressionValue;
+        }
+    }
+
+    if (localBody)
+    {
+        mut int32 localValue = firstLocalValue;
+        if (!BootstrapSourceKind(token, 52, tokenCount))
+        {
+            if (!TryParseBootstrapSourceCallArgument(tokenCount, expressionStart, 0,
+                    init var reparsedFirstEnd, init var reparsedFirstValue)
+                || !BootstrapSourceKind(reparsedFirstEnd, 52, tokenCount))
+            {
+                return false;
+            }
+            token = reparsedFirstEnd;
+            value = reparsedFirstValue;
+            operation = 0;
+            right = 0;
+            localValue = reparsedFirstValue;
+        }
+        if (!BootstrapSourceKind(token, 52, tokenCount))
+        {
+            return false;
+        }
+        token = token + 1;
+        if (BootstrapSourceTypeName(token, tokenCount))
+        {
+            token = token + 1;
+            secondLocalName = token;
+            if (!BootstrapSourceKind(secondLocalName, 2, tokenCount)
+                || BootstrapSourceMainName(secondLocalName, tokenCount)
+                || BootstrapSourceSameIdentifier(localName, secondLocalName, tokenCount))
+            {
+                return false;
+            }
+            token = token + 1;
+            if (!BootstrapSourceKind(token, 64, tokenCount))
+            {
+                return false;
+            }
+            token = token + 1;
+            if (!TryParseBootstrapSourceMainLocalExpression(
+                    tokenCount, token, localName, localValue, -1, 0,
+                    1, false, init var secondEnd, init var secondInitialValue,
+                    init var secondInitialOperation, init var secondInitialRight,
+                    init var secondExpressionFolded))
+            {
+                return false;
+            }
+            token = secondEnd;
+            secondLocalValue = BootstrapSourceExpressionValue(
+                secondInitialValue, secondInitialOperation, secondInitialRight);
+            if (!BootstrapSourceKind(token, 52, tokenCount))
+            {
+                return false;
+            }
+            token = token + 1;
+        }
+        if (!BootstrapSourceKind(token, 19, tokenCount))
+        {
+            return false;
+        }
+        token = token + 1;
+        int32 returnStart = token;
+        mut int32 returnOperandStart = returnStart;
+        if (BootstrapSourceKind(returnStart, 58, tokenCount))
+        {
+            returnOperandStart = returnStart + 1;
+        }
+        int32 returnLocalCount = secondLocalName >= 0 ? 2 : 1;
+        if (!TryParseBootstrapSourceMainLocalExpression(
+                tokenCount, token, localName, localValue, secondLocalName, secondLocalValue,
+                returnLocalCount, true, init var returnEnd, init var returnValue,
+                init var returnOperation, init var returnRight,
+                init var returnExpressionFolded))
+        {
+            return false;
+        }
+        bool localIsLeftOperand =
+            BootstrapSourceSameIdentifier(localName, returnOperandStart, tokenCount);
+        token = returnEnd;
+        if (returnExpressionFolded || returnOperation != 0 || !localIsLeftOperand
+            || BootstrapSourceKind(returnStart, 58, tokenCount))
+        {
+            value = returnValue;
+            operation = returnOperation;
+            right = returnRight;
+        }
+    }
+    if (!localBody && !BootstrapSourceKind(token, 52, tokenCount))
+    {
+        if (!TryParseBootstrapSourceCallArgument(tokenCount, expressionStart, 0,
+                init var foldedExpressionEnd, init var foldedExpressionValue)
+            || !BootstrapSourceKind(foldedExpressionEnd, 52, tokenCount))
+        {
+            return false;
+        }
+        token = foldedExpressionEnd;
+        value = foldedExpressionValue;
+        operation = 0;
+        right = 0;
+    }
+    if (!BootstrapSourceKind(token, 52, tokenCount))
+    {
+        return false;
+    }
+    token = token + 1;
+    if (blockBody)
+    {
+        if (!BootstrapSourceKind(token, 49, tokenCount))
+        {
+            return false;
+        }
+        token = token + 1;
+    }
+    if (token != tokenCount - 1
+        || Host.Tokens[token * 3] != 0
+        || Host.Tokens[token * 3 + 1] != Host.Source.Length
+        || Host.Tokens[token * 3 + 2] != 0)
+    {
+        return false;
+    }
+
+    WriteBootstrapInt32MainLeaf(value, operation, right);
+    return true;
+}
+
+bool TryEmitBootstrapInt32MainSourceSizedLeaf(int32 tokenCount)
+{
+    mut int32 token = 0;
+    if (!BootstrapSourceKind(token, 7, tokenCount)
+        || !BootstrapSourceTypeName(token + 1, tokenCount)
+        || !BootstrapSourceMainName(token + 2, tokenCount)
+        || !BootstrapSourceKind(token + 3, 46, tokenCount)
+        || !BootstrapSourceKind(token + 4, 47, tokenCount))
+    {
+        return false;
+    }
+    token = token + 5;
+    if (!BootstrapSourceKind(token, 48, tokenCount))
+    {
+        return false;
+    }
+    token = token + 1;
+
+    mut int32 localCount = 0;
+    while (BootstrapSourceTypeName(token, tokenCount))
+    {
+        token = token + 1;
+        int32 localName = token;
+        if (!BootstrapSourceKind(localName, 2, tokenCount)
+            || BootstrapSourceMainName(localName, tokenCount)
+            || localCount >= Host.BootstrapMainLocalNames.Length
+            || localCount >= Host.BootstrapMainLocalValues.Length
+            || !BootstrapSourceKind(localName + 1, 64, tokenCount))
+        {
+            return false;
+        }
+        for (mut int32 previousLocal = 0;
+            previousLocal < localCount;
+            previousLocal = previousLocal + 1)
+        {
+            if (BootstrapSourceSameIdentifier(
+                Host.BootstrapMainLocalNames[previousLocal], localName, tokenCount))
+            {
+                return false;
+            }
+        }
+        if (!TryParseBootstrapSourceCallArgument(
+                tokenCount, localName + 2, localCount,
+                init var initializerEnd, init var localValue))
+        {
+            return false;
+        }
+        Host.BootstrapMainLocalNames[localCount] = localName;
+        Host.BootstrapMainLocalValues[localCount] = localValue;
+        localCount = localCount + 1;
+        token = initializerEnd;
+        if (!BootstrapSourceKind(token, 52, tokenCount))
+        {
+            return false;
+        }
+        token = token + 1;
+    }
+    if (localCount < 3 || !BootstrapSourceKind(token, 19, tokenCount))
+    {
+        return false;
+    }
+    token = token + 1;
+    int32 returnStart = token;
+    if (!TryParseBootstrapSourceCallArgument(
+            tokenCount, returnStart, localCount,
+            init var returnEnd, init var returnValue))
+    {
+        return false;
+    }
+    mut bool returnReferencesLocal = false;
+    for (mut int32 returnToken = returnStart;
+        returnToken < returnEnd;
+        returnToken = returnToken + 1)
+    {
+        for (mut int32 local = 0; local < localCount; local = local + 1)
+        {
+            if (BootstrapSourceSameIdentifier(
+                Host.BootstrapMainLocalNames[local], returnToken, tokenCount))
+            {
+                returnReferencesLocal = true;
+            }
+        }
+    }
+    if (!returnReferencesLocal)
+    {
+        return false;
+    }
+    token = returnEnd;
+    if (!BootstrapSourceKind(token, 52, tokenCount))
+    {
+        return false;
+    }
+    token = token + 1;
+    if (!BootstrapSourceKind(token, 49, tokenCount))
+    {
+        return false;
+    }
+    token = token + 1;
+    if (token != tokenCount - 1
+        || Host.Tokens[token * 3] != 0
+        || Host.Tokens[token * 3 + 1] != Host.Source.Length
+        || Host.Tokens[token * 3 + 2] != 0)
+    {
+        return false;
+    }
+
+    WriteBootstrapInt32MainLeaf(returnValue, 0, 0);
+    return true;
+}
+
+bool TryNormalizeBootstrapSourceFileScopedNamespace(
+    int32 tokenCount, init ref<int32> normalizedTokenCount)
+{
+    normalizedTokenCount = tokenCount;
+    if (!BootstrapSourceKind(0, 6, tokenCount))
+    {
+        return true;
+    }
+
+    mut int32 declarationStart = 1;
+    if (!BootstrapSourceKind(declarationStart, 2, tokenCount))
+    {
+        return false;
+    }
+    declarationStart = declarationStart + 1;
+    while (BootstrapSourceKind(declarationStart, 54, tokenCount))
+    {
+        declarationStart = declarationStart + 1;
+        if (!BootstrapSourceKind(declarationStart, 2, tokenCount))
+        {
+            return false;
+        }
+        declarationStart = declarationStart + 1;
+    }
+    if (!BootstrapSourceKind(declarationStart, 52, tokenCount))
+    {
+        return false;
+    }
+    declarationStart = declarationStart + 1;
+    if (declarationStart >= tokenCount - 1)
+    {
+        return false;
+    }
+
+    // Rebase token indexes for the existing parser; source spans stay absolute.
+    for (mut int32 sourceToken = declarationStart; sourceToken < tokenCount;
+        sourceToken = sourceToken + 1)
+    {
+        int32 sourceOffset = sourceToken * 3;
+        int32 destinationOffset = (sourceToken - declarationStart) * 3;
+        Host.Tokens[destinationOffset] = Host.Tokens[sourceOffset];
+        Host.Tokens[destinationOffset + 1] = Host.Tokens[sourceOffset + 1];
+        Host.Tokens[destinationOffset + 2] = Host.Tokens[sourceOffset + 2];
+    }
+    normalizedTokenCount = tokenCount - declarationStart;
+    return true;
+}
+
+bool TryEmitBootstrapInt32MainSourceCallChain(int32 tokenCount)
+{
+    if (!TryParseBootstrapSourceHelperHeader(
+            tokenCount, 0, -1, init var leafName, init var argumentCount,
+            init var leafBodyArrow)
+        || argumentCount < 1
+        || BootstrapSourceMainName(leafName, tokenCount))
+    {
+        return false;
+    }
+    for (mut int32 argumentIndex = 0; argumentIndex < argumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        int32 parameterName = 5 + argumentIndex * 3;
+        if (BootstrapSourceMainName(parameterName, tokenCount)
+            || BootstrapSourceSameIdentifier(leafName, parameterName, tokenCount))
+        {
+            return false;
+        }
+        for (mut int32 previousIndex = 0; previousIndex < argumentIndex;
+            previousIndex = previousIndex + 1)
+        {
+            if (BootstrapSourceSameIdentifier(
+                    parameterName, 5 + previousIndex * 3, tokenCount))
+            {
+                return false;
+            }
+        }
+    }
+    mut int32 leafToken = leafBodyArrow + 1;
+    mut bool helperSubtraction = false;
+    mut bool helperMultiplication = false;
+    if (argumentCount == 1)
+    {
+        if (!BootstrapSourceSameIdentifier(5, leafToken, tokenCount))
+        {
+            return false;
+        }
+        leafToken = leafToken + 1;
+    }
+    else if (argumentCount == 2)
+    {
+        bool addsInOrder =
+            BootstrapSourceSameIdentifier(5, leafToken, tokenCount)
+            && BootstrapSourceKind(leafToken + 1, 57, tokenCount)
+            && BootstrapSourceSameIdentifier(8, leafToken + 2, tokenCount);
+        bool addsInReverseOrder =
+            BootstrapSourceSameIdentifier(8, leafToken, tokenCount)
+            && BootstrapSourceKind(leafToken + 1, 57, tokenCount)
+            && BootstrapSourceSameIdentifier(5, leafToken + 2, tokenCount);
+        bool subtractsInOrder =
+            BootstrapSourceSameIdentifier(5, leafToken, tokenCount)
+            && BootstrapSourceKind(leafToken + 1, 58, tokenCount)
+            && BootstrapSourceSameIdentifier(8, leafToken + 2, tokenCount);
+        bool multipliesInOrder =
+            BootstrapSourceSameIdentifier(5, leafToken, tokenCount)
+            && BootstrapSourceKind(leafToken + 1, 59, tokenCount)
+            && BootstrapSourceSameIdentifier(8, leafToken + 2, tokenCount);
+        if (!addsInOrder && !addsInReverseOrder
+            && !subtractsInOrder && !multipliesInOrder)
+        {
+            return false;
+        }
+        helperSubtraction = subtractsInOrder;
+        helperMultiplication = multipliesInOrder;
+        leafToken = leafToken + 3;
+    }
+    else
+    {
+        for (mut int32 argumentIndex = 0; argumentIndex < argumentCount;
+            argumentIndex = argumentIndex + 1)
+        {
+            if (!BootstrapSourceSameIdentifier(
+                    5 + argumentIndex * 3, leafToken, tokenCount))
+            {
+                return false;
+            }
+            leafToken = leafToken + 1;
+            if (argumentIndex + 1 < argumentCount)
+            {
+                bool addsParameter = BootstrapSourceKind(leafToken, 57, tokenCount);
+                bool subtractsParameter = BootstrapSourceKind(leafToken, 58, tokenCount);
+                bool multipliesParameter = BootstrapSourceKind(leafToken, 59, tokenCount);
+                if (!addsParameter && !subtractsParameter && !multipliesParameter
+                    || argumentIndex > 0
+                        && (subtractsParameter != helperSubtraction
+                            || multipliesParameter != helperMultiplication))
+                {
+                    return false;
+                }
+                if (argumentIndex == 0)
+                {
+                    helperSubtraction = subtractsParameter;
+                    helperMultiplication = multipliesParameter;
+                }
+                leafToken = leafToken + 1;
+            }
+        }
+    }
+    if (!BootstrapSourceKind(leafToken, 52, tokenCount))
+    {
+        return false;
+    }
+    if (Host.BootstrapCodeBytes.Length < 4)
+    {
+        return false;
+    }
+    mut int32 forwardingDeclaration = leafToken + 1;
+    mut int32 forwardingCount = 0;
+    mut int32 mainCallTarget = leafName;
+    mut int32 token = forwardingDeclaration;
+    while (BootstrapSourceKind(forwardingDeclaration, 8, tokenCount))
+    {
+        if (!TryParseBootstrapSourceHelperHeader(
+                tokenCount, forwardingDeclaration, argumentCount,
+                init var forwardingName, init var forwardingArgumentCount,
+                init var forwardingBodyArrow)
+            || BootstrapSourceMainName(forwardingName, tokenCount)
+            || BootstrapSourceSameIdentifier(
+                leafName, forwardingName, tokenCount))
+        {
+            return false;
+        }
+        mut int32 previousDeclaration = leafToken + 1;
+        while (previousDeclaration < forwardingDeclaration)
+        {
+            if (!TryParseBootstrapSourceHelperHeader(
+                    tokenCount, previousDeclaration, argumentCount,
+                    init var previousName, init var previousArgumentCount,
+                    init var previousBodyArrow)
+                || previousArgumentCount != argumentCount
+                || BootstrapSourceSameIdentifier(
+                    previousName, forwardingName, tokenCount))
+            {
+                return false;
+            }
+            mut int32 previousBodyEnd = previousBodyArrow + 1;
+            while (previousBodyEnd < forwardingDeclaration
+                && !BootstrapSourceKind(previousBodyEnd, 52, tokenCount))
+            {
+                previousBodyEnd = previousBodyEnd + 1;
+            }
+            if (previousBodyEnd >= forwardingDeclaration)
+            {
+                return false;
+            }
+            previousDeclaration = previousBodyEnd + 1;
+        }
+        if (previousDeclaration != forwardingDeclaration)
+        {
+            return false;
+        }
+
+        for (mut int32 argumentIndex = 0;
+            argumentIndex < forwardingArgumentCount;
+            argumentIndex = argumentIndex + 1)
+        {
+            int32 forwardingParameter = forwardingDeclaration + 5 + argumentIndex * 3;
+            if (BootstrapSourceMainName(forwardingParameter, tokenCount)
+                || BootstrapSourceSameIdentifier(
+                    forwardingName, forwardingParameter, tokenCount)
+                || BootstrapSourceSameIdentifier(
+                    mainCallTarget, forwardingParameter, tokenCount))
+            {
+                return false;
+            }
+            for (mut int32 previousIndex = 0;
+                previousIndex < argumentIndex;
+                previousIndex = previousIndex + 1)
+            {
+                if (BootstrapSourceSameIdentifier(
+                        forwardingParameter,
+                        forwardingDeclaration + 5 + previousIndex * 3,
+                        tokenCount))
+                {
+                    return false;
+                }
+            }
+            if (!BootstrapSourceTypeName(
+                    forwardingDeclaration + 4 + argumentIndex * 3, tokenCount)
+                || !BootstrapSourceTypeName(
+                    4 + argumentIndex * 3, tokenCount)
+                || !BootstrapSourceKind(
+                    forwardingDeclaration + 6 + argumentIndex * 3,
+                    argumentIndex + 1 < argumentCount ? 53 : 47, tokenCount))
+            {
+                return false;
+            }
+        }
+
+        token = forwardingBodyArrow + 1;
+        if (!BootstrapSourceSameIdentifier(mainCallTarget, token, tokenCount)
+            || !BootstrapSourceKind(token + 1, 46, tokenCount))
+        {
+            return false;
+        }
+        token = token + 2;
+        for (mut int32 argumentIndex = 0;
+            argumentIndex < argumentCount;
+            argumentIndex = argumentIndex + 1)
+        {
+            if (!BootstrapSourceSameIdentifier(
+                    forwardingDeclaration + 5 + argumentIndex * 3,
+                    token, tokenCount))
+            {
+                return false;
+            }
+            token = token + 1;
+            if (argumentIndex + 1 < argumentCount)
+            {
+                if (!BootstrapSourceKind(token, 53, tokenCount))
+                {
+                    return false;
+                }
+                token = token + 1;
+            }
+        }
+        if (!BootstrapSourceKind(token, 47, tokenCount)
+            || !BootstrapSourceKind(token + 1, 52, tokenCount))
+        {
+            return false;
+        }
+        forwardingCount = forwardingCount + 1;
+        mainCallTarget = forwardingName;
+        forwardingDeclaration = token + 2;
+    }
+    token = forwardingDeclaration;
+    if (forwardingCount < 1
+        || !BootstrapSourceKind(token, 7, tokenCount)
+        || !BootstrapSourceTypeName(token + 1, tokenCount)
+        || !BootstrapSourceMainName(token + 2, tokenCount)
+        || !BootstrapSourceKind(token + 3, 46, tokenCount)
+        || !BootstrapSourceKind(token + 4, 47, tokenCount))
+    {
+        return false;
+    }
+    token = token + 5;
+
+    mut bool blockBody = false;
+    mut int32 mainLocalCount = 0;
+    if (BootstrapSourceKind(token, 82, tokenCount))
+    {
+        token = token + 1;
+    }
+    else if (BootstrapSourceKind(token, 48, tokenCount))
+    {
+        blockBody = true;
+        token = token + 1;
+        while (BootstrapSourceTypeName(token, tokenCount))
+        {
+            token = token + 1;
+            int32 localName = token;
+            if (!BootstrapSourceKind(localName, 2, tokenCount)
+                || BootstrapSourceMainName(localName, tokenCount)
+                || BootstrapSourceSameIdentifier(leafName, localName, tokenCount)
+                || BootstrapSourceSameIdentifier(mainCallTarget, localName, tokenCount)
+                || mainLocalCount >= Host.BootstrapMainLocalNames.Length
+                || mainLocalCount >= Host.BootstrapMainLocalValues.Length
+                || !BootstrapSourceKind(localName + 1, 64, tokenCount))
+            {
+                return false;
+            }
+            for (mut int32 previousLocal = 0;
+                previousLocal < mainLocalCount;
+                previousLocal = previousLocal + 1)
+            {
+                if (BootstrapSourceSameIdentifier(
+                    Host.BootstrapMainLocalNames[previousLocal], localName, tokenCount))
+                {
+                    return false;
+                }
+            }
+            if (!TryParseBootstrapSourceCallArgument(
+                    tokenCount, localName + 2, mainLocalCount,
+                    init var initializerEnd, init var localValue))
+            {
+                return false;
+            }
+            Host.BootstrapMainLocalNames[mainLocalCount] = localName;
+            Host.BootstrapMainLocalValues[mainLocalCount] = localValue;
+            mainLocalCount = mainLocalCount + 1;
+            token = initializerEnd;
+            if (!BootstrapSourceKind(token, 52, tokenCount))
+            {
+                return false;
+            }
+            token = token + 1;
+        }
+        if (!BootstrapSourceKind(token, 19, tokenCount))
+        {
+            return false;
+        }
+        token = token + 1;
+    }
+    else
+    {
+        return false;
+    }
+    if (!BootstrapSourceSameIdentifier(mainCallTarget, token, tokenCount)
+        || !BootstrapSourceKind(token + 1, 46, tokenCount))
+    {
+        return false;
+    }
+    token = token + 2;
+
+    if (!TryGetBootstrapInt32MainSourceStackArgumentCodeLength(
+            argumentCount, helperMultiplication, init var baseCodeLength))
+    {
+        return false;
+    }
+    mut int32 frameBaseSize = 0x20;
+    if (argumentCount > 4)
+    {
+        frameBaseSize = frameBaseSize + (argumentCount - 4) * 8;
+    }
+    int32 stackFrameSize = (frameBaseSize + 23) / 16 * 16 - 8;
+    bool largeFrame = stackFrameSize > 0x7F;
+    bool probeFrame = stackFrameSize >= 0x1000;
+    int32 prologLength = probeFrame ? 0x32 : largeFrame ? 7 : 4;
+    int32 epilogueLength = largeFrame ? 8 : 5;
+    mut int32 forwardingLength = prologLength + 5 + epilogueLength;
+    for (mut int32 argumentIndex = 4; argumentIndex < argumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        int32 incomingOffset = stackFrameSize + 0x28
+            + (argumentIndex - 4) * 8;
+        int32 outgoingOffset = 0x20 + (argumentIndex - 4) * 8;
+        forwardingLength = forwardingLength
+            + (incomingOffset > 0x7F ? 7 : 4)
+            + (outgoingOffset > 0x7F ? 7 : 4);
+    }
+    if (forwardingCount > (int32.MaxValue - baseCodeLength) / forwardingLength)
+    {
+        return false;
+    }
+    int32 codeLength = baseCodeLength + forwardingCount * forwardingLength;
+    if (codeLength > Host.BootstrapCodeBytes.Length)
+    {
+        return false;
+    }
+    int32 argumentScratchOffset = codeLength - argumentCount * 4;
+    mut int32 mainSetupEnd = probeFrame ? 0x32 : largeFrame ? 7 : 4;
+    for (mut int32 argumentIndex = 0; argumentIndex < argumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        if (argumentIndex < 2)
+        {
+            mainSetupEnd = mainSetupEnd + 5;
+        }
+        else if (argumentIndex < 4)
+        {
+            mainSetupEnd = mainSetupEnd + 6;
+        }
+        else
+        {
+            int32 callerStackOffset = 0x20 + (argumentIndex - 4) * 8;
+            mainSetupEnd = mainSetupEnd
+                + (callerStackOffset > 0x7F ? 11 : 8);
+        }
+    }
+    if (mainSetupEnd > argumentScratchOffset)
+    {
+        return false;
+    }
+    mut int32 helperResult = 0;
+    for (mut int32 argumentIndex = 0; argumentIndex < argumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        if (argumentIndex > 0)
+        {
+            if (!BootstrapSourceKind(token, 53, tokenCount))
+            {
+                return false;
+            }
+            token = token + 1;
+        }
+        if (!TryParseBootstrapSourceCallArgument(tokenCount, token,
+                mainLocalCount,
+                init var argumentEnd, init var foldedArgument))
+        {
+            return false;
+        }
+        if (argumentIndex == 0)
+        {
+            helperResult = foldedArgument;
+        }
+        else if (helperSubtraction)
+        {
+            if (BootstrapSourceSubtractionOverflows(helperResult, foldedArgument))
+            {
+                return false;
+            }
+            helperResult = helperResult - foldedArgument;
+        }
+        else if (helperMultiplication)
+        {
+            if (BootstrapSourceExpressionOverflows(helperResult, 59, foldedArgument))
+            {
+                return false;
+            }
+            helperResult = helperResult * foldedArgument;
+        }
+        else
+        {
+            if (BootstrapSourceAdditionOverflows(helperResult, foldedArgument))
+            {
+                return false;
+            }
+            helperResult = helperResult + foldedArgument;
+        }
+        WriteBootstrapInt32Immediate(
+            argumentScratchOffset + argumentIndex * 4, foldedArgument);
+        token = argumentEnd;
+    }
+    if (!BootstrapSourceKind(token, 47, tokenCount)
+        || !BootstrapSourceKind(token + 1, 52, tokenCount))
+    {
+        return false;
+    }
+    token = token + 2;
+    if (blockBody)
+    {
+        if (!BootstrapSourceKind(token, 49, tokenCount))
+        {
+            return false;
+        }
+        token = token + 1;
+    }
+    if (token != tokenCount - 1
+        || Host.Tokens[token * 3] != 0
+        || Host.Tokens[token * 3 + 1] != Host.Source.Length
+        || Host.Tokens[token * 3 + 2] != 0)
+    {
+        return false;
+    }
+
+    mut int32 mainSetupOffset = prologLength;
+    WriteBootstrapInt32MainStackFrameProlog(0, stackFrameSize);
+    for (mut int32 argumentIndex = 0; argumentIndex < argumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        int32 scratchOffset = argumentScratchOffset + argumentIndex * 4;
+        int32 argumentValue = Host.BootstrapCodeBytes[scratchOffset]
+            | (Host.BootstrapCodeBytes[scratchOffset + 1] << 8)
+            | (Host.BootstrapCodeBytes[scratchOffset + 2] << 16)
+            | (Host.BootstrapCodeBytes[scratchOffset + 3] << 24);
+        WriteBootstrapInt32MainCallArgument(
+            mainSetupOffset, argumentIndex, argumentValue);
+        mainSetupOffset = mainSetupOffset
+            + BootstrapInt32MainCallArgumentLength(argumentIndex);
+    }
+    Host.BootstrapCodeBytes[mainSetupOffset] = 0xE8;
+    WriteBootstrapInt32Immediate(mainSetupOffset + 1, epilogueLength);
+    WriteBootstrapInt32MainStackFrameEpilogue(
+        mainSetupOffset + 5, stackFrameSize);
+    mut int32 helperOffset = mainSetupOffset + 5 + epilogueLength;
+    for (mut int32 forwardingIndex = 0;
+        forwardingIndex < forwardingCount;
+        forwardingIndex = forwardingIndex + 1)
+    {
+        WriteBootstrapInt32MainStackFrameProlog(
+            helperOffset, stackFrameSize);
+        mut int32 copyOffset = helperOffset + prologLength;
+        for (mut int32 argumentIndex = 4; argumentIndex < argumentCount;
+            argumentIndex = argumentIndex + 1)
+        {
+            int32 incomingOffset = stackFrameSize + 0x28
+                + (argumentIndex - 4) * 8;
+            int32 outgoingOffset = 0x20 + (argumentIndex - 4) * 8;
+            copyOffset = WriteBootstrapForwardedStackArgument(
+                copyOffset, incomingOffset, outgoingOffset);
+        }
+        Host.BootstrapCodeBytes[copyOffset] = 0xE8;
+        WriteBootstrapInt32Immediate(copyOffset + 1, epilogueLength);
+        WriteBootstrapInt32MainStackFrameEpilogue(
+            copyOffset + 5, stackFrameSize);
+        helperOffset = copyOffset + 5 + epilogueLength;
+    }
+    if (!TryWriteBootstrapParameterizedHelperBody(
+            helperOffset, argumentCount, helperSubtraction,
+            helperMultiplication, init var emittedEnd)
+        || emittedEnd != codeLength)
+    {
+        return false;
+    }
+    Host.BootstrapCodeLength[0] = codeLength;
+    return true;
+}
+
+bool TryParseBootstrapSourceHelperHeader(int32 tokenCount, int32 declarationToken,
+    int32 expectedArgumentCount, init ref<int32> nameToken,
+    init ref<int32> argumentCount, init ref<int32> bodyArrow)
+{
+    bodyArrow = -1;
+    if (!BootstrapSourceKind(declarationToken, 8, tokenCount)
+        || !BootstrapSourceTypeName(declarationToken + 1, tokenCount)
+        || !BootstrapSourceKind(declarationToken + 2, 2, tokenCount)
+        || !BootstrapSourceKind(declarationToken + 3, 46, tokenCount))
+    {
+        return false;
+    }
+
+    nameToken = declarationToken + 2;
+    mut int32 count = 0;
+    mut int32 parameterToken = declarationToken + 4;
+    if (BootstrapSourceKind(parameterToken, 47, tokenCount))
+    {
+        bodyArrow = parameterToken + 1;
+    }
+    else
+    {
+        for (; parameterToken < tokenCount; parameterToken = parameterToken + 3)
+        {
+            if (!BootstrapSourceTypeName(parameterToken, tokenCount)
+                || !BootstrapSourceKind(parameterToken + 1, 2, tokenCount))
+            {
+                return false;
+            }
+            count = count + 1;
+            int32 separatorToken = parameterToken + 2;
+            if (BootstrapSourceKind(separatorToken, 47, tokenCount))
+            {
+                bodyArrow = separatorToken + 1;
+                break;
+            }
+            if (!BootstrapSourceKind(separatorToken, 53, tokenCount))
+            {
+                return false;
+            }
+        }
+    }
+    if (bodyArrow < 0
+        || expectedArgumentCount >= 0 && count != expectedArgumentCount)
+    {
+        return false;
+    }
+    argumentCount = count;
+    return BootstrapSourceKind(bodyArrow, 82, tokenCount);
+}
+
+int32 BootstrapInt32MainCallArgumentLength(int32 argumentIndex)
+{
+    if (argumentIndex < 2)
+    {
+        return 5;
+    }
+    if (argumentIndex < 4)
+    {
+        return 6;
+    }
+    return 0x20 + (argumentIndex - 4) * 8 > 0x7F ? 11 : 8;
+}
+
+void WriteBootstrapInt32MainCallArgument(
+    int32 offset, int32 argumentIndex, int32 argumentValue)
+{
+    mut int32 immediateOffset = offset + 1;
+    if (argumentIndex == 0)
+    {
+        Host.BootstrapCodeBytes[offset] = 0xB9;
+    }
+    else if (argumentIndex == 1)
+    {
+        Host.BootstrapCodeBytes[offset] = 0xBA;
+    }
+    else if (argumentIndex == 2)
+    {
+        Host.BootstrapCodeBytes[offset] = 0x41;
+        Host.BootstrapCodeBytes[offset + 1] = 0xB8;
+        immediateOffset = offset + 2;
+    }
+    else if (argumentIndex == 3)
+    {
+        Host.BootstrapCodeBytes[offset] = 0x41;
+        Host.BootstrapCodeBytes[offset + 1] = 0xB9;
+        immediateOffset = offset + 2;
+    }
+    else
+    {
+        int32 stackOffset = 0x20 + (argumentIndex - 4) * 8;
+        Host.BootstrapCodeBytes[offset] = 0xC7;
+        if (stackOffset > 0x7F)
+        {
+            Host.BootstrapCodeBytes[offset + 1] = 0x84;
+            Host.BootstrapCodeBytes[offset + 2] = 0x24;
+            WriteBootstrapInt32Immediate(offset + 3, stackOffset);
+            immediateOffset = offset + 7;
+        }
+        else
+        {
+            Host.BootstrapCodeBytes[offset + 1] = 0x44;
+            Host.BootstrapCodeBytes[offset + 2] = 0x24;
+            Host.BootstrapCodeBytes[offset + 3] = stackOffset;
+            immediateOffset = offset + 4;
+        }
+    }
+    WriteBootstrapInt32Immediate(immediateOffset, argumentValue);
+}
+
+void WriteBootstrapInt32MainStackFrameProlog(int32 offset, int32 stackFrameSize)
+{
+    if (stackFrameSize >= 0x1000)
+    {
+        Host.BootstrapCodeBytes[offset] = 0x49;
+        Host.BootstrapCodeBytes[offset + 1] = 0x89;
+        Host.BootstrapCodeBytes[offset + 2] = 0xE3;
+        Host.BootstrapCodeBytes[offset + 3] = 0x41;
+        Host.BootstrapCodeBytes[offset + 4] = 0xBA;
+        WriteBootstrapInt32Immediate(offset + 5, stackFrameSize);
+        Host.BootstrapCodeBytes[offset + 9] = 0x49;
+        Host.BootstrapCodeBytes[offset + 10] = 0x81;
+        Host.BootstrapCodeBytes[offset + 11] = 0xEB;
+        WriteBootstrapInt32Immediate(offset + 12, 0x1000);
+        Host.BootstrapCodeBytes[offset + 16] = 0x41;
+        Host.BootstrapCodeBytes[offset + 17] = 0xF6;
+        Host.BootstrapCodeBytes[offset + 18] = 0x03;
+        Host.BootstrapCodeBytes[offset + 19] = 0;
+        Host.BootstrapCodeBytes[offset + 20] = 0x41;
+        Host.BootstrapCodeBytes[offset + 21] = 0x81;
+        Host.BootstrapCodeBytes[offset + 22] = 0xEA;
+        WriteBootstrapInt32Immediate(offset + 23, 0x1000);
+        Host.BootstrapCodeBytes[offset + 27] = 0x41;
+        Host.BootstrapCodeBytes[offset + 28] = 0x81;
+        Host.BootstrapCodeBytes[offset + 29] = 0xFA;
+        WriteBootstrapInt32Immediate(offset + 30, 0x1000);
+        Host.BootstrapCodeBytes[offset + 34] = 0x73;
+        Host.BootstrapCodeBytes[offset + 35] = 0xE5;
+        Host.BootstrapCodeBytes[offset + 36] = 0x4D;
+        Host.BootstrapCodeBytes[offset + 37] = 0x29;
+        Host.BootstrapCodeBytes[offset + 38] = 0xD3;
+        Host.BootstrapCodeBytes[offset + 39] = 0x41;
+        Host.BootstrapCodeBytes[offset + 40] = 0xF6;
+        Host.BootstrapCodeBytes[offset + 41] = 0x03;
+        Host.BootstrapCodeBytes[offset + 42] = 0;
+        Host.BootstrapCodeBytes[offset + 43] = 0x48;
+        Host.BootstrapCodeBytes[offset + 44] = 0x81;
+        Host.BootstrapCodeBytes[offset + 45] = 0xEC;
+        WriteBootstrapInt32Immediate(offset + 46, stackFrameSize);
+    }
+    else
+    {
+        Host.BootstrapCodeBytes[offset] = 0x48;
+        if (stackFrameSize > 0x7F)
+        {
+            Host.BootstrapCodeBytes[offset + 1] = 0x81;
+            Host.BootstrapCodeBytes[offset + 2] = 0xEC;
+            WriteBootstrapInt32Immediate(offset + 3, stackFrameSize);
+        }
+        else
+        {
+            Host.BootstrapCodeBytes[offset + 1] = 0x83;
+            Host.BootstrapCodeBytes[offset + 2] = 0xEC;
+            Host.BootstrapCodeBytes[offset + 3] = stackFrameSize;
+        }
+    }
+}
+
+void WriteBootstrapInt32MainStackFrameEpilogue(int32 offset, int32 stackFrameSize)
+{
+    Host.BootstrapCodeBytes[offset] = 0x48;
+    if (stackFrameSize > 0x7F)
+    {
+        Host.BootstrapCodeBytes[offset + 1] = 0x81;
+        Host.BootstrapCodeBytes[offset + 2] = 0xC4;
+        WriteBootstrapInt32Immediate(offset + 3, stackFrameSize);
+        Host.BootstrapCodeBytes[offset + 7] = 0xC3;
+    }
+    else
+    {
+        Host.BootstrapCodeBytes[offset + 1] = 0x83;
+        Host.BootstrapCodeBytes[offset + 2] = 0xC4;
+        Host.BootstrapCodeBytes[offset + 3] = stackFrameSize;
+        Host.BootstrapCodeBytes[offset + 4] = 0xC3;
+    }
+}
+
+int32 WriteBootstrapForwardedStackArgument(
+    int32 offset, int32 incomingOffset, int32 outgoingOffset)
+{
+    mut int32 writeOffset = offset;
+    if (incomingOffset > 0x7F)
+    {
+        Host.BootstrapCodeBytes[writeOffset] = 0x8B;
+        Host.BootstrapCodeBytes[writeOffset + 1] = 0x84;
+        Host.BootstrapCodeBytes[writeOffset + 2] = 0x24;
+        WriteBootstrapInt32Immediate(writeOffset + 3, incomingOffset);
+        writeOffset = writeOffset + 7;
+    }
+    else
+    {
+        Host.BootstrapCodeBytes[writeOffset] = 0x8B;
+        Host.BootstrapCodeBytes[writeOffset + 1] = 0x44;
+        Host.BootstrapCodeBytes[writeOffset + 2] = 0x24;
+        Host.BootstrapCodeBytes[writeOffset + 3] = incomingOffset;
+        writeOffset = writeOffset + 4;
+    }
+    if (outgoingOffset > 0x7F)
+    {
+        Host.BootstrapCodeBytes[writeOffset] = 0x89;
+        Host.BootstrapCodeBytes[writeOffset + 1] = 0x84;
+        Host.BootstrapCodeBytes[writeOffset + 2] = 0x24;
+        WriteBootstrapInt32Immediate(writeOffset + 3, outgoingOffset);
+        writeOffset = writeOffset + 7;
+    }
+    else
+    {
+        Host.BootstrapCodeBytes[writeOffset] = 0x89;
+        Host.BootstrapCodeBytes[writeOffset + 1] = 0x44;
+        Host.BootstrapCodeBytes[writeOffset + 2] = 0x24;
+        Host.BootstrapCodeBytes[writeOffset + 3] = outgoingOffset;
+        writeOffset = writeOffset + 4;
+    }
+    return writeOffset;
+}
+
+bool TryEmitBootstrapInt32MainSourceHelperCall(int32 tokenCount)
+{
+    int32 helperName = 2;
+    if (!BootstrapSourceKind(0, 8, tokenCount)
+        || !BootstrapSourceTypeName(1, tokenCount)
+        || !BootstrapSourceKind(helperName, 2, tokenCount)
+        || BootstrapSourceMainName(helperName, tokenCount)
+        || !BootstrapSourceKind(3, 46, tokenCount))
+    {
+        return false;
+    }
+
+    mut int32 helperArgumentCount = 0;
+    mut int32 helperBodyArrow = 5;
+    if (!BootstrapSourceKind(4, 47, tokenCount))
+    {
+        for (mut int32 parameterToken = 4; parameterToken < tokenCount;
+            parameterToken = parameterToken + 3)
+        {
+            if (!BootstrapSourceTypeName(parameterToken, tokenCount)
+                || !BootstrapSourceKind(parameterToken + 1, 2, tokenCount))
+            {
+                return false;
+            }
+
+            helperArgumentCount = helperArgumentCount + 1;
+            int32 separatorToken = parameterToken + 2;
+            if (BootstrapSourceKind(separatorToken, 47, tokenCount))
+            {
+                helperBodyArrow = separatorToken + 1;
+                break;
+            }
+            if (!BootstrapSourceKind(separatorToken, 53, tokenCount))
+            {
+                return false;
+            }
+        }
+    }
+
+    if (helperArgumentCount > 0)
+    {
+        return TryEmitBootstrapInt32MainStackArgumentHelperCall(
+            tokenCount, helperName, helperArgumentCount, helperBodyArrow);
+    }
+    return TryEmitBootstrapInt32MainSourceHelperCallLegacy(tokenCount, helperArgumentCount);
+}
+
+bool TryEmitBootstrapInt32MainSourceHelperCallLegacy(
+    int32 tokenCount, int32 helperArgumentCount)
+{
+    int32 helperName = 2;
+    if (helperArgumentCount != 0
+        || !BootstrapSourceKind(0, 8, tokenCount)
+        || !BootstrapSourceTypeName(1, tokenCount)
+        || !BootstrapSourceKind(helperName, 2, tokenCount)
+        || BootstrapSourceMainName(helperName, tokenCount)
+        || !BootstrapSourceKind(3, 46, tokenCount)
+        || !BootstrapSourceKind(4, 47, tokenCount)
+        || !TryParseBootstrapParameterlessHelperBody(
+            tokenCount, helperName, init var helperBodyEnd, init var helperValue,
+            init var helperOperation, init var helperRight))
+    {
+        return false;
+    }
+
+    mut int32 token = helperBodyEnd + 1;
+    mut int32 forwardingCount = 0;
+    mut int32 mainCallTarget = helperName;
+    while (BootstrapSourceKind(token, 8, tokenCount))
+    {
+        if (!TryParseBootstrapSourceHelperHeader(
+                tokenCount, token, 0, init var forwardingName,
+                init var forwardingArgumentCount, init var forwardingBodyArrow)
+            || BootstrapSourceMainName(forwardingName, tokenCount)
+            || BootstrapSourceSameIdentifier(helperName, forwardingName, tokenCount))
+        {
+            return false;
+        }
+        // A validated parameterless forwarder has six header tokens and four body tokens.
+        for (mut int32 previousDeclaration = helperBodyEnd + 1;
+            previousDeclaration < token; previousDeclaration = previousDeclaration + 10)
+        {
+            if (BootstrapSourceSameIdentifier(
+                    previousDeclaration + 2, forwardingName, tokenCount))
+            {
+                return false;
+            }
+        }
+        int32 callToken = forwardingBodyArrow + 1;
+        if (!BootstrapSourceSameIdentifier(mainCallTarget, callToken, tokenCount)
+            || !BootstrapSourceKind(callToken + 1, 46, tokenCount)
+            || !BootstrapSourceKind(callToken + 2, 47, tokenCount)
+            || !BootstrapSourceKind(callToken + 3, 52, tokenCount))
+        {
+            return false;
+        }
+        forwardingCount = forwardingCount + 1;
+        mainCallTarget = forwardingName;
+        token = callToken + 4;
+    }
+    int32 mainDeclaration = token;
+    if (!BootstrapSourceKind(token, 7, tokenCount)
+        || !BootstrapSourceTypeName(token + 1, tokenCount)
+        || !BootstrapSourceMainName(token + 2, tokenCount)
+        || !BootstrapSourceKind(token + 3, 46, tokenCount)
+        || !BootstrapSourceKind(token + 4, 47, tokenCount))
+    {
+        return false;
+    }
+    token = token + 5;
+
+    mut bool blockBody = false;
+    mut int32 mainLocalCount = 0;
+    if (BootstrapSourceKind(token, 82, tokenCount))
+    {
+        token = token + 1;
+    }
+    else if (BootstrapSourceKind(token, 48, tokenCount))
+    {
+        blockBody = true;
+        token = token + 1;
+        while (BootstrapSourceTypeName(token, tokenCount))
+        {
+            token = token + 1;
+            int32 localName = token;
+            if (!BootstrapSourceKind(localName, 2, tokenCount)
+                || BootstrapSourceMainName(localName, tokenCount)
+                || BootstrapSourceSameIdentifier(helperName, localName, tokenCount)
+                || mainLocalCount >= Host.BootstrapMainLocalNames.Length
+                || mainLocalCount >= Host.BootstrapMainLocalValues.Length
+                || !BootstrapSourceKind(localName + 1, 64, tokenCount))
+            {
+                return false;
+            }
+            for (mut int32 forwardingDeclaration = helperBodyEnd + 1;
+                forwardingDeclaration < mainDeclaration;
+                forwardingDeclaration = forwardingDeclaration + 10)
+            {
+                if (BootstrapSourceSameIdentifier(
+                        forwardingDeclaration + 2, localName, tokenCount))
+                {
+                    return false;
+                }
+            }
+            for (mut int32 previousLocal = 0;
+                previousLocal < mainLocalCount;
+                previousLocal = previousLocal + 1)
+            {
+                if (BootstrapSourceSameIdentifier(
+                    Host.BootstrapMainLocalNames[previousLocal], localName, tokenCount))
+                {
+                    return false;
+                }
+            }
+            if (!TryParseBootstrapSourceCallArgument(
+                    tokenCount, localName + 2, mainLocalCount,
+                    init var localEnd, init var localValue))
+            {
+                return false;
+            }
+            Host.BootstrapMainLocalNames[mainLocalCount] = localName;
+            Host.BootstrapMainLocalValues[mainLocalCount] = localValue;
+            mainLocalCount = mainLocalCount + 1;
+            token = localEnd;
+            if (!BootstrapSourceKind(token, 52, tokenCount))
+            {
+                return false;
+            }
+            token = token + 1;
+        }
+        if (!BootstrapSourceKind(token, 19, tokenCount))
+        {
+            return false;
+        }
+        token = token + 1;
+    }
+    else
+    {
+        return false;
+    }
+
+    if (!BootstrapSourceSameIdentifier(mainCallTarget, token, tokenCount)
+        || !BootstrapSourceKind(token + 1, 46, tokenCount)
+        || !BootstrapSourceKind(token + 2, 47, tokenCount))
+    {
+        return false;
+    }
+    token = token + 3;
+    if (!BootstrapSourceKind(token, 52, tokenCount))
+    {
+        return false;
+    }
+    token = token + 1;
+    if (blockBody)
+    {
+        if (!BootstrapSourceKind(token, 49, tokenCount))
+        {
+            return false;
+        }
+        token = token + 1;
+    }
+    if (token != tokenCount - 1
+        || Host.Tokens[token * 3] != 0
+        || Host.Tokens[token * 3 + 1] != Host.Source.Length
+        || Host.Tokens[token * 3 + 2] != 0)
+    {
+        return false;
+    }
+
+    mut int32 helperLength = helperOperation == 0 ? 6 : 11;
+    // Each nonleaf uses the existing four-byte prolog, five-byte call and five-byte epilog.
+    if (forwardingCount > (int32.MaxValue - helperLength) / 14 - 1)
+    {
+        return false;
+    }
+    int32 helperOffset = (forwardingCount + 1) * 14;
+    if (helperOffset > Host.BootstrapCodeBytes.Length - helperLength)
+    {
+        return false;
+    }
+    WriteBootstrapInt32MainLeaf(helperValue, helperOperation, helperRight);
+    helperLength = Host.BootstrapCodeLength[0];
+    for (mut int32 index = helperLength - 1; index >= 0; index = index - 1)
+    {
+        Host.BootstrapCodeBytes[index + helperOffset] = Host.BootstrapCodeBytes[index];
+    }
+
+    for (mut int32 offset = 0; offset < helperOffset; offset = offset + 14)
+    {
+        WriteBootstrapInt32MainStackFrameProlog(offset, 0x28);
+        Host.BootstrapCodeBytes[offset + 4] = 0xE8;
+        WriteBootstrapInt32Immediate(offset + 5, 5);
+        WriteBootstrapInt32MainStackFrameEpilogue(offset + 9, 0x28);
+    }
+    Host.BootstrapCodeLength[0] = helperLength + helperOffset;
+    return true;
+}
+
+bool TryParseBootstrapParameterlessHelperBody(int32 tokenCount, int32 helperName,
+    init ref<int32> endToken, init ref<int32> value,
+    init ref<int32> operation, init ref<int32> right)
+{
+    if (BootstrapSourceKind(5, 82, tokenCount))
+    {
+        if (!TryParseBootstrapParameterlessHelperReturnExpression(
+                tokenCount, init var expressionEnd, init var expressionValue,
+                init var expressionOperation, init var expressionRight)
+            || !BootstrapSourceKind(expressionEnd, 52, tokenCount))
+        {
+            return false;
+        }
+        endToken = expressionEnd;
+        value = expressionValue;
+        operation = expressionOperation;
+        right = expressionRight;
+        return true;
+    }
+    if (!BootstrapSourceKind(5, 48, tokenCount))
+    {
+        return false;
+    }
+
+    mut int32 token = 6;
+    mut int32 localCount = 0;
+    while (BootstrapSourceTypeName(token, tokenCount))
+    {
+        token = token + 1;
+        int32 localName = token;
+        if (!BootstrapSourceKind(localName, 2, tokenCount)
+            || BootstrapSourceMainName(localName, tokenCount)
+            || BootstrapSourceSameIdentifier(helperName, localName, tokenCount)
+            || localCount >= Host.BootstrapMainLocalNames.Length
+            || localCount >= Host.BootstrapMainLocalValues.Length
+            || !BootstrapSourceKind(localName + 1, 64, tokenCount))
+        {
+            return false;
+        }
+        for (mut int32 previousLocal = 0;
+            previousLocal < localCount;
+            previousLocal = previousLocal + 1)
+        {
+            if (BootstrapSourceSameIdentifier(
+                    Host.BootstrapMainLocalNames[previousLocal], localName, tokenCount))
+            {
+                return false;
+            }
+        }
+        if (!TryParseBootstrapSourceCallArgument(
+                tokenCount, localName + 2, localCount,
+                init var initializerEnd, init var localValue))
+        {
+            return false;
+        }
+        Host.BootstrapMainLocalNames[localCount] = localName;
+        Host.BootstrapMainLocalValues[localCount] = localValue;
+        localCount = localCount + 1;
+        token = initializerEnd;
+        if (!BootstrapSourceKind(token, 52, tokenCount))
+        {
+            return false;
+        }
+        token = token + 1;
+    }
+
+    if (localCount < 1 || !BootstrapSourceKind(token, 19, tokenCount))
+    {
+        return false;
+    }
+    token = token + 1;
+    int32 returnStart = token;
+    if (!TryParseBootstrapSourceCallArgument(
+            tokenCount, returnStart, localCount,
+            init var returnEnd, init var returnValue))
+    {
+        return false;
+    }
+    mut bool returnReferencesLocal = false;
+    for (mut int32 returnToken = returnStart;
+        returnToken < returnEnd;
+        returnToken = returnToken + 1)
+    {
+        for (mut int32 local = 0; local < localCount; local = local + 1)
+        {
+            if (BootstrapSourceSameIdentifier(
+                    Host.BootstrapMainLocalNames[local], returnToken, tokenCount))
+            {
+                returnReferencesLocal = true;
+            }
+        }
+    }
+    if (!returnReferencesLocal)
+    {
+        return false;
+    }
+    token = returnEnd;
+    if (!BootstrapSourceKind(token, 52, tokenCount)
+        || !BootstrapSourceKind(token + 1, 49, tokenCount))
+    {
+        return false;
+    }
+
+    endToken = token + 1;
+    value = returnValue;
+    operation = 0;
+    right = 0;
+    return true;
+}
+
+bool TryParseBootstrapParameterlessHelperReturnExpression(int32 tokenCount,
+    init ref<int32> endToken, init ref<int32> value,
+    init ref<int32> operation, init ref<int32> right)
+{
+    if (TryParseBootstrapSourceExpression(tokenCount, 6, -1, 0, -1, 0,
+            init var simpleEnd, init var simpleValue,
+            init var simpleOperation, init var simpleRight)
+        && (simpleOperation == 0 || simpleOperation == 57 || simpleOperation == 58)
+        && !BootstrapSourceExpressionOverflows(simpleValue, simpleOperation, simpleRight)
+        && BootstrapSourceKind(simpleEnd, 52, tokenCount))
+    {
+        endToken = simpleEnd;
+        value = simpleValue;
+        operation = simpleOperation;
+        right = simpleRight;
+        return true;
+    }
+
+    if (!TryParseBootstrapSourceCallArgument(
+            tokenCount, 6, 0, init var foldedEnd, init var foldedValue)
+        || !BootstrapSourceKind(foldedEnd, 52, tokenCount))
+    {
+        return false;
+    }
+    endToken = foldedEnd;
+    value = foldedValue;
+    operation = 0;
+    right = 0;
+    return true;
+}
+
+bool TryEmitBootstrapInt32MainStackArgumentHelperCall(
+    int32 tokenCount, int32 helperName, int32 helperArgumentCount, int32 helperBodyArrow)
+{
+    if (!TryGetBootstrapInt32MainSourceStackArgumentCodeLength(
+            helperArgumentCount, false, init var codeLength))
+    {
+        return false;
+    }
+
+    if (codeLength > Host.BootstrapCodeBytes.Length
+        || helperBodyArrow != 4 + helperArgumentCount * 3
+        || !BootstrapSourceKind(helperBodyArrow, 82, tokenCount))
+    {
+        return false;
+    }
+
+    for (mut int32 argumentIndex = 0; argumentIndex < helperArgumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        int32 parameterType = 4 + argumentIndex * 3;
+        int32 parameterName = parameterType + 1;
+        if (!BootstrapSourceTypeName(parameterType, tokenCount)
+            || !BootstrapSourceKind(parameterName, 2, tokenCount)
+            || BootstrapSourceMainName(parameterName, tokenCount)
+            || BootstrapSourceSameIdentifier(helperName, parameterName, tokenCount))
+        {
+            return false;
+        }
+        for (mut int32 previousIndex = 0; previousIndex < argumentIndex;
+            previousIndex = previousIndex + 1)
+        {
+            if (BootstrapSourceSameIdentifier(
+                    parameterName, 5 + previousIndex * 3, tokenCount))
+            {
+                return false;
+            }
+        }
+
+        int32 separatorToken = parameterType + 2;
+        if (argumentIndex + 1 < helperArgumentCount
+            ? !BootstrapSourceKind(separatorToken, 53, tokenCount)
+            : !BootstrapSourceKind(separatorToken, 47, tokenCount))
+        {
+            return false;
+        }
+    }
+
+    mut int32 token = helperBodyArrow + 1;
+    mut bool helperSubtraction = false;
+    mut bool helperMultiplication = false;
+    if (helperArgumentCount == 2)
+    {
+        bool subtractsParametersInOrder =
+            BootstrapSourceSameIdentifier(5, token, tokenCount)
+            && BootstrapSourceKind(token + 1, 58, tokenCount)
+            && BootstrapSourceSameIdentifier(8, token + 2, tokenCount);
+        bool multipliesParametersInOrder =
+            BootstrapSourceSameIdentifier(5, token, tokenCount)
+            && BootstrapSourceKind(token + 1, 59, tokenCount)
+            && BootstrapSourceSameIdentifier(8, token + 2, tokenCount);
+        bool addsParametersInOrder =
+            BootstrapSourceSameIdentifier(5, token, tokenCount)
+            && BootstrapSourceKind(token + 1, 57, tokenCount)
+            && BootstrapSourceSameIdentifier(8, token + 2, tokenCount);
+        bool addsParametersInReverseOrder =
+            BootstrapSourceSameIdentifier(8, token, tokenCount)
+            && BootstrapSourceKind(token + 1, 57, tokenCount)
+            && BootstrapSourceSameIdentifier(5, token + 2, tokenCount);
+        if (!subtractsParametersInOrder
+            && !multipliesParametersInOrder
+            && !addsParametersInOrder && !addsParametersInReverseOrder)
+        {
+            return false;
+        }
+        helperSubtraction = subtractsParametersInOrder;
+        helperMultiplication = multipliesParametersInOrder;
+        token = token + 3;
+    }
+    else
+    {
+        for (mut int32 argumentIndex = 0; argumentIndex < helperArgumentCount;
+            argumentIndex = argumentIndex + 1)
+        {
+            if (!BootstrapSourceSameIdentifier(
+                    5 + argumentIndex * 3, token, tokenCount))
+            {
+                return false;
+            }
+            token = token + 1;
+            if (argumentIndex + 1 < helperArgumentCount)
+            {
+                bool addsParameter = BootstrapSourceKind(token, 57, tokenCount);
+                bool subtractsParameter = BootstrapSourceKind(token, 58, tokenCount);
+                bool multipliesParameter = BootstrapSourceKind(token, 59, tokenCount);
+                if (!addsParameter && !subtractsParameter && !multipliesParameter
+                    || argumentIndex > 0
+                        && (subtractsParameter != helperSubtraction
+                            || multipliesParameter != helperMultiplication))
+                {
+                    return false;
+                }
+                if (argumentIndex == 0)
+                {
+                    helperSubtraction = subtractsParameter;
+                    helperMultiplication = multipliesParameter;
+                }
+                token = token + 1;
+            }
+        }
+    }
+    if (!BootstrapSourceKind(token, 52, tokenCount))
+    {
+        return false;
+    }
+    token = token + 1;
+    if (!BootstrapSourceKind(token, 7, tokenCount)
+        || !BootstrapSourceTypeName(token + 1, tokenCount)
+        || !BootstrapSourceMainName(token + 2, tokenCount)
+        || !BootstrapSourceKind(token + 3, 46, tokenCount)
+        || !BootstrapSourceKind(token + 4, 47, tokenCount))
+    {
+        return false;
+    }
+    token = token + 5;
+
+    mut bool blockBody = false;
+    mut int32 mainLocalCount = 0;
+    if (BootstrapSourceKind(token, 82, tokenCount))
+    {
+        token = token + 1;
+    }
+    else if (BootstrapSourceKind(token, 48, tokenCount))
+    {
+        blockBody = true;
+        token = token + 1;
+        while (BootstrapSourceTypeName(token, tokenCount))
+        {
+            token = token + 1;
+            int32 localName = token;
+            if (!BootstrapSourceKind(localName, 2, tokenCount)
+                || BootstrapSourceMainName(localName, tokenCount)
+                || BootstrapSourceSameIdentifier(helperName, localName, tokenCount)
+                || mainLocalCount >= Host.BootstrapMainLocalNames.Length
+                || mainLocalCount >= Host.BootstrapMainLocalValues.Length
+                || !BootstrapSourceKind(localName + 1, 64, tokenCount))
+            {
+                return false;
+            }
+            for (mut int32 previousLocal = 0;
+                previousLocal < mainLocalCount;
+                previousLocal = previousLocal + 1)
+            {
+                if (BootstrapSourceSameIdentifier(
+                        Host.BootstrapMainLocalNames[previousLocal], localName, tokenCount))
+                {
+                    return false;
+                }
+            }
+            if (!TryParseBootstrapSourceCallArgument(
+                    tokenCount, localName + 2, mainLocalCount,
+                    init var localEnd, init var localValue))
+            {
+                return false;
+            }
+            Host.BootstrapMainLocalNames[mainLocalCount] = localName;
+            Host.BootstrapMainLocalValues[mainLocalCount] = localValue;
+            mainLocalCount = mainLocalCount + 1;
+            token = localEnd;
+            if (!BootstrapSourceKind(token, 52, tokenCount))
+            {
+                return false;
+            }
+            token = token + 1;
+        }
+        if (!BootstrapSourceKind(token, 19, tokenCount))
+        {
+            return false;
+        }
+        token = token + 1;
+    }
+    else
+    {
+        return false;
+    }
+
+    if (!BootstrapSourceSameIdentifier(helperName, token, tokenCount)
+        || !BootstrapSourceKind(token + 1, 46, tokenCount))
+    {
+        return false;
+    }
+    token = token + 2;
+
+    if (!TryGetBootstrapInt32MainSourceStackArgumentCodeLength(
+            helperArgumentCount, helperMultiplication, init var operationCodeLength)
+        || operationCodeLength > Host.BootstrapCodeBytes.Length)
+    {
+        return false;
+    }
+
+    mut int32 frameBaseSize = 0x20;
+    if (helperArgumentCount > 4)
+    {
+        frameBaseSize = frameBaseSize + (helperArgumentCount - 4) * 8;
+    }
+    int32 stackFrameSize = (frameBaseSize + 23) / 16 * 16 - 8;
+    bool largeFrame = stackFrameSize > 0x7F;
+    bool probeFrame = stackFrameSize >= 0x1000;
+    int32 argumentScratchOffset = operationCodeLength - helperArgumentCount * 4;
+    mut int32 callerSetupEnd = probeFrame ? 0x32 : largeFrame ? 7 : 4;
+    for (mut int32 argumentIndex = 0; argumentIndex < helperArgumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        if (argumentIndex < 2)
+        {
+            callerSetupEnd = callerSetupEnd + 5;
+        }
+        else if (argumentIndex < 4)
+        {
+            callerSetupEnd = callerSetupEnd + 6;
+        }
+        else
+        {
+            int32 callerStackOffset = 0x20 + (argumentIndex - 4) * 8;
+            callerSetupEnd = callerSetupEnd
+                + (callerStackOffset > 0x7F ? 11 : 8);
+        }
+    }
+    // Caller setup must finish before it reaches staged operands in the code tail.
+    if (callerSetupEnd > argumentScratchOffset)
+    {
+        return false;
+    }
+
+    mut int32 helperResult = 0;
+    for (mut int32 argumentIndex = 0; argumentIndex < helperArgumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        if (argumentIndex > 0)
+        {
+            if (!BootstrapSourceKind(token, 53, tokenCount))
+            {
+                return false;
+            }
+            token = token + 1;
+        }
+        if (!TryParseBootstrapSourceCallArgument(tokenCount, token,
+                mainLocalCount,
+                init var argumentEnd, init var foldedArgument))
+        {
+            return false;
+        }
+        if (argumentIndex == 0)
+        {
+            helperResult = foldedArgument;
+        }
+        else if (helperSubtraction)
+        {
+            if (BootstrapSourceSubtractionOverflows(helperResult, foldedArgument))
+            {
+                return false;
+            }
+            helperResult = helperResult - foldedArgument;
+        }
+        else if (helperMultiplication)
+        {
+            if (BootstrapSourceExpressionOverflows(helperResult, 59, foldedArgument))
+            {
+                return false;
+            }
+            helperResult = helperResult * foldedArgument;
+        }
+        else
+        {
+            if (BootstrapSourceAdditionOverflows(helperResult, foldedArgument))
+            {
+                return false;
+            }
+            helperResult = helperResult + foldedArgument;
+        }
+        WriteBootstrapInt32Immediate(
+            argumentScratchOffset + argumentIndex * 4, foldedArgument);
+        token = argumentEnd;
+    }
+    if (!BootstrapSourceKind(token, 47, tokenCount)
+        || !BootstrapSourceKind(token + 1, 52, tokenCount))
+    {
+        return false;
+    }
+    token = token + 2;
+    if (blockBody)
+    {
+        if (!BootstrapSourceKind(token, 49, tokenCount))
+        {
+            return false;
+        }
+        token = token + 1;
+    }
+    if (token != tokenCount - 1
+        || Host.Tokens[token * 3] != 0
+        || Host.Tokens[token * 3 + 1] != Host.Source.Length
+        || Host.Tokens[token * 3 + 2] != 0)
+    {
+        return false;
+    }
+
+    mut int32 setupOffset = 4;
+    if (probeFrame)
+    {
+        Host.BootstrapCodeBytes[0] = 0x49;
+        Host.BootstrapCodeBytes[1] = 0x89;
+        Host.BootstrapCodeBytes[2] = 0xE3;
+        Host.BootstrapCodeBytes[3] = 0x41;
+        Host.BootstrapCodeBytes[4] = 0xBA;
+        WriteBootstrapInt32Immediate(5, stackFrameSize);
+        Host.BootstrapCodeBytes[9] = 0x49;
+        Host.BootstrapCodeBytes[10] = 0x81;
+        Host.BootstrapCodeBytes[11] = 0xEB;
+        WriteBootstrapInt32Immediate(12, 0x1000);
+        Host.BootstrapCodeBytes[16] = 0x41;
+        Host.BootstrapCodeBytes[17] = 0xF6;
+        Host.BootstrapCodeBytes[18] = 0x03;
+        Host.BootstrapCodeBytes[19] = 0;
+        Host.BootstrapCodeBytes[20] = 0x41;
+        Host.BootstrapCodeBytes[21] = 0x81;
+        Host.BootstrapCodeBytes[22] = 0xEA;
+        WriteBootstrapInt32Immediate(23, 0x1000);
+        Host.BootstrapCodeBytes[27] = 0x41;
+        Host.BootstrapCodeBytes[28] = 0x81;
+        Host.BootstrapCodeBytes[29] = 0xFA;
+        WriteBootstrapInt32Immediate(30, 0x1000);
+        Host.BootstrapCodeBytes[34] = 0x73;
+        Host.BootstrapCodeBytes[35] = 0xE5;
+        Host.BootstrapCodeBytes[36] = 0x4D;
+        Host.BootstrapCodeBytes[37] = 0x29;
+        Host.BootstrapCodeBytes[38] = 0xD3;
+        Host.BootstrapCodeBytes[39] = 0x41;
+        Host.BootstrapCodeBytes[40] = 0xF6;
+        Host.BootstrapCodeBytes[41] = 0x03;
+        Host.BootstrapCodeBytes[42] = 0;
+        Host.BootstrapCodeBytes[43] = 0x48;
+        Host.BootstrapCodeBytes[44] = 0x81;
+        Host.BootstrapCodeBytes[45] = 0xEC;
+        WriteBootstrapInt32Immediate(46, stackFrameSize);
+        setupOffset = 0x32;
+    }
+    else
+    {
+        Host.BootstrapCodeBytes[0] = 0x48;
+        if (largeFrame)
+        {
+            Host.BootstrapCodeBytes[1] = 0x81;
+            Host.BootstrapCodeBytes[2] = 0xEC;
+            WriteBootstrapInt32Immediate(3, stackFrameSize);
+            setupOffset = 7;
+        }
+        else
+        {
+            Host.BootstrapCodeBytes[1] = 0x83;
+            Host.BootstrapCodeBytes[2] = 0xEC;
+            Host.BootstrapCodeBytes[3] = stackFrameSize;
+        }
+    }
+    for (mut int32 argumentIndex = 0; argumentIndex < helperArgumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        int32 scratchOffset = argumentScratchOffset + argumentIndex * 4;
+        int32 argumentValue = Host.BootstrapCodeBytes[scratchOffset]
+            | (Host.BootstrapCodeBytes[scratchOffset + 1] << 8)
+            | (Host.BootstrapCodeBytes[scratchOffset + 2] << 16)
+            | (Host.BootstrapCodeBytes[scratchOffset + 3] << 24);
+        mut int32 immediateOffset = setupOffset + 1;
+        mut int32 instructionLength = 5;
+        if (argumentIndex == 0)
+        {
+            Host.BootstrapCodeBytes[setupOffset] = 0xB9;
+        }
+        else if (argumentIndex == 1)
+        {
+            Host.BootstrapCodeBytes[setupOffset] = 0xBA;
+        }
+        else if (argumentIndex == 2)
+        {
+            Host.BootstrapCodeBytes[setupOffset] = 0x41;
+            Host.BootstrapCodeBytes[setupOffset + 1] = 0xB8;
+            immediateOffset = setupOffset + 2;
+            instructionLength = 6;
+        }
+        else if (argumentIndex == 3)
+        {
+            Host.BootstrapCodeBytes[setupOffset] = 0x41;
+            Host.BootstrapCodeBytes[setupOffset + 1] = 0xB9;
+            immediateOffset = setupOffset + 2;
+            instructionLength = 6;
+        }
+        else
+        {
+            int32 callerStackOffset = 0x20 + (argumentIndex - 4) * 8;
+            Host.BootstrapCodeBytes[setupOffset] = 0xC7;
+            if (callerStackOffset > 0x7F)
+            {
+                Host.BootstrapCodeBytes[setupOffset + 1] = 0x84;
+                Host.BootstrapCodeBytes[setupOffset + 2] = 0x24;
+                WriteBootstrapInt32Immediate(
+                    setupOffset + 3, callerStackOffset);
+                immediateOffset = setupOffset + 7;
+                instructionLength = 11;
+            }
+            else
+            {
+                Host.BootstrapCodeBytes[setupOffset + 1] = 0x44;
+                Host.BootstrapCodeBytes[setupOffset + 2] = 0x24;
+                Host.BootstrapCodeBytes[setupOffset + 3] = callerStackOffset;
+                immediateOffset = setupOffset + 4;
+                instructionLength = 8;
+            }
+        }
+        WriteBootstrapInt32Immediate(immediateOffset, argumentValue);
+        setupOffset = setupOffset + instructionLength;
+    }
+
+    Host.BootstrapCodeBytes[setupOffset] = 0xE8;
+    WriteBootstrapInt32Immediate(
+        setupOffset + 1, largeFrame ? 8 : 5);
+    if (largeFrame)
+    {
+        Host.BootstrapCodeBytes[setupOffset + 5] = 0x48;
+        Host.BootstrapCodeBytes[setupOffset + 6] = 0x81;
+        Host.BootstrapCodeBytes[setupOffset + 7] = 0xC4;
+        WriteBootstrapInt32Immediate(setupOffset + 8, stackFrameSize);
+        Host.BootstrapCodeBytes[setupOffset + 12] = 0xC3;
+    }
+    else
+    {
+        Host.BootstrapCodeBytes[setupOffset + 5] = 0x48;
+        Host.BootstrapCodeBytes[setupOffset + 6] = 0x83;
+        Host.BootstrapCodeBytes[setupOffset + 7] = 0xC4;
+        Host.BootstrapCodeBytes[setupOffset + 8] = stackFrameSize;
+        Host.BootstrapCodeBytes[setupOffset + 9] = 0xC3;
+    }
+
+    int32 helperOffset = setupOffset + (largeFrame ? 13 : 10);
+    if (!TryWriteBootstrapParameterizedHelperBody(
+            helperOffset, helperArgumentCount, helperSubtraction,
+            helperMultiplication, init var emittedEnd)
+        || emittedEnd != operationCodeLength)
+    {
+        return false;
+    }
+    Host.BootstrapCodeLength[0] = operationCodeLength;
+    return true;
+}
+
+bool TryWriteBootstrapParameterizedHelperBody(int32 helperOffset,
+    int32 helperArgumentCount, bool helperSubtraction, bool helperMultiplication,
+    init ref<int32> emittedEnd)
+{
+    if (helperOffset < 0 || helperOffset >= Host.BootstrapCodeBytes.Length)
+    {
+        return false;
+    }
+    Host.BootstrapCodeBytes[helperOffset] = 0x89;
+    Host.BootstrapCodeBytes[helperOffset + 1] = 0xC8;
+    mut int32 stackReadOffset = helperOffset + 2;
+    for (mut int32 argumentIndex = 1; argumentIndex < helperArgumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        if (argumentIndex == 1)
+        {
+            Host.BootstrapCodeBytes[stackReadOffset] = helperSubtraction ? 0x29 : 0x01;
+            Host.BootstrapCodeBytes[stackReadOffset + 1] = 0xD0;
+            if (helperMultiplication)
+            {
+                Host.BootstrapCodeBytes[stackReadOffset] = 0x0F;
+                Host.BootstrapCodeBytes[stackReadOffset + 1] = 0xAF;
+                Host.BootstrapCodeBytes[stackReadOffset + 2] = 0xC2;
+                stackReadOffset = stackReadOffset + 3;
+            }
+            else
+            {
+                stackReadOffset = stackReadOffset + 2;
+            }
+        }
+        else if (argumentIndex == 2)
+        {
+            if (helperMultiplication)
+            {
+                Host.BootstrapCodeBytes[stackReadOffset] = 0x41;
+                Host.BootstrapCodeBytes[stackReadOffset + 1] = 0x0F;
+                Host.BootstrapCodeBytes[stackReadOffset + 2] = 0xAF;
+                Host.BootstrapCodeBytes[stackReadOffset + 3] = 0xC0;
+                stackReadOffset = stackReadOffset + 4;
+            }
+            else
+            {
+                Host.BootstrapCodeBytes[stackReadOffset] = 0x44;
+                Host.BootstrapCodeBytes[stackReadOffset + 1] = helperSubtraction ? 0x29 : 0x01;
+                Host.BootstrapCodeBytes[stackReadOffset + 2] = 0xC0;
+                stackReadOffset = stackReadOffset + 3;
+            }
+        }
+        else if (argumentIndex == 3)
+        {
+            if (helperMultiplication)
+            {
+                Host.BootstrapCodeBytes[stackReadOffset] = 0x41;
+                Host.BootstrapCodeBytes[stackReadOffset + 1] = 0x0F;
+                Host.BootstrapCodeBytes[stackReadOffset + 2] = 0xAF;
+                Host.BootstrapCodeBytes[stackReadOffset + 3] = 0xC1;
+                stackReadOffset = stackReadOffset + 4;
+            }
+            else
+            {
+                Host.BootstrapCodeBytes[stackReadOffset] = 0x44;
+                Host.BootstrapCodeBytes[stackReadOffset + 1] = helperSubtraction ? 0x29 : 0x01;
+                Host.BootstrapCodeBytes[stackReadOffset + 2] = 0xC8;
+                stackReadOffset = stackReadOffset + 3;
+            }
+        }
+        else
+        {
+            int32 helperStackOffset = 0x28 + (argumentIndex - 4) * 8;
+            if (helperMultiplication)
+            {
+                Host.BootstrapCodeBytes[stackReadOffset] = 0x0F;
+                Host.BootstrapCodeBytes[stackReadOffset + 1] = 0xAF;
+                stackReadOffset = stackReadOffset + 2;
+            }
+            else
+            {
+                Host.BootstrapCodeBytes[stackReadOffset] = helperSubtraction ? 0x2B : 0x03;
+            }
+            if (helperStackOffset > 0x7F)
+            {
+                if (helperMultiplication)
+                {
+                    Host.BootstrapCodeBytes[stackReadOffset] = 0x84;
+                    Host.BootstrapCodeBytes[stackReadOffset + 1] = 0x24;
+                    WriteBootstrapInt32Immediate(stackReadOffset + 2, helperStackOffset);
+                    stackReadOffset = stackReadOffset + 6;
+                }
+                else
+                {
+                    Host.BootstrapCodeBytes[stackReadOffset + 1] = 0x84;
+                    Host.BootstrapCodeBytes[stackReadOffset + 2] = 0x24;
+                    WriteBootstrapInt32Immediate(stackReadOffset + 3, helperStackOffset);
+                    stackReadOffset = stackReadOffset + 7;
+                }
+            }
+            else
+            {
+                if (helperMultiplication)
+                {
+                    Host.BootstrapCodeBytes[stackReadOffset] = 0x44;
+                    Host.BootstrapCodeBytes[stackReadOffset + 1] = 0x24;
+                    Host.BootstrapCodeBytes[stackReadOffset + 2] = helperStackOffset;
+                    stackReadOffset = stackReadOffset + 3;
+                }
+                else
+                {
+                    Host.BootstrapCodeBytes[stackReadOffset + 1] = 0x44;
+                    Host.BootstrapCodeBytes[stackReadOffset + 2] = 0x24;
+                    Host.BootstrapCodeBytes[stackReadOffset + 3] = helperStackOffset;
+                    stackReadOffset = stackReadOffset + 4;
+                }
+            }
+        }
+    }
+    Host.BootstrapCodeBytes[stackReadOffset] = 0xC3;
+    emittedEnd = stackReadOffset + 1;
+    return emittedEnd <= Host.BootstrapCodeBytes.Length;
+}
+
+bool TryGetBootstrapInt32MainSourceStackArgumentCodeLength(
+    int32 argumentCount, bool multiplication, init ref<int32> codeLength)
+{
+    if (argumentCount < 1 || argumentCount > Host.BootstrapCodeBytes.Length / 4)
+    {
+        return false;
+    }
+    if (argumentCount > 0xFFFF)
+    {
+        return false;
+    }
+
+    mut int32 frameBaseSize = 0x20;
+    if (argumentCount > 4)
+    {
+        frameBaseSize = frameBaseSize + (argumentCount - 4) * 8;
+    }
+    int32 stackFrameSize = (frameBaseSize + 23) / 16 * 16 - 8;
+    if (stackFrameSize > 0x7FFF8)
+    {
+        return false;
+    }
+    bool largeFrame = stackFrameSize > 0x7F;
+    bool probeFrame = stackFrameSize >= 0x1000;
+    codeLength = probeFrame ? 0x32 : largeFrame ? 7 : 4;
+    for (mut int32 argumentIndex = 0; argumentIndex < argumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        if (argumentIndex < 2)
+        {
+            codeLength = codeLength + 5;
+        }
+        else if (argumentIndex < 4)
+        {
+            codeLength = codeLength + 6;
+        }
+        else
+        {
+            int32 callerStackOffset = 0x20 + (argumentIndex - 4) * 8;
+            codeLength = codeLength + (callerStackOffset > 0x7F ? 11 : 8);
+        }
+    }
+    codeLength = codeLength + (largeFrame ? 13 : 10) + 3;
+    for (mut int32 argumentIndex = 1; argumentIndex < argumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        if (multiplication)
+        {
+            if (argumentIndex == 1)
+            {
+                codeLength = codeLength + 3;
+            }
+            else if (argumentIndex < 4)
+            {
+                codeLength = codeLength + 4;
+            }
+            else
+            {
+                int32 helperStackOffset = 0x28 + (argumentIndex - 4) * 8;
+                codeLength = codeLength + (helperStackOffset > 0x7F ? 8 : 5);
+            }
+        }
+        else if (argumentIndex == 1)
+        {
+            codeLength = codeLength + 2;
+        }
+        else if (argumentIndex < 4)
+        {
+            codeLength = codeLength + 3;
+        }
+        else
+        {
+            int32 helperStackOffset = 0x28 + (argumentIndex - 4) * 8;
+            codeLength = codeLength + (helperStackOffset > 0x7F ? 7 : 4);
+        }
+    }
+    return true;
+}
+
+bool TryParseBootstrapSourceSignedOperand(int32 tokenCount, int32 startToken,
+    int32 localName, int32 localValue, int32 secondLocalName, int32 secondLocalValue,
+    init ref<int32> endToken, init ref<int32> value)
+{
+    bool negative = BootstrapSourceKind(startToken, 58, tokenCount);
+    if (negative && BootstrapSourceKind(startToken + 1, 2, tokenCount))
+    {
+        if (!TryReadBootstrapSourceOperand(tokenCount, startToken + 1, false,
+                localName, localValue, secondLocalName, secondLocalValue,
+                init var localOperand))
+        {
+            return false;
+        }
+        if (localOperand == int32.MinValue)
+        {
+            return false;
+        }
+        endToken = startToken + 2;
+        value = -localOperand;
+        return true;
+    }
+
+    mut int32 operandToken = startToken;
+    if (negative)
+    {
+        operandToken = operandToken + 1;
+    }
+    if (!TryReadBootstrapSourceOperand(tokenCount, operandToken, negative,
+            localName, localValue, secondLocalName, secondLocalValue, init var parsedValue))
+    {
+        return false;
+    }
+    mut int32 result = parsedValue;
+    if (negative && result != int32.MinValue)
+    {
+        result = -result;
+    }
+    endToken = operandToken + 1;
+    value = result;
+    return true;
+}
+
+bool TryParseBootstrapSourceExpression(int32 tokenCount, int32 startToken,
+    int32 localName, int32 localValue, int32 secondLocalName, int32 secondLocalValue,
+    init ref<int32> endToken, init ref<int32> value,
+    init ref<int32> operation, init ref<int32> right)
+{
+    bool negative = BootstrapSourceKind(startToken, 58, tokenCount);
+    mut int32 token = startToken;
+    if (!TryParseBootstrapSourceSignedOperand(tokenCount, startToken,
+            localName, localValue, secondLocalName, secondLocalValue,
+            init var operandEnd, init var parsedValue))
+    {
+        return false;
+    }
+    token = operandEnd;
+    mut int32 result = parsedValue;
+
+    mut int32 parsedOperation = 0;
+    mut int32 rightValue = 0;
+    if (!negative && (BootstrapSourceKind(token, 57, tokenCount)
+        || BootstrapSourceKind(token, 58, tokenCount)
+        || BootstrapSourceKind(token, 59, tokenCount)
+        || BootstrapSourceKind(token, 60, tokenCount)
+        || BootstrapSourceKind(token, 61, tokenCount)))
+    {
+        parsedOperation = Host.Tokens[token * 3];
+        token = token + 1;
+        if (!TryReadBootstrapSourceOperand(tokenCount, token, false,
+                localName, localValue, secondLocalName, secondLocalValue, init var parsedRight))
+        {
+            return false;
+        }
+        rightValue = parsedRight;
+        token = token + 1;
+        if (result < 0 || rightValue < 0
+            || parsedOperation == 57 && result > int32.MaxValue - rightValue
+            || parsedOperation == 59 && rightValue != 0
+                && result > int32.MaxValue / rightValue
+            || (parsedOperation == 60 || parsedOperation == 61) && rightValue == 0)
+        {
+            return false;
+        }
+    }
+    endToken = token;
+    value = result;
+    operation = parsedOperation;
+    right = rightValue;
+    return true;
+}
+
+bool TryParseBootstrapSourceMainLocalExpression(int32 tokenCount, int32 startToken,
+    int32 localName, int32 localValue, int32 secondLocalName, int32 secondLocalValue,
+    int32 localCount, bool requireLocal,
+    init ref<int32> endToken, init ref<int32> value,
+    init ref<int32> operation, init ref<int32> right, init ref<bool> folded)
+{
+    if (TryParseBootstrapSourceExpression(tokenCount, startToken,
+            localName, localValue, secondLocalName, secondLocalValue,
+            init var legacyEnd, init var legacyValue,
+            init var legacyOperation, init var legacyRight)
+        && BootstrapSourceKind(legacyEnd, 52, tokenCount)
+        && !BootstrapSourceExpressionOverflows(
+            legacyValue, legacyOperation, legacyRight)
+        && (!requireLocal || BootstrapSourceMainExpressionReferencesLocal(
+            tokenCount, startToken, legacyEnd, localName, secondLocalName)))
+    {
+        endToken = legacyEnd;
+        value = legacyValue;
+        operation = legacyOperation;
+        right = legacyRight;
+        folded = false;
+        return true;
+    }
+
+    if (localCount < 0 || localCount > 2
+        || localCount > Host.BootstrapMainLocalNames.Length
+        || localCount > Host.BootstrapMainLocalValues.Length
+        || localCount > 0 && localName < 0
+        || localCount > 1 && secondLocalName < 0)
+    {
+        return false;
+    }
+    if (localCount > 0)
+    {
+        Host.BootstrapMainLocalNames[0] = localName;
+        Host.BootstrapMainLocalValues[0] = localValue;
+    }
+    if (localCount > 1)
+    {
+        Host.BootstrapMainLocalNames[1] = secondLocalName;
+        Host.BootstrapMainLocalValues[1] = secondLocalValue;
+    }
+    if (!TryParseBootstrapSourceCallArgument(tokenCount, startToken, localCount,
+            init var foldedEnd, init var foldedValue)
+        || !BootstrapSourceKind(foldedEnd, 52, tokenCount)
+        || requireLocal && !BootstrapSourceMainExpressionReferencesLocal(
+            tokenCount, startToken, foldedEnd, localName, secondLocalName))
+    {
+        return false;
+    }
+    endToken = foldedEnd;
+    value = foldedValue;
+    operation = 0;
+    right = 0;
+    folded = true;
+    return true;
+}
+
+bool BootstrapSourceMainExpressionReferencesLocal(
+    int32 tokenCount, int32 startToken, int32 endToken,
+    int32 localName, int32 secondLocalName)
+{
+    for (mut int32 token = startToken; token < endToken; token = token + 1)
+    {
+        if (localName >= 0
+            && BootstrapSourceSameIdentifier(localName, token, tokenCount)
+            || secondLocalName >= 0
+                && BootstrapSourceSameIdentifier(secondLocalName, token, tokenCount))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool TryReadBootstrapSourceCallOperand(int32 tokenCount, int32 token,
+    bool allowMinimumMagnitude, int32 localCount, init ref<int32> value)
+{
+    if (localCount < 0
+        || localCount > Host.BootstrapMainLocalNames.Length
+        || localCount > Host.BootstrapMainLocalValues.Length)
+    {
+        return false;
+    }
+    for (mut int32 local = 0; local < localCount; local = local + 1)
+    {
+        if (BootstrapSourceSameIdentifier(
+            Host.BootstrapMainLocalNames[local], token, tokenCount))
+        {
+            value = Host.BootstrapMainLocalValues[local];
+            return true;
+        }
+    }
+    if (!TryReadBootstrapSourceInt32(
+            tokenCount, token, allowMinimumMagnitude, init var parsedValue))
+    {
+        return false;
+    }
+    value = parsedValue;
+    return true;
+}
+
+bool TryParseBootstrapSourceCallSignedOperand(int32 tokenCount, int32 startToken,
+    int32 localCount, init ref<int32> endToken, init ref<int32> value)
+{
+    bool negative = BootstrapSourceKind(startToken, 58, tokenCount);
+    if (negative && BootstrapSourceKind(startToken + 1, 2, tokenCount))
+    {
+        if (!TryReadBootstrapSourceCallOperand(
+                tokenCount, startToken + 1, false, localCount, init var localOperand)
+            || localOperand == int32.MinValue)
+        {
+            return false;
+        }
+        endToken = startToken + 2;
+        value = -localOperand;
+        return true;
+    }
+
+    mut int32 operandToken = startToken;
+    if (negative)
+    {
+        operandToken = operandToken + 1;
+    }
+    if (!TryReadBootstrapSourceCallOperand(
+            tokenCount, operandToken, negative, localCount, init var parsedValue))
+    {
+        return false;
+    }
+    mut int32 result = parsedValue;
+    if (negative && result != int32.MinValue)
+    {
+        result = -result;
+    }
+    endToken = operandToken + 1;
+    value = result;
+    return true;
+}
+
+bool TryParseBootstrapSourceCallArgument(int32 tokenCount, int32 startToken,
+    int32 localCount,
+    init ref<int32> endToken, init ref<int32> value)
+{
+    mut int32 token = startToken;
+    mut int32 valueCount = 0;
+    mut int32 operatorCount = 0;
+    mut int32 groupDepth = 0;
+    mut bool expectOperand = true;
+    while (token < tokenCount - 1)
+    {
+        if (expectOperand)
+        {
+            if (BootstrapSourceKind(token, 58, tokenCount)
+                && BootstrapSourceKind(token + 1, 46, tokenCount))
+            {
+                if (operatorCount >= Host.BootstrapCallArgumentOperators.Length)
+                {
+                    return false;
+                }
+                // A negative group marker applies unary minus after reducing the group.
+                Host.BootstrapCallArgumentOperators[operatorCount] = -46;
+                operatorCount = operatorCount + 1;
+                groupDepth = groupDepth + 1;
+                token = token + 2;
+                continue;
+            }
+            if (BootstrapSourceKind(token, 46, tokenCount))
+            {
+                if (operatorCount >= Host.BootstrapCallArgumentOperators.Length)
+                {
+                    return false;
+                }
+                Host.BootstrapCallArgumentOperators[operatorCount] = 46;
+                operatorCount = operatorCount + 1;
+                groupDepth = groupDepth + 1;
+                token = token + 1;
+                continue;
+            }
+            if (!TryParseBootstrapSourceCallSignedOperand(tokenCount, token,
+                    localCount,
+                    init var operandEnd, init var operand))
+            {
+                return false;
+            }
+            if (valueCount >= Host.BootstrapCallArgumentValues.Length)
+            {
+                return false;
+            }
+            Host.BootstrapCallArgumentValues[valueCount] = operand;
+            valueCount = valueCount + 1;
+            token = operandEnd;
+            expectOperand = false;
+        }
+        else if (BootstrapSourceKind(token, 57, tokenCount)
+            || BootstrapSourceKind(token, 58, tokenCount)
+            || BootstrapSourceKind(token, 59, tokenCount)
+            || BootstrapSourceKind(token, 60, tokenCount)
+            || BootstrapSourceKind(token, 61, tokenCount))
+        {
+            int32 operation = Host.Tokens[token * 3];
+            int32 precedence = BootstrapSourceCallArgumentPrecedence(operation);
+            while (operatorCount > 0
+                && Host.BootstrapCallArgumentOperators[operatorCount - 1] != 46
+                && Host.BootstrapCallArgumentOperators[operatorCount - 1] != -46
+                && BootstrapSourceCallArgumentPrecedence(
+                    Host.BootstrapCallArgumentOperators[operatorCount - 1]) >= precedence)
+            {
+                if (!TryReduceBootstrapSourceCallArgument(
+                        valueCount, operatorCount, init var reducedValueCount))
+                {
+                    return false;
+                }
+                valueCount = reducedValueCount;
+                operatorCount = operatorCount - 1;
+            }
+            if (operatorCount >= Host.BootstrapCallArgumentOperators.Length)
+            {
+                return false;
+            }
+            Host.BootstrapCallArgumentOperators[operatorCount] = operation;
+            operatorCount = operatorCount + 1;
+            token = token + 1;
+            expectOperand = true;
+        }
+        else if (BootstrapSourceKind(token, 47, tokenCount) && groupDepth > 0)
+        {
+            while (operatorCount > 0
+                && Host.BootstrapCallArgumentOperators[operatorCount - 1] != 46
+                && Host.BootstrapCallArgumentOperators[operatorCount - 1] != -46)
+            {
+                if (!TryReduceBootstrapSourceCallArgument(
+                        valueCount, operatorCount, init var reducedValueCount))
+                {
+                    return false;
+                }
+                valueCount = reducedValueCount;
+                operatorCount = operatorCount - 1;
+            }
+            if (operatorCount == 0)
+            {
+                return false;
+            }
+            int32 groupMarker =
+                Host.BootstrapCallArgumentOperators[operatorCount - 1];
+            operatorCount = operatorCount - 1;
+            groupDepth = groupDepth - 1;
+            token = token + 1;
+            expectOperand = false;
+            if (groupMarker == -46)
+            {
+                if (valueCount == 0
+                    || Host.BootstrapCallArgumentValues[valueCount - 1] == int32.MinValue)
+                {
+                    return false;
+                }
+                Host.BootstrapCallArgumentValues[valueCount - 1] =
+                    -Host.BootstrapCallArgumentValues[valueCount - 1];
+            }
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    if (expectOperand)
+    {
+        return false;
+    }
+    while (operatorCount > 0)
+    {
+        if (Host.BootstrapCallArgumentOperators[operatorCount - 1] == 46
+            || Host.BootstrapCallArgumentOperators[operatorCount - 1] == -46
+            || !TryReduceBootstrapSourceCallArgument(
+                valueCount, operatorCount, init var reducedValueCount))
+        {
+            return false;
+        }
+        valueCount = reducedValueCount;
+        operatorCount = operatorCount - 1;
+    }
+    if (valueCount != 1)
+    {
+        return false;
+    }
+    value = Host.BootstrapCallArgumentValues[0];
+    endToken = token;
+    return true;
+}
+
+int32 BootstrapSourceCallArgumentPrecedence(int32 operation)
+{
+    if (operation == 59 || operation == 60 || operation == 61)
+    {
+        return 2;
+    }
+    return 1;
+}
+
+bool TryReduceBootstrapSourceCallArgument(
+    int32 valueCount, int32 operatorCount, init ref<int32> reducedValueCount)
+{
+    if (valueCount < 2 || operatorCount < 1)
+    {
+        return false;
+    }
+    int32 operation =
+        Host.BootstrapCallArgumentOperators[operatorCount - 1];
+    if (operation == 46 || operation == -46)
+    {
+        return false;
+    }
+    int32 left = Host.BootstrapCallArgumentValues[valueCount - 2];
+    int32 right = Host.BootstrapCallArgumentValues[valueCount - 1];
+    if (BootstrapSourceExpressionOverflows(left, operation, right))
+    {
+        return false;
+    }
+    Host.BootstrapCallArgumentValues[valueCount - 2] =
+        BootstrapSourceExpressionValue(left, operation, right);
+    reducedValueCount = valueCount - 1;
+    return true;
+}
+
+int32 BootstrapSourceExpressionValue(int32 value, int32 operation, int32 right)
+{
+    if (operation == 57)
+    {
+        return value + right;
+    }
+    if (operation == 58)
+    {
+        return value - right;
+    }
+    if (operation == 59)
+    {
+        return value * right;
+    }
+    if (operation == 60)
+    {
+        return value / right;
+    }
+    if (operation == 61)
+    {
+        return value % right;
+    }
+    return value;
+}
+
+bool BootstrapSourceAdditionOverflows(int32 left, int32 right)
+{
+    return right > 0 && left > int32.MaxValue - right
+        || right < 0 && left < int32.MinValue - right;
+}
+
+bool BootstrapSourceSubtractionOverflows(int32 left, int32 right)
+{
+    return right > 0 && left < int32.MinValue + right
+        || right < 0 && left > int32.MaxValue + right;
+}
+
+bool BootstrapSourceExpressionOverflows(int32 value, int32 operation, int32 right)
+{
+    if (operation == 0)
+    {
+        return false;
+    }
+    if (operation == 57)
+    {
+        return BootstrapSourceAdditionOverflows(value, right);
+    }
+    if (operation == 58)
+    {
+        int64 result = int64(value) - int64(right);
+        return result < int64(int32.MinValue) || result > int64(int32.MaxValue);
+    }
+    if (operation == 59)
+    {
+        int64 result = int64(value) * int64(right);
+        return result < int64(int32.MinValue) || result > int64(int32.MaxValue);
+    }
+    if (operation == 60 || operation == 61)
+    {
+        return right == 0 || value == int32.MinValue && right == -1;
+    }
+    return true;
+}
+
+bool TryReadBootstrapSourceOperand(int32 tokenCount, int32 token,
+    bool allowMinimumMagnitude, int32 localName, int32 localValue,
+    int32 secondLocalName, int32 secondLocalValue,
+    init ref<int32> value)
+{
+    if (BootstrapSourceSameIdentifier(localName, token, tokenCount))
+    {
+        value = localValue;
+        return true;
+    }
+    if (BootstrapSourceSameIdentifier(secondLocalName, token, tokenCount))
+    {
+        value = secondLocalValue;
+        return true;
+    }
+    if (!TryReadBootstrapSourceInt32(
+            tokenCount, token, allowMinimumMagnitude, init var parsedValue))
+    {
+        return false;
+    }
+    value = parsedValue;
+    return true;
+}
+
+bool BootstrapSourceKind(int32 token, int32 kind, int32 tokenCount)
+{
+    return token >= 0 && token < tokenCount - 1
+        && Host.Tokens[token * 3] == kind;
+}
+
+bool BootstrapSourceTypeName(int32 token, int32 tokenCount)
+{
+    if (token < 0 || token >= tokenCount - 1)
+    {
+        return false;
+    }
+    int32 offset = token * 3;
+    int32 start = Host.Tokens[offset + 1];
+    return Host.Tokens[offset] == 2
+        && Host.Tokens[offset + 2] == 5
+        && start >= 0 && start <= Host.Source.Length - 5
+        && Host.Source[start] == char16(105)
+        && Host.Source[start + 1] == char16(110)
+        && Host.Source[start + 2] == char16(116)
+        && Host.Source[start + 3] == char16(51)
+        && Host.Source[start + 4] == char16(50);
+}
+
+bool BootstrapSourceMainName(int32 token, int32 tokenCount)
+{
+    if (token < 0 || token >= tokenCount - 1)
+    {
+        return false;
+    }
+    int32 offset = token * 3;
+    int32 start = Host.Tokens[offset + 1];
+    return Host.Tokens[offset] == 2
+        && Host.Tokens[offset + 2] == 4
+        && start >= 0 && start <= Host.Source.Length - 4
+        && Host.Source[start] == char16(77)
+        && Host.Source[start + 1] == char16(97)
+        && Host.Source[start + 2] == char16(105)
+        && Host.Source[start + 3] == char16(110);
+}
+
+bool BootstrapSourceSameIdentifier(int32 left, int32 right, int32 tokenCount)
+{
+    if (!BootstrapSourceKind(left, 2, tokenCount)
+        || !BootstrapSourceKind(right, 2, tokenCount))
+    {
+        return false;
+    }
+    int32 leftOffset = left * 3;
+    int32 rightOffset = right * 3;
+    int32 leftStart = Host.Tokens[leftOffset + 1];
+    int32 leftLength = Host.Tokens[leftOffset + 2];
+    int32 rightStart = Host.Tokens[rightOffset + 1];
+    int32 rightLength = Host.Tokens[rightOffset + 2];
+    if (leftLength <= 0 || rightLength != leftLength
+        || leftStart < 0 || rightStart < 0
+        || leftStart > Host.Source.Length - leftLength
+        || rightStart > Host.Source.Length - rightLength)
+    {
+        return false;
+    }
+    for (mut int32 index = 0; index < leftLength; index = index + 1)
+    {
+        if (Host.Source[leftStart + index] != Host.Source[rightStart + index])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool TryReadBootstrapSourceInt32(int32 tokenCount, int32 token, bool allowMinimumMagnitude,
+    init ref<int32> value)
+{
+    if (token < 0 || token >= tokenCount - 1)
+    {
+        return false;
+    }
+    int32 offset = token * 3;
+    mut int32 start = Host.Tokens[offset + 1];
+    mut int32 length = Host.Tokens[offset + 2];
+    if (Host.Tokens[offset] != 3 || start < 0 || length <= 0
+        || start > Host.Source.Length || length > Host.Source.Length - start)
+    {
+        return false;
+    }
+
+    mut uint32 radix = 10;
+    if (length >= 2 && Host.Source[start] == char16(48))
+    {
+        char16 prefix = Host.Source[start + 1];
+        if (prefix == char16(120) || prefix == char16(88))
+        {
+            radix = 16;
+            start = start + 2;
+            length = length - 2;
+        }
+        else if (prefix == char16(98) || prefix == char16(66))
+        {
+            radix = 2;
+            start = start + 2;
+            length = length - 2;
+        }
+    }
+    if (!TryParseUInt32Base(start, length, radix, init var magnitude))
+    {
+        return false;
+    }
+
+    if (magnitude <= 2147483647)
+    {
+        value = int32(magnitude);
+        return true;
+    }
+    if (allowMinimumMagnitude && magnitude == 2147483648)
+    {
+        value = int32.MinValue;
+        return true;
+    }
+    return false;
+}

@@ -1,0 +1,56 @@
+namespace Terrum.CodeAnalysis;
+
+void WriteBootstrapInt32MainLeaf(int32 value, int32 operation, int32 right)
+{
+    Host.BootstrapCodeBytes[0] = 0xB8;
+    WriteBootstrapInt32Immediate(1, value);
+    mut int32 codeLength = 6;
+    if (operation == 60 || operation == 61)
+    {
+        Host.BootstrapCodeBytes[5] = 0x99;
+        Host.BootstrapCodeBytes[6] = 0xB9;
+        WriteBootstrapInt32Immediate(7, right);
+        Host.BootstrapCodeBytes[11] = 0xF7;
+        Host.BootstrapCodeBytes[12] = 0xF9;
+        if (operation == 61)
+        {
+            Host.BootstrapCodeBytes[13] = 0x89;
+            Host.BootstrapCodeBytes[14] = 0xD0;
+            Host.BootstrapCodeBytes[15] = 0xC3;
+            codeLength = 16;
+        }
+        else
+        {
+            Host.BootstrapCodeBytes[13] = 0xC3;
+            codeLength = 14;
+        }
+    }
+    else if (operation == 59)
+    {
+        Host.BootstrapCodeBytes[5] = 0x69;
+        Host.BootstrapCodeBytes[6] = 0xC0;
+        WriteBootstrapInt32Immediate(7, right);
+        Host.BootstrapCodeBytes[11] = 0xC3;
+        codeLength = 12;
+    }
+    else if (operation == 57 || operation == 58)
+    {
+        Host.BootstrapCodeBytes[5] = operation == 57 ? 0x05 : 0x2D;
+        WriteBootstrapInt32Immediate(6, right);
+        Host.BootstrapCodeBytes[10] = 0xC3;
+        codeLength = 11;
+    }
+    else
+    {
+        Host.BootstrapCodeBytes[5] = 0xC3;
+    }
+    Host.BootstrapCodeLength[0] = codeLength;
+}
+
+void WriteBootstrapInt32Immediate(int32 offset, int32 value)
+{
+    Host.BootstrapCodeBytes[offset] = value & 0xFF;
+    Host.BootstrapCodeBytes[offset + 1] = (value >> 8) & 0xFF;
+    Host.BootstrapCodeBytes[offset + 2] = (value >> 16) & 0xFF;
+    Host.BootstrapCodeBytes[offset + 3] = (value >> 24) & 0xFF;
+}

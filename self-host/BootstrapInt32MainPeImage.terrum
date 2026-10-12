@@ -1,0 +1,1649 @@
+namespace Terrum.CodeAnalysis;
+
+bool TryWriteBootstrapInt32MainPeImage()
+{
+    if (Host.BootstrapImageLength.Length != 1)
+    {
+        return false;
+    }
+
+    Host.BootstrapImageLength[0] = 0;
+    if (Host.BootstrapImageBytes.Length < 1536
+        || Host.BootstrapCodeBytes.Length < 16
+        || Host.BootstrapCodeLength.Length != 1)
+    {
+        return false;
+    }
+
+    for (mut int32 index = 0; index < Host.BootstrapImageBytes.Length; index = index + 1)
+    {
+        Host.BootstrapImageBytes[index] = 0;
+    }
+
+    int32 codeLength = Host.BootstrapCodeLength[0];
+    if (codeLength < 1 || codeLength > Host.BootstrapCodeBytes.Length)
+    {
+        return false;
+    }
+    for (mut int32 index = 0; index < codeLength; index = index + 1)
+    {
+        int32 value = Host.BootstrapCodeBytes[index];
+        if (value < 0 || value > 0xFF)
+        {
+            return false;
+        }
+    }
+
+    mut int32 callChainArgumentCount = 0;
+    mut bool callChainMultiplication = false;
+    mut int32 callChainForwardingCount = 0;
+    mut bool hasCallChain = false;
+    mut bool hasParameterlessCallChain = false;
+    if (TryGetBootstrapInt32MainCallChainCountForLength(
+        codeLength, init var parsedCallChainArgumentCount,
+        init var parsedCallChainMultiplication,
+        init var parsedCallChainForwardingCount))
+    {
+        hasCallChain = true;
+        callChainArgumentCount = parsedCallChainArgumentCount;
+        callChainMultiplication = parsedCallChainMultiplication;
+        callChainForwardingCount = parsedCallChainForwardingCount;
+    }
+    else if (TryGetBootstrapInt32MainParameterlessCallChainCountForLength(
+        codeLength, init var parameterlessForwardingCount))
+    {
+        hasParameterlessCallChain = true;
+        callChainForwardingCount = parameterlessForwardingCount;
+    }
+    else if (codeLength == 6)
+    {
+        if (Host.BootstrapCodeBytes[0] != 0xB8
+            || Host.BootstrapCodeBytes[5] != 0xC3)
+        {
+            return false;
+        }
+    }
+    else if (codeLength == 11)
+    {
+        if (Host.BootstrapCodeBytes[0] == 0xE9)
+        {
+            if (ReadBootstrapPeInt32(1) != 0
+                || Host.BootstrapCodeBytes[5] != 0xB8
+                || Host.BootstrapCodeBytes[10] != 0xC3)
+            {
+                return false;
+            }
+        }
+        else
+        {
+            int32 left = ReadBootstrapPeInt32(1);
+            int32 right = ReadBootstrapPeInt32(6);
+            if (Host.BootstrapCodeBytes[0] != 0xB8
+                || Host.BootstrapCodeBytes[5] != 0x05 && Host.BootstrapCodeBytes[5] != 0x2D
+                || Host.BootstrapCodeBytes[10] != 0xC3
+                || left < 0 || right < 0
+                || Host.BootstrapCodeBytes[5] == 0x05 && left > int32.MaxValue - right)
+            {
+                return false;
+            }
+        }
+    }
+    else if (codeLength == 12)
+    {
+        int32 left = ReadBootstrapPeInt32(1);
+        int32 right = ReadBootstrapPeInt32(7);
+        if (Host.BootstrapCodeBytes[0] != 0xB8
+            || Host.BootstrapCodeBytes[5] != 0x69
+            || Host.BootstrapCodeBytes[6] != 0xC0
+            || Host.BootstrapCodeBytes[11] != 0xC3
+            || left < 0 || right < 0
+            || right != 0 && left > int32.MaxValue / right)
+        {
+            return false;
+        }
+    }
+    else if (codeLength == 14)
+    {
+        int32 left = ReadBootstrapPeInt32(1);
+        int32 right = ReadBootstrapPeInt32(7);
+        if (Host.BootstrapCodeBytes[0] != 0xB8
+            || Host.BootstrapCodeBytes[5] != 0x99
+            || Host.BootstrapCodeBytes[6] != 0xB9
+            || Host.BootstrapCodeBytes[11] != 0xF7
+            || Host.BootstrapCodeBytes[12] != 0xF9
+            || Host.BootstrapCodeBytes[13] != 0xC3
+            || left < 0 || right <= 0)
+        {
+            return false;
+        }
+    }
+    else if (codeLength == 16)
+    {
+        int32 left = ReadBootstrapPeInt32(1);
+        int32 right = ReadBootstrapPeInt32(7);
+        if (Host.BootstrapCodeBytes[0] != 0xB8
+            || Host.BootstrapCodeBytes[5] != 0x99
+            || Host.BootstrapCodeBytes[6] != 0xB9
+            || Host.BootstrapCodeBytes[11] != 0xF7
+            || Host.BootstrapCodeBytes[12] != 0xF9
+            || Host.BootstrapCodeBytes[13] != 0x89
+            || Host.BootstrapCodeBytes[14] != 0xD0
+            || Host.BootstrapCodeBytes[15] != 0xC3
+            || left < 0 || right <= 0)
+        {
+            return false;
+        }
+    }
+    else if (codeLength == 20 || codeLength == 25)
+    {
+        if (Host.BootstrapCodeBytes[0] != 0x48
+            || Host.BootstrapCodeBytes[1] != 0x83
+            || Host.BootstrapCodeBytes[2] != 0xEC
+            || Host.BootstrapCodeBytes[3] != 0x28
+            || Host.BootstrapCodeBytes[4] != 0xE8
+            || ReadBootstrapPeInt32(5) != 5
+            || Host.BootstrapCodeBytes[9] != 0x48
+            || Host.BootstrapCodeBytes[10] != 0x83
+            || Host.BootstrapCodeBytes[11] != 0xC4
+            || Host.BootstrapCodeBytes[12] != 0x28
+            || Host.BootstrapCodeBytes[13] != 0xC3
+            || Host.BootstrapCodeBytes[14] != 0xB8)
+        {
+            return false;
+        }
+
+        if (codeLength == 20)
+        {
+            if (Host.BootstrapCodeBytes[19] != 0xC3)
+            {
+                return false;
+            }
+        }
+        else
+        {
+            int32 left = ReadBootstrapPeInt32(15);
+            int32 right = ReadBootstrapPeInt32(20);
+            if (Host.BootstrapCodeBytes[19] != 0x05
+                    && Host.BootstrapCodeBytes[19] != 0x2D
+                || Host.BootstrapCodeBytes[24] != 0xC3
+                || left < 0 || right < 0
+                || Host.BootstrapCodeBytes[19] == 0x05
+                    && left > int32.MaxValue - right)
+            {
+                return false;
+            }
+        }
+    }
+    else if (codeLength >= 22)
+    {
+        if (!TryValidateBootstrapInt32MainStackArgumentCallForLength(codeLength))
+        {
+            return false;
+        }
+    }
+    else
+    {
+        return false;
+    }
+    mut int32 stackArgumentCount = 0;
+    mut bool hasStackArgumentCall = false;
+    if (hasCallChain)
+    {
+        stackArgumentCount = callChainArgumentCount;
+        hasStackArgumentCall = true;
+    }
+    else if (TryGetBootstrapInt32MainStackArgumentCountForLength(
+            codeLength, init var parsedStackArgumentCount))
+    {
+        stackArgumentCount = parsedStackArgumentCount;
+        hasStackArgumentCall = true;
+    }
+    mut int32 sectionVirtualSize = codeLength;
+    mut int32 metadataOffset = 0;
+    if (codeLength == 20 || codeLength == 25 || hasStackArgumentCall
+        || hasParameterlessCallChain)
+    {
+        if (codeLength > int32.MaxValue - 3)
+        {
+            return false;
+        }
+        metadataOffset = (codeLength + 3) / 4 * 4;
+        if ((hasCallChain || hasParameterlessCallChain)
+            && callChainForwardingCount > int32.MaxValue / 20 - 1)
+        {
+            return false;
+        }
+        int32 metadataSize = hasCallChain || hasParameterlessCallChain
+            ? (callChainForwardingCount + 1) * 20 : 20;
+        if (metadataOffset > int32.MaxValue - metadataSize)
+        {
+            return false;
+        }
+        sectionVirtualSize = metadataOffset + metadataSize;
+    }
+    if (sectionVirtualSize > int32.MaxValue - 0xFFF)
+    {
+        return false;
+    }
+    int32 sectionRawSize = (sectionVirtualSize + 0x1FF) / 0x200 * 0x200;
+    if (sectionRawSize > int32.MaxValue - 0x400)
+    {
+        return false;
+    }
+    int32 imageLength = 0x400 + sectionRawSize;
+    int32 imageVirtualSize = (sectionVirtualSize + 0xFFF) / 0x1000 * 0x1000;
+    if (imageVirtualSize > int32.MaxValue - 0x1000
+        || Host.BootstrapImageBytes.Length < imageLength)
+    {
+        return false;
+    }
+
+    for (mut int32 index = 0; index < codeLength; index = index + 1)
+    {
+        Host.BootstrapImageBytes[0x400 + index] = Host.BootstrapCodeBytes[index];
+    }
+
+    if (hasCallChain || hasParameterlessCallChain)
+    {
+        mut int32 mainFunctionEnd = 14;
+        mut int32 forwardingFunctionEnd = 28;
+        if (hasCallChain)
+        {
+            if (!TryGetBootstrapInt32MainCallChainLayoutForDepth(
+                    callChainArgumentCount, callChainMultiplication,
+                    callChainForwardingCount,
+                    init var parsedMainFunctionEnd, init var parsedForwardingFunctionEnd,
+                    init var chainCodeLength)
+                || chainCodeLength != codeLength)
+            {
+                return false;
+            }
+            mainFunctionEnd = parsedMainFunctionEnd;
+            forwardingFunctionEnd = parsedForwardingFunctionEnd;
+        }
+        int32 functionTableRva = 0x1000 + metadataOffset;
+        int32 functionTableOffset = 0x400 + metadataOffset;
+        int32 functionCount = callChainForwardingCount + 1;
+        int32 functionTableSize = functionCount * 12;
+        mut int32 frameBaseSize = 0x20;
+        if (callChainArgumentCount > 4)
+        {
+            frameBaseSize = frameBaseSize + (callChainArgumentCount - 4) * 8;
+        }
+        int32 stackFrameSize = (frameBaseSize + 23) / 16 * 16 - 8;
+        bool largeFrame = stackFrameSize > 0x7F;
+        bool probeFrame = stackFrameSize >= 0x1000;
+        int32 prologLength = probeFrame ? 0x32 : largeFrame ? 7 : 4;
+
+        for (mut int32 functionIndex = 0; functionIndex < functionCount;
+            functionIndex = functionIndex + 1)
+        {
+            int32 functionStart = functionIndex == 0 ? 0
+                : mainFunctionEnd + (functionIndex - 1)
+                    * (forwardingFunctionEnd - mainFunctionEnd);
+            int32 functionEnd = functionIndex == 0 ? mainFunctionEnd
+                : functionStart
+                    + (forwardingFunctionEnd - mainFunctionEnd);
+            int32 functionOffset = functionTableOffset + functionIndex * 12;
+            int32 unwindInfoOffset = functionTableOffset + functionTableSize
+                + functionIndex * 8;
+            int32 unwindInfoRva = functionTableRva + functionTableSize
+                + functionIndex * 8;
+            WriteBootstrapPe32(functionOffset, 0x1000 + functionStart);
+            WriteBootstrapPe32(functionOffset + 4, 0x1000 + functionEnd);
+            WriteBootstrapPe32(functionOffset + 8, unwindInfoRva);
+            WriteBootstrapPeStackFrameUnwindInfo(
+                unwindInfoOffset, stackFrameSize, prologLength);
+        }
+        WriteBootstrapPe32(0x120, functionTableRva);
+        WriteBootstrapPe32(0x124, functionTableSize);
+    }
+    else if (codeLength == 20 || codeLength == 25 || hasStackArgumentCall)
+    {
+        int32 functionTableRva = 0x1000 + metadataOffset;
+        int32 functionTableOffset = 0x400 + metadataOffset;
+        int32 unwindInfoRva = functionTableRva + 12;
+        int32 unwindInfoOffset = functionTableOffset + 12;
+        mut int32 frameBaseSize = 0x20;
+        if (stackArgumentCount > 4)
+        {
+            frameBaseSize = frameBaseSize + (stackArgumentCount - 4) * 8;
+        }
+        int32 stackFrameSize = (frameBaseSize + 23) / 16 * 16 - 8;
+        bool largeFrame = stackFrameSize > 0x7F;
+        bool probeFrame = stackFrameSize >= 0x1000;
+        mut int32 callerEndOffset = probeFrame ? 0x32 : largeFrame ? 7 : 4;
+        for (mut int32 argumentIndex = 0; argumentIndex < stackArgumentCount;
+            argumentIndex = argumentIndex + 1)
+        {
+            if (argumentIndex < 2)
+            {
+                callerEndOffset = callerEndOffset + 5;
+            }
+            else if (argumentIndex < 4)
+            {
+                callerEndOffset = callerEndOffset + 6;
+            }
+            else
+            {
+                int32 callerStackOffset = 0x20 + (argumentIndex - 4) * 8;
+                callerEndOffset = callerEndOffset
+                    + (callerStackOffset > 0x7F ? 11 : 8);
+            }
+        }
+        int32 functionEndRva = 0x1000 + callerEndOffset + 5
+            + (largeFrame ? 8 : 5);
+        WriteBootstrapPe32(functionTableOffset, 0x1000);
+        WriteBootstrapPe32(functionTableOffset + 4, functionEndRva);
+        WriteBootstrapPe32(functionTableOffset + 8, unwindInfoRva);
+        Host.BootstrapImageBytes[unwindInfoOffset] = 1;
+        Host.BootstrapImageBytes[unwindInfoOffset + 1] = probeFrame ? 0x32
+            : largeFrame ? 7 : 4;
+        Host.BootstrapImageBytes[unwindInfoOffset + 2] = largeFrame ? 2 : 1;
+        Host.BootstrapImageBytes[unwindInfoOffset + 4] = probeFrame ? 0x32
+            : largeFrame ? 7 : 4;
+        Host.BootstrapImageBytes[unwindInfoOffset + 5] = largeFrame ? 0x01
+            : ((stackFrameSize / 8 - 1) << 4) | 0x02;
+        if (largeFrame)
+        {
+            int32 allocationUnits = stackFrameSize / 8;
+            Host.BootstrapImageBytes[unwindInfoOffset + 6] = allocationUnits & 0xFF;
+            Host.BootstrapImageBytes[unwindInfoOffset + 7] = allocationUnits >> 8;
+        }
+        WriteBootstrapPe32(0x120, functionTableRva);
+        WriteBootstrapPe32(0x124, 12);
+    }
+    WriteBootstrapPe16(0, 0x5A4D);
+    WriteBootstrapPe32(0x3C, 0x80);
+    WriteBootstrapPe32(0x80, 0x00004550);
+    WriteBootstrapPe16(0x84, 0x8664);
+    WriteBootstrapPe16(0x86, 1);
+    WriteBootstrapPe16(0x94, 0xF0);
+    WriteBootstrapPe16(0x96, 0x0022);
+    WriteBootstrapPe16(0x98, 0x020B);
+    WriteBootstrapPe16(0x9A, 1);
+    WriteBootstrapPe32(0x9C, sectionRawSize);
+    WriteBootstrapPe32(0xA8, 0x1000);
+    WriteBootstrapPe32(0xAC, 0x1000);
+    WriteBootstrapPe32(0xB0, 0x40000000);
+    WriteBootstrapPe32(0xB4, 1);
+    WriteBootstrapPe32(0xB8, 0x1000);
+    WriteBootstrapPe32(0xBC, 0x200);
+    WriteBootstrapPe16(0xC0, 6);
+    WriteBootstrapPe16(0xC8, 6);
+    WriteBootstrapPe32(0xD0, 0x1000 + imageVirtualSize);
+    WriteBootstrapPe32(0xD4, 0x400);
+    WriteBootstrapPe16(0xDC, 3);
+    WriteBootstrapPe16(0xDE, 0x0160);
+    WriteBootstrapPe32(0xE0, 0x100000);
+    WriteBootstrapPe32(0xE8, 0x1000);
+    WriteBootstrapPe32(0xF0, 0x100000);
+    WriteBootstrapPe32(0xF8, 0x1000);
+    WriteBootstrapPe32(0x104, 16);
+    Host.BootstrapImageBytes[0x188] = 0x2E;
+    Host.BootstrapImageBytes[0x189] = 0x74;
+    Host.BootstrapImageBytes[0x18A] = 0x65;
+    Host.BootstrapImageBytes[0x18B] = 0x78;
+    Host.BootstrapImageBytes[0x18C] = 0x74;
+    WriteBootstrapPe32(0x190, sectionVirtualSize);
+    WriteBootstrapPe32(0x194, 0x1000);
+    WriteBootstrapPe32(0x198, sectionRawSize);
+    WriteBootstrapPe32(0x19C, 0x400);
+    WriteBootstrapPe32(0x1AC, 0x60000020);
+    Host.BootstrapImageLength[0] = imageLength;
+    return true;
+}
+
+bool TryGetBootstrapInt32MainStackArgumentCountForLength(
+    int32 codeLength, init ref<int32> argumentCount)
+{
+    // Search each instruction-width profile; the helper opcode distinguishes equal-sized candidates.
+    mut int32 high = codeLength / 4;
+    if (high > Host.BootstrapCodeBytes.Length / 4)
+    {
+        high = Host.BootstrapCodeBytes.Length / 4;
+    }
+    if (high > 0xFFFF)
+    {
+        high = 0xFFFF;
+    }
+    mut bool found = false;
+    mut int32 foundArgumentCount = 0;
+    for (mut int32 operationIndex = 0; operationIndex < 2; operationIndex = operationIndex + 1)
+    {
+        bool multiplication = operationIndex == 1;
+        mut int32 low = 1;
+        mut int32 searchHigh = high;
+        for (mut int32 searchIteration = 0;
+            searchIteration < 16 && low <= searchHigh;
+            searchIteration = searchIteration + 1)
+        {
+            int32 candidateCount = low + (searchHigh - low) / 2;
+            if (!TryGetBootstrapInt32MainPeStackArgumentCodeLength(
+                    candidateCount, multiplication, init var expectedLength))
+            {
+                return false;
+            }
+            if (expectedLength == codeLength)
+            {
+                if (TryValidateBootstrapInt32MainStackArgumentHelperHeader(
+                        candidateCount, codeLength, multiplication))
+                {
+                    if (found)
+                    {
+                        return false;
+                    }
+                    found = true;
+                    foundArgumentCount = candidateCount;
+                }
+                break;
+            }
+            if (expectedLength < codeLength)
+            {
+                low = candidateCount + 1;
+            }
+            else
+            {
+                searchHigh = candidateCount - 1;
+            }
+        }
+    }
+    if (!found)
+    {
+        return false;
+    }
+    argumentCount = foundArgumentCount;
+    return true;
+}
+
+bool TryGetBootstrapInt32MainPeStackArgumentCodeLength(
+    int32 argumentCount, bool multiplication, init ref<int32> codeLength)
+{
+    if (argumentCount < 1 || argumentCount > Host.BootstrapCodeBytes.Length / 4
+        || argumentCount > 0xFFFF)
+    {
+        return false;
+    }
+
+    mut int32 frameBaseSize = 0x20;
+    if (argumentCount > 4)
+    {
+        frameBaseSize = frameBaseSize + (argumentCount - 4) * 8;
+    }
+    int32 stackFrameSize = (frameBaseSize + 23) / 16 * 16 - 8;
+    if (stackFrameSize > 0x7FFF8)
+    {
+        return false;
+    }
+    bool largeFrame = stackFrameSize > 0x7F;
+    bool probeFrame = stackFrameSize >= 0x1000;
+    codeLength = probeFrame ? 0x32 : largeFrame ? 7 : 4;
+    for (mut int32 argumentIndex = 0; argumentIndex < argumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        if (argumentIndex < 2)
+        {
+            codeLength = codeLength + 5;
+        }
+        else if (argumentIndex < 4)
+        {
+            codeLength = codeLength + 6;
+        }
+        else
+        {
+            int32 callerStackOffset = 0x20 + (argumentIndex - 4) * 8;
+            codeLength = codeLength + (callerStackOffset > 0x7F ? 11 : 8);
+        }
+    }
+    codeLength = codeLength + (largeFrame ? 13 : 10) + 3;
+    for (mut int32 argumentIndex = 1; argumentIndex < argumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        if (multiplication)
+        {
+            if (argumentIndex == 1)
+            {
+                codeLength = codeLength + 3;
+            }
+            else if (argumentIndex < 4)
+            {
+                codeLength = codeLength + 4;
+            }
+            else
+            {
+                int32 helperStackOffset = 0x28 + (argumentIndex - 4) * 8;
+                codeLength = codeLength + (helperStackOffset > 0x7F ? 8 : 5);
+            }
+        }
+        else if (argumentIndex == 1)
+        {
+            codeLength = codeLength + 2;
+        }
+        else if (argumentIndex < 4)
+        {
+            codeLength = codeLength + 3;
+        }
+        else
+        {
+            int32 helperStackOffset = 0x28 + (argumentIndex - 4) * 8;
+            codeLength = codeLength + (helperStackOffset > 0x7F ? 7 : 4);
+        }
+    }
+    return true;
+}
+
+bool TryValidateBootstrapInt32MainStackArgumentHelperHeader(
+    int32 argumentCount, int32 codeLength, bool multiplication)
+{
+    mut int32 frameBaseSize = 0x20;
+    if (argumentCount > 4)
+    {
+        frameBaseSize = frameBaseSize + (argumentCount - 4) * 8;
+    }
+    int32 stackFrameSize = (frameBaseSize + 23) / 16 * 16 - 8;
+    bool largeFrame = stackFrameSize > 0x7F;
+    bool probeFrame = stackFrameSize >= 0x1000;
+    mut int32 helperOffset = probeFrame ? 0x32 : largeFrame ? 7 : 4;
+    for (mut int32 argumentIndex = 0; argumentIndex < argumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        if (argumentIndex < 2)
+        {
+            helperOffset = helperOffset + 5;
+        }
+        else if (argumentIndex < 4)
+        {
+            helperOffset = helperOffset + 6;
+        }
+        else
+        {
+            int32 callerStackOffset = 0x20 + (argumentIndex - 4) * 8;
+            helperOffset = helperOffset
+                + (callerStackOffset > 0x7F ? 11 : 8);
+        }
+    }
+    helperOffset = helperOffset + 5 + (largeFrame ? 8 : 5);
+    if (helperOffset < 0 || helperOffset > codeLength - 2
+        || Host.BootstrapCodeBytes[helperOffset] != 0x89
+        || Host.BootstrapCodeBytes[helperOffset + 1] != 0xC8)
+    {
+        return false;
+    }
+    if (argumentCount == 1)
+    {
+        return !multiplication;
+    }
+    if (multiplication)
+    {
+        return helperOffset <= codeLength - 5
+            && Host.BootstrapCodeBytes[helperOffset + 2] == 0x0F
+            && Host.BootstrapCodeBytes[helperOffset + 3] == 0xAF
+            && Host.BootstrapCodeBytes[helperOffset + 4] == 0xC2;
+    }
+    return helperOffset <= codeLength - 4
+            && Host.BootstrapCodeBytes[helperOffset + 2] == 0x01
+            && Host.BootstrapCodeBytes[helperOffset + 3] == 0xD0
+        || helperOffset <= codeLength - 4
+            && Host.BootstrapCodeBytes[helperOffset + 2] == 0x29
+            && Host.BootstrapCodeBytes[helperOffset + 3] == 0xD0;
+}
+
+bool TryValidateBootstrapInt32MainStackArgumentCallForLength(int32 codeLength)
+{
+    if (!TryGetBootstrapInt32MainStackArgumentCountForLength(
+            codeLength, init var argumentCount))
+    {
+        return false;
+    }
+
+    mut int32 frameBaseSize = 0x20;
+    if (argumentCount > 4)
+    {
+        frameBaseSize = frameBaseSize + (argumentCount - 4) * 8;
+    }
+    int32 stackFrameSize = (frameBaseSize + 23) / 16 * 16 - 8;
+    return TryValidateBootstrapInt32MainStackArgumentCall(argumentCount, stackFrameSize);
+}
+
+bool TryValidateBootstrapInt32MainStackArgumentCall(int32 argumentCount, int32 stackFrameSize)
+{
+    bool largeFrame = stackFrameSize > 0x7F;
+    bool probeFrame = stackFrameSize >= 0x1000;
+    if (probeFrame)
+    {
+        if (!TryValidateBootstrapInt32MainStackProbeProlog(stackFrameSize))
+        {
+            return false;
+        }
+    }
+    else if (Host.BootstrapCodeBytes[0] != 0x48
+        || Host.BootstrapCodeBytes[1] != (largeFrame ? 0x81 : 0x83)
+        || Host.BootstrapCodeBytes[2] != 0xEC
+        || (largeFrame
+            ? ReadBootstrapPeInt32(3) != stackFrameSize
+            : Host.BootstrapCodeBytes[3] != stackFrameSize))
+    {
+        return false;
+    }
+
+    mut int32 setupOffset = probeFrame ? 0x32 : largeFrame ? 7 : 4;
+    mut int32 callOffset = setupOffset;
+    for (mut int32 argumentIndex = 0; argumentIndex < argumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        if (argumentIndex < 2)
+        {
+            callOffset = callOffset + 5;
+        }
+        else if (argumentIndex < 4)
+        {
+            callOffset = callOffset + 6;
+        }
+        else
+        {
+            int32 callerStackOffset = 0x20 + (argumentIndex - 4) * 8;
+            callOffset = callOffset + (callerStackOffset > 0x7F ? 11 : 8);
+        }
+    }
+    int32 epilogueLength = largeFrame ? 8 : 5;
+    int32 helperOffset = callOffset + 5 + epilogueLength;
+    mut bool subtraction = false;
+    mut bool multiplication = false;
+    if (argumentCount > 1)
+    {
+        if (Host.BootstrapCodeBytes[helperOffset + 2] == 0x0F
+            && Host.BootstrapCodeBytes[helperOffset + 3] == 0xAF
+            && Host.BootstrapCodeBytes[helperOffset + 4] == 0xC2)
+        {
+            multiplication = true;
+        }
+        else if (Host.BootstrapCodeBytes[helperOffset + 2] == 0x29
+            && Host.BootstrapCodeBytes[helperOffset + 3] == 0xD0)
+        {
+            subtraction = true;
+        }
+        else if (Host.BootstrapCodeBytes[helperOffset + 2] != 0x01
+            || Host.BootstrapCodeBytes[helperOffset + 3] != 0xD0)
+        {
+            return false;
+        }
+    }
+
+    mut int32 argumentResult = 0;
+    for (mut int32 argumentIndex = 0; argumentIndex < argumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        mut int32 immediateOffset = setupOffset + 1;
+        mut int32 instructionLength = 5;
+        if (argumentIndex == 0)
+        {
+            if (Host.BootstrapCodeBytes[setupOffset] != 0xB9)
+            {
+                return false;
+            }
+        }
+        else if (argumentIndex == 1)
+        {
+            if (Host.BootstrapCodeBytes[setupOffset] != 0xBA)
+            {
+                return false;
+            }
+        }
+        else if (argumentIndex == 2)
+        {
+            if (Host.BootstrapCodeBytes[setupOffset] != 0x41
+                || Host.BootstrapCodeBytes[setupOffset + 1] != 0xB8)
+            {
+                return false;
+            }
+            immediateOffset = setupOffset + 2;
+            instructionLength = 6;
+        }
+        else if (argumentIndex == 3)
+        {
+            if (Host.BootstrapCodeBytes[setupOffset] != 0x41
+                || Host.BootstrapCodeBytes[setupOffset + 1] != 0xB9)
+            {
+                return false;
+            }
+            immediateOffset = setupOffset + 2;
+            instructionLength = 6;
+        }
+        else
+        {
+            int32 callerStackOffset = 0x20 + (argumentIndex - 4) * 8;
+            if (Host.BootstrapCodeBytes[setupOffset] != 0xC7)
+            {
+                return false;
+            }
+            if (callerStackOffset > 0x7F)
+            {
+                if (Host.BootstrapCodeBytes[setupOffset + 1] != 0x84
+                    || Host.BootstrapCodeBytes[setupOffset + 2] != 0x24
+                    || ReadBootstrapPeInt32(setupOffset + 3) != callerStackOffset)
+                {
+                    return false;
+                }
+                immediateOffset = setupOffset + 7;
+                instructionLength = 11;
+            }
+            else
+            {
+                if (Host.BootstrapCodeBytes[setupOffset + 1] != 0x44
+                    || Host.BootstrapCodeBytes[setupOffset + 2] != 0x24
+                    || Host.BootstrapCodeBytes[setupOffset + 3] != callerStackOffset)
+                {
+                    return false;
+                }
+                immediateOffset = setupOffset + 4;
+                instructionLength = 8;
+            }
+        }
+
+        int32 argument = ReadBootstrapPeInt32(immediateOffset);
+        if (argumentIndex == 0)
+        {
+            argumentResult = argument;
+        }
+        else if (subtraction)
+        {
+            if (argument > 0 && argumentResult < int32.MinValue + argument
+                || argument < 0 && argumentResult > int32.MaxValue + argument)
+            {
+                return false;
+            }
+            argumentResult = argumentResult - argument;
+        }
+        else if (multiplication)
+        {
+            if (BootstrapPeInt32MultiplicationOverflows(argumentResult, argument))
+            {
+                return false;
+            }
+            argumentResult = argumentResult * argument;
+        }
+        else
+        {
+            if (argument > 0 && argumentResult > int32.MaxValue - argument
+                || argument < 0 && argumentResult < int32.MinValue - argument)
+            {
+                return false;
+            }
+            argumentResult = argumentResult + argument;
+        }
+        setupOffset = setupOffset + instructionLength;
+    }
+
+    if (setupOffset != callOffset
+        || Host.BootstrapCodeBytes[callOffset] != 0xE8
+        || ReadBootstrapPeInt32(callOffset + 1) != epilogueLength
+        || Host.BootstrapCodeBytes[callOffset + 5] != 0x48
+        || Host.BootstrapCodeBytes[callOffset + 6] != (largeFrame ? 0x81 : 0x83)
+        || Host.BootstrapCodeBytes[callOffset + 7] != 0xC4
+        || (largeFrame
+            ? ReadBootstrapPeInt32(callOffset + 8) != stackFrameSize
+            : Host.BootstrapCodeBytes[callOffset + 8] != stackFrameSize)
+        || Host.BootstrapCodeBytes[callOffset + (largeFrame ? 12 : 9)] != 0xC3)
+    {
+        return false;
+    }
+
+    if (Host.BootstrapCodeBytes[helperOffset] != 0x89
+        || Host.BootstrapCodeBytes[helperOffset + 1] != 0xC8)
+    {
+        return false;
+    }
+    mut int32 stackReadOffset = helperOffset + 2;
+    for (mut int32 argumentIndex = 1; argumentIndex < argumentCount;
+        argumentIndex = argumentIndex + 1)
+    {
+        if (multiplication && argumentIndex == 1)
+        {
+            if (Host.BootstrapCodeBytes[stackReadOffset] != 0x0F
+                || Host.BootstrapCodeBytes[stackReadOffset + 1] != 0xAF
+                || Host.BootstrapCodeBytes[stackReadOffset + 2] != 0xC2)
+            {
+                return false;
+            }
+            stackReadOffset = stackReadOffset + 3;
+        }
+        else if (multiplication && argumentIndex == 2)
+        {
+            if (Host.BootstrapCodeBytes[stackReadOffset] != 0x41
+                || Host.BootstrapCodeBytes[stackReadOffset + 1] != 0x0F
+                || Host.BootstrapCodeBytes[stackReadOffset + 2] != 0xAF
+                || Host.BootstrapCodeBytes[stackReadOffset + 3] != 0xC0)
+            {
+                return false;
+            }
+            stackReadOffset = stackReadOffset + 4;
+        }
+        else if (multiplication && argumentIndex == 3)
+        {
+            if (Host.BootstrapCodeBytes[stackReadOffset] != 0x41
+                || Host.BootstrapCodeBytes[stackReadOffset + 1] != 0x0F
+                || Host.BootstrapCodeBytes[stackReadOffset + 2] != 0xAF
+                || Host.BootstrapCodeBytes[stackReadOffset + 3] != 0xC1)
+            {
+                return false;
+            }
+            stackReadOffset = stackReadOffset + 4;
+        }
+        else if (multiplication)
+        {
+            int32 helperStackOffset = 0x28 + (argumentIndex - 4) * 8;
+            if (Host.BootstrapCodeBytes[stackReadOffset] != 0x0F
+                || Host.BootstrapCodeBytes[stackReadOffset + 1] != 0xAF)
+            {
+                return false;
+            }
+            if (helperStackOffset > 0x7F)
+            {
+                if (Host.BootstrapCodeBytes[stackReadOffset + 2] != 0x84
+                    || Host.BootstrapCodeBytes[stackReadOffset + 3] != 0x24
+                    || ReadBootstrapPeInt32(stackReadOffset + 4) != helperStackOffset)
+                {
+                    return false;
+                }
+                stackReadOffset = stackReadOffset + 8;
+            }
+            else
+            {
+                if (Host.BootstrapCodeBytes[stackReadOffset + 2] != 0x44
+                    || Host.BootstrapCodeBytes[stackReadOffset + 3] != 0x24
+                    || Host.BootstrapCodeBytes[stackReadOffset + 4] != helperStackOffset)
+                {
+                    return false;
+                }
+                stackReadOffset = stackReadOffset + 5;
+            }
+        }
+        else if (argumentIndex == 1)
+        {
+            if (Host.BootstrapCodeBytes[stackReadOffset] != (subtraction ? 0x29 : 0x01)
+                || Host.BootstrapCodeBytes[stackReadOffset + 1] != 0xD0)
+            {
+                return false;
+            }
+            stackReadOffset = stackReadOffset + 2;
+        }
+        else if (argumentIndex == 2)
+        {
+            if (Host.BootstrapCodeBytes[stackReadOffset] != 0x44
+                || Host.BootstrapCodeBytes[stackReadOffset + 1] != (subtraction ? 0x29 : 0x01)
+                || Host.BootstrapCodeBytes[stackReadOffset + 2] != 0xC0)
+            {
+                return false;
+            }
+            stackReadOffset = stackReadOffset + 3;
+        }
+        else if (argumentIndex == 3)
+        {
+            if (Host.BootstrapCodeBytes[stackReadOffset] != 0x44
+                || Host.BootstrapCodeBytes[stackReadOffset + 1] != (subtraction ? 0x29 : 0x01)
+                || Host.BootstrapCodeBytes[stackReadOffset + 2] != 0xC8)
+            {
+                return false;
+            }
+            stackReadOffset = stackReadOffset + 3;
+        }
+        else
+        {
+            int32 helperStackOffset = 0x28 + (argumentIndex - 4) * 8;
+            if (Host.BootstrapCodeBytes[stackReadOffset] != (subtraction ? 0x2B : 0x03))
+            {
+                return false;
+            }
+            if (helperStackOffset > 0x7F)
+            {
+                if (Host.BootstrapCodeBytes[stackReadOffset + 1] != 0x84
+                    || Host.BootstrapCodeBytes[stackReadOffset + 2] != 0x24
+                    || ReadBootstrapPeInt32(stackReadOffset + 3) != helperStackOffset)
+                {
+                    return false;
+                }
+                stackReadOffset = stackReadOffset + 7;
+            }
+            else
+            {
+                if (Host.BootstrapCodeBytes[stackReadOffset + 1] != 0x44
+                    || Host.BootstrapCodeBytes[stackReadOffset + 2] != 0x24
+                    || Host.BootstrapCodeBytes[stackReadOffset + 3] != helperStackOffset)
+                {
+                    return false;
+                }
+                stackReadOffset = stackReadOffset + 4;
+            }
+        }
+    }
+    return stackReadOffset + 1 == Host.BootstrapCodeLength[0]
+        && Host.BootstrapCodeBytes[stackReadOffset] == 0xC3;
+}
+
+bool TryGetBootstrapInt32MainParameterlessCallChainCountForLength(
+    int32 codeLength, init ref<int32> forwardingCount)
+{
+    forwardingCount = 0;
+    if (codeLength < 34 || codeLength > Host.BootstrapCodeBytes.Length)
+    {
+        return false;
+    }
+    // Fourteen bytes per nonleaf; the existing helper leaf is six or eleven bytes.
+    int32 helperLength = codeLength % 14;
+    if (helperLength != 6 && helperLength != 11)
+    {
+        return false;
+    }
+    int32 helperOffset = codeLength - helperLength;
+    for (mut int32 offset = 0; offset < helperOffset; offset = offset + 14)
+    {
+        if (!TryValidateBootstrapStackFramePrologAt(offset, 0x28, 4)
+            || !TryValidateBootstrapStackFrameCallAndEpilogue(offset + 4, 5, 0x28))
+        {
+            return false;
+        }
+    }
+    if (Host.BootstrapCodeBytes[helperOffset] != 0xB8
+        || Host.BootstrapCodeBytes[codeLength - 1] != 0xC3)
+    {
+        return false;
+    }
+    if (helperLength == 11)
+    {
+        int32 left = ReadBootstrapPeInt32(helperOffset + 1);
+        int32 right = ReadBootstrapPeInt32(helperOffset + 6);
+        int32 opcode = Host.BootstrapCodeBytes[helperOffset + 5];
+        if (opcode != 0x05 && opcode != 0x2D
+            || left < 0 || right < 0
+            || opcode == 0x05 && left > int32.MaxValue - right)
+        {
+            return false;
+        }
+    }
+    forwardingCount = helperOffset / 14 - 1;
+    return true;
+}
+
+bool TryGetBootstrapInt32MainCallChainCountForLength(int32 codeLength,
+    init ref<int32> argumentCount, init ref<bool> multiplication,
+    init ref<int32> forwardingCount)
+{
+    argumentCount = 0;
+    multiplication = false;
+    forwardingCount = 0;
+    if (codeLength < 4 || codeLength > Host.BootstrapCodeBytes.Length)
+    {
+        return false;
+    }
+
+    mut int32 stackFrameSize = 0;
+    if (Host.BootstrapCodeBytes[0] == 0x49
+        && Host.BootstrapCodeBytes[1] == 0x89
+        && Host.BootstrapCodeBytes[2] == 0xE3
+        && Host.BootstrapCodeBytes[3] == 0x41
+        && Host.BootstrapCodeBytes[4] == 0xBA)
+    {
+        if (codeLength < 9)
+        {
+            return false;
+        }
+        stackFrameSize = ReadBootstrapPeInt32(5);
+    }
+    else if (Host.BootstrapCodeBytes[0] == 0x48
+        && Host.BootstrapCodeBytes[1] == 0x83
+        && Host.BootstrapCodeBytes[2] == 0xEC)
+    {
+        stackFrameSize = Host.BootstrapCodeBytes[3];
+    }
+    else if (Host.BootstrapCodeBytes[0] == 0x48
+        && Host.BootstrapCodeBytes[1] == 0x81
+        && Host.BootstrapCodeBytes[2] == 0xEC)
+    {
+        if (codeLength < 7)
+        {
+            return false;
+        }
+        stackFrameSize = ReadBootstrapPeInt32(3);
+    }
+    else
+    {
+        return false;
+    }
+    if (stackFrameSize < 0x28 || stackFrameSize > 0x7FFF8
+        || stackFrameSize % 8 != 0)
+    {
+        return false;
+    }
+
+    mut bool found = false;
+    mut int32 foundArgumentCount = 0;
+    mut bool foundMultiplication = false;
+    mut int32 foundForwardingCount = 0;
+    mut int32 firstCandidateCount = stackFrameSize / 8 - 1;
+    mut int32 lastCandidateCount = stackFrameSize / 8;
+    if (stackFrameSize == 0x28)
+    {
+        firstCandidateCount = 1;
+        lastCandidateCount = 5;
+    }
+    for (mut int32 candidateArgumentCount = firstCandidateCount;
+        candidateArgumentCount <= lastCandidateCount;
+        candidateArgumentCount = candidateArgumentCount + 1)
+    {
+        if (!TryGetBootstrapInt32MainCallChainLayoutForDepth(
+                candidateArgumentCount, false, 1,
+                init var mainFunctionEnd, init var firstForwardingEnd,
+                init var singleForwardingCodeLength))
+        {
+            continue;
+        }
+        int32 forwardingLength = firstForwardingEnd - mainFunctionEnd;
+        for (mut int32 operationIndex = 0; operationIndex < 2;
+            operationIndex = operationIndex + 1)
+        {
+            bool candidateMultiplication = operationIndex == 1;
+            if (!TryGetBootstrapInt32MainPeStackArgumentCodeLength(
+                    candidateArgumentCount, candidateMultiplication,
+                    init var baseCodeLength)
+                || codeLength < baseCodeLength)
+            {
+                continue;
+            }
+            int32 extraCodeLength = codeLength - baseCodeLength;
+            if (forwardingLength <= 0
+                || extraCodeLength % forwardingLength != 0)
+            {
+                continue;
+            }
+            int32 candidateForwardingCount = extraCodeLength / forwardingLength;
+            if (candidateForwardingCount < 1
+                || !TryValidateBootstrapInt32MainCallChain(
+                    candidateArgumentCount, candidateMultiplication,
+                    candidateForwardingCount, codeLength))
+            {
+                continue;
+            }
+            if (found)
+            {
+                return false;
+            }
+            found = true;
+            foundArgumentCount = candidateArgumentCount;
+            foundMultiplication = candidateMultiplication;
+            foundForwardingCount = candidateForwardingCount;
+        }
+    }
+    if (!found)
+    {
+        return false;
+    }
+    argumentCount = foundArgumentCount;
+    multiplication = foundMultiplication;
+    forwardingCount = foundForwardingCount;
+    return true;
+}
+
+bool TryGetBootstrapInt32MainCallChainLayout(int32 argumentCount,
+    bool multiplication, init ref<int32> mainFunctionEnd,
+    init ref<int32> forwardingFunctionEnd, init ref<int32> codeLength)
+{
+    return TryGetBootstrapInt32MainCallChainLayoutForDepth(
+        argumentCount, multiplication, 1, init mainFunctionEnd,
+        init forwardingFunctionEnd, init codeLength);
+}
+
+bool TryGetBootstrapInt32MainCallChainLayoutForDepth(int32 argumentCount,
+    bool multiplication, int32 forwardingCount,
+    init ref<int32> mainFunctionEnd, init ref<int32> forwardingFunctionEnd,
+    init ref<int32> codeLength)
+{
+    if (forwardingCount < 1
+        || !TryGetBootstrapInt32MainPeStackArgumentCodeLength(
+            argumentCount, multiplication, init var baseCodeLength))
+    {
+        return false;
+    }
+    mut int32 frameBaseSize = 0x20;
+    if (argumentCount > 4)
+    {
+        frameBaseSize = frameBaseSize + (argumentCount - 4) * 8;
+    }
+    int32 stackFrameSize = (frameBaseSize + 23) / 16 * 16 - 8;
+    bool largeFrame = stackFrameSize > 0x7F;
+    int32 prologLength = stackFrameSize >= 0x1000 ? 0x32
+        : largeFrame ? 7 : 4;
+    int32 epilogueLength = largeFrame ? 8 : 5;
+    mut int32 callOffset = prologLength;
+    for (mut int32 index = 0; index < argumentCount; index = index + 1)
+    {
+        if (index < 2)
+        {
+            callOffset = callOffset + 5;
+        }
+        else if (index < 4)
+        {
+            callOffset = callOffset + 6;
+        }
+        else
+        {
+            int32 outgoingOffset = 0x20 + (index - 4) * 8;
+            callOffset = callOffset + (outgoingOffset > 0x7F ? 11 : 8);
+        }
+    }
+    mainFunctionEnd = callOffset + 5 + epilogueLength;
+    mut int32 forwardingLength = prologLength + 5 + epilogueLength;
+    for (mut int32 index = 4; index < argumentCount; index = index + 1)
+    {
+        int32 incomingOffset = stackFrameSize + 0x28 + (index - 4) * 8;
+        int32 outgoingOffset = 0x20 + (index - 4) * 8;
+        forwardingLength = forwardingLength
+            + (incomingOffset > 0x7F ? 7 : 4)
+            + (outgoingOffset > 0x7F ? 7 : 4);
+    }
+    if (forwardingLength > int32.MaxValue - mainFunctionEnd
+        || baseCodeLength < mainFunctionEnd
+        || forwardingCount > (int32.MaxValue - baseCodeLength) / forwardingLength)
+    {
+        return false;
+    }
+    forwardingFunctionEnd = mainFunctionEnd + forwardingLength;
+    codeLength = baseCodeLength + forwardingCount * forwardingLength;
+    return true;
+}
+
+bool TryValidateBootstrapInt32MainCallChain(int32 argumentCount,
+    bool expectedMultiplication, int32 forwardingCount, int32 codeLength)
+{
+    if (!TryGetBootstrapInt32MainCallChainLayoutForDepth(
+            argumentCount, expectedMultiplication, forwardingCount,
+            init var mainFunctionEnd, init var forwardingFunctionEnd,
+            init var expectedCodeLength)
+        || codeLength != expectedCodeLength)
+    {
+        return false;
+    }
+
+    mut int32 frameBaseSize = 0x20;
+    if (argumentCount > 4)
+    {
+        frameBaseSize = frameBaseSize + (argumentCount - 4) * 8;
+    }
+    int32 stackFrameSize = (frameBaseSize + 23) / 16 * 16 - 8;
+    bool largeFrame = stackFrameSize > 0x7F;
+    int32 prologLength = stackFrameSize >= 0x1000 ? 0x32
+        : largeFrame ? 7 : 4;
+    int32 epilogueLength = largeFrame ? 8 : 5;
+    if (!TryValidateBootstrapStackFramePrologAt(
+            0, stackFrameSize, prologLength))
+    {
+        return false;
+    }
+    int32 forwardingLength = forwardingFunctionEnd - mainFunctionEnd;
+    for (mut int32 forwardingIndex = 0;
+        forwardingIndex < forwardingCount;
+        forwardingIndex = forwardingIndex + 1)
+    {
+        if (!TryValidateBootstrapStackFramePrologAt(
+                mainFunctionEnd + forwardingIndex * forwardingLength,
+                stackFrameSize, prologLength))
+        {
+            return false;
+        }
+    }
+
+    int32 helperOffset = mainFunctionEnd + forwardingCount * forwardingLength;
+    mut bool subtraction = false;
+    mut bool multiplication = false;
+    if (argumentCount > 1)
+    {
+        if (Host.BootstrapCodeBytes[helperOffset + 2] == 0x0F
+            && Host.BootstrapCodeBytes[helperOffset + 3] == 0xAF
+            && Host.BootstrapCodeBytes[helperOffset + 4] == 0xC2)
+        {
+            multiplication = true;
+        }
+        else if (Host.BootstrapCodeBytes[helperOffset + 2] == 0x29
+            && Host.BootstrapCodeBytes[helperOffset + 3] == 0xD0)
+        {
+            subtraction = true;
+        }
+        else if (Host.BootstrapCodeBytes[helperOffset + 2] != 0x01
+            || Host.BootstrapCodeBytes[helperOffset + 3] != 0xD0)
+        {
+            return false;
+        }
+    }
+    if (multiplication != expectedMultiplication)
+    {
+        return false;
+    }
+
+    int32 mainCallOffset = mainFunctionEnd - 5 - epilogueLength;
+    mut int32 setupOffset = prologLength;
+    mut int32 argumentResult = 0;
+    for (mut int32 index = 0; index < argumentCount; index = index + 1)
+    {
+        mut int32 immediateOffset = setupOffset + 1;
+        mut int32 instructionLength = 5;
+        if (index == 0)
+        {
+            if (Host.BootstrapCodeBytes[setupOffset] != 0xB9)
+            {
+                return false;
+            }
+        }
+        else if (index == 1)
+        {
+            if (Host.BootstrapCodeBytes[setupOffset] != 0xBA)
+            {
+                return false;
+            }
+        }
+        else if (index == 2)
+        {
+            if (Host.BootstrapCodeBytes[setupOffset] != 0x41
+                || Host.BootstrapCodeBytes[setupOffset + 1] != 0xB8)
+            {
+                return false;
+            }
+            immediateOffset = setupOffset + 2;
+            instructionLength = 6;
+        }
+        else if (index == 3)
+        {
+            if (Host.BootstrapCodeBytes[setupOffset] != 0x41
+                || Host.BootstrapCodeBytes[setupOffset + 1] != 0xB9)
+            {
+                return false;
+            }
+            immediateOffset = setupOffset + 2;
+            instructionLength = 6;
+        }
+        else
+        {
+            int32 outgoingOffset = 0x20 + (index - 4) * 8;
+            if (Host.BootstrapCodeBytes[setupOffset] != 0xC7)
+            {
+                return false;
+            }
+            if (outgoingOffset > 0x7F)
+            {
+                if (Host.BootstrapCodeBytes[setupOffset + 1] != 0x84
+                    || Host.BootstrapCodeBytes[setupOffset + 2] != 0x24
+                    || ReadBootstrapPeInt32(setupOffset + 3) != outgoingOffset)
+                {
+                    return false;
+                }
+                immediateOffset = setupOffset + 7;
+                instructionLength = 11;
+            }
+            else
+            {
+                if (Host.BootstrapCodeBytes[setupOffset + 1] != 0x44
+                    || Host.BootstrapCodeBytes[setupOffset + 2] != 0x24
+                    || Host.BootstrapCodeBytes[setupOffset + 3] != outgoingOffset)
+                {
+                    return false;
+                }
+                immediateOffset = setupOffset + 4;
+                instructionLength = 8;
+            }
+        }
+
+        int32 argument = ReadBootstrapPeInt32(immediateOffset);
+        if (index == 0)
+        {
+            argumentResult = argument;
+        }
+        else if (subtraction)
+        {
+            if (argument > 0 && argumentResult < int32.MinValue + argument
+                || argument < 0 && argumentResult > int32.MaxValue + argument)
+            {
+                return false;
+            }
+            argumentResult = argumentResult - argument;
+        }
+        else if (multiplication)
+        {
+            if (BootstrapPeInt32MultiplicationOverflows(argumentResult, argument))
+            {
+                return false;
+            }
+            argumentResult = argumentResult * argument;
+        }
+        else
+        {
+            if (argument > 0 && argumentResult > int32.MaxValue - argument
+                || argument < 0 && argumentResult < int32.MinValue - argument)
+            {
+                return false;
+            }
+            argumentResult = argumentResult + argument;
+        }
+        setupOffset = setupOffset + instructionLength;
+    }
+    if (setupOffset != mainCallOffset
+        || !TryValidateBootstrapStackFrameCallAndEpilogue(
+            mainCallOffset, epilogueLength, stackFrameSize))
+    {
+        return false;
+    }
+
+    for (mut int32 forwardingIndex = 0;
+        forwardingIndex < forwardingCount;
+        forwardingIndex = forwardingIndex + 1)
+    {
+        int32 forwardingStart = mainFunctionEnd
+            + forwardingIndex * forwardingLength;
+        mut int32 copyOffset = forwardingStart + prologLength;
+        for (mut int32 index = 4; index < argumentCount;
+            index = index + 1)
+        {
+            int32 incomingOffset = stackFrameSize + 0x28 + (index - 4) * 8;
+            int32 outgoingOffset = 0x20 + (index - 4) * 8;
+            if (incomingOffset > 0x7F)
+            {
+                if (Host.BootstrapCodeBytes[copyOffset] != 0x8B
+                    || Host.BootstrapCodeBytes[copyOffset + 1] != 0x84
+                    || Host.BootstrapCodeBytes[copyOffset + 2] != 0x24
+                    || ReadBootstrapPeInt32(copyOffset + 3) != incomingOffset)
+                {
+                    return false;
+                }
+                copyOffset = copyOffset + 7;
+            }
+            else
+            {
+                if (Host.BootstrapCodeBytes[copyOffset] != 0x8B
+                    || Host.BootstrapCodeBytes[copyOffset + 1] != 0x44
+                    || Host.BootstrapCodeBytes[copyOffset + 2] != 0x24
+                    || Host.BootstrapCodeBytes[copyOffset + 3] != incomingOffset)
+                {
+                    return false;
+                }
+                copyOffset = copyOffset + 4;
+            }
+            if (outgoingOffset > 0x7F)
+            {
+                if (Host.BootstrapCodeBytes[copyOffset] != 0x89
+                    || Host.BootstrapCodeBytes[copyOffset + 1] != 0x84
+                    || Host.BootstrapCodeBytes[copyOffset + 2] != 0x24
+                    || ReadBootstrapPeInt32(copyOffset + 3) != outgoingOffset)
+                {
+                    return false;
+                }
+                copyOffset = copyOffset + 7;
+            }
+            else
+            {
+                if (Host.BootstrapCodeBytes[copyOffset] != 0x89
+                    || Host.BootstrapCodeBytes[copyOffset + 1] != 0x44
+                    || Host.BootstrapCodeBytes[copyOffset + 2] != 0x24
+                    || Host.BootstrapCodeBytes[copyOffset + 3] != outgoingOffset)
+                {
+                    return false;
+                }
+                copyOffset = copyOffset + 4;
+            }
+        }
+        if (copyOffset + 5 + epilogueLength
+                != forwardingStart + forwardingLength
+            || !TryValidateBootstrapStackFrameCallAndEpilogue(
+                copyOffset, epilogueLength, stackFrameSize))
+        {
+            return false;
+        }
+    }
+
+    if (Host.BootstrapCodeBytes[helperOffset] != 0x89
+        || Host.BootstrapCodeBytes[helperOffset + 1] != 0xC8)
+    {
+        return false;
+    }
+    mut int32 arithmeticOffset = helperOffset + 2;
+    for (mut int32 index = 1; index < argumentCount; index = index + 1)
+    {
+        if (multiplication && index == 1)
+        {
+            arithmeticOffset = arithmeticOffset + 3;
+        }
+        else if (multiplication && index == 2)
+        {
+            if (Host.BootstrapCodeBytes[arithmeticOffset] != 0x41
+                || Host.BootstrapCodeBytes[arithmeticOffset + 1] != 0x0F
+                || Host.BootstrapCodeBytes[arithmeticOffset + 2] != 0xAF
+                || Host.BootstrapCodeBytes[arithmeticOffset + 3] != 0xC0)
+            {
+                return false;
+            }
+            arithmeticOffset = arithmeticOffset + 4;
+        }
+        else if (multiplication && index == 3)
+        {
+            if (Host.BootstrapCodeBytes[arithmeticOffset] != 0x41
+                || Host.BootstrapCodeBytes[arithmeticOffset + 1] != 0x0F
+                || Host.BootstrapCodeBytes[arithmeticOffset + 2] != 0xAF
+                || Host.BootstrapCodeBytes[arithmeticOffset + 3] != 0xC1)
+            {
+                return false;
+            }
+            arithmeticOffset = arithmeticOffset + 4;
+        }
+        else if (multiplication)
+        {
+            int32 stackOffset = 0x28 + (index - 4) * 8;
+            if (Host.BootstrapCodeBytes[arithmeticOffset] != 0x0F
+                || Host.BootstrapCodeBytes[arithmeticOffset + 1] != 0xAF)
+            {
+                return false;
+            }
+            if (stackOffset > 0x7F)
+            {
+                if (Host.BootstrapCodeBytes[arithmeticOffset + 2] != 0x84
+                    || Host.BootstrapCodeBytes[arithmeticOffset + 3] != 0x24
+                    || ReadBootstrapPeInt32(arithmeticOffset + 4) != stackOffset)
+                {
+                    return false;
+                }
+                arithmeticOffset = arithmeticOffset + 8;
+            }
+            else
+            {
+                if (Host.BootstrapCodeBytes[arithmeticOffset + 2] != 0x44
+                    || Host.BootstrapCodeBytes[arithmeticOffset + 3] != 0x24
+                    || Host.BootstrapCodeBytes[arithmeticOffset + 4] != stackOffset)
+                {
+                    return false;
+                }
+                arithmeticOffset = arithmeticOffset + 5;
+            }
+        }
+        else if (index == 1)
+        {
+            if (Host.BootstrapCodeBytes[arithmeticOffset]
+                    != (subtraction ? 0x29 : 0x01)
+                || Host.BootstrapCodeBytes[arithmeticOffset + 1] != 0xD0)
+            {
+                return false;
+            }
+            arithmeticOffset = arithmeticOffset + 2;
+        }
+        else if (index == 2)
+        {
+            if (Host.BootstrapCodeBytes[arithmeticOffset] != 0x44
+                || Host.BootstrapCodeBytes[arithmeticOffset + 1]
+                    != (subtraction ? 0x29 : 0x01)
+                || Host.BootstrapCodeBytes[arithmeticOffset + 2] != 0xC0)
+            {
+                return false;
+            }
+            arithmeticOffset = arithmeticOffset + 3;
+        }
+        else if (index == 3)
+        {
+            if (Host.BootstrapCodeBytes[arithmeticOffset] != 0x44
+                || Host.BootstrapCodeBytes[arithmeticOffset + 1]
+                    != (subtraction ? 0x29 : 0x01)
+                || Host.BootstrapCodeBytes[arithmeticOffset + 2] != 0xC8)
+            {
+                return false;
+            }
+            arithmeticOffset = arithmeticOffset + 3;
+        }
+        else
+        {
+            int32 stackOffset = 0x28 + (index - 4) * 8;
+            if (Host.BootstrapCodeBytes[arithmeticOffset]
+                    != (subtraction ? 0x2B : 0x03))
+            {
+                return false;
+            }
+            if (stackOffset > 0x7F)
+            {
+                if (Host.BootstrapCodeBytes[arithmeticOffset + 1] != 0x84
+                    || Host.BootstrapCodeBytes[arithmeticOffset + 2] != 0x24
+                    || ReadBootstrapPeInt32(arithmeticOffset + 3) != stackOffset)
+                {
+                    return false;
+                }
+                arithmeticOffset = arithmeticOffset + 7;
+            }
+            else
+            {
+                if (Host.BootstrapCodeBytes[arithmeticOffset + 1] != 0x44
+                    || Host.BootstrapCodeBytes[arithmeticOffset + 2] != 0x24
+                    || Host.BootstrapCodeBytes[arithmeticOffset + 3] != stackOffset)
+                {
+                    return false;
+                }
+                arithmeticOffset = arithmeticOffset + 4;
+            }
+        }
+    }
+    return arithmeticOffset + 1 == codeLength
+        && Host.BootstrapCodeBytes[arithmeticOffset] == 0xC3;
+}
+
+bool TryValidateBootstrapStackFrameCallAndEpilogue(
+    int32 callOffset, int32 epilogueLength, int32 stackFrameSize)
+{
+    return Host.BootstrapCodeBytes[callOffset] == 0xE8
+        && ReadBootstrapPeInt32(callOffset + 1) == epilogueLength
+        && Host.BootstrapCodeBytes[callOffset + 5] == 0x48
+        && Host.BootstrapCodeBytes[callOffset + 6]
+            == (stackFrameSize > 0x7F ? 0x81 : 0x83)
+        && Host.BootstrapCodeBytes[callOffset + 7] == 0xC4
+        && (stackFrameSize > 0x7F
+            ? ReadBootstrapPeInt32(callOffset + 8) == stackFrameSize
+                && Host.BootstrapCodeBytes[callOffset + 12] == 0xC3
+            : Host.BootstrapCodeBytes[callOffset + 8] == stackFrameSize
+                && Host.BootstrapCodeBytes[callOffset + 9] == 0xC3);
+}
+
+bool TryValidateBootstrapStackFramePrologAt(
+    int32 offset, int32 stackFrameSize, int32 prologLength)
+{
+    if (prologLength == 0x32)
+    {
+        return TryValidateBootstrapStackProbePrologAt(offset, stackFrameSize);
+    }
+    return Host.BootstrapCodeBytes[offset] == 0x48
+        && Host.BootstrapCodeBytes[offset + 1]
+            == (stackFrameSize > 0x7F ? 0x81 : 0x83)
+        && Host.BootstrapCodeBytes[offset + 2] == 0xEC
+        && (stackFrameSize > 0x7F
+            ? ReadBootstrapPeInt32(offset + 3) == stackFrameSize
+            : Host.BootstrapCodeBytes[offset + 3] == stackFrameSize);
+}
+
+bool BootstrapPeInt32MultiplicationOverflows(int32 left, int32 right)
+{
+    int64 result = int64(left) * int64(right);
+    return result < int64(int32.MinValue) || result > int64(int32.MaxValue);
+}
+
+bool TryValidateBootstrapInt32MainStackProbeProlog(int32 stackFrameSize)
+{
+    return TryValidateBootstrapStackProbePrologAt(0, stackFrameSize);
+}
+
+bool TryValidateBootstrapStackProbePrologAt(
+    int32 offset, int32 stackFrameSize)
+{
+    return Host.BootstrapCodeBytes[offset] == 0x49
+        && Host.BootstrapCodeBytes[offset + 1] == 0x89
+        && Host.BootstrapCodeBytes[offset + 2] == 0xE3
+        && Host.BootstrapCodeBytes[offset + 3] == 0x41
+        && Host.BootstrapCodeBytes[offset + 4] == 0xBA
+        && ReadBootstrapPeInt32(offset + 5) == stackFrameSize
+        && Host.BootstrapCodeBytes[offset + 9] == 0x49
+        && Host.BootstrapCodeBytes[offset + 10] == 0x81
+        && Host.BootstrapCodeBytes[offset + 11] == 0xEB
+        && ReadBootstrapPeInt32(offset + 12) == 0x1000
+        && Host.BootstrapCodeBytes[offset + 16] == 0x41
+        && Host.BootstrapCodeBytes[offset + 17] == 0xF6
+        && Host.BootstrapCodeBytes[offset + 18] == 0x03
+        && Host.BootstrapCodeBytes[offset + 19] == 0
+        && Host.BootstrapCodeBytes[offset + 20] == 0x41
+        && Host.BootstrapCodeBytes[offset + 21] == 0x81
+        && Host.BootstrapCodeBytes[offset + 22] == 0xEA
+        && ReadBootstrapPeInt32(offset + 23) == 0x1000
+        && Host.BootstrapCodeBytes[offset + 27] == 0x41
+        && Host.BootstrapCodeBytes[offset + 28] == 0x81
+        && Host.BootstrapCodeBytes[offset + 29] == 0xFA
+        && ReadBootstrapPeInt32(offset + 30) == 0x1000
+        && Host.BootstrapCodeBytes[offset + 34] == 0x73
+        && Host.BootstrapCodeBytes[offset + 35] == 0xE5
+        && Host.BootstrapCodeBytes[offset + 36] == 0x4D
+        && Host.BootstrapCodeBytes[offset + 37] == 0x29
+        && Host.BootstrapCodeBytes[offset + 38] == 0xD3
+        && Host.BootstrapCodeBytes[offset + 39] == 0x41
+        && Host.BootstrapCodeBytes[offset + 40] == 0xF6
+        && Host.BootstrapCodeBytes[offset + 41] == 0x03
+        && Host.BootstrapCodeBytes[offset + 42] == 0
+        && Host.BootstrapCodeBytes[offset + 43] == 0x48
+        && Host.BootstrapCodeBytes[offset + 44] == 0x81
+        && Host.BootstrapCodeBytes[offset + 45] == 0xEC
+        && ReadBootstrapPeInt32(offset + 46) == stackFrameSize;
+}
+
+int32 ReadBootstrapPeInt32(int32 offset)
+{
+    return Host.BootstrapCodeBytes[offset]
+        | (Host.BootstrapCodeBytes[offset + 1] << 8)
+        | (Host.BootstrapCodeBytes[offset + 2] << 16)
+        | (Host.BootstrapCodeBytes[offset + 3] << 24);
+}
+
+void WriteBootstrapPeStackFrameUnwindInfo(
+    int32 offset, int32 stackFrameSize, int32 prologLength)
+{
+    bool largeFrame = stackFrameSize > 0x7F;
+    Host.BootstrapImageBytes[offset] = 1;
+    Host.BootstrapImageBytes[offset + 1] = prologLength;
+    Host.BootstrapImageBytes[offset + 2] = largeFrame ? 2 : 1;
+    Host.BootstrapImageBytes[offset + 4] = prologLength;
+    Host.BootstrapImageBytes[offset + 5] = largeFrame ? 0x01
+        : ((stackFrameSize / 8 - 1) << 4) | 0x02;
+    if (largeFrame)
+    {
+        int32 allocationUnits = stackFrameSize / 8;
+        Host.BootstrapImageBytes[offset + 6] = allocationUnits & 0xFF;
+        Host.BootstrapImageBytes[offset + 7] = allocationUnits >> 8;
+    }
+}
+
+void WriteBootstrapPe16(int32 offset, int32 value)
+{
+    Host.BootstrapImageBytes[offset] = value & 0xFF;
+    Host.BootstrapImageBytes[offset + 1] = (value >> 8) & 0xFF;
+}
+
+void WriteBootstrapPe32(int32 offset, int32 value)
+{
+    Host.BootstrapImageBytes[offset] = value & 0xFF;
+    Host.BootstrapImageBytes[offset + 1] = (value >> 8) & 0xFF;
+    Host.BootstrapImageBytes[offset + 2] = (value >> 16) & 0xFF;
+    Host.BootstrapImageBytes[offset + 3] = (value >> 24) & 0xFF;
+}

@@ -1,0 +1,170 @@
+namespace Terrum.CodeAnalysis;
+
+// Requires the host-audited v88 projection; publishes only the supported leaf body.
+bool TryEmitBootstrapInt32MainReturn()
+{
+    if (Host.BootstrapCodeLength.Length != 1)
+    {
+        return false;
+    }
+
+    Host.BootstrapCodeLength[0] = 0;
+    if (Host.BootstrapCodeBytes.Length != 16
+        || Host.FrontendProgram.Length != 25025
+        || Host.FrontendProgram[0] != 88
+        || Host.FrontendProgram[1] != 1
+        || Host.FrontendProgram[2] < 1
+        || Host.FrontendProgram[2] > 32
+        || Host.FrontendProgram[3] != 0)
+    {
+        return false;
+    }
+
+    mut int32 mainBody = -1;
+    for (mut int32 function = 0; function < Host.FrontendProgram[2]; function = function + 1)
+    {
+        int32 body = 8 + function * 780;
+        int32 nameStart = Host.FrontendProgram[body + 9];
+        int32 nameLength = Host.FrontendProgram[body + 10];
+        if (nameStart < 0 || nameLength < 0 || nameStart > Host.Source.Length - nameLength)
+        {
+            return false;
+        }
+
+        if (nameLength == 4
+            && Host.Source[nameStart] == char16(77)
+            && Host.Source[nameStart + 1] == char16(97)
+            && Host.Source[nameStart + 2] == char16(105)
+            && Host.Source[nameStart + 3] == char16(110))
+        {
+            if (mainBody != -1)
+            {
+                return false;
+            }
+
+            mainBody = body;
+        }
+    }
+
+    if (mainBody < 0
+        || Host.FrontendProgram[mainBody + 2] != 1
+        || Host.FrontendProgram[mainBody + 5] != 1
+        || Host.FrontendProgram[mainBody + 6] != 0
+        || Host.FrontendProgram[mainBody + 21] != 0
+        || Host.FrontendProgram[mainBody + 22] != 0
+        || Host.FrontendProgram[mainBody + 37] < 1
+        || Host.FrontendProgram[mainBody + 37] > 3
+        || Host.FrontendProgram[mainBody + 38] != -1
+        || Host.FrontendProgram[mainBody + 40] != -1
+        || Host.FrontendProgram[mainBody + 299] != 0)
+    {
+        return false;
+    }
+
+    int32 nodeCount = Host.FrontendProgram[mainBody + 37];
+    int32 root = Host.FrontendProgram[mainBody + 39];
+    if (Host.FrontendProgram[mainBody + 41] < 0
+        || Host.FrontendProgram[mainBody + 41] > 1
+        || Host.FrontendProgram[mainBody + 298] != 0
+        || root != nodeCount - 1)
+    {
+        return false;
+    }
+    if (root < 0 || root >= nodeCount)
+    {
+        return false;
+    }
+    int32 node = mainBody + 42 + root * 8;
+    mut int32 magnitude = 0;
+    mut int32 operation = 0;
+    mut int32 addend = 0;
+    mut bool negative = false;
+    if (nodeCount == 3)
+    {
+        int32 left = mainBody + 42;
+        int32 right = mainBody + 50;
+        operation = Host.FrontendProgram[node];
+        if (root != 2
+            || operation < 57 || operation > 61
+            || Host.FrontendProgram[node + 1] != 1
+            || Host.FrontendProgram[node + 4] != 0
+            || Host.FrontendProgram[node + 5] != 1
+            || Host.FrontendProgram[node + 6] != 0
+            || Host.FrontendProgram[node + 7] != 0
+            || Host.FrontendProgram[left] != 3
+            || Host.FrontendProgram[left + 1] != 1
+            || Host.FrontendProgram[left + 4] != -1
+            || Host.FrontendProgram[left + 5] != -1
+            || Host.FrontendProgram[left + 6] < 0
+            || Host.FrontendProgram[left + 7] != 0
+            || Host.FrontendProgram[right] != 3
+            || Host.FrontendProgram[right + 1] != 1
+            || Host.FrontendProgram[right + 4] != -1
+            || Host.FrontendProgram[right + 5] != -1
+            || Host.FrontendProgram[right + 6] < 0
+            || Host.FrontendProgram[right + 7] != 0
+            || operation == 57 && Host.FrontendProgram[left + 6]
+                > int32.MaxValue - Host.FrontendProgram[right + 6]
+            || operation == 59 && Host.FrontendProgram[right + 6] != 0
+                && Host.FrontendProgram[left + 6]
+                    > int32.MaxValue / Host.FrontendProgram[right + 6]
+            || (operation == 60 || operation == 61)
+                && Host.FrontendProgram[right + 6] == 0)
+        {
+            return false;
+        }
+
+        magnitude = Host.FrontendProgram[left + 6];
+        addend = Host.FrontendProgram[right + 6];
+    }
+    else if (nodeCount == 1 || nodeCount == 2)
+    {
+        negative = Host.FrontendProgram[node] == 58;
+        if (Host.FrontendProgram[node + 1] != 1
+            || Host.FrontendProgram[node + 5] != -1
+            || Host.FrontendProgram[node + 7] != 0)
+        {
+            return false;
+        }
+
+        if (!negative)
+        {
+            magnitude = Host.FrontendProgram[node + 6];
+            if (nodeCount != 1
+                || Host.FrontendProgram[node] != 3
+                || Host.FrontendProgram[node + 4] != -1
+                || magnitude < 0)
+            {
+                return false;
+            }
+        }
+        else
+        {
+            int32 operand = mainBody + 42;
+            magnitude = Host.FrontendProgram[operand + 6];
+            if (nodeCount != 2
+                || Host.FrontendProgram[node + 4] != 0
+                || Host.FrontendProgram[node + 6] != 0
+                || Host.FrontendProgram[operand] != 3
+                || Host.FrontendProgram[operand + 1] != 1
+                || Host.FrontendProgram[operand + 4] != -1
+                || Host.FrontendProgram[operand + 5] != -1
+                || Host.FrontendProgram[operand + 7] != 0
+                || magnitude < 0 && magnitude != -2147483647 - 1)
+            {
+                return false;
+            }
+        }
+    }
+    else
+    {
+        return false;
+    }
+
+    if (negative && magnitude != int32.MinValue)
+    {
+        magnitude = -magnitude;
+    }
+    WriteBootstrapInt32MainLeaf(magnitude, operation, addend);
+    return true;
+}
