@@ -1,0 +1,23 @@
+namespace Terrum.CodeAnalysis;
+
+public bool TryGetSourceDiagnosticLocation(int32 position, init ref<int32> line, init ref<int32> column)
+{
+    if (position < 0 || position > Host.Source.Length)
+    {
+        return false;
+    }
+
+    if (!SourceLineIndex.TryCreate(init var index))
+    {
+        return false;
+    }
+
+    if (!index.TryGetPosition(position, init var zeroBasedLine, init var zeroBasedColumn))
+    {
+        return false;
+    }
+
+    line = zeroBasedLine + 1;
+    column = zeroBasedColumn + 1;
+    return true;
+}

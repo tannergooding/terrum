@@ -4,5 +4,6 @@ namespace Terrum.CodeAnalysis.Tests;
 int32 Main()
 {
     require CheckSourceLineIndex();
+    require CheckSourceDiagnosticLocation();
     return 0;
 }

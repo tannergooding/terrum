@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -15,6 +16,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Text;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -1106,8 +1108,11 @@ public sealed class ModuleTests
             "SourceRange",
             "CharacterFacts",
             "SourceText",
+            "SourcePosition",
             "SourceLineIndex",
+            "SourceDiagnosticLocation",
             "SourceLineIndexTests",
+            "SourceDiagnosticLocationTests",
         };
         var components = new SyntaxTree[componentNames.Length];
         for (var index = 0; index < componentNames.Length; index++)
@@ -1119,14 +1124,22 @@ public sealed class ModuleTests
         }
 
         const string sourceText = "A\U0001F600\r\nb\n";
-        var sourceGrant = new HostBuffer("Source", PrimitiveType.Char16,
-            [.. sourceText.Select(static codeUnit => (int)codeUnit)], false) {
-            IsInvocationScoped = true,
-        };
-        var library = Compilation.CreateLibrary(components, [sourceGrant], policy);
+        ImmutableArray<HostBuffer> CreateSourceGrant(string text)
+        {
+            return [
+                new HostBuffer("Source", PrimitiveType.Char16,
+                    [.. text.Select(static codeUnit => (int)codeUnit)], false) {
+                    IsInvocationScoped = true,
+                },
+            ];
+        }
+
+        var library = Compilation.CreateLibrary(components, CreateSourceGrant(sourceText), policy);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program),
-            ["Terrum.CodeAnalysis.Tests.CheckSourceLineIndex"]);
+            ["Terrum.CodeAnalysis.Tests.CheckSourceLineIndex",
+                "Terrum.CodeAnalysis.Tests.CheckSourceDiagnosticLocation",
+                "Terrum.CodeAnalysis.TryGetSourceDiagnosticLocation"]);
 
         var runnerPath = Path.Combine(root, "self-host", "SourceLineIndexComponentTestRunner.terrum");
         var runner = SyntaxTree.Parse(await File.ReadAllTextAsync(runnerPath).ConfigureAwait(true), runnerPath);
@@ -1137,11 +1150,66 @@ public sealed class ModuleTests
         Assert.True(linked.RequiresSourceGrant);
         foreach (var sourceFixture in new[] { sourceText, "", "\r\n\n" })
         {
-            var grant = new HostBuffer("Source", PrimitiveType.Char16,
-                [.. sourceFixture.Select(static codeUnit => (int)codeUnit)], false) {
-                IsInvocationScoped = true,
-            };
-            Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(linked, [grant], (NativeRuntimePolicy)policy));
+            Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(linked,
+                CreateSourceGrant(sourceFixture), (NativeRuntimePolicy)policy));
+        }
+
+        var diagnosticRunner = SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis.Tests;
+            int32 Main() {
+                require CheckSourceDiagnosticLocation();
+                return 0;
+            }
+            """, "source-diagnostic-location-component-runner.terrum");
+        var diagnosticCompilation = Compilation.Create(diagnosticRunner,
+            ModuleCompiler.CreateReference(producer), policy);
+        Assert.False(diagnosticCompilation.HasErrors,
+            string.Join(Environment.NewLine, diagnosticCompilation.Diagnostics));
+        var diagnosticConsumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(diagnosticCompilation.Program), producer);
+        var diagnosticLinked = ModuleCompiler.Link(diagnosticConsumer, producer);
+        var diagnosticFixtures = new[] {
+            "",
+            "\n",
+            "\r",
+            "\r\n",
+            "a\n",
+            "a\r",
+            "a\r\n",
+            "A\U0001F600\r\nb\n",
+        };
+        var diagnosticConsumers = new BoundProgram[diagnosticFixtures.Max(static fixture => fixture.Length) + 1];
+        for (var position = 0; position < diagnosticConsumers.Length; position++)
+        {
+            var positionConsumer = SyntaxTree.Parse($$"""
+                using Terrum.CodeAnalysis;
+                int32 Main() {
+                    if (!TryGetSourceDiagnosticLocation({{position}},
+                        init var line, init var column)) { return -1; }
+                    return line * 256 + column;
+                }
+                """, "source-diagnostic-location-position-consumer.terrum");
+            var positionCompilation = Compilation.Create(positionConsumer,
+                ModuleCompiler.CreateReference(producer), policy);
+            Assert.False(positionCompilation.HasErrors,
+                string.Join(Environment.NewLine, positionCompilation.Diagnostics));
+            var consumerProgram = ModuleCompiler.CreateConsumer(
+                Assert.IsType<BoundProgram>(positionCompilation.Program), producer);
+            diagnosticConsumers[position] = ModuleCompiler.Link(consumerProgram, producer);
+        }
+
+        foreach (var sourceFixture in diagnosticFixtures)
+        {
+            var source = SourceText.From(sourceFixture);
+            var grant = CreateSourceGrant(sourceFixture);
+            Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(diagnosticLinked, grant, (NativeRuntimePolicy)policy));
+            for (var position = 0; position <= source.Length; position++)
+            {
+                var location = source.GetLinePosition(position);
+                var expected = (location.Line + 1) * 256 + location.Character + 1;
+                Assert.Equal(expected, NativeJit.ExecuteWithSourceGrant(diagnosticConsumers[position],
+                    grant, (NativeRuntimePolicy)policy));
+            }
         }
     }
 

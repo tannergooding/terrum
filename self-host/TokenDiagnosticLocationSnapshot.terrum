@@ -1,0 +1,105 @@
+namespace Terrum.CodeAnalysis;
+
+public unique struct TokenDiagnosticLocationSnapshot
+{
+    // Layout: diagnostic count, line count, diagnostic triples, then line starts.
+    private OwnedInt32Buffer _records;
+
+    private TokenDiagnosticLocationSnapshot(OwnedInt32Buffer records)
+    {
+        _records = move records;
+    }
+
+    public int32 GetCount()
+    {
+        return _records.Read(0);
+    }
+
+    public bool TryGet(int32 index, init ref<int32> code, init ref<SourceRange> span,
+        init ref<int32> line, init ref<int32> column)
+    {
+        int32 diagnosticCount = _records.Read(0);
+        if (index < 0 || index >= diagnosticCount)
+        {
+            return false;
+        }
+
+        int32 offset = 2 + index * 3;
+        int32 start = _records.Read(offset + 1);
+        require SourceRange.TryCreate(start, _records.Read(offset + 2), init var foundSpan);
+
+        int32 lineCount = _records.Read(1);
+        int32 lineStarts = 2 + diagnosticCount * 3;
+        mut int32 low = 0;
+        mut int32 high = lineCount;
+        while (low + 1 < high)
+        {
+            int32 middle = low + (high - low) / 2;
+            if (_records.Read(lineStarts + middle) <= start)
+            {
+                low = middle;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        code = _records.Read(offset);
+        span = foundSpan;
+        line = low + 1;
+        column = start - _records.Read(lineStarts + low) + 1;
+        return true;
+    }
+
+    public static bool TryBuild(init ref<TokenDiagnosticLocationSnapshot> result)
+    {
+        if (!TokenDiagnosticSnapshot.TryBuild(init var diagnostics)
+            || !SourceLineIndex.TryCreate(init var sourceLines))
+        {
+            return false;
+        }
+
+        int32 diagnosticCount = diagnostics.GetCount();
+        int32 lineCount = sourceLines.GetLineCount();
+        if (lineCount > int32.MaxValue - 2
+            || diagnosticCount > (int32.MaxValue - 2 - lineCount) / 3)
+        {
+            return false;
+        }
+
+        int32 capacity = 2 + diagnosticCount * 3 + lineCount;
+        if (!OwnedInt32Buffer.TryCreate(capacity, out var created))
+        {
+            return false;
+        }
+
+        mut OwnedInt32Buffer records = move created;
+        require records.TryAppend(diagnosticCount);
+        require records.TryAppend(lineCount);
+        for (mut int32 index = 0; index < diagnosticCount; index = index + 1)
+        {
+            require diagnostics.TryGet(index, init var code, init var span);
+            require records.TryAppend(code);
+            require records.TryAppend(span.Start);
+            require records.TryAppend(span.Length);
+        }
+        for (mut int32 line = 0; line < lineCount; line = line + 1)
+        {
+            require sourceLines.TryGetOffset(line, 0, init var start);
+            require records.TryAppend(start);
+        }
+
+        result = new TokenDiagnosticLocationSnapshot(move records);
+        return true;
+    }
+
+    public static bool TryScan(init ref<TokenDiagnosticLocationSnapshot> result)
+    {
+        if (Scan() < 1)
+        {
+            return false;
+        }
+        return TryBuild(init result);
+    }
+}

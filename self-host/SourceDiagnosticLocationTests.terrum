@@ -1,0 +1,33 @@
+namespace Terrum.CodeAnalysis.Tests;
+
+public bool CheckSourceDiagnosticLocation()
+{
+    mut int32 position = 0;
+    while (position <= Host.Source.Length)
+    {
+        if (!TryGetSourceDiagnosticLocation(position, init var line, init var column))
+        {
+            return false;
+        }
+
+        if (line != GetSourceLineNumberOrMinusOne(position) + 1
+            || column != GetSourceCharacterPositionOrMinusOne(position) + 1)
+        {
+            return false;
+        }
+
+        position = position + 1;
+    }
+
+    if (TryGetSourceDiagnosticLocation(-1, init var beforeLine, init var beforeColumn)
+        || beforeLine is init || beforeColumn is init
+        || TryGetSourceDiagnosticLocation(Host.Source.Length + 1, init var afterLine, init var afterColumn)
+        || afterLine is init || afterColumn is init
+        || TryGetSourceDiagnosticLocation(int32.MaxValue, init var maximumLine, init var maximumColumn)
+        || maximumLine is init || maximumColumn is init)
+    {
+        return false;
+    }
+
+    return true;
+}

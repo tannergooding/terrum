@@ -168,6 +168,90 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("\uD800\r\uD800")]
+    [InlineData("a\r\n\uD800\n\uD800")]
+    [InlineData("a\uD800\rx\uD800")]
+    [InlineData("\uD800\r\n\"unterminated")]
+    public async Task DiagnosticLocationSnapshotMapsHostDiagnosticsAcrossLineBreaksAsync(string text)
+    {
+        var expected = Lexer.Lex(SourceText.From(text)).Diagnostics;
+        Assert.NotEmpty(expected);
+
+        var entry = new StringBuilder("""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (!TokenDiagnosticLocationSnapshot.TryScan(init var diagnostics)
+                    || diagnostics.GetCount() !=
+            """);
+        _ = entry.Append(CultureInfo.InvariantCulture, $" {expected.Length}) {{ return 1; }}\n");
+        for (var index = 0; index < expected.Length; index++)
+        {
+            var diagnostic = expected[index];
+            var code = int.Parse(diagnostic.Code.AsSpan(3), CultureInfo.InvariantCulture);
+            var location = SourceText.From(text).GetLinePosition(diagnostic.Span.Start);
+            _ = entry.Append(FormattableString.Invariant($$"""
+                require diagnostics.TryGet({{index}}, init var code{{index}}, init var span{{index}},
+                    init var line{{index}}, init var column{{index}});
+                if (code{{index}} != {{code}} || span{{index}}.Start != {{diagnostic.Span.Start}}
+                    || span{{index}}.Length != {{diagnostic.Span.Length}}
+                    || line{{index}} != {{location.Line + 1}}
+                    || column{{index}} != {{location.Character + 1}}) { return 2; }
+                """));
+        }
+        _ = entry.Append("""
+                if (diagnostics.TryGet(-1, init var invalidCode, init var invalidSpan,
+                    init var invalidLine, init var invalidColumn)
+                    || invalidCode is init || invalidSpan is init
+                    || invalidLine is init || invalidColumn is init) { return 3; }
+                if (diagnostics.TryGet(diagnostics.GetCount(), init var beyondCode,
+                    init var beyondSpan, init var beyondLine, init var beyondColumn)
+                    || beyondCode is init || beyondSpan is init
+                    || beyondLine is init || beyondColumn is init) { return 4; }
+                return 42;
+            }
+            """);
+
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry.ToString(), (BoundRuntimePolicy)policy,
+                includeSourceLines: true).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task DiagnosticLocationSnapshotHandlesMaximumDenseLineSourceAsync(NativeRuntimePolicy policy)
+    {
+        var diagnosticCount = ScannerHost.MaximumSourceLength / 2;
+        var text = string.Concat(Enumerable.Repeat("\uD800\r", diagnosticCount));
+        Assert.Equal(ScannerHost.MaximumSourceLength, text.Length);
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (!TokenDiagnosticLocationSnapshot.TryScan(init var diagnostics)
+                    || diagnostics.GetCount() != {{diagnosticCount}}) { return 1; }
+                mut int32 index = 0;
+                while (index < {{diagnosticCount}}) {
+                    if (!diagnostics.TryGet(index, init var code, init var span,
+                        init var line, init var column)
+                        || code != 1 || span.Start != index * 2 || span.Length != 1
+                        || line != index + 1 || column != 1) { return 2; }
+                    index = index + 1;
+                }
+                return 42;
+            }
+            """;
+
+        var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
+            includeSourceLines: true).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData(0, -1)]
     [InlineData(0, int.MaxValue)]
     [InlineData(1, 0)]
@@ -4837,7 +4921,7 @@ public sealed partial class ManagedScannerComponentTests
         CompileAsync(text, entry, policy, "ScalarParameterPairParser");
 
     private static async Task<BoundProgram> CompileAsync(string text, string entry,
-        BoundRuntimePolicy policy, string? parserName = null)
+        BoundRuntimePolicy policy, string? parserName = null, bool includeSourceLines = false)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         string[] names = ["SourceRange", "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "CharacterLiteral", "StringEscape",
@@ -4857,6 +4941,11 @@ public sealed partial class ManagedScannerComponentTests
                         parserName, "TokenCursor",
                         "ScalarFrontendProgram", "ScalarFrontendProjection"]
                     : [.. names, "ScalarParserTypes", parserName];
+        }
+        if (includeSourceLines)
+        {
+            names = [.. names, "SourceText", "SourcePosition", "SourceLineIndex",
+                "TokenDiagnosticLocationSnapshot"];
         }
         var trees = new List<SyntaxTree>(names.Length + 1);
         foreach (var name in names)
