@@ -1,0 +1,123 @@
+namespace Terrum.CodeAnalysis;
+
+// Call after MethodDef body ownership is validated. Operation-count rows are
+// published only after all Bodies have been framed and indexed by method.
+public static bool TryBuildCompactBodySourceMapOperationIndex(
+    int32 bodyCount, int32 methodDefCount, int32 typeSpecCount)
+{
+    if (Host.SourceMapOperationCounts.Length > 0)
+    {
+        Host.SourceMapOperationCounts[0] = 0;
+    }
+
+    // A zero-row Body index is one zero offset with no trailing payload.
+    if (bodyCount < 0 || bodyCount > 16777215
+        || methodDefCount < 0 || methodDefCount > 16777215
+        || typeSpecCount < 0 || typeSpecCount > 16777215
+        || Host.BodyOwners.Length != bodyCount + 1
+        || (bodyCount == 0
+            && (Host.BodyRows.Length != 4
+                || Host.BodyRows[0] != 0 || Host.BodyRows[1] != 0
+                || Host.BodyRows[2] != 0 || Host.BodyRows[3] != 0))
+        || Host.SourceMapOperationBlockStarts.Length != methodDefCount + 1
+        || Host.SourceMapOperationBlockCounts.Length != methodDefCount + 1
+        || Host.SourceMapOperationCounts.Length == 0
+        || Host.BodyOwners[0] != 0)
+    {
+        return false;
+    }
+
+    Host.SourceMapOperationBlockStarts[0] = 0;
+    Host.SourceMapOperationBlockCounts[0] = 0;
+    for (mut int32 method = 1; method <= methodDefCount; method = method + 1)
+    {
+        Host.SourceMapOperationBlockStarts[method] = 0;
+        Host.SourceMapOperationBlockCounts[method] = 0;
+    }
+
+    if (bodyCount > 0 && !TryValidateBodyTableIndex(bodyCount))
+    {
+        return false;
+    }
+
+    for (mut int32 body = 1; body <= bodyCount; body = body + 1)
+    {
+        int32 method = Host.BodyOwners[body];
+        if (method <= 0 || method > methodDefCount
+            || Host.SourceMapOperationBlockCounts[method] != 0)
+        {
+            return false;
+        }
+
+        if (TryGetValidatedCompactLinearBodyFrame(bodyCount, body, typeSpecCount,
+                init var linearBlocks, init var ignoredLinearOperationCount))
+        {
+            Host.SourceMapOperationBlockCounts[method] = linearBlocks;
+        }
+        else if (TryGetValidatedCompactIndexedBodyFrame(bodyCount, body,
+                typeSpecCount, init var indexedBlocks, init var ignoredIndexedOperationCount)
+            && indexedBlocks > 0)
+        {
+            Host.SourceMapOperationBlockCounts[method] = indexedBlocks;
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+    mut int32 nextOperationCount = 1;
+    for (mut int32 method = 1; method <= methodDefCount; method = method + 1)
+    {
+        int32 blocks = Host.SourceMapOperationBlockCounts[method];
+        if (blocks == 0)
+        {
+            continue;
+        }
+        if (blocks > Host.SourceMapOperationCounts.Length - nextOperationCount)
+        {
+            return false;
+        }
+
+        Host.SourceMapOperationBlockStarts[method] = nextOperationCount;
+        nextOperationCount = nextOperationCount + blocks;
+    }
+
+    for (mut int32 body = 1; body <= bodyCount; body = body + 1)
+    {
+        int32 method = Host.BodyOwners[body];
+        int32 firstOperationCount = Host.SourceMapOperationBlockStarts[method];
+        if (firstOperationCount <= 0)
+        {
+            return false;
+        }
+
+        if (TryGetValidatedCompactLinearBodyFrame(bodyCount, body, typeSpecCount,
+                init var linearBlocks, init var linearOperationCount))
+        {
+            if (linearBlocks != Host.SourceMapOperationBlockCounts[method])
+            {
+                return false;
+            }
+            Host.SourceMapOperationCounts[firstOperationCount] = linearOperationCount;
+        }
+        else if (TryWriteValidatedCompactIndexedBodyOperationCounts(bodyCount, body,
+                typeSpecCount, 1, init var indexedBlocks, init var ignoredOperationCount)
+            && indexedBlocks == Host.SourceMapOperationBlockCounts[method]
+            && Host.BodyBlockOperationCounts[1] == indexedBlocks)
+        {
+            for (mut int32 block = 1; block <= indexedBlocks; block = block + 1)
+            {
+                Host.SourceMapOperationCounts[firstOperationCount + block - 1] =
+                    Host.BodyBlockOperationCounts[1 + block];
+            }
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+    Host.SourceMapOperationCounts[0] = 1;
+    return true;
+}

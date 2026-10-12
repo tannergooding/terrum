@@ -1,0 +1,2185 @@
+namespace Terrum.CodeAnalysis;
+
+// Provisional indexed-Body value/type facts, boundary liveness and selected
+// region/control-flow checks, not call/effect/ownership or memory/GC-root safety.
+// All slots are zero-based: block starts include both boundaries; definitions are
+// block-relative (-1 for parameters). Outputs are valid only when Complete[0] is 1.
+// LastUses and DeclaredLastUses are exact-value-count scratch, cleared after each block.
+// Region and reachability buffers are verifier scratch, cleared per call.
+// Immediate dominators use forward edges only: a path containing a loop backedge
+// repeats its header, so it cannot add a simple path from the function entry.
+public static bool TryBuildCompactIndexedBodyValueIndex(
+    int32 recordCount, int32 row, int32 parameterCount, int32 typeSpecCount)
+{
+    if (Host.BodyValueIndexComplete.Length != 1)
+    {
+        return false;
+    }
+
+    Host.BodyValueIndexComplete[0] = 0;
+    if (!TryValidateBodyTableIndex(recordCount))
+    {
+        return false;
+    }
+
+    return TryBuildValidatedCompactIndexedBodyValueIndex(
+        recordCount, row, parameterCount, typeSpecCount);
+}
+
+// Use after validating this exact Body index with TryValidateBodyTableIndex.
+bool TryBuildValidatedCompactIndexedBodyValueIndex(
+    int32 recordCount, int32 row, int32 parameterCount, int32 typeSpecCount)
+{
+    if (Host.BodyValueIndexComplete.Length != 1)
+    {
+        return false;
+    }
+
+    Host.BodyValueIndexComplete[0] = 0;
+    if (parameterCount < 0 || parameterCount > 16777215
+        || !TryGetValidatedCompactIndexedBodyFrame(recordCount, row, typeSpecCount,
+            init var blocks, init var ignoredOperationCount)
+        || !TryGetValidatedBodyTableRowExtent(recordCount, row,
+            init var bodyDataStart, init var bodyLength))
+    {
+        return false;
+    }
+
+    int32 bodyStart = (recordCount + 1) * 4 + bodyDataStart;
+    int32 end = bodyStart + bodyLength;
+    if (!TryReadCompactIndexedByte(bodyStart, end, init var layout))
+    {
+        return false;
+    }
+    int32 width = (layout & 3) == 0 ? 1 : (layout & 3) == 1 ? 2 : 4;
+    uint32 sentinel = width == 1 ? 0xFF : width == 2 ? 0xFFFF : 0xFFFF_FFFF;
+    if (!TryReadCompactIndexedCount(bodyStart + 1 + width, end, width,
+            init var afterValueCount, init var values)
+        || !TryReadCompactIndexedCount(afterValueCount, end, width,
+            init var afterRegionCount, init var regions)
+        || !TryReadCompactIndexedCount(afterRegionCount, end, width,
+            init var afterTypeCount, init var types)
+        || parameterCount > values
+        || Host.BodyBlockValueStarts.Length != blocks + 1
+        || Host.BodyBlockRegions.Length != blocks + 1
+        || Host.BodyBlockReachable.Length != blocks + 1
+        || Host.BodyBlockImmediateDominators.Length != blocks + 1
+        || Host.BodyBlockDominatorDepths.Length != blocks + 1
+        || Host.BodyRegionDepths.Length != regions + 1
+        || Host.BodyRegionBackedges.Length != regions + 1
+        || Host.BodyValueDefinitions.Length != values
+        || Host.BodyValueOwners.Length != values
+        || Host.BodyValueUseBlocks.Length != values
+        || Host.BodyValueLiveInBlocks.Length != values
+        || Host.BodyValueLastUses.Length != values
+        || Host.BodyValueDeclaredLastUses.Length != values)
+    {
+        return false;
+    }
+
+    // Framing has already bounded every count, index and extent in this exact row.
+    int32 descriptors = afterTypeCount + types * 4 + regions * (1 + 4 * width);
+    int32 starts = descriptors + values * (2 * width);
+    int32 definitions = starts + (blocks + 1) * width;
+    int32 offsets = definitions + values * width;
+    int32 terminators = offsets + (blocks + 1) * width;
+    int32 blockDataStart = terminators + blocks * width;
+    int32 regionStart = afterTypeCount + types * 4;
+    if (!TryInitializeCompactIndexedBodyRegions(regionStart, end, width,
+            blocks, regions, offsets, blockDataStart))
+    {
+        return false;
+    }
+
+    for (mut int32 block = 0; block <= blocks; block = block + 1)
+    {
+        if (!TryReadCompactIndexedLocalAt(starts, end, width, block,
+                init var start))
+        {
+            return false;
+        }
+        Host.BodyBlockValueStarts[block] = int32(start);
+    }
+    for (mut int32 block = 1; block <= blocks; block = block + 1)
+    {
+        for (mut int32 value = Host.BodyBlockValueStarts[block - 1];
+                value < Host.BodyBlockValueStarts[block]; value = value + 1)
+        {
+            if (!TryReadCompactIndexedLocalAt(definitions, end, width, value,
+                    init var definition))
+            {
+                return false;
+            }
+            Host.BodyValueDefinitions[value] = definition == sentinel ? -1 : int32(definition);
+            Host.BodyValueOwners[value] = block;
+            Host.BodyValueUseBlocks[value] = 0;
+            Host.BodyValueLiveInBlocks[value] = 0;
+            Host.BodyValueLastUses[value] = -1;
+            Host.BodyValueDeclaredLastUses[value] = -1;
+        }
+    }
+
+    // Non-backedges target later blocks, while valid backedges target loop
+    // headers already reached from the function entry.
+    for (mut int32 block = 1; block <= blocks; block = block + 1)
+    {
+        if (Host.BodyBlockReachable[block] != 1)
+        {
+            return false;
+        }
+
+        if (block == 1)
+        {
+            Host.BodyBlockImmediateDominators[block] = block;
+            Host.BodyBlockDominatorDepths[block] = 0;
+        }
+        else
+        {
+            int32 immediateDominator = Host.BodyBlockImmediateDominators[block];
+            if (immediateDominator <= 0 || immediateDominator >= block)
+            {
+                return false;
+            }
+            Host.BodyBlockDominatorDepths[block] =
+                Host.BodyBlockDominatorDepths[immediateDominator] + 1;
+        }
+
+        if (!TryReadCompactIndexedLocalAt(offsets, end, width, block - 1,
+                init var blockOffset)
+            || !TryReadCompactIndexedLocalAt(offsets, end, width, block,
+                init var nextOffset)
+            || !TryReadCompactIndexedLocalAt(terminators, end, width, block - 1,
+                init var terminatorOffset))
+        {
+            return false;
+        }
+
+        int32 blockStart = blockDataStart + int32(blockOffset);
+        int32 blockEnd = blockDataStart + int32(nextOffset);
+        int32 terminatorPosition = blockStart + int32(terminatorOffset);
+        if (!TryReadCompactIndexedByte(blockStart, blockEnd, init var presence))
+        {
+            return false;
+        }
+        mut int32 cursor = blockStart + 1;
+        if ((presence & 1) != 0)
+        {
+            cursor = cursor + width;
+        }
+        mut int32 blockParameters = 0;
+        if ((presence & 2) != 0)
+        {
+            if (!TryReadCompactIndexedCount(cursor, blockEnd, width,
+                    init var afterParameterCount, init var count)
+                || count > Host.BodyBlockValueStarts[block] - Host.BodyBlockValueStarts[block - 1])
+            {
+                return false;
+            }
+            blockParameters = count;
+            cursor = afterParameterCount;
+            for (mut int32 parameter = 0; parameter < count; parameter = parameter + 1)
+            {
+                int32 valueIndex = Host.BodyBlockValueStarts[block - 1] + parameter;
+                if (!TryReadCompactIndexedCount(cursor, blockEnd, width,
+                        init var afterParameter, init var value)
+                    || value != valueIndex + 1 || Host.BodyValueDefinitions[valueIndex] != -1)
+                {
+                    return false;
+                }
+                cursor = afterParameter;
+            }
+        }
+        if (block == 1 && blockParameters != parameterCount)
+        {
+            return false;
+        }
+        mut int32 liveInsStart = cursor;
+        mut int32 liveInsEnd = cursor;
+        if ((presence & 4) != 0)
+        {
+            liveInsStart = cursor;
+            if (!TryReadCompactIndexedList(cursor, blockEnd, width, values,
+                    init var afterLiveIns))
+            {
+                return false;
+            }
+            if (!TryMarkCompactIndexedLiveIns(liveInsStart, afterLiveIns,
+                    width, block))
+            {
+                return false;
+            }
+            liveInsEnd = afterLiveIns;
+            cursor = afterLiveIns;
+        }
+        mut int32 liveOutsStart = cursor;
+        mut int32 liveOutsEnd = cursor;
+        if ((presence & 8) != 0)
+        {
+            liveOutsStart = cursor;
+            if (!TryReadCompactIndexedList(cursor, blockEnd, width, values,
+                    init var afterLiveOuts)
+                || !TryValidateCompactIndexedLiveOuts(cursor, afterLiveOuts,
+                    width, block))
+            {
+                return false;
+            }
+            liveOutsEnd = afterLiveOuts;
+            cursor = afterLiveOuts;
+        }
+        mut int32 lastUsesStart = cursor;
+        mut int32 lastUseCount = 0;
+        if ((presence & 16) != 0)
+        {
+            if (!TryReadCompactIndexedCount(cursor, blockEnd, width,
+                    init var afterLastUseCount, init var count))
+            {
+                return false;
+            }
+            cursor = afterLastUseCount;
+            lastUsesStart = cursor;
+            lastUseCount = count;
+            mut int32 previous = 0;
+            for (mut int32 item = 0; item < count; item = item + 1)
+            {
+                if (!TryReadCompactIndexedCount(cursor, blockEnd, width,
+                        init var afterValue, init var value)
+                    || !TryReadCompactIndexedCount(afterValue, blockEnd, width,
+                        init var afterLastUse, init var lastUse)
+                    || value <= previous || value > values)
+                {
+                    return false;
+                }
+                Host.BodyValueDeclaredLastUses[value - 1] = lastUse;
+                previous = value;
+                cursor = afterLastUse;
+            }
+        }
+        if (!TryReadCompactIndexedCount(cursor, blockEnd, width,
+                init var afterOperationCount, init var operations))
+        {
+            return false;
+        }
+        cursor = afterOperationCount;
+        mut int32 nextResult = Host.BodyBlockValueStarts[block - 1] + blockParameters + 1;
+        for (mut int32 ordinal = 0; ordinal < operations; ordinal = ordinal + 1)
+        {
+            int32 useOffset = cursor - blockStart;
+            if (!TryReadCompactIndexedOperation(cursor, terminatorPosition,
+                    init var afterInstruction, init var opcode,
+                    init var referenceWidth, init var countWidth, init var dataWidth)
+                || (opcode > 0x0A && opcode != 0x12 && (opcode < 0x15 || opcode > 0x18))
+                || !TrySkipCompactIndexedOperation(afterInstruction, terminatorPosition,
+                    opcode, referenceWidth, countWidth, dataWidth, init var afterOperation)
+                || !TryReadCompactIndexedCount(afterInstruction, afterOperation, referenceWidth,
+                    init var afterResult, init var result))
+            {
+                return false;
+            }
+            if (opcode != 0x12 || result != 0)
+            {
+                if (!TryCheckCompactIndexedValueResult(result, nextResult, block, useOffset))
+                {
+                    return false;
+                }
+                if ((opcode == 1 || opcode == 2 || opcode == 6 || opcode == 8
+                        || opcode == 9 || opcode == 0x16)
+                    && !TryMatchCompactIndexedTypedResult(
+                        afterResult, afterOperation, referenceWidth,
+                        descriptors, end, width, values, types, result))
+                {
+                    return false;
+                }
+                if ((opcode == 1 || opcode == 2)
+                    && !TryMatchCompactIndexedConstant(afterResult, afterOperation,
+                        opcode, referenceWidth, dataWidth, end, afterTypeCount,
+                        typeSpecCount, types))
+                {
+                    return false;
+                }
+                if (opcode == 3
+                    && !TryMatchCompactIndexedCopyType(
+                        afterResult, afterOperation, referenceWidth,
+                        descriptors, end, width, values, types, result))
+                {
+                    return false;
+                }
+                nextResult = nextResult + 1;
+            }
+            mut int32 usesStart = afterResult;
+            if (opcode == 0x18)
+            {
+                if (!TryReadCompactIndexedCount(afterResult, afterOperation, referenceWidth,
+                        init var afterSecondResult, init var secondResult)
+                    || !TryCheckCompactIndexedValueResult(secondResult, nextResult, block, useOffset)
+                    || !TryMatchCompactIndexedDivRemTypes(
+                        afterSecondResult, afterOperation, referenceWidth,
+                        descriptors, end, width, values, types, afterTypeCount,
+                        typeSpecCount, result, secondResult))
+                {
+                    return false;
+                }
+                nextResult = nextResult + 1;
+                usesStart = afterSecondResult;
+            }
+            if ((opcode == 4 || opcode == 5 || opcode == 6 || opcode == 7
+                    || opcode == 8 || opcode == 9 || opcode == 0x0A
+                    || opcode == 0x15 || opcode == 0x16 || opcode == 0x17)
+                && !TryMatchCompactIndexedOperationTypes(
+                    afterResult, afterOperation, opcode, referenceWidth,
+                    descriptors, end, width, values, types, afterTypeCount,
+                    typeSpecCount, result))
+            {
+                return false;
+            }
+            if (!TryIndexCompactIndexedOperationUses(usesStart, afterOperation, opcode,
+                    referenceWidth, countWidth, dataWidth, types, block, useOffset, ordinal))
+            {
+                return false;
+            }
+            cursor = afterOperation;
+        }
+        if (nextResult != Host.BodyBlockValueStarts[block] + 1
+            || cursor != terminatorPosition
+            || !TryReadCompactIndexedTerminator(cursor, blockEnd,
+                init var afterTerminator, init var terminator,
+                init var referenceWidth, init var countWidth, init var dataWidth)
+            || ((presence & 8) != 0 && (terminator == 0x83 || terminator == 0x87))
+            || !TryMatchCompactIndexedTerminatorTypes(afterTerminator, blockEnd,
+                terminator, referenceWidth, countWidth, dataWidth, blocks,
+                descriptors, end, width, values, types, afterTypeCount,
+                typeSpecCount)
+            || !TryIndexCompactIndexedTerminatorUses(afterTerminator, blockEnd, terminator,
+                referenceWidth, countWidth, dataWidth, block, int32(terminatorOffset), operations)
+            || !TryIndexCompactIndexedTerminatorRegions(afterTerminator, blockEnd,
+                terminator, referenceWidth, countWidth, dataWidth, block,
+                blocks, regionStart, end, width, regions))
+        {
+            return false;
+        }
+        if (!TryValidateCompactIndexedLiveInFlow(
+                liveInsStart, liveInsEnd, liveOutsStart, liveOutsEnd, width, block))
+        {
+            return false;
+        }
+        // Clear only declared keys: absent keys remain vacant for the next block,
+        // without a values-by-blocks scan or stale declarations authorizing uses.
+        for (mut int32 item = 0; item < lastUseCount; item = item + 1)
+        {
+            if (!TryReadCompactIndexedCount(lastUsesStart + item * (2 * width),
+                    blockEnd, width, init var ignoredAfterValue, init var value)
+                || Host.BodyValueLastUses[value - 1] != Host.BodyValueDeclaredLastUses[value - 1])
+            {
+                return false;
+            }
+            Host.BodyValueLastUses[value - 1] = -1;
+            Host.BodyValueDeclaredLastUses[value - 1] = -1;
+        }
+    }
+    if (!TryValidateCompactIndexedLoopBackedges(regionStart, end, width, regions)
+        || !TryValidateCompactIndexedLiveInNecessity(
+            blockDataStart, end, width, blocks, values, offsets, terminators)
+        || !TryValidateCompactIndexedLiveOutTransfers(
+            blockDataStart, end, width, blocks, values, offsets, terminators))
+    {
+        return false;
+    }
+
+    for (mut int32 value = 0; value < values; value = value + 1)
+    {
+        if (!TryReadCompactIndexedCount(descriptors + (2 * value + 1) * width,
+                end, width, init var ignoredAfterUses, init var declaredUses)
+            || Host.BodyValueUseBlocks[value] != declaredUses)
+        {
+            return false;
+        }
+    }
+
+    Host.BodyValueIndexComplete[0] = 1;
+    return true;
+}
+
+bool TryCheckCompactIndexedValueResult(int32 result, int32 nextResult,
+    int32 block, int32 offset)
+{
+    return result == nextResult && result > 0 && result <= Host.BodyValueDefinitions.Length
+        && Host.BodyValueOwners[result - 1] == block
+        && Host.BodyValueDefinitions[result - 1] == offset;
+}
+
+bool TryMatchCompactIndexedTypedResult(int32 typeStart, int32 operationEnd,
+    int32 referenceWidth, int32 descriptors, int32 bodyEnd, int32 valueWidth,
+    int32 values, int32 types, int32 result)
+{
+    if (!TryReadCompactIndexedCount(typeStart, operationEnd, referenceWidth,
+            init var ignoredAfterType, init var operationType)
+        || !TryReadCompactIndexedDescriptorType(
+            descriptors, bodyEnd, valueWidth, values, types, result,
+            init var resultType)
+        || operationType != resultType)
+    {
+        return false;
+    }
+    return true;
+}
+
+bool TryMatchCompactIndexedConstant(int32 start, int32 operationEnd,
+    uint32 opcode, int32 referenceWidth, int32 dataWidth, int32 bodyEnd,
+    int32 typeMap, int32 typeSpecCount, int32 types)
+{
+    if (!TryReadCompactIndexedCount(start, operationEnd, referenceWidth,
+            init var afterType, init var bodyType)
+        || !TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd, types,
+            typeSpecCount, bodyType, init var code)
+        || !TryReadCompactIndexedData(afterType, operationEnd, dataWidth,
+            init var afterData, init var bits)
+        || afterData != operationEnd)
+    {
+        return false;
+    }
+
+    if (opcode == 1)
+    {
+        return FitsCompactIndexedBitPattern(code, bits);
+    }
+    if (opcode == 2)
+    {
+        return IsCompactIndexedIntegerType(code)
+            && FitsCompactIndexedSignedConstant(code, bits, dataWidth);
+    }
+    return false;
+}
+
+bool FitsCompactIndexedBitPattern(int32 code, uint64 bits)
+{
+    if (code == 0x01)
+    {
+        return bits <= 1;
+    }
+    if (code == 0x03)
+    {
+        return bits <= 0xFFFF;
+    }
+    if (code == 0x08 || code == 0x0D || code == 0x14)
+    {
+        return bits <= 0xFFFF_FFFF;
+    }
+    return code == 0x09 || code == 0x0E || code == 0x15;
+}
+
+bool FitsCompactIndexedSignedConstant(int32 code, uint64 bits, int32 dataWidth)
+{
+    uint64 signMask = dataWidth == 1 ? 0x80
+        : dataWidth == 2 ? 0x8000
+        : dataWidth == 4 ? 0x8000_0000
+        : 0x8000_0000_0000_0000;
+    bool isNegative = (bits & signMask) != 0;
+    if (code == 0x08)
+    {
+        if (dataWidth < 8)
+        {
+            return true;
+        }
+        return isNegative
+            ? bits >= 0xFFFF_FFFF_8000_0000
+            : bits <= 0x7FFF_FFFF;
+    }
+    if (code == 0x09)
+    {
+        return true;
+    }
+    if (code == 0x0D)
+    {
+        return !isNegative && bits <= 0xFFFF_FFFF;
+    }
+    return code == 0x0E && !isNegative;
+}
+
+bool TryReadCompactIndexedData(int32 start, int32 end, int32 width,
+    init ref<int32> nextPosition, init ref<uint64> value)
+{
+    if ((width != 1 && width != 2 && width != 4 && width != 8)
+        || start < 0 || end > Host.BodyRows.Length || start > end - width)
+    {
+        return false;
+    }
+
+    mut uint64 bits = 0;
+    for (mut int32 index = 0; index < width; index = index + 1)
+    {
+        if (!TryReadCompactIndexedByte(start + index, end, init var part))
+        {
+            return false;
+        }
+        bits = bits | (uint64(part) << (index * 8));
+    }
+    nextPosition = start + width;
+    value = bits;
+    return true;
+}
+
+bool TryMatchCompactIndexedCopyType(int32 sourceStart, int32 operationEnd,
+    int32 referenceWidth, int32 descriptors, int32 bodyEnd, int32 valueWidth,
+    int32 values, int32 types, int32 result)
+{
+    if (!TryReadCompactIndexedCount(sourceStart, operationEnd, referenceWidth,
+            init var ignoredAfterSource, init var source)
+        || !TryReadCompactIndexedDescriptorType(
+            descriptors, bodyEnd, valueWidth, values, types, source,
+            init var sourceType)
+        || !TryReadCompactIndexedDescriptorType(
+            descriptors, bodyEnd, valueWidth, values, types, result,
+            init var resultType)
+        || sourceType != resultType)
+    {
+        return false;
+    }
+    return true;
+}
+
+bool TryMatchCompactIndexedDivRemTypes(int32 operandsStart, int32 operationEnd,
+    int32 referenceWidth, int32 descriptors, int32 bodyEnd, int32 valueWidth,
+    int32 values, int32 types, int32 typeMap, int32 typeSpecCount,
+    int32 quotient, int32 remainder)
+{
+    if (!TryReadCompactIndexedDescriptorType(
+            descriptors, bodyEnd, valueWidth, values, types, quotient,
+            init var quotientType)
+        || !TryReadCompactIndexedDescriptorType(
+            descriptors, bodyEnd, valueWidth, values, types, remainder,
+            init var remainderType)
+        || !TryReadCompactIndexedOperandType(operandsStart, operationEnd,
+            referenceWidth, descriptors, bodyEnd, valueWidth, values, types,
+            init var afterLeft, init var leftType)
+        || !TryReadCompactIndexedOperandType(afterLeft, operationEnd,
+            referenceWidth, descriptors, bodyEnd, valueWidth, values, types,
+            init var afterRight, init var rightType)
+        || afterRight != operationEnd)
+    {
+        return false;
+    }
+
+    return leftType == rightType && quotientType == leftType
+        && remainderType == leftType
+        && TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd, types,
+            typeSpecCount, leftType, init var code)
+        && IsCompactIndexedIntegerType(code);
+}
+
+bool TryGetCompactIndexedBuiltinTypeCode(int32 typeMap, int32 bodyEnd,
+    int32 types, int32 typeSpecCount, int32 bodyType, init ref<int32> code)
+{
+    if (bodyType <= 0 || bodyType > types
+        || !TryReadCompactIndexedCount(typeMap + (bodyType - 1) * 4,
+            bodyEnd, 4, init var afterTypeSpec, init var typeSpec)
+        || afterTypeSpec > bodyEnd || typeSpec <= 0 || typeSpec > typeSpecCount
+        || !TryGetTypeSpecRowExtent(typeSpecCount, typeSpec,
+            init var rowStart, init var rowLength)
+        || rowLength != 3
+        || !TryReadTypeSpecByte(rowStart, rowLength, 0, init var form)
+        || form != 1
+        || !TryReadTypeSpecByte(rowStart, rowLength, 1, init var qualifiers)
+        || qualifiers != 0
+        || !TryReadTypeSpecByte(rowStart, rowLength, 2, init code))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool TryGetCompactIndexedOptionalTypeCode(int32 typeMap, int32 bodyEnd,
+    int32 types, int32 typeSpecCount, int32 bodyType, init ref<int32> code)
+{
+    if (bodyType <= 0 || bodyType > types
+        || !TryReadCompactIndexedCount(typeMap + (bodyType - 1) * 4,
+            bodyEnd, 4, init var afterTypeSpec, init var typeSpec)
+        || afterTypeSpec > bodyEnd || typeSpec <= 0 || typeSpec > typeSpecCount
+        || !TryGetTypeSpecRowExtent(typeSpecCount, typeSpec,
+            init var optionalStart, init var optionalLength)
+        || optionalLength != 6
+        || !TryReadTypeSpecByte(optionalStart, optionalLength, 0, init var form)
+        || form != 6
+        || !TryReadTypeSpecByte(optionalStart, optionalLength, 1, init var qualifiers)
+        || qualifiers != 0
+        || !TryReadTypeSpecWord(optionalStart, optionalLength, 2,
+            init var innerTypeSpec)
+        || innerTypeSpec == 0 || innerTypeSpec >= uint32(typeSpec)
+        || !TryGetTypeSpecRowExtent(typeSpecCount, int32(innerTypeSpec),
+            init var innerStart, init var innerLength)
+        || innerLength != 3
+        || !TryReadTypeSpecByte(innerStart, innerLength, 0, init var innerForm)
+        || innerForm != 1
+        || !TryReadTypeSpecByte(innerStart, innerLength, 1,
+            init var innerQualifiers)
+        || innerQualifiers != 0
+        || !TryReadTypeSpecByte(innerStart, innerLength, 2, init code)
+        || !IsCompactIndexedOptionalScalarType(code))
+    {
+        return false;
+    }
+
+    code = 0x100 | code;
+    return true;
+}
+
+bool IsCompactIndexedIntegerType(int32 code)
+{
+    return code == 0x08 || code == 0x09 || code == 0x0D || code == 0x0E;
+}
+
+bool IsCompactIndexed32BitIntegerType(int32 code)
+{
+    return code == 0x08 || code == 0x0D;
+}
+
+bool IsCompactIndexedCheckedConversionType(int32 code)
+{
+    return code == 0x03 || IsCompactIndexedIntegerType(code);
+}
+
+bool IsCompactIndexedOptionalScalarType(int32 code)
+{
+    return code == 0x01 || code == 0x03 || code == 0x08 || code == 0x09
+        || code == 0x0D || code == 0x0E;
+}
+
+bool IsCompactIndexedSwitchType(int32 code)
+{
+    return code == 0x01 || code == 0x03 || IsCompactIndexedIntegerType(code);
+}
+
+bool TryMatchCompactIndexedTerminatorTypes(int32 start, int32 end, uint32 opcode,
+    int32 referenceWidth, int32 countWidth, int32 dataWidth, int32 blocks,
+    int32 descriptors, int32 bodyEnd, int32 valueWidth, int32 values,
+    int32 types, int32 typeMap, int32 typeSpecCount)
+{
+    if (opcode != 0x81 && opcode != 0x82)
+    {
+        return true;
+    }
+    if (!TryReadCompactIndexedCount(start, end, referenceWidth,
+            init var afterSelector, init var selector)
+        || !TryReadCompactIndexedDescriptorType(descriptors, bodyEnd, valueWidth,
+            values, types, selector, init var selectorType)
+        || !TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd, types,
+            typeSpecCount, selectorType, init var selectorCode))
+    {
+        return false;
+    }
+    if (opcode == 0x81)
+    {
+        return selectorCode == 0x01;
+    }
+    if (!IsCompactIndexedSwitchType(selectorCode)
+        || !TryReadCompactIndexedCount(afterSelector, end, countWidth,
+            init var afterCaseCount, init var cases))
+    {
+        return false;
+    }
+
+    mut int32 cursor = afterCaseCount;
+    mut uint64 previous = 0;
+    for (mut int32 item = 0; item < cases; item = item + 1)
+    {
+        if (!TryReadCompactIndexedData(cursor, end, dataWidth,
+                init var afterPattern, init var bits)
+            || !FitsCompactIndexedBitPattern(selectorCode, bits)
+            || item != 0 && bits <= previous
+            || !TrySkipCompactIndexedEdge(afterPattern, end,
+                referenceWidth, countWidth, blocks, values, init var afterEdge))
+        {
+            return false;
+        }
+        previous = bits;
+        cursor = afterEdge;
+    }
+    return TrySkipCompactIndexedEdge(cursor, end,
+        referenceWidth, countWidth, blocks, values, init var afterDefault)
+        && afterDefault == end;
+}
+
+bool TryReadCompactIndexedDescriptorType(int32 descriptors, int32 bodyEnd,
+    int32 valueWidth, int32 values, int32 types, int32 value,
+    init ref<int32> type)
+{
+    if (value <= 0 || value > values
+        || !TryReadCompactIndexedCount(
+            descriptors + (value - 1) * 2 * valueWidth, bodyEnd, valueWidth,
+            init var ignoredAfterDescriptor, init type)
+        || type <= 0 || type > types)
+    {
+        return false;
+    }
+    return true;
+}
+
+bool TryReadCompactIndexedOperandType(int32 start, int32 end, int32 referenceWidth,
+    int32 descriptors, int32 bodyEnd, int32 valueWidth, int32 values, int32 types,
+    init ref<int32> nextPosition, init ref<int32> type)
+{
+    if (!TryReadCompactIndexedCount(start, end, referenceWidth,
+            init var afterValue, init var value)
+        || !TryReadCompactIndexedDescriptorType(
+            descriptors, bodyEnd, valueWidth, values, types, value,
+            init var descriptorType))
+    {
+        return false;
+    }
+    nextPosition = afterValue;
+    type = descriptorType;
+    return true;
+}
+
+bool TryMatchCompactIndexedOperationTypes(int32 start, int32 operationEnd,
+    uint32 opcode, int32 referenceWidth, int32 descriptors, int32 bodyEnd,
+    int32 valueWidth, int32 values, int32 types, int32 typeMap,
+    int32 typeSpecCount, int32 result)
+{
+    if (!TryReadCompactIndexedDescriptorType(
+            descriptors, bodyEnd, valueWidth, values, types, result,
+            init var resultType))
+    {
+        return false;
+    }
+    mut int32 cursor = start;
+    mut uint32 kind = 0;
+    if (opcode == 4 || opcode == 5 || opcode == 0x15)
+    {
+        if (!TryReadCompactIndexedByte(cursor, operationEnd, init var parsedKind))
+        {
+            return false;
+        }
+        kind = parsedKind;
+        cursor = cursor + 1;
+    }
+    if (opcode == 4 || opcode == 0x17)
+    {
+        if (!TryReadCompactIndexedOperandType(cursor, operationEnd, referenceWidth,
+                descriptors, bodyEnd, valueWidth, values, types,
+                init var afterOperand, init var operandType)
+            || afterOperand != operationEnd)
+        {
+            return false;
+        }
+        if (resultType != operandType
+            || !TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd, types,
+                typeSpecCount, operandType, init var operandCode))
+        {
+            return false;
+        }
+        if (opcode == 4)
+        {
+            return kind == 1
+                ? operandCode == 0x01
+                : kind == 2 || kind == 3
+                    ? IsCompactIndexedIntegerType(operandCode)
+                    : false;
+        }
+        return opcode == 0x17 && (operandCode == 0x08 || operandCode == 0x09);
+    }
+    if (opcode == 6 || opcode == 0x16)
+    {
+        if (!TryReadCompactIndexedCount(cursor, operationEnd, referenceWidth,
+                init var afterDestination, init var destinationType)
+            || destinationType != resultType)
+        {
+            return false;
+        }
+
+        if (opcode == 6)
+        {
+            if (!TryReadCompactIndexedByte(afterDestination, operationEnd,
+                    init var policy)
+                || policy < 1 || policy > 3
+                || !TryReadCompactIndexedOperandType(afterDestination + 1,
+                    operationEnd, referenceWidth, descriptors, bodyEnd,
+                    valueWidth, values, types, init var afterSource,
+                    init var sourceType)
+                || afterSource != operationEnd
+                || !TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd,
+                    types, typeSpecCount, destinationType,
+                    init var destinationCode)
+                || !IsCompactIndexedIntegerType(destinationCode)
+                || !TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd,
+                    types, typeSpecCount, sourceType, init var sourceCode)
+                || !IsCompactIndexedIntegerType(sourceCode))
+            {
+                return false;
+            }
+
+            return policy != 3
+                || IsCompactIndexed32BitIntegerType(destinationCode)
+                    == IsCompactIndexed32BitIntegerType(sourceCode);
+        }
+
+        if (!TryReadCompactIndexedOperandType(afterDestination, operationEnd,
+                referenceWidth, descriptors, bodyEnd, valueWidth, values, types,
+                init var afterSource, init var sourceType)
+            || afterSource != operationEnd
+            || !TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd, types,
+                typeSpecCount, destinationType, init var destinationCode)
+            || !IsCompactIndexedCheckedConversionType(destinationCode)
+            || !TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd, types,
+                typeSpecCount, sourceType, init var sourceCode))
+        {
+            return false;
+        }
+        return IsCompactIndexedCheckedConversionType(sourceCode);
+    }
+    if (opcode == 8 || opcode == 9)
+    {
+        if (!TryReadCompactIndexedCount(cursor, operationEnd, referenceWidth,
+                init var afterOptionalType, init var optionalType)
+            || optionalType != resultType
+            || !TryGetCompactIndexedOptionalTypeCode(typeMap, bodyEnd, types,
+                typeSpecCount, optionalType, init var optionalCode))
+        {
+            return false;
+        }
+
+        if (opcode == 9)
+        {
+            return afterOptionalType == operationEnd;
+        }
+
+        return TryReadCompactIndexedOperandType(afterOptionalType, operationEnd,
+                referenceWidth, descriptors, bodyEnd, valueWidth, values, types,
+                init var afterPayload, init var payloadType)
+            && afterPayload == operationEnd
+            && TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd, types,
+                typeSpecCount, payloadType, init var payloadCode)
+            && payloadCode == (optionalCode & 0xFF);
+    }
+    if (opcode == 0x0A)
+    {
+        return TryReadCompactIndexedOperandType(cursor, operationEnd, referenceWidth,
+                descriptors, bodyEnd, valueWidth, values, types,
+                init var afterOptional, init var optionalType)
+            && afterOptional == operationEnd
+            && TryGetCompactIndexedOptionalTypeCode(typeMap, bodyEnd, types,
+                typeSpecCount, optionalType, init var optionalCode)
+            && TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd, types,
+                typeSpecCount, resultType, init var presenceCode)
+            && presenceCode == 0x01;
+    }
+    if (opcode == 7)
+    {
+        if (!TryReadCompactIndexedOperandType(cursor, operationEnd, referenceWidth,
+                descriptors, bodyEnd, valueWidth, values, types,
+                init var afterCondition, init var conditionType)
+            || !TryReadCompactIndexedOperandType(afterCondition, operationEnd,
+                referenceWidth, descriptors, bodyEnd, valueWidth, values, types,
+                init var afterTrueValue, init var trueType)
+            || !TryReadCompactIndexedOperandType(afterTrueValue, operationEnd,
+                referenceWidth, descriptors, bodyEnd, valueWidth, values, types,
+                init var afterFalseValue, init var falseType)
+            || afterFalseValue != operationEnd)
+        {
+            return false;
+        }
+        return trueType == falseType && resultType == trueType
+            && TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd, types,
+                typeSpecCount, conditionType, init var conditionCode)
+            && conditionCode == 0x01;
+    }
+    if (opcode == 5 || opcode == 0x15)
+    {
+        if (!TryReadCompactIndexedOperandType(cursor, operationEnd, referenceWidth,
+                descriptors, bodyEnd, valueWidth, values, types,
+                init var afterLeft, init var leftType)
+            || !TryReadCompactIndexedOperandType(afterLeft, operationEnd,
+                referenceWidth, descriptors, bodyEnd, valueWidth, values, types,
+                init var afterRight, init var rightType)
+            || afterRight != operationEnd
+            || opcode == 5 && leftType != rightType
+            || opcode == 0x15 && kind <= 5 && leftType != rightType)
+        {
+            return false;
+        }
+        if (opcode == 5 && kind >= 4 && kind <= 9)
+        {
+            return TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd, types,
+                    typeSpecCount, resultType, init var resultCode)
+                && resultCode == 0x01;
+        }
+        if (opcode == 5)
+        {
+            return resultType == leftType
+                && TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd, types,
+                    typeSpecCount, leftType, init var binaryCode)
+                && IsCompactIndexedIntegerType(binaryCode);
+        }
+        if (opcode == 0x15 && kind >= 6 && kind <= 7)
+        {
+            return resultType == leftType
+                && TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd, types,
+                    typeSpecCount, leftType, init var leftCode)
+                && IsCompactIndexedIntegerType(leftCode)
+                && TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd, types,
+                    typeSpecCount, rightType, init var rightCode)
+                && rightCode == 0x0D;
+        }
+        if (opcode == 0x15)
+        {
+            return resultType == leftType
+                && TryGetCompactIndexedBuiltinTypeCode(typeMap, bodyEnd, types,
+                    typeSpecCount, leftType, init var arithmeticCode)
+                && IsCompactIndexedIntegerType(arithmeticCode);
+        }
+        return resultType == leftType;
+    }
+    return false;
+}
+
+bool TryInitializeCompactIndexedBodyRegions(int32 regionStart, int32 end,
+    int32 width, int32 blocks, int32 regions, int32 offsets, int32 blockDataStart)
+{
+    for (mut int32 block = 0; block <= blocks; block = block + 1)
+    {
+        Host.BodyBlockRegions[block] = 0;
+        Host.BodyBlockReachable[block] = 0;
+        Host.BodyBlockImmediateDominators[block] = 0;
+        Host.BodyBlockDominatorDepths[block] = 0;
+    }
+    Host.BodyBlockReachable[1] = 1;
+    for (mut int32 region = 0; region <= regions; region = region + 1)
+    {
+        Host.BodyRegionDepths[region] = 0;
+        Host.BodyRegionBackedges[region] = 0;
+        if (region == 0)
+        {
+            continue;
+        }
+
+        if (!TryReadCompactIndexedRegion(regionStart, end, width, regions, region,
+                init var kind, init var parent, init var entry, init var exit,
+                init var cleanup)
+            || (kind != 1 && kind != 6)
+            || parent >= region
+            || entry == 0 || entry > blocks
+            || exit == 0 || exit > blocks || exit == entry
+            || cleanup != 0)
+        {
+            return false;
+        }
+        Host.BodyRegionDepths[region] = Host.BodyRegionDepths[parent] + 1;
+    }
+
+    for (mut int32 block = 1; block <= blocks; block = block + 1)
+    {
+        if (!TryReadCompactIndexedLocalAt(offsets, end, width, block - 1,
+                init var blockOffset)
+            || !TryReadCompactIndexedLocalAt(offsets, end, width, block,
+                init var nextOffset))
+        {
+            return false;
+        }
+
+        int32 blockStart = blockDataStart + int32(blockOffset);
+        int32 blockEnd = blockDataStart + int32(nextOffset);
+        if (!TryReadCompactIndexedByte(blockStart, blockEnd, init var presence))
+        {
+            return false;
+        }
+
+        if ((presence & 1) != 0)
+        {
+            if (!TryReadCompactIndexedCount(blockStart + 1, blockEnd, width,
+                    init var afterRegion, init var blockRegion))
+            {
+                return false;
+            }
+            Host.BodyBlockRegions[block] = blockRegion;
+        }
+
+        if (Host.BodyBlockRegions[block] > regions)
+        {
+            return false;
+        }
+    }
+
+    if (Host.BodyBlockRegions[1] != 0
+        && (!TryReadCompactIndexedRegion(regionStart, end, width, regions,
+                Host.BodyBlockRegions[1], init var entryKind,
+                init var entryParent, init var entryBlock,
+                init var ignoredEntryExit, init var ignoredEntryCleanup)
+            || entryBlock != 1 || entryParent != 0))
+    {
+        return false;
+    }
+
+    for (mut int32 region = 1; region <= regions; region = region + 1)
+    {
+        if (!TryReadCompactIndexedRegion(regionStart, end, width, regions, region,
+                init var kind, init var parent, init var entry, init var exit,
+                init var ignoredCleanup)
+            || Host.BodyBlockRegions[entry] != region
+            || !TryGetCompactIndexedCommonRegion(regionStart, end, width, regions,
+                parent, Host.BodyBlockRegions[exit], init var commonRegion)
+            || commonRegion != Host.BodyBlockRegions[exit]
+            || kind == 6 && Host.BodyBlockRegions[exit] != parent)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryReadCompactIndexedRegion(int32 regionStart, int32 end, int32 width,
+    int32 regions, int32 region, init ref<uint32> kind,
+    init ref<int32> parent, init ref<int32> entry,
+    init ref<int32> exit, init ref<int32> cleanup)
+{
+    if (region <= 0 || region > regions)
+    {
+        return false;
+    }
+
+    int32 recordStart = regionStart + (region - 1) * (1 + 4 * width);
+    return TryReadCompactIndexedByte(recordStart, end, init kind)
+        && TryReadCompactIndexedCount(recordStart + 1, end, width,
+            init var afterParent, init parent)
+        && TryReadCompactIndexedCount(afterParent, end, width,
+            init var afterEntry, init entry)
+        && TryReadCompactIndexedCount(afterEntry, end, width,
+            init var afterExit, init exit)
+        && TryReadCompactIndexedCount(afterExit, end, width,
+            init var ignoredAfterCleanup, init cleanup);
+}
+
+bool TryGetCompactIndexedCommonRegion(int32 regionStart, int32 end,
+    int32 width, int32 regions, int32 first, int32 second,
+    init ref<int32> commonRegion)
+{
+    if (first < 0 || first > regions || second < 0 || second > regions)
+    {
+        return false;
+    }
+
+    mut int32 firstDepth = Host.BodyRegionDepths[first];
+    mut int32 secondDepth = Host.BodyRegionDepths[second];
+    mut int32 firstRegion = first;
+    mut int32 secondRegion = second;
+    while (firstDepth > secondDepth)
+    {
+        if (!TryReadCompactIndexedRegion(regionStart, end, width, regions,
+                firstRegion, init var ignoredKind, init var parent,
+                init var ignoredEntry, init var ignoredExit,
+                init var ignoredCleanup))
+        {
+            return false;
+        }
+        firstRegion = parent;
+        firstDepth = firstDepth - 1;
+    }
+    while (secondDepth > firstDepth)
+    {
+        if (!TryReadCompactIndexedRegion(regionStart, end, width, regions,
+                secondRegion, init var ignoredKind, init var parent,
+                init var ignoredEntry, init var ignoredExit,
+                init var ignoredCleanup))
+        {
+            return false;
+        }
+        secondRegion = parent;
+        secondDepth = secondDepth - 1;
+    }
+    while (firstRegion != secondRegion)
+    {
+        if (!TryReadCompactIndexedRegion(regionStart, end, width, regions,
+                firstRegion, init var ignoredFirstKind, init var firstParent,
+                init var ignoredFirstEntry, init var ignoredFirstExit,
+                init var ignoredFirstCleanup)
+            || !TryReadCompactIndexedRegion(regionStart, end, width, regions,
+                secondRegion, init var ignoredSecondKind, init var secondParent,
+                init var ignoredSecondEntry, init var ignoredSecondExit,
+                init var ignoredSecondCleanup))
+        {
+            return false;
+        }
+        firstRegion = firstParent;
+        secondRegion = secondParent;
+    }
+
+    commonRegion = firstRegion;
+    return true;
+}
+
+bool TryIndexCompactIndexedTerminatorRegions(int32 start, int32 end,
+    uint32 opcode, int32 referenceWidth, int32 countWidth, int32 dataWidth,
+    int32 block, int32 blocks, int32 regionStart, int32 bodyEnd,
+    int32 width, int32 regions)
+{
+    mut int32 cursor = start;
+    if (opcode == 0x83)
+    {
+        return TryReadCompactIndexedCount(cursor, end, referenceWidth,
+                init var afterReturn, init var ignoredReturnValue)
+            && afterReturn == end;
+    }
+    if (opcode == 0x87)
+    {
+        return TryReadCompactIndexedByte(cursor, end, init var ignoredFailureReason)
+            && cursor + 1 == end;
+    }
+
+    if (opcode == 0x81 || opcode == 0x82)
+    {
+        if (!TryReadCompactIndexedCount(cursor, end, referenceWidth,
+                init var afterSelector, init var ignoredSelector))
+        {
+            return false;
+        }
+        cursor = afterSelector;
+    }
+
+    if (opcode == 0x82)
+    {
+        if (!TryReadCompactIndexedCount(cursor, end, countWidth,
+                init var afterCaseCount, init var cases))
+        {
+            return false;
+        }
+        cursor = afterCaseCount;
+        for (mut int32 item = 0; item < cases; item = item + 1)
+        {
+            if (!TrySkipCompactIndexedBytes(cursor, end, dataWidth,
+                    init var afterPattern)
+                || !TryValidateCompactIndexedRegionEdge(afterPattern, end,
+                    referenceWidth, countWidth, blocks, block, regionStart,
+                    bodyEnd, width, regions, init var afterEdge))
+            {
+                return false;
+            }
+            cursor = afterEdge;
+        }
+        return TryValidateCompactIndexedRegionEdge(cursor, end,
+                referenceWidth, countWidth, blocks, block, regionStart,
+                bodyEnd, width, regions, init var afterDefault)
+            && afterDefault == end;
+    }
+
+    int32 edgeCount = opcode == 0x81 ? 2 : 1;
+    for (mut int32 edge = 0; edge < edgeCount; edge = edge + 1)
+    {
+        if (!TryValidateCompactIndexedRegionEdge(cursor, end, referenceWidth,
+                countWidth, blocks, block, regionStart, bodyEnd, width,
+                regions, init var afterEdge))
+        {
+            return false;
+        }
+        cursor = afterEdge;
+    }
+
+    return cursor == end;
+}
+
+bool TryValidateCompactIndexedRegionEdge(int32 start, int32 end,
+    int32 referenceWidth, int32 countWidth, int32 blocks, int32 sourceBlock,
+    int32 regionStart, int32 bodyEnd, int32 width, int32 regions,
+    init ref<int32> nextPosition)
+{
+    if (!TryReadCompactIndexedCount(start, end, referenceWidth,
+            init var afterTarget, init var target)
+        || target == 0 || target > blocks
+        || !TrySkipCompactIndexedEdge(start, end, referenceWidth, countWidth,
+            blocks, Host.BodyValueDefinitions.Length, init nextPosition))
+    {
+        return false;
+    }
+
+    int32 sourceRegion = Host.BodyBlockRegions[sourceBlock];
+    int32 targetRegion = Host.BodyBlockRegions[target];
+    if (!TryGetCompactIndexedCommonRegion(regionStart, bodyEnd, width, regions,
+            sourceRegion, targetRegion, init var commonRegion))
+    {
+        return false;
+    }
+
+    mut int32 entered = targetRegion;
+    while (entered != commonRegion)
+    {
+        if (!TryReadCompactIndexedRegion(regionStart, bodyEnd, width, regions,
+                entered, init var ignoredKind, init var ignoredParent,
+                init var entry, init var ignoredExit,
+                init var ignoredCleanup)
+            || target != entry)
+        {
+            return false;
+        }
+        if (!TryReadCompactIndexedRegion(regionStart, bodyEnd, width, regions,
+                entered, init var ignoredEntryKind, init var parent,
+                init var ignoredEntry, init var ignoredEntryExit,
+                init var ignoredEntryCleanup))
+        {
+            return false;
+        }
+        entered = parent;
+    }
+
+    mut int32 exited = sourceRegion;
+    while (exited != commonRegion)
+    {
+        if (!TryReadCompactIndexedRegion(regionStart, bodyEnd, width, regions,
+                exited, init var ignoredKind, init var ignoredParent,
+                init var ignoredEntry, init var exit,
+                init var ignoredCleanup)
+            || target != exit
+            || !TryReadCompactIndexedRegion(regionStart, bodyEnd, width, regions,
+                exited, init var ignoredExitKind, init var parent,
+                init var ignoredExitEntry, init var ignoredExitBlock,
+                init var ignoredExitCleanup))
+        {
+            return false;
+        }
+        exited = parent;
+    }
+
+    if (target <= sourceBlock)
+    {
+        if (targetRegion == 0
+            || !TryReadCompactIndexedRegion(regionStart, bodyEnd, width, regions,
+                targetRegion, init var kind, init var ignoredParent,
+                init var entry, init var ignoredExit,
+                init var ignoredCleanup)
+            || kind != 1 || commonRegion != targetRegion || target != entry)
+        {
+            return false;
+        }
+        Host.BodyRegionBackedges[targetRegion] = 1;
+    }
+
+    if (Host.BodyBlockReachable[sourceBlock] == 1)
+    {
+        Host.BodyBlockReachable[target] = 1;
+    }
+
+    return target <= sourceBlock
+        || TryAccumulateCompactIndexedDominator(target, sourceBlock);
+}
+
+bool TryAccumulateCompactIndexedDominator(int32 target, int32 sourceBlock)
+{
+    int32 candidate = Host.BodyBlockImmediateDominators[target];
+    if (candidate == 0)
+    {
+        Host.BodyBlockImmediateDominators[target] = sourceBlock;
+        return true;
+    }
+
+    mut int32 left = candidate;
+    mut int32 right = sourceBlock;
+    while (left != right)
+    {
+        if (left <= 0 || right <= 0)
+        {
+            return false;
+        }
+
+        int32 leftDepth = Host.BodyBlockDominatorDepths[left];
+        int32 rightDepth = Host.BodyBlockDominatorDepths[right];
+        if (leftDepth > rightDepth)
+        {
+            left = Host.BodyBlockImmediateDominators[left];
+        }
+        else if (rightDepth > leftDepth)
+        {
+            right = Host.BodyBlockImmediateDominators[right];
+        }
+        else
+        {
+            left = Host.BodyBlockImmediateDominators[left];
+            right = Host.BodyBlockImmediateDominators[right];
+        }
+    }
+
+    Host.BodyBlockImmediateDominators[target] = left;
+    return true;
+}
+
+bool TryValidateCompactIndexedLoopBackedges(int32 regionStart, int32 end,
+    int32 width, int32 regions)
+{
+    for (mut int32 region = 1; region <= regions; region = region + 1)
+    {
+        if (!TryReadCompactIndexedRegion(regionStart, end, width, regions,
+                region, init var kind, init var ignoredParent,
+                init var ignoredEntry, init var ignoredExit,
+                init var ignoredCleanup)
+            || kind == 1 && Host.BodyRegionBackedges[region] != 1)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryReadCompactIndexedValueUse(int32 start, int32 end, int32 width,
+    int32 block, int32 offset, int32 ordinal, init ref<int32> nextPosition)
+{
+    if (!TryReadCompactIndexedCount(start, end, width, init var afterValue, init var value)
+        || value == 0 || value > Host.BodyValueDefinitions.Length)
+    {
+        return false;
+    }
+    int32 index = value - 1;
+    int32 owner = Host.BodyValueOwners[index];
+    int32 definition = Host.BodyValueDefinitions[index];
+    if (owner > block || owner == block && definition != -1
+            && (definition == 0 || definition >= offset)
+        || owner != block && Host.BodyValueLiveInBlocks[index] != block
+        || Host.BodyValueDeclaredLastUses[index] < 0)
+    {
+        return false;
+    }
+    mut int32 dominator = block;
+    while (dominator > owner)
+    {
+        dominator = Host.BodyBlockImmediateDominators[dominator];
+    }
+    if (dominator != owner)
+    {
+        return false;
+    }
+    if (Host.BodyValueLastUses[index] < 0)
+    {
+        Host.BodyValueUseBlocks[index] = Host.BodyValueUseBlocks[index] + 1;
+    }
+    Host.BodyValueLastUses[index] = ordinal;
+    nextPosition = afterValue;
+    return true;
+}
+
+bool TryMarkCompactIndexedLiveIns(int32 start, int32 end, int32 width, int32 block)
+{
+    if (!TryReadCompactIndexedCount(start, end, width,
+            init var afterCount, init var count))
+    {
+        return false;
+    }
+
+    mut int32 position = afterCount;
+    mut int32 previous = 0;
+    for (mut int32 item = 0; item < count; item = item + 1)
+    {
+        if (!TryReadCompactIndexedCount(position, end, width,
+                init var afterValue, init var value)
+            || value <= previous
+            || !TryValidateCompactIndexedValueOwner(value, block, false))
+        {
+            return false;
+        }
+        Host.BodyValueLiveInBlocks[value - 1] = block;
+        previous = value;
+        position = afterValue;
+    }
+
+    return position == end;
+}
+
+bool TryValidateCompactIndexedLiveOuts(int32 start, int32 end, int32 width, int32 block)
+{
+    if (!TryReadCompactIndexedCount(start, end, width,
+            init var afterCount, init var count))
+    {
+        return false;
+    }
+
+    mut int32 position = afterCount;
+    mut int32 previous = 0;
+    for (mut int32 item = 0; item < count; item = item + 1)
+    {
+        if (!TryReadCompactIndexedCount(position, end, width,
+                init var afterValue, init var value)
+            || value <= previous
+            || !TryValidateCompactIndexedValueOwner(value, block, true))
+        {
+            return false;
+        }
+        previous = value;
+        position = afterValue;
+    }
+
+    return position == end;
+}
+
+bool TryValidateCompactIndexedValueOwner(int32 value, int32 block,
+    bool allowBlockOwner)
+{
+    if (value == 0 || value > Host.BodyValueOwners.Length)
+    {
+        return false;
+    }
+    int32 owner = Host.BodyValueOwners[value - 1];
+    if (owner == 0 || owner > block || !allowBlockOwner && owner == block)
+    {
+        return false;
+    }
+    mut int32 dominator = block;
+    while (dominator > owner)
+    {
+        dominator = Host.BodyBlockImmediateDominators[dominator];
+    }
+
+    return dominator == owner;
+}
+
+bool TryValidateCompactIndexedLiveInFlow(int32 liveInStart, int32 liveInEnd,
+    int32 liveOutStart, int32 liveOutEnd, int32 width, int32 block)
+{
+    if (liveInStart != liveInEnd)
+    {
+        if (!TryReadCompactIndexedCount(liveInStart, liveInEnd, width,
+                init var afterLiveInCount, init var liveInCount))
+        {
+            return false;
+        }
+        mut int32 position = afterLiveInCount;
+        for (mut int32 item = 0; item < liveInCount; item = item + 1)
+        {
+            if (!TryReadCompactIndexedCount(position, liveInEnd, width,
+                    init var afterLiveIn, init var liveIn))
+            {
+                return false;
+            }
+            if (Host.BodyValueLastUses[liveIn - 1] < 0
+                && !TryContainsCompactIndexedValue(
+                    liveOutStart, liveOutEnd, width, liveIn))
+            {
+                return false;
+            }
+            position = afterLiveIn;
+        }
+        if (position != liveInEnd)
+        {
+            return false;
+        }
+    }
+
+    if (liveOutStart != liveOutEnd)
+    {
+        if (!TryReadCompactIndexedCount(liveOutStart, liveOutEnd, width,
+                init var afterLiveOutCount, init var liveOutCount))
+        {
+            return false;
+        }
+        mut int32 position = afterLiveOutCount;
+        for (mut int32 item = 0; item < liveOutCount; item = item + 1)
+        {
+            if (!TryReadCompactIndexedCount(position, liveOutEnd, width,
+                    init var afterLiveOut, init var liveOut)
+                || Host.BodyValueOwners[liveOut - 1] != block
+                    && Host.BodyValueLiveInBlocks[liveOut - 1] != block)
+            {
+                return false;
+            }
+            position = afterLiveOut;
+        }
+        if (position != liveOutEnd)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryContainsCompactIndexedValue(int32 start, int32 end, int32 width, int32 value)
+{
+    return TryContainsCompactIndexedKey(start, end, width, 1, value);
+}
+
+bool TryContainsCompactIndexedKey(int32 start, int32 end, int32 width,
+    int32 wordsPerEntry, int32 value)
+{
+    if (start == end
+        || !TryReadCompactIndexedCount(start, end, width,
+            init var afterCount, init var count))
+    {
+        return false;
+    }
+
+    mut int32 lower = 0;
+    mut int32 upper = count;
+    while (lower < upper)
+    {
+        int32 middle = lower + (upper - lower) / 2;
+        if (!TryReadCompactIndexedCount(afterCount + middle * wordsPerEntry * width,
+                end, width, init var ignoredAfterValue, init var candidate))
+        {
+            return false;
+        }
+        if (candidate < value)
+        {
+            lower = middle + 1;
+        }
+        else
+        {
+            upper = middle;
+        }
+    }
+
+    return lower < count
+        && TryReadCompactIndexedCount(afterCount + lower * wordsPerEntry * width,
+            end, width, init var ignoredAfterValue, init var candidate)
+        && candidate == value;
+}
+
+bool TryValidateCompactIndexedLiveInNecessity(int32 blockDataStart, int32 bodyEnd,
+    int32 width, int32 blocks, int32 values, int32 offsets, int32 terminators)
+{
+    // Local equations alone permit self-supporting dead loop transit. Seed
+    // only actual uses, then propagate necessity through declared live-ins.
+    // Reachable is scratch here and is restored before publishing the index.
+    for (mut int32 index = 0; index < values; index = index + 1)
+    {
+        if (Host.BodyValueLiveInBlocks[index] == 0)
+        {
+            continue;
+        }
+        if (Host.BodyValueUseBlocks[index] == 0)
+        {
+            return false;
+        }
+
+        int32 value = index + 1;
+        mut int32 neededBlocks = 0;
+        mut int32 reachedBlocks = 0;
+        for (mut int32 block = 1; block <= blocks; block = block + 1)
+        {
+            Host.BodyBlockReachable[block] = 0;
+            if (!TryReadCompactIndexedBlockLiveSets(blockDataStart, bodyEnd,
+                    width, blocks, values, offsets, block,
+                    init var blockStart, init var blockEnd,
+                    init var liveInStart, init var liveInEnd,
+                    init var ignoredLiveOutStart, init var liveOutEnd)
+                || !TryReadCompactIndexedByte(blockStart, blockEnd, init var presence))
+            {
+                return false;
+            }
+            if (!TryContainsCompactIndexedValue(liveInStart, liveInEnd, width, value))
+            {
+                continue;
+            }
+
+            neededBlocks = neededBlocks + 1;
+            if ((presence & 16) != 0
+                && TryContainsCompactIndexedKey(liveOutEnd, blockEnd, width, 2, value))
+            {
+                Host.BodyBlockReachable[block] = 1;
+                reachedBlocks = reachedBlocks + 1;
+            }
+        }
+
+        mut bool changed = true;
+        while (changed && reachedBlocks < neededBlocks)
+        {
+            changed = false;
+            for (mut int32 block = blocks; block > 0; block = block - 1)
+            {
+                if (Host.BodyBlockReachable[block] != 0)
+                {
+                    continue;
+                }
+                if (!TryReadCompactIndexedBlockLiveSets(blockDataStart, bodyEnd,
+                        width, blocks, values, offsets, block,
+                        init var blockStart, init var blockEnd,
+                        init var liveInStart, init var liveInEnd,
+                        init var ignoredLiveOutStart, init var ignoredLiveOutEnd))
+                {
+                    return false;
+                }
+                if (!TryContainsCompactIndexedValue(liveInStart, liveInEnd, width, value))
+                {
+                    continue;
+                }
+                if (!TryCompactIndexedSuccessorReachesUse(blockStart, blockEnd,
+                        bodyEnd, width, blocks, values, terminators, block,
+                        init var reachesUse))
+                {
+                    return false;
+                }
+                if (reachesUse)
+                {
+                    Host.BodyBlockReachable[block] = 1;
+                    reachedBlocks = reachedBlocks + 1;
+                    changed = true;
+                }
+            }
+        }
+        if (reachedBlocks != neededBlocks)
+        {
+            return false;
+        }
+    }
+
+    for (mut int32 block = 1; block <= blocks; block = block + 1)
+    {
+        Host.BodyBlockReachable[block] = 1;
+    }
+
+    return true;
+}
+
+bool TryCompactIndexedSuccessorReachesUse(int32 blockStart, int32 blockEnd,
+    int32 bodyEnd, int32 width, int32 blocks, int32 values, int32 terminators,
+    int32 block, init ref<bool> reachesUseResult)
+{
+    if (!TryReadCompactIndexedLocalAt(terminators, bodyEnd, width,
+            block - 1, init var terminatorOffset)
+        || !TryReadCompactIndexedTerminator(blockStart + int32(terminatorOffset),
+            blockEnd, init var afterTerminator, init var terminator,
+            init var referenceWidth, init var countWidth, init var dataWidth))
+    {
+        return false;
+    }
+    if (terminator == 0x83 || terminator == 0x87)
+    {
+        reachesUseResult = false;
+        return true;
+    }
+
+    mut int32 cursor = afterTerminator;
+    mut bool reachesUse = false;
+    if (terminator == 0x81 || terminator == 0x82)
+    {
+        if (!TryReadCompactIndexedCount(cursor, blockEnd, referenceWidth,
+                init var afterSelector, init var ignoredSelector))
+        {
+            return false;
+        }
+        cursor = afterSelector;
+    }
+    if (terminator == 0x82)
+    {
+        if (!TryReadCompactIndexedCount(cursor, blockEnd, countWidth,
+                init var afterCaseCount, init var caseCount))
+        {
+            return false;
+        }
+        cursor = afterCaseCount;
+        for (mut int32 item = 0; item < caseCount; item = item + 1)
+        {
+            if (!TrySkipCompactIndexedBytes(cursor, blockEnd, dataWidth,
+                    init var afterPattern)
+                || !TryReadCompactIndexedCount(afterPattern, blockEnd, referenceWidth,
+                    init var ignoredAfterTarget, init var target)
+                || !TrySkipCompactIndexedEdge(afterPattern, blockEnd,
+                    referenceWidth, countWidth, blocks, values, init var afterEdge))
+            {
+                return false;
+            }
+            reachesUse = reachesUse || Host.BodyBlockReachable[target] == 1;
+            cursor = afterEdge;
+        }
+    }
+
+    int32 edgeCount = terminator == 0x81 ? 2 : 1;
+    for (mut int32 edge = 0; edge < edgeCount; edge = edge + 1)
+    {
+        if (!TryReadCompactIndexedCount(cursor, blockEnd, referenceWidth,
+                init var ignoredAfterTarget, init var target)
+            || !TrySkipCompactIndexedEdge(cursor, blockEnd,
+                referenceWidth, countWidth, blocks, values, init var afterEdge))
+        {
+            return false;
+        }
+        reachesUse = reachesUse || Host.BodyBlockReachable[target] == 1;
+        cursor = afterEdge;
+    }
+    if (cursor != blockEnd)
+    {
+        return false;
+    }
+
+    reachesUseResult = reachesUse;
+    return true;
+}
+
+bool TryValidateCompactIndexedLiveOutTransfers(int32 blockDataStart, int32 bodyEnd,
+    int32 width, int32 blocks, int32 values, int32 offsets, int32 terminators)
+{
+    for (mut int32 value = 0; value < values; value = value + 1)
+    {
+        Host.BodyValueLiveInBlocks[value] = 0;
+    }
+
+    for (mut int32 block = 1; block <= blocks; block = block + 1)
+    {
+        if (!TryReadCompactIndexedBlockLiveSets(blockDataStart, bodyEnd, width,
+                blocks, values, offsets, block,
+                init var blockStart, init var blockEnd,
+                init var liveInStart, init var liveInEnd,
+                init var liveOutStart, init var liveOutEnd)
+            || !TryReadCompactIndexedLocalAt(terminators, bodyEnd, width,
+                block - 1, init var terminatorOffset)
+            || !TryReadCompactIndexedTerminator(
+                blockStart + int32(terminatorOffset), blockEnd,
+                init var afterTerminator, init var terminator,
+                init var referenceWidth, init var countWidth, init var dataWidth))
+        {
+            return false;
+        }
+
+        if (terminator == 0x83 || terminator == 0x87)
+        {
+            if (liveOutStart != liveOutEnd)
+            {
+                return false;
+            }
+            continue;
+        }
+
+        mut int32 cursor = afterTerminator;
+        mut int32 expectedCount = 0;
+        if (terminator == 0x81 || terminator == 0x82)
+        {
+            if (!TryReadCompactIndexedCount(cursor, blockEnd, referenceWidth,
+                    init var afterSelector, init var ignoredSelector))
+            {
+                return false;
+            }
+            cursor = afterSelector;
+        }
+        if (terminator == 0x82)
+        {
+            if (!TryReadCompactIndexedCount(cursor, blockEnd, countWidth,
+                    init var afterCaseCount, init var caseCount))
+            {
+                return false;
+            }
+            cursor = afterCaseCount;
+            for (mut int32 item = 0; item < caseCount; item = item + 1)
+            {
+                if (!TrySkipCompactIndexedBytes(cursor, blockEnd, dataWidth,
+                        init var afterPattern))
+                {
+                    return false;
+                }
+                int32 added = TryMarkCompactIndexedEdgeLiveValues(
+                    afterPattern, blockEnd, referenceWidth, countWidth,
+                    blockDataStart, bodyEnd, width, blocks, values, offsets, block,
+                    init var afterEdge);
+                if (added < 0)
+                {
+                    return false;
+                }
+                expectedCount = expectedCount + added;
+                cursor = afterEdge;
+            }
+        }
+
+        int32 edgeCount = terminator == 0x81 ? 2 : 1;
+        for (mut int32 edge = 0; edge < edgeCount; edge = edge + 1)
+        {
+            int32 added = TryMarkCompactIndexedEdgeLiveValues(
+                cursor, blockEnd, referenceWidth, countWidth,
+                blockDataStart, bodyEnd, width, blocks, values, offsets, block,
+                init var afterEdge);
+            if (added < 0)
+            {
+                return false;
+            }
+            expectedCount = expectedCount + added;
+            cursor = afterEdge;
+        }
+        if (cursor != blockEnd)
+        {
+            return false;
+        }
+
+        mut int32 declaredCount = 0;
+        if (liveOutStart != liveOutEnd)
+        {
+            if (!TryReadCompactIndexedCount(liveOutStart, liveOutEnd, width,
+                    init var afterCount, init var count))
+            {
+                return false;
+            }
+            mut int32 position = afterCount;
+            for (mut int32 item = 0; item < count; item = item + 1)
+            {
+                if (!TryReadCompactIndexedCount(position, liveOutEnd, width,
+                        init var afterValue, init var liveOut)
+                    || Host.BodyValueLiveInBlocks[liveOut - 1] != block)
+                {
+                    return false;
+                }
+                declaredCount = declaredCount + 1;
+                position = afterValue;
+            }
+            if (position != liveOutEnd)
+            {
+                return false;
+            }
+        }
+        if (declaredCount != expectedCount)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryReadCompactIndexedBlockLiveSets(int32 blockDataStart, int32 bodyEnd,
+    int32 width, int32 blocks, int32 values, int32 offsets, int32 block,
+    init ref<int32> blockStartResult, init ref<int32> blockEndResult,
+    init ref<int32> liveInStartResult, init ref<int32> liveInEndResult,
+    init ref<int32> liveOutStartResult, init ref<int32> liveOutEndResult)
+{
+    if (!TryReadCompactIndexedLocalAt(offsets, bodyEnd, width, block - 1,
+            init var blockOffset)
+        || !TryReadCompactIndexedLocalAt(offsets, bodyEnd, width, block,
+            init var nextOffset))
+    {
+        return false;
+    }
+    int32 blockStart = blockDataStart + int32(blockOffset);
+    int32 blockEnd = blockDataStart + int32(nextOffset);
+    if (!TryReadCompactIndexedByte(blockStart, blockEnd, init var presence))
+    {
+        return false;
+    }
+
+    mut int32 cursor = blockStart + 1;
+    if ((presence & 1) != 0)
+    {
+        if (!TryReadCompactIndexedCount(cursor, blockEnd, width,
+                init var afterRegion, init var ignoredRegion))
+        {
+            return false;
+        }
+        cursor = afterRegion;
+    }
+    if ((presence & 2) != 0)
+    {
+        if (!TryReadCompactIndexedList(cursor, blockEnd, width, values,
+                init var afterParameters))
+        {
+            return false;
+        }
+        cursor = afterParameters;
+    }
+
+    mut int32 liveInStart = cursor;
+    mut int32 liveInEnd = cursor;
+    if ((presence & 4) != 0)
+    {
+        liveInStart = cursor;
+        if (!TryReadCompactIndexedList(cursor, blockEnd, width, values,
+                init var afterLiveIns))
+        {
+            return false;
+        }
+        cursor = afterLiveIns;
+        liveInEnd = cursor;
+    }
+
+    mut int32 liveOutStart = cursor;
+    mut int32 liveOutEnd = cursor;
+    if ((presence & 8) != 0)
+    {
+        liveOutStart = cursor;
+        if (!TryReadCompactIndexedList(cursor, blockEnd, width, values,
+                init var afterLiveOuts))
+        {
+            return false;
+        }
+        liveOutEnd = afterLiveOuts;
+    }
+
+    blockStartResult = blockStart;
+    blockEndResult = blockEnd;
+    liveInStartResult = liveInStart;
+    liveInEndResult = liveInEnd;
+    liveOutStartResult = liveOutStart;
+    liveOutEndResult = liveOutEnd;
+    return true;
+}
+
+int32 TryMarkCompactIndexedEdgeLiveValues(int32 start, int32 end,
+    int32 referenceWidth, int32 countWidth, int32 blockDataStart, int32 bodyEnd,
+    int32 width, int32 blocks, int32 values, int32 offsets, int32 sourceBlock,
+    init ref<int32> nextPosition)
+{
+    nextPosition = start;
+    if (!TryReadCompactIndexedCount(start, end, referenceWidth,
+            init var afterTarget, init var target)
+        || target == 0 || target > blocks
+        || !TryReadCompactIndexedCount(afterTarget, end, countWidth,
+            init var afterCount, init var argumentCount)
+        || argumentCount > values)
+    {
+        return -1;
+    }
+
+    mut int32 addedCount = 0;
+    mut int32 cursor = afterCount;
+    for (mut int32 argument = 0; argument < argumentCount; argument = argument + 1)
+    {
+        if (!TryReadCompactIndexedCount(cursor, end, referenceWidth,
+                init var afterArgument, init var value))
+        {
+            return -1;
+        }
+        int32 added = TryMarkCompactIndexedLiveValue(value, sourceBlock);
+        if (added < 0)
+        {
+            return -1;
+        }
+        addedCount = addedCount + added;
+        cursor = afterArgument;
+    }
+    int32 afterEdge = cursor;
+
+    if (!TryReadCompactIndexedBlockLiveSets(blockDataStart, bodyEnd, width,
+            blocks, values, offsets, int32(target),
+            init var ignoredBlockStart, init var ignoredBlockEnd,
+            init var liveInStart, init var liveInEnd,
+            init var ignoredLiveOutStart, init var ignoredLiveOutEnd))
+    {
+        return -1;
+    }
+    if (liveInStart != liveInEnd)
+    {
+        if (!TryReadCompactIndexedCount(liveInStart, liveInEnd, width,
+                init var afterLiveInCount, init var liveInCount))
+        {
+            return -1;
+        }
+        cursor = afterLiveInCount;
+        for (mut int32 item = 0; item < liveInCount; item = item + 1)
+        {
+            if (!TryReadCompactIndexedCount(cursor, liveInEnd, width,
+                    init var afterLiveIn, init var value))
+            {
+                return -1;
+            }
+            int32 added = TryMarkCompactIndexedLiveValue(value, sourceBlock);
+            if (added < 0)
+            {
+                return -1;
+            }
+            addedCount = addedCount + added;
+            cursor = afterLiveIn;
+        }
+        if (cursor != liveInEnd)
+        {
+            return -1;
+        }
+    }
+
+    nextPosition = afterEdge;
+    return addedCount;
+}
+
+int32 TryMarkCompactIndexedLiveValue(int32 value, int32 sourceBlock)
+{
+    if (value == 0 || value > Host.BodyValueLiveInBlocks.Length)
+    {
+        return -1;
+    }
+    int32 index = value - 1;
+    if (Host.BodyValueLiveInBlocks[index] == sourceBlock)
+    {
+        return 0;
+    }
+    Host.BodyValueLiveInBlocks[index] = sourceBlock;
+    return 1;
+}
+
+bool TryReadCompactIndexedValueType(int32 start, int32 end, int32 width,
+    int32 types, init ref<int32> nextPosition)
+{
+    if (!TryReadCompactIndexedCount(start, end, width,
+            init var afterType, init var type)
+        || type == 0 || type > types)
+    {
+        return false;
+    }
+    nextPosition = afterType;
+    return true;
+}
+
+bool TryIndexCompactIndexedOperationUses(int32 start, int32 end, uint32 opcode,
+    int32 referenceWidth, int32 countWidth, int32 dataWidth, int32 types,
+    int32 block, int32 offset, int32 ordinal)
+{
+    mut int32 cursor = start;
+    mut int32 uses = 0;
+    if (opcode == 1 || opcode == 2 || opcode == 6 || opcode == 8
+        || opcode == 9 || opcode == 0x16)
+    {
+        if (!TryReadCompactIndexedValueType(cursor, end, referenceWidth,
+                types, init var afterType))
+        {
+            return false;
+        }
+        cursor = afterType;
+    }
+    if (opcode == 1 || opcode == 2)
+    {
+        if (!TrySkipCompactIndexedBytes(cursor, end, dataWidth, init var afterData))
+        {
+            return false;
+        }
+        cursor = afterData;
+    }
+    else if (opcode == 0x12)
+    {
+        if (!TryReadCompactIndexedCount(cursor, end, referenceWidth,
+                init var afterMethod, init var method))
+        {
+            return false;
+        }
+        cursor = afterMethod;
+        if (method == 0)
+        {
+            if (!TrySkipCompactIndexedBytes(cursor, end, 4, init var afterToken))
+            {
+                return false;
+            }
+            cursor = afterToken;
+        }
+        if (!TryReadCompactIndexedCount(cursor, end, countWidth,
+                init var afterArguments, init var arguments))
+        {
+            return false;
+        }
+        cursor = afterArguments;
+        uses = arguments;
+    }
+    else if (opcode == 4 || opcode == 5 || opcode == 6 || opcode == 0x15)
+    {
+        if (!TryReadCompactIndexedByte(cursor, end, init var kind)
+            || kind == 0 || opcode == 4 && kind > 3
+            || opcode == 5 && kind > 12 || opcode == 6 && kind > 3
+            || opcode == 0x15 && kind > 7)
+        {
+            return false;
+        }
+        cursor = cursor + 1;
+        uses = opcode == 5 || opcode == 0x15 ? 2 : 1;
+    }
+    else if (opcode == 7)
+    {
+        uses = 3;
+    }
+    else if (opcode == 0x18)
+    {
+        uses = 2;
+    }
+    else if (opcode != 9)
+    {
+        uses = 1;
+    }
+    for (mut int32 use = 0; use < uses; use = use + 1)
+    {
+        if (!TryReadCompactIndexedValueUse(cursor, end, referenceWidth,
+                block, offset, ordinal, init var afterUse))
+        {
+            return false;
+        }
+        cursor = afterUse;
+    }
+
+    return cursor == end;
+}
+
+bool TryIndexCompactIndexedEdgeUses(int32 start, int32 end, int32 referenceWidth,
+    int32 countWidth, int32 block, int32 offset, int32 ordinal,
+    init ref<int32> nextPosition)
+{
+    if (!TryReadCompactIndexedCount(start, end, referenceWidth,
+            init var afterTarget, init var ignoredTarget)
+        || !TryReadCompactIndexedCount(afterTarget, end, countWidth,
+            init var afterCount, init var count))
+    {
+        return false;
+    }
+    mut int32 cursor = afterCount;
+    for (mut int32 argument = 0; argument < count; argument = argument + 1)
+    {
+        if (!TryReadCompactIndexedValueUse(cursor, end, referenceWidth,
+                block, offset, ordinal, init var afterUse))
+        {
+            return false;
+        }
+        cursor = afterUse;
+    }
+    nextPosition = cursor;
+    return true;
+}
+
+bool TryIndexCompactIndexedTerminatorUses(int32 start, int32 end, uint32 opcode,
+    int32 referenceWidth, int32 countWidth, int32 dataWidth,
+    int32 block, int32 offset, int32 ordinal)
+{
+    mut int32 cursor = start;
+    if (opcode == 0x83)
+    {
+        if (!TryReadCompactIndexedCount(cursor, end, referenceWidth,
+                init var afterReturn, init var value))
+        {
+            return false;
+        }
+        if (value != 0 && !TryReadCompactIndexedValueUse(cursor, end, referenceWidth,
+                block, offset, ordinal, init var ignoredAfterUse))
+        {
+            return false;
+        }
+        cursor = afterReturn;
+    }
+    else if (opcode == 0x87)
+    {
+        cursor = cursor + 1;
+    }
+    else
+    {
+        mut int32 edgeCount = opcode == 0x81 ? 2 : 1;
+        if (opcode == 0x81 || opcode == 0x82)
+        {
+            if (!TryReadCompactIndexedValueUse(cursor, end, referenceWidth,
+                    block, offset, ordinal, init var afterSelector))
+            {
+                return false;
+            }
+            cursor = afterSelector;
+        }
+        if (opcode == 0x82)
+        {
+            if (!TryReadCompactIndexedCount(cursor, end, countWidth,
+                    init var afterCount, init var cases))
+            {
+                return false;
+            }
+            cursor = afterCount;
+            for (mut int32 item = 0; item < cases; item = item + 1)
+            {
+                if (!TrySkipCompactIndexedBytes(cursor, end, dataWidth,
+                        init var afterPattern)
+                    || !TryIndexCompactIndexedEdgeUses(afterPattern, end,
+                        referenceWidth, countWidth, block, offset, ordinal,
+                        init var afterEdge))
+                {
+                    return false;
+                }
+                cursor = afterEdge;
+            }
+        }
+        for (mut int32 edge = 0; edge < edgeCount; edge = edge + 1)
+        {
+            if (!TryIndexCompactIndexedEdgeUses(cursor, end, referenceWidth,
+                    countWidth, block, offset, ordinal, init var afterEdge))
+            {
+                return false;
+            }
+            cursor = afterEdge;
+        }
+    }
+
+    return cursor == end;
+}
