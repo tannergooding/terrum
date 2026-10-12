@@ -23,6 +23,24 @@ public sealed class CheckedRecoveryTests
     [InlineData("bool Take(out int32 x) { unsafe { try { require false; x = 1; } catch { return x == 1; } } return false; } int32 Main() { return 0; }", BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
     [InlineData("bool Take(out int32 x) { unsafe { try { x = 1; require false; } catch { Clear(out x); return x == 1; } } return false; } bool Clear(out int32 x) { return false; } int32 Main() { return 0; }", BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
     [InlineData("bool Take(out int32 x) { unsafe { try { require Set(out x); require false; } catch { return x == 1; } } return false; } bool Set(out int32 x) { x = 1; return true; } int32 Main() { return 0; }", BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
+    [InlineData("""
+        [NoThrow] void Fill(out int32 value, int32 ignored) { value = 42; }
+        int32 Fail() { require false; return 0; }
+        int32 Main() {
+            mut int32 value = 7;
+            unsafe { try { Fill(out value, Fail()); } catch { return value; } }
+            return 0;
+        }
+        """, BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
+    [InlineData("""
+        [NoThrow] void Fill(int32 ignored, out int32 value) { value = 42; }
+        int32 Fail() { require false; return 0; }
+        int32 Main() {
+            mut int32 value = 7;
+            unsafe { try { Fill(value: out value, ignored: Fail()); } catch { return value; } }
+            return 0;
+        }
+        """, BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
     [InlineData("int32 Main() { unsafe { try { require false; } catch { return 42; } } try { return 1; } finally { require false; } }", BoundRuntimePolicy.CheckedExceptions, "TRM3017")]
     [InlineData("bool Take(out int32 x, int32 divisor) { try { x = 10 / divisor; return true; } finally { Observe(x); } } [NoThrow] void Observe(int32 x) {} int32 Main() { return 0; }", BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
     [InlineData("bool Take(out int32 x, int32 divisor) { unsafe { try { require false; } catch { x = 10 / divisor; return true; } finally { Observe(x); } } } [NoThrow] void Observe(int32 x) {} int32 Main() { return 0; }", BoundRuntimePolicy.CheckedExceptions, "TRM3016")]

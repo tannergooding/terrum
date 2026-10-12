@@ -117,6 +117,89 @@ public sealed partial class JitTests
     }
 
     [Fact]
+    public Task CheckedEarlierArgumentFailureLeavesInitDestinationVacantAsync() =>
+        AssertCheckedExecutionAsync("""
+            bool Fill(int32 ignored, init ref<int32> value) {
+                value = 42;
+                return true;
+            }
+            int32 Fail() { require false; return 0; }
+            int32 Main() {
+                init int32 value;
+                unsafe {
+                    try {
+                        if (Fill(Fail(), init value)) { return 1; }
+                        return 2;
+                    } catch {
+                        return value is init ? 43 : 42;
+                    }
+                }
+            }
+            """, 42);
+
+    [Fact]
+    public Task CheckedLaterArgumentFailureLeavesStagedInitDestinationVacantAsync() =>
+        AssertCheckedExecutionAsync("""
+            [NoThrow] bool Fill(init ref<int32> value, int32 ignored) {
+                value = 42;
+                return true;
+            }
+            int32 Fail() { require false; return 0; }
+            int32 Main() {
+                init int32 value;
+                unsafe {
+                    try {
+                        Fill(init value, Fail());
+                        return 1;
+                    } catch {
+                        return value is init ? 43 : 42;
+                    }
+                }
+                return 0;
+            }
+            """, 42);
+
+    [Fact]
+    public Task CheckedReorderedNamedLaterArgumentFailureLeavesInitDestinationVacantAsync() =>
+        AssertCheckedExecutionAsync("""
+            [NoThrow] bool Fill(int32 ignored, init ref<int32> value) {
+                value = 42;
+                return true;
+            }
+            int32 Fail() { require false; return 0; }
+            int32 Main() {
+                init int32 value;
+                unsafe {
+                    try {
+                        Fill(value: init value, ignored: Fail());
+                        return 1;
+                    } catch {
+                        return value is init ? 43 : 42;
+                    }
+                }
+                return 0;
+            }
+            """, 42);
+
+    [Fact]
+    public Task CheckedEarlierArgumentFailureLeavesOutDestinationUnchangedAsync() =>
+        AssertCheckedExecutionAsync("""
+            [NoThrow] void Fill(int32 ignored, out int32 value) { value = 42; }
+            int32 Fail() { require false; return 0; }
+            int32 Main() {
+                mut int32 value = 7;
+                unsafe {
+                    try {
+                        Fill(Fail(), out value);
+                        return 1;
+                    } catch {
+                        return value == 7 ? 42 : 43;
+                    }
+                }
+            }
+            """, 42);
+
+    [Fact]
     public Task CheckedNonBooleanUniqueInitFailureDoesNotPublishAsync()
     {
         const string Source = """
