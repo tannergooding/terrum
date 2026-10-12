@@ -245,7 +245,17 @@ public static partial class TrRmExecutableCompiler
     public static BoundProgram Load(ReadOnlySpan<byte> artifact)
     {
         var index = new TrRmArtifactIndex(artifact);
-        TrRmStructuralMetadataValidator.Validate(index);
+        var validatedTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(index);
+        var modules = validatedTables.Modules;
+        var strings = validatedTables.Strings;
+        var types = validatedTables.TypeSpecs;
+        var sigs = validatedTables.Signatures;
+        var defs = validatedTables.Methods;
+        var parameters = validatedTables.Parameters;
+        var bodies = validatedTables.Bodies;
+        var contractTable = validatedTables.Contracts;
+        var typeCount = types.Count;
         for (var section = 0; section < index.SectionCount; section++)
         {
             index.GetSection(section, out var kind, out _, out _, out _);
@@ -256,15 +266,13 @@ public static partial class TrRmExecutableCompiler
         }
 
         index.TryGetSection(1, out var moduleBytes, out var moduleCount);
-        index.TryGetSection(2, out var stringBytes, out var stringCount);
-        index.TryGetSection(0x11, out var typeBytes, out var typeCount);
-        index.TryGetSection(0x16, out var methodBytes, out var methodCount);
-        index.TryGetSection(0x17, out var sigBytes, out var sigCount);
-        index.TryGetSection(0x18, out var paramBytes, out var paramCount);
+        index.TryGetSection(0x16, out _, out var methodCount);
+        index.TryGetSection(0x17, out _, out var sigCount);
+        index.TryGetSection(0x18, out _, out _);
         index.TryGetSection(4, out var featureBytes, out var featureCount);
-        index.TryGetSection(0x1B, out var contractBytes, out var contractCount);
+        index.TryGetSection(0x1B, out var contractBytes, out _);
         index.TryGetSection(0x1D, out var exportBytes, out var exportCount);
-        index.TryGetSection(0x20, out var bodyBytes, out var bodyCount);
+        index.TryGetSection(0x20, out _, out var bodyCount);
         if (moduleCount != 1 || methodCount == 0 || bodyCount != methodCount
             || sigCount == 0 || typeCount == 0)
         {
@@ -272,15 +280,11 @@ public static partial class TrRmExecutableCompiler
         }
 
         var featureTable = new TrRmFeatureTableReader(featureBytes, featureCount);
-        var types = new TrRmTypeSpecTableReader(typeBytes, typeCount, 0, 0, 0, 0);
         var hasOptionalScalarTypes = false;
         for (var row = 1; row <= typeCount; row++)
         {
             hasOptionalScalarTypes |= TrRmOptionalScalar.IsOptionalType(BodyTypeFromRow(types, row));
         }
-        var strings = new TrRmStringTableReader(stringBytes, stringCount);
-        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 0, 0,
-            methodCount, 0, featureCount);
         if (modules.GetRequirements(1) != (1u, 0u))
         {
             throw Invalid("Only fail-fast Windows x64 target requirement 1 is executable.");
@@ -296,15 +300,6 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var sigs = new TrRmMethodSigTableReader(sigBytes, sigCount, types, paramCount, 0);
-        var nominal = new TrRmTypeDefTableReader([], 0, strings, modules, 0, 0, 0, contractCount);
-        var defs = new TrRmMethodDefTableReader(methodBytes, methodCount, strings, modules,
-            nominal, sigs, contractCount, bodyCount);
-        var parameters = paramCount == 0 ? default
-            : new TrRmParamTableReader(paramBytes, paramCount, sigs, types);
-        var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
-        var clauses = default(TrRmVariableTableIndex);
-        var clausesInitialized = false;
         var declaredExports = new HashSet<int>(exportCount);
         for (var row = 0; row < exportCount; row++)
         {
@@ -373,16 +368,11 @@ public static partial class TrRmExecutableCompiler
             var requiresUnsafeCaller = false;
             if (contracts != 0)
             {
-                if (contracts != 1 || contractBytes.IsEmpty)
+                if (contracts != 1)
                 {
                     throw Invalid("Unsupported method contract.");
                 }
-                if (!clausesInitialized)
-                {
-                    clauses = new TrRmVariableTableIndex(contractBytes, contractCount, 8, 1);
-                    clausesInitialized = true;
-                }
-                var clause = clauses.GetRow(contractFirst);
+                var clause = contractTable.GetRow(contractFirst);
                 var effectMask = clause.Length == 12
                     ? BinaryPrimitives.ReadUInt32LittleEndian(clause[8..]) : 0;
                 if (clause.Length != 12 || BinaryPrimitives.ReadUInt16LittleEndian(clause[4..]) != 1

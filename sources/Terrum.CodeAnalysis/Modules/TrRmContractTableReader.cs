@@ -122,6 +122,9 @@ public readonly ref struct TrRmContractTableReader
         }
     }
 
+    internal ReadOnlySpan<byte> GetRow(int row)
+        => _rows.GetRow(row);
+
     private static void Fill(uint[] owners, int start, int count, uint owner)
     {
         if (count == 0 ? start != 0

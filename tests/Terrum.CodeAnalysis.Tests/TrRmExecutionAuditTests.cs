@@ -616,7 +616,7 @@ public sealed class TrRmExecutionAuditTests
                     1, (byte)result, (byte)typeId]);
                 for (var index = 0; index < dataWidth; index++)
                 {
-                    body.Add((byte)(bits >> (index * 8)));
+                    body.Add(unchecked((byte)(bits >> (index * 8))));
                 }
             }
         }
@@ -680,7 +680,7 @@ public sealed class TrRmExecutionAuditTests
                     1, (byte)result, (byte)typeId]);
                 for (var index = 0; index < dataWidth; index++)
                 {
-                    body.Add((byte)(bits >> (index * 8)));
+                    body.Add(unchecked((byte)(bits >> (index * 8))));
                 }
             }
         }
@@ -705,7 +705,7 @@ public sealed class TrRmExecutionAuditTests
                 1, 1, (byte)sourceTypeId]);
             for (var index = 0; index < dataWidth; index++)
             {
-                body.Add((byte)(sourceBits >> (index * 8)));
+                body.Add(unchecked((byte)(sourceBits >> (index * 8))));
             }
         }
         if (narrowing)
@@ -781,7 +781,7 @@ public sealed class TrRmExecutionAuditTests
                     1, (byte)result, (byte)typeId]);
                 for (var index = 0; index < dataWidth; index++)
                 {
-                    body.Add((byte)(bits >> (index * 8)));
+                    body.Add(unchecked((byte)(bits >> (index * 8))));
                 }
             }
         }
@@ -845,7 +845,7 @@ public sealed class TrRmExecutionAuditTests
                     1, (byte)result, (byte)typeId]);
                 for (var index = 0; index < dataWidth; index++)
                 {
-                    body.Add((byte)(bits >> (index * 8)));
+                    body.Add(unchecked((byte)(bits >> (index * 8))));
                 }
             }
         }

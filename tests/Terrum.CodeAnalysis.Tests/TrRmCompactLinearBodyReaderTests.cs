@@ -582,7 +582,7 @@ public sealed class TrRmCompactLinearBodyReaderTests
         }
     }
 
-    private static (int Operations, int ValueCount, int[] Definitions, int[] LastUses,
+    internal static (int Operations, int ValueCount, int[] Definitions, int[] LastUses,
         int[] UseBlocks, byte[] TypeCodes, bool[] Optional) Inspect(
         byte[] row, int parameterCount, byte runtimePolicy = 0, byte parameterMode = 0,
         bool duplicateSignatureType = false, byte typeCode = 8,
@@ -721,9 +721,11 @@ public sealed class TrRmCompactLinearBodyReaderTests
     }
 
     internal static int GetOperationCount(byte[] row, int parameterCount, byte typeCode = 8,
-        byte? secondTypeCode = null, bool resultUsesSecondType = false)
+        byte? secondTypeCode = null, bool resultUsesSecondType = false,
+        bool secondMethod = false, bool packedTarget = false, bool expectedTarget = false)
         => Inspect(row, parameterCount, typeCode: typeCode, secondTypeCode: secondTypeCode,
-            resultUsesSecondType: resultUsesSecondType).Operations;
+            resultUsesSecondType: resultUsesSecondType, secondMethod: secondMethod,
+            packedTarget: packedTarget, expectedTarget: expectedTarget).Operations;
 
     private static void Write(byte[] bytes, int offset, uint value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);

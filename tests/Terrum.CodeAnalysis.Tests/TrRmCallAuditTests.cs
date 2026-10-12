@@ -95,7 +95,7 @@ public sealed class TrRmCallAuditTests
     {
         var artifact = TrRmExecutionAuditTests.LocalCallArtifact(
             [4, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1],
-            RepeatedVoidCalls(50_000), resultRow: 7);
+            RepeatedVoidCalls(50_300), resultRow: 7);
         var exception = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
         Assert.IsType<NotSupportedException>(exception.InnerException);
     }

@@ -1506,7 +1506,55 @@ public sealed class TrRmBodyExampleTests
             1, 1, 1, 42, 3, 2, 1, 0x83, 2,
         ];
 
-    private static (int Blocks, int Values) InspectIndexed(byte[] section,
+    internal static (int Blocks, int Values) InspectIndexed(byte[] section,
+        int parameterCount = 3, byte secondTypeCode = 8, int resultTypeSpec = 2,
+        byte[]? parameterTypeIds = null, byte? thirdTypeCode = null,
+        byte runtimePolicy = 0, bool thirdTypeOptional = false,
+        byte firstTypeCode = 1, bool secondMethod = false,
+        bool importedTarget = false, bool expectedTarget = false,
+        bool ownedTarget = false, bool packedTarget = false,
+        bool privateOwner = false, byte callerTargetRequirement = 0,
+        byte packedTargetRequirement = 0, byte packedTargetRuntimePolicy = 0,
+        bool genericOwner = false)
+    {
+        var reader = CreateIndexedReader(section, parameterCount, secondTypeCode,
+            resultTypeSpec, parameterTypeIds, thirdTypeCode, runtimePolicy,
+            thirdTypeOptional, firstTypeCode, secondMethod, importedTarget,
+            expectedTarget, ownedTarget, packedTarget, privateOwner,
+            callerTargetRequirement, packedTargetRequirement,
+            packedTargetRuntimePolicy, genericOwner);
+        return (reader.BlockCount, reader.ValueCount);
+    }
+
+    internal static int CountIndexedOperations(byte[] section, int parameterCount = 3,
+        int resultTypeSpec = 2, byte[]? parameterTypeIds = null)
+    {
+        var reader = CreateIndexedReader(section, parameterCount,
+            resultTypeSpec: resultTypeSpec, parameterTypeIds: parameterTypeIds);
+        var operationCount = 0;
+        for (var block = 1; block <= reader.BlockCount; block++)
+        {
+            operationCount += reader.GetOperationCount(block);
+        }
+
+        return operationCount;
+    }
+
+    internal static int[] GetIndexedBlockOperationCounts(byte[] section,
+        int parameterCount = 3, int resultTypeSpec = 2, byte[]? parameterTypeIds = null)
+    {
+        var reader = CreateIndexedReader(section, parameterCount,
+            resultTypeSpec: resultTypeSpec, parameterTypeIds: parameterTypeIds);
+        var operationCounts = new int[reader.BlockCount];
+        for (var block = 1; block <= reader.BlockCount; block++)
+        {
+            operationCounts[block - 1] = reader.GetOperationCount(block);
+        }
+
+        return operationCounts;
+    }
+
+    private static TrRmCompactIndexedBodyReader CreateIndexedReader(byte[] section,
         int parameterCount = 3, byte secondTypeCode = 8, int resultTypeSpec = 2,
         byte[]? parameterTypeIds = null, byte? thirdTypeCode = null,
         byte runtimePolicy = 0, bool thirdTypeOptional = false,
@@ -1632,12 +1680,14 @@ public sealed class TrRmBodyExampleTests
         var bodies = new TrRmBodyTableReader(bodyRows, bodyCount);
         var reader = new TrRmCompactIndexedBodyReader(bodies, 1, modules,
             methods, signatures, parameters, types, defs, imports);
-        return (reader.BlockCount, reader.ValueCount);
+        return reader;
     }
 
     internal static byte[] ReadExample(string heading)
     {
-        var generalHex = heading switch
+        // These fixtures identify the compiler's development schema, not the
+        // canonical registry, whose opcode assignments have since changed.
+        var fixtureHex = heading switch
         {
             "GeneralCheckedAdd" => """
                 00 00 00 00 61 00 00 00
@@ -1675,25 +1725,58 @@ public sealed class TrRmBodyExampleTests
                 00 01 04 00 00 00 00 00 01 04 00 00 00
                 83 04
                 """,
-            _ => null,
+            "## Value and place state through checked arithmetic" => """
+                00 00 00 00 72 00 00 00
+                00 01 05 01 00 01 01 00 00 00 01 00 05 01
+                01 01 01 01 00 01 01 00 01 01 00 01 01 00 01
+                00 05
+                18 00 00 00 1B 00 00 00 22 00 00 00 25 00 00 00 29 00 00 00
+                00 00 00 00 33 00 00 00 31 00 00 00
+                00 00 00 00 00 01 01 01 01
+                05 01 06 02 02 03 05 04 05 05 07 01 01 07 07
+                0B 01 01 02 02 01 0A 0E 01 02 0D 03 01 02 04 01 05
+                15 05 01 03 04 0F 01 05 83 05
+                """,
+            "### Checked add end to end (informative)" => """
+                00 00 00 00 17 00 00 00
+                04 01 01 00 00 00 03
+                15 03 01 01 02 02 04 01 03 15 05 01 03 04 83 05
+                """,
+            "### Compact linear constant return" => """
+                00 00 00 00 0D 00 00 00
+                04 01 01 00 00 00 01
+                01 01 01 2A 83 01
+                """,
+            "#### Compact linear parameter return" => """
+                00 00 00 00 09 00 00 00
+                04 01 01 00 00 00 00 83 01
+                """,
+            "#### Compact indexed conditional merge" => """
+                00 00 00 00 5C 00 00 00
+                08 04 04 00 02 01 00 00 00 02 00 00 00
+                01 01 02 01 02 01 02 01
+                00 03 03 03 04 FF FF FF FF
+                00 12 1F 2C 35 0C 09 09 07
+                1A 03 01 02 03 02 02 03 01 01 00 00 81 01 02 00 03 00
+                1C 01 03 01 03 01 03 00 00 80 04 01 03
+                1C 01 02 01 02 01 02 00 00 80 04 01 02
+                12 01 04 01 04 00 00 83 04
+                """,
+            "#### Compact indexed conditional sum" => """
+                00 00 00 00 52 00 00 00
+                08 03 04 00 02 01 00 00 00 02 00 00 00
+                01 01 02 02 02 01 02 01
+                00 03 04 04 FF FF FF 0C
+                00 12 25 2E 0C 11 07
+                1A 03 01 02 03 02 02 03 01 01 00 00 81 01 02 00 03 00
+                14 02 02 03 03 02 00 03 00 04 01 01 15 04 01 02 03 83 04
+                14 01 02 01 02 00 00 83 02
+                """,
+            _ => throw new ArgumentOutOfRangeException(nameof(heading), heading,
+                "Unknown development-schema Body fixture."),
         };
 
-        if (generalHex is not null)
-        {
-            return Convert.FromHexString(Regex.Replace(generalHex, @"\s+", ""));
-        }
-
-        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", ".."));
-        var document = File.ReadAllText(Path.Combine(root, "docs", "specs",
-            "il-instruction-set.md"));
-        var start = document.IndexOf(heading, StringComparison.Ordinal);
-        Assert.True(start >= 0);
-        var next = document.IndexOf("\n## ", start + heading.Length, StringComparison.Ordinal);
-        var section = document[start..(next < 0 ? document.Length : next)];
-        var match = Regex.Match(section, @"```text\r?\n(?<hex>(?:[0-9A-Fa-f ]+\r?\n)+)```");
-        Assert.True(match.Success);
-        return Convert.FromHexString(Regex.Replace(match.Groups["hex"].Value, @"\s+", ""));
+        return Convert.FromHexString(Regex.Replace(fixtureHex, @"\s+", ""));
     }
 
     private static uint ReadUInt32(byte[] bytes, ref int position)

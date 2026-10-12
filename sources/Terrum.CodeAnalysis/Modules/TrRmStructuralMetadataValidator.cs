@@ -9,6 +9,34 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <remarks>Does not verify executable Body instructions, target ABI layouts, executable contracts or import binding.</remarks>
 public static class TrRmStructuralMetadataValidator
 {
+    internal readonly ref struct ValidatedExecutionTables
+    {
+        internal ValidatedExecutionTables(TrRmStringTableReader strings,
+            TrRmModuleTableReader modules, TrRmTypeSpecTableReader typeSpecs,
+            TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+            TrRmMethodDefTableReader methods, TrRmBodyTableReader bodies,
+            TrRmContractTableReader contracts)
+        {
+            Strings = strings;
+            Modules = modules;
+            TypeSpecs = typeSpecs;
+            Signatures = signatures;
+            Parameters = parameters;
+            Methods = methods;
+            Bodies = bodies;
+            Contracts = contracts;
+        }
+
+        internal TrRmStringTableReader Strings { get; }
+        internal TrRmModuleTableReader Modules { get; }
+        internal TrRmTypeSpecTableReader TypeSpecs { get; }
+        internal TrRmMethodSigTableReader Signatures { get; }
+        internal TrRmParamTableReader Parameters { get; }
+        internal TrRmMethodDefTableReader Methods { get; }
+        internal TrRmBodyTableReader Bodies { get; }
+        internal TrRmContractTableReader Contracts { get; }
+    }
+
     private enum BodyInspection
     {
         None,
@@ -18,24 +46,30 @@ public static class TrRmStructuralMetadataValidator
     }
 
     public static void Validate(ReadOnlySpan<byte> artifact)
-        => ValidateCore(new TrRmArtifactIndex(artifact), BodyInspection.None);
+        => _ = ValidateCore(new TrRmArtifactIndex(artifact), BodyInspection.None);
 
     internal static void Validate(TrRmArtifactIndex index)
+        => _ = ValidateCore(index, BodyInspection.None);
+
+    internal static ValidatedExecutionTables ValidateAndGetExecutionTables(
+        TrRmArtifactIndex index)
         => ValidateCore(index, BodyInspection.None);
 
     public static void ValidateCompactLinear(ReadOnlySpan<byte> artifact)
-        => ValidateCore(artifact, BodyInspection.CompactLinear);
+        => _ = ValidateCore(artifact, BodyInspection.CompactLinear);
 
     public static void ValidateCompactIndexed(ReadOnlySpan<byte> artifact)
-        => ValidateCore(artifact, BodyInspection.CompactIndexed);
+        => _ = ValidateCore(artifact, BodyInspection.CompactIndexed);
 
     public static void ValidateCompact(ReadOnlySpan<byte> artifact)
-        => ValidateCore(artifact, BodyInspection.CompactMixed);
+        => _ = ValidateCore(artifact, BodyInspection.CompactMixed);
 
-    private static void ValidateCore(ReadOnlySpan<byte> artifact, BodyInspection inspection)
+    private static ValidatedExecutionTables ValidateCore(ReadOnlySpan<byte> artifact,
+        BodyInspection inspection)
         => ValidateCore(new TrRmArtifactIndex(artifact), inspection);
 
-    private static void ValidateCore(TrRmArtifactIndex index, BodyInspection inspection)
+    private static ValidatedExecutionTables ValidateCore(TrRmArtifactIndex index,
+        BodyInspection inspection)
     {
         if (!index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount)
             || !index.TryGetSection(0x0002, out var stringBytes, out var stringCount))
@@ -191,6 +225,8 @@ public static class TrRmStructuralMetadataValidator
         _ = exports;
         _ = sourceFiles;
         _ = sourceMaps;
+        return new ValidatedExecutionTables(strings, modules, typeSpecs,
+            signatures, parameters, methods, bodies, contracts);
     }
 
     private static InvalidDataException InvalidMetadata()

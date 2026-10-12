@@ -39,3 +39,9 @@ An explicitly selected historical development schema can be inspected by a
 separate tool. It cannot be loaded as current-schema input merely because its
 format pair matches. There is no requirement to retain unpublished formats,
 legacy aliases or migration shims.
+
+`TrRmBodyExampleTests` keeps explicit development-schema fixtures rather than
+reading hex examples from the current specification. Hosted readers and
+Terrum-authored framing/value-index candidates are compared against those
+same selected legacy fixtures; passing them does not establish migration to
+the unified opcode, Param, reference or Module-manifest registries.

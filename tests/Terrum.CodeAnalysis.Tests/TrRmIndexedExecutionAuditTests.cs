@@ -95,7 +95,7 @@ public sealed class TrRmIndexedExecutionAuditTests
         else
         {
             blocks[0].AddRange([0xF0, 0x10, 1, 1, 1,
-                (byte)selector, (byte)(selector >> 8)]);
+                unchecked((byte)selector), unchecked((byte)(selector >> 8))]);
         }
         terminators.Add((byte)blocks[0].Count);
         blocks[0].AddRange([0xF0, 0x10, 0x82, 1, 2, 0, 0, 2, 0, 0, 1, 3, 0, 4, 0]);
@@ -129,7 +129,7 @@ public sealed class TrRmIndexedExecutionAuditTests
         {
             for (var index = 0; index < sizeof(ulong); index++)
             {
-                bytes.Add((byte)(value >> (index * 8)));
+                bytes.Add(unchecked((byte)(value >> (index * 8))));
             }
         }
 
